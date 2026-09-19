@@ -167,6 +167,14 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
   讨论都要先说清是姓名口径还是邮箱口径、窗口口径还是全历史口径。
 - **运行时指标**：与活动监视器 / `top` / `ps` 的可比性由 `PerformanceLiveSampleTests`
   三条用例钉住（采样可与活动监视器比、进程组与真实进程匹配、磁盘吞吐是差值而非累计量）。
-- **覆盖率**：与 `llvm-cov` 逐位一致——自扫时两边都给出 `10618/23611`。
-  注意**分母口径**：不区分项目内外时 lcov 汇总会虚高约 16 个百分点，
-  因此报告只统计当前项目根之内的源文件。
+- **覆盖率**：以 `llvm-cov` 为基准。2026-09-20 在 `ee8e7b9` 上重测：
+  ```
+  swift test --enable-code-coverage
+  xcrun llvm-cov export -format=lcov -instr-profile <...>/codecov/default.profdata \
+      <...>/TcoderMonitorPackageTests.xctest/Contents/MacOS/TcoderMonitorPackageTests
+  ```
+  汇总本次 lcov 的全部 `LF/LH`：**全口径 26645/41635 = 64.00%**，
+  只取 `Sources/TcoderMonitor/**` 则 **11078/23651 = 46.84%**。
+  两个数必须一起读：分母口径不同差 17 个百分点，报一个不报另一个就是虚高。
+  分析器的规则是**只统计当前项目根之内的源文件**，第三方与构建产物目录不进分母。
+  （旧版这里写过一组 `10618/23611` 的数，是更早修订上的测量，已按上述命令重跑替换。）
