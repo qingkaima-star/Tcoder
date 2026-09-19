@@ -50,6 +50,12 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         var excludedEntryCount: Int { skipLedger.skippedFileTotal }
         var excludedLineCount: Int { skipLedger.skippedLineTotal }
 
+        /// 完整的「少掉的部分去哪了」清账，一行一条原因。`skipLedgerAuditRan` 为 false 时
+        /// 如实标注行数未统计，不会把 0 当成「这些文件没有行」。
+        func skipClearing() -> [String] {
+            skipLedger.clearing(linesCounted: skipLedger.linesCounted)
+        }
+
         /// 逐条带真实数字的限制说明，供横幅/脚注直接展示。
         var limitationSummary: [String] {
             var lines: [String] = []
