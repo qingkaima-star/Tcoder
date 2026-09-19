@@ -185,9 +185,9 @@ final class GitTimezoneTests: XCTestCase {
         XCTAssertEqual(half.date.timeIntervalSince1970, 1_789_797_600, accuracy: 0.5, "-05:30 绝对时刻正确")
         let zulu = GitLogParser.parseAuthorTimestamp("2026-09-19T00:30:00Z")
         XCTAssertEqual(zulu?.offsetSeconds, 0, "Z 结尾当作 0 偏移")
-        XCTAssertEqual(zulu?.date.timeIntervalSince1970, Fixture.sat0030UTC, accuracy: 0.5, "Z 瞬间正确")
+        XCTAssertEqual(zulu?.date.timeIntervalSince1970 ?? -1, Fixture.sat0030UTC, accuracy: 0.5, "Z 瞬间正确")
         let zero = GitLogParser.parseAuthorTimestamp("2026-09-19T00:30:00+00:00")
-        XCTAssertEqual(zero?.date.timeIntervalSince1970, Fixture.sat0030UTC, accuracy: 0.5, "+00:00 与 Z 等价")
+        XCTAssertEqual(zero?.date.timeIntervalSince1970 ?? -1, Fixture.sat0030UTC, accuracy: 0.5, "+00:00 与 Z 等价")
         XCTAssertNil(GitLogParser.parseAuthorTimestamp("昨天下午"), "非 ISO8601 返回 nil")
         XCTAssertNil(GitLogParser.parseAuthorTimestamp(""), "空字符串返回 nil")
         XCTAssertNil(GitLogParser.parseAuthorTimestamp("2026-09-19"), "缺时间部分返回 nil")
@@ -468,15 +468,6 @@ final class ManifestParserTests: XCTestCase {
         XCTAssertEqual(Fixture.found(deps, "tempfile")?.scope, .dev, "[dev-dependencies] 是开发")
         XCTAssertEqual(Fixture.found(deps, "cc")?.scope, .build, "[build-dependencies] 是构建")
         XCTAssertEqual(deps.first?.ecosystem, .cargo, "生态必须是 cargo")
-    }
-
-    private func assertLock(_ ecosystem: DependencyEcosystem, _ listing: [String], _ expected: String?,
-                           _ label: String) {
-        XCTAssertEqual(ManifestParsers.lockfileName(for: ecosystem, in: Set(listing)), expected, label)
-    }
-
-    private func assertName(_ fileName: String, _ expected: DependencyEcosystem?, _ label: String) {
-        XCTAssertEqual(ManifestFileName.ecosystem(for: fileName), expected, label)
     }
 
     func testLockfileNameDetectionForKnownLockfiles() {

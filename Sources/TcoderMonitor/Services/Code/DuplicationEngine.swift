@@ -86,8 +86,8 @@ enum DuplicationEngine {
             }
             scan.beginFile(numbers: numbers, hashes: hashes)
 
-            // 只登记「该窗口在跨文件处第一次出现」的指纹：同文件相邻窗口靠 hashes 向前延长，
-            // 不需要为每个窗口都留一条记录，窗口级内存因此与文件数线性而非与拷贝次数相关。
+            // 每个窗口都登记指纹（带每指纹/每文件预算），只作为「这个 6 行在别的文件也出现过」
+            // 的配对索引；长克隆靠 hashesByFile 现场延长，不为同一克隆重复存多条记录。
             var windowStart = 0
             while windowStart < hashes.count {
                 scan.register(hash: hashes[windowStart], fileIndex: fileIndex, windowStart: windowStart)

@@ -507,7 +507,7 @@ enum LogLineParser {
     private static let syslogStamp = RX(#"([A-Z][a-z]{2})\s{1,2}(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})(?:[.,](\d{1,3}))?"#)
     private static let epochStamp = RX(#"(?<![\d.])(\d{10,13})(?![\d.])"#)
     private static let dateOnlyStamp = RX(#"\b\d{4}-\d{2}-\d{2}\b"#)
-    private static let bracketPrefix = RX(#"^[\s\[(]{0,2}[\[(<][^\]\)>]{1,40}[\]\)>][ \t]*[:\-|>?]{0,2}[ \t]*"#)
+    private static let bracketPrefix = RX(#"^[\s\[(<]{0,2}[\[(<](?!(?:ERROR|WARN|WARNING|INFO|DEBUG|TRACE|FATAL|SEVERE|CRITICAL|EXCEPTION|NOTICE)\b)[^\]\)>]{1,40}[\]\)>][ \t]*[:\-|>?]{0,2}[ \t]*"#, options: .caseInsensitive)
 
     // 级别
     private static let crashMarker = RX(#"\b(?:SIGSEGV|SIGABRT|SIGBUS|SIGILL|SIGTRAP|EXC_BAD_ACCESS|EXC_CRASH)\b|\bFatal error:|\bprecondition failure\b|\bFatal Python error\b|\bThread[ \t]+\d+[ \t]+Crashed\b"#)
@@ -520,14 +520,14 @@ enum LogLineParser {
     private static let crashedThreadHeader = RX(#"^\s*Crashed[ \t]+Thread:[ \t]*\d+\s*$"#, options: .caseInsensitive)
 
     // 堆栈帧
-    private static let javaFrame = RX(#"\bat\s+[A-Za-z_$][\w$<>$.]*\.[\w$<>$.]+\([\w$.]*\.(?:java|kt|kts|scala|groovy)(?::\d+)?\)"#)
+    private static let javaFrame = RX(#"\bat\s+[A-Za-z_$][\w$<>$.]*\.[\w$<>$.]+\([\w$.]*\.(?:java|kt|kts|scala|groovy)(?![\w-])(?::\d+)?\)"#)
     private static let genericAtFrame = RX(#"(?:^|[\t ])at\s+[\w$<>.$,()\[\]]+\([\w$.]*\.[A-Za-z]{2,5}(?::\d+)?\)"#)
-    private static let nativeFrame = RX(#"#\d+[ \t]+0x[0-9a-fA-F]+[ \t]+in[ \t]+\S+"#)
+    private static let nativeFrame = RX(#"#\d+[ \t]+0x[0-9a-fA-F_]+[ \t]+in[ \t]+\S+"#)
     private static let pythonFrame = RX(#"File[ \t]*"[^"]+",[ \t]*line[ \t]+\d+(?:,[ \t]*in[ \t]+\S+)?"#)
     private static let hexFrame = RX(#"\b0x[0-9a-fA-F]{6,}\b"#)
     private static let swiftSymbolFrame = RX("([A-Za-z_$][\\w$]*\\.){2,}[\\w$]+\\s*:\\s*[\\w$()\\[\\],.&' \u{2039}\u{203a}]+")
-    private static let fileLineFrame = RX(#"[\w$./\-]+\.(?:java|kt|kts|swift|py|go|ts|tsx|js|jsx|vue|scala|rb|rs)(?::\d+)?"#)
-    private static let sourceFileFromFrame = RX(#"\(([\w$.\-/]+\.(?:java|kt|kts|swift|py|go|ts|tsx|js|jsx|vue|scala|rb|rs))(?::(\d+))?\)"#)
+    private static let fileLineFrame = RX(#"[\w$./\-]+\.(?:java|kt|kts|swift|py|go|ts|tsx|js|jsx|vue|scala|rb|rs)(?![\w-])(?::\d+)?"#)
+    private static let sourceFileFromFrame = RX(#"\(([\w$.\-/]+\.(?:java|kt|kts|swift|py|go|ts|tsx|js|jsx|vue|scala|rb|rs))(?![\w-])(?::(\d+))?\)"#)
     private static let quotedPath = RX(#""([^"\n]+)""#)
 
     /// 归属判定用：这些形态的行挂在上一条 error 级事件上
@@ -537,10 +537,10 @@ enum LogLineParser {
         RX(#"^(?:[\t ]|\\t)*\.\.\.[ \t]+\d+[ \t]+more"#, options: .caseInsensitive),  // "... 12 more"
         RX(#"^\s*Caused by:[ \t]+"#),                                     // Java 异常链
         RX(#"^\s*Suppressed:[ \t]+"#),
-        RX(#"^\s*#\d+[ \t]+0x[0-9a-fA-F]+"#),                             // lldb / crash 帧 "#0 0x..."
+        RX(#"^\s*#\d+[ \t]+0x[0-9a-fA-F_]+"#),                             // lldb / crash 帧 "#0 0x..."
         RX(#"^\s*(?:\(\?\?\)\s*)?0x[0-9a-fA-F]{6,}\b"#),                  // 裸地址帧
         RX(#"^\s*File[ \t]*"[^"]+",[ \t]*line[ \t]+\d+"#),                // Python 帧
-        RX(#"^\s*[\w$./\-]+\.(?:java|kt|kts|swift|py|go|ts|tsx|js|jsx|vue|scala|rb|rs|m|mm|c|cpp):\d+\b"#),
+        RX(#"^\s*[\w$./\-]+\.(?:java|kt|kts|swift|py|go|ts|tsx|js|jsx|vue|scala|rb|rs|m|mm|c|cpp)(?![\w-]):\d+"#),
         RX(#"^\s*[\w$./\-(\)\[\]<>,]+\s*\+\s*0x[0-9a-fA-F]{2,}"#),         // Go / C 符号偏移帧 "pkg.fn(0x1) + 0x20"
         RX(#"^\s+[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*){2,}\s*:"#),        // 缩进 + Swift demangled 符号
     ]
@@ -636,7 +636,7 @@ enum LogLineParser {
     /// epoch 只认行首 24 字符内的独立 token：正文里的 10 位订单号不该被当成时间。
     private static func epochDate(in text: String, prefixLimit: Int?) -> Date? {
         guard let limit = prefixLimit else { return nil }
-        guard let result = epochStamp.first(in: text), withinPrefix(result.range.location, min(limit, 24)) else { return nil }
+        guard let result = epochStamp.first(in: text), withinPrefix(result.range.location, min(limit, 2)) else { return nil }
         guard let token = rxGroup(result, 1, in: text), let value = Double(token) else { return nil }
         let seconds: Double
         switch token.count {
@@ -727,7 +727,7 @@ enum LogLineParser {
 
         let prefixHit = anchoredLevelHit(in: window)
         if let crashLocation = crashMarker.first(in: window)?.range.location {
-            if let hit = prefixHit, hit.location <= crashLocation { return hit.severity }
+            if let hit = prefixHit, hit.location < crashLocation { return hit.severity }
             return .crash
         }
         if let hit = prefixHit { return hit.severity }
@@ -863,7 +863,7 @@ enum LogLineParser {
         var skipped = 0
         while cursor < ns.length, skipped < limit {
             let character = ns.substring(with: NSRange(location: cursor, length: 1))
-            if "])>-[:|, \t".contains(character) {
+            if "])>-:|, \t".contains(character) {
                 cursor += 1
                 skipped += 1
             } else {
@@ -1000,7 +1000,9 @@ enum LogLineParser {
         }
         if let best { return best.value }
 
-        if let result = swiftSymbolFrame.first(in: text), let value = rxGroup(result, 0, in: text) {
+        // demangled 符号帧要求缩进：否则 `pkg.Class: message` 这类 Java 正文会被误认成帧
+        if text.hasPrefix(" ") || text.hasPrefix("\t") || text.hasPrefix("\\t"),
+           let result = swiftSymbolFrame.first(in: text), let value = rxGroup(result, 0, in: text) {
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty == false { return String(trimmed.prefix(200)) }
         }

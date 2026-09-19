@@ -169,7 +169,10 @@ enum ByteFormat {
             value /= 1000
             index += 1
         }
-        return String(format: index == 0 ? "%.0f %s" : "%.1f %s", value, units[index])
+        // NOTE: `%s` expects a C string pointer; passing a Swift String here traps
+        // inside _platform_strlen. Interpolate the unit instead.
+        return index == 0 ? "\(Int(value)) \(units[index])"
+                          : String(format: "%.1f", value) + " " + units[index]
     }
 }
 

@@ -48,10 +48,13 @@ enum ComplexityEngine {
             if line > 0, !src.balancedBefore[line - 1] { line += 1; continue }
             if let mask = scriptMask, !mask[line] { line += 1; continue }
             let cleanedLine = src.cleaned[line]
-            guard !cleanedLine.isEmpty, cleanedLine.utf16.count <= maxLineLengthForMatch else {
+            // utf8.count 对原生 Swift String 是 O(1)，utf16.count 会触发转码；这里只是长度门槛
+            guard !cleanedLine.isEmpty, cleanedLine.utf8.count <= maxLineLengthForMatch else {
                 line += 1
                 continue
             }
+            // 廉价预筛：绝大多数语言的签名都必须带 `(`，先挡掉就不必为每行进 NSString/正则循环
+            if profile.parenOnEveryPattern, cleanedLine.contains("(") == false { line += 1; continue }
             guard let name = matchSignature(cleanedLine, profile) else { line += 1; continue }
 
             var closing: Int?
@@ -169,18 +172,24 @@ enum ComplexityEngine {
             if let re = branchKeywordExpression {
                 let text = rawLine as NSString
                 let matches = re.matches(in: rawLine, options: [], range: NSRange(location: 0, length: text.length))
-                for match in matches where keywords.contains(text.substring(with: match.range)) {
-                    total += 1
+                for match in matches {
+                    var word = text.substring(with: match.range)
+                    // `else   if`（多个空白）也要落到 "else if" 这个关键字上
+                    if word.hasPrefix("else") { word = "else if" }
+                    if keywords.contains(word) { total += 1 }
                 }
             }
-            total += branchSymbols(in: Array(rawLine), profile: profile)
+            total += branchSymbols(in: rawLine, profile: profile)
         }
         return max(1, total)
     }
 
     // 三元 `?` 的判定是纯启发式：Swift/Kotlin/Dart 里 `Int?` 满天飞，所以额外要求
     // 「冒号出现在该 ? 之后」，否则 `let x: Int? = 5` 会被误计一次。
-    private static func branchSymbols(in chars: [Character], profile: LangProfile) -> Int {
+    private static func branchSymbols(in rawLine: String, profile: LangProfile) -> Int {
+        // 绝大多数代码行既没有 && / || 也没有 ?，先零成本过一遍再决定要不要转 [Character]
+        guard rawLine.contains(where: { $0 == "?" || $0 == "&" || $0 == "|" }) else { return 0 }
+        let chars = Array(rawLine)
         guard !chars.isEmpty else { return 0 }
         var lastColon = -1
         for (offset, c) in chars.enumerated() where c == ":" { lastColon = offset }
@@ -296,6 +305,8 @@ enum ComplexityEngine {
         return trimmed
     }
 
+    /// 名字命中这些词就不是函数：控制流关键字（`if (x) {`）、类型说明符与 C/C++ 属性式关键字
+    /// （`alignas(64) struct Foo {` 会被 cStyle 误读成 `alignas(...)` 函数）。
     private static func isReservedName(_ name: String) -> Bool {
         switch name {
         case "if", "else", "for", "foreach", "while", "until", "repeat", "do", "switch", "case",
@@ -305,7 +316,11 @@ enum ComplexityEngine {
              "delete", "typeof", "instanceof", "void", "this", "super", "self", "Self", "nil",
              "true", "false", "null", "undefined", "elif", "begin", "rescue", "ensure", "class",
              "struct", "enum", "protocol", "extension", "interface", "object", "module", "namespace",
-             "operator", "get", "set", "init", "next", "print", "raise", "assert", "match", "with":
+             "operator", "get", "set", "init", "next", "print", "raise", "assert", "match", "with",
+             "alignas", "alignof", "decltype", "sizeof", "static_assert", "static_cast",
+             "reinterpret_cast", "const_cast", "dynamic_cast", "noexcept", "typeid", "explicit",
+             "friend", "template", "typename", "using", "union", "mutable", "constexpr",
+             "consteval", "constinit", "co_await", "co_return", "co_yield", "typedef", "typeof_unqual":
             return true
         default:
             return false
@@ -663,6 +678,7 @@ enum ComplexityEngine {
         var countsTernary = true
         var countsNullCoalescing = false
         var countsOptionalChaining = false
+        var parenOnEveryPattern = true
     }
 
     /// 正则编译缓存。签名 pattern 是热点：每个文件都要走一遍 profile → 每条 pattern 建一个
@@ -685,6 +701,7 @@ enum ComplexityEngine {
         var profile = LangProfile()
         profile.family = family(of: canonical)
         profile.patterns = patterns(of: canonical)
+        profile.parenOnEveryPattern = profile.patterns.allSatisfy { $0.needsParen }
         profile.lineComments = charactersList(primaryLineComments(for: canonical))
         if let pair = blockPair(for: canonical) {
             profile.blockStart = Array(pair.start)
@@ -827,7 +844,9 @@ enum ComplexityEngine {
     /// 跨行字符串的定界符（Python 的 `"""`、JS 的模板串），交给 charactersList 变成 [[Character]]。
     private static func multiLineQuotes(for language: String) -> [String] {
         var delimiters = SourceLanguageCatalog.docStringDelimiters(for: language)
-        if language == "TypeScript" || language == "JavaScript" || language == "Vue" {
+        if language == "TypeScript" || language == "JavaScript" || language == "Vue" || language == "Go" {
+            // Go 的反引号原始字符串可以跨行，里面什么都有（花括号、引号、`//`）；
+            // 不当成字符串处理的话花括号深度就会被带偏，函数边界整段错位。
             delimiters = delimiters.filter { $0 != "`" } + ["`"]
         }
         return delimiters
@@ -980,7 +999,8 @@ enum ComplexityEngine {
     }
 
     private static var goFunction: SignaturePattern {
-        SignaturePattern(#"^func[ \t]*(?:\([^()]*\)[ \t]*)?([A-Za-z_]\w*)[ \t]*\("#)
+        // Go 1.18+ 泛型：`func Map[K comparable, V any](...)` 的类型参数表夹在名字和 `(` 之间
+        SignaturePattern(#"^func[ \t]*(?:\([^()]*\)[ \t]*)?([A-Za-z_]\w*)[ \t]*(?:\[[^\]\n]*\))?[ \t]*\("#)
     }
 
     private static var rustFunction: SignaturePattern {

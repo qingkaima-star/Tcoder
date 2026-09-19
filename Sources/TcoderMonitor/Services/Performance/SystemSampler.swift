@@ -18,6 +18,12 @@ struct VmCounters: Sendable, Equatable {
     var wired: UInt64 = 0
     var compressed: UInt64 = 0
     var free: UInt64 = 0
+    var speculative: UInt64 = 0
+    var purgeable: UInt64 = 0
+
+    var reclaimableBytes: UInt64 {
+        (free &+ speculative &+ purgeable) &* pageSize
+    }
 }
 
 /// 一次原始读数的全部累积量：调用方存起来与下一次相减得到速率。
@@ -63,8 +69,8 @@ struct SystemSampler: Sendable {
         snapshot.thermalState = ThermalState(processInfoValue: ProcessInfo.processInfo.thermalState.rawValue)
 
         snapshot.cpuUsage = Self.cpuUsage(previous: previous?.cores ?? [], current: current.cores)
-        snapshot.memoryUsedBytes = Self.memoryUsedBytes(current.vm)
         snapshot.memoryTotalBytes = ProcessInfo.processInfo.physicalMemory
+        snapshot.memoryUsedBytes = Self.memoryUsedBytes(current.vm, totalBytes: snapshot.memoryTotalBytes)
         snapshot.memoryPressure = Self.pressure(for: snapshot.memoryFraction)
 
         if let previous {
@@ -119,9 +125,15 @@ extension SystemSampler {
         return min(max(usage, 0), 1)
     }
 
-    /// 口径对齐活动监视器：active + wired + 压缩器实际占用页；inactive 可回收故不计。
-    static func memoryUsedBytes(_ vm: VmCounters) -> UInt64 {
-        (vm.active &+ vm.wired &+ vm.compressed) &* vm.pageSize
+    /// 与活动监视器同口径：已用 = 总量 -（free + speculative + purgeable）。
+    /// inactive 是文件缓存但监视器仍计入已用，所以不能只算 active+wired+compressed。
+    static func memoryUsedBytes(_ vm: VmCounters, totalBytes: UInt64) -> UInt64 {
+        let reclaimable = vm.reclaimableBytes
+        if reclaimable >= totalBytes {
+            // 页计数瞬时不一致时退化为「active + wired + 压缩器占用」，至少不会是负数。
+            return min(totalBytes, (vm.active &+ vm.wired &+ vm.compressed) &* vm.pageSize)
+        }
+        return totalBytes - reclaimable
     }
 
     static func bytesPerSecond(previous: UInt64, current: UInt64, elapsed: TimeInterval) -> UInt64 {
@@ -195,7 +207,9 @@ private extension SystemSampler {
             inactive: UInt64(stats.inactive_count),
             wired: UInt64(stats.wire_count),
             compressed: UInt64(stats.compressor_page_count),
-            free: UInt64(stats.free_count)
+            free: UInt64(stats.free_count),
+            speculative: UInt64(stats.speculative_count),
+            purgeable: UInt64(stats.purgeable_count)
         )
     }
 
