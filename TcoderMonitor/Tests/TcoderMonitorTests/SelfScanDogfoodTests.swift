@@ -226,14 +226,33 @@ final class SelfScanDogfoodTests: XCTestCase {
             + "拖后腿维度=\(worst?.name ?? "无")(\(worst?.score ?? 0))")
     }
 
+    // MARK: - 取证落盘
+
+    /// SwiftPM 在测试进程收尾时会丢掉 stdout 的后半段（实测 65 行的转储只剩前 20 行，
+    /// 连后面的短行一起没了）。取证证据漏行比刷屏严重得多，所以完整转储写文件，
+    /// 终端只留一行指针 + 各条防作弊门的单行结论。
+    private static let evidenceURL = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("tcoder-wsj-selfscan-evidence.txt")
+
+    private func writeEvidence(_ text: String) throws {
+        let url = Self.evidenceURL
+        if FileManager.default.fileExists(atPath: url.path),
+           let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(text.data(using: .utf8) ?? Data())
+            try handle.close()
+        } else {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
     // MARK: - 完整证据转储
 
-    /// 一次 `emit` 一行、最后**单次** print：分多次 print 时 SwiftPM 的
-    /// stdout 管道会在长转储中间丢行（实测巨大文件榜与复杂度榜各丢了十几行），
-    /// 取证漏行比慢一点严重得多。
     func testFullSelfScanEvidenceDump() async throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["TCODER_SELF_SCAN"] == "1",
                           "完整转储需显式开启：TCODER_SELF_SCAN=1")
+        // 每次跑都从干净文件开始，免得上一轮的尾巴混进这一轮。
+        try? FileManager.default.removeItem(at: Self.evidenceURL)
         let scan = try await selfScan()
         let truth = try independentSwiftLineCounts()
         let root = Self.repoRoot.path
@@ -331,8 +350,19 @@ final class SelfScanDogfoodTests: XCTestCase {
         emit("优势：\(health.strengths)")
         emit("问题：\(health.issues)")
         emit("建议：\(health.recommendations)")
-        emit("==========================================\n")
-        print("\n" + lines.joined(separator: "\n"))
+
+        let census = try await complexityCensus()
+        emit("—— 10. 普查 vs 榜单（绕开 prefix(20) 自己数）——")
+        emit("全仓函数 \(census.functionCount) 个，全仓均复杂度 \(String(format: "%.2f", census.repoMean))，"
+            + "≥\(Self.complexFunctionBar) 的 \(census.atLeast16) 个，≥21 的 \(census.atLeast21) 个，"
+            + "≥31 的 \(census.atLeast31) 个，最高 \(census.maxValue)")
+        emit("榜单 topComplexFunctions 只留 \(scan.code.topComplexFunctions.count) 条（被 prefix(20) 截断），"
+            + "其均值 \(String(format: "%.1f", census.hotspotMean)) ← 评分现在用的就是这个数")
+        emit("独立口径 >\(Self.toolHighFileLines) 行的 .swift 文件 \(truth.filter { $0.lines > Self.toolHighFileLines }.count) 个，"
+            + ">1000 行 \(truth.filter { $0.lines > Self.thousandLineBar }.count) 个")
+        emit("==========================================")
+        try writeEvidence(lines.joined(separator: "\n") + "\n")
+        print("【取证落盘】\(Self.evidenceURL.path)（\(lines.count) 行）")
     }
 
     // MARK: - 独立复核：绕开 top-20 截断，数全量函数
