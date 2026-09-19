@@ -313,7 +313,79 @@ final class DesignTokenTests: XCTestCase {
         }
     }
 
-    // MARK: - K. 玻璃闸门
+    // MARK: - L. 缺证据不得渲染成结论（WS-G P0 + WS-I §3.4）
+
+    /// P0 本体：`RiskLevel.none` 在离线默认态下几乎对所有项目成立
+    /// （`riskLevel` 只看 `vulnerableCount`），所以对勾会把"我们没查"画成"我们查了、是安全的"。
+    func testUnverifiedRiskBadgeNeverDrawsACheckmark() {
+        for risk in RiskLevel.allCases {
+            let p = RiskBadge.presentation(risk: risk, verified: false)
+            XCTAssertNotEqual(p.icon, .noRisk,
+                              "未核对态下的 \(risk.rawValue) 仍然画出了对勾")
+            XCTAssertEqual(p.role.name, "neutral", "未核对必须走中性色，不得带倾向")
+            XCTAssertEqual(p.text, "未核对")
+        }
+    }
+
+    /// 反向保险：`.none` 也被代码规模/复杂度等维度复用，那里的"无风险"是**真结论**，
+    /// 不能因为 P0 被一起改掉。
+    func testVerifiedNoRiskBadgeStillEarnsItsCheckmark() {
+        let p = RiskBadge.presentation(risk: .none, verified: true)
+        XCTAssertEqual(p.icon, .noRisk, "真核对过的无风险不该被降级成问号")
+        XCTAssertEqual(p.text, "风险 无")
+    }
+
+    /// 「无风险」与「未核对」共用 neutral 色（RiskLevel.none 本就映射到 neutral），
+    /// 所以区分必须落在**图标 + 文字**这两个通道上——这正是 WS-H §10「不许只靠颜色表意」。
+    func testNoRiskAndUnverifiedAreToldApartByIconAndTextNotByColor() {
+        let clean = RiskBadge.presentation(risk: .none, verified: true)
+        let unknown = RiskBadge.presentation(risk: .none, verified: false)
+        XCTAssertEqual(clean.role.name, unknown.role.name, "两者同色是预期，别把它当 bug 改")
+        XCTAssertNotEqual(clean.icon, unknown.icon)
+        XCTAssertNotEqual(clean.text, unknown.text)
+    }
+
+    func testUnverifiedIconIsRegisteredAndDistinctFromNoRisk() {
+        XCTAssertNotEqual(IconName.unverified.rawValue, IconName.noRisk.rawValue)
+        XCTAssertNotNil(NSImage(systemSymbolName: IconName.unverified.rawValue,
+                                accessibilityDescription: nil))
+    }
+
+    /// "没查到" 必须显示 `--`；真 0 必须照原样显示 0。两者混同就是 WS-D 反复强调的那类事故。
+    func testMetricTileRendersMissingValueAsPlaceholderNotZero() {
+        XCTAssertEqual(Theme.Placeholder.missingValue, "--")
+        XCTAssertEqual(MetricTile.displayValue(nil), "--")
+        XCTAssertNotEqual(MetricTile.displayValue(nil), "0",
+                          "缺数据被渲染成 0，等于凭空造出一个好消息")
+        XCTAssertEqual(MetricTile.displayValue("0"), "0", "真 0 必须原样显示")
+    }
+
+    func testMetricTileDropsCallerTintWhenThereIsNoValue() {
+        XCTAssertTrue(MetricTile.forcesNeutralTint(for: nil),
+                      "无值时仍在沿用调用方给的倾向色")
+        XCTAssertFalse(MetricTile.forcesNeutralTint(for: "0"),
+                       "真 0 是有数据的结论，不该被中性化")
+        XCTAssertFalse(MetricTile.forcesNeutralTint(for: "42"))
+    }
+
+    // MARK: - M. 与 WS-I 设计债清单的对应（防止我把已修的又漏回去）
+
+    /// WS-I §4：全仓 `.monospacedDigit()` 命中 0，根因在 `Theme.metricNumber/heroNumber` 没开。
+    /// 这一条就是那个"改一处全站生效"的落点，必须已经修好。
+    func testLargeNumberTokensAreMonospacedNow() {
+        XCTAssertTrue(Theme.Typo.metricNumber.monospacedDigits,
+                      "WS-I §4 指出的根因未修：metricNumber 仍不等宽")
+        XCTAssertTrue(Theme.Typo.heroMetric.monospacedDigits)
+        XCTAssertFalse(Theme.Typo.metricNumber.design == .rounded)
+        XCTAssertFalse(Theme.Typo.heroMetric.design == .rounded)
+    }
+
+    /// WS-I §2.5：badge 底色透明度在 0.12 / 0.14 / 0.15 之间漂移，现收成一档。
+    func testBadgeTintAlphaIsASingleValue() {
+        XCTAssertEqual(Theme.Palette.Opacity.badgeFill, 0.15)
+    }
+
+    // MARK: - N. 玻璃闸门
 
     func testGlassEngineReportsOneDeterministicMode() {
         let first = GlassEngine.mode
