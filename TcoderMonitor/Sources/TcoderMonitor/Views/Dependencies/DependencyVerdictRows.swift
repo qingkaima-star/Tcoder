@@ -142,7 +142,7 @@ enum DependencySafetyVerdict: Equatable {
         case .findings(let count, _):
             return "命中 \(NumberFormat.grouped(count)) 条内置快照与安全公告"
         case .unchecked(let covered, let total, let uncovered):
-            var text = "未联网核对，仅内置快照（覆盖 npm / Maven / Python）"
+            var text = "未联网核对，仅内置快照（覆盖 npm / Maven / Python），\(DependencySnapshot.asOfText)"
             text += total == 0 ? "· 无依赖可核对" : "· \(NumberFormat.grouped(covered)) / \(NumberFormat.grouped(total)) 项有版本数据"
             if !uncovered.isEmpty { text += "· 未覆盖生态：\(uncovered.joined(separator: "、"))" }
             return text

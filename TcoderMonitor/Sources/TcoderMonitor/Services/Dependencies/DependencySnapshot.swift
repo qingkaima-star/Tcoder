@@ -24,6 +24,23 @@ enum DependencySnapshot {
     /// 且不低于该生态常见稳定版的版本号。没把握的包一律不收录（查不到返回 nil，绝不猜）。
     static let snapshotDate: Date = DependencySnapshot.date(year: 2026, month: 9, day: 19)
 
+    /// 「内置快照是哪天的」那一句，离线判据与降级说明**共用同一份**，
+    /// 免得分析器写一遍、视图再写一遍然后各自腐烂（#25 的原始症状就是这字段谁都不说）。
+    ///
+    /// 措辞里刻意不出现「失败」二字：`VulnerabilityEvidence.classify` 拿
+    /// `networkLookupNote.contains("失败")` 当降级判据，这句话会被拼进那个 note。
+    static var asOfText: String {
+        "快照截至 \(DateFormat.full.string(from: snapshotDate))（\(DateFormat.sinceDescription(snapshotDate))）"
+    }
+
+    /// 给已有的在线核对说明补上快照日期；说明为空时原样返回，
+    /// 已经带过这句话也不再重复补（避免同一屏出现两遍日期）。
+    static func noteAppended(to note: String) -> String {
+        guard note.isEmpty == false else { return note }
+        guard note.contains(asOfText) == false else { return note }
+        return note + "；" + asOfText
+    }
+
     /// 精确查表：命中返回 latest known version，未收录返回 nil。
     ///
     /// 规则：先按 `"<ecosystem.rawValue>|<name 原样>"` 精确命中，再做「同生态内大小写不敏感」
