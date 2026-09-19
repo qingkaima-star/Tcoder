@@ -48,8 +48,16 @@ if ! ./scripts/locked_build.sh build --build-tests > "$BUILD_LOG" 2>&1; then
   fail=1
 fi
 
-if [ "$fail" = "0" ]; then
-  # 日志自带本次运行的身份。只有标记**恰好出现一次**，才能证明下面读到的数字
+# 快速模式：PREMERGE_SKIP_TEST=1 只做"能不能编译"这一半。
+# 用途：一批分支排队等合入时，先用它把"没写完的重构"筛掉（这正是弄坏 main 的那个故障模式），
+# 合并后再由 main 上的一次全量 test 兜底。跳过时结论会明写"未跑测试"，不许冒充全绿。
+SKIP=0
+if [ "${PREMERGE_SKIP_TEST:-0}" = "1" ]; then
+  SKIP=1
+  echo "  ⚠ PREMERGE_SKIP_TEST=1：本轮**未跑测试**，结论仅限「测试模块能编译」。"
+fi
+
+if [ "$fail" = "0" ] && [ "$SKIP" = "0" ]; then
   # 是这一次跑出来的，而不是别的分支留在同一个文件里的。
   { echo "PREMERGE-MARK branch=$BRANCH run=$RUN_TAG"
     ./scripts/locked_build.sh test
@@ -70,7 +78,7 @@ fi
 # 退出码 0 并不等于"真的跑过测试"。我差点用一版只看退出码的门禁放行了自己写的
 # `--filter`（名字写错时 xctest 输出 `Executed 0 tests, with 0 failures`，是永真绿）。
 # 所以这里必须**正向断言**跑掉了多少例、失败了多少例，取不到汇总行就判失败。
-if [ "$fail" = "0" ]; then
+if [ "$fail" = "0" ] && [ "$SKIP" = "0" ]; then
   SUMMARY=$(grep -aE "Executed [0-9]+ tests?" "$TEST_LOG" | tail -1)
   if [ -z "$SUMMARY" ]; then
     echo "  ❌ 测试日志里没有汇总行，无法证明跑过测试（取不到数字＝没跑）"
@@ -108,7 +116,11 @@ if [ -n "$CREATED" ]; then
 fi
 
 if [ "$fail" = "0" ]; then
-  echo "==> ✅ $BRANCH 可以合入 main"
+  if [ "$SKIP" = "1" ]; then
+    echo "==> ⚠ $BRANCH 编译体检通过（**未跑测试**），可合入；合入后必须由 main 的全量 test 兜底"
+  else
+    echo "==> ✅ $BRANCH 可以合入 main"
+  fi
 else
   echo "==> ❌ $BRANCH 不可合入。请让负责人自己跑双绿后再来。"
 fi
