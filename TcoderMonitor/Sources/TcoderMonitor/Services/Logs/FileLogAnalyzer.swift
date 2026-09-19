@@ -60,7 +60,6 @@ final class FileLogAnalyzer: LogAnalysisProviding {
         // 读取失败的文件不进「已扫描文件」：`LogSummary.hasData` 认 scannedFiles 非空，
         // 让它们混进来等于用一次权限不足换一张 all-clear（审计 P1 #11）。
         // 读到但内容为空的文件**保留**——那是「已核对零命中」，与「没核对」是两种状态。
-        // 契约缺口：`ScannedLogFile` 没有承载读取失败原因的字段，被剔掉的条数目前无法呈现给 UI。
         summary.scannedFiles = readings.filter { $0.readFailed == false }.map {
             ScannedLogFile(
                 path: $0.url.path,
@@ -70,6 +69,20 @@ final class FileLogAnalyzer: LogAnalysisProviding {
                 role: $0.role
             )
         }
+        // 被剔掉的那些不能就此消失：单独一本账带着各自的原因，UI 才说得出
+        // 「已跳过 N 份读取失败（权限不足 ×2、文件已不存在 ×1）」。
+        // 只在非空时赋值——没有失败就没有这个 key，旧报告的形状也不变。
+        let failed = readings.filter { $0.readFailed }.map {
+            ScannedLogFile(
+                path: $0.url.path,
+                sizeBytes: $0.sizeBytes,
+                lineCount: $0.totalLines,
+                modifiedAt: $0.modifiedAt,
+                role: $0.role,
+                readFailure: $0.readFailure ?? "读取失败（原因未记录）"
+            )
+        }
+        if !failed.isEmpty { summary.readFailedFiles = failed }
         return summary
     }
 

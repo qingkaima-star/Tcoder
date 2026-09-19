@@ -62,6 +62,10 @@ struct LogFileReading: Sendable {
     /// 前者是「没核对」，后者是「核对过、零命中」；把前者混进 scannedFiles 会让
     /// 一次权限不足换来一张 all-clear（`LogSummary.hasData` 认 scannedFiles 非空）。
     var readFailed: Bool = false
+    /// 为什么没读到（「权限不足」/「文件已不存在」/…）。与 `readFailed` 同时置位，
+    /// 供 `ScannedLogFile.readFailure` 呈现给 UI——只有一个布尔的话，UI 说得出"跳过了"
+    /// 却说不出为什么，用户无从判断这份日志是不是真的不需要看。
+    var readFailure: String? = nil
 }
 
 struct LogAggregate: Sendable {
@@ -88,8 +92,12 @@ enum LogReader {
         var reading = LogFileReading(url: log.url, role: log.role, sizeBytes: log.sizeBytes,
                                      modifiedAt: log.modifiedAt)
         guard maxBytes > 0, maxLines > 0 else { return reading }
-        guard let handle = try? FileHandle(forReadingFrom: log.url) else {
+        let handle: FileHandle
+        do {
+            handle = try FileHandle(forReadingFrom: log.url)
+        } catch {
             reading.readFailed = true
+            reading.readFailure = readFailureReason(for: error)
             return reading
         }
         defer { try? handle.close() }
@@ -133,9 +141,17 @@ enum LogReader {
             builder.append(decode(lineData))
         }
 
+        /// 读取中途的错误。打开成功但读不出内容时，原因和「文件本来就是空的」必须分开——
+        /// 前者是没核对，后者才是核对过零命中。
+        var readError: Error?
+
         func readChunk() -> Data? {
-            guard let data = try? handle.read(upToCount: chunkLength) else { return nil }
-            return data
+            do {
+                return try handle.read(upToCount: chunkLength)
+            } catch {
+                if readError == nil { readError = error }
+                return nil
+            }
         }
 
         var stoppedByLineCap = false
@@ -176,10 +192,36 @@ enum LogReader {
         reading.events = builder.events
         // 文件声明有内容、却一行都没读出来：这不是「空的」，这是没读进来。
         // 不标成读取失败，就会被当成「核对过、零命中」参与后续结论。
-        if reading.totalLines == 0 && reading.sizeBytes > 0 {
+        if let readError {
             reading.readFailed = true
+            reading.readFailure = readFailureReason(for: readError)
+        } else if reading.totalLines == 0 && reading.sizeBytes > 0 {
+            reading.readFailed = true
+            reading.readFailure = "文件有 \(reading.sizeBytes) 字节，却一行都没有读到"
         }
         return reading
+    }
+
+    /// 把「打不开 / 读不动」的错误翻成给用户看的一句话。
+    ///
+    /// 只把能确定成因的几类翻成短句；其余原样带上系统描述而不是兜一个「读取失败」——
+    /// 「已跳过 3 份」这种话如果每份原因都一样，用户就分不出哪些是自己能修的（权限、
+    /// 文件被移走）哪些是真故障。
+    static func readFailureReason(for error: Error) -> String {
+        let cocoa = error as NSError
+        if cocoa.domain == NSCocoaErrorDomain {
+            if cocoa.code == CocoaError.fileReadNoSuchFile.rawValue
+                || cocoa.code == CocoaError.fileNoSuchFile.rawValue {
+                return "文件已不存在"
+            }
+            if cocoa.code == CocoaError.fileReadNoPermission.rawValue {
+                return "权限不足"
+            }
+        }
+        if cocoa.domain == NSPOSIXErrorDomain, cocoa.code == Int(EACCES) || cocoa.code == Int(EPERM) {
+            return "权限不足"
+        }
+        return "无法读取（\(cocoa.localizedDescription)）"
     }
 }
 

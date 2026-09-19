@@ -7,6 +7,16 @@ struct LogSummary: Codable, Equatable, Sendable {
     var windowStart: Date?
     var windowEnd: Date?
     var scannedFiles: [ScannedLogFile] = []
+    /// 因读取失败而被排除在「已核对」之外的文件，各自带 `readFailure` 原因。
+    ///
+    /// **为什么不并进 `scannedFiles`**：`hasData` 认 `!scannedFiles.isEmpty`，
+    /// 把读失败的文件塞回去，就等于让一次权限不足重新换来一张 all-clear——那正是
+    /// `FileLogAnalyzer` 那道 filter 要挡住的（审计 P1 #11）。所以单独记一本账。
+    ///
+    /// 整个数组也是 Optional（而不是 `= []`），同理：非可选的新 key 在旧报告里不存在，
+    /// 合成解码会抛 `keyNotFound`，`try?` 会把用户已存报告整份静默丢掉。
+    /// 语义上 nil 与空数组等价，写入方只在非空时赋值。
+    var readFailedFiles: [ScannedLogFile]? = nil
 
     var errorCount: Int = 0
     var exceptionCount: Int = 0
@@ -43,6 +53,13 @@ struct ScannedLogFile: Codable, Equatable, Hashable, Identifiable, Sendable {
     var lineCount: Int
     var modifiedAt: Date
     var role: LogFileRole
+    /// 读取失败时面向用户的一句话原因（「权限不足」等）；读成功或老报告里没有 = nil。
+    ///
+    /// **必须是 Optional。** `ProjectStore` 全程 `try?` 解码，而 Swift 合成的 `Codable`
+    /// 不会为缺失的 key 套用属性默认值——这里若写成 `var readFailure: String = ""`，
+    /// 用户升级前存的每一份报告都会 `keyNotFound` → 被 `try?` 静默变成 nil →
+    /// **整份历史报告消失，且不报任何错**。Optional 缺 key 才解得成 nil。
+    var readFailure: String? = nil
 
     var id: String { path }
 }
