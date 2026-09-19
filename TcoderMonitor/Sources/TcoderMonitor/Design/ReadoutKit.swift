@@ -1,16 +1,20 @@
 import SwiftUI
 
-// MARK: - 读数 / 占比 / 提示 / 侧栏 / 页面骨架
+// MARK: - 读数 / 占比 / 页面骨架
 //
-// 只保留**有真实调用方**的三件：`Readout.Field`(12) / `Readout.Bar`(2) /
+// 只保留**有真实调用方**的四件：`Readout.Field`(12) / `Readout.Bar`(2) /
 // `Share.Row`(2) / `Page.Scaffold`(3)。#28 里删掉了 `Readout.Metric`（页面用 `DataReadout`，
 // 41 处）、`Notice`（页面用 `DataNotice`）、`Sidebar.Item`（WS-K 自绘）、`Empty.Card`
 // （WS-M 有 `HealthNotScoredCard`/`HealthNoInputCard`）——它们零引用，留着就是装饰。
 //
 // 上一轮的背景是：三条流不能改 Design，只能各自造，
 // 结果同一个「标签 + 数字」在三页长出三种实现（WS-L `DataFieldRow`/`DataReadout`、
-// WS-M `LiveNumber`、WS-K `StatLine`）。这里给一套并集，并且把**缺证据必须中性**
-// 焊进类型：要显示数字就得走 `Theme.Evidence`，拿不到"随手一个 String + 绿色"。
+// WS-M `LiveNumber`、WS-K `StatLine`）。这里收成一套。
+//
+// ⚠️ 关于"缺证据必须中性"：#28 曾在这里配 `Theme.Evidence` 三态类型把它焊进类型，
+// 因页面零引用已删。**该规则目前回到"靠约定 + 各页自己写对"的层面**，
+// 全仓 15 处手写 `?? Theme.Placeholder.missingValue` 已逐处列进《42》§14；
+// #34 若要做回类型级强制，正解是上提 WS-L 那份**有活用户**的 `DataAbsence`，不是重造我这版。
 
 // MARK: 键值读数
 

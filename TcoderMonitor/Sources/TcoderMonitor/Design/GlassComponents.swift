@@ -41,14 +41,14 @@ struct GlassCard<Content: View>: View {
     }
 }
 
-/// 带标题行的分区卡——页面里绝大多数卡片的默认形态，也是 `SectionCard` 的继任者。
+/// 带标题行的分区卡——页面里绝大多数卡片的默认形态（41 处在用）。
 /// 同心圆角（WS-H §3.3）：外层 `Radius.card`(16)，内部 tile 用 `Radius.md`(10)。
 struct GlassSection<Content: View>: View {
     var title: String
     var subtitle: String?
     var icon: IconName?
-    /// 标题行右侧插槽。沿用 `SectionCard` 的 `AnyView?` 约定，
-    /// 免得为泛型 trailing 一次性改动全部调用点。
+    /// 标题行右侧插槽用 `AnyView?` 而非泛型 trailing：
+    /// 与页面自 `SectionCard` 时代起就传 `AnyView` 的调用点保持兼容（该壳已在 #28 删除）。
     var trailing: AnyView?
     var padding: CGFloat
     @ViewBuilder var content: Content
