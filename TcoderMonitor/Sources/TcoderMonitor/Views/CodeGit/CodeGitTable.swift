@@ -8,7 +8,7 @@ import SwiftUI
 
 // MARK: 列定义
 
-enum DataGridColumnAlignment {
+enum DataGridColumnAlignment: Equatable {
     case leading
     case trailing
 
@@ -21,7 +21,7 @@ enum DataGridColumnAlignment {
 }
 
 /// 一列的布局。`width == nil` = 弹性列（名称列），其余一律定宽尾对齐。
-struct DataGridColumn {
+struct DataGridColumn: Equatable {
     let title: String
     let width: CGFloat?
     let alignment: DataGridColumnAlignment
@@ -37,9 +37,18 @@ struct DataGridColumn {
 /// 10pt 等宽数字 4 位约 24pt，加尾随单位「行」后取 56；徽标「仅版本比对」在 10pt
 /// Medium 加 `Spacing.chip` 内边距后约 84pt。改数值请连同注释里的依据一起改。
 enum DataColumns {
+    /// 复杂度风险页 · 重复块清单
+    static let duplicationBlocks: [DataGridColumn] = [
+        DataGridColumn("重复块", nil, .leading),
+        DataGridColumn("行数", 56),
+        DataGridColumn("出现", 56),
+        DataGridColumn("相似度", 64),
+        DataGridColumn(" ", 24),
+    ]
+
     /// 复杂度风险页 · 高复杂度函数榜
     static let complexityFunctions: [DataGridColumn] = [
-        DataGridColumn("函数"),
+        DataGridColumn("函数", nil, .leading),
         DataGridColumn("起始行", 56),
         DataGridColumn("行数", 56),
         DataGridColumn("圈复杂度", 62),
@@ -48,10 +57,10 @@ enum DataColumns {
         DataGridColumn(" ", 24),
     ]
 
-    /// 代码规模页 · 巨大文件榜
+    /// 代码规模页 · 巨大文件榜。「相对体量」是与全仓最大文件的比值条，故定宽窄于数字列。
     static let hugeFiles: [DataGridColumn] = [
-        DataGridColumn("文件"),
-        DataGridColumn("体量", 52),
+        DataGridColumn("文件", nil, .leading),
+        DataGridColumn("相对体量", 64),
         DataGridColumn("行数", 62),
         DataGridColumn("风险", 92),
         DataGridColumn(" ", 24),
@@ -59,7 +68,7 @@ enum DataColumns {
 
     /// 依赖分析页 · 依赖表
     static let dependencies: [DataGridColumn] = [
-        DataGridColumn("依赖"),
+        DataGridColumn("依赖", nil, .leading),
         DataGridColumn("声明版本", 84),
         DataGridColumn("已知最新", 84),
         DataGridColumn("作用域", 60),
@@ -68,8 +77,8 @@ enum DataColumns {
 
     /// Git 洞察页 · 最近提交
     static let recentCommits: [DataGridColumn] = [
-        DataGridColumn("SHA", 66),
-        DataGridColumn("提交说明"),
+        DataGridColumn("SHA", 66, .leading),
+        DataGridColumn("提交说明", nil, .leading),
         DataGridColumn("文件", 48),
         DataGridColumn("增", 56),
         DataGridColumn("删", 56),
@@ -84,6 +93,8 @@ enum DataColumns {
 
     /// 图例色点边长。6 与 `Radius.sm` 同档，量级约等于 10pt 文字的大写字高——
     /// 再大就开始和文字抢注意力，再小在深色模式下几乎看不见。
+    /// 名称列一律显式写 `.leading`：`DataGridColumn` 的默认对齐是尾对齐（数字列占多数），
+    /// 弹性列漏写就会把表头拉到列右边。
     static let legendSwatchSide: CGFloat = Theme.Radius.sm
 
     /// 取列：越界时退回弹性列，免得调用方传错下标直接崩。
@@ -275,7 +286,7 @@ struct DataShareBarRow: View {
                     .font(Theme.Typo.label.font)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                MiniBarGauge(fraction: fraction, tint: tint, height: 5)
+                MiniBarGauge(fraction: fraction, tint: tint, height: DataGaugeHeight.inline)
                     .frame(maxWidth: .infinity)
             }
             .tableCell(DataColumns.column(DataColumns.shareBar, 0))
@@ -291,6 +302,17 @@ struct DataShareBarRow: View {
                 .tableCell(DataColumns.column(DataColumns.shareBar, 2))
         }
     }
+}
+
+// MARK: 量表高度
+
+/// `MiniBarGauge` 的两档高度（WS-H §9：分量表 4–5、tile 内 5–6）。
+/// 收在一处，页面里就不再出现 `height: 5` / `height: 6` 这种各写各的漂移。
+enum DataGaugeHeight {
+    /// 占比条、行内量表。
+    static let inline: CGFloat = 5
+    /// 指标条里的主量表。
+    static let metric: CGFloat = 6
 }
 
 // MARK: 行底色
@@ -315,13 +337,21 @@ struct DataNotice: View {
     let text: String
     var role: Theme.SemanticRole = Theme.Semantic.info
     var icon: IconName = .info
+    /// 登记表尚未收录的符号走这个口子（取值一律来自 `CodeGitSymbol` 的命名常量）。
+    var symbol: String?
     /// 图标紧邻已有文字时保持装饰性；纯图标动作才需要 label。
     var iconLabel: String?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
-            ThemedIcon(icon, role: .inlineText, label: iconLabel)
-                .foregroundStyle(role.textColor)
+            Group {
+                if let symbol {
+                    CodeGitSymbol.decorated(symbol, role: .inlineText)
+                } else {
+                    ThemedIcon(icon, role: .inlineText, label: iconLabel)
+                }
+            }
+            .foregroundStyle(role.textColor)
             Text(text)
                 .font(Theme.Typo.narrative.font)
                 .lineSpacing(Theme.Typo.narrative.lineSpacing)

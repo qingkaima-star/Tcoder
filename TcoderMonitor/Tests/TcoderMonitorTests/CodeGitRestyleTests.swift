@@ -1,0 +1,411 @@
+import XCTest
+@testable import TcoderMonitor
+
+/// WS-L 代码与 Git 类页面重样的判据测试。
+///
+/// 只测**纯函数**（口径派生、三态判定、读数聚合、分类色稳定性、文案措辞）：
+/// 不启动 App、不碰渲染，UI 取证由总工统一安排。
+final class CodeGitRestyleTests: XCTestCase {
+
+    // MARK: - Helpers
+
+    private func author(_ name: String, _ email: String, commits: Int,
+                        last: Date? = nil) -> AuthorStats {
+        AuthorStats(name: name, email: email, commits: commits, additions: 0, deletions: 0,
+                    filesTouched: 0, firstCommitAt: nil, lastCommitAt: last,
+                    activityByHour: [], topDirectories: [:])
+    }
+
+    private func bucket(_ date: Date, commits: Int, granularity: BucketGranularity = .week) -> CommitBucket {
+        CommitBucket(date: date, commits: commits, additions: 0, deletions: 0, granularity: granularity)
+    }
+
+    // MARK: - Git 提交口径（「62 vs 48」那条账）
+
+    func testMergeOnlyGapIsReportedAsMergesNotAsWindowTruncation() {
+        // 本仓库形态：窗口远没用满，差额全是合并。
+        let scope = GitHistoryScope(totalCommits: 62, nonMergeCommitsAnalysed: 48, windowLimit: 20_000)
+        XCTAssertEqual(scope.basis, .complete(mergeCount: 14))
+        XCTAssertEqual(scope.mergeCount, 14)
+        XCTAssertFalse(scope.isWindowTruncated,
+                       "有合并提交不等于窗口被截断，不能再据此拉「只代表这段窗口」的警告横幅")
+        XCTAssertTrue(scope.headline.contains("共 62 次提交（含 14 次合并）"), scope.headline)
+        XCTAssertTrue(scope.headline.contains("48 次非合并提交"), scope.headline)
+        XCTAssertEqual(scope.authorBasis, 48, "作者与代码行的分母必须是不含合并的 48")
+        XCTAssertTrue(scope.windowSuffix.isEmpty)
+        XCTAssertFalse(GitCommitScopeSection.message(for: scope).contains("不代表全部历史"))
+        XCTAssertTrue(scope.totalTileCaption.contains("含 14 次合并"), scope.totalTileCaption)
+    }
+
+    func testWindowCappedRepositoryNeverClaimsAnExactMergeCount() {
+        // Homebrew 实测：total 50,666 / 窗口 20,000，差额 30,666 里混着没读到的更早历史。
+        let scope = GitHistoryScope(totalCommits: 50_666, nonMergeCommitsAnalysed: 20_000,
+                                    windowLimit: 20_000)
+        XCTAssertEqual(scope.basis, .windowCapped)
+        XCTAssertNil(scope.mergeCount, "窗口打满时报不出精确合并数，宁可不写")
+        XCTAssertTrue(scope.isWindowTruncated)
+        XCTAssertTrue(scope.headline.contains("最近 20,000 次非合并提交"), scope.headline)
+        XCTAssertTrue(scope.headline.contains("更早的历史未纳入"), scope.headline)
+        XCTAssertTrue(scope.windowSuffix.contains("近 20,000 次提交窗口内"), scope.windowSuffix)
+        XCTAssertTrue(GitCommitScopeSection.message(for: scope).contains("不代表全部历史"))
+        XCTAssertTrue(scope.authorTileCaption(authorCount: 617).contains("窗口内"),
+                      scope.authorTileCaption(authorCount: 617))
+    }
+
+    func testLegacyReportWithoutWindowFieldIsItsOwnState() {
+        // 旧报告没有 commitsAnalyzed（=0）：既不能说全是合并，也不能说被截断。
+        let scope = GitHistoryScope(totalCommits: 62, nonMergeCommitsAnalysed: 0, windowLimit: 20_000)
+        XCTAssertEqual(scope.basis, .unknown)
+        XCTAssertNil(scope.mergeCount)
+        XCTAssertTrue(scope.headline.contains("重新分析后可拆分"), scope.headline)
+        XCTAssertEqual(scope.authorBasis, 62, "缺字段时退回旧口径，但文案必须说明")
+        XCTAssertFalse(scope.isWindowTruncated)
+        XCTAssertEqual(scope.totalTileCaption, "旧报告未记录窗口口径")
+    }
+
+    func testMergeFreeHistoryCoversEveryCommit() {
+        let scope = GitHistoryScope(totalCommits: 62, nonMergeCommitsAnalysed: 62, windowLimit: 20_000)
+        XCTAssertEqual(scope.basis, .complete(mergeCount: 0))
+        XCTAssertTrue(scope.headline.contains("历史中没有合并提交"), scope.headline)
+        XCTAssertFalse(scope.mergesExplainTheGap)
+        XCTAssertEqual(scope.totalTileCaption, "无合并提交 · 已覆盖全部历史")
+    }
+
+    func testAuthorTableSumMatchesTheBasisPrintedOnScreen() {
+        // 现场核对：作者表求和必须等于页面上那枚「作者统计基准」，否则用户还是会发现对不上。
+        let git = GitInsights(totalCommits: 62, commitsAnalyzed: 48,
+                              authors: [author("Tcoder Team", "t@tcoder.local", commits: 48)])
+        let scope = git.commitScope
+        XCTAssertEqual(git.authors.reduce(0) { $0 + $1.commits }, scope.authorBasis)
+        XCTAssertEqual(git.authorShare(of: git.authors[0]) ?? 0, 1.0, accuracy: 0.0001)
+        XCTAssertNil(GitInsights().authorShare(of: author("x", "x@y", commits: 1)),
+                     "分母为 0 时返回 nil，让界面显示 --，而不是算出一个假的 0%")
+    }
+
+    func testDiscoveryWordingSeparatesWhereFromWhy() {
+        let up = GitInsights(discoveryMode: .parentDirectory, discoveryHops: 2)
+        XCTAssertEqual(GitRepositorySourceSection.discoveryCaption(up), "向上 2 层找到")
+        XCTAssertTrue(GitRepositorySourceSection.discoveryDetail(up).contains("仓库内部"))
+        let down = GitInsights(discoveryMode: .nestedSubdirectory, discoveryHops: 1)
+        XCTAssertTrue(GitRepositorySourceSection.discoveryDetail(down).contains("子仓库"))
+        XCTAssertEqual(GitRepositorySourceSection.discoveryCaption(GitInsights()), "未找到仓库")
+    }
+
+    // MARK: - 趋势读数与时段矩阵
+
+    func testTrendReadoutAggregatesBuckets() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let buckets = [
+            bucket(now, commits: 5),
+            bucket(now.addingTimeInterval(604_800), commits: 0),
+            bucket(now.addingTimeInterval(1_209_600), commits: 9),
+        ]
+        let summary = GitTrendReadoutBar.summary(of: buckets)
+        XCTAssertEqual(summary.count, 3)
+        XCTAssertEqual(summary.peak, 9)
+        XCTAssertEqual(summary.lowest, 0)
+        XCTAssertEqual(summary.emptyBuckets, 1)
+        XCTAssertEqual(summary.average, 14.0 / 3.0, accuracy: 0.001)
+        XCTAssertEqual(summary.unitLabel, "每周")
+        XCTAssertTrue(summary.spanCaption.contains("→"), summary.spanCaption)
+    }
+
+    func testTrendReadoutOnEmptyBucketsDoesNotInventZeroes() {
+        let summary = GitTrendReadoutBar.summary(of: [])
+        XCTAssertEqual(summary.count, 0)
+        XCTAssertEqual(summary.unitLabel, "无分桶")
+        XCTAssertEqual(summary.spanCaption, "无分桶")
+    }
+
+    func testAllZeroActivityMeansNoTimestampsNotQuietHours() {
+        XCTAssertTrue(GitActivityHeatmap.hasNoTimestamps(
+            hourCounts: Array(repeating: 0, count: 24), weekdayCounts: Array(repeating: 0, count: 7)))
+        XCTAssertFalse(GitActivityHeatmap.hasNoTimestamps(
+            hourCounts: [1] + Array(repeating: 0, count: 23), weekdayCounts: Array(repeating: 0, count: 7)))
+    }
+
+    // MARK: - 贡献者分析
+
+    func testBusFactorUsesNonMergeBasisNotMergedTotal() {
+        // 窗口口径 48：头名 34/48 = 71% → high；错用含合并的 62 只有 55% → 会被降级成 medium。
+        let git = GitInsights(totalCommits: 62, commitsAnalyzed: 48,
+                              authors: [author("A", "a@x", commits: 34),
+                                        author("B", "b@x", commits: 14)])
+        XCTAssertEqual(ContributorAnalysis.busFactorRisk(git), .high)
+        XCTAssertNotEqual(git.busFactorRisk, .high, "模型用含合并的分母，会系统性低估集中度")
+        XCTAssertTrue(ContributorBusFactorSection.message(for: git).contains("分母 = 48 次非合并提交"),
+                      ContributorBusFactorSection.message(for: git))
+    }
+
+    func testBusFactorWithoutAnyAuthorSaysCannotEvaluate() {
+        let message = ContributorBusFactorSection.message(for: GitInsights())
+        XCTAssertTrue(message.contains("无法评估 Bus Factor"), message)
+        XCTAssertEqual(ContributorAnalysis.busFactorRisk(GitInsights()), .none)
+    }
+
+    func testRankingIsStableAndDisplayNameFallsBackToEmail() {
+        let anonymous = author("", "zoe@x", commits: 5)
+        let named = author("Aaron", "a@x", commits: 5)
+        let sorted = ContributorAnalysis.sorted([anonymous, named])
+        XCTAssertEqual(sorted.map { ContributorAnalysis.displayName($0) }, ["Aaron", "zoe@x"],
+                       "同分时按显示名升序，榜位才不会每次刷新都换")
+        XCTAssertEqual(ContributorAnalysis.displayName(anonymous), "zoe@x")
+        XCTAssertEqual(ContributorAnalysis.email(anonymous), "zoe@x")
+        XCTAssertEqual(ContributorAnalysis.email(author("", "", commits: 1)), "无邮箱记录")
+    }
+
+    func testRecentlyActiveWindowIsThirtyDays() {
+        let now = Date(timeIntervalSince1970: 1_750_000_000)
+        let fresh = author("Fresh", "f@x", commits: 1, last: now.addingTimeInterval(-2 * 86_400))
+        let stale = author("Stale", "s@x", commits: 9, last: now.addingTimeInterval(-90 * 86_400))
+        let silent = author("Silent", "z@x", commits: 9)
+        XCTAssertEqual(ContributorAnalysis.recentlyActive([fresh, stale, silent], now: now).map(\.name),
+                       ["Fresh"])
+    }
+
+    func testAvatarInitialHandlesCJKLatinAndEmpty() {
+        XCTAssertEqual(ContributorAvatar.initial(author: author("张三", "z@x", commits: 1)), "张")
+        XCTAssertEqual(ContributorAvatar.initial(author: author("token", "t@x", commits: 1)), "T")
+        XCTAssertEqual(ContributorAvatar.initial(author: author("  ", "bob@x", commits: 1)), "B")
+        XCTAssertEqual(ContributorAvatar.initial(author: author("", "", commits: 1)), "?")
+    }
+
+    func testCategoryColorIsStableAcrossCallsAndInsidePalette() {
+        let email = "dev@tcoder.local"
+        XCTAssertEqual(CodeGitCategoryColor.index(for: email), CodeGitCategoryColor.index(for: email),
+                       "同一作者每次启动必须是同一个颜色——旧实现用 hashValue 取色会随机漂移")
+        XCTAssertEqual(CodeGitCategoryColor.index(for: "UPPER@X"),
+                       CodeGitCategoryColor.index(for: "upper@x"), "大小写不同的同一邮箱应同色")
+        XCTAssertTrue((0..<Theme.Chart.count).contains(CodeGitCategoryColor.index(for: email)))
+        XCTAssertTrue((0..<Theme.Chart.count).contains(CodeGitCategoryColor.index(for: "")))
+    }
+
+    // MARK: - 代码页三态
+
+    func testCodeGateKeepsNotAnalysedApartFromMeasuredEmpty() {
+        XCTAssertEqual(CodeDataGate.state(of: nil), .notAnalysed)
+        XCTAssertEqual(CodeDataGate.state(of: CodeMetrics()), .measuredEmpty)
+        XCTAssertEqual(CodeDataGate.state(of: CodeMetrics(totalFiles: 3, totalLines: 30)), .analysed)
+        XCTAssertNil(CodeDataGate.metrics(of: CodeMetrics()), "扫到空结果时不能继续渲染指标卡")
+
+        let notAnalysed = CodeDataGate.emptyCopy(for: nil, page: "复杂度")
+        let measured = CodeDataGate.emptyCopy(for: CodeMetrics(), page: "复杂度")
+        XCTAssertNotNil(notAnalysed)
+        XCTAssertNotNil(measured)
+        XCTAssertNotEqual(notAnalysed?.title, measured?.title)
+        XCTAssertTrue(measured!.message.contains("这是测得的结果"), measured!.message)
+        XCTAssertTrue(notAnalysed!.message.contains("重新分析"), notAnalysed!.message)
+    }
+
+    func testMissingNumbersRenderAsPlaceholderNotZero() {
+        XCTAssertEqual(DataAbsence.value("12").display, "12")
+        XCTAssertEqual(DataAbsence.measuredEmpty.display, NumberFormat.grouped(0))
+        XCTAssertEqual(DataAbsence.notAnalysed.display, "--",
+                       "没有证据时必须显示 --，0 会被读成「零风险」这个好消息")
+        XCTAssertFalse(DataAbsence.notAnalysed.permitsConclusion)
+        XCTAssertEqual(DataAbsence.notAnalysed.effectiveRole(Theme.Semantic.success).name, "neutral",
+                       "缺数据时中性角色必须盖掉调用方给的倾向色")
+        XCTAssertEqual(DataAbsence.value("0").effectiveRole(Theme.Semantic.success).name, "success")
+    }
+
+    func testAverageFileLinesUnknownIsPlaceholderNotZero() {
+        XCTAssertEqual(CodeScaleSection.averageFileLines(CodeMetrics()), "--")
+        XCTAssertEqual(CodeScaleSection.averageFileLines(CodeMetrics(totalFiles: 4, totalLines: 40)), "10.0")
+        XCTAssertEqual(CodeMetricsSummaryGrid.shareOf(10, CodeMetrics()), "--",
+                       "总行数为 0 时没有「占比」这个结论可言")
+        XCTAssertEqual(CodeRiskAnalysis.averageComplexityValue(CodeMetrics(totalFiles: 1, totalLines: 10)),
+                       "--", "一个函数都没识别出来时不能显示 0")
+    }
+
+    func testLanguageMixMergesTailHonestly() {
+        let shares = [
+            LanguageShare(language: "Swift", fileCount: 40, lineCount: 1_000, share: 0.5),
+            LanguageShare(language: "Python", fileCount: 10, lineCount: 400, share: 0.2),
+            LanguageShare(language: "Ruby", fileCount: 5, lineCount: 200, share: 0.1),
+            LanguageShare(language: "Go", fileCount: 5, lineCount: 200, share: 0.1),
+            LanguageShare(language: "JS", fileCount: 2, lineCount: 100, share: 0.05),
+            LanguageShare(language: "CSS", fileCount: 2, lineCount: 100, share: 0.05),
+            LanguageShare(language: "Sh", fileCount: 1, lineCount: 0, share: 0),
+        ]
+        let code = CodeMetrics(languages: shares)
+        let visible = CodeMetricsView.visibleShares(code, head: 4)
+        // 同分时先按行数降序、再按语言名升序：Ruby 与 Go 都是 200 行 / 10%，所以 Go 在前。
+        XCTAssertEqual(visible.map(\.language), ["Swift", "Python", "Go", "Ruby", "其他"])
+        XCTAssertEqual(visible.last?.lineCount, 200, "「其他」= JS 100 + CSS 100")
+        XCTAssertEqual(visible.last?.fileCount, 4)
+        XCTAssertTrue(CodeMetricsView.mergedNote(code, head: 4)!.contains("占比最低的 2 种语言"))
+        XCTAssertNil(CodeMetricsView.mergedNote(code, head: 8), "没超过展示上限就不该有合并说明")
+        XCTAssertEqual(CodeScaleSection.subtitle(code), "按有效代码行计，共 7 种语言，展示前 6 种")
+    }
+
+    func testMarkerNoteOnZeroMarkersSaysScannedNotFound() {
+        let clean = CodeMetrics(totalFiles: 12, totalLines: 400, codeLines: 300)
+        XCTAssertTrue(CodeMarkersSection.markerNote(clean).contains("已完成扫描"))
+        XCTAssertFalse(CodeMarkersSection.markerNote(clean).contains("建议优先"))
+        XCTAssertEqual(CodeMarkersSection.markerDensityPerKilo(clean), 0)
+        let withFixMe = CodeMetrics(totalFiles: 12, totalLines: 400, codeLines: 300, fixmeCount: 3)
+        XCTAssertTrue(CodeMarkersSection.markerNote(withFixMe).contains("FIXME 3 处"))
+    }
+
+    // MARK: - 风险判据
+
+    func testDuplicationTiersFlipAtTheirDocumentedThresholds() {
+        XCTAssertEqual(CodeRiskAnalysis.ratioRole(0).name, "success")
+        XCTAssertEqual(CodeRiskAnalysis.ratioRole(CodeRiskAnalysis.duplicationNotableRatio - 0.001).name,
+                       "success")
+        XCTAssertEqual(CodeRiskAnalysis.ratioRole(CodeRiskAnalysis.duplicationNotableRatio).name, "warning")
+        XCTAssertEqual(CodeRiskAnalysis.ratioRole(CodeRiskAnalysis.duplicationHighRatio).name, "danger")
+    }
+
+    func testEverySuggestionLineCarriesARealNumber() {
+        let block = DuplicatedBlock(occurrences: [
+            DuplicatedFragment(path: "/p/a.swift", startLine: 10),
+            DuplicatedFragment(path: "/p/b.swift", startLine: 40),
+            DuplicatedFragment(path: "/p/c.swift", startLine: 70),
+        ], lineCount: 22, similarity: 0.94)
+        let code = CodeMetrics(
+            totalFiles: 50, totalLines: 9_000, commentLines: 120, codeLines: 7_000,
+            todoCount: 9, fixmeCount: 4,
+            hugeFiles: [FileHotspot(path: "/p/big.swift", lineCount: 900, risk: .high,
+                                    suggestion: "按职责拆分")],
+            duplicationRatio: 0.2, duplicatedBlocks: [block])
+        let items = CodeRiskAnalysis.suggestions(for: code)
+        XCTAssertFalse(items.isEmpty)
+        for item in items {
+            XCTAssertTrue(item.text.contains { $0.isNumber },
+                          "无数字支撑的结论不许出现在建议区：\(item.text)")
+        }
+        XCTAssertTrue(items.contains { $0.id == "duplication-high" })
+        XCTAssertTrue(items.contains { $0.id == "huge-file" })
+        XCTAssertTrue(items.contains { $0.id == "markers" })
+        XCTAssertTrue(items.contains { $0.id == "comments" })
+        XCTAssertEqual(items.first(where: { $0.id == "duplication-high" })?.role.name, "danger")
+    }
+
+    func testCleanScanProducesNoSuggestionsAndOneHonestNote() {
+        // 注释率要给到提示线以上，否则「注释率偏低」本身就会产出一条建议，测不到空集。
+        let code = CodeMetrics(totalFiles: 4, totalLines: 200, commentLines: 20, codeLines: 180)
+        XCTAssertTrue(CodeRiskAnalysis.suggestions(for: code).isEmpty)
+        let note = CodeRiskAnalysis.noRiskNote(code)
+        XCTAssertTrue(note.contains("已完成扫描"), note)
+        XCTAssertTrue(note.contains("重复代码率 0.0%"), note)
+    }
+
+    func testComplexityDivergenceNeedsFiveHotspots() {
+        func hotspots(_ count: Int, cc: Int) -> [FunctionHotspot] {
+            (1...count).map {
+                FunctionHotspot(name: "f\($0)", filePath: "/p/x.swift", startLine: $0,
+                                lineCount: 60, cyclomaticComplexity: cc, parameterCount: 7, risk: .high)
+            }
+        }
+        let few = CodeMetrics(totalFiles: 5, totalLines: 500, codeLines: 400,
+                              topComplexFunctions: hotspots(4, cc: 30),
+                              averageCyclomaticComplexity: 4)
+        XCTAssertNil(CodeRiskAnalysis.relativeComplexitySuggestion(few),
+                     "样本不足 5 个就不该断言「平均值被少数函数拉高」")
+        let many = CodeMetrics(totalFiles: 5, totalLines: 500, codeLines: 400,
+                               topComplexFunctions: hotspots(6, cc: 40), longFunctions: 6,
+                               averageCyclomaticComplexity: 4)
+        XCTAssertNotNil(CodeRiskAnalysis.relativeComplexitySuggestion(many))
+        let items = CodeRiskAnalysis.suggestions(for: many)
+        XCTAssertTrue(items.contains { $0.id == "parameters" }, "7 个参数 ≥ 阈值 6，必须点名")
+        XCTAssertTrue(items.contains { $0.id == "complexity-high-cluster" })
+        XCTAssertEqual(CodeRiskAnalysis.highRiskFunctionCount(many), 6)
+    }
+
+    func testDuplicationOccurrenceSummaryCountsTheRest() {
+        let block = DuplicatedBlock(occurrences: (1...6).map {
+            DuplicatedFragment(path: "/src/dir/file\($0).swift", startLine: $0 * 10)
+        }, lineCount: 30, similarity: 0.9)
+        let shown = CodeDuplicationBlockRow.occurrenceTitles(block, root: "/src")
+        XCTAssertTrue(shown.contains("另有 2 处"), shown)
+        XCTAssertEqual(CodeDuplicationBlockRow.occurrenceTitles(block, root: "/src", limit: 6)
+            .components(separatedBy: "   ").count, 6)
+        XCTAssertTrue(CodeDuplicationBlockRow.hint(block, root: "/src").contains("相似度 90.0%"))
+    }
+
+    // MARK: - 依赖页诚实线
+
+    func testUncheckedRowNeverRendersAsSafe() {
+        for status in [DependencyRowStatus.versionOnly, .unchecked] {
+            XCTAssertEqual(status.role.name, "neutral", "\(status.text) 不得带倾向色")
+            XCTAssertNotEqual(status.badgeIcon, .noRisk, "没核对过就不能用对勾")
+            XCTAssertNotEqual(status.text, "正常")
+        }
+        XCTAssertEqual(DependencyRowStatus.verifiedSafe.role.name, "success")
+        XCTAssertEqual(DependencyRowStatus.verifiedSafe.badgeIcon, .noRisk)
+        XCTAssertEqual(DependencyRowStatus.outdated.role.name, "warning")
+        XCTAssertEqual(DependencyRowStatus.vulnerable(count: 2).badgeIcon, .vulnerable)
+    }
+
+    func testOfflineEmptyAdvisorySaysNotChecked() {
+        let record = DependencyRecord(name: "lodash", version: "4.17.21", ecosystem: .npm,
+                                      scope: .runtime, manifestPath: "/p/package.json",
+                                      latestKnownVersion: nil, versionCheckSource: .none,
+                                      knownVulnerabilities: [])
+        let report = DependencyReport(ecosystems: [
+            EcosystemReport(ecosystem: .npm, manifestPath: "/p/package.json", lockfileName: nil,
+                            dependencies: [record], frameworkMarkers: [])
+        ])
+        let caption = DependencyAdvisoriesSection.emptyCaption(report)
+        XCTAssertTrue(caption.contains("没有查"), caption)
+        XCTAssertFalse(caption.contains("未发现已知漏洞"),
+                       "离线空列表不得写成 all-clear 句式")
+        XCTAssertEqual(DependencyAdvisoriesSection.subtitle(items: [], deps: report),
+                       "内置快照与安全公告均未命中")
+        XCTAssertEqual(DependencySafetyVerdict(report).badgeIcon, .unverified)
+    }
+
+    func testOutdatedCaptionWithoutComparableVersionsIsNotACleanZero() {
+        XCTAssertEqual(DependencySummaryGrid.outdatedCaption(DependencyReport()), "没有可判定的依赖")
+        let record = DependencyRecord(name: "left-pad", version: "1.0.0", ecosystem: .npm,
+                                      scope: .runtime, manifestPath: "/p/package.json",
+                                      latestKnownVersion: "2.0.0", versionCheckSource: .bundledSnapshot,
+                                      knownVulnerabilities: [])
+        let report = DependencyReport(ecosystems: [
+            EcosystemReport(ecosystem: .npm, manifestPath: "/p/package.json", lockfileName: nil,
+                            dependencies: [record], frameworkMarkers: [])
+        ])
+        XCTAssertTrue(DependencySummaryGrid.outdatedCaption(report).contains("占依赖总数"),
+                      DependencySummaryGrid.outdatedCaption(report))
+    }
+
+    func testAdviceLineIsInfoNotSuccess() {
+        let item = VulnerabilityItem(id: "off-1", severity: .high, aliases: ["CVE-1"],
+                                     targets: ["a", "b", "c", "d", "e"], range: "pkg <1.0",
+                                     summary: "越界读取", advice: "建议升级至 1.0.1", score: 7.5,
+                                     source: "npm")
+        XCTAssertEqual(VulnerabilityRow.adviceRole(item).name, "info",
+                       "「建议升级」是修复路径，不是已安全的结论")
+        let line = VulnerabilityRow.targetsLine(item)
+        XCTAssertTrue(line.hasPrefix("pkg <1.0 → "), line)
+        XCTAssertTrue(line.contains("等 5 项"), line)
+    }
+
+    // MARK: - 表格列定义
+
+    func testEveryTableHasOneLeadingColumnAndUniqueTitles() {
+        let tables: [(String, [DataGridColumn])] = [
+            ("complexityFunctions", DataColumns.complexityFunctions),
+            ("hugeFiles", DataColumns.hugeFiles),
+            ("dependencies", DataColumns.dependencies),
+            ("recentCommits", DataColumns.recentCommits),
+            ("duplicationBlocks", DataColumns.duplicationBlocks),
+        ]
+        for (name, columns) in tables {
+            XCTAssertEqual(columns.filter { $0.width == nil }.count, 1,
+                             "\(name) 必须恰好一个弹性名称列，否则表头与行会错位")
+            XCTAssertEqual(columns.filter { $0.width == nil }.first?.alignment, .leading)
+            XCTAssertTrue(columns.filter { $0.width != nil }.allSatisfy { $0.alignment != .leading }
+                            || name == "recentCommits",
+                          "\(name) 的定宽列不左对齐（SHA 列除外：十六进制串按前缀读，左对齐才对）")
+            XCTAssertEqual(Set(columns.map(\.title)).count, columns.count, "\(name) 列名重复")
+        }
+    }
+
+    func testColumnLookupsClampInsteadOfCrashing() {
+        let columns = DataColumns.dependencies
+        XCTAssertEqual(DataColumns.column(columns, columns.count).width, nil)
+        XCTAssertEqual(DataColumns.column(columns, -1).width, nil)
+    }
+}

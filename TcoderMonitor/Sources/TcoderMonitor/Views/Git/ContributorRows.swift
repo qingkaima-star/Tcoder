@@ -122,7 +122,7 @@ struct ContributorRow: View {
             }
 
             HStack(spacing: Theme.Spacing.sm) {
-                MiniBarGauge(fraction: share ?? 0, tint: tint, height: 5)
+                MiniBarGauge(fraction: share ?? 0, tint: tint, height: DataGaugeHeight.inline)
                     .frame(maxWidth: .infinity)
                 Text(share.map { NumberFormat.percent($0, precision: 1) }
                      ?? Theme.Placeholder.missingValue)
