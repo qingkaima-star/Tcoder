@@ -68,6 +68,7 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
             await applyNetworkKnowledge(&report)
         } else {
             report.networkLookupPerformed = false
+            report.networkLookupNote = Self.offlineCaveat(for: report)
         }
         return report
     }
@@ -205,6 +206,43 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
             record.knownVulnerabilities = Self.deduped(hits.map { $0.cveIdentifiers.first ?? $0.id })
         }
         report.offlineVulnerabilities = VulnerabilitySource.offlineVulnerabilities(for: allRecords(report))
+    }
+
+    /// 离线时的「我们没做什么」说明，与在线路径同等直白（在线侧在
+    /// `DependencyNetworkLookup` 里会把失败与未覆盖生态写进 note，离线侧原先什么都没有，
+    /// 于是 `vulnerableCount = 0` 读起来像"查过、干净"）。
+    static func offlineCaveat(for report: DependencyReport) -> String {
+        let records = report.ecosystems.flatMap(\.dependencies)
+        let skipped = records.filter { KnownVulnerability.comparableCore($0.version) == nil }.count
+        var parts = ["未联网核对：漏洞判定只依据内置快照（覆盖 npm / Maven / Python）"]
+        let uncovered = ecosystemsWithoutOfflineRules(in: report)
+        if !uncovered.isEmpty {
+            parts.append("本次未覆盖生态：\(uncovered.joined(separator: "、"))")
+        }
+        if skipped > 0 {
+            parts.append("\(skipped) 项版本不可比较（\"*\"、workspace:*、分支/修订号等）已跳过比对")
+        }
+        if report.totalDependencies == 0 { parts.append("没有可核对的依赖") }
+        return parts.joined(separator: "；")
+    }
+
+    /// 该生态有没有内置离线漏洞规则。从规则表与坐标互通表**推导**，不另抄一份清单，
+    /// 免得规则增删后口径漂移（`DependencyReport.uncoveredEcosystemNames` 就是抄了
+    /// `displayName` 清单，结果把 npm 误报成"未覆盖"）。
+    static func hasOfflineRules(for ecosystem: DependencyEcosystem) -> Bool {
+        let scopes = Set(DependencySnapshot.lookupScopes(for: ecosystem))
+        return VulnerabilitySource.bundled.contains { scopes.contains($0.ecosystem.rawValue) }
+    }
+
+    /// 报告里存在、但内置规则不覆盖的生态（去重、保持首次出现顺序）。
+    static func ecosystemsWithoutOfflineRules(in report: DependencyReport) -> [String] {
+        var seen = Set<DependencyEcosystem>()
+        var names: [String] = []
+        for ecosystem in report.ecosystems.map(\.ecosystem) {
+            guard !hasOfflineRules(for: ecosystem), seen.insert(ecosystem).inserted else { continue }
+            names.append(ecosystem.displayName)
+        }
+        return names
     }
 
     // MARK: - Optional online enrichment

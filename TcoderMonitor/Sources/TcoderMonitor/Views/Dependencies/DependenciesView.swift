@@ -55,10 +55,7 @@ struct DependenciesView: View {
 
     private func summaryGrid(_ deps: DependencyReport) -> some View {
         let total = max(1, deps.totalDependencies)
-        let allRecords = deps.ecosystems.flatMap(\.dependencies)
-        // 「查过且没问题」和「根本没数据可查」是两回事：内置快照只覆盖 npm/Maven/Python/Go/Cargo
-        // 等生态，RubyGems、CocoaPods、NuGet 一条都没有，此时 vulnerableCount=0 只代表未判定。
-        let checked = allRecords.filter { $0.versionCheckSource != .none }.count
+        let verdict = DependencySafetyVerdict(deps)
         return LazyVGrid(columns: Self.metricColumns, spacing: 12) {
             MetricTile(
                 label: "依赖总数",
@@ -87,22 +84,11 @@ struct DependenciesView: View {
                 label: "漏洞数",
                 value: NumberFormat.grouped(deps.vulnerableCount),
                 unit: "条",
-                caption: vulnerabilityCaption(deps, checked: checked, total: deps.totalDependencies),
-                tint: deps.vulnerableCount > 0 ? Theme.color(for: deps.riskLevel)
-                    : (checked > 0 ? Theme.healthy : Theme.neutral),
+                caption: verdict.summaryCaption,
+                tint: verdict.tint,
                 systemImage: "exclamationmark.shield.fill"
             )
         }
-    }
-
-    /// 0 条漏洞有三种含义，必须分开说：查过且干净 / 只查了一部分 / 根本没数据可查。
-    private func vulnerabilityCaption(_ deps: DependencyReport, checked: Int, total: Int) -> String {
-        if deps.vulnerableCount > 0 { return "命中内置快照与安全公告" }
-        if checked == 0 { return "\(NumberFormat.grouped(total)) 项均无版本数据可比对，未做判定" }
-        if checked < total {
-            return "\(NumberFormat.grouped(checked)) / \(NumberFormat.grouped(total)) 项已比对，未发现已知漏洞"
-        }
-        return "全部 \(NumberFormat.grouped(total)) 项已比对，未发现已知漏洞"
     }
 
     private func overviewCard(_ deps: DependencyReport) -> some View {
@@ -110,7 +96,7 @@ struct DependenciesView: View {
             "风险总览",
             subtitle: "分析于 \(LogRecency.describe(deps.analyzedAt)) · \(DateFormat.full.string(from: deps.analyzedAt))",
             icon: "shield.lefthalf.filled",
-            trailing: AnyView(RiskBadge(risk: deps.riskLevel))
+            trailing: AnyView(SafetyVerdictBadge(verdict: DependencySafetyVerdict(deps)))
         ) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 16) {
@@ -194,7 +180,7 @@ struct DependenciesView: View {
                 DependencyTableHeader(count: sorted.count)
                 Divider().opacity(0.4)
                 ForEach(visible) { record in
-                    DependencyRow(record: record, vulnerableCount: record.knownVulnerabilities.count)
+                    DependencyRow(record: record)
                 }
             }
             if sorted.count > Self.rowLimit {
@@ -351,10 +337,10 @@ private enum DepColumns {
 
 private struct DependencyRow: View {
     let record: DependencyRecord
-    let vulnerableCount: Int
 
     var body: some View {
-        HStack(spacing: 8) {
+        let status = DependencyRowStatus.of(record)
+        return HStack(spacing: 8) {
             Text(record.name)
                 .font(Theme.monoSmall)
                 .lineLimit(1)
@@ -374,25 +360,15 @@ private struct DependencyRow: View {
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
                 .frame(width: DepColumns.scope, alignment: .trailing)
-            Text(statusText)
+            Text(status.text)
                 .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(statusTint)
+                .foregroundStyle(status.tint)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
-                .background(statusTint.opacity(0.14), in: RoundedRectangle(cornerRadius: 3))
+                .background(status.tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 3))
                 .frame(width: DepColumns.status, alignment: .trailing)
-                .help("版本数据来源：\(record.versionCheckSource.rawValue)；共 \(NumberFormat.grouped(vulnerableCount)) 条已知漏洞")
+                .help(status.tooltip(record: record))
         }
-    }
-
-    private var statusText: String {
-        if vulnerableCount > 0 { return "有漏洞" }
-        return record.isProbablyOutdated ? "过旧" : "正常"
-    }
-
-    private var statusTint: Color {
-        if vulnerableCount > 0 { return Theme.danger }
-        return record.isProbablyOutdated ? Theme.caution : Theme.healthy
     }
 }
 
@@ -442,5 +418,152 @@ private struct VulnerabilityRow: View {
         let list = item.targets.prefix(4).joined(separator: ", ")
         let more = item.targets.count > 4 ? " 等 \(item.targets.count) 项" : ""
         return "\(prefix)\(list)\(more)"
+    }
+}
+
+// MARK: - 安全结论口径（视图与单元测试共用同一份判定，避免"测的是一套、渲染的是另一套"）
+
+/// 「零漏洞」有三层完全不同的含义，必须分开给结论。
+///
+/// 默认 `allowNetworkLookups = false`，此时 `vulnerableCount` 恒为 0：如果就据此画绿，
+/// 等于把「根本没查」说成「查了且没病」。判定一律走 `DependencyReport.hasVulnerabilityCoverage`。
+enum DependencySafetyVerdict: Equatable {
+    /// 真的有命中。
+    case findings(count: Int, risk: RiskLevel)
+    /// 没联网、也没拿到任何在线公告 —— 零命中只是"未判定"。
+    case unchecked(coveredCount: Int, total: Int, uncoveredEcosystems: [String])
+    /// 做过在线核对（或已带回公告），结论才是"干净"。
+    case clean(coveredCount: Int, total: Int)
+
+    init(_ report: DependencyReport) {
+        let records = report.ecosystems.flatMap(\.dependencies)
+        let covered = records.filter { $0.versionCheckSource != .none }.count
+        let total = report.totalDependencies
+        if report.vulnerableCount > 0 {
+            self = .findings(count: report.vulnerableCount, risk: report.riskLevel)
+        } else if report.hasVulnerabilityCoverage {
+            self = .clean(coveredCount: covered, total: total)
+        } else {
+            self = .unchecked(coveredCount: covered, total: total,
+                              uncoveredEcosystems: ManifestDependencyAnalyzer.ecosystemsWithoutOfflineRules(in: report))
+        }
+    }
+
+    /// 允许出现"绿色 = 安全"结论的唯一两种状态。
+    var mayClaimSafe: Bool {
+        switch self {
+        case .findings, .unchecked: return false
+        case .clean: return true
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .findings(let count, _) where count > 0: return Theme.danger
+        case .findings(_, let risk): return Theme.color(for: risk)
+        case .unchecked: return Theme.neutral
+        case .clean: return Theme.healthy
+        }
+    }
+
+    var badgeText: String {
+        switch self {
+        case .findings(_, let risk): return "风险 \(risk.rawValue)"
+        case .unchecked: return "未核对"
+        case .clean: return "已核对"
+        }
+    }
+
+    /// 「漏洞数」磁贴的副标题：绿色 all-clear 只在真的核对过时才允许出现。
+    var summaryCaption: String {
+        switch self {
+        case .findings(let count, _):
+            return "命中 \(NumberFormat.grouped(count)) 条内置快照与安全公告"
+        case .unchecked(let covered, let total, let uncovered):
+            var text = "未联网核对，仅内置快照（覆盖 npm / Maven / Python）"
+            text += total == 0 ? "· 无依赖可核对" : "· \(NumberFormat.grouped(covered)) / \(NumberFormat.grouped(total)) 项有版本数据"
+            if !uncovered.isEmpty { text += "· 未覆盖生态：\(uncovered.joined(separator: "、"))" }
+            return text
+        case .clean(let covered, let total):
+            if covered == 0 { return "已联网核对，但无可比对版本数据的依赖" }
+            if covered >= total { return "全部 \(NumberFormat.grouped(total)) 项已比对，未发现已知漏洞" }
+            return "\(NumberFormat.grouped(covered)) / \(NumberFormat.grouped(total)) 项已比对，未发现已知漏洞"
+        }
+    }
+}
+
+/// 单条依赖的状态徽章。绿只给"确实拿到在线结论"的行 ——
+/// 几百行未核对的依赖挂几百个常驻绿徽章，就是几百条没依据的 all-clear。
+enum DependencyRowStatus: Equatable {
+    case vulnerable(count: Int)
+    case outdated
+    /// 版本来源是在线源，且无公告：这是真核对过的干净。
+    case verifiedSafe
+    /// 只有内置快照比对了版本，漏洞层面没联网查过。
+    case versionOnly
+    /// 连版本都没有可比对。
+    case unchecked
+
+    static func of(_ record: DependencyRecord) -> DependencyRowStatus {
+        if !record.knownVulnerabilities.isEmpty { return .vulnerable(count: record.knownVulnerabilities.count) }
+        if record.isProbablyOutdated { return .outdated }
+        switch record.versionCheckSource {
+        case .onlineRegistry: return .verifiedSafe
+        case .bundledSnapshot: return .versionOnly
+        case .none: return .unchecked
+        }
+    }
+
+    var text: String {
+        switch self {
+        case .vulnerable: return "有漏洞"
+        case .outdated: return "过旧"
+        case .verifiedSafe: return "正常"
+        case .versionOnly: return "仅版本比对"
+        case .unchecked: return "未核对"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .vulnerable: return Theme.danger
+        case .outdated: return Theme.caution
+        case .verifiedSafe: return Theme.healthy
+        case .versionOnly, .unchecked: return Theme.neutral
+        }
+    }
+
+    func tooltip(record: DependencyRecord) -> String {
+        let base = "版本数据来源：\(record.versionCheckSource.rawValue)；声明版本 \(record.version)"
+        switch self {
+        case .vulnerable(let count): return "\(base)；\(count) 条已知漏洞：\(record.knownVulnerabilities.joined(separator: "、"))"
+        case .outdated: return "\(base)；内置/在线最新为 \(record.latestKnownVersion ?? "未知")，未联网核对漏洞"
+        case .verifiedSafe: return "\(base)；在线核对过，无已知公告"
+        case .versionOnly: return "\(base)；只比对了版本新旧，漏洞层面未联网核对"
+        case .unchecked: return "\(base)；无可比对数据（版本不可解析或该生态无快照）"
+        }
+    }
+}
+
+/// 未核对时用中性徽章并写明"未核对"，不复用 `RiskBadge(.none)` 的绿底对勾。
+/// （`Theme.swift` 的 `RiskBadge` 归 WS-G，本文件不改它。）
+private struct SafetyVerdictBadge: View {
+    let verdict: DependencySafetyVerdict
+
+    var body: some View {
+        switch verdict {
+        case .findings(_, let risk):
+            RiskBadge(risk: risk)
+        case .clean:
+            RiskBadge(risk: .none)
+        case .unchecked:
+            Text(verdict.badgeText)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Theme.neutral)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Theme.neutral.opacity(0.14), in: Capsule())
+                .help("默认不联网时漏洞判定恒为 0 条，这是「没有查」，不是「没有病」")
+        }
     }
 }
