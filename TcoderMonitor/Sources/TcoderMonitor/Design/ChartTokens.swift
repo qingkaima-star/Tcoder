@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - 图表：全 App 唯一一套色板 + 序列登记 + 轴与容器
+// MARK: - 图表：全 App 唯一一套色板 + 稳定取号
 //
 // 为什么色板要收成"只能按号取"：WS-H 定则要全仓只有一套图表调色板，
 // 而《45》§2.1 实测到两套散色 + 一个**功能缺陷**——`LanguageBar` 用
@@ -8,6 +8,9 @@ import SwiftUI
 // **同一门语言每次启动换一个颜色**。页面自己补了 FNV-1a，于是又变成两处各一份。
 // 现在取号与稳定哈希都在这一处，页面拿不到裸色值（`palette` 已收 private）。
 //
+// 只留**有调用方**的东西：`Series` 号位表、`Axis`/`Scale`/`Panel` 已在 #28 里删掉——
+// WS-M 的 `ChartSeries`/`ChartAxis`/`ChartScale` 是活的且是超集，页面容器事实标准是
+// `GlassSection` + 真 `AxisMarks`，我那份手搓标签的 Panel 属降级实现。
 // 增强对比（increase contrast）第三套仍缺：需要 Asset Catalog，
 // 而 `Package.swift` 未声明 `resources:` 且不归我所有 → 契约缺口，见笔记 66。
 
@@ -55,8 +58,10 @@ extension Theme {
             color(at: index(forLabel: label))
         }
 
-        /// 按稳定键取色值本体。Swift Charts 的 `foregroundStyle(by:)` 这类场合要的是
-        /// `Color`/十六进制而不是索引，用它拿——页面因此不必绕过号位自己凑色。
+        /// 按稳定键取色值本体（Swift Charts 的 `foregroundStyle(by:)` 这类场合要的是
+        /// `Color`/十六进制而不是索引，用它拿，页面不必绕过号位凑色）。
+        /// **有外部消费者**：`ShellDesignTests` 用它断言"按键取色"与"按号取色"两条路径
+        /// 必须同色——#28 曾把它当零引用删掉，结果把 WS-K 的测试编译弄红。别再删。
         static func token(forLabel label: String,
                           in appearance: DesignAppearance = .light) -> ColorToken {
             pair(at: index(forLabel: label)).token(in: appearance)
@@ -87,134 +92,6 @@ extension Theme {
                     .init(color: color.opacity(Theme.Palette.Opacity.gradientFloor), location: 1),
                 ],
                 startPoint: .top, endPoint: .bottom)
-        }
-
-        // MARK: 序列号位登记
-
-        /// 每条序列占一个号位。**新增图表必须在这里登记**，不在页面里挑颜色——
-        /// 否则"同一指标在不同页不同色"会重新长出来（《45》§2.1 的根因）。
-        /// 号位间隔留了空档，是为了让语义相近的序列落在色板同区段。
-        enum Series {
-            static let cpu = 0            // 蓝 · 主/自身数据
-            static let memory = 2         // 橙 · 关注
-            static let disk = 4           // 紫 · 分类 A
-            static let network = 6        // 青 · 分类 C
-            static let healthTrend = 0    // 蓝 · 与 CPU 同为"自身主数据"，不同屏不冲突
-            static let commitActivity = 1 // 绿 · 正向
-            static let duplication = 3    // 红 · 风险
-            static let coverage = 5       // 粉
-
-            /// 全部已登记号位，供单测校验没有越界与语义撞车。
-            static let allRegistered: [(name: String, index: Int)] = [
-                ("cpu", cpu), ("memory", memory), ("disk", disk), ("network", network),
-                ("healthTrend", healthTrend), ("commitActivity", commitActivity),
-                ("duplication", duplication), ("coverage", coverage),
-            ]
-        }
-
-        // MARK: 轴
-
-        /// 一条纵轴。`minValue != 0` 就是**收窄过的轴**——它会放大波动观感，
-        /// 所以 `isZoomed` 必须被容器显式标注出来，不能悄悄用收窄轴吓人。
-        struct Axis: Equatable {
-            let minValue: Double
-            let step: Double
-            let maxValue: Double
-
-            init(minValue: Double = 0, step: Double, maxValue: Double) {
-                self.minValue = minValue
-                self.step = step
-                self.maxValue = maxValue
-            }
-
-            var isZoomed: Bool { minValue > 0 }
-
-            var ticks: [Double] {
-                guard step > 0 else { return [minValue] }
-                var out: [Double] = []
-                var value = minValue
-                while value <= maxValue + 1e-9 {
-                    out.append(value)
-                    value += step
-                }
-                return out
-            }
-
-            /// Swift Charts 的 y 值域。
-            var domain: ClosedRange<Double> { minValue...maxValue }
-        }
-
-        enum Scale {
-            /// 峰值上方留 20% 呼吸，曲线不顶格。
-            static let headroom = 1.2
-            static let desiredTickCount = 4
-            static let percentMax = 100.0
-            static let percentTicks: [Double] = [0, 25, 50, 75, 100]
-
-            /// 百分比轴（CPU、覆盖率、重复率）。
-            static let percent = Axis(step: 25, maxValue: percentMax)
-        }
-
-        /// 带轴标注的曲线容器：外层内容卡 + 左侧刻度列 + 「轴已收窄」显式提示。
-        ///
-        /// 轴标签一律 10pt 等宽（全仓文字下限），数字右对齐——
-        /// 这样刻度列不会因为 100/25 位数不同而左右跳。
-        struct Panel<Content: View>: View {
-            var title: String?
-            var axis: Axis
-            var seriesIndex: Int
-            var height: CGFloat
-            /// 轴标签的格式化，默认取整数。
-            var labelFor: (Double) -> String
-            @ViewBuilder var content: Content
-
-            init(
-                title: String? = nil,
-                axis: Axis,
-                seriesIndex: Int = 0,
-                height: CGFloat = Theme.Layout.chartMinHeight,
-                labelFor: @escaping (Double) -> String = { String(Int($0.rounded())) },
-                @ViewBuilder content: () -> Content
-            ) {
-                self.title = title
-                self.axis = axis
-                self.seriesIndex = seriesIndex
-                self.height = height
-                self.labelFor = labelFor
-                self.content = content()
-            }
-
-            var body: some View {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    if let title {
-                        HStack(spacing: Theme.Spacing.xs) {
-                            Text(title).font(Theme.Typo.cardTitle.font)
-                            Spacer(minLength: Theme.Spacing.xs)
-                            if axis.isZoomed {
-                                // 收窄轴必须写明：不写就是拿轴范围制造恐慌
-                                Theme.Notice.inline("纵轴已从 \(labelFor(axis.minValue)) 起",
-                                                     role: Theme.Semantic.info)
-                            }
-                        }
-                    }
-                    HStack(alignment: .top, spacing: Theme.Spacing.xxs) {
-                        VStack(spacing: 0) {
-                            ForEach(Array(axis.ticks.reversed().enumerated()), id: \.offset) { _, tick in
-                                Text(labelFor(tick))
-                                    .font(Theme.Typo.monoLabel.font)
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .trailing)
-                            }
-                        }
-                        .frame(width: Theme.Layout.axisLabelWidth)
-                        .frame(maxHeight: .infinity)
-                        content
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                    .frame(height: height)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
         }
     }
 }

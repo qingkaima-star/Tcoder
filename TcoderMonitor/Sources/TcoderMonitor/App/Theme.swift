@@ -5,11 +5,12 @@ import SwiftUI
 /// 令牌与组件本身已经全部搬到 `Sources/TcoderMonitor/Design/**`：
 ///   - `Theme.Semantic` / `Theme.Palette` / `Theme.Typo` / `Theme.Spacing`
 ///     / `Theme.Radius` / `Theme.Stroke` / `Theme.Elevation` / `Theme.Layout` / `Theme.Chart`
-///     → `Design/ThemeTokens.swift`、`Design/ColorToken.swift`
+///     → `Design/ThemeTokens.swift`、`Design/ColorToken.swift`、`Design/ChartTokens.swift`
 ///   - `GlassCard` / `GlassSection` / `GlassToolbar` / `GlassButton` / `SemanticBadge`
 ///     → `Design/GlassComponents.swift`，闸门在 `Design/Glass.swift`
-///   - `SectionCard` / `MetricTile` / `RiskBadge` / `SeverityBadge` / `MiniBarGauge`
+///   - `MetricTile` / `RiskBadge` / `SeverityBadge` / `MiniBarGauge`
 ///     / `EmptyStateView` / `ProgressOverlay` / `IconName` / `ThemedIcon`
+///     （`SectionCard` 已在 #28 删除：41 处调用全部迁到 `GlassSection`，零引用后不留壳）
 ///     → `Design/SharedComponents.swift`、`Design/IconTokens.swift`
 ///
 /// **下面这一层 `deprecated` 转发是临时桥**：九个页面此刻仍在被 WS-A/B/C 并行改写，
