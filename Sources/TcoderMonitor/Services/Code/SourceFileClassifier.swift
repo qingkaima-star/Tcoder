@@ -337,7 +337,12 @@ final class SourceFileClassifier {
             content = String(decoding: [UInt8](data), as: UTF8.self)
         }
 
-        var segments = content.split(omittingEmptySubsequences: false) { $0 == "\n" }
+        // `"\r\n"` is a single Character (one grapheme cluster) in Swift, so a
+        // `$0 == "\n"` predicate never fires on CRLF files and the whole file
+        // collapses into one "line". Accept all three line terminators.
+        var segments = content.split(omittingEmptySubsequences: false) {
+            $0 == "\n" || $0 == "\r\n" || $0 == "\r"
+        }
         if segments.last?.isEmpty == true { segments.removeLast() }
         // 病态大文件只保留前 20 万行，其后的行不进入任何统计
         if segments.count > Self.maximumLineCount {

@@ -26,7 +26,16 @@ enum DuplicationEngine {
     /// 返回 nil 表示该行丢弃（空行、注释行、纯标点、以及撑不起指纹的短样板行）。
     static func normalize(_ text: String, language: String) -> String? {
         guard let bytes = normalizeBytes(text, syntax: buildLineSyntax(language: language)) else { return nil }
-        return String(decoding: bytes, as: UTF8.self)
+        let result = String(decoding: bytes, as: UTF8.self)
+        // Lines carrying almost no information (`}`, `x`, `a + b`,
+        // `return totalPayable`) must not participate in fingerprinting, otherwise
+        // every file in the repository "duplicates" every other one and the
+        // duplication ratio is pure noise. Real statements keep >= 3 word tokens
+        // (`let totalAmount = N` -> let/totalAmount/N).
+        let informativeTokens = result.split(separator: " ").filter { token in
+            token.contains { $0.isLetter || $0.isNumber }
+        }.count
+        return informativeTokens >= 3 ? result : nil
     }
 
     // MARK: - Analysis
