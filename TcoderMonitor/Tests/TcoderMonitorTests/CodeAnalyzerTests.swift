@@ -298,11 +298,13 @@ final class CodeAnalyzerTests: XCTestCase {
                        "App.swift", "根目录直属文件只留文件名")
         XCTAssertEqual(SourceFileClassifier.relativePath(for: URL(fileURLWithPath: "/elsewhere/deep/Other.swift"), root: root),
                        "Other.swift", "现状：根之外的 URL 退化为主文件名")
-        // 现状记录：根未做软链接归一化时（macOS 临时目录、软链接下的仓库根都很常见）同样退化成主文件名，
-        // 这会让 UI 上不同目录的同名文件显示成同一个路径。
+        // 枚举器返回的是 canonical 路径（/tmp 实为 /private/tmp），而调用方传的是原始根：
+        // 归一化后两者必须判定为同一个根，否则相对路径退化成裸文件名，
+        // UI 上不同目录的同名文件会显示成同一条路径，且 `ScanOptions.skipDirectories` 里
+        // 带 `/` 的项（如 "Resources/raw"）永远命不中。
         XCTAssertEqual(SourceFileClassifier.relativePath(for: URL(fileURLWithPath: "/private/tmp/x/KeepMe/Kept.swift"),
                                                         root: URL(fileURLWithPath: "/tmp/x")),
-                       "Kept.swift", "现状：/tmp 与 /private/tmp 判定不到同一个根")
+                       "KeepMe/Kept.swift", "根与 URL 只有软链接形态差异时必须是同一个根")
     }
 
     func testClassifyRejectsUnknownExtensionOversizedFileAndSymlink() throws {
@@ -816,8 +818,8 @@ final class CodeAnalyzerTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(block.occurrences.count, 2, "每个重复块至少要出现在两处")
             XCTAssertLessThanOrEqual(block.occurrences.count, 6, "每个块的 occurrence 数必须有上限")
             XCTAssertTrue(block.similarity >= 0 && block.similarity <= 1, "相似度必须落在 0...1")
-            XCTAssertEqual(Set(block.occurrences.map(\.path)).count, block.occurrences.count,
-                           "同一块里的 occurrence 必须来自不同文件")
+            XCTAssertEqual(Set(block.occurrences.map { "\($0.path):\($0.startLine)" }).count, block.occurrences.count,
+                           "同一块里的 occurrence 位置不得重复（同文件内部粘贴允许作为独立 occurrence）")
             for occurrence in block.occurrences {
                 XCTAssertTrue(occurrence.path.hasPrefix(root.path), "重复块路径必须落在夹具根内：\(occurrence.path)")
                 XCTAssertGreaterThanOrEqual(occurrence.startLine, 1, "重复位置必须是 1-based 行号")
