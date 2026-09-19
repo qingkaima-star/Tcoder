@@ -173,8 +173,18 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
   xcrun llvm-cov export -format=lcov -instr-profile <...>/codecov/default.profdata \
       <...>/TcoderMonitorPackageTests.xctest/Contents/MacOS/TcoderMonitorPackageTests
   ```
-  汇总本次 lcov 的全部 `LF/LH`：**全口径 26645/41635 = 64.00%**，
-  只取 `Sources/TcoderMonitor/**` 则 **11078/23651 = 46.84%**。
-  两个数必须一起读：分母口径不同差 17 个百分点，报一个不报另一个就是虚高。
-  分析器的规则是**只统计当前项目根之内的源文件**，第三方与构建产物目录不进分母。
-  （旧版这里写过一组 `10618/23611` 的数，是更早修订上的测量，已按上述命令重跑替换。）
+  汇总本次 lcov 的全部 `LF/LH`：**全口径 26645/41635 = 64.00%**。
+  分析器与独立汇总逐位一致，由 `SelfScanCoverageAgreementTests` 三条用例守着
+  （其中真产物那条需 `TCODER_SELF_LCOV=<lcov 路径>` 显式开启）。
+  **但这 64.00% 不是一个可以直接拿去打分的质量指标**，因为分母里混着项目自己的测试代码：
+  ```
+  Sources/TcoderMonitor/**（生产码）   11078 / 23651  = 46.84%   占分母 56.81%
+  Tests/TcoderMonitorTests/**（测试码） 15553 / 17967  = 86.56%   占分母 43.15%
+  .build 生成物                            14 /     17
+  ```
+  也就是说"测试代码自己几乎全覆盖"把总数字抬高了 **17 个百分点**。
+  `CoverageAnalyzer.overallLinePercent` 目前就是 lcov 全记录加权，
+  **不按项目根过滤、也不排除测试目标**——这一点在本 README 早前的版本里被我写成了
+  "报告只统计当前项目根之内的源文件"，那句是错的，已按实测改掉
+  （反证：把 lcov 复制进临时根后，161 条记录的 `SF:` 路径全在根外，求和结果不变）。
+  分数侧的影响与修法另见待办 #37。
