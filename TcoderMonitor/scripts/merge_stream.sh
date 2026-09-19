@@ -32,6 +32,30 @@ die_clean() {           # 万一真进了冲突态，先撤销再报错，绝不
   exit 1
 }
 
+# 0) 只允许合"**被体检过的那个 commit**"。
+# 2026-09-20 咬到过一次真实缺口：门禁跑在 ed58dd5 上（510 例 0 失败），
+# 负责人在门禁期间又交了 dfa6be3，我 merge 的是**从未体检**的那个头。
+# "分支有提交 ≠ 分支能编译"的升级版是"分支**上次**能编译 ≠ 现在这个头能编译"。
+SLUG=$(printf '%s' "$BRANCH" | tr -c 'A-Za-z0-9._-' '_')
+TIP=$(git rev-parse "$BRANCH" 2>/dev/null) || die_clean "解析不到分支 $BRANCH"
+FULL_OK="/tmp/premerge-pass-${SLUG}-${TIP}.ok"
+BUILD_ONLY_OK="/tmp/premerge-pass-${SLUG}-${TIP}.buildonly.ok"
+if [ -f "$FULL_OK" ]; then
+  echo "==> 门禁回执在案：$(cat "$FULL_OK")"
+elif [ -f "$BUILD_ONLY_OK" ]; then
+  echo "==> ⚠ 回执是「只编译、未跑测试」（PREMERGE_SKIP_TEST=1），合完必须在 main 上补全量 test"
+elif [ "${MERGE_ALLOW_UNGATED:-0}" = "1" ]; then
+  echo "==> ⚠ MERGE_ALLOW_UNGATED=1 显式放行未体检的 ${TIP:0:7}——合完立刻在 main 上跑全量 test 兜底"
+else
+  STALE=$(ls -1 "/tmp/premerge-pass-${SLUG}-"*.ok 2>/dev/null | tail -1)
+  echo "==> ❌ 没有覆盖当前分支头的门禁回执。"
+  echo "    分支头 = ${TIP}"
+  [ -n "$STALE" ] && echo "    最近一份回执 = $(basename "$STALE" | sed "s/^premerge-pass-${SLUG}-//; s/\.ok$//")（已过期，别拿它当凭证）"
+  echo "    请先跑： ./scripts/premerge_check.sh $BRANCH"
+  echo "    （确知是纯文档改动要强行放行：MERGE_ALLOW_UNGATED=1 …，并承诺合完补跑全量 test）"
+  exit 1
+fi
+
 # 1) 合并前 main 必须是干净的
 DIRTY=$(git status --porcelain | wc -l | tr -d ' ')
 if [ "$DIRTY" != "0" ]; then

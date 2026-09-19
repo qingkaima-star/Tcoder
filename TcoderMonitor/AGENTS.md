@@ -212,8 +212,10 @@ WS-L 另背一条**功能性诚实修正**（不是美化）：界面显示"提�
 - 读实时性能：`@Environment(AppState.self) private var state` → `state.monitor.history` /
   `state.monitor.latestSnapshot` / `state.monitor.topProcesses`。
 - `SystemSnapshot` 已是 `Identifiable`（`id = timestamp` 的 TimeInterval），可直接喂 Swift Charts。
-- 统一用设计系统组件：`SectionCard`、`MetricTile`、`RiskBadge`、`SeverityBadge`、
-  `MiniBarGauge`、`EmptyStateView`、`BannerRow`/`BannerStyle`、`StatLine`、`Theme.*`。
+- 统一用设计系统组件：`GlassSection`（分区卡的事实标准：46 处调用 / 22 个文件）、`MetricTile`、`RiskBadge`、
+  `SeverityBadge`、`MiniBarGauge`、`EmptyStateView`、`BannerRow`/`BannerStyle`、`StatLine`、`Theme.*`。
+  `SectionCard` 与 `Design/TableKit.swift` 整文件已因零引用删除（2026-09-20，WS-G #28），**别再往回加**；
+  表格列头现走 WS-M 的 `TableHeaderCell` 与 WS-L 的 `DataColumns` 两套，收敛方案见待办 #34。
   需要新组件写在你自己的目录里，不要往 `Theme.swift` 里加。
 - 文案一律简体中文；数字用 `NumberFormat.grouped/compact/percent`、`ByteFormat.string/rate/bitRate`、
   `DateFormat.sinceDescription`。
