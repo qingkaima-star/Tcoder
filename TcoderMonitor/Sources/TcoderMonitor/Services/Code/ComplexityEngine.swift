@@ -16,6 +16,10 @@ enum ComplexityEngine {
 
     // MARK: Tunables
 
+    /// 少于 2 行的候选一律丢弃：`func f() { return 1 }` 这类单行函数不可能成为风险热点。
+    /// 代价是要在 UI 上说清口径 —— Go/C/Ruby 的生成代码里单行函数占比很高
+    /// （实测 `go/ast/ast.go` 174 个 `^func` 里 143 个是单行体，`simd/archsimd/ops_amd64.go`
+    /// 的 1597 个 `func` 全是无函数体的生成声明），因此 `averageFunctionLength` 只统计 ≥2 行的函数。
     private static let minFunctionLines = 2
     private static let maxFunctionLines = 20_000
     private static let maxCandidatesPerFile = 20_000
@@ -379,6 +383,11 @@ enum ComplexityEngine {
             // cStyle 的返回类型组是 (?:…) 非捕获的，拿不到「组 2」，所以这里直接用
             // 「组 1 之前的前缀」判定：前缀为空说明这是 `foo(bar)` 之类的裸调用行。
             let headText = (groupText(text, match, 1, prefixOnly: true) ?? "").trimmingCharacters(in: .whitespaces)
+            // 类型声明不是函数。C++ 的 `class PROTOBUF_EXPORT PROTOBUF_ALIGNAS(8)`、Kotlin 的
+            // `data class Foo(val x: Int)`、Java 的 `public class Foo(int x)` 都长得像
+            // 「返回类型 + 名字 + 括号」，一旦被吃下来，边界会一路走到类体的 `}` ——
+            // protobuf 真实语料里实测到一个类声明被记成 626 行 / CC=43 的「超高复杂度函数」。
+            if isTypeDeclaration(headText) { continue }
             if pattern.requiresTypeToken {
                 let typeToken = (groupText(text, match, 2) ?? "").trimmingCharacters(in: .whitespaces)
                 if typeToken.isEmpty { continue }
@@ -415,6 +424,33 @@ enum ComplexityEngine {
 
     /// 名字命中这些词就不是函数：控制流关键字（`if (x) {`）、类型说明符与 C/C++ 属性式关键字
     /// （`alignas(64) struct Foo {` 会被 cStyle 误读成 `alignas(...)` 函数）。
+    /// 名字之前出现「独立的类型声明关键字」→ 这行是类/结构体/枚举声明，不是函数定义。
+    /// 两条必要的豁免，都是从真实语料里来的：
+    /// 1) 前缀里有 `func`/`fun`/`def`/`fn`/`sub`/`procedure` 这类定义关键字时一律放行，
+    ///    否则 Swift 的 `@objc class func foo()` 会被误杀（`class` 在那里是方法修饰符）；
+    /// 2) 前缀里有 `*` 或 `&` 时放行，那是 C/C++ 的返回类型：
+    ///    `static struct foo *get(void) {` 是真函数，不是 `struct foo` 声明。
+    private static let typeDeclarationKeywords: Set<String> = [
+        "class", "struct", "enum", "union", "interface", "protocol", "record", "trait",
+        "impl", "namespace", "typedef", "annotation", "actor", "object", "module",
+    ]
+    private static let definitionKeywords: Set<String> = [
+        "func", "fun", "def", "fn", "sub", "procedure", "lambda",
+    ]
+
+    static func isTypeDeclaration(_ textBeforeName: String) -> Bool {
+        if textBeforeName.contains("*") || textBeforeName.contains("&") { return false }
+        let tokens = textBeforeName.split { !($0.isLetter || $0.isNumber || $0 == "_") }
+        var sawDefinition = false
+        var sawDeclaration = false
+        for token in tokens {
+            let word = String(token)
+            if definitionKeywords.contains(word) { sawDefinition = true }
+            if typeDeclarationKeywords.contains(word) { sawDeclaration = true }
+        }
+        return sawDeclaration && !sawDefinition
+    }
+
     private static func isReservedName(_ name: String) -> Bool {
         switch name {
         case "if", "else", "for", "foreach", "while", "until", "repeat", "do", "switch", "case",
