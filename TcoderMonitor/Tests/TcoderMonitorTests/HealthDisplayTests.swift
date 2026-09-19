@@ -170,6 +170,15 @@ final class HealthDisplayTests: XCTestCase {
         XCTAssertFalse(tooltip.contains("摊"), "不在表里的维度没有任何「原始占比」可摊：\(tooltip)")
     }
 
+    /// #32：列头是整列静态文案，**不许**断言只有部分行才成立的偏移原因。
+    func testWeightColumnHeaderNeverAssertsARowLevelCause() {
+        let help = HealthBreakdown.weightColumnHelp
+        XCTAssertTrue(help.contains("100%"), "列头该说的是对整列恒成立的不变量：\(help)")
+        XCTAssertFalse(help.contains("摊"), "列头不得宣称摊分——原因逐行不同：\(help)")
+        XCTAssertFalse(help.contains("缺席"), "同上：九维全在场时这句话是假的：\(help)")
+        XCTAssertTrue(help.contains("各行"), "要把读者指向逐行提示：\(help)")
+    }
+
     // MARK: - 显示名映射（模型冻结词 → 规范词）
 
     func testDuplicationDisplaysTheStandardTerm() {

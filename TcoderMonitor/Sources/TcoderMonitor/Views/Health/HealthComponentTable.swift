@@ -151,6 +151,13 @@ enum HealthBreakdown {
 
     /// 占比比对容差：0.5 个百分点。小于它的差异不值得在文案里单独归因。
     static let shareTolerance = 0.005
+
+    /// 权列表头的口径说明。**只陈述对整列恒成立的不变量**。
+    ///
+    /// 上一轮这里写死了「缺失维度的权重已摊到在场维度」——列头是整列静态文案，
+    /// 而偏移原因逐行不同（九维全在场时真实原因是表合计 110% 的整体折算，与缺席无关），
+    /// 所以那种写法必然在某些场景下说谎。原因交给每行自己的 `weightTooltip`。
+    static let weightColumnHelp = "本次实际乘数：在场维度的乘数合计恒为 100%，故 Σ(得分 × 乘数) 可复现综合分。与内置表原始值不一致的原因见各行提示。"
 }
 
 /// `weightTooltip` 的分支依据。每种原因一句不同的话，避免「无条件宣称」。
@@ -227,7 +234,7 @@ struct HealthComponentTable: View {
         GlassSection("维度分量",
                      subtitle: "综合分 = Σ(得分 × 归一化权重) · 按拖累程度排序，贡献最低者在前",
                      icon: .health,
-                     trailing: AnyView(StatLine(label: "合计", value: Live.fixed(sum, digits: 1)))) {
+                     trailing: AnyView(Theme.Readout.Field("合计", Live.fixed(sum, digits: 1)))) {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 table
                 Divider()
@@ -247,7 +254,7 @@ struct HealthComponentTable: View {
                     .gridColumnAlignment(.leading)
                 TableHeaderCell("得分", width: DataColumn.score + DataColumn.scoreGauge,
                                 help: "该维度 0~100 分，条形按同一比例")
-                TableHeaderCell("权重", width: DataColumn.weight, help: "本次实际乘数（缺失维度的权重已摊到在场维度）")
+                TableHeaderCell("权重", width: DataColumn.weight, help: HealthBreakdown.weightColumnHelp)
                 TableHeaderCell("贡献", width: DataColumn.contribution, help: "得分 × 归一化权重")
                 TableHeaderCell("详情").flexCell().gridColumnAlignment(.leading)
             }

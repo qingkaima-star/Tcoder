@@ -24,33 +24,28 @@ struct PerformanceView: View {
     private var context: SampleContext { SampleContext.from(monitor) }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                header
-                statusBanners
-                PerformanceSystemTiles(context: context)
-                PerformanceLiveCharts(points: chartWindow,
-                                      context: context,
-                                      windowSeconds: Self.windowSeconds)
-                PerformanceProcessGroupsCard(groups: monitor.trackedGroups,
-                                             context: context,
-                                             isTruncated: monitor.processMetricsTruncated,
-                                             onRemove: { monitor.removeGroup(id: $0) })
-                PerformanceProcessTableCard(rows: rankedProcesses,
-                                            context: context,
-                                            sortKey: $sortKey,
-                                            measuredCount: monitor.measuredProcessCount,
-                                            totalCount: monitor.latestSnapshot?.processCount,
-                                            isTruncated: monitor.processMetricsTruncated)
-                PerformanceMatcherEditor(onAdd: { title, pattern in
-                    _ = monitor.addGroup(title: title, matchPattern: pattern)
-                })
-            }
-            .padding(Theme.Spacing.md)
-            .frame(maxWidth: Theme.Layout.maxWidthDense)
-            .frame(maxWidth: .infinity)
+        // 页面骨架（左右 16 / 顶 24 / 卡间 16 / 超宽屏限宽居中）来自基座，不再各页手搓
+        Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthDense) {
+            header
+            statusBanners
+            PerformanceSystemTiles(context: context)
+            PerformanceLiveCharts(points: chartWindow,
+                                  context: context,
+                                  windowSeconds: Self.windowSeconds)
+            PerformanceProcessGroupsCard(groups: monitor.trackedGroups,
+                                         context: context,
+                                         isTruncated: monitor.processMetricsTruncated,
+                                         onRemove: { monitor.removeGroup(id: $0) })
+            PerformanceProcessTableCard(rows: rankedProcesses,
+                                        context: context,
+                                        sortKey: $sortKey,
+                                        measuredCount: monitor.measuredProcessCount,
+                                        totalCount: monitor.latestSnapshot?.processCount,
+                                        isTruncated: monitor.processMetricsTruncated)
+            PerformanceMatcherEditor(onAdd: { title, pattern in
+                _ = monitor.addGroup(title: title, matchPattern: pattern)
+            })
         }
-        .scrollContentBackground(.hidden)
     }
 
     private var chartWindow: [SystemSnapshot] {
@@ -85,13 +80,13 @@ struct PerformanceView: View {
         }
     }
 
+    /// 三页共用的「标签 + 数字」读数一律走基座 `Theme.Readout`，
+    /// 不再引 WS-K 冻结文件里的 `StatLine`（WS-I §3.5 点名的归属错位）。
     private var sampleStats: some View {
-        HStack(spacing: Theme.Spacing.xxs) {
-            StatLine(label: "上次采样", value: DateFormat.sinceDescription(monitor.lastSampleAt))
-            Text("·").foregroundStyle(.tertiary)
-            StatLine(label: "采样点", value: NumberFormat.grouped(monitor.history.count))
-            Text("·").foregroundStyle(.tertiary)
-            StatLine(label: "间隔", value: Self.sampleIntervalText)
+        HStack(spacing: Theme.Spacing.md) {
+            Theme.Readout.Field("上次采样", DateFormat.sinceDescription(monitor.lastSampleAt))
+            Theme.Readout.Field("采样点", NumberFormat.grouped(monitor.history.count))
+            Theme.Readout.Field("间隔", Self.sampleIntervalText)
         }
     }
 

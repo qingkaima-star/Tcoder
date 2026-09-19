@@ -106,13 +106,12 @@ struct HealthTrendCard: View {
     @ViewBuilder
     private var readoutStrip: some View {
         let scores = points.map { Double($0.score) }
-        HStack(spacing: Theme.Spacing.md) {
-            // 一律走 Live.fixed：nil → `--`，不给「无历史」编一个 0 分。
-            StatLine(label: "最高", value: Live.fixed(scores.max(), digits: 0))
-            StatLine(label: "最低", value: Live.fixed(scores.min(), digits: 0))
-            StatLine(label: "均值", value: Live.fixed(Self.average(scores), digits: 1))
-            StatLine(label: "跨度", value: "\(NumberFormat.grouped(spanDays)) 天")
-            Spacer(minLength: 0)
+        // 读数条走基座 Readout：内嵌面 + 同心圆角（外 16 / 内 10），不再引 WS-K 的 StatLine
+        Theme.Readout.Bar {
+            Theme.Readout.Field("最高", Live.fixed(scores.max(), digits: 0))
+            Theme.Readout.Field("最低", Live.fixed(scores.min(), digits: 0))
+            Theme.Readout.Field("均值", Live.fixed(Self.average(scores), digits: 1))
+            Theme.Readout.Field("跨度", "\(NumberFormat.grouped(spanDays)) 天")
         }
     }
 

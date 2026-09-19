@@ -30,37 +30,30 @@ struct LogsAffectedFilesCard: View {
         let ranked = sorted
         guard !ranked.isEmpty else { return AnyView(EmptyView()) }
         let top = Array(ranked.prefix(Self.itemLimit))
-        let peak = max(1, top.first?.value ?? 1)
+        let total = max(1, ranked.reduce(0) { $0 + $1.value })
         return AnyView(
             GlassSection("受影响源文件",
-                         subtitle: "按错误出现次数取前 \(top.count) 项 · 条形按峰值归一",
+                         subtitle: subtitle(topCount: top.count),
                          icon: .duplicate) {
-                Grid(alignment: .trailing, horizontalSpacing: Theme.Spacing.sm,
-                     verticalSpacing: Theme.Spacing.xxs) {
+                // 占比行走基座 `Theme.Share.Row`（《45》§3.3 判的重复形状）。
+                // 注意分母：条形与百分比**必须同一个分母**，否则条长和数字各说一套。
+                // 上一版条按峰值归一、旁边只给次数，看着一致其实两个口径，这里一起收掉。
+                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                     ForEach(top, id: \.key) { item in
-                        GridRow {
-                            Text((item.key as NSString).lastPathComponent)
-                                .font(Theme.Typo.monoSmall.font)
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .flexCell()
-                                .gridColumnAlignment(.leading)
-                                .help(item.key)
-                            MiniBarGauge(fraction: Double(item.value) / Double(peak),
-                                         tint: Theme.Semantic.danger.graphicColor,
-                                         height: BarThickness.tile)
-                                .frame(maxWidth: .infinity)
-                                .gridColumnAlignment(.trailing)
-                            LiveNumber("\(NumberFormat.grouped(item.value)) 次",
-                                       tier: Theme.Typo.monoSmall,
-                                       tint: Theme.Semantic.danger.textColor)
-                                .numberCell(DataColumn.count)
-                        }
+                        Theme.Share.Row(label: (item.key as NSString).lastPathComponent,
+                                        fraction: Double(item.value) / Double(total),
+                                        percentText: NumberFormat.percent(Double(item.value) / Double(total), precision: 1),
+                                        countText: "\(NumberFormat.grouped(item.value)) 次",
+                                        color: Theme.Semantic.danger.graphicColor)
+                            .help(item.key)
                     }
                 }
             }
         )
+    }
+
+    private func subtitle(topCount: Int) -> String {
+        "按错误出现次数取前 \(topCount) 项 · 条形与百分比同为「占全部出现次数」的比重"
     }
 
     private var sorted: [(key: String, value: Int)] {

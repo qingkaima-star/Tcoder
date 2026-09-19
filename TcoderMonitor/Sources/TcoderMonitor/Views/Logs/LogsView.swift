@@ -21,8 +21,7 @@ struct LogsView: View {
     var body: some View {
         @Bindable var state = state
 
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+        Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthReading) {
                 header(window: $state.logWindowDays)
                 banners
                 LogsMetricGrid(logs: report?.logs, code: report?.code)
@@ -30,12 +29,7 @@ struct LogsView: View {
                 LogsErrorClustersCard(logs: report?.logs)
                 LogsAffectedFilesCard(logs: report?.logs)
                 LogsScannedFilesCard(logs: report?.logs)
-            }
-            .padding(Theme.Spacing.md)
-            .frame(maxWidth: Theme.Layout.maxWidthReading)
-            .frame(maxWidth: .infinity)
         }
-        .scrollContentBackground(.hidden)
         .onChange(of: state.logWindowDays) { _, _ in rescanForNewWindow() }
     }
 
