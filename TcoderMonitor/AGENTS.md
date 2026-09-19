@@ -158,6 +158,28 @@ Tests/TcoderMonitorTests/Health*Tests.swift
 3. **阈值不许为了刷分而动**。巨大文件行数、复杂度榜长度这类定义属冻结区；
    把阈值放宽让自己变好看，等于把工具废掉。
 
+### 21:05 第二轮：页面重样流（承接 WS-G 基座）
+
+WS-G 的 `Design/**` 已合入 main，九页重样解锁。三条流按**页面目录**切分，互不重叠：
+
+| 流 | 负责页面 | 可写路径 |
+|---|---|---|
+| WS-K 外壳与导航 | 侧栏 / 页面切换 / 顶栏 / 总览 | `Views/RootView.swift`、`Views/ProjectDetailView.swift`、`Views/DashboardView.swift`（自总工冻结区**移交**）、新建 `Views/Shell/**` |
+| WS-L 代码与 Git 类 | 代码规模 / 复杂度风险 / Git 洞察 / 贡献者 / 依赖 | `Views/Code/**`、`Views/Git/**`、`Views/Dependencies/**`、新建 `Views/CodeGit/**` |
+| WS-M 性能与评分 | **杀手功能**性能监控 / 错误日志 / 健康评分 | `Views/Performance/**`、`Views/Logs/**`、`Views/Health/**`、新建 `Views/PerfLogs/**` |
+
+三家共同的红线：
+- **不得改 `Design/**` 与 `App/Theme.swift`**（那是 WS-G 的），不得改 `Services/**`、`Models/**`；
+- 视图签名 `XxxView(report: ProjectReport?)` 冻结；
+- **不得新增超 800 行文件**（`SelfScanDogfoodTests.swift:154` 全仓棘轮，`ceiling = 9` 不许放宽，
+  当前实测 8 个，**只剩 1 个余量**）；
+- **不得启动 App**（UI 取证格同一时刻只有一人，由总工排期），改为交《预期视觉变化清单》供最终目视核对。
+
+WS-L 另背一条**功能性诚实修正**（不是美化）：界面显示"提交总数 62"而作者表求和 48，
+差值恰为 14 个 merge 提交，分析器一贯用 `--no-merges` 统计作者——用户自己会发现对不上而我们从不解释。
+须在 Git 页写明"共 62 次提交（含 14 次合并）· 作者与代码行统计基于 48 次非合并提交"，
+并在 `historyTruncated` 时标出"近 N 次提交窗口内"。
+
 ## 4. 视图约定
 
 - 视图 struct 名与初始化签名已冻结：`XxxView(report: ProjectReport?)`。内部自己取子字段。
