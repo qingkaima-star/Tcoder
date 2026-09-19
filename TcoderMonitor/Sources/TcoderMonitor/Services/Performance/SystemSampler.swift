@@ -12,6 +12,11 @@ struct CoreTicks: Sendable, Equatable {
 }
 
 /// `vm_statistics64` 里我们真正要的几页计数，统一换算成字节口径所需的页数。
+///
+/// **只在 `SystemSampler.vmCounters()` 成功时构造。** 失败时它返回 `nil`，绝不返回一个
+/// 全 0 的实例——七项页计数全 0 会让 `reclaimableBytes == 0`，于是
+/// `memoryUsedBytes = totalBytes - 0 = totalBytes`，一次内核调用失败就被画成
+/// 「内存 100% 占满 · 压力紧张」，还会作为真实历史点连进曲线（WS-D 审计 P1）。
 struct VmCounters: Sendable, Equatable {
     var pageSize: UInt64 = 4096
     var active: UInt64 = 0
@@ -25,13 +30,23 @@ struct VmCounters: Sendable, Equatable {
     var reclaimableBytes: UInt64 {
         (free &+ speculative &+ purgeable) &* pageSize
     }
+
+    /// 这组页计数能当成真实机器状态吗。
+    ///
+    /// 判据不是「有没有值」而是「这台机器可能吗」：任何在跑的 macOS 都有活跃页，
+    /// 七项全 0 只可能是没读到；页大小为 0 时所有字节换算都会塌成 0，同样不可信。
+    var isUsableRead: Bool {
+        guard pageSize > 0 else { return false }
+        return active &+ inactive &+ wired &+ compressed &+ free &+ speculative &+ purgeable > 0
+    }
 }
 
 /// 一次原始读数的全部累积量：调用方存起来与下一次相减得到速率。
 struct SystemCounters: Sendable, Equatable {
     var timestamp: Date = Date()
     var cores: [CoreTicks] = []
-    var vm: VmCounters = VmCounters()
+    /// `nil` = 这次 `host_statistics64` 没读到。缺证据不是 0，也不是「全空」。
+    var vm: VmCounters?
     var diskReadBytes: UInt64 = 0
     var diskWriteBytes: UInt64 = 0
     var networkInBytes: UInt64 = 0
@@ -44,7 +59,8 @@ struct SystemCounters: Sendable, Equatable {
 struct SystemSampler: Sendable {
     init() {}
 
-    /// 一次性原始读取；任何系统调用失败都退化为 0 / 空数组，不抛错、不 crash。
+    /// 一次性原始读取；系统调用失败退化为 0 / 空数组 / `nil`，不抛错、不 crash。
+    /// 内存是唯一以 `nil`（而不是 0）表达失败的字段——0 页计数会被下游算成「内存全占满」。
     func read() -> SystemCounters {
         let timestamp = Date()
         let disk = BlockStorageSampler.ioBytes()
@@ -70,9 +86,19 @@ struct SystemSampler: Sendable {
         snapshot.thermalState = ThermalState(processInfoValue: ProcessInfo.processInfo.thermalState.rawValue)
 
         snapshot.cpuUsage = Self.cpuUsage(previous: previous?.cores ?? [], current: current.cores)
+        // `memoryTotalBytes` 来自 ProcessInfo，是另一次独立的读取，成功就该保留真值。
         snapshot.memoryTotalBytes = ProcessInfo.processInfo.physicalMemory
-        snapshot.memoryUsedBytes = Self.memoryUsedBytes(current.vm, totalBytes: snapshot.memoryTotalBytes)
-        snapshot.memoryPressure = Self.pressure(for: snapshot.memoryFraction)
+        if let used = Self.memoryUsedBytes(current.vm, totalBytes: snapshot.memoryTotalBytes) {
+            snapshot.memoryUsedBytes = used
+            snapshot.memoryPressure = Self.pressure(for: snapshot.memoryFraction)
+        } else {
+            // 缺读数时已用保持 0（初值）而不是 `total - 0 == total`，档位给 unknown。
+            // 仍留一个已知不诚实处：`SystemSnapshot.memoryUsedBytes` 是非可选 UInt64，
+            // 这里的 0 含义是「没有证据」，但视图会照样渲染成「0 B · 占 0%」。
+            // 彻底修好需要 Models 把内存字段改 Optional（已上报总工），服务层先保住
+            // 不再冒假 100%、并给出可判定的 `unknown`。
+            snapshot.memoryPressure = .unknown
+        }
 
         if let previous {
             let elapsed = current.timestamp.timeIntervalSince(previous.timestamp)
@@ -128,7 +154,11 @@ extension SystemSampler {
 
     /// 与活动监视器同口径：已用 = 总量 -（free + speculative + purgeable）。
     /// inactive 是文件缓存但监视器仍计入已用，所以不能只算 active+wired+compressed。
-    static func memoryUsedBytes(_ vm: VmCounters, totalBytes: UInt64) -> UInt64 {
+    ///
+    /// 返回 `nil` = 「没有可用读数」。这条函数以前对失败读数会算出 `totalBytes - 0`
+    /// = 内存 100% 占满，所以缺证据必须由类型表达，而不是交给调用方记得先判。
+    static func memoryUsedBytes(_ vm: VmCounters?, totalBytes: UInt64) -> UInt64? {
+        guard let vm, vm.isUsableRead, totalBytes > 0 else { return nil }
         let reclaimable = vm.reclaimableBytes
         if reclaimable >= totalBytes {
             // 页计数瞬时不一致时退化为「active + wired + 压缩器占用」，至少不会是负数。
@@ -166,7 +196,10 @@ extension SystemSampler {
         return UInt64(rate)
     }
 
-    static func pressure(for fraction: Double) -> MemoryPressure {
+    /// 内存压力档位。`available == false` 时**只**能是 `.unknown`——
+    /// 没有读数既不是「正常」也不是「紧张」，那是把一次失败读成结论。
+    static func pressure(for fraction: Double, available: Bool = true) -> MemoryPressure {
+        guard available else { return .unknown }
         if fraction >= 0.85 { return .critical }
         if fraction >= 0.7 { return .warning }
         return .normal
@@ -208,8 +241,15 @@ private extension SystemSampler {
         }
     }
 
+}
+
+/// 不 `private`：单测要直接确认「本机成功」与「失败时是 nil」两种出口。
+extension SystemSampler {
     /// host_statistics64(HOST_VM_INFO64) → 页计数；pageSize 用内核页大小（Apple Silicon 16 KB）。
-    static func vmCounters() -> VmCounters {
+    ///
+    /// 返回 `nil` 表示「这次什么都没读到」，是唯一诚实的失败表达。以前失败返回一个
+    /// 全 0 的 `VmCounters`，下游 `total - reclaimable` 会把它算成「已用 == 总量」。
+    static func vmCounters() -> VmCounters? {
         let pageSize: UInt64 = vm_kernel_page_size > 0 ? UInt64(vm_kernel_page_size) : 4096
 
         var stats = vm_statistics64_data_t()
@@ -219,9 +259,9 @@ private extension SystemSampler {
                 host_statistics64(mach_host_self(), HOST_VM_INFO64, rebased, &count)
             }
         }
-        guard result == KERN_SUCCESS else { return VmCounters(pageSize: pageSize) }
+        guard result == KERN_SUCCESS else { return nil }
 
-        return VmCounters(
+        let counters = VmCounters(
             pageSize: pageSize,
             active: UInt64(stats.active_count),
             inactive: UInt64(stats.inactive_count),
@@ -231,6 +271,8 @@ private extension SystemSampler {
             speculative: UInt64(stats.speculative_count),
             purgeable: UInt64(stats.purgeable_count)
         )
+        // 防御纵深：内核返回 KERN_SUCCESS 但给了组空值，同样按「没读到」处理。
+        return counters.isUsableRead ? counters : nil
     }
 }
 
