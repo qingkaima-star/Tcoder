@@ -261,11 +261,11 @@ struct CodeDuplicationBlockRow: View {
     private var columns: [DataGridColumn] { DataColumns.duplicationBlocks }
 
     var body: some View {
-        HStack(alignment: .center, spacing: Theme.Spacing.sm) {
+        HStack(alignment: .center, spacing: DataRowMetrics.cellGap) {
             Button {
                 reveal(block.occurrences.first?.path)
             } label: {
-                HStack(alignment: .center, spacing: Theme.Spacing.sm) {
+                HStack(alignment: .center, spacing: DataRowMetrics.cellGap) {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                         Text(Self.occurrenceTitles(block, root: root))
                             .font(CodeGitType.tableIdentifier)
@@ -290,7 +290,7 @@ struct CodeDuplicationBlockRow: View {
                         .foregroundStyle(.secondary)
                         .tableCell(DataColumns.column(columns, 3))
                 }
-                .padding(.vertical, Theme.Spacing.xs)
+                .dataTableRow()
                 .padding(.horizontal, Theme.Spacing.xs)
                 .background(CodeGitRowTint.fill(Theme.Semantic.neutral),
                             in: RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
@@ -338,12 +338,12 @@ struct CodeComplexityRow: View {
     private var role: Theme.SemanticRole { Theme.Semantic.role(for: hotspot.risk) }
 
     var body: some View {
-        HStack(alignment: .center, spacing: Theme.Spacing.sm) {
+        HStack(alignment: .center, spacing: DataRowMetrics.cellGap) {
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting(
                     [CodeViewFormat.resolvedURL(hotspot.filePath, root: root)])
             } label: {
-                HStack(alignment: .center, spacing: Theme.Spacing.sm) {
+                HStack(alignment: .center, spacing: DataRowMetrics.cellGap) {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                         Text(hotspot.name)
                             .font(CodeGitType.tableIdentifier)
@@ -378,7 +378,7 @@ struct CodeComplexityRow: View {
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .tableCell(DataColumns.column(columns, 5))
                 }
-                .padding(.vertical, Theme.Spacing.xs)
+                .dataTableRow()
                 .padding(.horizontal, Theme.Spacing.xs)
                 .background(CodeGitRowTint.fill(role),
                             in: RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))

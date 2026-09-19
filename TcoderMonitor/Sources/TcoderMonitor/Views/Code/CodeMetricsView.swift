@@ -133,7 +133,7 @@ struct CodeScaleSection: View {
                         .font(Theme.Typo.heroMetric.font)
                         .foregroundStyle(Theme.Semantic.accent.textColor)
                     Text("总行数（= 空行 + 注释 + 代码）")
-                        .font(Theme.Typo.label.font)
+                        .font(CodeGitType.prose(Theme.Typo.label))
                         .foregroundStyle(.secondary)
                     Spacer(minLength: Theme.Spacing.xs)
                 }
@@ -168,7 +168,7 @@ struct CodeScaleSection: View {
                     + "但没有任何语言的有效代码行占比大于 0。"
             )
         } else {
-            VStack(spacing: Theme.Spacing.xs) {
+            VStack(spacing: DataRowMetrics.rowGap) {
                 DataTableHeader(columns: DataColumns.shareBar)
                 ForEach(rows) { share in
                     CodeLanguageShareRow(share: share, onOpenHint: CodeLanguageShareRow.hint(share))
@@ -176,7 +176,6 @@ struct CodeScaleSection: View {
             }
             if let note = CodeMetricsView.mergedNote(code, head: CodeMetricsView.languageHeadCount) {
                 Text(note)
-                    .font(Theme.Typo.microLabel.font)
                     .monospacedDigit()
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -235,7 +234,6 @@ struct CodeInvariantRow: View {
     private func term(_ label: String, _ value: Int, _ role: Theme.SemanticRole) -> some View {
         HStack(spacing: Theme.Spacing.xxs) {
             Text(label)
-                .font(Theme.Typo.microLabel.font)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
             Text(NumberFormat.grouped(value))
@@ -273,7 +271,7 @@ struct CodeMarkersSection: View {
 
                 DataRowSeparator()
 
-                VStack(spacing: Theme.Spacing.xs) {
+                VStack(spacing: DataRowMetrics.rowGap) {
                     DataFieldRow(label: "扫描耗时", value: CodeViewFormat.duration(code.durationMs),
                                  style: .number)
                     DataRowSeparator()
@@ -285,7 +283,6 @@ struct CodeMarkersSection: View {
                 }
 
                 Text(Self.markerNote(code))
-                    .font(Theme.Typo.narrative.font)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .lineSpacing(Theme.Typo.narrative.lineSpacing)
@@ -330,7 +327,7 @@ struct CodeHotspotSection: View {
                         + "未超过阈值。这是测得的结果，不是没扫。"
                 )
             } else {
-                VStack(spacing: Theme.Spacing.xs) {
+                VStack(spacing: DataRowMetrics.rowGap) {
                     DataTableHeader(columns: DataColumns.hugeFiles)
                     let rows = Array(code.hugeFiles.prefix(rowLimit))
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, hotspot in
@@ -342,7 +339,6 @@ struct CodeHotspotSection: View {
                     }
                     if code.hugeFiles.count > rows.count {
                         Text("另有 \(NumberFormat.grouped(code.hugeFiles.count - rows.count)) 个未展示")
-                            .font(Theme.Typo.microLabel.font)
                             .monospacedDigit()
                             .monospacedDigit()
                             .foregroundStyle(.tertiary)
@@ -381,7 +377,7 @@ struct CodeDuplicationSummarySection: View {
                         .font(Theme.Typo.metricNumber.font)
                         .foregroundStyle(Theme.Semantic.role(for: code.overallRisk).textColor)
                     Text("代码行落在重复块内")
-                        .font(Theme.Typo.label.font)
+                        .font(CodeGitType.prose(Theme.Typo.label))
                         .foregroundStyle(.secondary)
                     Spacer(minLength: Theme.Spacing.xs)
                 }

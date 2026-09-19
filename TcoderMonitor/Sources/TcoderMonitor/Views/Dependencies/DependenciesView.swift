@@ -148,7 +148,7 @@ struct DependencyOverviewSection: View {
                                 role: verdict.role)
                 }
 
-                VStack(spacing: Theme.Spacing.xs) {
+                VStack(spacing: DataRowMetrics.rowGap) {
                     DataFieldRow(label: "联网查询",
                                  value: deps.networkLookupPerformed ? "是" : "否", style: .text,
                                  valueColor: deps.networkLookupPerformed
@@ -196,7 +196,7 @@ struct DependencyEcosystemSection: View {
             trailing: AnyView(RiskBadge(risk: eco.riskLevel))
         ) {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                VStack(spacing: Theme.Spacing.xs) {
+                VStack(spacing: DataRowMetrics.rowGap) {
                     DataFieldRow(
                         label: "锁文件",
                         value: eco.lockfileName.map {
@@ -210,7 +210,6 @@ struct DependencyEcosystemSection: View {
                 if !eco.frameworkMarkers.isEmpty {
                     HStack(alignment: .center, spacing: Theme.Spacing.xs) {
                         Text("框架标记")
-                            .font(Theme.Typo.microLabel.font)
                             .monospacedDigit()
                             .foregroundStyle(.secondary)
                         ForEach(eco.frameworkMarkers, id: \.self) { marker in
@@ -237,11 +236,10 @@ struct DependencyTable: View {
 
         if sorted.isEmpty {
             Text("该清单没有解析出可枚举的依赖项。")
-                .font(Theme.Typo.narrative.font)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
         } else {
-            VStack(spacing: Theme.Spacing.xxs) {
+            VStack(spacing: DataRowMetrics.rowGap) {
                 DataTableHeader(columns: DataColumns.dependencies)
                 ForEach(visible) { record in
                     DependencyRow(record: record)
@@ -284,7 +282,7 @@ struct DependencyAdvisoriesSection: View {
                            icon: DependencySafetyVerdict(deps).badgeIcon,
                            iconLabel: "漏洞核对状态")
             } else {
-                VStack(spacing: Theme.Spacing.xs) {
+                VStack(spacing: DataRowMetrics.rowGap) {
                     ForEach(items) { item in
                         VulnerabilityRow(item: item)
                         if item.id != items.last?.id {
@@ -326,17 +324,16 @@ struct NetworkOptionsCard: View {
     var body: some View {
         GlassSection("分析选项", subtitle: "联网核对会显著变慢，离线时仍会用内置快照", icon: .network) {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                HStack(spacing: Theme.Spacing.sm) {
+                HStack(spacing: DataRowMetrics.cellGap) {
                     Toggle("分析时联网查询最新版本与漏洞库", isOn: $allowNetwork)
                         .toggleStyle(.switch)
-                        .font(Theme.Typo.body.font)
+                        .font(CodeGitType.prose(Theme.Typo.body))
                     Spacer(minLength: Theme.Spacing.sm)
                     GlassButton("重新分析", icon: .reanalyze, style: .prominent,
                                 isEnabled: canRescan, action: rescan)
                         .help("对当前项目重新执行全部分析器")
                 }
                 Text(Self.statusCaption(allowNetwork: allowNetwork))
-                    .font(Theme.Typo.narrative.font)
                     .monospacedDigit()
                     .foregroundStyle(allowNetwork
                         ? Theme.Semantic.warning.textColor

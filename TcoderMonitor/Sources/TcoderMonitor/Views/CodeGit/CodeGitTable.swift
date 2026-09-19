@@ -122,11 +122,10 @@ struct DataTableHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            HStack(spacing: Theme.Spacing.sm) {
+            HStack(spacing: DataRowMetrics.cellGap) {
                 ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
                     Text(column.title)
-                        .font(Theme.Typo.microLabel.font)
-                        .monospacedDigit()
+                        .font(CodeGitType.prose(Theme.Typo.microLabel))
                         .foregroundStyle(.secondary)
                         .tableCell(DataColumns.column(columns, index))
                 }
@@ -170,10 +169,9 @@ struct DataFieldRow: View {
     var help: String?
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
+        HStack(alignment: .firstTextBaseline, spacing: DataRowMetrics.cellGap) {
             Text(label)
-                .font(Theme.Typo.label.font)
-                .monospacedDigit()
+                .font(CodeGitType.prose(Theme.Typo.label))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Spacer(minLength: Theme.Spacing.sm)
@@ -238,8 +236,7 @@ struct DataReadout: View {
                 .monospacedDigit()
             if let caption {
                 Text(caption)
-                    .font(Theme.Typo.microLabel.font)
-                    .monospacedDigit()
+                    .font(CodeGitType.prose(Theme.Typo.microLabel))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
@@ -278,7 +275,7 @@ struct DataShareBarRow: View {
     var percentPrecision: Int = 1
 
     var body: some View {
-        HStack(spacing: Theme.Spacing.sm) {
+        HStack(spacing: DataRowMetrics.cellGap) {
             HStack(spacing: Theme.Spacing.xs) {
                 if showSwatch {
                     Circle()
@@ -288,8 +285,7 @@ struct DataShareBarRow: View {
                         .accessibilityHidden(true)
                 }
                 Text(label)
-                    .font(Theme.Typo.label.font)
-                    .monospacedDigit()
+                    .font(CodeGitType.prose(Theme.Typo.label))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 MiniBarGauge(fraction: fraction, tint: tint, height: DataGaugeHeight.inline)
@@ -307,6 +303,33 @@ struct DataShareBarRow: View {
                 .foregroundStyle(.tertiary)
                 .tableCell(DataColumns.column(DataColumns.shareBar, 2))
         }
+    }
+}
+
+// MARK: 行节奏
+
+/// 榜单行的节奏。五页的表原本各写各的：Git 与依赖行是 `xxs`(4)、
+/// 复杂度与重复块行是 `xs`(8) 再叠一层外层 `xxs`，同屏两张表的行高就差 4pt。
+/// 这里收成一个来源，行高再也不会随页面漂移。
+enum DataRowMetrics {
+    /// 行内上下留白。
+    static let verticalPadding: CGFloat = Theme.Spacing.xs
+    /// 行与行之间（含分隔线两侧）的留白。
+    static let rowGap: CGFloat = Theme.Spacing.xxs
+    /// 单元格之间的横向间距。
+    static let cellGap: CGFloat = Theme.Spacing.sm
+    /// 单行榜单行的最小高度：可点区下限 20 + 一行沟槽 12。
+    /// 有了下限，"只有名称的一行"和"名称+路径的两行"才不会把整张表拉成锯齿。
+    static let minRowHeight: CGFloat = Theme.Layout.minHitTarget + Theme.Spacing.sm
+}
+
+/// 一行表格内容：统一上下留白、统一最小行高。
+extension View {
+    func dataTableRow() -> some View {
+        self
+            .padding(.vertical, DataRowMetrics.verticalPadding)
+            .frame(maxWidth: .infinity, minHeight: DataRowMetrics.minRowHeight,
+                   alignment: .leading)
     }
 }
 
@@ -359,8 +382,7 @@ struct DataNotice: View {
             }
             .foregroundStyle(role.textColor)
             Text(text)
-                .font(Theme.Typo.narrative.font)
-                .monospacedDigit()
+                .font(CodeGitType.prose(Theme.Typo.narrative))
                 .lineSpacing(Theme.Typo.narrative.lineSpacing)
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)

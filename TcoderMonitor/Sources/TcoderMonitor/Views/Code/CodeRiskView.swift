@@ -47,14 +47,13 @@ struct CodeRiskOverviewSection: View {
                         .font(Theme.Typo.heroMetric.font)
                         .foregroundStyle(role.textColor)
                     Text("综合风险等级")
-                        .font(Theme.Typo.label.font)
+                        .font(CodeGitType.prose(Theme.Typo.label))
                         .foregroundStyle(.secondary)
                     Spacer(minLength: Theme.Spacing.xs)
                 }
 
                 Text("口径：\(NumberFormat.grouped(code.totalFiles)) 个文件 · "
                     + "\(NumberFormat.grouped(code.codeLines)) 行有效代码 · 主语言 \(code.primaryLanguage)")
-                    .font(Theme.Typo.narrative.font)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .lineSpacing(Theme.Typo.narrative.lineSpacing)
@@ -120,7 +119,7 @@ struct CodeDuplicationSection: View {
                         .font(Theme.Typo.metricNumber.font)
                         .foregroundStyle(ratio.textColor)
                     Text("的代码行落在重复块内")
-                        .font(Theme.Typo.label.font)
+                        .font(CodeGitType.prose(Theme.Typo.label))
                         .foregroundStyle(.secondary)
                     Spacer(minLength: Theme.Spacing.xs)
                 }
@@ -128,7 +127,6 @@ struct CodeDuplicationSection: View {
                 MiniBarGauge(fraction: code.duplicationRatio, tint: ratio.graphicColor, height: DataGaugeHeight.metric)
 
                 Text(CodeRiskAnalysis.duplicationCaption(code))
-                    .font(Theme.Typo.microLabel.font)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
 
@@ -143,7 +141,7 @@ struct CodeDuplicationSection: View {
                             + "重复率为 \(NumberFormat.percent(code.duplicationRatio, precision: 1))。"
                     )
                 } else {
-                    VStack(spacing: Theme.Spacing.xs) {
+                    VStack(spacing: DataRowMetrics.rowGap) {
                         DataTableHeader(columns: DataColumns.duplicationBlocks)
                         let rows = Array(code.duplicatedBlocks.prefix(Self.rowLimit))
                         ForEach(Array(rows.enumerated()), id: \.element.id) { index, block in
@@ -155,7 +153,6 @@ struct CodeDuplicationSection: View {
                     }
                     if code.duplicatedBlocks.count > shownCount {
                         Text("另有 \(NumberFormat.grouped(code.duplicatedBlocks.count - shownCount)) 个重复块未列出。")
-                            .font(Theme.Typo.microLabel.font)
                             .monospacedDigit()
                             .foregroundStyle(.tertiary)
                     }
@@ -188,7 +185,7 @@ struct CodeComplexitySection: View {
                         + "\(NumberFormat.grouped(code.averageFunctionLength)) 行。"
                 )
             } else {
-                VStack(spacing: Theme.Spacing.xs) {
+                VStack(spacing: DataRowMetrics.rowGap) {
                     DataTableHeader(columns: DataColumns.complexityFunctions)
                     let rows = code.topComplexFunctions
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, hotspot in
@@ -199,7 +196,6 @@ struct CodeComplexitySection: View {
                     }
                 }
                 Text("点击行在 Finder 中定位源文件，行尾图标用默认应用打开。")
-                    .font(Theme.Typo.microLabel.font)
                     .monospacedDigit()
                     .foregroundStyle(.tertiary)
                     .padding(.top, Theme.Spacing.xxs)
@@ -224,7 +220,7 @@ struct CodeSuggestionSection: View {
                 DataNotice(text: CodeRiskAnalysis.noRiskNote(code),
                            role: Theme.Semantic.neutral, icon: .noRisk, iconLabel: "本次无结构性风险")
             } else {
-                VStack(spacing: Theme.Spacing.xs) {
+                VStack(spacing: DataRowMetrics.rowGap) {
                     ForEach(items) { item in
                         DataNotice(text: item.text, role: item.role, icon: item.icon,
                                    symbol: item.symbol, iconLabel: item.label)

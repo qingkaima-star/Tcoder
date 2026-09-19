@@ -231,7 +231,7 @@ struct DependencyRow: View {
     private var status: DependencyRowStatus { .of(record) }
 
     var body: some View {
-        HStack(spacing: Theme.Spacing.sm) {
+        HStack(spacing: DataRowMetrics.cellGap) {
             Text(record.name)
                 .font(CodeGitType.tableIdentifier)
                 .lineLimit(1)
@@ -253,7 +253,6 @@ struct DependencyRow: View {
                 .tableCell(DataColumns.column(columns, 2))
 
             Text(record.scope.rawValue)
-                .font(Theme.Typo.microLabel.font)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .tableCell(DataColumns.column(columns, 3))
@@ -263,7 +262,7 @@ struct DependencyRow: View {
                 .tableCell(DataColumns.column(columns, 4))
                 .help(status.tooltip(record: record))
         }
-        .padding(.vertical, Theme.Spacing.xxs)
+        .dataTableRow()
     }
 }
 
@@ -275,7 +274,7 @@ struct VulnerabilityRow: View {
     private var role: Theme.SemanticRole { Theme.Semantic.role(for: item.severity) }
 
     var body: some View {
-        HStack(alignment: .top, spacing: Theme.Spacing.sm) {
+        HStack(alignment: .top, spacing: DataRowMetrics.cellGap) {
             /// 严重度左侧标尺：宽度取描边强调档，高度随行内容拉伸，不再钉死 34pt。
             Capsule()
                 .fill(role.graphicColor)
@@ -291,7 +290,6 @@ struct VulnerabilityRow: View {
                             .foregroundStyle(.secondary)
                     }
                     Text(item.source)
-                        .font(Theme.Typo.microLabel.font)
                         .monospacedDigit()
                         .foregroundStyle(.tertiary)
                     if !item.aliases.isEmpty {
@@ -302,7 +300,6 @@ struct VulnerabilityRow: View {
                     }
                 }
                 Text(item.summary)
-                    .font(Theme.Typo.narrative.font)
                     .monospacedDigit()
                     .lineSpacing(Theme.Typo.narrative.lineSpacing)
                     .lineLimit(2)
@@ -314,7 +311,6 @@ struct VulnerabilityRow: View {
                     .textSelection(.enabled)
                 if let advice = item.advice {
                     Text(advice)
-                        .font(Theme.Typo.narrative.font)
                         .monospacedDigit()
                         .foregroundStyle(Self.adviceRole(item).textColor)
                         .lineLimit(2)
@@ -322,7 +318,7 @@ struct VulnerabilityRow: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, Theme.Spacing.xxs)
+        .dataTableRow()
     }
 
     private var severityIcon: IconName { item.severity == .none ? .clean : .vulnerable }

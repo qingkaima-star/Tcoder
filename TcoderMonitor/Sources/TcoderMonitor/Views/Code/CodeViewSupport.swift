@@ -145,11 +145,11 @@ struct CodeHotspotRow: View {
 
     var body: some View {
         let url = CodeViewFormat.resolvedURL(hotspot.path, root: root)
-        HStack(alignment: .center, spacing: Theme.Spacing.sm) {
+        HStack(alignment: .center, spacing: DataRowMetrics.cellGap) {
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             } label: {
-                HStack(alignment: .center, spacing: Theme.Spacing.sm) {
+                HStack(alignment: .center, spacing: DataRowMetrics.cellGap) {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                         Text(CodeViewFormat.fileName(hotspot.path))
                             .font(CodeGitType.tableIdentifier)
@@ -189,7 +189,7 @@ struct CodeHotspotRow: View {
             CodeOpenFileButton(path: hotspot.path, root: root)
                 .tableCell(DataColumns.column(columns, 4))
         }
-        .padding(.vertical, Theme.Spacing.xxs)
+        .dataTableRow()
     }
 
     private var fraction: Double {
