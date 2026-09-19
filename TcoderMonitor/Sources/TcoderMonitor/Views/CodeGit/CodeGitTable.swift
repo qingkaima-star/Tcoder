@@ -1,10 +1,21 @@
 import SwiftUI
 
-// MARK: - 数据表基座（WS-L）
+// MARK: - 数据表基座（全仓唯一一套列系统，#34 收敛后由八个有表的页面共用）
 //
-// 这五个页面全是数据密集型榜单，「看起来专业」与「看起来不专业」的差别基本就落在
+// 这八个页面（代码规模 / 复杂度风险 / Git 洞察 / 贡献者 / 依赖 / 性能 / 日志 / 健康）
+// 全是数据密集型榜单，「看起来专业」与「看起来不专业」的差别基本就落在
 // 列对齐、数字等宽、行高节奏这三件事上。本文件把它收成一处：
 // 列宽与对齐只有这一张表能定义，表头与数据行从同一份 `DataGridColumn` 取布局。
+//
+// **为什么是这一套活下来**：`Design/TableKit.swift` 里的基座件 `Theme.Table`（零调用）
+// 已在 `ed58dd5` 被 WS-G #28 删除，删除理由写明它是「与页面既有两套不兼容的第三条路」，
+// 而它自己那份并集形状就是照本文件的 `DataGridColumn` 抄的（见该文件被删前的头注释）。
+// 同一提交里另一套是 WS-M 的 `TableHeaderCell`（逐格手写 + `Grid`），它把列宽写成标量常量、
+// 表头与行的对齐各写一次，正是 #34 要消灭的第二次发散。故本轮把三页迁到本套、删掉那一套。
+//
+// 页面侧用法（八页一致，共 11 处列头）：`static let columns: [DataGridColumn]` → 表头 `DataTableHeader(columns:)`
+// → 行内每格 `.tableCell(DataColumns.column(Self.columns, i))`。
+// 不要在本文件之外再写第二个「表头长什么样」的定义。
 
 // MARK: 列定义
 
@@ -21,21 +32,29 @@ enum DataGridColumnAlignment: Equatable {
 }
 
 /// 一列的布局。`width == nil` = 弹性列（名称列），其余一律定宽尾对齐。
+/// `help` 只被**列头**消费（整列口径说明，悬停在列名上）；逐行变化的口径仍由页面
+/// 自己挂在单元格上，不要塞进列定义——列头是整列静态文案，写不得只对部分行成立的原因
+/// （`HealthBreakdown.weightColumnHelp` 这条就是被 #32 纠正过一次）。
 struct DataGridColumn: Equatable {
     let title: String
     let width: CGFloat?
     let alignment: DataGridColumnAlignment
+    let help: String?
 
-    init(_ title: String, _ width: CGFloat? = nil, _ alignment: DataGridColumnAlignment = .trailing) {
+    init(_ title: String, _ width: CGFloat? = nil,
+         _ alignment: DataGridColumnAlignment = .trailing, help: String? = nil) {
         self.title = title
         self.width = width
         self.alignment = alignment
+        self.help = help
     }
 }
 
-/// 全流唯一的列宽表。定宽的依据是**该列最宽内容的实测宽度**，不是手感：
+/// 全仓唯一的列宽表（#34 之后八页共用，原先 WS-M 那 14 个标量常量并到下面来了）。
+/// 定宽的依据是**该列最宽可信读数的实测宽度**，不是手感：
 /// 10pt 等宽数字 4 位约 24pt，加尾随单位「行」后取 56；徽标「仅版本比对」在 10pt
-/// Medium 加 `Spacing.chip` 内边距后约 84pt。改数值请连同注释里的依据一起改。
+/// Medium 加 `Spacing.chip` 内边距后约 84pt；内存列要放得下 `123.4 GB`、
+/// 打开文件列要放得下 `12,345`。改数值请连同注释里的依据一起改。
 enum DataColumns {
     /// 复杂度风险页 · 重复块清单
     static let duplicationBlocks: [DataGridColumn] = [
@@ -91,6 +110,44 @@ enum DataColumns {
         DataGridColumn("次数", 68),
     ]
 
+    // MARK: #34 迁入的三页（原 WS-M `TableHeaderCell` + `DataColumn` 标量常量那套）
+
+    /// 性能页 · 进程占用排行。列名与列序与迁移前逐字相同（`TableHeaderConvergenceTests`
+    /// 拿这份快照做断言，改动必须是有意识的）。
+    static let processes: [DataGridColumn] = [
+        DataGridColumn("进程名称", nil, .leading),
+        DataGridColumn("PID", 52, help: "进程号，只读展示"),
+        DataGridColumn("CPU 核", 62, help: "单核等价：1.00 = 占满一个核心，可大于 1"),
+        DataGridColumn("内存", 76, help: "常驻内存 RSS"),
+        DataGridColumn("线程", 50, help: "task_info 返回的线程数"),
+        DataGridColumn("打开文件", 66, help: "进程当前持有的描述符数量"),
+    ]
+
+    /// 日志页 · 已扫描文件。
+    static let scannedLogFiles: [DataGridColumn] = [
+        DataGridColumn("类型", 76, .leading),
+        DataGridColumn("文件", nil, .leading),
+        DataGridColumn("大小", 72, help: "文件字节数（1024 进制）"),
+        DataGridColumn("行数", 78),
+        DataGridColumn("修改", 78),
+    ]
+
+    /// 健康页 · 维度分量。得分列是「量表 + 数字」两截拼的复合列，表头宽度取
+    /// 量表 + 行内间距 + 数字之和（`Grid` 时代列宽由行内容自己撑出来，
+    /// 迁到定宽列之后必须把这段间距算进表头，否则表头会比数据短 4pt 而错位）。
+    /// 两截各自的宽度也留在这里，页面不再各写一个 `frame(width:)` 魔法数。
+    static let healthScoreGauge: CGFloat = 44
+    static let healthScoreNumber: CGFloat = 30
+    static let healthScoreColumn: CGFloat = healthScoreGauge + Theme.Spacing.xxs + healthScoreNumber
+    static let healthComponents: [DataGridColumn] = [
+        DataGridColumn("维度", 126, .leading),
+        DataGridColumn("得分", healthScoreColumn,
+                       help: "该维度 0~100 分，条形按同一比例"),
+        DataGridColumn("权重", 50, help: HealthBreakdown.weightColumnHelp),
+        DataGridColumn("贡献", 52, help: "得分 × 归一化权重"),
+        DataGridColumn("详情", nil, .leading),
+    ]
+
     /// 图例色点边长。6 与 `Radius.sm` 同档，量级约等于 10pt 文字的大写字高——
     /// 再大就开始和文字抢注意力，再小在深色模式下几乎看不见。
     /// 名称列一律显式写 `.leading`：`DataGridColumn` 的默认对齐是尾对齐（数字列占多数），
@@ -117,6 +174,9 @@ extension View {
 
 // MARK: 表头与分隔
 
+/// **全仓唯一的表格列头**（#34）。列名、列宽、对齐、口径提示全部从 `columns` 取，
+/// 与数据行同源，所以「表头写一套、行写另一套」这种错位在这套里写不出来。
+/// 末尾自带一条发丝分隔线，页面不要再补 `Divider()`。
 struct DataTableHeader: View {
     let columns: [DataGridColumn]
 
@@ -128,6 +188,7 @@ struct DataTableHeader: View {
                         .font(CodeGitType.prose(Theme.Typo.microLabel))
                         .foregroundStyle(.secondary)
                         .tableCell(DataColumns.column(columns, index))
+                        .modifier(DataOptionalHelp(help: column.help))
                 }
             }
             DataRowSeparator()

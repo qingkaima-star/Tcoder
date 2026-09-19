@@ -1,37 +1,25 @@
 import SwiftUI
 
-// MARK: - 数据表与实时数字的观感基座（性能 / 日志 / 健康三页共用）
+// MARK: - 实时数字与单元格观感（性能 / 日志 / 健康三页共用）
 //
 // 活动监视器的专业感来自两件极小的事：**列宽定死** 与 **数字等宽**。
 // 这两件事一旦各页自己写就会漂（WS-I §4 实测全仓 `.monospacedDigit()` 命中 0），
-// 所以列宽、单元格对齐、占位符着色全部收在这一个文件里。
+// 所以数字取色、单元格对齐、占位符着色全部收在这一个文件里。
+//
+// #34 起，**列头与列宽不再归本文件管**：全仓唯一一套列系统在
+// `Views/CodeGit/CodeGitTable.swift`（`DataGridColumn` / `DataTableHeader` / `.tableCell`），
+// 原先这里的 `TableHeaderCell` 与那 14 个 `DataColumn` 列宽常量已随收敛删除。
+// 下面剩下的三个宽度都不是列：两个是「错误聚类」列表的行内列（那张列表没有列头），
+// 一个是排序控件。
 
-/// 三页数据表的列宽。取值按「该列最大可信读数」量出来，
-/// 例如内存列要放得下 `123.4 GB`、打开文件列要放得下 `12,345`。
-enum DataColumn {
-    // 进程表
-    static let pid: CGFloat = 52
-    static let cpuCores: CGFloat = 62
-    static let memory: CGFloat = 76
-    static let threads: CGFloat = 50
-    static let openFiles: CGFloat = 66
-
-    // 日志页
+/// 非列头的定宽：没有列头的列表与控件用得到的宽度。
+/// **新表格的列宽不许加到这里**，请去 `DataColumns` 声明一份 `[DataGridColumn]`。
+enum PerfLogWidths {
+    /// 错误聚类列表 · 出现次数。
     static let count: CGFloat = 56
-    static let fileSize: CGFloat = 72
-    static let fileLines: CGFloat = 78
-    static let fileDate: CGFloat = 78
-    static let fileRole: CGFloat = 76
+    /// 错误聚类列表 · 样本序号（个位数，只用来把样本对齐）。
     static let sampleIndex: CGFloat = 22
-
-    // 健康页
-    static let dimension: CGFloat = 126
-    static let score: CGFloat = 30
-    static let scoreGauge: CGFloat = 44
-    static let weight: CGFloat = 50
-    static let contribution: CGFloat = 52
-
-    // 控件
+    /// 进程页排序分段控件。取值 = 两个选项里较长那条「按 CPU 核当量」的实测宽度。
     static let sortPicker: CGFloat = 208
 }
 
@@ -71,37 +59,6 @@ struct LiveNumber: View {
     }
 }
 
-/// 表头单元格。10pt Medium —— WS-H §4.2 的全仓文字下限，比现状的 8/9pt 可读。
-struct TableHeaderCell: View {
-    var title: String
-    var width: CGFloat?
-    var trailingAligned: Bool
-    var help: String?
-
-    init(_ title: String, width: CGFloat? = nil, trailing: Bool = true, help: String? = nil) {
-        self.title = title
-        self.width = width
-        self.trailingAligned = trailing
-        self.help = help
-    }
-
-    var body: some View {
-        Text(title)
-            .font(Theme.Typo.microLabel.font)
-            .foregroundStyle(.secondary)
-            .frame(width: width, alignment: trailingAligned ? .trailing : .leading)
-            .modifier(HelpModifier(text: help))
-    }
-}
-
-private struct HelpModifier: ViewModifier {
-    var text: String?
-
-    func body(content: Content) -> some View {
-        if let text { content.help(text) } else { content }
-    }
-}
-
 /// 一行口径 / 状态说明：图标 + 文字双通道（WS-H §10「不只靠颜色表意」）。
 /// 三页的「本次采样失败 / 未启用 / 已核对零命中」都走它，句式因此只有一处定义。
 struct NoteLine: View {
@@ -130,12 +87,14 @@ struct NoteLine: View {
 }
 
 extension View {
-    /// 定宽数值格：与表头同源，右对齐，刷新时列宽不动。
+    /// 定宽数值格：右对齐，刷新时列宽不动。
+    /// 有列头的数据表请改用它旁边的 `.tableCell(列)`（列宽从列定义来，#34）；
+    /// 这里只服务没有列头的列表与复合列里的子截。
     func numberCell(_ width: CGFloat) -> some View {
         frame(width: width, alignment: .trailing)
     }
 
-    /// 变宽文本格（进程名、路径、详情）：左对齐并吃掉剩余宽度。
+    /// 变宽文本格（路径、详情）：左对齐并吃掉剩余宽度。同上，有列头的表用 `.tableCell(列)`。
     func flexCell() -> some View {
         frame(maxWidth: .infinity, alignment: .leading)
     }

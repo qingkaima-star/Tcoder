@@ -61,24 +61,16 @@ struct PerformanceProcessTableCard: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .frame(width: DataColumn.sortPicker)
+        .frame(width: PerfLogWidths.sortPicker)
         .help("切换排序口径；两种都是全系统范围的占用排序")
     }
 
+    /// 表头与行都从 `DataColumns.processes` 取布局（#34 收敛前这里是 `Grid` +
+    /// 逐格手写的 `TableHeaderCell`，列宽与对齐各写一遍）。
+    /// 行间距沿用原 `Grid` 的 `verticalSpacing: .xxs`，密度一字未改。
     private var table: some View {
-        Grid(alignment: .trailing, horizontalSpacing: Theme.Spacing.sm, verticalSpacing: Theme.Spacing.xxs) {
-            GridRow {
-                TableHeaderCell("进程名称", trailing: false)
-                    .gridColumnAlignment(.leading)
-                TableHeaderCell("PID", width: DataColumn.pid, help: "进程号，只读展示")
-                TableHeaderCell("CPU 核", width: DataColumn.cpuCores,
-                                help: "单核等价：1.00 = 占满一个核心，可大于 1")
-                TableHeaderCell("内存", width: DataColumn.memory, help: "常驻内存 RSS")
-                TableHeaderCell("线程", width: DataColumn.threads, help: "task_info 返回的线程数")
-                TableHeaderCell("打开文件", width: DataColumn.openFiles,
-                                help: "进程当前持有的描述符数量")
-            }
-            Divider().gridCellColumns(6)
+        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+            DataTableHeader(columns: DataColumns.processes)
             ForEach(shown) { process in
                 row(process)
             }
@@ -87,30 +79,30 @@ struct PerformanceProcessTableCard: View {
 
     private func row(_ process: ProcessSnapshot) -> some View {
         let cores = ProcessMetric.cpuCores(of: process)
-        return GridRow {
+        return HStack(spacing: DataRowMetrics.cellGap) {
             Text(process.name)
                 .font(Theme.Typo.body.font)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .flexCell()
+                .tableCell(DataColumns.column(DataColumns.processes, 0))
             LiveNumber(Live.grouped(Int(process.pid)), tier: Theme.Typo.monoSmall)
-                .numberCell(DataColumn.pid)
+                .tableCell(DataColumns.column(DataColumns.processes, 1))
             LiveNumber(Live.cores(context.hasDerivative ? cores : nil),
                        tier: Theme.Typo.monoSmall,
                        tint: Self.cpuTint(cores: context.hasDerivative ? cores : nil))
-                .numberCell(DataColumn.cpuCores)
+                .tableCell(DataColumns.column(DataColumns.processes, 2))
                 .help(context.hasDerivative
                         ? "单核等价 \(Live.cores(cores))"
                         : "进程 CPU 也是差分指标：上一帧未到时不给 0")
             LiveNumber(Live.bytes(ProcessMetric.residentBytes(of: process)),
                        tier: Theme.Typo.monoSmall)
-                .numberCell(DataColumn.memory)
+                .tableCell(DataColumns.column(DataColumns.processes, 3))
             LiveNumber(Live.grouped(ProcessMetric.threads(of: process)),
                        tier: Theme.Typo.monoSmall)
-                .numberCell(DataColumn.threads)
+                .tableCell(DataColumns.column(DataColumns.processes, 4))
             LiveNumber(Live.grouped(ProcessMetric.openFiles(of: process)),
                        tier: Theme.Typo.monoSmall)
-                .numberCell(DataColumn.openFiles)
+                .tableCell(DataColumns.column(DataColumns.processes, 5))
         }
         .help(process.commandLine.isEmpty ? process.name : process.commandLine)
     }
