@@ -66,8 +66,22 @@ struct LogsMetricGrid: View {
 
     private var subtitle: String {
         guard let logs else { return "尚未分析，下方数值一律 --" }
-        guard logs.hasData else { return "没有可读的日志文件，下方数值一律 --" }
-        return "扫描 \(NumberFormat.grouped(logs.totalLinesScanned)) 行 · \(NumberFormat.grouped(logs.scannedFiles.count)) 个文件"
+        guard logs.hasData else {
+            // 全读不动时 hasData 为假，只说「没有可读的日志文件」会被听成「这个项目没有日志」，
+            // 而真相是「有 N 份、N 份都读不动」——跳过条数与原因在这条路径上更该说出口。
+            return "没有可读的日志文件，下方数值一律 --" + skippedNote(logs)
+        }
+        return "扫描 \(NumberFormat.grouped(logs.totalLinesScanned)) 行 · "
+            + "\(NumberFormat.grouped(logs.scannedFiles.count)) 个文件" + skippedNote(logs)
+    }
+
+    /// 「已跳过 N 份读取失败（权限不足 ×2、文件已不存在 ×1）」。
+    /// 带原因分布而不是只报个数：同样是被跳过，权限问题用户自己能修，文件消失是另一回事。
+    private func skippedNote(_ logs: LogSummary) -> String {
+        guard let failed = logs.readFailedFiles, failed.isEmpty == false else { return "" }
+        let grouped = Dictionary(grouping: failed.map { $0.readFailure ?? "未记录原因" }, by: { $0 })
+        let reasons = grouped.keys.sorted().map { "\($0) ×\(NumberFormat.grouped(grouped[$0]?.count ?? 0))" }
+        return " · 已跳过 \(NumberFormat.grouped(failed.count)) 份读取失败（\(reasons.joined(separator: "、"))）"
     }
 
     private var riskBadge: AnyView? {

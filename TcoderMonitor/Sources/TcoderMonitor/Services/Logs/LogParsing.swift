@@ -208,20 +208,39 @@ enum LogReader {
     /// 「已跳过 3 份」这种话如果每份原因都一样，用户就分不出哪些是自己能修的（权限、
     /// 文件被移走）哪些是真故障。
     static func readFailureReason(for error: Error) -> String {
-        let cocoa = error as NSError
-        if cocoa.domain == NSCocoaErrorDomain {
-            if cocoa.code == CocoaError.fileReadNoSuchFile.rawValue
-                || cocoa.code == CocoaError.fileNoSuchFile.rawValue {
-                return "文件已不存在"
-            }
-            if cocoa.code == CocoaError.fileReadNoPermission.rawValue {
+        for candidate in errorChain(error) {
+            if candidate.domain == NSPOSIXErrorDomain,
+               candidate.code == Int(EACCES) || candidate.code == Int(EPERM) {
                 return "权限不足"
             }
+            if candidate.domain == NSCocoaErrorDomain {
+                if candidate.code == CocoaError.fileNoSuchFile.rawValue
+                    || candidate.code == CocoaError.fileReadNoSuchFile.rawValue {
+                    return "文件已不存在"
+                }
+                if candidate.code == CocoaError.fileReadNoPermission.rawValue {
+                    return "权限不足"
+                }
+            }
         }
-        if cocoa.domain == NSPOSIXErrorDomain, cocoa.code == Int(EACCES) || cocoa.code == Int(EPERM) {
-            return "权限不足"
+        return "无法读取（\((error as NSError).localizedDescription)）"
+    }
+
+    /// 错误本身，以及它一层层包着的 `NSUnderlyingError`。
+    ///
+    /// **必须往下走一层**：`FileHandle(forReadingFrom:)` 撞权限时外层是
+    /// `NSCocoaErrorDomain` code **513**（不是 257 `fileReadNoPermission`，也不在 POSIX 域），
+    /// 真正的 `EACCES` 只在 underlying 的 `NSPOSIXErrorDomain` 13 里。只看外层就会把
+    /// 一份「权限不足」误报成一句长长的系统描述——本机编译产物探针实测：
+    /// `outer=NSCocoaErrorDomain/513, underlying=NSPOSIXErrorDomain/13`。
+    private static func errorChain(_ error: Error, depthLimit: Int = 5) -> [NSError] {
+        var result: [NSError] = []
+        var cursor: NSError? = error as NSError
+        while let current = cursor, result.count < depthLimit {
+            result.append(current)
+            cursor = current.userInfo[NSUnderlyingErrorKey] as? NSError
         }
-        return "无法读取（\(cocoa.localizedDescription)）"
+        return result
     }
 }
 
