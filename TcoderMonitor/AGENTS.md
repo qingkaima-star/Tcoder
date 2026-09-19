@@ -45,6 +45,19 @@ cd /Users/one/Documents/Tcoder/TcoderMonitor
 若要暂存未完成工作，用带说明的 `git stash push -m "..."` 并**同时**存一份
 `git diff > .inflight/<名字>.patch`，别只靠队列里的消息通知总工。
 
+**禁止用 `git reset --hard` / `git checkout -- <文件>` 清理在途改动（2026-09-20 实测丢过一整份工）。**
+WS-C 的 #26（`ScannedLogFile` 读取失败原因字段）两个在途文件就是这么没的：
+`reflog` 里留着 `reset: moving to HEAD`，而字段在 `Models/LogInsights.swift` 里已不存在，
+既没提交也没留档，等于白做一轮。
+要把工作树恢复干净，**只有两条合法路**：
+
+```bash
+git stash push -u -m "<流名>-<时间>-<内容>"      # 可取回
+git diff > .inflight/<流名>.patch                # 同时留一份可读档
+```
+
+**每做完一小步就 commit**——攒着的在途改动就是最容易整份丢掉的东西。
+
 **补充（20:34 实测教训）：`Tests/TcoderMonitorTests/**` 是同一个编译单元。**
 你写的测试文件哪怕生产代码全对，只要它编译不过，
 **全仓所有工作流就都跑不了 `test`**——别人会以为是自己的代码坏了。
