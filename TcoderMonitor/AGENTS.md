@@ -24,11 +24,26 @@
 
 ## 1. 环境事实
 
+- **git 仓库根是 `/Users/one/Documents/Tcoder`**（不是子目录）。App 源码在 `TcoderMonitor/` 下，
+  所以从任何子目录跑 `git` 都可用，但 `git status` 的路径会带 `TcoderMonitor/` 前缀。
 - 仓库根：`/Users/one/Documents/Tcoder/TcoderMonitor`
 - Swift 6.3.3 / Xcode 26.6 / macOS SDK 26.5 / 仅 arm64。目标系统 macOS 14+。
 - SwiftPM 可执行 target + `@main`（没有 main.swift）。语言模式被显式降到 **Swift 5**
   （`Package.swift` 里 `.swiftLanguageMode(.v5)`），所以 Sendable 只会警告，不会报错。
   **不要改 `Package.swift`，不要把语言模式调回 6。**
+
+## 1.5 停笔纪律（并行开发最容易出事的地方）
+
+**不允许把半成品留在工作区。** 停笔前必须自己跑到双绿：
+
+```bash
+cd /Users/one/Documents/Tcoder/TcoderMonitor
+./scripts/locked_build.sh build && ./scripts/locked_build.sh test
+```
+
+改完就 `git add <你的文件> && git commit`，不要留未提交的编译错——别人会以为仓库是坏的。
+若要暂存未完成工作，用带说明的 `git stash push -m "..."` 并**同时**存一份
+`git diff > .inflight/<名字>.patch`，别只靠队列里的消息通知总工。
 
 ## 2. 构建纪律（最重要）
 
@@ -98,6 +113,11 @@ Tests/TcoderMonitorTests/Health*Tests.swift
 ```
 入口类型：`MachSystemMonitor`、`FileLogAnalyzer`、`WeightedHealthScorer`、
 视图：`PerformanceView`、`LogsView`、`HealthView`。
+
+**18:33 所有权变更**：`Services/Health/WeightedHealthScorer.swift` 由总工交还给 WS-C
+（要接 `ScoreCurves.swift`）。前提：`HealthScoreTests` 36 例保持全绿，尤其两条硬契约
+① 分量 `weight` 自身归一化到 1.0；② `overall == sum(score*weight)`（±1）。
+接不进去就删掉 `ScoreCurves.swift`，**不许留无调用方的实现文件**。
 
 同一工作流内的子代理之间也必须**按文件名切分**，任何人不得改别人的文件。
 

@@ -2,9 +2,38 @@ import Foundation
 
 // MARK: - Git history analysis
 
+/// How the analyzer located the repository relative to the directory the user picked.
+enum GitDiscoveryMode: String, Codable, Sendable {
+    case selectedDirectory = "所选目录即仓库"
+    case parentDirectory = "向上找到父仓库"
+    case nestedSubdirectory = "向下找到子仓库"
+    case none = "未找到仓库"
+}
+
+struct NestedRepositoryCandidate: Codable, Equatable, Hashable, Identifiable, Sendable {
+    var path: String
+    var branch: String
+    var commitCount: Int
+    var lastCommitAt: Date?
+
+    var id: String { path }
+    var directoryName: String { URL(fileURLWithPath: path).lastPathComponent }
+}
+
 struct GitInsights: Codable, Equatable, Sendable {
     var analyzedAt: Date = Date()
     var isRepository: Bool = false
+
+    /// Where `.git` actually lives. May differ from the directory the user selected
+    /// when discovery walked up to a parent or down into a subdirectory.
+    var resolvedRepositoryRoot: String?
+    var discoveryMode: GitDiscoveryMode = .none
+    /// Depth of the hop between the selected directory and the resolved repository.
+    var discoveryHops: Int = 0
+    /// Other repositories found underneath the selected directory, so the UI can let
+    /// the user pick one instead of silently analysing the wrong repository.
+    var nestedCandidates: [NestedRepositoryCandidate] = []
+
     var branch: String = ""
     var headSHA: String = ""
     var remoteURL: String = ""
