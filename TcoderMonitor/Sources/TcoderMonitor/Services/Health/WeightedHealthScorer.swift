@@ -65,19 +65,31 @@ final class WeightedHealthScorer: HealthScoringProviding {
         switch dimension {
         case .complexity:
             guard let code = inputs.code else { return nil }
+            // 三种证据状态，按可信度排序：
+            //   1) 分析器给出全仓均值 → 直接用，样本口径后缀不再需要；
+            //   2) 没有全仓均值但有热点榜 → 退回热点榜均值，detail 必须标明是样本口径；
+            //   3) 两者都没有 → 「一个函数都没测到」，本维度不参与评分。
+            //      注意第 3 支必须按「有没有测到东西」判，不能只看 analyzedFunctionCount：
+            //      分母 >0 但榜单为空时热点均值会算成 0，曲线会把「没测到」当成复杂度 0 给满分，
+            //      那正是这条诚实原则要挡住的。与 `.testing` 的 `coverage.hasData` 同源。
+            // WS-A 尚未填这两个字段、且没报热点时，全仓真实扫描会走第 3 支、复杂度暂时缺席
+            // （HealthView 的「缺失维度」会列出来），这是刻意的，不是漏算。
             let hotspots = code.topComplexFunctions
+            guard code.averageCyclomaticComplexity != nil || !hotspots.isEmpty else { return nil }
             let highRisk = hotspots.filter { $0.cyclomaticComplexity >= 16 }.count
             let worst = hotspots.map(\.cyclomaticComplexity).max() ?? 0
-            let mean = hotspots.isEmpty ? 0 : Double(hotspots.map(\.cyclomaticComplexity).reduce(0, +)) / Double(hotspots.count)
-            let curve = HealthCurves.complexity(averageCC: mean, highRiskCount: highRisk,
-                                                maxCC: worst, functionCount: hotspots.count)
-            let verdict = curve.score >= 85 ? "函数复杂度可控（最高 CC \(worst)）" : nil
-            if let verdict { strengths.append(verdict) }
+            let hasRepoMean = code.averageCyclomaticComplexity != nil
+            let mean = code.averageCyclomaticComplexity
+                ?? (hotspots.isEmpty ? 0
+                    : Double(hotspots.map(\.cyclomaticComplexity).reduce(0, +)) / Double(hotspots.count))
+            let curve = HealthCurves.complexity(averageCC: mean, highRiskCount: highRisk, maxCC: worst,
+                                                functionCount: max(code.analyzedFunctionCount, hotspots.count))
+            if curve.score >= 85 { strengths.append("函数复杂度可控（最高 CC \(worst)）") }
             if curve.score <= 60 {
                 issues.append("\(highRisk) 个函数圈复杂度 ≥16，最高 \(worst)")
                 recommendations.append("优先拆分最高复杂度函数，用早返回替代嵌套分支")
             }
-            return notingSample(curve, hotspots.count)
+            return hasRepoMean ? curve : notingSample(curve, hotspots.count)
 
         case .duplication:
             guard let code = inputs.code else { return nil }
@@ -190,8 +202,8 @@ final class WeightedHealthScorer: HealthScoringProviding {
 
     // MARK: - Helpers
 
-    /// CodeMetrics 没有「全仓平均圈复杂度」，只有热点函数榜；这里把样本口径写进文案，
-    /// 避免读者把按热点均值算出的分数当成全仓均值。补齐该字段是报给总工的契约缺口。
+    /// 没有全仓均值、只能用热点榜均值算复杂度时，把样本口径写进文案，
+    /// 避免读者把这个数当成全仓平均（`CodeMetrics.topComplexFunctions` 是封顶的榜单）。
     private func notingSample(_ curve: CurveResult, _ sampleCount: Int) -> CurveResult {
         guard sampleCount > 0 else { return curve }
         return CurveResult(score: curve.score, detail: curve.detail + "（热点样本 \(sampleCount) 个的均值）",
