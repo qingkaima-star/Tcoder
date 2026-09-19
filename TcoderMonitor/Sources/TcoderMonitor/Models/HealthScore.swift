@@ -26,7 +26,9 @@ struct ScoreComponent: Codable, Equatable, Identifiable, Sendable {
     var name: String
     /// 0...100 before weighting.
     var score: Int
-    /// Relative weight; the set should sum to ~1.0.
+    /// Relative weight, normalized by `WeightedHealthScorer` against the sum of the
+    /// weights actually present. After scoring, the emitted components' weights sum to
+    /// 1.0 even though `HealthDimension.defaultWeight` totals 1.10.
     var weight: Double
     var detail: String
     var risk: RiskLevel
@@ -47,6 +49,14 @@ enum HealthDimension: String, CaseIterable, Sendable {
     case testing = "测试覆盖"
 
     var defaultWeight: Double {
+        // These are *relative* weights expressed as parts of 110, not percentages:
+        // the nine values below sum to 1.10 by construction. `WeightedHealthScorer`
+        // divides by the sum of the weights actually present, so `overall` is
+        // unaffected by the 1.10 total and only the ratios carry meaning.
+        //
+        // Do not "fix" the total to 1.0 by rounding individual values — that would
+        // silently change the calibration the user set. Rescaling proportionally is
+        // safe but pointless given the normalization above.
         switch self {
         case .codeQuality: return 0.14
         case .complexity: return 0.18

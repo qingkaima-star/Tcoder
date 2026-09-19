@@ -340,6 +340,80 @@ extension CodeAnalyzerTests {
         XCTAssertEqual(Set(audited.files.map(\.relativePath)), Set(plain.files.map(\.relativePath)))
     }
 
+    // MARK: - Q. 覆盖度：上限生效过就不能把结果当全量（WS-D 诚实性审计 P1 #7 / #8）
+
+    /// 被 20 万行/文件上限切过的文件必须留痕，否则 `totalLines` 看起来像全量。
+    func testLineCapTruncationIsReported() async throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+        _ = try write(String(repeating: "1\n", count: 200_001), to: "huge.swift", in: root)
+        _ = try write("let ok = 1\n", to: "normal.swift", in: root)
+
+        let file = try XCTUnwrap(classify(root.appendingPathComponent("huge.swift"), root: root))
+        XCTAssertEqual(file.totalLineCount, 200_000, "只保留前 20 万行")
+        XCTAssertTrue(file.lineCountTruncated, "必须留痕：这个文件被行数上限切过")
+        XCTAssertFalse(try XCTUnwrap(classify(root.appendingPathComponent("normal.swift"), root: root)).lineCountTruncated,
+                       "正常文件不得被标成截断")
+
+        let outcome = try await FileSystemCodeAnalyzer().analyzeWithCoverage(root: root, options: options())
+        XCTAssertEqual(outcome.coverage.lineTruncatedFileCount, 1)
+        XCTAssertTrue(outcome.coverage.isPartial, "有上限生效过 ⇒ 这是部分测量")
+        XCTAssertTrue(outcome.coverage.limitationSummary.contains { $0.contains("20 万行") },
+                      "限制说明要带真实数字：\(outcome.coverage.limitationSummary)")
+    }
+
+    /// `maxFiles` 生效后，覆盖率事实必须能从 `analyze` 的返回值里拿到（原先四个字段全被丢弃）。
+    func testFileCapCoverageIsExposed() async throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+        for index in 0..<6 { _ = try write("let v\(index) = 1\n", to: "f\(index).swift", in: root) }
+        var opts = options(maxFiles: 3)
+        let outcome = try await FileSystemCodeAnalyzer().analyzeWithCoverage(root: root, options: opts)
+        XCTAssertTrue(outcome.coverage.truncatedByMaxFiles, "6 个文件、上限 3，必须报截断")
+        XCTAssertEqual(outcome.coverage.includedFileCount, 3)
+        XCTAssertEqual(outcome.metrics.totalFiles, 3, "指标本身只统计进入的部分")
+        XCTAssertTrue(outcome.coverage.isPartial)
+        XCTAssertTrue(outcome.coverage.limitationSummary.contains { $0.contains("上限") },
+                      "\(outcome.coverage.limitationSummary)")
+        opts.maxFiles = 100
+        let whole = try await FileSystemCodeAnalyzer().analyzeWithCoverage(root: root, options: opts)
+        XCTAssertFalse(whole.coverage.truncatedByMaxFiles)
+        XCTAssertFalse(whole.coverage.isPartial, "一个上限都没碰到时不得谎称部分测量")
+        XCTAssertTrue(whole.coverage.limitationSummary.isEmpty, "\(whole.coverage.limitationSummary)")
+    }
+
+    /// 重复率的「低估」原先只写在源码注释里；现在必须是本次运行的实测数字。
+    func testDuplicationBudgetLossIsMeasured() async throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+        // 同一段 15 行代码抄 40 份：远超每指纹 24 处、每文件 8 处的片段预算
+        let body = [
+            "fun sharedProbe(left: Int, right: Int): Int {",
+            "    var totalValue = left + right * 3",
+            "    if totalValue > 100 && left != right {",
+            "        totalValue = totalValue - right",
+            "    }",
+            "    while totalValue > 50 {",
+            "        totalValue = totalValue / 2",
+            "    }",
+            "    val labelMark = \"shared-copy-\"",
+            "    if totalValue < 0 || left > 900 {",
+            "        return right",
+            "    }",
+            "    println(labelMark)",
+            "    return totalValue",
+            "}",
+        ].joined(separator: "\n") + "\n"
+        for index in 0..<40 { _ = try write(body, to: "copy\(index).kt", in: root) }
+        let outcome = try await FileSystemCodeAnalyzer().analyzeWithCoverage(root: root, options: options(maxFiles: 200))
+        XCTAssertGreaterThan(outcome.coverage.duplicateFragmentsDroppedByBudget, 0,
+                             "片段预算必然被触顶，必须报出被丢掉的拷贝数")
+        XCTAssertTrue(outcome.coverage.isPartial)
+        XCTAssertTrue(outcome.coverage.limitationSummary.contains { $0.contains("指纹预算") || $0.contains("明细榜单") },
+                      "\(outcome.coverage.limitationSummary)")
+        XCTAssertGreaterThan(outcome.metrics.duplicationRatio, 0, "重复率本身仍要算得出来")
+    }
+
     /// 台账必须能按**根因目录**报出行数 —— 用户看到的是「已跳过 vendor/ 352,784 行」，
     /// 而不是一个光秃秃的总数（Homebrew 实测 vendor 一条就占 excludedDirectoryContent 的 558,732 行）。
     func testSkipLedgerAttributesLinesToTheRootCauseDirectory() async throws {
