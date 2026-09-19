@@ -253,22 +253,30 @@ struct DashboardView: View {
     }
 
     /// 测试覆盖率只在仓库真出了报告时才出现，没报告就不画，避免读成一个假的 0%。
+    ///
+    /// #37：主读数改成**仅生产码**口径，并把口径写在同一屏。原先这里展示的是
+    /// 「报告里所有文件」的加权值，而测试代码几乎必然被自己的测试覆盖到——
+    /// 本机实测它占分母 43.83%、自身 86.38%，于是只加测试就能把这个数字养大。
+    /// 全口径仍然展示，但明确标注「不用于评分」，只展示高的那一个是不诚实的。
     @ViewBuilder
     private var coverageStrip: some View {
         if let coverage = report?.coverage, coverage.hasData {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 Divider()
                 HStack(spacing: Theme.Spacing.md) {
+                    StatLine(label: "生产码行覆盖",
+                             value: coverage.overallLinePercent.map { Self.percentOf100($0, precision: 1) }
+                                 ?? Theme.Placeholder.missingValue)
                     StatLine(label: "单元测试",
                              value: coverage.unit.map { Self.percentOf100($0.linePercent) } ?? "无报告")
                     StatLine(label: "集成测试",
                              value: coverage.integration.map { Self.percentOf100($0.linePercent) } ?? "无报告")
-                    StatLine(label: "整体行覆盖",
-                             value: coverage.overallLinePercent.map { Self.percentOf100($0, precision: 1) }
-                                 ?? Theme.Placeholder.missingValue)
                     Spacer(minLength: Theme.Spacing.xs)
                     RiskBadge(risk: coverage.riskLevel, showIcon: false)
                 }
+                Text(coverageCaliberLine(coverage))
+                    .font(Theme.Typo.microLabel.font.monospacedDigit())
+                    .foregroundStyle(.tertiary)
                 if let branch = coverage.overallBranchPercent {
                     Text("分支覆盖 \(Self.percentOf100(branch, precision: 1)) · 来源 "
                          + coverage.reports.map { $0.toolName }.joined(separator: " / "))
@@ -277,6 +285,21 @@ struct DashboardView: View {
                 }
             }
         }
+    }
+
+    /// 口径说明一行字：报告没有源文件粒度时必须明说「等同全量」，
+    /// 不能让一个没区分过的数字顶着「生产码」的标签。
+    private func coverageCaliberLine(_ coverage: CoverageMetrics) -> String {
+        guard coverage.scopeIsSeparated, let full = coverage.allSourcesLinePercent,
+              let production = coverage.overallLinePercent else {
+            return "口径：报告只有汇总粒度，未区分测试代码 · 来源 "
+                + coverage.reports.map { $0.toolName }.joined(separator: " / ")
+        }
+        let gap = full - production
+        let gapText = gap >= 0.05 ? "，含测试代码 \(Self.percentOf100(full, precision: 1))（不用于评分）"
+                                  : "，与含测试代码的口径一致"
+        return "口径：仅生产码（已排除 Tests/、PackageTests、.build、*Tests.swift）"
+            + gapText + " · 差 \(Self.percentOf100(gap, precision: 1)) 来自测试代码"
     }
 
     /// `CoverageMetrics.linePercent` 已经是 0...100，而 `NumberFormat.percent` 收的是

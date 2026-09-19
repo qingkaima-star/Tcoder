@@ -92,28 +92,61 @@ final class CoverageAnalyzer: CoverageProviding {
         }
     }
 
+    /// lcov 是唯一带**源文件粒度**的格式（每条记录一个 `SF:`），所以只有它能真的
+    /// 把测试代码从计分分母里剔出去。其余四种格式只有汇总数字，标成
+    /// `.aggregateOnly` 让它们的生产码口径**明说等同全量**，而不是假装区分过。
     private func parseLCov(text: String, url: URL) -> CoverageReport? {
-        var linesFound = 0, linesHit = 0, branchesFound = 0, branchesHit = 0, functionsFound = 0, functionsHit = 0
+        var allLinesFound = 0, allLinesHit = 0
+        var prodLinesFound = 0, prodLinesHit = 0
+        var allBranchesFound = 0, allBranchesHit = 0
+        var prodBranchesFound = 0, prodBranchesHit = 0
+        var functionsFound = 0, functionsHit = 0
+        var inProductionRecord = false
+        var sawSourceFileRecord = false
+
         for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
             let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("SF:") {
+                let path = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                sawSourceFileRecord = true
+                inProductionRecord = CoverageScope.isProductionSource(path: path)
+                continue
+            }
+            // 没有 SF: 归属的计数不允许悄悄算进生产码。
+            if line == "end_of_record" { inProductionRecord = false }
+
+            func add(_ value: Int, toAll all: inout Int, toProduction production: inout Int) {
+                all += value
+                if inProductionRecord { production += value }
+            }
             switch line.prefix(3) {
-            case "LF:": linesFound += Self.int(after: line)
-            case "LH:": linesHit += Self.int(after: line)
-            case "BRF": branchesFound += Self.int(after: line)
-            case "BRH": branchesHit += Self.int(after: line)
+            case "LF:": add(Self.int(after: line), toAll: &allLinesFound, toProduction: &prodLinesFound)
+            case "LH:": add(Self.int(after: line), toAll: &allLinesHit, toProduction: &prodLinesHit)
+            case "BRF": add(Self.int(after: line), toAll: &allBranchesFound, toProduction: &prodBranchesFound)
+            case "BRH": add(Self.int(after: line), toAll: &allBranchesHit, toProduction: &prodBranchesHit)
             case "FNF": functionsFound += Self.int(after: line)
             case "FNH": functionsHit += Self.int(after: line)
             default: break
             }
         }
-        guard linesFound > 0 else { return nil }
+        guard allLinesFound > 0 else { return nil }
+
+        let separated = sawSourceFileRecord
+        let linesCovered = separated ? prodLinesHit : allLinesHit
+        let linesTotal = separated ? prodLinesFound : allLinesFound
+        let branchesCovered = separated ? prodBranchesHit : allBranchesHit
+        let branchesFound = separated ? prodBranchesFound : allBranchesFound
         return CoverageReport(
             path: url.path,
             kind: Self.classify(url: url),
             toolName: "lcov",
-            linesCovered: linesHit, linesTotal: linesFound,
-            branchesCovered: branchesHit, branchesTotal: branchesFound > 0 ? branchesFound : nil,
-            methodsCovered: functionsHit, methodsTotal: functionsFound
+            linesCovered: linesCovered, linesTotal: linesTotal,
+            branchesCovered: branchesCovered, branchesTotal: branchesFound > 0 ? branchesFound : nil,
+            methodsCovered: functionsHit, methodsTotal: functionsFound,
+            allLinesCovered: allLinesHit, allLinesTotal: allLinesFound,
+            allBranchesCovered: allBranchesHit,
+            allBranchesTotal: allBranchesFound > 0 ? allBranchesFound : nil,
+            scopeGranularity: separated ? .perSourceFile : .aggregateOnly
         )
     }
 
@@ -135,7 +168,11 @@ final class CoverageAnalyzer: CoverageProviding {
             linesCovered: lines.covered, linesTotal: lines.total,
             branchesCovered: branches?.covered ?? 0,
             branchesTotal: Self.positiveTotal(of: branches),
-            methodsCovered: functions?.covered ?? 0, methodsTotal: functions?.total ?? 0
+            methodsCovered: functions?.covered ?? 0, methodsTotal: functions?.total ?? 0,
+            allLinesCovered: lines.covered, allLinesTotal: lines.total,
+            allBranchesCovered: branches?.covered ?? 0,
+            allBranchesTotal: Self.positiveTotal(of: branches),
+            scopeGranularity: .aggregateOnly
         )
     }
 
@@ -182,7 +219,11 @@ final class CoverageAnalyzer: CoverageProviding {
             branchesCovered: branch?.covered ?? 0,
             branchesTotal: branch.map { $0.missed + $0.covered }.flatMap { $0 > 0 ? $0 : nil },
             methodsCovered: method?.covered ?? 0,
-            methodsTotal: method.map { $0.missed + $0.covered } ?? 0
+            methodsTotal: method.map { $0.missed + $0.covered } ?? 0,
+            allLinesCovered: line.covered, allLinesTotal: total,
+            allBranchesCovered: branch?.covered ?? 0,
+            allBranchesTotal: branch.map { $0.missed + $0.covered }.flatMap { $0 > 0 ? $0 : nil },
+            scopeGranularity: .aggregateOnly
         )
     }
 
@@ -211,7 +252,11 @@ final class CoverageAnalyzer: CoverageProviding {
             linesCovered: covered, linesTotal: valid,
             branchesCovered: Int(attr("branches-covered") ?? 0),
             branchesTotal: branchValid > 0 ? branchValid : nil,
-            methodsCovered: 0, methodsTotal: 0
+            methodsCovered: 0, methodsTotal: 0,
+            allLinesCovered: covered, allLinesTotal: valid,
+            allBranchesCovered: Int(attr("branches-covered") ?? 0),
+            allBranchesTotal: branchValid > 0 ? branchValid : nil,
+            scopeGranularity: .aggregateOnly
         )
     }
 
@@ -232,7 +277,10 @@ final class CoverageAnalyzer: CoverageProviding {
             toolName: "clover",
             linesCovered: value(2), linesTotal: total,
             branchesCovered: 0, branchesTotal: nil,
-            methodsCovered: 0, methodsTotal: 0
+            methodsCovered: 0, methodsTotal: 0,
+            allLinesCovered: value(2), allLinesTotal: total,
+            allBranchesCovered: 0, allBranchesTotal: nil,
+            scopeGranularity: .aggregateOnly
         )
     }
 
