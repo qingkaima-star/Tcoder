@@ -303,18 +303,24 @@ enum LogDiscovery {
         }
     }
 
-    /// 崩溃报告文件名形如 `TcoderMonitor-2026-09-19-081233.ips`，取日期之前的前缀判断归属。
+    /// 崩溃报告归属规则（明确定死，不再隐式混合）：
+    ///
+    /// **只认「报告主名 == 被监控项目名」整段相等**，不做子串匹配。
+    /// Apple 的报告名形如 `TcoderMonitor-2026-09-19-081233.ips`，主名是日期前的那一段；
+    /// 只有它整体等于项目名（不区分大小写）才算这个项目的崩溃。
+    ///
+    /// 因此项目叫 "Tcoder" **不会**再把本工具自己（`TcoderMonitor`）的崩溃报告混进来 ——
+    /// 之前用前缀子串匹配时两者会互相命中。想看本工具自身健康，就把它的构建目录作为
+    /// 一个独立项目添加（项目名就是 `TcoderMonitor`），归属仍然显式。
     static func isOwnDiagnosticReport(_ url: URL, projectName: String) -> Bool {
+        let token = projectName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard token.count >= 3 else { return false }
         let name = url.deletingPathExtension().lastPathComponent.lowercased()
-        var tokens = ["tcodermonitor", "tcoder"]
-        let trimmed = projectName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if !trimmed.isEmpty { tokens.append(trimmed) }
-        tokens = Array(Set(tokens))
-        for token in tokens where token.count >= 3 {
-            if name.hasPrefix(token) { return true }
-            if token.count >= 6, name.contains("-\(token)") { return true }
-        }
-        return false
+        // 主名 = 第一个「-20xx-」日期段之前的部分；取不到就整串当主名。
+        let head = name.range(of: "-20[0-9][0-9]-", options: .regularExpression).map { range in
+            String(name[..<range.lowerBound])
+        } ?? name
+        return head == token
     }
 
     private static func isLogFile(_ url: URL) -> Bool {
@@ -1098,7 +1104,14 @@ enum LogAggregator {
         result.totalLinesScanned = readings.reduce(0) { $0 + $1.totalLines }
 
         var events: [LogEvent] = []
-        for reading in readings { events.append(contentsOf: reading.events) }
+        // 崩溃报告有两种提取路径：逐行解析器会把 .ips 的 JSON 行当成日志（产出裸 JSON 的
+        // 「错误」），CrashReportParser 才是权威解读。同一份文件只允许后者的事件入场，
+        // 否则一次崩溃会被拆成两条 cluster、次数也翻倍。
+        let crashHandledPaths = Set(extraEvents.map(\.sourceLogPath))
+        for reading in readings {
+            if crashHandledPaths.contains(reading.url.path) { continue }
+            events.append(contentsOf: reading.events)
+        }
         events.append(contentsOf: extraEvents)
         events = deduplicated(events)
         result.events = events

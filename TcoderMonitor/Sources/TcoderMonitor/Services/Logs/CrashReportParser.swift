@@ -108,7 +108,12 @@ enum CrashReportParser {
         let triggered = threads.first { boolValue($0["triggered"]) || boolValue($0["crashed"]) }
             ?? indexed(threads, int(body["crashedThread"]))
             ?? threads.first
-        let rawFrames = (array(triggered?["backtrace"]) ?? array(triggered?["frames"]))
+        // Apple 的 .ips 有两种写法：`"frames": [...]` 直挂，或 `"backtrace": {"frames": [...]}` 包一层。
+        // 只认前者的话，真实报告（后者）的整条崩溃栈会被丢掉，标题里就没有可读符号。
+        let nestedFrames = dictionary(triggered?["backtrace"]).flatMap { array($0["frames"]) }
+        let rawFrames = (array(triggered?["frames"])
+            ?? array(triggered?["backtrace"])
+            ?? nestedFrames)
             ?? array(body["lastExceptionBacktrace"])
             ?? []
         var stackFrames: [String] = []
@@ -130,26 +135,25 @@ enum CrashReportParser {
             || terminationText != nil || bugType != nil || !stackFrames.isEmpty || !asiLines.isEmpty
         guard hasEvidence else { return [] }
 
-        var messageParts: [String] = ["崩溃 \(procName)"]
-        if let bugType { messageParts.append("bug_type " + clip(bugType, 40)) }
-        if let exceptionType { messageParts.append(clip(normalize(exceptionType), 80)) }
-        if let subtype { messageParts.append(clip(subtype, 160)) }
-        if let signal { messageParts.append(clip(normalize(signal), 40)) }
-        if let codes { messageParts.append("codes " + clip(codes, 120)) }
-        if let terminationText { messageParts.append("终止原因 " + clip(normalize(terminationText), 160)) }
-        if let terminationFlags { messageParts.append("flags " + clip(terminationFlags, 40)) }
-        if let threadLabel { messageParts.append("线程 " + clip(normalize(threadLabel), 80)) }
-        messageParts.append(contentsOf: asiLines.map { clip($0, 160) })
-        let message = normalize(messageParts.filter { !$0.isEmpty }.joined(separator: " · "))
-
-        // incident_id / app_session 先归一化再写进 rawLine（crashSignature 会复用 rawLine 文本）。
+        // rawLine 装全部机器字段（含 Exception Type / signal / subtype）供排查与签名，
+        // displayMessage 走 `title(...)` 这条统一口径：人先看懂「什么异常、崩在哪个符号」。
         var rawParts: [String] = ["崩溃报告 \(path)", "proc=\(procName)"]
+        if let exceptionType { rawParts.append("Exception Type: " + clip(normalize(exceptionType), 60)) }
+        if let signal { rawParts.append("signal " + clip(normalize(signal), 40)) }
+        if let subtype { rawParts.append("subtype " + clip(normalize(subtype), 120)) }
+        if let bugType { rawParts.append("bug_type " + clip(bugType, 40)) }
+        if let codes { rawParts.append("codes " + clip(codes, 120)) }
+        if let terminationText { rawParts.append("Termination Reason: " + clip(normalize(terminationText), 160)) }
+        if let terminationFlags { rawParts.append("flags " + clip(terminationFlags, 40)) }
+        if let threadLabel { rawParts.append("thread " + clip(normalize(threadLabel), 80)) }
+        rawParts.append(contentsOf: asiLines.prefix(4).map { clip($0, 160) })
         if let appVersion { rawParts.append("app_version=" + clip(normalize(appVersion), 60)) }
         if let appSession { rawParts.append("session=" + clip(normalize(appSession), 60)) }
         if let incidentID { rawParts.append("incident=" + clip(normalize(incidentID), 60)) }
         if let product { rawParts.append("product=" + clip(normalize(product), 60)) }
         if let osVersion { rawParts.append("os=" + clip(normalize(osVersion), 80)) }
         let rawLine = rawParts.joined(separator: " ")
+        let message = title(haystack: rawLine, symbol: stackFrames.first, procName: procName)
 
         let event = LogEvent(
             date: ipsDate(body: body, header: header, path: path, modifiedAt: modifiedAt),
@@ -418,8 +422,13 @@ extension CrashReportParser {
         func flushDetails() {
             defer { details = [] }
             guard let index = currentPrimary, index < events.count, !details.isEmpty else { return }
-            let merged = ([events[index].message] + details).joined(separator: " · ")
-            events[index].message = normalize(merged)
+            // 机器字段（Exception Codes / Termination Reason / Thread N Crashed …）并进 rawLine 供排查，
+            // 标题按统一口径重排，不再用「 · 」把整段拼起来当标题。
+            let haystack = ([events[index].rawLine] + details).joined(separator: " ")
+            events[index].rawLine = haystack
+            events[index].message = CrashReportParser.title(haystack: haystack,
+                                                            symbol: events[index].stackFrames.first,
+                                                            procName: nil)
         }
 
         for (offset, line) in lines.enumerated() {
@@ -507,10 +516,50 @@ extension CrashReportParser {
 
     /// 与文本日志保持一致的归一化：优先 signature(for:)，退回 message，再退回整行。
     static func baseMessage(for parsed: ParsedLogLine) -> String {
-        var base = parsed.message
-        if let signature = LogLineParser.signature(for: parsed), !signature.isEmpty { base = signature }
-        if base.isEmpty { base = parsed.raw }
-        return normalize(base)
+        title(haystack: parsed.raw.isEmpty ? parsed.message : parsed.raw, symbol: nil, procName: nil)
+    }
+
+    /// 崩溃标题的唯一口径（用户实测反馈：不能把裸 JSON / 机器字段当标题）。
+    /// 顺序：Exception Type（带信号）→ 崩溃于哪个符号 → KERN_/BUS_ 等机器码 → 终止原因；
+    /// 一个都取不到才退回原文。`bug_type` / `codes` / `flags` / `Incident Identifier` 一律不进标题。
+    static func title(haystack: String, symbol: String?, procName: String?) -> String {
+        var parts: [String] = []
+        let exception = clip(normalize(firstClause(exceptionTypeValuePattern.firstGroup(in: haystack, 1)
+                                                  ?? exceptionTypePattern.firstGroup(in: haystack, 0))), 60)
+        let signal = clip(normalize(signalPattern.firstGroup(in: haystack, 0) ?? ""), 24)
+        if !exception.isEmpty {
+            // `Exception Type: EXC_BAD_ACCESS (SIGSEGV)` 本身常带信号，别再拼第二遍。
+            parts.append(signal.isEmpty || exception.contains(signal) ? exception : "\(exception) (\(signal))")
+        } else if !signal.isEmpty {
+            parts.append(signal)
+        }
+        if let symbol, !symbol.isEmpty { parts.append("崩溃于 " + clip(humanize(symbol), 90)) }
+        if let machine = machineCodePattern.firstGroup(in: haystack, 0) { parts.append(machine) }
+        if parts.isEmpty, let termination = terminationValuePattern.firstGroup(in: haystack, 1) {
+            parts.append("终止原因 " + clip(normalize(firstClause(termination)), 120))
+        }
+        if let procName, !procName.isEmpty { parts.append("进程 \(procName)") }
+        if parts.isEmpty { parts.append(clip(normalize(haystack), 120)) }
+        return normalize(parts.joined(separator: " · "))
+    }
+
+    /// 值捕获用的截断：`Exception Type:` 这类正则会一路吃到行尾，把后面的
+    /// `Exception Codes` / `Thread N` / `subtype` 等机器字段也吞进标题。
+    /// 这里在第一个已知机器键处切一刀，只留人要看的那一段。
+    static let machineKeyStops: [String] = [
+        "Exception Codes", "Exception Subtype", "Termination Reason", "Incident Identifier",
+        "Crash Reporter", "Thread ", "signal ", "subtype ", "flags ", "bug_type ", "codes ",
+        "session=", "incident=", "app_version=", "product=", "os=", "proc=",
+    ]
+
+    static func firstClause(_ text: String?) -> String {
+        guard let text, !text.isEmpty else { return "" }
+        var cut = text.endIndex
+        for key in machineKeyStops {
+            guard let found = text.range(of: key) else { continue }
+            if found.lowerBound < cut { cut = found.lowerBound }
+        }
+        return String(text[..<cut]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func matchedCue(in line: String) -> Cue? {
@@ -579,6 +628,20 @@ extension CrashReportParser {
 
     static func emptyToNil(_ text: String) -> String? {
         text.isEmpty ? nil : text
+    }
+
+    /// 把栈帧压成看得懂的符号名：`_platform_strlen in libsystem_platform.dylib` → `_platform_strlen`，
+    /// `foo() + 128 (Bar.swift:210)` → `foo() (Bar.swift:210)`。
+    static func humanize(_ frame: String) -> String {
+        if let range = frame.range(of: " in ") {
+            let symbol = String(frame[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+            if !symbol.isEmpty { return symbol }
+        }
+        var text = frame
+        if let plus = text.range(of: " + 0x", options: .backwards) ?? text.range(of: " + ", options: .backwards) {
+            text.replaceSubrange(plus.lowerBound..<plus.upperBound, with: "")
+        }
+        return text.trimmingCharacters(in: .whitespaces)
     }
 
     /// 与文本日志同一条归一化通道（去 uuid / 地址 / 绝对路径 / 数字噪声）。

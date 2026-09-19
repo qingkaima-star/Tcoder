@@ -164,5 +164,87 @@ final class LogFixtureClusterTests: XCTestCase {
         // 帧可能被挂到同组的另一条事件上，所以跨全部 crash 签名找抛出点。
         XCTAssertTrue(crashClusters.flatMap(\.stackTopFrames).contains(where: { $0.contains("Store.swift") }),
                       "崩溃栈里的 Store.swift 必须出现在栈顶帧里，实得 \(crashClusters.map(\.stackTopFrames))")
+        // 纯文本崩溃日志走同一套标题口径，不能把机器字段拼成标题。
+        for cluster in crashClusters {
+            XCTAssertFalse(cluster.displayMessage.contains("Incident Identifier"),
+                           "crash.log 的标题不得含机器字段，实得 \(cluster.displayMessage)")
+            XCTAssertFalse(cluster.displayMessage.contains("Exception Codes"),
+                           "crash.log 的标题不得含机器字段，实得 \(cluster.displayMessage)")
+            XCTAssertTrue(cluster.displayMessage.contains("EXC_BAD_ACCESS")
+                            || cluster.displayMessage.contains("Fatal error"),
+                          "标题要能看出崩溃类型，实得 \(cluster.displayMessage)")
+        }
+    }
+
+    /// .ips 的 displayMessage 必须是人能读懂的一句话，不能是裸 JSON 片段；
+    /// 并且同一份报告只能产出一条 cluster（逐行解析器与崩溃解析器不能各算一遍）。
+    func testIpsReportShowsReadableTitleAndSingleCluster() async throws {
+        let header = """
+        {"app_name":"TcoderMonitor","app_version":"1.0","bug_type":"309","incident_id":"7B1D9F3E-4A55-4C8D-9E2F-1A2B3C4D5E6F","name":"TcoderMonitor","os_version":"macOS 26.5","timestamp":"2026-09-19 08:13:01.00 +0800"}
+        """
+        let body = """
+        {"bug_type":"309","timestamp":"2026-09-19 08:13:01.00 +0800","procName":"TcoderMonitor",\
+        "exception":{"type":"EXC_BAD_ACCESS","signal":"SIGSEGV","subtype":"KERN_INVALID_ADDRESS at 0x000000016f8a8b00","codes":"0x0000000000000001, 0x87b32a038583d000"},\
+        "termination":{"flags":0,"code":11,"namespace":"SIGNAL","indicator":"Segmentation fault: 11"},\
+        "asi":{"Backtrace":["frame A = 1","frame B = 2"]},\
+        "threads":[{"id":1,"name":"com.apple.main-thread","triggered":true,\
+        "backtrace":{"frames":[{"image_offset":44720,"symbol":"_platform_strlen","sourceLineInfo":{"file":"Cache.swift","line":210}}]}}],\
+        "usedImages":[{"name":"libsystem_platform.dylib","path":"/usr/lib/libsystem_platform.dylib"}]}
+        """
+        let url = root.appendingPathComponent("Logs").appendingPathComponent("TcoderMonitor-2026-09-19-081301.ips")
+        try (header + "\n" + body).write(to: url, atomically: true, encoding: .utf8)
+
+        let summary = try await FileLogAnalyzer().analyze(projectRoot: root, extraLogURLs: [], withinDays: 30)
+        print("--- .ips 单份报告 ---")
+        print("CRASH = \(summary.crashCount)  EXCEPTION = \(summary.exceptionCount)")
+        for cluster in summary.topErrors {
+            print("[\(cluster.severity.rawValue)] ×\(cluster.count)  \(cluster.signature)")
+            print("    标题: \(cluster.displayMessage)")
+        }
+
+        let crashClusters = summary.topErrors.filter { $0.severity == .crash }
+        XCTAssertEqual(crashClusters.count, 1,
+                       "一份 .ips 只能产出一条崩溃 cluster，实得 \(crashClusters.map(\.signature))")
+        guard let cluster = crashClusters.first else { return }
+        XCTAssertEqual(cluster.count, 1, "一次崩溃必须计 1 次，实得 \(cluster.count)")
+
+        // 裸 JSON / 机器字段当标题是用户明确反馈看不懂的问题。
+        // 注意 `Cache.swift:210` 里的冒号是合法的，所以只禁 JSON 结构字符与已知机器键。
+        for banned in ["{", "}", "\"", "bug_type", "codes", "flags", "Incident Identifier", "asi"] {
+            XCTAssertFalse(cluster.displayMessage.lowercased().contains(banned.lowercased()),
+                           "displayMessage 不得含 JSON/机器字段「\(banned)」，实得 \(cluster.displayMessage)")
+        }
+        XCTAssertTrue(cluster.displayMessage.contains("EXC_BAD_ACCESS"),
+                      "标题要以 Exception Type 开头，实得 \(cluster.displayMessage)")
+        XCTAssertTrue(cluster.displayMessage.contains("SIGSEGV"))
+        XCTAssertTrue(cluster.displayMessage.contains("_platform_strlen"),
+                      "标题要带崩溃符号，实得 \(cluster.displayMessage)")
+        XCTAssertLessThan(cluster.displayMessage.count, 160, "标题要短到能一行读完")
+        // 签名仍保留稳定形式，不受标题改写影响。
+        XCTAssertTrue(cluster.signature.contains("EXC_BAD_ACCESS"))
+        XCTAssertFalse(cluster.signature.contains("87b32a038583"), "签名里的地址必须归一化")
+    }
+
+    /// 归属规则：只认报告主名整段等于项目名，"Tcoder" 不得吃掉本工具自己的 "TcoderMonitor" 崩溃。
+    func testDiagnosticReportOwnershipIsExactNotSubstring() {
+        func report(_ name: String) -> URL { URL(fileURLWithPath: "/tmp/\(name).ips") }
+        XCTAssertTrue(LogDiscovery.isOwnDiagnosticReport(report("TcoderMonitor-2026-09-19-081301"),
+                                                         projectName: "TcoderMonitor"),
+                      "自己的报告必须算自己的")
+        XCTAssertFalse(LogDiscovery.isOwnDiagnosticReport(report("TcoderMonitor-2026-09-19-081301"),
+                                                          projectName: "Tcoder"),
+                       "项目名是另一个可执行名的前缀时不得命中（用户实测踩到的问题）")
+        XCTAssertTrue(LogDiscovery.isOwnDiagnosticReport(report("tcoder-2026-09-19-081301"),
+                                                         projectName: "Tcoder"),
+                      "大小写不同但整段相等仍算命中")
+        XCTAssertFalse(LogDiscovery.isOwnDiagnosticReport(report("TcoderHelper-2026-09-19-081301"),
+                                                          projectName: "Tcoder"),
+                       "主名带后缀的是另一个可执行文件，不得混进来")
+        XCTAssertFalse(LogDiscovery.isOwnDiagnosticReport(report("Firefox-2026-09-19-081301"),
+                                                          projectName: "Tcoder"),
+                       "别的应用的报告一律不读（AGENTS.md 禁区）")
+        XCTAssertFalse(LogDiscovery.isOwnDiagnosticReport(report("TcoderMonitor-2026-09-19-081301"),
+                                                          projectName: "  "),
+                       "项目名为空时一律不命中，避免匹配到全部报告")
     }
 }
