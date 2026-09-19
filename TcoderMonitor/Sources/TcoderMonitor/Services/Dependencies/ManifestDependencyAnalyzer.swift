@@ -257,13 +257,7 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
             attempted += 1
             let registry = await DependencyNetworkLookup.npmLatestVersions(npmNames)
             if !registry.latestVersions.isEmpty {
-                Self.mutateRecords(&report.ecosystems) { record in
-                    guard record.ecosystem == .npm,
-                          KnownVulnerability.comparableCore(record.version) != nil,
-                          let latest = registry.latestVersions[record.name] else { return }
-                    record.latestKnownVersion = latest
-                    record.versionCheckSource = .onlineRegistry
-                }
+                Self.applyRegistryVersions(registry, to: &report.ecosystems)
             }
             if registry.failedRequests > 0 {
                 notes.append("npm registry：\(registry.packagesChecked) 个包中 \(registry.failedRequests) 个查询失败")
@@ -290,6 +284,23 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
         report.networkLookupNote = notes.isEmpty
             ? (attempted > 0 ? "在线查询已完成（OSV + npm registry）" : "本项目没有可在线查询的生态（SwiftPM / CocoaPods 不在 OSV 覆盖范围内）")
             : notes.joined(separator: "；")
+    }
+
+    /// 把 registry 取回的最新版本写回记录，并把来源**一并**归因为在线源。
+    ///
+    /// 版本值和来源字段必须成对写：只写值不改来源，UI 会把"实现在线核对过"读成"没核对"；
+    /// 反过来把来源改掉却不落值，就是凭空声称。registry 没答的包一律原样保留
+    /// （内置快照或 `.none`），这样"其实没查到"仍然读起来像"没查到"。
+    /// 抽成静态纯函数是为了让这条归因链路能被不打公网的用例钉住。
+    static func applyRegistryVersions(_ registry: RegistryLookupResult,
+                                      to ecosystems: inout [EcosystemReport]) {
+        mutateRecords(&ecosystems) { record in
+            guard record.ecosystem == .npm,
+                  KnownVulnerability.comparableCore(record.version) != nil,
+                  let latest = registry.latestVersions[record.name] else { return }
+            record.latestKnownVersion = latest
+            record.versionCheckSource = .onlineRegistry
+        }
     }
 
     /// 已被内置规则覆盖的标识（CVE + 规则 id），用于避免在线结果重复计入。
