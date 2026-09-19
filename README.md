@@ -34,7 +34,7 @@ Apple Silicon 原生 macOS App（Swift + SwiftUI），对本地开发项目做�
 
 > 上表是开发向速览。逐页「给我看什么 / 数字怎么算的 / 什么时候会不准」见
 > [`docs/使用说明.md`](docs/使用说明.md) 第 3 节；页面名称以侧栏为准
-> （`Views/Shell/SectionNav.swift:15-23`）。
+> （`SectionNav.DetailSection`）。
 > 另注：「依赖分析」一行只举了常见清单名，代码实际识别 16 个清单文件名
 > （还含 `settings.gradle(.kts)`、`setup.py`、`Pipfile`、`packages.config`，
 > `Services/Dependencies/ManifestParsers.swift:36-53`）。
@@ -120,18 +120,18 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
 > 两处措辞在此校正（不改上面的结论，只补精确出处）：
 > ① 第三种漏洞状态在界面上写的是「未联网核对，仅内置快照（覆盖 npm / Maven / Python）· 无依赖可核对」
 >   或「已联网核对，但无可比对版本数据的依赖」
->   （`Sources/TcoderMonitor/Views/Dependencies/DependencyVerdictRows.swift:140-154`），
+>   （`DependencyVerdictRows.DependencySafetyVerdict.summaryCaption`），
 >   不是「均无版本数据可比对」这句话；
 > ② 界面判断「历史是否被窗口截断」用的是派生判据 `isWindowTruncated`
->   （`Sources/TcoderMonitor/Views/CodeGit/GitHistoryScope.swift:65-67`），
+>   （`GitHistoryScope.isWindowTruncated`），
 >   **不是**契约字段 `GitInsights.historyTruncated`——后者被合并提交污染，两者不等价
 >   （赋值处 `Services/Git/ShellGitAnalyzer.swift:245-247`）。
 
 ## 已知限制
 
 - **内置示例项目的样例数字在六个页面不带任何「示例」标记**。标记现共四处：
-  侧栏 `Views/Shell/ProjectSidebar.swift:219-222`、性能监控 `PerformanceView.swift:75-76`、
-  错误日志 `Views/Logs/LogsView.swift:50-51`、健康评分 `Views/Health/HealthView.swift:44-45`；
+  侧栏 `ProjectSidebar.ProjectRow.body`、性能监控 `PerformanceView.header`、
+  错误日志 `LogsView.header`、健康评分 `HealthView.header`；
   **总览 / 代码规模 / 复杂度风险 / Git 洞察 / 贡献者 / 依赖分析** 六页 `isDemo` 零引用。
   数值全来自 `Services/Demo/DemoData.swift` 的写死样例。
 - `git log` 撞上 60 秒硬超时（`Services/Git/ShellGitAnalyzer.swift:53`）时本轮 Git 结果整块置空，
