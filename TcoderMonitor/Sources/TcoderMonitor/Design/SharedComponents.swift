@@ -67,9 +67,13 @@ struct SectionCard<Content: View>: View {
 }
 
 /// 指标 tile。紧凑档内边距 16、圆角 10（同心：外层卡 16 / 内层 tile 10）。
+///
+/// `value` 收 Optional（WS-I §3.4 的空态契约）：**"没查到" 必须渲染成 `--` + 中性色，
+/// 不能渲染成 0**。0 是结论、`--` 是没证据，两者在监控类 App 里差一个事故。
+/// 传 nil 时前景强制回 neutral，盖掉调用方给的 tint——因为"没数据"本身不该带任何倾向色。
 struct MetricTile: View {
     var label: String
-    var value: String
+    var value: String?
     var unit: String?
     var caption: String?
     var tint: Color
@@ -77,7 +81,7 @@ struct MetricTile: View {
 
     init(
         label: String,
-        value: String,
+        value: String?,
         unit: String? = nil,
         caption: String? = nil,
         tint: Color = Theme.Semantic.accent.textColor,
@@ -105,9 +109,9 @@ struct MetricTile: View {
                     .lineLimit(1)
             }
             HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
-                Text(value)
+                Text(Self.displayValue(value))
                     .font(Theme.Typo.metricNumber.font)
-                    .foregroundStyle(tint)
+                    .foregroundStyle(Self.tint(value: value, fallback: tint))
                     .contentTransition(.numericText())
                 if let unit {
                     Text(unit)
@@ -126,18 +130,46 @@ struct MetricTile: View {
                alignment: .leading)
         .surface(layer: .contentInset, shape: .rounded(Theme.Radius.md))
     }
+
+    /// 缺证据时的显示值。纯函数，供单测钉住。
+    static func displayValue(_ raw: String?) -> String { raw ?? Theme.Placeholder.missingValue }
+
+    /// 无值时是否强制中性色（忽略调用方给的倾向色）。
+    /// 单独抽成谓词是为了可测——`Color` 由动态 `NSColor` 包出来，两次取值不相等。
+    static func forcesNeutralTint(for raw: String?) -> Bool { raw == nil }
+
+    /// 有值用调用方给的倾向色，无值一律中性。
+    static func tint(value raw: String?, fallback: Color) -> Color {
+        forcesNeutralTint(for: raw) ? Theme.Semantic.neutral.textColor : fallback
+    }
 }
 
 /// 风险徽标。**色 + 文字 + 图标三通道**，不只靠颜色表意（WS-H §10）。
+///
+/// ⚠️ `verified` 是 WS-G P0：`RiskLevel.none` 有两义——
+/// 「真核对过、确认没有风险」（代码规模、复杂度等维度）与
+/// 「根本没查所以没有命中」（依赖漏洞离线默认态，见 `DependencyReport.hasVulnerabilityCoverage`）。
+/// 前者该画对勾，后者画对勾就是**把"我们没查"渲染成"我们查了、是安全的"**。
+/// 所以这里不全局改对勾，而是多一个显式入参，由调用方（WS-B 在 `DependenciesView`、
+/// WS-C 在 `WeightedHealthScorer`）按契约降级。
 struct RiskBadge: View {
     var risk: RiskLevel
     var showIcon: Bool = true
+    /// false = 该维度没真正核对过（离线未核验 / 未启用）。必须走中性"未核对"态。
+    var verified: Bool = true
 
     var body: some View {
-        SemanticBadge(
-            "风险 \(risk.rawValue)",
-            role: Theme.Semantic.role(for: risk),
-            icon: showIcon ? RiskBadge.icon(for: risk) : nil)
+        let p = Self.presentation(risk: risk, verified: verified)
+        SemanticBadge(p.text, role: p.role, icon: showIcon ? p.icon : nil)
+    }
+
+    /// 徽章显示内容做成纯函数，好让单测能钉住"未核对不得出现对勾"这条诚实线。
+    static func presentation(risk: RiskLevel, verified: Bool = true)
+        -> (text: String, role: Theme.SemanticRole, icon: IconName) {
+        guard verified else {
+            return ("未核对", Theme.Semantic.neutral, .unverified)
+        }
+        return ("风险 \(risk.rawValue)", Theme.Semantic.role(for: risk), icon(for: risk))
     }
 
     /// 分级符号按 WS-H §6.4：无=勾、低/中=三角、高/严重=八边形（更高警戒）。

@@ -994,3 +994,151 @@ final class GitHistoryTruncationTests: XCTestCase {
         }
     }
 }
+
+// MARK: - 契约 F：漏洞核对覆盖度（WS-D 审计 P0#1/#2/#4 的回归门）
+//
+// 根因：默认 allowNetworkLookups = false → vulnerableCount 恒为 0，
+// 而 riskLevel 只看 vulnerableCount，于是任何项目都能拿到绿色「风险 无」+ 每行「正常」。
+// 现在视图与单测共用 DependencySafetyVerdict / DependencyRowStatus 这一份判定。
+
+final class DependencySafetyVerdictTests: XCTestCase {
+    private func report(networkPerformed: Bool,
+                        versions: [VersionCheckSource],
+                        advisories: [SecurityAdvisory] = [],
+                        offlineVulns: [DependencyVulnerability] = []) -> DependencyReport {
+        let records = versions.enumerated().map { index, source -> DependencyRecord in
+            DependencyRecord(name: "pkg\(index)", version: "1.0.0", ecosystem: .npm, scope: .runtime,
+                             manifestPath: "package.json", latestKnownVersion: source == .none ? nil : "9.9.9",
+                             versionCheckSource: source, knownVulnerabilities: [])
+        }
+        var result = DependencyReport(analyzedAt: Fixture.commit(sha: Fixture.shaA, date: Date()).date)
+        result.ecosystems = [EcosystemReport(ecosystem: .npm, manifestPath: "package.json",
+                                            lockfileName: nil, dependencies: records, frameworkMarkers: [])]
+        result.advisories = advisories
+        result.offlineVulnerabilities = offlineVulns
+        result.networkLookupPerformed = networkPerformed
+        return result
+    }
+
+    /// 同一份「零命中」数据，联网与否必须给出**不同**的可见结论。
+    func testOfflineAndOnlineZeroFindingsDifferVisibly() {
+        let offline = DependencySafetyVerdict(report(networkPerformed: false, versions: [.bundledSnapshot]))
+        let online = DependencySafetyVerdict(report(networkPerformed: true, versions: [.onlineRegistry]))
+
+        XCTAssertEqual(offline, .unchecked(coveredCount: 1, total: 1, uncoveredEcosystems: []))
+        XCTAssertEqual(online, .clean(coveredCount: 1, total: 1))
+        XCTAssertFalse(offline.mayClaimSafe, "没联网就不许声称安全")
+        XCTAssertTrue(online.mayClaimSafe)
+        XCTAssertNotEqual(offline.badgeText, online.badgeText)
+        XCTAssertEqual(offline.badgeText, "未核对")
+        XCTAssertEqual(online.badgeText, "已核对")
+        XCTAssertTrue(offline.summaryCaption.contains("未联网核对"), offline.summaryCaption)
+        XCTAssertTrue(online.summaryCaption.contains("未发现已知漏洞"), online.summaryCaption)
+        XCTAssertFalse(offline.summaryCaption.contains("未发现已知漏洞"),
+                       "离线文案里不能出现「未发现已知漏洞」这种 all-clear")
+    }
+
+    /// 契约层 `uncoveredEcosystemNames` 拿 displayName 去比 ["npm","maven","python"]，
+    /// 于是 npm（displayName 是 "npm / Node.js"）被误报成"未覆盖生态"。
+    /// 服务层改成从规则表推导，这里把两边差异钉住。
+    func testUncoveredEcosystemListFollowsTheRuleTableNotADuplicatedNameSet() {
+        var npmOnly = DependencyReport()
+        npmOnly.ecosystems = [EcosystemReport(ecosystem: .npm, manifestPath: "package.json",
+                                             lockfileName: nil, dependencies: [], frameworkMarkers: [])]
+        XCTAssertEqual(ManifestDependencyAnalyzer.ecosystemsWithoutOfflineRules(in: npmOnly), [],
+                       "npm 有内置规则，不该被点名为未覆盖")
+
+        var goAndCargo = DependencyReport()
+        goAndCargo.ecosystems = [
+            EcosystemReport(ecosystem: .go, manifestPath: "go.mod", lockfileName: nil,
+                            dependencies: [], frameworkMarkers: []),
+            EcosystemReport(ecosystem: .cargo, manifestPath: "Cargo.toml", lockfileName: nil,
+                            dependencies: [], frameworkMarkers: []),
+        ]
+        XCTAssertEqual(ManifestDependencyAnalyzer.ecosystemsWithoutOfflineRules(in: goAndCargo), ["Go", "Cargo"],
+                       "无内置规则的生态必须被点名")
+        XCTAssertTrue(goAndCargo.uncoveredEcosystemNames.count >= 2,
+                      "契约层同样会点名这两个，只是它连 npm 也一起误点名")
+    }
+
+    func testVerdictKeepsFindingsAndTreatsAdvisoriesAsCoverage() {
+        let hit = DependencyVulnerability(id: "V1", package: "lodash", ecosystem: .npm,
+                                          vulnerableRange: "< 4.17.21", fixedVersion: "4.17.21",
+                                          summary: "命令注入", severity: .high,
+                                          cveIdentifiers: ["CVE-2021-23337"], affectedDependencies: ["lodash@4.17.15"])
+        let found = DependencySafetyVerdict(report(networkPerformed: false, versions: [.bundledSnapshot],
+                                                  offlineVulns: [hit]))
+        guard case .findings(let count, _) = found else { return XCTFail("有命中必须是 findings，实得 \(found)") }
+        XCTAssertEqual(count, 1)
+        XCTAssertFalse(found.mayClaimSafe)
+
+        // 带回过在线公告＝确实联网查过；但公告非空必然也计入 vulnerableCount，所以走 findings 分支
+        let advisory = SecurityAdvisory(id: "A1", aliases: ["CVE-1"], summary: "s", details: "d",
+                                        severity: .medium, cvssScore: nil, affectedPackages: ["pkg0@1.0.0"],
+                                        ecosystem: .npm, publishedAt: nil, source: "OSV")
+        let covered = DependencySafetyVerdict(report(networkPerformed: false, versions: [.onlineRegistry],
+                                                    advisories: [advisory]))
+        guard case .findings(let coveredCount, _) = covered else {
+            return XCTFail("有在线公告就是命中，必须走 findings，实得 \(covered)")
+        }
+        XCTAssertEqual(coveredCount, 1)
+    }
+
+    func testRowStatusOnlyTurnsGreenOnOnlineSource() {
+        func row(_ source: VersionCheckSource, vulns: [String] = [], latest: String? = "1.0.0") -> DependencyRowStatus {
+            DependencyRowStatus.of(DependencyRecord(name: "pkg", version: "1.0.0", ecosystem: .npm, scope: .runtime,
+                                                    manifestPath: "package.json", latestKnownVersion: latest,
+                                                    versionCheckSource: source, knownVulnerabilities: vulns))
+        }
+        XCTAssertEqual(row(.onlineRegistry), .verifiedSafe)
+        XCTAssertEqual(row(.onlineRegistry).text, "正常")
+        XCTAssertEqual(row(.bundledSnapshot), .versionOnly, "只有内置快照比过版本 → 漏洞层面仍未核对")
+        XCTAssertNotEqual(row(.bundledSnapshot).text, "正常")
+        XCTAssertEqual(row(.none, latest: nil), .unchecked)
+        XCTAssertNotEqual(row(.none, latest: nil).text, "正常")
+        XCTAssertEqual(row(.none, vulns: ["CVE-1"]).text, "有漏洞")
+        XCTAssertEqual(row(.bundledSnapshot, latest: "9.9.9"), .outdated, "版本落后是版本结论，可保留")
+        XCTAssertTrue(row(.bundledSnapshot).tooltip(record: DependencyRecord(
+            name: "pkg", version: "1.0.0", ecosystem: .npm, scope: .runtime, manifestPath: "package.json",
+            latestKnownVersion: "1.0.0", versionCheckSource: .bundledSnapshot,
+            knownVulnerabilities: [])).contains("未联网核对"))
+    }
+
+    func testOfflineCaveatNamesSkippedIncomparableVersions() {
+        let records: [DependencyRecord] = [
+            DependencyRecord(name: "lodash", version: "4.17.21", ecosystem: .npm, scope: .runtime,
+                             manifestPath: "package.json", latestKnownVersion: nil,
+                             versionCheckSource: .none, knownVulnerabilities: []),
+            DependencyRecord(name: "@tcoder/local", version: "workspace:*", ecosystem: .npm, scope: .unknown,
+                             manifestPath: "package.json", latestKnownVersion: nil,
+                             versionCheckSource: .none, knownVulnerabilities: []),
+            DependencyRecord(name: "ghost", version: "*", ecosystem: .npm, scope: .runtime,
+                             manifestPath: "package.json", latestKnownVersion: nil,
+                             versionCheckSource: .none, knownVulnerabilities: []),
+        ]
+        var report = DependencyReport()
+        report.ecosystems = [EcosystemReport(ecosystem: .npm, manifestPath: "package.json",
+                                            lockfileName: nil, dependencies: records, frameworkMarkers: [])]
+        let note = ManifestDependencyAnalyzer.offlineCaveat(for: report)
+        XCTAssertTrue(note.contains("未联网核对"), note)
+        XCTAssertTrue(note.contains("2 项版本不可比较"), "workspace:* 与 * 两个要按数量说出来：\(note)")
+    }
+
+    func testOfflineAnalysisWritesCaveatIntoReportEndToEnd() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("tcoder-wsb-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        try #"{"name":"tcoder-lab","dependencies":{"lodash":"4.17.21","@tcoder/local":"workspace:*"}}"#
+            .write(to: root.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+
+        let result = try await ManifestDependencyAnalyzer().analyze(projectRoot: root, allowNetwork: false)
+        XCTAssertEqual(result.totalDependencies, 2)
+        XCTAssertEqual(result.vulnerableCount, 0, "内置规则没有 lodash 4.17.21 的命中")
+        XCTAssertFalse(result.networkLookupPerformed)
+        XCTAssertFalse(DependencySafetyVerdict(result).mayClaimSafe, "这份报告不得被渲染成安全")
+        XCTAssertTrue(result.networkLookupNote.contains("未联网核对"),
+                     "离线也要说清我们没做什么，实得：\(result.networkLookupNote)")
+        XCTAssertTrue(result.networkLookupNote.contains("1 项版本不可比较"), result.networkLookupNote)
+    }
+}

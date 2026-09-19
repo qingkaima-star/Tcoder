@@ -10,36 +10,24 @@ import Foundation
 
 /// 漏洞核对的证据状态。依赖健康这一维最容易虚报：
 /// 「没查过漏洞库」和「查了、确实零命中」在数据上长得一样（都是 0 个漏洞），
-/// 但后者才配接近满分。与 `.testing` 的 `coverage.hasData`、
+/// 但只有后者配计分。与 `.testing` 的 `coverage.hasData`、
 /// `.complexity` 的「无函数证据不参与评分」是同一条原则：**没有证据 ≠ 好证据**。
+///
+/// 判据一律走契约里的派生态 `DependencyReport.hasVulnerabilityCoverage`，
+/// 不去猜 `networkLookupNote` 的文案。
 enum VulnerabilityEvidence: String, Sendable, Equatable {
-    /// 联网核对已执行且未报告失败，或离线规则已有命中 —— 结论可信。
+    /// 已核对且零命中，或内置规则已有命中 —— 结论可信，参与评分。
     case verified
-    /// 用户关着联网，压根没查。
+    /// 压根没核对（未联网且内置规则无命中）—— 本维度不参与评分。
     case unchecked
-    /// 尝试过但没查完（部分包失败，或该生态不在漏洞库覆盖范围内）。
+    /// 尝试过但没查完（部分包查询失败）—— 零命中时不敢说干净，不参与评分。
     case degraded
 
-    /// 未核对时允许的最高分：停在 B 档上沿，不给 A。
-    static let uncappedCeiling = 84.0
-
-    var ceilingNote: String? {
-        switch self {
-        case .verified: return nil
-        case .unchecked: return "未启用漏洞核对"
-        case .degraded: return "漏洞核对未完成"
-        }
-    }
-
     /// 从服务层产出判定证据状态。纯函数，便于单测钉住三种输入。
-    ///
-    /// 只认 `networkLookupPerformed` 与「note 里有没有失败字样」，**不拿 note 是否为空当判据**：
-    /// 服务层将来给「用户关着联网」补一句如实说明（我已就此报给总工/WS-B）是改进，
-    /// 不该反过来改变这里的结论。
     static func classify(_ report: DependencyReport) -> VulnerabilityEvidence {
-        // 已经有正向发现（离线规则或在线 advisories）时，结论本身即证据。
+        // 已有正向发现时绝不缺席：把已知漏洞整个维度摘掉会让带 CVE 的仓库分数反而变高。
         if report.vulnerableCount > 0 { return .verified }
-        guard report.networkLookupPerformed else { return .unchecked }
+        guard report.hasVulnerabilityCoverage else { return .unchecked }
         return report.networkLookupNote.contains("失败") ? .degraded : .verified
     }
 }
@@ -271,8 +259,11 @@ enum HealthCurves {
 
     // MARK: - 依赖健康
 
-    static func dependencyHealth(vulnerableCount: Int, outdatedCount: Int, totalDependencies: Int,
-                                 evidence: VulnerabilityEvidence = .verified) -> CurveResult {
+    /// 依赖健康曲线。**只在 `VulnerabilityEvidence == .verified` 时调用**：
+    /// 未核对/核对未完成时由评分器让整个维度缺席，而不是在这里给个打折的分数——
+    /// 「零漏洞」既可能是查过之后干净，也可能压根没查，曲线分不出这两种。
+    static func dependencyHealth(vulnerableCount: Int, outdatedCount: Int,
+                                 totalDependencies: Int) -> CurveResult {
         if totalDependencies == 0 {
             return CurveResult(score: 100, detail: "未发现依赖清单", risk: .none)
         }
@@ -284,26 +275,18 @@ enum HealthCurves {
             (x: 0, score: 0), (x: 0.1, score: 6), (x: 0.25, score: 18), (x: 0.5, score: 32), (x: 0.8, score: 45)
         ])
         let deducted = vulnerablePenalty + outdatedPenalty
-        var score = ScoreCurve.clamped(100 - deducted)
-        var risk: RiskLevel
+        let score = ScoreCurve.clamped(100 - deducted)
+        let risk: RiskLevel
         if vulnerable == 0 { risk = outdatedRatio > 0.25 ? .low : .none }
         else if vulnerable <= 2 { risk = .medium }
         else if vulnerable <= 9 { risk = .high }
         else { risk = .critical }
-
-        // 「没查过漏洞库」不等于「零漏洞」。未核对/核对未完成时封顶，
-        // 让这一维度最多停在 B 档，绝不因为用户关了联网就白送一个 A。
-        var detail = joined([
+        let detail = joined([
             "依赖 \(whole(totalDependencies)) 个",
-            vulnerable > 0 ? "漏洞 \(whole(vulnerable)) 个" : "",
+            vulnerable > 0 ? "漏洞 \(whole(vulnerable)) 个" : "漏洞核对零命中",
             "落后 \(whole(outdatedCount)) 个占 \(percent(outdatedRatio))",
             deducted > 0 ? "扣 \(decimal(deducted)) 分" : "",
         ])
-        if vulnerable == 0, let ceilingNote = evidence.ceilingNote {
-            score = Swift.min(score, VulnerabilityEvidence.uncappedCeiling)
-            risk = Swift.max(risk, RiskLevel.low)
-            detail = joined([ceilingNote, detail])
-        }
         return CurveResult(score: score, detail: detail, risk: risk)
     }
 
