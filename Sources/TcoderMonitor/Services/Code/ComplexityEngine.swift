@@ -497,7 +497,7 @@ enum ComplexityEngine {
             }
             if let delim = matchMultiLineQuote(chars, at: i, profile) {
                 state.stringDelim = delim
-                state.stringIsTemplate = delim.first == "`"
+                state.stringIsTemplate = delim.first == "`" && profile.backtickInterpolates
                 state.inTemplateExpression = false
                 i += delim.count
                 if scanString(chars, &i, delim, state.stringIsTemplate, profile, &state, &out) == false {
@@ -553,6 +553,9 @@ enum ComplexityEngine {
         _ profile: LangProfile, _ state: inout LexState, _ out: inout LineOutput
     ) -> Bool {
         let n = chars.count
+        // Go 的反引号原始字符串里反斜杠不是转义符（`\` 就是两个字符），
+        // 这里若照 JS 的方式跳两步，会把收尾的反引号一起吃掉，从此整文件被当成在字符串里。
+        let honorsEscapes = delim.first != "`" || profile.backtickInterpolates
         while i < n {
             if isTemplate, chars[i] == "$", i + 1 < n, chars[i + 1] == "{" {
                 state.inTemplateExpression = true
@@ -560,7 +563,7 @@ enum ComplexityEngine {
                 i += 2
                 return true
             }
-            if chars[i] == "\\" {
+            if honorsEscapes, chars[i] == "\\" {
                 i += 2
                 continue
             }
@@ -679,6 +682,9 @@ enum ComplexityEngine {
         var countsNullCoalescing = false
         var countsOptionalChaining = false
         var parenOnEveryPattern = true
+        /// 只有 JS/TS/Vue 的反引号模板串会做 `${}` 插值；Go 的反引号原始串是纯字面量，
+        /// 若也按模板处理，串里的 `${` 会让状态机卡在「表达式内」，把原始串当代码统计花括号。
+        var backtickInterpolates = false
     }
 
     /// 正则编译缓存。签名 pattern 是热点：每个文件都要走一遍 profile → 每条 pattern 建一个
@@ -711,6 +717,7 @@ enum ComplexityEngine {
         profile.multiLineQuotes = charactersList(multiLineQuotes(for: canonical))
         profile.allowTrailingSemicolonEnd = profile.family == .curly
         profile.scriptRegionOnly = canonical == "Vue"
+        profile.backtickInterpolates = canonical == "TypeScript" || canonical == "JavaScript" || canonical == "Vue"
         profile.branchKeywords = branchKeywords(for: canonical)
         profile.countsLogicalSymbols = canonical != "Python" && canonical != "HTML"
         profile.countsTernary = canonical != "Python" && canonical != "Go"

@@ -228,15 +228,18 @@ struct HealthView: View {
     // MARK: - 维度分量表
 
     private func componentTable(_ health: HealthScore) -> some View {
+        // 评分器给出的是原始权重，综合分按「缺失维度权重等比摊到在场维度」归一化后才是真正乘数。
+        let weights = normalizedWeights(for: health)
+        let contribution: (ScoreComponent) -> Double = {
+            Double($0.score) * (weights[$0.name] ?? $0.weight)
+        }
         // 拖累最大的排最前：贡献分越低越靠前。
         let rows = health.components.sorted { lhs, rhs in
-            if lhs.weightedContribution != rhs.weightedContribution {
-                return lhs.weightedContribution < rhs.weightedContribution
-            }
+            let left = contribution(lhs), right = contribution(rhs)
+            if abs(left - right) > 0.001 { return left < right }
             return lhs.score < rhs.score
         }
-        let sum = health.components.reduce(0) { $0 + $1.weightedContribution }
-        let weightSum = health.components.reduce(0) { $0 + $1.weight }
+        let sum = health.components.reduce(0) { $0 + contribution($1) }
         let missing = missingDimensions(of: health)
         let notes = normalizationNotes(for: health)
 
@@ -285,17 +288,17 @@ struct HealthView: View {
                                     .frame(width: Self.scoreNumberWidth, alignment: .trailing)
                             }
 
-                            Text(NumberFormat.percent(component.weight, precision: 0))
+                            Text(NumberFormat.percent(weights[component.name] ?? component.weight, precision: 0))
                                 .font(Theme.monoSmall)
                                 .foregroundStyle(.secondary)
                                 .frame(minWidth: Self.weightColumnWidth, alignment: .trailing)
                                 .help(weightHelp(for: component, in: health))
 
-                            Text(String(format: "%.1f", component.weightedContribution))
+                            Text(String(format: "%.1f", contribution(component)))
                                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(Theme.color(forScore: component.score))
                                 .frame(minWidth: Self.contributionColumnWidth, alignment: .trailing)
-                                .help(contributionHelp(component))
+                                .help(contributionHelp(component, weights: weights))
 
                             Text(component.detail)
                                 .font(.system(size: 9))
@@ -310,22 +313,22 @@ struct HealthView: View {
                 Divider().opacity(0.5)
 
                 if missing.isEmpty {
-                    Text("参与计分的 \(Self.scorableDimensionCount) 个维度全部有输入；测试覆盖按口径权重为 0，不计入总分。")
+                    Text("这次扫描的输入覆盖了全部可计分维度，权重未做摊分。测试覆盖只在项目真的产出了覆盖率报告时参与计分。")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 } else {
                     Text("缺失维度：\(missing.map(\.rawValue).joined(separator: "、"))")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Theme.caution)
-                    Text("缺失维度不参与计分，权重已按比例归一到其余维度。\(notes)")
+                    Text("缺失维度不参与计分也不得分，其权重已按比例摊到在场维度。\(notes)")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                if abs(weightSum - 1) > 0.02 {
-                    // 权重合计不是 100% 时说明清楚，不假装合计等于满分。
-                    Text("各维度权重合计 \(NumberFormat.percent(weightSum, precision: 1))，贡献分按实际权重计，因此合计与综合分可能有舍入差。")
+                if abs(sum - Double(health.overall)) > 1.5 {
+                    // 分量之和与综合分对不上时说明清楚，不假装表格能直接加出总分。
+                    Text("分量合计 \(String(format: "%.1f", sum)) 与综合分 \(health.overall) 有出入，通常是评分器的归一化或取整口径不同。")
                         .font(.caption2)
                         .foregroundStyle(Theme.caution)
                 }
@@ -340,10 +343,11 @@ struct HealthView: View {
             .frame(width: width, alignment: alignment)
     }
 
-    /// 贡献格的满分与缺口：满分 = 权重 × 100，缺口就是这一维度把综合分拖下去的量。
-    private func contributionHelp(_ component: ScoreComponent) -> String {
-        let full = component.weight * 100
-        let lost = component.weight * Double(100 - component.score)
+    /// 贡献格的满分与缺口：满分 = 归一化权重 × 100，缺口就是这一维度把综合分拖下去的量。
+    private func contributionHelp(_ component: ScoreComponent, weights: [String: Double]) -> String {
+        let weight = weights[component.name] ?? component.weight
+        let full = weight * 100
+        let lost = weight * Double(100 - component.score)
         return "满分可得 \(String(format: "%.1f", full))，这一维度拖了 \(String(format: "%.1f", lost)) 分"
     }
 
@@ -355,25 +359,32 @@ struct HealthView: View {
         return dimension.defaultWeight
     }
 
+    /// 评分器可能已经归一过，也可能给的是原始权重；两者都要能落地。
+    private func effectiveWeight(_ component: ScoreComponent) -> Double {
+        component.weight > 0 ? component.weight : (baseWeight(of: component) ?? 0)
+    }
+
+    /// 缺失维度不参与，所以在场维度的权重按 Σ 归一 —— 这才是综合分真正乘的那个数。
+    private func normalizedWeights(for health: HealthScore) -> [String: Double] {
+        let present = health.components.reduce(0) { $0 + effectiveWeight($1) }
+        guard present > 0 else { return [:] }
+        var result: [String: Double] = [:]
+        for component in health.components { result[component.name] = effectiveWeight(component) / present }
+        return result
+    }
+
     /// 有默认权重、但这次没算出来的维度。
     private func missingDimensions(of health: HealthScore) -> [HealthDimension] {
         let present = Set(health.components.map(\.name))
         return HealthDimension.allCases.filter { $0.defaultWeight > 0 && !present.contains($0.rawValue) }
     }
 
-    /// 缺失维度的权重被等比摊到在场维度之后应有的权重。
-    private func renormalizedWeight(of component: ScoreComponent, in health: HealthScore) -> Double? {
-        guard let base = baseWeight(of: component) else { return nil }
-        let presentSum = health.components.reduce(0) { $0 + (baseWeight(of: $1) ?? 0) }
-        guard presentSum > 0 else { return nil }
-        return base / presentSum
-    }
-
     private func normalizationNotes(for health: HealthScore) -> String {
+        let weights = normalizedWeights(for: health)
         let notes: [String] = health.components.compactMap { component in
-            guard let base = baseWeight(of: component) else { return nil }
-            guard abs(base - component.weight) >= 0.005 else { return nil }
-            return "\(component.name) \(NumberFormat.percent(base, precision: 0))→\(NumberFormat.percent(component.weight, precision: 0))"
+            guard let base = baseWeight(of: component), let used = weights[component.name] else { return nil }
+            guard abs(base - used) >= 0.005 else { return nil }
+            return "\(component.name) \(NumberFormat.percent(base, precision: 0))→\(NumberFormat.percent(used, precision: 0))"
         }
         return notes.isEmpty ? "" : "（\(notes.joined(separator: " · "))）"
     }
@@ -382,9 +393,10 @@ struct HealthView: View {
         guard let base = baseWeight(of: component) else {
             return "该维度不在内置权重表里，直接采用评分器给出的权重。"
         }
-        let text = "原始权重 \(NumberFormat.percent(base, precision: 0)) → 本次使用 \(NumberFormat.percent(component.weight, precision: 0))"
-        guard let renormalized = renormalizedWeight(of: component, in: health) else { return text }
-        return text + "（缺失维度等比归一后约 \(NumberFormat.percent(renormalized, precision: 0))）"
+        let used = normalizedWeights(for: health)[component.name] ?? component.weight
+        return "原始权重 \(NumberFormat.percent(base, precision: 0)) → 本次实际乘数 "
+            + NumberFormat.percent(used, precision: 1)
+            + "（缺失维度的权重等比摊到在场维度）"
     }
 
     // MARK: - 优点 / 问题 / 建议

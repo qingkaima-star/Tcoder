@@ -13,6 +13,7 @@ final class MachSystemMonitor: SystemMonitoringProviding {
     private var previousCounters: SystemCounters?
     private var previousProcesses: [Int32: ProcessCPUState] = [:]
     private var lastSweepAt = Date()
+    private var isSampling = false
     private var managedGroups: [TrackedProcessGroup] = TrackedProcessGroup.builtInDefaults
 
     private(set) var latestSnapshot: SystemSnapshot?
@@ -21,6 +22,9 @@ final class MachSystemMonitor: SystemMonitoringProviding {
     private(set) var trackedGroups: [ProcessGroupSnapshot] = []
     private(set) var isRunning = false
 
+    /// 最近一轮扫到的全量进程，只在内存里留一帧，用来做「按内存排序」的正确排名。
+    private(set) var allProcesses: [ProcessSnapshot] = []
+
     private static let historyCapacity = 600
     private static let topProcessLimit = 40
 
@@ -28,8 +32,9 @@ final class MachSystemMonitor: SystemMonitoringProviding {
 
     var lastSampleAt: Date? { latestSnapshot?.timestamp }
 
+    /// 按内存降序 —— 从全量进程里排，不能从 CPU top-N 里排，否则内存大户只要不忙就永远看不到。
     var processesByMemory: [ProcessSnapshot] {
-        topProcesses.sorted { $0.memoryBytes > $1.memoryBytes }
+        Array(allProcesses.sorted { $0.memoryBytes > $1.memoryBytes }.prefix(Self.topProcessLimit))
     }
 
     func groups() -> [TrackedProcessGroup] { managedGroups }
@@ -105,13 +110,18 @@ final class MachSystemMonitor: SystemMonitoringProviding {
     // MARK: Sampling
 
     private func tick() {
+        // 一轮 libproc 全量扫描可能要几百毫秒；没有这把锁的话定时器会叠出多个并发扫描，
+        // 既拖慢主线程回投也把 previous 计数搞乱。
+        guard !isSampling else { return }
+        isSampling = true
+
         let elapsed = max(0.05, Date().timeIntervalSince(lastSweepAt))
         let previousCounters = self.previousCounters
         let previousProcesses = self.previousProcesses
         let groups = self.managedGroups
         let sampler = self.sampler
 
-        Task.detached(priority: .utility) {
+        Task.detached(priority: .utility) { [weak self] in
             let counters = sampler.read()
             let sweep = ProcessInspector.sweep(previous: previousProcesses, elapsed: elapsed)
             let snapshot = sampler.snapshot(
@@ -130,11 +140,13 @@ final class MachSystemMonitor: SystemMonitoringProviding {
 
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                self.isSampling = false
                 self.previousCounters = counters
                 self.previousProcesses = sweep.states
                 self.lastSweepAt = Date()
                 self.latestSnapshot = snapshot
                 self.topProcesses = ranked
+                self.allProcesses = sweep.processes
                 self.trackedGroups = groupSnapshots
                 self.history.append(snapshot)
                 if self.history.count > Self.historyCapacity {
@@ -145,6 +157,8 @@ final class MachSystemMonitor: SystemMonitoringProviding {
     }
 
     private func refreshGroups() {
-        trackedGroups = ProcessInspector.groupSnapshots(for: managedGroups, processes: topProcesses)
+        // 用全量进程而不是 CPU top-N：常驻但空闲的服务（Redis、Nginx）恰恰是用户要盯的组，
+        // 只从 CPU 榜里找会让它们显示成 0 进程。
+        trackedGroups = ProcessInspector.groupSnapshots(for: managedGroups, processes: allProcesses)
     }
 }

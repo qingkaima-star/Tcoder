@@ -33,8 +33,13 @@ print(f"    项目路径 = {path}")
 PY
 
 echo "==> 3/5 启动 App"
-pkill -x TcoderMonitor 2>/dev/null || true
-sleep 1
+# 用 quit 而不是 pkill：强杀会被 macOS 记成异常退出，下次启动弹「是否重新打开窗口」
+osascript -e 'tell application id "com.tcoder.monitor" to quit' 2>/dev/null || pkill -x TcoderMonitor 2>/dev/null || true
+sleep 2
+rm -rf "$HOME/Library/Saved Application State/com.tcoder.monitor.savedState" 2>/dev/null || true
+# 曾经崩溃过一次的话，macOS 会一直弹「是否重新打开窗口」并挡住主窗口创建；
+# Info.plist 的 NSQuitAlwaysKeepsWindows=false 对已记录的崩溃不生效，需要这条。
+defaults write com.tcoder.monitor ApplePersistenceIgnoreState -bool YES
 open "$APP"
 sleep 14
 
@@ -51,6 +56,7 @@ fi
 
 echo "==> 4/5 读回落盘的测量结果"
 REPORT="$SUPPORT/reports/$UUID.json"
+for _ in $(seq 1 20); do [ -f "$REPORT" ] && break; sleep 3; done
 if [ -f "$REPORT" ]; then
   python3 - "$REPORT" <<'PY'
 import json, sys

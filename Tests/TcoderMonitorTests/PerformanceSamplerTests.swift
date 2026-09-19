@@ -45,10 +45,13 @@ final class PerformanceSamplerTests: XCTestCase {
         inactive: UInt64 = 500,
         wired: UInt64 = 300,
         compressed: UInt64 = 100,
-        free: UInt64 = 2_000
+        free: UInt64 = 2_000,
+        speculative: UInt64 = 0,
+        purgeable: UInt64 = 0
     ) -> VmCounters {
         VmCounters(pageSize: pageSize, active: active, inactive: inactive,
-                   wired: wired, compressed: compressed, free: free)
+                   wired: wired, compressed: compressed, free: free,
+                   speculative: speculative, purgeable: purgeable)
     }
 
     private func counters(
@@ -159,30 +162,58 @@ final class PerformanceSamplerTests: XCTestCase {
     }
 
     // MARK: - 2. SystemSampler.memoryUsedBytes
+    //
+    // 口径为总工实测后的版本：used = total - (free + speculative + purgeable) * pageSize，
+    // 与活动监视器一致（inactive 是文件缓存但被算作已用，所以不能只加 active+wired+compressed）。
 
-    func testMemoryUsedBytesEqualsActivePlusWiredPlusCompressedTimesPageSize() {
-        let counters = memory(pageSize: 16_384, active: 720_505, inactive: 715_260,
-                              wired: 341_465, compressed: 1_300_992, free: 3_611)
-        let expected = (720_505 + 341_465 + 1_300_992) * 16_384
-        XCTAssertEqual(SystemSampler.memoryUsedBytes(counters), UInt64(expected),
-                       "已用内存必须是 (active+wired+compressed)*pageSize")
+    func testMemoryUsedBytesMatchesActivityMonitorFormulaOnRealPageCounts() {
+        // 本机实测（48 GiB、page 16384）：free 59454 / speculative 20714 / purgeable 9795
+        let total = UInt64(51_539_607_552)
+        let counters = memory(pageSize: 16_384, active: 757_410, inactive: 736_816,
+                              wired: 342_131, compressed: 1_300_992,
+                              free: 59_454, speculative: 20_714, purgeable: 9_795)
+        let reclaimablePages = 59_454 + 20_714 + 9_795
+        let expected = total - UInt64(reclaimablePages) * 16_384
+        let used = SystemSampler.memoryUsedBytes(counters, totalBytes: total)
+        XCTAssertEqual(used, expected, "已用内存必须等于 total - (free+speculative+purgeable)*pageSize")
+        // 46.6 GiB / 48 GiB —— 与同一时刻 `top` 的 "PhysMem: 46G used" 对得上。
+        XCTAssertEqual(Double(used) / Double(total), 0.9702, accuracy: 0.001,
+                       "换算成占比必须接近 top 的 46G/48G")
     }
 
-    func testMemoryUsedBytesExcludesInactiveAndFreePages() {
-        // 这就是与 `top` 的 PhysMem 口径差：inactive 绝不计入。
-        let baseline = memory(active: 720_505, inactive: 0, wired: 341_465, compressed: 1_300_992, free: 0)
-        let withInactive = memory(active: 720_505, inactive: 715_260, wired: 341_465, compressed: 1_300_992, free: 3_611)
-        let used = SystemSampler.memoryUsedBytes(baseline)
-        XCTAssertEqual(used, SystemSampler.memoryUsedBytes(withInactive),
-                       "只改变 inactive / free 不得改变已用内存")
-        let ifInactiveCounted = (720_505 + 715_260 + 341_465 + 1_300_992) * 16_384
-        XCTAssertNotEqual(used, UInt64(ifInactiveCounted), "已用内存不得包含 inactive（top 的 PhysMem 口径）")
-        XCTAssertLessThan(used, UInt64(ifInactiveCounted), "包含 inactive 的结果一定更大")
+    func testMemoryUsedBytesCountsInactivePagesAsUsed() {
+        // 与旧口径的关键差别：inactive 会体现在结果里（因为它是从 total 反减出来的，
+        // 改变 inactive 而保持 free/spec/purgeable 不变时，总量假设不变 → 结果不变；
+        // 反过来页数总和小于 total 时说明还有 inactive 之外的空间）。
+        let total = UInt64(400_000_000)
+        let baseline = memory(pageSize: 1_000, active: 100, inactive: 0, wired: 300,
+                              compressed: 100, free: 50_000, speculative: 10, purgeable: 5)
+        let withInactive = memory(pageSize: 1_000, active: 100, inactive: 715_260, wired: 300,
+                                  compressed: 100, free: 50_000, speculative: 10, purgeable: 5)
+        XCTAssertEqual(SystemSampler.memoryUsedBytes(baseline, totalBytes: total),
+                       SystemSampler.memoryUsedBytes(withInactive, totalBytes: total),
+                       "只改变 inactive 不得改变结果：inactive 不是靠加进来的，是靠「不在 free/spec/purgeable 里」算进来的")
+        XCTAssertEqual(SystemSampler.memoryUsedBytes(withInactive, totalBytes: total),
+                       total - 50_015_000 + 0,
+                       "reclaimable = (50000+10+5)*1000")
     }
 
-    func testMemoryUsedBytesIsZeroWhenPageSizeIsZero() {
-        let counters = memory(pageSize: 0, active: 720_505, wired: 341_465, compressed: 1_300_992)
-        XCTAssertEqual(SystemSampler.memoryUsedBytes(counters), 0, "pageSize 为 0 时必须返回 0 而不是崩溃")
+    func testMemoryUsedBytesFallsBackWhenReclaimableExceedsTotal() {
+        // 页计数瞬时不一致（唤醒、休眠、计数器抖动）时必须退化成加法口径而不是下溢成天文数字。
+        let counters = memory(pageSize: 16_384, active: 720_505, wired: 341_465,
+                              compressed: 1_300_992, free: 9_000_000, speculative: 0, purgeable: 0)
+        let used = SystemSampler.memoryUsedBytes(counters, totalBytes: 51_539_607_552)
+        let fallback = (720_505 + 341_465 + 1_300_992) * 16_384
+        XCTAssertEqual(used, UInt64(fallback), "必须退化为 (active+wired+compressed)*pageSize")
+        XCTAssertLessThanOrEqual(used, 51_539_607_552, "绝不得超过物理总量")
+    }
+
+    func testMemoryUsedBytesNeverExceedsTotalAndIsZeroSafe() {
+        let zeroPage = memory(pageSize: 0, active: 720_505, wired: 341_465, compressed: 1_300_992)
+        XCTAssertEqual(SystemSampler.memoryUsedBytes(zeroPage, totalBytes: 1_000_000), 1_000_000,
+                       "pageSize 为 0 时 reclaimable 为 0，退化为「全量已用」而不是崩溃")
+        XCTAssertEqual(SystemSampler.memoryUsedBytes(zeroPage, totalBytes: 0), 0,
+                       "总量为 0 必须返回 0")
     }
 
     // MARK: - 3. SystemSampler.bytesPerSecond
@@ -310,8 +341,9 @@ final class PerformanceSamplerTests: XCTestCase {
         let current = counters(at: Self.epoch, cores: coreArray(ticks(idle: 30)), memory: memory(),
                                diskRead: 0, diskWrite: 0, networkIn: 0, networkOut: 0)
         let snapshot = SystemSampler().snapshot(previous: nil, current: current, processCount: 1)
-        XCTAssertEqual(snapshot.memoryUsedBytes, SystemSampler.memoryUsedBytes(current.vm),
-                       "已用内存必须由 current.vm 推得")
+        XCTAssertEqual(snapshot.memoryUsedBytes,
+                       SystemSampler.memoryUsedBytes(current.vm, totalBytes: snapshot.memoryTotalBytes),
+                       "已用内存必须由 current.vm 与总量共同推得")
         XCTAssertGreaterThan(snapshot.memoryTotalBytes, 0, "内存总量必须为正，否则 memoryFraction 无意义")
         let expectedFraction = Double(snapshot.memoryUsedBytes) / Double(snapshot.memoryTotalBytes)
         XCTAssertEqual(snapshot.memoryFraction, expectedFraction, accuracy: 1e-12,

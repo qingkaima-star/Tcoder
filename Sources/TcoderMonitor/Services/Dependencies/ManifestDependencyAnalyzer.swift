@@ -42,7 +42,18 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
             guard let parsed = ManifestParsers.parse(text: text,
                                                     manifestPath: hit.relativePath,
                                                     directoryRelativePath: hit.directoryRelativePath,
-                                                    directoryListing: listing) else { continue }
+                                                    directoryListing: listing) else {
+                // 认得出是清单、但一条外部依赖都没有（例如本仓库自己的 Package.swift）。
+                // 仍产出一张 0 依赖卡片，UI 才能区分「有清单无依赖」和「根本没有清单」。
+                guard let ecosystem = ManifestFileName.ecosystem(for: hit.url.lastPathComponent) else { continue }
+                ecosystems.append(EcosystemReport(ecosystem: ecosystem,
+                                                  manifestPath: hit.relativePath,
+                                                  lockfileName: ManifestParsers.lockfileName(for: ecosystem,
+                                                                                             in: listing),
+                                                  dependencies: [],
+                                                  frameworkMarkers: []))
+                continue
+            }
             ecosystems.append(EcosystemReport(ecosystem: parsed.ecosystem,
                                               manifestPath: parsed.manifestRelativePath,
                                               lockfileName: parsed.lockfileName,

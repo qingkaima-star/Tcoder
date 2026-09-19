@@ -1,4 +1,5 @@
 import Foundation
+import IOKit
 
 // MARK: - 原始计数器快照
 
@@ -46,7 +47,7 @@ struct SystemSampler: Sendable {
     /// 一次性原始读取；任何系统调用失败都退化为 0 / 空数组，不抛错、不 crash。
     func read() -> SystemCounters {
         let timestamp = Date()
-        let disk = ProcessInspector.systemDiskIO()
+        let disk = BlockStorageSampler.ioBytes()
         let network = Self.networkBytes()
         return SystemCounters(
             timestamp: timestamp,
@@ -213,8 +214,45 @@ private extension SystemSampler {
         )
     }
 
-    /// getifaddrs 累加 AF_LINK 字节数；lo0 是回环，算进去会凭空造出流量。
-    static func networkBytes() -> (inbound: UInt64, outbound: UInt64) {
+// MARK: - 块设备吞吐（IOKit）
+
+/// 磁盘读写的权威来源：`IOBlockStorageDriver` 的 `Statistics`。
+///
+/// 为什么不用 libproc：无权限时 `proc_pid_rusage` 的 `ri_diskio_bytesread` 在本机
+/// 对全部 260 个可见进程恒为 0、写只有 2 GiB，而同一时刻 `top` 的累计是 3461G 读 /
+/// 2021G 写 —— 差三个数量级，按进程累加根本复现不了活动监视器的磁盘列。
+/// IOKit 这条路不需要 root，累加所有块设备驱动后与 `top` 完全一致。
+enum BlockStorageSampler {
+    static func ioBytes() -> (read: UInt64, write: UInt64) {
+        guard let matching = IOServiceMatching("IOBlockStorageDriver") else { return (0, 0) }
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator) == KERN_SUCCESS else {
+            return (0, 0)
+        }
+        defer { IOObjectRelease(iterator) }
+
+        var read: UInt64 = 0
+        var write: UInt64 = 0
+        while case let service = IOIteratorNext(iterator), service != 0 {
+            var properties: Unmanaged<CFMutableDictionary>?
+            if IORegistryEntryCreateCFProperties(service, &properties, kCFAllocatorDefault, 0) == KERN_SUCCESS,
+               let dictionary = properties?.takeRetainedValue() as? [String: Any],
+               let statistics = dictionary["Statistics"] as? [String: Any] {
+                read &+= counter(statistics["Bytes (Read)"])
+                write &+= counter(statistics["Bytes (Write)"])
+            }
+            IOObjectRelease(service)
+        }
+        return (read, write)
+    }
+
+    private static func counter(_ raw: Any?) -> UInt64 {
+        guard let number = raw as? NSNumber else { return 0 }
+        // 计数可能带符号位（超过 Int64.max 时），用 uint64Value 统一口径。
+        return number.uint64Value
+    }
+}
+
         var first: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&first) == 0 else { return (0, 0) }
         defer { freeifaddrs(first) }

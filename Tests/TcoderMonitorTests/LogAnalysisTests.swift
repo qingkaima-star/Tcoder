@@ -192,7 +192,7 @@ private func wallClockCandidates(_ year: Int, _ month: Int, _ day: Int,
 
 private func assertNearAnyWallClock(_ date: Date?, _ candidates: [Date],
                                     accuracy: TimeInterval = 1.0,
-                                    _ label: String = "",
+                                    label: String = "",
                                     file: StaticString = #filePath, line: UInt = #line) {
     guard let date else {
         XCTFail("parseTimestamp 返回 nil：\(label)", file: file, line: line)

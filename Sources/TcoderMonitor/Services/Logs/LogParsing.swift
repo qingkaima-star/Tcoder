@@ -161,7 +161,7 @@ enum LogDiscovery {
 
         for url in projectLogCandidates(root: projectRoot) { register(url) }
         for url in libraryLogCandidates(projectName: projectName) { register(url) }
-        for url in diagnosticReportCandidates(withinDays: withinDays) { register(url) }
+        for url in diagnosticReportCandidates(withinDays: withinDays, projectName: projectName) { register(url) }
 
         return unique.values
             .sorted { lhs, rhs in
@@ -279,7 +279,7 @@ enum LogDiscovery {
         }
     }
 
-    private static func diagnosticReportCandidates(withinDays: Int) -> [URL] {
+    private static func diagnosticReportCandidates(withinDays: Int, projectName: String) -> [URL] {
         let directory = diagnosticReportsDirectory()
         let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey, .nameKey,
                                       .contentModificationDateKey]
@@ -289,12 +289,29 @@ enum LogDiscovery {
         let cutoff: Date? = withinDays > 0 ? Date().addingTimeInterval(-Double(withinDays) * 86_400) : nil
         return entries.filter { url in
             guard url.pathExtension.lowercased() == "ips" else { return false }
+            // 先按归属过滤再读内容：DiagnosticReports 是全机共用目录，
+            // 绝大多数文件属于本机其他应用，规约禁止读取（AGENTS.md 禁区）。
+            guard isOwnDiagnosticReport(url, projectName: projectName) else { return false }
             let values = try? url.resourceValues(forKeys: Set(keys))
             guard values?.isSymbolicLink != true, values?.isRegularFile != false else { return false }
             guard let cutoff else { return true }
             guard let modified = values?.contentModificationDate else { return false }
             return modified >= cutoff
         }
+    }
+
+    /// 崩溃报告文件名形如 `TcoderMonitor-2026-09-19-081233.ips`，取日期之前的前缀判断归属。
+    static func isOwnDiagnosticReport(_ url: URL, projectName: String) -> Bool {
+        let name = url.deletingPathExtension().lastPathComponent.lowercased()
+        var tokens = ["tcodermonitor", "tcoder"]
+        let trimmed = projectName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !trimmed.isEmpty { tokens.append(trimmed) }
+        tokens = Array(Set(tokens))
+        for token in tokens where token.count >= 3 {
+            if name.hasPrefix(token) { return true }
+            if token.count >= 6, name.contains("-\(token)") { return true }
+        }
+        return false
     }
 
     private static func isLogFile(_ url: URL) -> Bool {
