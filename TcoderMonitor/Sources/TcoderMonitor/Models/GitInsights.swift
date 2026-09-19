@@ -39,6 +39,12 @@ struct GitInsights: Codable, Equatable, Sendable {
     var remoteURL: String = ""
 
     var totalCommits: Int = 0
+    /// How many commits were actually parsed. Large repositories are read within a
+    /// cap, so this can be smaller than `totalCommits`; derived statistics
+    /// (commits/day, author shares, activity heatmaps) describe this window only.
+    var commitsAnalyzed: Int = 0
+    /// True when the cap was hit, i.e. the analysis covers only the newest history.
+    var historyTruncated: Bool = false
     var firstCommitAt: Date?
     var lastCommitAt: Date?
     var projectAgeDays: Int = 0
