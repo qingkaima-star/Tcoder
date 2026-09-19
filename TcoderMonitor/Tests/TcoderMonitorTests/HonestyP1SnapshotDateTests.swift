@@ -22,12 +22,48 @@ final class HonestyP1SnapshotDateTests: XCTestCase {
 
         XCTAssertTrue(note.contains("未联网核对"), "既有判据不能丢：\(note)")
         XCTAssertTrue(note.contains("快照截至"), "必须说明内置快照是哪天的：\(note)")
-        // 断言取自**同一个字段**，这样将来刷新快照日期时这条不会假红，
-        // 而一旦有人把日期写死成常量，它就立刻红。
-        XCTAssertTrue(note.contains(DateFormat.full.string(from: DependencySnapshot.snapshotDate)),
-                      "文案里的日期必须就是 snapshotDate 字段：\(note)")
+        XCTAssertTrue(note.contains(DependencySnapshot.snapshotDayText),
+                      "文案里的日期必须就是 snapshotDate 那一天：\(note)")
         XCTAssertTrue(note.contains("（\(DateFormat.sinceDescription(DependencySnapshot.snapshotDate))）"),
                       "光有日期还不够，必须紧跟距今时长（复用 DateFormat.sinceDescription）：\(note)")
+    }
+
+    // MARK: - #35 假精度：快照只有天粒度，不许渲染出分钟
+
+    /// 用户看到 `17:05` 会以为我们掌握分钟级采集时刻，而那个数只是当初写代码那一下的挂钟。
+    func testSnapshotDisclosureCarriesNoInventedTimeOfDay() {
+        XCTAssertFalse(DependencySnapshot.snapshotDayText.contains(":"),
+                       "日期段里不许出现时分：\(DependencySnapshot.snapshotDayText)")
+        XCTAssertFalse(DependencySnapshot.asOfText.contains(":"),
+                       "整句披露都不该带时分冒号：\(DependencySnapshot.asOfText)")
+        XCTAssertEqual(DependencySnapshot.snapshotDayText.count, 10,
+                       "到日的日期就是 yyyy-MM-dd 十个字符：\(DependencySnapshot.snapshotDayText)")
+        let characters = Array(DependencySnapshot.snapshotDayText)
+        guard characters.count >= 8 else {
+            return XCTFail("日期段短到不能按 年-月-日 检查，实际：\(DependencySnapshot.snapshotDayText)")
+        }
+        XCTAssertEqual(String(characters[4]), "-", "必须是 年-月-日 的形状：\(DependencySnapshot.snapshotDayText)")
+        XCTAssertEqual(String(characters[7]), "-", "同上：\(DependencySnapshot.snapshotDayText)")
+        XCTAssertTrue(characters[0...3].allSatisfy { $0.isNumber },
+                      "年份段必须是四位数字：\(DependencySnapshot.snapshotDayText)")
+
+        let calendar = Calendar(identifier: .gregorian)
+        let stamp = calendar.dateComponents([.hour, .minute], from: DependencySnapshot.snapshotDate)
+        XCTAssertEqual(stamp.hour, 0, "snapshotDate 本身必须落在日首，不是某个月的第 17 小时")
+        XCTAssertEqual(stamp.minute, 0, "同上：分钟没有依据就该是 0")
+    }
+
+    /// 面向用户的文案里不许出现那个年份写错的兜底常量（2025-09-19 17:05）。
+    func testNoUserFacingTextLeaksTheWrongYearFallbackConstant() {
+        let year = Calendar(identifier: .gregorian).component(.year, from: DependencySnapshot.snapshotDate)
+        XCTAssertGreaterThan(year, 2025, "快照年份本身就是这条的对照")
+        let expected = String(year)
+        for text in [DependencySnapshot.asOfText,
+                     ManifestDependencyAnalyzer.offlineCaveat(for: offlineReport()),
+                     DependencySafetyVerdict(offlineReport()).summaryCaption] {
+            XCTAssertTrue(text.contains(expected), "文案里的年份必须来自 snapshotDate：\(text)")
+            XCTAssertFalse(text.contains("2025"), "兜底常量的错误年份不得显形：\(text)")
+        }
     }
 
     func testUncheckedVerdictCaptionNamesTheSnapshotDay() {
@@ -35,8 +71,10 @@ final class HonestyP1SnapshotDateTests: XCTestCase {
 
         XCTAssertTrue(caption.contains("未联网核对"), caption)
         XCTAssertTrue(caption.contains("快照截至"), "磁贴副标题也要带快照日期：\(caption)")
-        XCTAssertTrue(caption.contains(DateFormat.full.string(from: DependencySnapshot.snapshotDate)),
-                      "视图侧的日期必须与分析器同一个字段：\(caption)")
+        XCTAssertTrue(caption.contains(DependencySnapshot.snapshotDayText),
+                      "视图侧的日期必须与分析器同一天、同一个粒度：\(caption)")
+        XCTAssertFalse(caption.contains(":") || caption.contains("："),
+                       "副标题里不该出现任何时分（内置快照没有分钟级依据）：\(caption)")
         XCTAssertFalse(caption.contains("未发现已知漏洞"),
                        "加了日期不等于给出 all-clear：\(caption)")
     }

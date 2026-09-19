@@ -17,11 +17,19 @@ import Foundation
 /// 内置「最新版本」快照。
 enum DependencySnapshot {
 
-    /// 快照数据对应的日期，用于 UI 说明「快照截至 …」。
+    /// 快照数据对应的日期（**只到天**），用于 UI 说明「快照截至 …」。
     ///
     /// 诚实标注：npm 条目是在该日期用 `https://registry.npmjs.org/<pkg>/latest` 实测得到的；
     /// 其他生态（Maven / SwiftPM / PyPI / Go / Cargo）是**保守取值**——只写确认存在、
     /// 且不低于该生态常见稳定版的版本号。没把握的包一律不收录（查不到返回 nil，绝不猜）。
+    ///
+    /// 为什么不到分钟（#35）：这张表只是「哪天抄的」一份静态常量表，分钟级没有任何依据。
+    /// 旧实现在 `date(year:month:day:)` 里写死 `hour = 17` / `minute = 5`，渲染出来是
+    /// 「快照截至 2026-09-19 17:05」，用户会以为我们掌握分钟级采集时刻。
+    /// 追查过出处：那两个字段与当时的兜底 epoch（`1_758_272_700` = **2025**-09-19 17:05 CST）
+    /// 出自同一个提交，落盘时间是本地 17:14，而全仓（含 WS-B 工作笔记与 README）
+    /// 没有任何一处把 17:05 记成一次采集记录的时刻 —— 它是写代码那一下的挂钟，
+    /// 兜底常量的年份还比快照早一年（改了年月、忘了改兜底）。两处一起删掉。
     static let snapshotDate: Date = DependencySnapshot.date(year: 2026, month: 9, day: 19)
 
     /// 「内置快照是哪天的」那一句，离线判据与降级说明**共用同一份**，
@@ -30,7 +38,16 @@ enum DependencySnapshot {
     /// 措辞里刻意不出现「失败」二字：`VulnerabilityEvidence.classify` 拿
     /// `networkLookupNote.contains("失败")` 当降级判据，这句话会被拼进那个 note。
     static var asOfText: String {
-        "快照截至 \(DateFormat.full.string(from: snapshotDate))（\(DateFormat.sinceDescription(snapshotDate))）"
+        "快照截至 \(snapshotDayText)（\(DateFormat.sinceDescription(snapshotDate))）"
+    }
+
+    /// 全仓共用的日期格式化器只有 `DateFormat.full`（`yyyy-MM-dd HH:mm`），
+    /// 快照只到天，所以取它输出的**日期段**——不为此新建格式化器。
+    /// 切法由 `HonestyP1SnapshotDateTests` 钉住（形状为 年-月-日、整句不含时分冒号）。
+    static let daySegmentLength = 10
+
+    static var snapshotDayText: String {
+        String(DateFormat.full.string(from: snapshotDate).prefix(daySegmentLength))
     }
 
     /// 给已有的在线核对说明补上快照日期；说明为空时原样返回，
@@ -83,6 +100,12 @@ enum DependencySnapshot {
         }
     }
 
+    /// 把「某年某月某日」摆成 Asia/Shanghai 那一天的**日首**时刻（日粒度，见 `snapshotDate`）。
+    ///
+    /// 兜底值给的是 epoch 0（1970-01-01）而不是任何一个"看着像另一天"的日期：
+    /// `calendar` 与 `timeZone` 都是字面量，正常系统上走不到这一支；
+    /// 真走到了说明时区表被砍，那时宁可显形成一个一眼就是坏值的日期，
+    /// 也不该再留一个年份写错、看着像有出处的常量（#35 就是被那样一个值骗过一次）。
     static func date(year: Int, month: Int, day: Int) -> Date {
         var comps = DateComponents()
         comps.calendar = Calendar(identifier: .gregorian)
@@ -90,9 +113,8 @@ enum DependencySnapshot {
         comps.year = year
         comps.month = month
         comps.day = day
-        comps.hour = 17
-        comps.minute = 5
-        return comps.date ?? Date(timeIntervalSince1970: 1_758_272_700)
+        // 不设 hour / minute：`DateComponents.date` 对缺省字段按 0 处理，结果就是那一天 0 点。
+        return comps.date ?? Date(timeIntervalSince1970: 0)
     }
 
     /// key = "<ecosystem.rawValue>|<package name 原样>"；value = 最新已知版本。
