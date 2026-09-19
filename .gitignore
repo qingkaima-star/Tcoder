@@ -18,3 +18,6 @@ Package.resolved
 
 # swiftc -typecheck 的临时产物目录（并行自查时生成，不该入库）
 .tc-typecheck/
+
+# 每工作流独立工作树（AGENTS.md §7），不入库
+.worktrees/

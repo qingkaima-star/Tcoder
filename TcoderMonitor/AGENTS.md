@@ -171,6 +171,52 @@ Tests/TcoderMonitorTests/Health*Tests.swift
 格式：追加二级小节 `## HH:MM <子代理名/职责>`，写清：做了什么、验证到哪一步
 （贴真实命令输出数字）、契约缺口、下一步。**空话不写。**
 
+## 7. 工作树规约（20:38 由用户定调，最高优先级，覆盖本文件其他并行约定）
+
+**每人一棵工作树，改完各自合入主线，然后清掉自己的工作树。**
+主工作树 `/Users/one/Documents/Tcoder` 从此**只作集成用**，任何负责人不得直接在主树里编辑。
+
+### 为什么必须这样
+
+1. **构建锁自然解除**。`swift build` 的 `.build` 不支持并发，此前所有人抢一把串行锁排队。
+   每个 worktree 有独立 `.build`，锁文件路径也独立
+   （`locked_build.sh` 用 `$PWD/.build/agents.lock`），于是**真并行编译**成为可能。
+2. **不再互相覆盖**。历史上发生过：旧 WS-A 会话未真正停止，与新会话抢写
+   `Services/Code/**`，导致总行数不升反降、`DuplicationEngine` 回到半成品状态。
+3. **取证才可信**。在主树里构建，拿到的二进制混着别人未提交的在途改动，
+   "交付二进制与 HEAD 一致"这句话就是假的。
+
+### 目录与命名
+
+```
+/Users/one/Documents/Tcoder/.worktrees/<工作流名>     # 已 gitignore
+分支 ws/<工作流名>，一律从 main 的某个明确 hash 切出
+```
+
+现有工作流：`a-code`、`b-git-deps`、`c-runtime`、`d-audit`、`e-release`、`f-manifest`。
+
+### 每人必须做的
+
+1. 进自己的 worktree 干活，**路径以外的一律不碰**（尤其不要 cd 回主树构建）。
+2. 在自己的分支上小步提交，commit message 前缀写自己的工作流名。
+3. 合入前自检：`./scripts/locked_build.sh build && ./scripts/locked_build.sh test` 双绿。
+4. **合入主线由总工执行**（别人不要自己 merge/push main），完成后
+   `git worktree remove` 清掉自己的工作树与分支。
+
+### 仍然共享的状态（worktree 解决不了，必须靠约定）
+
+- **`~/Library/Application Support/TcoderMonitor` 与 `defaults` 域 `com.tcoder.monitor`
+  是全机唯一的**：多个 worktree 的 App 实例同时跑，会共用项目列表与报告，
+  退出时还会互相回写覆盖。→ **同一时刻只允许一个人启动 App 做验证**，
+  跑 UI 取证前先 `pgrep -x TcoderMonitor` 确认为 0。
+- 真实仓库（`/opt/homebrew` 等）与 `~/Library/Logs` 是只读共享，没问题。
+
+### 迁移期（现在）
+
+WS-A/WS-B/WS-C 此刻在**主树里有未提交在途改动**。不允许直接切 worktree 把他们的工作丢了。
+过渡办法（总工执行）：先让三人各自在主树把当前成果 commit（双绿为前提），
+总工随后从该 main 切出各自 worktree，**下一轮起所有人只能在 worktree 里干活**。
+
 ## 6. 完成标准（Definition of Done）
 
 1. `./scripts/locked_build.sh build` 通过（贴输出）。
