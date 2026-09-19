@@ -56,7 +56,9 @@ struct ContributorsView: View {
                 label: "贡献者",
                 value: NumberFormat.grouped(authors.count),
                 unit: "人",
-                caption: "活跃 \(NumberFormat.grouped(git.activeAuthorCount)) 人 · 共 \(NumberFormat.grouped(git.totalCommits)) 次提交",
+                caption: git.historyTruncated
+                    ? "活跃 \(NumberFormat.grouped(git.activeAuthorCount)) 人 · 已分析 \(NumberFormat.grouped(git.commitsAnalyzed)) / \(NumberFormat.grouped(git.totalCommits)) 次提交"
+                    : "活跃 \(NumberFormat.grouped(git.activeAuthorCount)) 人 · 共 \(NumberFormat.grouped(git.totalCommits)) 次提交",
                 tint: Theme.accent,
                 systemImage: "person.2.fill"
             )
@@ -64,7 +66,7 @@ struct ContributorsView: View {
                 label: "头部作者占比",
                 value: topShare(git).map { NumberFormat.percent($0, precision: 0) } ?? "—",
                 caption: git.topAuthor.map { "\(displayName($0)) · \(NumberFormat.grouped($0.commits)) 次" } ?? "无作者数据",
-                tint: Theme.color(for: git.busFactorRisk),
+                tint: Theme.color(for: gitBusFactorRisk(git)),
                 systemImage: "crown.fill"
             )
             MetricTile(
@@ -87,8 +89,9 @@ struct ContributorsView: View {
     }
 
     private func topShare(_ git: GitInsights) -> Double? {
-        guard let top = git.topAuthor, git.totalCommits > 0 else { return nil }
-        return Double(top.commits) / Double(git.totalCommits)
+        let base = gitShareBase(git)
+        guard let top = git.topAuthor, base > 0 else { return nil }
+        return Double(top.commits) / Double(base)
     }
 
     private func recentlyActive(_ authors: [AuthorStats]) -> [AuthorStats] {
@@ -117,7 +120,7 @@ struct ContributorsView: View {
         ) {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(shown.enumerated()), id: \.element.id) { index, author in
-                    ContributorRow(author: author, rank: index + 1, totalCommits: git.totalCommits)
+                    ContributorRow(author: author, rank: index + 1, totalCommits: gitShareBase(git))
                     if index < shown.count - 1 {
                         Divider().opacity(0.4)
                     }
@@ -137,7 +140,7 @@ struct ContributorsView: View {
 
     private func concentrationCard(_ git: GitInsights, authors: [AuthorStats]) -> some View {
         let top = Array(authors.prefix(3))
-        let total = max(1, git.totalCommits)
+        let total = max(1, gitShareBase(git))
         let topCommits = top.reduce(0) { $0 + $1.commits }
         return SectionCard(
             "贡献集中度",
@@ -161,7 +164,7 @@ struct ContributorsView: View {
                 }
                 if git.activeAuthorCount <= 1 {
                     BannerRow(text: "全部提交仅来自 1 位贡献者，任何离队都会让项目停摆。", style: .error)
-                } else if git.busFactorRisk >= .high {
+                } else if gitBusFactorRisk(git) >= .high {
                     BannerRow(
                         text: "其余 \(NumberFormat.grouped(git.activeAuthorCount - 1)) 位作者合计不足 \(NumberFormat.percent(1 - Double(top.first?.commits ?? 0) / Double(total), precision: 0))，缺少可接手的第二人。",
                         style: .warning
@@ -181,7 +184,7 @@ private struct BusFactorBanner: View {
         BannerRow(text: message, style: style)
     }
 
-    private var risk: RiskLevel { git.busFactorRisk }
+    private var risk: RiskLevel { gitBusFactorRisk(git) }
 
     private var style: BannerStyle {
         switch risk {
@@ -192,10 +195,10 @@ private struct BusFactorBanner: View {
     }
 
     private var message: String {
-        guard let top = git.topAuthor, git.totalCommits > 0 else {
+        guard let top = git.topAuthor, gitShareBase(git) > 0 else {
             return "尚无提交作者统计，无法评估 Bus Factor。"
         }
-        let share = NumberFormat.percent(Double(top.commits) / Double(git.totalCommits), precision: 0)
+        let share = NumberFormat.percent(Double(top.commits) / Double(gitShareBase(git)), precision: 0)
         let name = displayName(top)
         switch risk {
         case .critical:
@@ -414,4 +417,24 @@ private func contributorColor(for email: String) -> Color {
 private func displayName(_ author: AuthorStats) -> String {
     if !author.name.isEmpty { return author.name }
     return author.email.isEmpty ? "未知作者" : author.email
+}
+
+/// 占比的分母必须和分子同口径：`totalCommits` 是**含 merge 的仓库真值**，而
+/// `AuthorStats.commits` 只数到分析窗口里的非合并提交。历史被截断时两者相除会把
+/// 人均占比压到失真（50,666 条的仓里，窗口内的头号作者会被显示成 6%），
+/// 所以一律退回 `commitsAnalyzed`；旧数据没有该字段时（=0）才用 totalCommits 兜底。
+private func gitShareBase(_ git: GitInsights) -> Int {
+    git.commitsAnalyzed > 0 ? git.commitsAnalyzed : git.totalCommits
+}
+
+/// 与 `GitInsights.busFactorRisk` 同一套阈值，但分母换成窗口口径 —— 模型是冻结的，
+/// 它用 totalCommits 做分母，截断时会系统性低估集中度风险。
+private func gitBusFactorRisk(_ git: GitInsights) -> RiskLevel {
+    let base = gitShareBase(git)
+    guard let top = git.topAuthor, base > 0 else { return .none }
+    let share = Double(top.commits) / Double(base)
+    if git.activeAuthorCount <= 1 && base > 50 { return .critical }
+    if share > 0.7 { return .high }
+    if share > 0.5 { return .medium }
+    return .low
 }
