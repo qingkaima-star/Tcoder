@@ -130,7 +130,6 @@ struct HealthComponentTable: View {
     let health: HealthScore
     let report: ProjectReport?
 
-    private static let barHeight: CGFloat = 4
 
     private var rows: [ScoreRow] { HealthBreakdown.rows(for: health) }
     private var sum: Double { HealthBreakdown.sumOfContributions(rows) }
@@ -182,7 +181,7 @@ struct HealthComponentTable: View {
             HStack(spacing: Theme.Spacing.xxs) {
                 MiniBarGauge(fraction: Double(row.score) / 100,
                              tint: role.graphicColor,
-                             height: Self.barHeight)
+                             height: BarThickness.component)
                     .frame(width: DataColumn.scoreGauge)
                 LiveNumber(String(row.score), tier: Theme.Typo.monoSmall,
                            tint: role.textColor)

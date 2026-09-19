@@ -35,6 +35,13 @@ enum DataColumn {
     static let sortPicker: CGFloat = 208
 }
 
+/// 量表厚度。《40 WS-H》§9 只给两档：分量表 4、tile 内 5–6，
+/// 页面不再各写一个 height 魔法数（占位空行也用同一档，保证等高）。
+enum BarThickness {
+    static let tile: CGFloat = 5
+    static let component: CGFloat = 4
+}
+
 /// 会实时变化的数字。等宽 + 右对齐 + 定宽三件事一起做，缺证据时强制中性色。
 struct LiveNumber: View {
     var text: String

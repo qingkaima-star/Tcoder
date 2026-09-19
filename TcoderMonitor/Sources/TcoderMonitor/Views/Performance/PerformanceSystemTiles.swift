@@ -132,9 +132,9 @@ struct PerformanceSystemTiles: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             tile
             if let fraction {
-                MiniBarGauge(fraction: fraction, tint: graphic, height: 5)
+                MiniBarGauge(fraction: fraction, tint: graphic, height: BarThickness.tile)
             } else {
-                Color.clear.frame(height: 5)
+                Color.clear.frame(height: BarThickness.tile)
             }
         }
     }

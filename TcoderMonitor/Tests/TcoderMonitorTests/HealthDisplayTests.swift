@@ -103,13 +103,10 @@ final class HealthDisplayTests: XCTestCase {
     }
 
     // MARK: - 未评分不给 0 分环
-
-    func testUnscoredRingShowsPlaceholderAndNotZero() {
-        XCTAssertEqual(HealthScoreRing.scoreText(nil), "--")
-        XCTAssertEqual(HealthScoreRing.scoreText(0), "0")
-        XCTAssertTrue(HealthScoreRing.forcesNeutral(for: nil))
-        XCTAssertFalse(HealthScoreRing.forcesNeutral(for: 0), "真 0 分是结论，与没评分是两件事")
-    }
+    //
+    // 环本体已并入 WS-K 的共享 `HealthRing`（Views/Shell/DashboardHero.swift），
+    // 那边由 `ShellDesignTests` 盯空心圈；这里只钉本页依赖的**取色决策**，
+    // 避免同一个断言在两处各写一份。
 
     func testUnscoredColorIsNeutralNotDanger() {
         XCTAssertEqual(Theme.Semantic.role(forScore: nil).name, "neutral")

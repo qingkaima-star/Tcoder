@@ -25,7 +25,6 @@ struct LogsAffectedFilesCard: View {
     let logs: LogSummary?
 
     private static let itemLimit = 10
-    private static let barHeight: CGFloat = 5
 
     var body: some View {
         let ranked = sorted
@@ -50,7 +49,7 @@ struct LogsAffectedFilesCard: View {
                                 .help(item.key)
                             MiniBarGauge(fraction: Double(item.value) / Double(peak),
                                          tint: Theme.Semantic.danger.graphicColor,
-                                         height: Self.barHeight)
+                                         height: BarThickness.tile)
                                 .frame(maxWidth: .infinity)
                                 .gridColumnAlignment(.trailing)
                             LiveNumber("\(NumberFormat.grouped(item.value)) 次",

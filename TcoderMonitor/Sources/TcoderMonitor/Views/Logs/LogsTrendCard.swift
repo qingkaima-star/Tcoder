@@ -67,6 +67,8 @@ struct LogTrendChart: View {
 
     /// 柱帽圆角属图表几何，不是排版圆角（WS-I §9 把图表几何列为例外）。
     private static let barRadius: CGFloat = 1.5
+    /// 警告折线用虚线：与堆叠柱分开靠的是线型，不是再多加一种颜色。
+    private static let warningLineDash: [CGFloat] = [3, 2]
 
     /// 计数轴：步长取整且至少 1，避免出现「0.5 条」这种刻度
     /// （通用 `axis(peak:)` 的台阶是为字节速率设计的，峰值很小时会给到 0.5）。
@@ -93,7 +95,7 @@ struct LogTrendChart: View {
             LineMark(x: .value("日期", bucket.date, unit: .day),
                      y: .value("条数", bucket.warnings))
                 .foregroundStyle(Theme.Semantic.warning.graphicColor)
-                .lineStyle(StrokeStyle(lineWidth: Theme.Stroke.chartLine, dash: [3, 2]))
+                .lineStyle(StrokeStyle(lineWidth: Theme.Stroke.chartLine, dash: Self.warningLineDash))
                 .interpolationMethod(.monotone)
         }
         .chartForegroundStyleScale(domain: Self.stack.map(\.name),

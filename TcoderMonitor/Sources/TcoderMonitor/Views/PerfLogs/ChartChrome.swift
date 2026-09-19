@@ -305,6 +305,9 @@ extension ChartScale {
 
 /// 图例 + 当前读数：色块、名称、**分子分母口径**、读数四件事都在一行。
 struct SeriesLegend: View {
+    /// 图例色点直径。属图表几何（WS-I §9 列为例外），跟着 10pt 文字量出来的一格。
+    private static let dotDiameter: CGFloat = 6
+
     var name: String
     var series: Int
     /// 分子 / 分母的交代，例如「已用 12.4 GB / 总量 32 GB」。
@@ -315,7 +318,7 @@ struct SeriesLegend: View {
         HStack(spacing: Theme.Spacing.xxs) {
             Circle()
                 .fill(ChartSeries.color(series))
-                .frame(width: 6, height: 6)
+                .frame(width: Self.dotDiameter, height: Self.dotDiameter)
             Text(name)
                 .font(Theme.Typo.microLabel.font)
                 .foregroundStyle(.secondary)

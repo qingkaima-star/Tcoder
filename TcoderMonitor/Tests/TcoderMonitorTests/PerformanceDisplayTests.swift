@@ -232,13 +232,17 @@ final class PerformanceDisplayTests: XCTestCase {
     // MARK: - 计数轴与百分比轴（总工截图复核问题 1 / 3）
 
     func testCountAxisNeverPrintsFractionalCounts() {
-        // 峰值 1 条时通用台阶会给 0.5 步长 → 标签打成 0,0,1,1,2,2。计数轴必须锁到整数。
+        // 单日 1 条最容易给到 0.5 步长（通用台阶是给字节速率设计的），标签就会打成 0/0/1/1。
         let axis = ChartScale.countAxis(peak: 1)
         XCTAssertEqual(axis.step, 1)
         XCTAssertTrue(axis.ticks.allSatisfy { $0 == $0.rounded() }, "\(axis.ticks)")
-        XCTAssertEqual(ChartScale.countAxis(peak: 0).ticks, ChartScale.countAxis(peak: 0).ticks)
-        XCTAssertTrue(ChartScale.countAxis(peak: 0).ticks.allSatisfy { $0 == $0.rounded() })
-        XCTAssertTrue(ChartScale.countAxis(peak: 250).ticks.allSatisfy { $0 == $0.rounded() })
+        for peak in [0, 1, 3, 7, 250, 10_000] {
+            let made = ChartScale.countAxis(peak: Double(peak))
+            XCTAssertGreaterThanOrEqual(made.step, 1, "峰值 \(peak) 的步长小于 1")
+            XCTAssertTrue(made.ticks.allSatisfy { $0 == $0.rounded() },
+                          "峰值 \(peak) 出现小数刻度 \(made.ticks)")
+            XCTAssertGreaterThan(made.maxValue, 0, "峰值 \(peak) 的轴没有可画高度")
+        }
     }
 
     func testPercentAxisStaysAtZeroOriginUntilTheCurveIsPinnedHigh() {
