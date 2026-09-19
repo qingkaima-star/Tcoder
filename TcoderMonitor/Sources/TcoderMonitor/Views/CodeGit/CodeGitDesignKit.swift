@@ -67,6 +67,10 @@ enum CodeGitSymbol {
     static let recency = "clock.arrow.circlepath"
     static let marker = "flag"
     static let suggestion = "lightbulb"
+    static let parameters = "tray.full"
+    static let longFunction = "arrow.up.left.and.arrow.down.right"
+    static let comments = "text.bubble"
+    static let outdated = "arrow.down.circle"
 
     /// 装饰性图标：尺寸与字重跟随它所属的文字语境（[HIG-S]）。
     static func decorated(_ symbol: String, role: IconRole = .badge) -> some View {
@@ -151,13 +155,13 @@ enum DataAbsence: Equatable {
         }
     }
 
-    /// 没证据时强制中性色，不接受调用方给的倾向色——「没查」本身不该带倾向。
-    func tint(_ role: Theme.SemanticRole) -> Color {
-        switch self {
-        case .notAnalysed: return Theme.Semantic.neutral.textColor
-        default: return role.textColor
-        }
+    /// 没证据时强制退回中性角色，不接受调用方给的倾向色——「没查」本身不该带倾向。
+    /// 返回角色而不是 `Color`：动态色无法在单测里比较，角色名可以。
+    func effectiveRole(_ role: Theme.SemanticRole) -> Theme.SemanticRole {
+        self == .notAnalysed ? Theme.Semantic.neutral : role
     }
+
+    func tint(_ role: Theme.SemanticRole) -> Color { effectiveRole(role).textColor }
 
     /// 是否允许给出结论性措辞（绿色对勾、「无风险」之类）。
     var permitsConclusion: Bool { self != .notAnalysed }

@@ -50,10 +50,12 @@ struct GitRepositorySourceSection: View {
                     Spacer(minLength: Theme.Spacing.xs)
                     Text(Self.discoveryCaption(git))
                         .font(Theme.Typo.microLabel.font)
+                        .monospacedDigit()
                         .foregroundStyle(.tertiary)
                 }
                 Text(Self.discoveryDetail(git))
                     .font(Theme.Typo.microLabel.font)
+                    .monospacedDigit()
                     .foregroundStyle(.tertiary)
             }
         }
@@ -219,6 +221,7 @@ struct GitActivitySection: View {
                 GitActivityHeatmap(hourCounts: git.activityByHour, weekdayCounts: git.activityByWeekday)
                 Text(Self.busiestCaption(git))
                     .font(Theme.Typo.microLabel.font)
+                    .monospacedDigit()
                     .foregroundStyle(.tertiary)
             }
         }
