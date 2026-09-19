@@ -10,7 +10,7 @@ struct LogsErrorClustersCard: View {
             if let clusters, !clusters.isEmpty {
                 VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                     ForEach(Array(clusters.enumerated()), id: \.element.id) { index, cluster in
-                        ErrorClusterRow(cluster: cluster)
+                        LogErrorClusterRow(cluster: cluster)
                         if index < clusters.count - 1 { Divider() }
                     }
                 }
@@ -48,7 +48,7 @@ struct LogsErrorClustersCard: View {
 }
 
 /// 单条错误签名：签名 + 原文 + 首次 / 最近 + 可展开的样例与堆栈。
-struct ErrorClusterRow: View {
+struct LogErrorClusterRow: View {
     let cluster: ErrorCluster
 
     var body: some View {
