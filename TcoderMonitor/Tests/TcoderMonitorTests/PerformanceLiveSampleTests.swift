@@ -29,9 +29,11 @@ final class PerformanceLiveSampleTests: XCTestCase {
         print("内存已用 = \(ByteFormat.string(snapshot.memoryUsedBytes, precision: 2))"
             + " / \(ByteFormat.string(snapshot.memoryTotalBytes, precision: 0))"
             + " = \(NumberFormat.percent(snapshot.memoryFraction, precision: 2)) · 压力 \(snapshot.memoryPressure.rawValue)")
-        print("  vm 页: active=\(first.vm.active) inactive=\(first.vm.inactive) wired=\(first.vm.wired)"
-            + " compressor=\(first.vm.compressed) free=\(first.vm.free)"
-            + " speculative=\(first.vm.speculative) purgeable=\(first.vm.purgeable) page=\(first.vm.pageSize)")
+        print("  vm 页: " + (first.vm.map {
+            "active=\($0.active) inactive=\($0.inactive) wired=\($0.wired)"
+                + " compressor=\($0.compressed) free=\($0.free)"
+                + " speculative=\($0.speculative) purgeable=\($0.purgeable) page=\($0.pageSize)"
+        } ?? "读数缺失（host_statistics64 未成功，内存三项按缺证据处理）"))
         print("磁盘 = 读 \(ByteFormat.rate(snapshot.diskReadBytesPerSecond))"
             + " · 写 \(ByteFormat.rate(snapshot.diskWriteBytesPerSecond))")
         print("  累计 read=\(first.diskReadBytes) write=\(first.diskWriteBytes) → \(second.diskReadBytes)/\(second.diskWriteBytes)")
