@@ -512,14 +512,36 @@ final class SelfScanDogfoodTests: XCTestCase {
                        "全仓均复杂度与独立普查对不上（测得 "
                      + "\(code.averageCyclomaticComplexity ?? -1) vs 普查 \(census.repoMean)）")
 
-        // —— 已翻正 2（WS-C）：复杂度维度不再拿 top-20 热点均值冒充全仓水位。
+        // —— 已翻正 2（WS-C + WS-A）：复杂度维度不再拿 top-20 热点均值冒充全仓水位。
+        // 校法刻意**不碰数字字面量**：detail 把 4.098 写成 "4" 还是 "4.1" 是格式化选择，
+        // 拿字符串去比小位数等于用测试绑架实现格式（上一轮就是这么红的：断言 "4.0"，
+        // 而实现如实给出 "4"）。改成三层，各管一件事。
         let complexity = try XCTUnwrap(scan.health.components.first { $0.name.contains("复杂度") },
                                        "复杂度维度必须存在")
-        let repoMeanLabel = String(format: "%.1f", census.repoMean)
-        XCTAssertTrue(complexity.detail.contains("平均圈复杂度 \(repoMeanLabel)"),
-                      "复杂度维度没引用全仓均值 \(repoMeanLabel)，当前 detail：\(complexity.detail)")
-        XCTAssertFalse(complexity.detail.contains(String(format: "%.1f", census.hotspotMean)),
-                       "复杂度维度又退回用 top-20 热点样本均值（\(census.hotspotMean)）冒充全仓水位了")
+
+        // ① 校**口径声明**：均值必须自称全仓，且不得再出现"热点样本"。
+        XCTAssertTrue(complexity.detail.contains("全仓"),
+                      "复杂度维度没声明均值口径是全仓，当前 detail：\(complexity.detail)")
+        XCTAssertFalse(complexity.detail.contains("热点样本"),
+                       "复杂度维度又拿 top-20 热点样本均值冒充全仓水位了")
+
+        // ② 要校数值就**先解析再比数**，容差跟着它自己的显示精度走：
+        //    只写整数位就允许 ±0.5，写了一位小数就收紧到 ±0.05。
+        let reported = try XCTUnwrap(reportedRepoMean(in: complexity.detail),
+                                     "detail 里解析不出『平均圈复杂度 <数字>』，数值校验形同虚设")
+        let tolerance = reported.text.contains(".") ? 0.05 : 0.5
+        XCTAssertEqual(reported.value, census.repoMean, accuracy: tolerance,
+                       "detail 报的均值 \(reported.text) 与独立普查 "
+                     + "\(String(format: "%.3f", census.repoMean)) 对不上")
+        XCTAssertLessThan(abs(reported.value - census.repoMean),
+                          abs(reported.value - census.hotspotMean),
+                          "detail 里的均值离热点样本均值 \(census.hotspotMean) 反而更近，疑似又用错口径")
+
+        // ③ **分母也必须上屏**：均值为 4 的可信度完全取决于"4 是多少个函数的 4"，
+        //    不报样本量的均值没有意义。
+        XCTAssertTrue(complexity.detail.contains("\(census.functionCount)"),
+                      "detail 没报出分母（独立普查 \(census.functionCount) 个函数）："
+                    + "不报样本量的均值没有意义。当前 detail：\(complexity.detail)")
 
         // —— 仍在身（产品口径）：detail 里"N 个函数 CC≥16"数的还是被 prefix(20)
         //    截断的榜单条数，而真实普查见下面 print。修好后把这条翻正为
@@ -616,6 +638,19 @@ final class SelfScanDogfoodTests: XCTestCase {
         // 是按经典 McCabe 标定的，而计数口径把可选值语法糖也记成了判定。
         XCTAssertEqual(cc("failableCast"), 4,
                        "as?/?. 与 ?? 各算一次判定。若你收紧了口径，请把本条与 48 号笔记一起更新")
+    }
+
+    /// 从评分 detail 里解析"平均圈复杂度 X"的那个数，**连带它写出来的原文**——
+    /// 原文里有没有小数点决定我们允许多大的比对容差。
+    /// 这样实现方爱保留几位就保留几位，测试只管"这个数是不是全仓均值"。
+    private func reportedRepoMean(in detail: String) -> (value: Double, text: String)? {
+        let pattern = "平均圈复杂度\\s*([0-9]+(?:\\.[0-9]+)?)"
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: detail, range: NSRange(detail.startIndex..., in: detail)),
+              match.numberOfRanges >= 2,
+              let captured = Range(match.range(at: 1), in: detail),
+              let value = Double(detail[captured]) else { return nil }
+        return (value, String(detail[captured]))
     }
 
     // MARK: - git 独立基线（只读命令）
