@@ -3,23 +3,34 @@ import XCTest
 /// WS-V #29：文档代码引用的有效性棘轮。
 ///
 /// 要补的洞：全仓此前**没有任何一条测试读过** `README.md` 或 `docs/使用说明.md`。
-/// WS-G 一次删掉 988 行基座、WS-K/L/M 重样又删掉一批 Views 类型之后，文档里的
-/// `SectionNav.DetailSection` 这类锚点已经指到不存在的符号上，而**没有一条测试会红**。
-/// 那是侥幸，不是被守住。
+/// WS-G 一次删掉 988 行基座、WS-K/L/M 重样又删掉一批 Views 类型之后，文档里的锚点
+/// 可以指到不存在的符号上而**没有一条测试会红**。那是侥幸，不是被守住。
+///
+/// 文档的锚点约定（总工实测指出，我第一版判错了，教训记在这里）：
+/// 锚点写的是 **`文件名.类型.成员`**，例如 `ContributorRows.ContributorRow.body`
+/// 指 `Sources/TcoderMonitor/Views/Git/ContributorRows.swift` 里 `struct ContributorRow`
+/// 的 `body`。**首段是文件名，不是标识符**——`ContributorRows` 作为类型名根本不存在。
+/// 我最初按「每一段都必须是 `Sources/**` 里的标识符`」判，于是 33 条活锚点被登记成
+/// 「已知失效」。后果比清单长严重得多：进了基线就永远不红，真死锚混进去也会被
+/// 当「已知」吞掉，而且基线永远不会缩小，因为文档本来就没写错。
+/// 现在：首段若等于某个 `Sources/**` 的**文件名去后缀**，先吃掉这一段再逐段核验；
+/// 豁免掉的文件名与条数**全部打印**，并有守恒断言兜着，不许豁免变成第二个黑洞。
 ///
 /// 四条设计约束，各自对应一个真踩过的失败模式：
 /// 1. **分母必须被断言**。同类守卫曾因 `File.exists(相对路径)` 对仓库根判假，
-///    把 91 条里的 85 条静默 skip 掉，于是「零失效」永远绿。所以这里不仅断言总数 > 0，
-///    还按类别断言（符号锚点 > 0 且文件行号锚点 > 0），并断言两份文档都真被读到且非空。
-/// 2. **尺子自己也要被测**：喂合成死引用必须判红，喂合成活引用必须判绿——
-///    单向元测试会把「逢报必红」也当成守卫生效。
-/// 3. **不许用 XCTSkip 蒙**：文档读不到/为空一律 `XCTFail`，skip 数断言为 0。
-/// 4. **只减不增**：见 `knownDeadAnchors`。
+///    把 91 条里的 85 条静默 skip 掉，于是「零失效」永远绿。所以除了总数 > 0，
+///    还按类别断言（符号类 > 0 且文件行号类 > 0）、文档读到数 == 登记数、skip == 0，
+///    并加一条**守恒断言**：符号锚点必须逐条落到「判活(文件名作用域) / 判活(纯符号) /
+///    判死」三个桶之一，三桶之和 == 符号总数，少一条就是被静默吞了。
+/// 2. **尺子自己也要被测，且两个方向都要**：合成死引用必须判红，合成活引用必须判绿；
+///    文件名作用域这条新规则更要双向钉住（豁免后仍缺成员的，必须照样判红）。
+/// 3. **不许用 XCTSkip 蒙**：文档读不到 / 为空一律 `XCTFail`。
+/// 4. **只减不增**：`knownDeadAnchors` 与实测失效集合双向相等；当前必须是空集。
 ///
-/// 判定口径与它的限度（不假装做到了没做到的事）：`Type.member` 的**每一段**都必须作为
-/// 完整单词出现在 `Sources/**` 的标识符集合里。这能抓到「类型被删/改名」和「成员被删/改名」，
-/// 抓不到「成员被挪到另一个类型上」（`X.body` 里 `body` 在别处出现就算命中）。
-/// 收紧到「同一类型作用域内」需要真的解析 Swift 语法，那是另一个量级的活儿。
+/// 剩余限度（不假装做到了没做到的事）：判定仍是「逐段作为完整单词出现」，
+/// 抓得到类型 / 成员被删或改名，抓不到「成员被挪到另一个类型 / 文件上」
+/// （`X.body` 里 `body` 在别处出现即算命中）；也不核验首段文件名与后段类型
+/// 真的同处一个文件。收紧到作用域内需要解析 Swift 语法，那是另一个量级的活儿。
 final class DocReferenceRatchetTests: XCTestCase {
 
     /// 仓库根：本文件 → TcoderMonitorTests → Tests → TcoderMonitor → 工作树根（README.md 与 docs/ 在此）。
@@ -34,7 +45,7 @@ final class DocReferenceRatchetTests: XCTestCase {
     /// 我们自己的文件类型：这类锚点必须能在仓库里找到实体文件。
     private static let repoFileExtensions: Set<String> = ["swift", "md", "sh"]
 
-    /// 文档里作为**用户项目示例**出现的清单/报告文件名（package.json、pom.xml…）。
+    /// 文档里作为**用户项目示例**出现的清单 / 报告文件名（package.json、pom.xml…）。
     /// 它们指的是别人仓库里的文件，按扩展名排除；排除条数会被打印，
     /// 且断言「被排除的扩展名必须都在这张表里」，不许悄悄扩大豁免面。
     private static let exampleManifestExtensions: Set<String> = [
@@ -47,49 +58,18 @@ final class DocReferenceRatchetTests: XCTestCase {
         "dist", "build", "out",
     ]
 
-    /// 已知失效基线（2026-09-20 实测：WS-K/L/M 重样 + WS-G 删基座的后果）。
-    /// 这是**只减不增**的棘轮：新死引用立刻变红；修好一条却忘了从基线删掉，也变红。
-    /// 两个方向都钉，基线就不可能退化成藏污纳垢的白名单。
-    private static let knownDeadAnchors: Set<String> = [
-        "CodeGitTable.DataColumns.complexityFunctions",
-        "CodeRiskRows.CodeRiskAnalysis.suggestions",
-        "ContributorRows.ContributorAnalysis.busFactorRisk",
-        "ContributorRows.ContributorAnalysis.displayName",
-        "ContributorRows.ContributorAnalysis.sorted",
-        "ContributorRows.ContributorRow.body",
-        "DashboardHero.HealthHeroCard.body",
-        "DashboardHero.HealthRing",
-        "DependencyVerdictRows.DependencyRowStatus.text",
-        "DependencyVerdictRows.DependencySafetyVerdict",
-        "DependencyVerdictRows.DependencySafetyVerdict.summaryCaption",
-        "DependencyVerdictRows.SafetyVerdictBadge.body",
-        "GitInsightsSections.GitActivitySection.body",
-        "GitInsightsSections.GitCommitScopeSection.body",
-        "GitInsightsSections.GitCommitScopeSection.message",
-        "GitInsightsSections.GitDataAbsence.emptyState",
-        "GitInsightsSections.GitRepositoryInfoSection.body",
-        "GitInsightsSections.GitRepositorySourceSection.discoveryDetail",
-        "HealthAdviceCards.HealthTrendCard.body",
-        "LiveReadings.memoryUsedBytes",
-        "LiveReadings.trustedMemoryPoints",
-        "LogsErrorClusters.LogErrorClusterRow.body",
-        "LogsErrorClusters.LogsErrorClustersCard.body",
-        "LogsFileTables.LogsAffectedFilesCard.body",
-        "PerformanceProcessGroups.PerformanceGroupCard.badgeText",
-        "PerformanceProcessGroups.PerformanceGroupCard.copy",
-        "PerformanceProcessGroups.PerformanceGroupCard.header",
-        "PerformanceProcessGroups.PerformanceProcessGroupsCard.body",
-        "PerformanceProcessTable.PerformanceProcessTableCard.body",
-        "PerformanceProcessTable.PerformanceProcessTableCard.coverageNote",
-        "PerformanceProcessTable.ProcessSortKey",
-        "PerformanceProcessTable.ProcessSortKey.title",
-        "SectionNav.DetailSection",
-    ]
+    /// 已知失效基线。**当前必须为空**：2026-09-20 按「文件名.类型.成员」口径重算后，
+    /// 原先误登记的 33 条全部判活，真死引用为 0。
+    /// 只有出现「确实失效、又暂时不该让全仓变红」的锚时才允许带**理由**放进来，
+    /// 而下面的双向相等断言保证它只能被删掉、不能被沿用。
+    private static let knownDeadAnchors: [String: String] = [:]
 
-    // MARK: - 解析规则（纯函数，元测试直接喂合成输入）
+    // MARK: - 被检索引
 
     private struct CodeIndex {
         var identifiers: Set<String> = []
+        /// `Sources/**` 里 Swift 文件名的去后缀形式——文档锚点的首段用它做作用域豁免。
+        var sourceFileStems: Set<String> = []
         /// 文件名 -> 行数（`wc -l` 口径：数换行符，末尾不成行的一段算一行）。
         var files: [String: Int] = [:]
     }
@@ -98,7 +78,20 @@ final class DocReferenceRatchetTests: XCTestCase {
         case symbol(segments: [String])
         case file(name: String, line: Int?)
         case example(ext: String)
+
+        var isSymbol: Bool {
+            if case .symbol = self { return true }
+            return false
+        }
     }
+
+    private struct Resolution {
+        var reason: String?
+        var usedFileScope: Bool
+        var droppedSegment: String?
+    }
+
+    // MARK: - 解析规则（纯函数，元测试直接喂合成输入）
 
     private func classify(_ token: String) -> Anchor {
         let halves = token.components(separatedBy: ":")
@@ -111,18 +104,30 @@ final class DocReferenceRatchetTests: XCTestCase {
         return .symbol(segments: parts)
     }
 
-    /// nil = 有效；非 nil = 失效原因。
-    private func resolve(_ anchor: Anchor, in index: CodeIndex) -> String? {
+    /// 符号锚点：首段若是 `Sources/**` 的文件名，按文档约定吃掉它，再逐段核验。
+    private func resolve(_ anchor: Anchor, in index: CodeIndex) -> Resolution {
         switch anchor {
         case .example:
-            return nil
+            return Resolution(reason: nil, usedFileScope: false, droppedSegment: nil)
         case let .symbol(segments):
-            let missing = segments.filter { !index.identifiers.contains($0) }
-            return missing.isEmpty ? nil : "Sources/** 里找不到 \(missing.joined(separator: "."))"
+            var checked = segments
+            var dropped: String?
+            if let head = segments.first, segments.count >= 2, index.sourceFileStems.contains(head) {
+                checked.removeFirst()
+                dropped = head
+            }
+            let missing = checked.filter { !index.identifiers.contains($0) }
+            let reason = missing.isEmpty ? nil : "Sources/** 里找不到 \(missing.joined(separator: "."))"
+            return Resolution(reason: reason, usedFileScope: dropped != nil, droppedSegment: dropped)
         case let .file(name, line):
-            guard let count = index.files[name] else { return "仓库里没有 \(name)" }
-            if let line, line > count { return "\(name) 只有 \(count) 行，引用了第 \(line) 行" }
-            return nil
+            guard let count = index.files[name] else {
+                return Resolution(reason: "仓库里没有 \(name)", usedFileScope: false, droppedSegment: nil)
+            }
+            if let line, line > count {
+                return Resolution(reason: "\(name) 只有 \(count) 行，引用了第 \(line) 行",
+                                  usedFileScope: false, droppedSegment: nil)
+            }
+            return Resolution(reason: nil, usedFileScope: false, droppedSegment: nil)
         }
     }
 
@@ -136,15 +141,11 @@ final class DocReferenceRatchetTests: XCTestCase {
             XCTFail("锚点正则构造失败，扫描器根本没在跑")
             return []
         }
-        return pattern.matches(in: text, range: fullRange(of: text)).map { text.slice($0.range(at: 1)) }
+        return pattern.matches(in: text, range: NSRange(location: 0, length: text.utf16.count))
+            .map { $0.range(at: 1).slice(in: text) }
     }
 
     // MARK: - 建索引与扫描
-
-    /// NSRegularExpression 要 UTF-16 区间；这个 SDK 不给 `matches(in:)` 的 range 默认值。
-    private func fullRange(of text: String) -> NSRange {
-        NSRange(location: 0, length: text.utf16.count)
-    }
 
     private func walk(under directory: URL, _ body: (URL) -> Void) {
         let fm = FileManager.default
@@ -167,11 +168,14 @@ final class DocReferenceRatchetTests: XCTestCase {
         walk(under: Self.repoRoot.appendingPathComponent("TcoderMonitor/Sources", isDirectory: true)) { url in
             guard url.pathExtension == "swift",
                   let text = try? String(contentsOf: url, encoding: .utf8) else { return }
-            for match in identifierPattern.matches(in: text, range: fullRange(of: text)) {
-                index.identifiers.insert(text.slice(match.range))
+            index.sourceFileStems.insert(url.deletingPathExtension().lastPathComponent)
+            let range = NSRange(location: 0, length: text.utf16.count)
+            for match in identifierPattern.matches(in: text, range: range) {
+                index.identifiers.insert(match.range.slice(in: text))
             }
         }
         XCTAssertFalse(index.identifiers.isEmpty, "Sources 一个标识符都没数到，索引坏了")
+        XCTAssertFalse(index.sourceFileStems.isEmpty, "Sources 一个文件名都没数到，作用域豁免会空转")
         walk(under: Self.repoRoot) { url in
             guard index.files[url.lastPathComponent] == nil,
                   let text = try? String(contentsOf: url, encoding: .utf8) else { return }
@@ -188,6 +192,9 @@ final class DocReferenceRatchetTests: XCTestCase {
         var fileCount = 0
         var exampleCount = 0
         var excludedExtensions = Set<String>()
+        var symbolFileScopedLive = 0
+        var symbolPlainLive = 0
+        var droppedSegments = Set<String>()
         var dead: [String: String] = [:]
     }
 
@@ -203,16 +210,25 @@ final class DocReferenceRatchetTests: XCTestCase {
             scan.docsRead += 1
             for token in tokens(in: text) {
                 let anchor = classify(token)
+                let resolution = resolve(anchor, in: index)
                 switch anchor {
                 case let .example(ext):
                     scan.exampleCount += 1
                     scan.excludedExtensions.insert(ext)
                 case .symbol:
                     scan.symbolCount += 1
+                    if resolution.reason == nil {
+                        if resolution.usedFileScope {
+                            scan.symbolFileScopedLive += 1
+                            scan.droppedSegments.insert(resolution.droppedSegment ?? "?")
+                        } else {
+                            scan.symbolPlainLive += 1
+                        }
+                    }
                 case .file:
                     scan.fileCount += 1
                 }
-                if let reason = resolve(anchor, in: index) { scan.dead[token] = reason }
+                if let reason = resolution.reason { scan.dead[token] = reason }
             }
         }
         return scan
@@ -220,7 +236,7 @@ final class DocReferenceRatchetTests: XCTestCase {
 
     // MARK: - 断言
 
-    /// 分母守卫：先证明尺子在量东西。这条不成立时，任何「零失效」的结论都没有意义。
+    /// 分母守卫：先证明尺子在量东西，再证明它没把量到的东西静默吞掉。
     func testScannerActuallyReadsDocsAndFindsAnchors() throws {
         let scan = scanDocs(with: try buildIndex())
         XCTAssertEqual(scan.unreadable, [], "有文档读不到却被当成「引用都有效」：\(scan.unreadable)")
@@ -229,114 +245,136 @@ final class DocReferenceRatchetTests: XCTestCase {
         XCTAssertGreaterThan(scan.fileCount, 0, "一个文件行号锚点都没扫到 = 同上")
         XCTAssertEqual(scan.excludedExtensions.subtracting(Self.exampleManifestExtensions), [],
                        "排除集里出现了没登记的扩展名，豁免面被悄悄扩大了")
+        XCTAssertGreaterThan(scan.symbolCount + scan.fileCount, 100,
+                             "在锚范围内的引用不到 100 条，不像这份文档的真实规模")
 
-        let total = scan.symbolCount + scan.fileCount
-        XCTAssertGreaterThan(total, 100, "在锚范围内的引用只有 \(total) 条，不像这份文档的真实规模")
-        print("【#29 分母】在锚引用 \(total) 条（符号 \(scan.symbolCount) / 文件行号 \(scan.fileCount)）"
-            + "，示例清单名排除 \(scan.exampleCount) 条，文档读到 \(scan.docsRead)/\(Self.docs.count) 份，skip 0")
+        // 守恒：每条符号锚点都必须落在三个桶之一，谁也不许凭空消失。
+        let deadSymbols = scan.dead.filter { classify($0.key).isSymbol }.count
+        XCTAssertEqual(scan.symbolCount, scan.symbolFileScopedLive + scan.symbolPlainLive + deadSymbols,
+                       """
+                       符号锚点不守恒（总 \(scan.symbolCount) ≠ 作用域判活 \(scan.symbolFileScopedLive)
+                       + 纯符号判活 \(scan.symbolPlainLive) + 判死 \(deadSymbols)），
+                       说明有锚点被静默吞掉——正是「91 条里跳过 85 条」那一族失效。
+                       """)
+        XCTAssertGreaterThan(scan.symbolFileScopedLive, 0,
+                             "文件名作用域这条路径一次都没走到，说明豁免逻辑没被执行、口径可能又漂了")
+
+        print("【#29 分母】在锚引用 \(scan.symbolCount + scan.fileCount) 条"
+            + "（符号 \(scan.symbolCount)：按文件名作用域判活 \(scan.symbolFileScopedLive)"
+            + " / 纯符号判活 \(scan.symbolPlainLive)）、文件行号 \(scan.fileCount) 条；"
+            + "示例清单名排除 \(scan.exampleCount) 条；文档读到 \(scan.docsRead)/\(Self.docs.count) 份，skip 0；"
+            + "豁免掉的文件名首段 \(scan.droppedSegments.count) 个："
+            + "\(scan.droppedSegments.sorted().joined(separator: ", "))")
     }
 
-    /// 棘轮本体：新增死引用变红；修掉了却忘了同步基线，也变红。
+    /// 棘轮本体：新增死引用变红；修掉了却忘了同步基线，也变红。基线当前必须是空集。
     func testNoNewDeadReferencesAndBaselineOnlyShrinks() throws {
         let scan = scanDocs(with: try buildIndex())
         let found = Set(scan.dead.keys)
 
-        let fresh = found.subtracting(Self.knownDeadAnchors).sorted()
+        XCTAssertTrue(Self.knownDeadAnchors.isEmpty,
+                      "基线又被塞进 \(Self.knownDeadAnchors.count) 条：\(Self.knownDeadAnchors.keys.sorted())。"
+                    + "按「文件名.类型.成员」口径重算后真死引用是 0；放条目前先证明它是真死的。")
+
+        let fresh = found.subtracting(Set(Self.knownDeadAnchors.keys)).sorted()
         XCTAssertTrue(fresh.isEmpty, """
-        文档里出现了基线之外的新死引用 \(fresh.count) 条：
+        文档里出现了基线之外的失效引用 \(fresh.count) 条：
         \(fresh.map { "  \($0) → \(scan.dead[$0] ?? "?")" }.joined(separator: "\n"))
+        报给对应流修文档，别塞回基线——第一版就是把 33 条活锚点塞进基线的。
         """)
 
-        let healed = Self.knownDeadAnchors.subtracting(found).sorted()
-        XCTAssertTrue(healed.isEmpty, """
-        基线里这 \(healed.count) 条已经不再失效，请从 knownDeadAnchors 删掉：\(healed)
-        留着不放等于给它发了一张永久免死牌——棘轮只许往紧里拧。
-        """)
+        let healed = Set(Self.knownDeadAnchors.keys).subtracting(found).sorted()
+        XCTAssertTrue(healed.isEmpty, "基线里这 \(healed.count) 条已不再失效，请删掉：\(healed)")
 
-        XCTAssertEqual(found, Self.knownDeadAnchors, "死引用集合与基线不逐条相等")
-        print("【#29 棘轮】新增失效 0 条；已知待修 \(found.count) 条，与基线 \(Self.knownDeadAnchors.count) 条逐条相等")
+        XCTAssertEqual(found, Set(Self.knownDeadAnchors.keys), "实测失效集合与基线不逐条相等")
+        print("【#29 棘轮】在锚 \(scan.symbolCount + scan.fileCount) 条 → 失效 \(found.count) 条，"
+            + "基线 \(Self.knownDeadAnchors.count) 条，逐条相等")
     }
 
-    /// 把已知失效连同原因打印出来，交给各流认领（不参与判定）。
-    func testKnownDeadAnchorsAreReportedWithReasons() throws {
+    /// 把每条失效连同原因打印出来，交各流认领；不参与判定。
+    func testDeadAnchorsAreReportedWithReasons() throws {
         let scan = scanDocs(with: try buildIndex())
         for token in scan.dead.keys.sorted() {
-            print("  【待修】\(token) —— \(scan.dead[token] ?? "")")
+            print("  【失效】\(token) —— \(scan.dead[token] ?? "")")
         }
-        if Self.knownDeadAnchors.isEmpty {
-            XCTAssertTrue(scan.dead.isEmpty, "基线已清空但仍有 \(scan.dead.count) 条死引用")
-        } else {
-            XCTAssertFalse(scan.dead.isEmpty, "基线非空却报零失效，说明扫描没跑到文档")
-        }
+        XCTAssertEqual(scan.dead.count, Self.knownDeadAnchors.count, "打印出的失效条数与基线条数不等")
     }
 
-    /// 端到端金丝雀：拿**真实的 Sources 索引**和**真实的正则**过一段合成文本，
-    /// 断言两条假锚点被判失效、一条真锚点（`LogsView.header`）被判有效。
-    /// 与上面那条元测试的分工：那条测纯函数，这条测「索引 + 正则 + 规则」整条链路，
-    /// 顺带证明索引不是空的（真锚点解得开）。改文档做注入式验证太脏，所以搬进合成文本。
-    func testEndToEndCanaryAgainstTheRealIndex() throws {
-        let index = try buildIndex()
-        let canary = """
-        合成行：死符号 `WsvCanaryDeadType.someMember`、没这个文件 `WsvCanaryFile.swift:999`、
-        行号越界 `Package.swift:99999`、真实锚点 `LogsView.header`。
-        """
-        let hits = tokens(in: canary)
-        XCTAssertEqual(Set(hits), ["WsvCanaryDeadType.someMember", "WsvCanaryFile.swift:999",
-                                   "Package.swift:99999", "LogsView.header"],
-                       "合成文本里的锚点没被全部扫到，正则或口径漂了")
-        let dead = hits.compactMap { token -> String? in
-            resolve(classify(token), in: index) != nil ? token : nil
-        }.sorted()
-        XCTAssertEqual(dead, ["Package.swift:99999", "WsvCanaryDeadType.someMember",
-                              "WsvCanaryFile.swift:999"],
-                       "金丝雀没有被全部判红，或把真实锚点误判成失效")
-    }
+    // MARK: - 元测试：尺子自己也要被测，两个方向都要
 
-    // MARK: - 元测试：尺子自己也要被测
-
-    /// 造一个只含 `RealType`/`realMember` 与 `Real.swift`(10 行) 的小世界：
-    /// 死引用必须全被抓出，活引用必须全被放过——两个方向都要，
-    /// 否则「逢报必红」的钝尺子也会自称在守护。
-    func testRulerDetectsDeadAndAcceptsLiveAnchors() throws {
+    /// 合成小世界：`ContributorRows.swift` 存在、里面有 `ContributorRow` 和 `body`，
+    /// 但 `ContributorRows` 作为**类型名**不存在——文档正是这么写的。
+    /// 三个方向一起钉：豁免首段后判活、豁免后仍缺成员判死、谁都不认识的判死。
+    func testRulerHandlesFileScopedAnchorsBothWays() throws {
         var index = CodeIndex()
-        index.identifiers = ["RealType", "realMember", "Another", "Gone"]
-        index.files = ["Real.swift": 10, "Guide.md": 3]
+        index.identifiers = ["ContributorRow", "body", "RealType", "realMember"]
+        index.sourceFileStems = ["ContributorRows", "Real"]
+        index.files = ["Real.swift": 10, "ContributorRows.swift": 120, "Guide.md": 3]
 
-        let deadSamples = [
-            "NonexistentTypeXYZ.someMember",
-            "RealType.removedMember",
-            "A.B.NotThere",
-            "Real.swift:99",
-            "Ghost.swift:1",
-        ]
-        for token in deadSamples {
-            XCTAssertEqual(tokens(in: "`\(token)`"), [token], "样例 \(token) 没被识别成锚点，尺子读不到它")
-            XCTAssertNotNil(resolve(classify(token), in: index), "死样例 \(token) 被判成有效，尺子钝了")
+        // ① 文件名作用域：首段不是类型名，豁免后必须判活（第一版就栽在这里，误登记 33 条）。
+        let fileScoped = "ContributorRows.ContributorRow.body"
+        XCTAssertNil(resolve(classify(fileScoped), in: index).reason,
+                     "活锚点 \(fileScoped) 被判死——第一版的口径错就在这里")
+        XCTAssertTrue(resolve(classify(fileScoped), in: index).usedFileScope,
+                      "首段 ContributorRows 应当被当作文件名吃掉，并记录这次豁免")
+
+        // ② 豁免不是免死金牌：文件在、里面的成员没了，照样判死。
+        XCTAssertNotNil(resolve(classify("ContributorRows.NotARealType.member"), in: index).reason,
+                        "豁免首段之后必须继续核验剩下的段；这里判活等于把豁免改成第二个黑洞")
+
+        // ③ 首段既不是文件名也不是标识符 -> 判死。
+        for dead in ["GhostFile.NotARealType.member", "NonexistentTypeXYZ.someMember",
+                     "RealType.removedMember", "Real.swift:99", "Ghost.swift:1", "A.B.NotThere"] {
+            XCTAssertNotNil(resolve(classify(dead), in: index).reason, "死样例 \(dead) 被判成有效，尺子钝了")
         }
 
-        for token in ["RealType.realMember", "Real.swift:10", "Real.swift", "Guide.md:3"] {
-            XCTAssertNil(resolve(classify(token), in: index), "活样例 \(token) 被判成失效，尺子在乱咬")
+        // ④ 活样例必须放过，否则「逢报必红」的钝尺子也会自称在守护。
+        for live in ["RealType.realMember", "Real.swift:10", "Real.swift", "Guide.md:3",
+                     "ContributorRows.ContributorRow.body"] {
+            XCTAssertNil(resolve(classify(live), in: index).reason, "活样例 \(live) 被判成失效，尺子在乱咬")
         }
 
-        // 行号边界：等于末行算有效，多一行算失效（不许恒真也不许恒假）。
-        XCTAssertNil(resolve(classify("Real.swift:10"), in: index))
-        XCTAssertEqual(resolve(classify("Real.swift:11"), in: index),
+        // ⑤ 行号边界：末行有效、多一行失效（不许恒真，也不许恒假）。
+        XCTAssertNil(resolve(classify("Real.swift:10"), in: index).reason)
+        XCTAssertEqual(resolve(classify("Real.swift:11"), in: index).reason,
                        "Real.swift 只有 10 行，引用了第 11 行")
-        // 示例清单名走 example 分支：既不算在锚范围，也不该被判失效。
+
+        // ⑥ 分类本身也要对：示例清单名走 example，普通点号串走 symbol。
         if case .example = classify("package.json") {} else {
             XCTFail("package.json 应按示例清单名排除，而不是当成本仓文件引用")
         }
         if case .symbol = classify("LogsView.header") {} else {
             XCTFail("LogsView.header 应判为符号锚点")
         }
+        XCTAssertEqual(tokens(in: "`\(fileScoped)`"), [fileScoped],
+                       "样例没被正则扫出来的话，上面所有判定都是空谈")
+    }
+
+    /// 端到端金丝雀：真实索引 + 真实正则，过一段合成文本，双向都要对。
+    func testEndToEndCanaryAgainstTheRealIndex() throws {
+        let index = try buildIndex()
+        let canary = """
+        合成行：真实文件名作用域 `ContributorRows.ContributorRow.body`、真实纯符号 `LogsView.header`、
+        假符号 `WsvCanaryDeadType.someMember`、假文件 `WsvCanaryFile.swift:999`、
+        行号越界 `Package.swift:99999`。
+        """
+        let hits = tokens(in: canary)
+        XCTAssertEqual(Set(hits), [
+            "ContributorRows.ContributorRow.body", "LogsView.header", "WsvCanaryDeadType.someMember",
+            "WsvCanaryFile.swift:999", "Package.swift:99999",
+        ], "合成文本里的锚点没被全部扫到，正则或口径漂了")
+
+        let dead = hits.filter { resolve(classify($0), in: index).reason != nil }.sorted()
+        XCTAssertEqual(dead, ["Package.swift:99999", "WsvCanaryDeadType.someMember", "WsvCanaryFile.swift:999"],
+                       "金丝雀没有被全部判红，或把真实锚点误判成了失效")
     }
 }
 
-private extension String {
-    /// 按 NSRegularExpression 的 NSRange（UTF-16 口径）取子串。
+private extension NSRange {
+    /// 按 NSRegularExpression 的 UTF-16 区间取子串。
     /// 文档里有中文，用「按 Character 偏移」的写法会切错位置，必须走 Range 转换。
-    func slice(_ range: NSRange) -> String {
-        guard let swiftRange = Range(range, in: self) else { return "" }
-        return String(self[swiftRange])
+    func slice(in text: String) -> String {
+        guard let swiftRange = Range(self, in: text) else { return "" }
+        return String(text[swiftRange])
     }
 }
