@@ -131,23 +131,42 @@ final class SelfScanDogfoodTests: XCTestCase {
         Set(metrics.hugeFiles.map { URL(fileURLWithPath: $0.path).path })
     }
 
-    // MARK: - 防作弊门 1：超限文件必须被工具自己报出来
+    // MARK: - 防作弊门 1：超限文件必须被工具自己报出来（双向一致性）
 
+    /// 只问一件事：**独立数出来的超限文件集合，与工具报出来的集合，是不是同一批。**
+    /// 这里原来还有一条 `XCTAssertFalse(over.isEmpty)`，把「仓库里必须有 800+ 行文件」
+    /// 当成不变事实——于是 WS-V 把债还清的那天，它把成功判成了故障。
+    /// 「工具是否还有能力看见超限文件」改由 `SelfScanHugeFileMechanismTests` 用
+    /// 合成夹具单独把关（那条与仓库有没有债无关，工具瞎了它就红）。
     func testEveryFileOverHighLineBarIsReportedByTheToolItself() async throws {
         let metrics = try await selfScan().code
         let reported = hugeFilePaths(in: metrics)
         let over = try independentSwiftLineCounts().filter { $0.lines > Self.toolHighFileLines }
 
-        XCTAssertFalse(over.isEmpty,
-                       "本仓库有 \(Self.toolHighFileLines) 行以上的 Swift 文件是既定事实，若为空说明口径变了")
+        // 方向一（漏报）：我独立数出的超限文件，工具一个都不许漏。
         let missed = over.filter { !reported.contains($0.path) }.map { "\($0.path)(\($0.lines) 行)" }
         XCTAssertTrue(missed.isEmpty, """
         工具没有把超限文件报进 hugeFiles，等于自我失明。漏报：\(missed.sorted().joined(separator: ", "))
         """)
 
+        // 方向二（凭空造）：工具报进 hugeFiles 且自称 800+ 行的，我必须能独立数出来。
+        let claimed = Set(metrics.hugeFiles
+            .filter { $0.lineCount > Self.toolHighFileLines }
+            .map { URL(fileURLWithPath: $0.path).path })
+        let invented = claimed.subtracting(Set(over.map(\.path))).sorted()
+        XCTAssertTrue(invented.isEmpty, """
+        工具把 \(invented.count) 个文件当成 800+ 行，独立复检却数不到，等于无中生有：\(invented)
+        """)
+
+        // 债还清是合法终态：两边同时为空才允许为空，只许同增同减。
+        XCTAssertTrue(over.isEmpty == claimed.isEmpty,
+                      "独立口径 \(over.count) 个 / 工具口径 \(claimed.count) 个，一个清零一个没清，两边在量不同的东西")
+
         let overThousand = over.filter { $0.lines > Self.thousandLineBar }
         print("【防作弊门】独立数出的超限文件 \(over.count) 个（其中 >\(Self.thousandLineBar) 行 \(overThousand.count) 个），"
-            + "工具 hugeFiles 报 \(metrics.hugeFiles.count) 个，最大 \(metrics.largestFileLineCount) 行")
+            + "工具 hugeFiles 报 \(metrics.hugeFiles.count) 个（其中自称 >\(Self.toolHighFileLines) 行 \(claimed.count) 个），"
+            + "最大 \(metrics.largestFileLineCount) 行"
+            + (over.isEmpty ? " —— 800+ 行债务已清零，机制由合成夹具把关" : ""))
     }
 
     // MARK: - 防作弊门 2：行数只降不升（dogfooding 棘轮）
