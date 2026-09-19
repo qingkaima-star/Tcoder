@@ -144,3 +144,22 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
 - 内存口径为 `total - (free + speculative + purgeable)`，与活动监视器一致。
 - 首次扫描 `~/Documents`、`~/Desktop` 下的目录时 macOS 可能弹一次文件访问授权。
 - 覆盖率只读取仓库已生成的报告（lcov / istanbul / JaCoCo / coverage.py / clover），不会代为执行测试。
+
+### 这些数字是跟谁对齐的
+
+> 一个功能指标如果讲不出"跟哪个系统工具比过、差多少、差在哪"，它就不该被拿去打分。
+
+- **代码规模**：常见做法是拿 `cloc` 当基准，但**本机没有 `cloc`**（`tokei`、`scc` 同样未安装），
+  所以这里改用一套与分析器零共享代码的独立口径核对：`git ls-files` 排除 `vendor/` 后 `wc -l`。
+  主导语言逐位吻合——Homebrew 非 vendor 的 `.rb` 为 **1756 文件 / 239,668 行**。
+  文件总数上的差值来自分析器**比窄后缀白名单更包含**（`.rake`、`.gemspec`、`.podspec`
+  以及 `Gemfile`、`bin/brew` 这类无后缀可执行脚本），不是漏算或多算。
+- **Git 指标**：提交总数与 `git rev-list --count HEAD` 逐位一致；增删行数与同窗口
+  `git log --no-merges --numstat` 的聚合**一字不差**（`+1672258/-1347981`）。
+  作者数按 email 去重后与 `git` 仍差 1（工具 617 / git 618），
+  **归并规则尚未在界面或文档中声明**，这是当前已知未结项。
+- **运行时指标**：与活动监视器 / `top` / `ps` 的可比性由 `PerformanceLiveSampleTests`
+  三条用例钉住（采样可与活动监视器比、进程组与真实进程匹配、磁盘吞吐是差值而非累计量）。
+- **覆盖率**：与 `llvm-cov` 逐位一致——自扫时两边都给出 `10618/23611`。
+  注意**分母口径**：不区分项目内外时 lcov 汇总会虚高约 16 个百分点，
+  因此报告只统计当前项目根之内的源文件。
