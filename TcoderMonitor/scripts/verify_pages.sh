@@ -8,6 +8,24 @@ APP="dist/Tcoder Monitor.app"
 OUT="${1:-/tmp/tcoder-pages}"
 SECTIONS=("总览" "代码规模" "复杂度风险" "Git 洞察" "贡献者" "性能监控" "错误日志" "依赖分析" "健康评分")
 
+# 取证门禁：截图前必须从当前源码重新构建并跑绿测试。
+# 曾经因为拿旧 dist 二进制截图，把九张几乎同尺寸的图当成"九页均已验证"。
+# 九张图尺寸几乎一致，就是取了旧二进制的最直接破绽。
+if [ "${SKIP_VERIFY_GATE:-0}" != "1" ]; then
+  echo "==> 门禁 1/2 从当前源码构建"
+  if ! ./scripts/build_app.sh release; then
+    echo "!! 构建失败，拒绝取证（现在的工作区不足以产出可信截图）"; exit 1
+  fi
+  echo "==> 门禁 2/2 跑单元测试"
+  if ! ./scripts/locked_build.sh test > /tmp/tcoder-verify-test.log 2>&1; then
+    echo "!! 测试未通过，拒绝取证。失败摘要："
+    grep -E "error:|failed \(|XCTAssert" /tmp/tcoder-verify-test.log | head -15
+    exit 1
+  fi
+  tail -3 /tmp/tcoder-verify-test.log
+  echo "==> 门禁通过，dist 已与当前源码一致"
+fi
+
 mkdir -p "$OUT"
 rm -f "$OUT"/*.png
 
