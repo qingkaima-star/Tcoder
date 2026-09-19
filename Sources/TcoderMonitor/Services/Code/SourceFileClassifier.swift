@@ -401,10 +401,27 @@ private func sourceMarkerOccurrences(of marker: String, in uppercasedText: Strin
     var searchStart = uppercasedText.startIndex
     while searchStart < uppercasedText.endIndex {
         guard let found = uppercasedText.range(of: marker, range: searchStart..<uppercasedText.endIndex) else { break }
-        count += 1
+        // 词边界：`todoCount` / `fixmeCount` 这类标识符不是待办标记
+        if hasMarkerBoundary(text: uppercasedText, lower: found.lowerBound, upper: found.upperBound) {
+            count += 1
+        }
         searchStart = found.upperBound
     }
     return count
+}
+
+private func hasMarkerBoundary(text: String, lower: String.Index, upper: String.Index) -> Bool {
+    if lower != text.startIndex, isMarkerByte(text[text.index(before: lower)]) { return false }
+    if upper != text.endIndex, isMarkerByte(text[upper]) { return false }
+    return true
+}
+
+private func isMarkerByte(_ character: Character) -> Bool {
+    guard let scalar = character.asciiValue else { return character.isLetter || character.isNumber }
+    switch scalar {
+    case 0x30...0x39, 0x41...0x5A, 0x61...0x7A, 0x5F: return true
+    default: return false
+    }
 }
 
 // MARK: - Tree scanner

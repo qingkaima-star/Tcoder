@@ -141,6 +141,8 @@ struct DashboardView: View {
                         StatLine(label: "空行", value: NumberFormat.grouped(code.blankLines))
                     }
                     .font(.caption)
+
+                    coverageStrip
                 }
             } else {
                 EmptyStateView(icon: "doc.text", title: "暂无代码数据", message: "选择项目目录后自动统计。")
@@ -174,6 +176,39 @@ struct DashboardView: View {
                 .font(.caption)
             } else {
                 EmptyStateView(icon: "waveform", title: "正在采集…", message: "首个采样点到达后显示曲线。")
+            }
+        }
+    }
+
+    /// Test coverage only appears when the repository actually publishes a report,
+    /// so a project without one never shows a misleading 0%.
+    @ViewBuilder
+    private var coverageStrip: some View {
+        if let coverage = report?.coverage, coverage.hasData {
+            VStack(alignment: .leading, spacing: 6) {
+                Divider().opacity(0.5)
+                HStack(spacing: 14) {
+                    StatLine(
+                        label: "单元测试",
+                        value: coverage.unit.map { String(format: "%.0f%%", $0.linePercent) } ?? "无报告"
+                    )
+                    StatLine(
+                        label: "集成测试",
+                        value: coverage.integration.map { String(format: "%.0f%%", $0.linePercent) } ?? "无报告"
+                    )
+                    StatLine(
+                        label: "整体行覆盖",
+                        value: coverage.overallLinePercent.map { String(format: "%.1f%%", $0) } ?? "--"
+                    )
+                    Spacer(minLength: 0)
+                    RiskBadge(risk: coverage.riskLevel, showIcon: false)
+                }
+                .font(.caption)
+                if let branch = coverage.overallBranchPercent {
+                    Text("分支覆盖 \(String(format: "%.1f%%", branch)) · 来源 \(coverage.reports.map { $0.toolName }.joined(separator: " / "))")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                }
             }
         }
     }

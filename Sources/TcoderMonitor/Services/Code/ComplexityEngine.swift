@@ -622,7 +622,8 @@ enum ComplexityEngine {
             self.requiresTypeToken = requiresTypeToken
             self.requiresModifierWhenNoType = requiresModifierWhenNoType
             self.needsParen = needsParen
-            self.expression = Self.cache(pattern)
+            // 嵌套类型里的 Self 指的是 SignaturePattern，必须显式回到 ComplexityEngine 才拿到缓存函数
+            self.expression = ComplexityEngine.cache(pattern)
         }
     }
 
@@ -637,14 +638,24 @@ enum ComplexityEngine {
         var quotes: Set<Character> = ["\"", "'"]
         var allowTrailingSemicolonEnd = true
         var scriptRegionOnly = false
+        // 圈复杂度按语言取子集：关键字集合 + 参与判定的符号种类
+        var branchKeywords: Set<String> = []
+        var countsLogicalSymbols = true
+        var countsTernary = true
+        var countsNullCoalescing = false
+        var countsOptionalChaining = false
     }
 
-    private static let patternCache = NSCache<NSString, NSRegularExpression>()
+    /// 正则编译缓存。签名 pattern 是热点：每个文件都要走一遍 profile → 每条 pattern 建一个
+    /// NSRegularExpression，绝不能反复编译。NSCache 本身线程安全，跨 Task.detached 并发读写
+    /// 没有数据竞争；两个线程同时 miss 只会各编译一次、后写覆盖，结果等价。
+    nonisolated(unsafe) private static let patternCache = NSCache<NSString, NSRegularExpression>()
 
     private static func cache(_ pattern: String) -> NSRegularExpression {
         if let hit = patternCache.object(forKey: pattern as NSString) { return hit }
+        // 编译失败就退回「永不匹配」的表达式：单个语言规则坏了不该让整条链路崩溃
         let made = (try? NSRegularExpression(pattern: pattern, options: []))
-            ?? (try? NSRegularExpression(pattern: "\\u{0}\\u{1}", options: []))!
+            ?? (try? NSRegularExpression(pattern: "(?!x)x", options: []))!
         patternCache.setObject(made, forKey: pattern as NSString)
         return made
     }
@@ -664,7 +675,49 @@ enum ComplexityEngine {
         profile.multiLineQuotes = charactersList(multiLineQuotes(for: canonical))
         profile.allowTrailingSemicolonEnd = profile.family == .curly
         profile.scriptRegionOnly = canonical == "Vue"
+        profile.branchKeywords = branchKeywords(for: canonical)
+        profile.countsLogicalSymbols = canonical != "Python" && canonical != "HTML"
+        profile.countsTernary = canonical != "Python" && canonical != "Go"
+        profile.countsNullCoalescing = nullCoalescingLanguages.contains(canonical)
+        profile.countsOptionalChaining = optionalChainingLanguages.contains(canonical)
         return profile
+    }
+
+    private static let nullCoalescingLanguages: Set<String> = [
+        "Swift", "Kotlin", "TypeScript", "JavaScript", "Vue", "Dart", "PHP", "Objective-C", "Scala",
+    ]
+
+    private static let optionalChainingLanguages: Set<String> = [
+        "Swift", "Kotlin", "TypeScript", "JavaScript", "Vue", "Dart",
+    ]
+
+    /// 每种语言只统计它真正存在的判定关键字，避免 `require`/`when`/`match` 在别的语言里凑数。
+    private static func branchKeywords(for language: String) -> Set<String> {
+        let common: Set<String> = ["if", "else if", "for", "while", "until", "case", "catch", "require"]
+        switch language {
+        case "Swift":
+            return ["if", "else if", "for", "while", "case", "catch", "guard"]
+        case "Java", "Kotlin", "TypeScript", "JavaScript", "Vue", "Dart", "Gradle":
+            return common.union(["foreach", "when"])
+        case "C", "C++", "Objective-C":
+            return common
+        case "Go":
+            return ["if", "else if", "for", "case"]
+        case "Rust":
+            return common.union(["loop", "match"])
+        case "Python":
+            return ["if", "elif", "for", "while", "case", "when", "except", "and", "or"]
+        case "Ruby":
+            return ["if", "elsif", "for", "while", "until", "case", "when", "rescue", "and", "or"]
+        case "PHP":
+            return ["if", "elseif", "foreach", "for", "while", "until", "case", "catch", "require"]
+        case "Shell":
+            return ["if", "elif", "for", "while", "until", "case"]
+        case "Scala":
+            return ["if", "for", "while", "until", "case", "when", "catch"]
+        default:
+            return allBranchKeywords
+        }
     }
 
     private static func canonicalLanguage(_ language: String) -> String {
@@ -752,7 +805,8 @@ enum ComplexityEngine {
         return nil
     }
 
-    private static func multiLineQuotes(for language: String) -> [[String]] {
+    /// 跨行字符串的定界符（Python 的 `"""`、JS 的模板串），交给 charactersList 变成 [[Character]]。
+    private static func multiLineQuotes(for language: String) -> [String] {
         var delimiters = SourceLanguageCatalog.docStringDelimiters(for: language)
         if language == "TypeScript" || language == "JavaScript" || language == "Vue" {
             delimiters = delimiters.filter { $0 != "`" } + ["`"]
@@ -805,151 +859,153 @@ enum ComplexityEngine {
         }
     }
 
-    private static let annotationPrefix = "\\s*@\\w+(?:\\.\\w+)*(?:\\([^()]*\\))?"
-    private static let modifierGroup = """
-    (?:(?:public|private(?:\\(\\))?|protected|internal|fileprivate|open|static|class|final|abstract\\\
-    |override|sealed|data|value|inline|noinline|crossinline|tailrec|operator|infix|external|constextri\\\
-    f|constexpr|volatile|register|restrict|synchronized|throws|rethrows|async|await|lazy|mutating|noni\\\
-    solated|isolated|weak|strong|autoclosure|composable|virtual|override|readonly|native|strictfp|defa\\\
-    ult|abstract)[ \\t]+)
-    """
+    // 以下全部正则一律用 Swift 原始字符串 #"…"#：
+    // 原始串里 `\(` 就是字面的「反斜杠 + 左括号」（正则的转义括号），只有 `\#(x)` 才是插值。
+    // 普通字符串里单反斜杠 `\(` 会被 Swift 当成插值起点，这正是本文件此前一批编译错误的根因。
 
-    private static var head: String { "(?:\(annotationPrefix)|\(modifierGroup))*[ \\t]*" }
+    private static let annotationPrefix = #"\s*@\w+(?:\.\w+)*(?:\([^()]*\))?"#
 
-    private static let params = "\\((?:[^;{}\\n]*)\\)"
+    private static let modifierGroup =
+        #"(?:(?:public|private(?:\(\))?|protected|internal|fileprivate|open|static|class|final|"#
+        + #"abstract|override|sealed|data|value|inline|noinline|crossinline|tailrec|operator|infix|"#
+        + #"external|constexpr|volatile|register|restrict|synchronized|throws|rethrows|async|await|"#
+        + #"lazy|mutating|nonisolated|isolated|weak|strong|autoclosure|composable|virtual|readonly|"#
+        + #"native|strictfp|default)[ \t]+)"#
+
+    /// 「注解 + 修饰符」前缀，可重复零次以上。
+    private static var head: String { #"(?:\#(annotationPrefix)|\#(modifierGroup))*[ \t]*"# }
+
+    /// 单层参数列表（不含嵌套花括号，遇分号/换行即止）。
+    private static let params = #"\((?:[^;{}\n]*)\)"#
 
     private static var swiftFunction: SignaturePattern {
-        let modifiers = "(?:(?:public|private|internal|fileprivate|open|static|class|final|override|"
-            + "mutating|nonmutating|nonisolated|isolated|async|throws|rethrows|lazy|@\\w+(?:\\([^()]*\\))?)[ \\t]+)*"
+        let modifiers = #"(?:(?:public|private|internal|fileprivate|open|static|class|final|override|"#
+            + #"mutating|nonmutating|nonisolated|isolated|async|throws|rethrows|lazy|@\w+(?:\([^()]*\))?)[ \t]+)*"#
+        // 覆盖：func name(_ a: Int, b: String) throws -> Foo {
+        //       func name() { … / 泛型 func name<T: P>(…) where T: Q { …
+        //       多行签名（`(` 之后换行，`{` 落在后面几行）→ 只要求匹配到 `(` 即可，
+        //       函数体边界由 curlyEnd 向后找第一个 `{`。
         return SignaturePattern(
-            "^\(head)\(modifiers)func[ \\t]+([A-Za-z_]\\w*)[ \\t]*(?:<[^<>()]*>)?[ \\t]*\\("
+            #"^\#(head)\#(modifiers)func[ \t]+([A-Za-z_]\w*)[ \t]*(?:<[^<>()]*>)?[ \t]*\((?:[^;{}\n]*\))?(?:[^{;\n]*)?(?:\{|$)"#
         )
     }
 
     private static var swiftInitSubscript: SignaturePattern {
         SignaturePattern(
-            "^\(head)(?:[A-Za-z_][\\w.]*[ \\t]+)*((?:init|subscript)(?:\\p{Hiragana}\\p{Katakana}\\w*)?)"
-                + "[ \\t]*(?:<[^<>()]*>)?[ \\t]*\\(",
+            #"^\#(head)(?:[A-Za-z_][\w.]*[ \t]+)*((?:init|subscript)(?:\p{Hiragana}\p{Katakana}\w*)?)"#
+                + #"[ \t]*(?:<[^<>()]*>)?[ \t]*\("#,
             namePrefix: "@"
         )
     }
 
     private static var kotlinFunction: SignaturePattern {
-        SignaturePattern("^\(head)(?:fun|operator)[ \\t]+(?:<[^<>]*>[ \\t]*)?([A-Za-z_]\\w*)[ \\t]*\\(")
+        SignaturePattern(#"^\#(head)(?:fun|operator)[ \t]+(?:<[^<>]*>[ \t]*)?([A-Za-z_]\w*)[ \t]*\("#)
     }
 
     private static var scalaFunction: SignaturePattern {
-        SignaturePattern("^\(head)def[ \\t]+([A-Za-z_]\\w*)[ \\t]*(?:\\(|:)")
+        SignaturePattern(#"^\#(head)def[ \t]+([A-Za-z_]\w*)[ \t]*(?:\(|:)"#)
     }
 
     private static var cStyleFunction: SignaturePattern {
-        let type = "(?:[A-Za-z_$][\\w$]*(?:\\.\\w+)*(?:<[^<>{}();]*>)?(?:[ \\t]*\\[[ \\t]*\\])*[ \\t*&]+)+"
+        let type = #"(?:[A-Za-z_$][\w$]*(?:\.\w+)*(?:<[^<>{}();]*>)?(?:[ \t]*\[[ \t]*\])*[ \t*&]+)+"#
         return SignaturePattern(
-            "^\(head)(?:\(type))?([A-Za-z_$][\\w$]*)[ \\t]*\((?:[^;{}\\n]*)\\)"
-                + "(?:[ \\t]+throws[ \\t]+[\\w.,$ \\t]+)?[ \\t]*(?:\\{|$)",
+            #"^\#(head)(?:\#(type))?([A-Za-z_$][\w$]*)[ \t]*\#(params)(?:[ \t]+throws[ \t]+[\w.,$ \t]+)?[ \t]*(?:\{|$)"#,
             requiresModifierWhenNoType: true
         )
     }
 
     private static var objectiveCMethod: SignaturePattern {
-        SignaturePattern("^[ \\t]*[-+][ \\t]*\\([^()]*\\)[ \\t]*([A-Za-z_]\\w*)")
+        SignaturePattern(#"^[ \t]*[-+][ \t]*\([^()]*\)[ \t]*([A-Za-z_]\w*)"#)
     }
 
     private static var jsFunction: SignaturePattern {
         SignaturePattern(
-            "^\(head)(?:export[ \\t]+)?(?:default[ \\t]+)?function[ \\t]*\\*?[ \\t]*([A-Za-z_$][\\w$]*)?[ \\t]*\\("
+            #"^\#(head)(?:export[ \t]+)?(?:default[ \t]+)?function[ \t]*\*?[ \t]*([A-Za-z_$][\w$]*)?[ \t]*\("#
         )
     }
 
     private static var jsVariableArrow: SignaturePattern {
-        let name = "([A-Za-z_$][\\w$]*)"
-        let typeAnn = "(?:[ \\t]*:[ \\t]*[^=;{}()]*?)?"
+        let name = #"([A-Za-z_$][\w$]*)"#
+        let typeAnn = #"(?:[ \t]*:[ \t]*[^=;{}()]*?)?"#
         return SignaturePattern(
-            "^\(head)(?:const|let|var)[ \\t]+\(name)[ \\t]*=[ \\t]*(?:async[ \\t]+)?"
-                + "(?:function[ \\t]*\\*?[ \\t]*(?:[A-Za-z_$][\\w$]*)?[ \\t]*)?\(typeAnn)\\("
+            #"^\#(head)(?:const|let|var)[ \t]+\#(name)[ \t]*=[ \t]*(?:async[ \t]+)?"#
+                + #"(?:function[ \t]*\*?[ \t]*(?:[A-Za-z_$][\w$]*)?[ \t]*)?\#(typeAnn)\("#
         )
     }
 
     private static var jsMethod: SignaturePattern {
-        let member = "(?:[A-Za-z_$][\\w$]*|\\[[^\\]\\n]{1,60}\\]|\"[^\"\\n]{1,60}\"|'[^'\\n]{1,60}')"
+        let member = #"(?:[A-Za-z_$][\w$]*|\[[^\]\n]{1,60}\]|"[^"\n]{1,60}"|'[^'\n]{1,60}')"#
         return SignaturePattern(
-            "^\(head)(?:get[ \\t]+|set[ \\t]+)?\(member)[ \\t]*\\.?[ \\t]*\((?:[^;{}\\n]*)\\)"
-                + "(?:[ \\t]*:[ \\t]*[^;{}\\n=]+)?[ \\t]*\\{",
+            #"^\#(head)(?:get[ \t]+|set[ \t]+)?\#(member)[ \t]*\.?[ \t]*\#(params)"#
+                + #"(?:[ \t]*:[ \t]*[^;{}\n=]+)?[ \t]*\{"#,
             namePrefix: "."
         )
     }
 
     private static var jsObjectMethod: SignaturePattern {
         SignaturePattern(
-            "^\(head)(?:\"[^\\"\\n]{1,60}\"|'[^'\\n]{1,60}'|[A-Za-z_$][\\w$]*)[ \\t]*:[ \\t]*(?:async[ \\t]+)?"
-                + "(?:function[ \\t]*\\*?[ \\t]*(?:[A-Za-z_$][\\w$]*)?[ \\t]*)?(?:\\((?:[^;{}\\n]*)\\)|"
-                + "[A-Za-z_$][\\w$]*)(?:[ \\t]*:[ \\t]*[^;{}\\n=]+)?[ \\t]*(?:=>|\\{)",
+            #"^\#(head)(?:"[^"\n]{1,60}"|'[^'\n]{1,60}'|[A-Za-z_$][\w$]*)[ \t]*:[ \t]*(?:async[ \t]+)?"#
+                + #"(?:function[ \t]*\*?[ \t]*(?:[A-Za-z_$][\w$]*)?[ \t]*)?(?:\#(params)|[A-Za-z_$][\w$]*)"#
+                + #"(?:[ \t]*:[ \t]*[^;{}\n=]+)?[ \t]*(?:=>|\{)"#,
             namePrefix: "."
         )
     }
 
     private static var goFunction: SignaturePattern {
-        SignaturePattern("^func[ \\t]*(?:\\([^()]*\\)[ \\t]*)?([A-Za-z_]\\w*)[ \\t]*\\(")
+        SignaturePattern(#"^func[ \t]*(?:\([^()]*\)[ \t]*)?([A-Za-z_]\w*)[ \t]*\("#)
     }
 
     private static var rustFunction: SignaturePattern {
         SignaturePattern(
-            "^[ \\t]*(?:pub(?:\\([^()]*\\))?[ \\t]+)?(?:(?:default|async|unsafe|extern|const)[ \\t]+)*"
-                + "fn[ \\t]+([A-Za-z_]\\w*)[ \\t]*(?:<[^<>()]*>)?[ \\t]*\\("
+            #"^[ \t]*(?:pub(?:\([^()]*\))?[ \t]+)?(?:(?:default|async|unsafe|extern|const)[ \t]+)*"#
+                + #"fn[ \t]+([A-Za-z_]\w*)[ \t]*(?:<[^<>()]*>)?[ \t]*\("#
         )
     }
 
     private static var pythonFunction: SignaturePattern {
-        SignaturePattern("^[ \\t]*(?:async[ \\t]+)?def[ \\t]+([A-Za-z_]\\w*)[ \\t]*\\(")
+        SignaturePattern(#"^[ \t]*(?:async[ \t]+)?def[ \t]+([A-Za-z_]\w*)[ \t]*\("#)
     }
 
     private static var rubyFunction: SignaturePattern {
         SignaturePattern(
-            "^[ \\t]*def[ \\t]+([A-Za-z_]\\w*[?!=]?|\\[\\]=[\\]]?|[!~<>=+\\-*/%|&^]+)[ \\t]*(?:\\(|$|;)",
+            #"^[ \t]*def[ \t]+([A-Za-z_]\w*[?!=]?|\[\]=[\]]?|[!~<>=+\-*/%|&^]+)[ \t]*(?:\(|$|;)"#,
             needsParen: false
         )
     }
 
     private static var phpFunction: SignaturePattern {
-        SignaturePattern(
-            "^\(head)function[ \\t]+&?([A-Za-z_][\\w]*)[ \\t]*\\("
-        )
+        SignaturePattern(#"^\#(head)function[ \t]+&?([A-Za-z_][\w]*)[ \t]*\("#)
     }
 
     private static var shellBrace: SignaturePattern {
-        SignaturePattern("^[ \\t]*([A-Za-z_]\\w*)[ \\t]*\\([ \\t]*\\)[ \\t]*(?:\\{|$)")
+        SignaturePattern(#"^[ \t]*([A-Za-z_]\w*)[ \t]*\([ \t]*\)[ \t]*(?:\{|$)"#)
     }
 
     private static var shellNameParen: SignaturePattern {
-        SignaturePattern("^[ \\t]*(?:function[ \\t]+|source[ \\t]+)([A-Za-z_]\\w*)[ \\t]*(?:\\([^()]*\\))?[ \\t]*(?:\\{|$)")
+        SignaturePattern(
+            #"^[ \t]*(?:function[ \t]+|source[ \t]+)([A-Za-z_]\w*)[ \t]*(?:\([^()]*\))?[ \t]*(?:\{|$)"#
+        )
     }
 
     // MARK: Ruby block helpers
 
-    private static let rubyCloserWords = ["end", "class", "module", "begin", "rescue", "ensure"]
+    fileprivate static let rubyCloserWords = ["end", "class", "module", "begin", "rescue", "ensure"]
 
-    private static let rubyOpenerWords = [
+    fileprivate static let rubyOpenerWords = [
         "def", "class", "module", "do", "begin", "if", "unless", "while", "until", "case",
     ]
 }
 
 // MARK: - Small text helpers (file private)
 
-extension ComplexityEngine {
-
-    fileprivate static var StringExtensionHooks: Void { () }
-}
-
 private extension String {
 
     var isRubyBlockCloser: Bool {
-        let head = rubyFirstWord
-        return ComplexityEngine_rubyCloserWords.contains(head)
+        ComplexityEngine.rubyCloserWords.contains(rubyFirstWord)
     }
 
     var isRubyBlockOpener: Bool {
-        let head = rubyFirstWord
-        return ComplexityEngine_rubyOpenerWords.contains(head)
+        ComplexityEngine.rubyOpenerWords.contains(rubyFirstWord)
     }
 
     private var rubyFirstWord: String {
@@ -968,6 +1024,3 @@ private extension String {
         return nil
     }
 }
-
-private let ComplexityEngine_rubyCloserWords = ["end", "class", "module", "begin", "rescue", "ensure"]
-private let ComplexityEngine_rubyOpenerWords = ["def", "class", "module", "do", "begin", "if", "unless", "while", "until", "case"]

@@ -28,7 +28,7 @@ struct ParsedManifest: Equatable, Sendable {
 // MARK: - 清单文件名 -> 生态
 
 enum ManifestFileName {
-    /// 文件名 -> 生态。覆盖 DependencyEcosystem.manifestNames 的全部名字。
+    /// 文件名 -> 生态。覆盖 DependencyEcosystem.manifestNames 里的全部名字。
     private static let table: [String: DependencyEcosystem] = [
         "package.json": .npm,
         "pom.xml": .maven,
@@ -63,6 +63,9 @@ enum ManifestFileName {
 // MARK: - 总入口
 
 enum ManifestParsers {
+    /// 未声明版本时统一用的占位串。
+    static let undeclaredVersion = "未声明"
+
     /// 唯一的总入口：按 manifest 文件名分派到对应格式解析器。
     /// 无法识别的文件名、内容为空、或解不出任何依赖时返回 nil（不抛异常、不崩溃）。
     static func parse(text: String,
@@ -106,14 +109,13 @@ enum ManifestParsers {
 
         let dependencies = dedupe(raw)
         guard !dependencies.isEmpty else { return nil }
-        let names = dependencies.map(\.name)
         return ParsedManifest(
             ecosystem: ecosystem,
             manifestRelativePath: manifestPath,
             directoryRelativePath: directoryRelativePath,
             dependencies: dependencies,
             lockfileName: lockfileName(for: ecosystem, in: directoryListing),
-            frameworkMarkers: frameworkMarkers(ecosystem: ecosystem, dependencyNames: names)
+            frameworkMarkers: frameworkMarkers(ecosystem: ecosystem, dependencyNames: dependencies.map(\.name))
         )
     }
 
@@ -122,7 +124,7 @@ enum ManifestParsers {
         var found: [String] = []
         var seen = Set<String>()
         for groups in matches(of: "<module>\\s*([^<]*?)\\s*</module>", in: pomText) {
-            guard let raw = groups.last, !raw.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+            guard let raw = groups.last else { continue }
             let value = trim(raw)
             if value.isEmpty || value == "." { continue }
             if seen.insert(value).inserted { found.append(value) }
@@ -136,19 +138,14 @@ enum ManifestParsers {
         for name in dependencyNames {
             let tokens = tokens(of: name)
             guard !tokens.isEmpty else { continue }
+            var hits: [String] = []
             for rule in markerRules where rule.matches(ecosystem) {
                 guard rule.keys.contains(where: { containsPhrase(tokens, $0) }) else { continue }
-                counts[rule.marker, default: 0] += 1
-                break
+                if !hits.contains(rule.marker) { hits.append(rule.marker) }
             }
+            for marker in hits { counts[marker, default: 0] += 1 }
         }
-        // 次级键：多规则命中同一 marker 的情况已在上面按 dep 计数，这里只排 marker
-        var merged: [String: Int] = [:]
-        for (marker, count) in counts {
-            let display = marker
-            merged[display, default: 0] += count
-        }
-        let sorted = merged.sorted { lhs, rhs in
+        let sorted = counts.sorted { lhs, rhs in
             if lhs.value != rhs.value { return lhs.value > rhs.value }
             return lhs.key.localizedCaseInsensitiveCompare(rhs.key) == .orderedAscending
         }
@@ -162,37 +159,36 @@ enum ManifestParsers {
         }
         return nil
     }
+}
 
-    // MARK: - 内部工具
+// MARK: - 内部通用工具
 
-    private static func fileName(of path: String) -> String {
+extension ManifestParsers {
+    static func fileName(of path: String) -> String {
         (path as NSString).lastPathComponent
     }
 
-    private static func trim(_ text: String) -> String {
+    static func trim(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// 统一换行，返回按行切开的数组（不含换行符）。
-    private static func lines(_ text: String) -> [String] {
+    /// 统一换行后按行切开（不含换行符）。
+    static func lines(_ text: String) -> [String] {
         text.replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
             .components(separatedBy: "\n")
     }
 
-    /// 未声明版本时的占位，保持与契约里 "未声明" 一致。
-    static let undeclaredVersion = "未声明"
-
-    private static func record(_ name: String,
-                               _ version: String,
-                               _ ecosystem: DependencyEcosystem,
-                               _ scope: DependencyScope,
-                               _ manifestPath: String) -> DependencyRecord {
+    static func record(_ name: String,
+                       _ version: String,
+                       _ ecosystem: DependencyEcosystem,
+                       _ scope: DependencyScope,
+                       _ manifestPath: String) -> DependencyRecord {
         let cleanedName = trim(name)
-        let cleanedVersion = trim(version).isEmpty ? undeclaredVersion : trim(version)
+        let cleanedVersion = trim(version)
         return DependencyRecord(
             name: cleanedName,
-            version: cleanedVersion,
+            version: cleanedVersion.isEmpty ? undeclaredVersion : cleanedVersion,
             ecosystem: ecosystem,
             scope: scope,
             manifestPath: manifestPath,
@@ -203,7 +199,7 @@ enum ManifestParsers {
     }
 
     /// 清单内按 name 去重，后出现的覆盖前者的取值（顺序按首次出现）。
-    private static func dedupe(_ records: [DependencyRecord]) -> [DependencyRecord] {
+    static func dedupe(_ records: [DependencyRecord]) -> [DependencyRecord] {
         var result: [DependencyRecord] = []
         var indexByName: [String: Int] = [:]
         for item in records {
@@ -217,33 +213,48 @@ enum ManifestParsers {
         return result
     }
 
-    /// 正则枚举，返回每条匹配的分组数组（group 0 为整条匹配，未命中为 nil）。
-    private static func matches(of pattern: String, in text: String) -> [[String?]] {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+    /// 正则枚举，返回每条匹配的分组数组（下标 0 为整条匹配，未命中的分组为空串）。
+    static func matches(of pattern: String,
+                        in text: String,
+                        options: NSRegularExpression.Options = []) -> [[String]] {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else { return [] }
         let ns = text as NSString
-        var out: [[String?]] = []
-        out.reserveCapacity(16)
+        var out: [[String]] = []
         regex.enumerateMatches(in: text, options: [], range: NSRange(location: 0, length: ns.length)) { result, _, _ in
             guard let result else { return }
-            var groups: [String?] = []
+            var groups: [String] = []
             for index in 0..<result.numberOfRanges {
                 let range = result.range(at: index)
-                groups.append(range.location == NSNotFound ? nil : ns.substring(with: range))
+                groups.append(range.location == NSNotFound ? "" : ns.substring(with: range))
             }
             out.append(groups)
         }
         return out
     }
 
-    private static func firstGroup(_ pattern: String, _ group: Int, in text: String) -> String? {
+    static func value(at index: Int, in groups: [String]) -> String? {
+        guard index < groups.count else { return nil }
+        let value = groups[index]
+        return value.isEmpty ? nil : value
+    }
+
+    static func firstGroup(_ pattern: String, _ group: Int, in text: String) -> String? {
         for groups in matches(of: pattern, in: text) {
-            if group < groups.count, let value = groups[group], !value.isEmpty { return value }
+            if let value = value(at: group, in: groups) { return value }
         }
         return nil
     }
 
-    /// 去掉行内注释：`//` 只在引号外才算注释（避免误伤 "https://..."）。
-    private static func stripSlashComment(_ line: String) -> String {
+    static func replaceMatches(_ text: String, pattern: String, with template: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        let ns = text as NSString
+        return regex.stringByReplacingMatches(in: text, options: [],
+                                              range: NSRange(location: 0, length: ns.length),
+                                              withTemplate: template)
+    }
+
+    /// 去掉 `//` 行注释：`//` 只在引号外才算注释（避免误伤 "https://..."）。
+    static func stripSlashComment(_ line: String) -> String {
         var inSingle = false
         var inDouble = false
         var result = ""
@@ -262,8 +273,8 @@ enum ManifestParsers {
         return result
     }
 
-    /// Python 风格注释：行首 `#` 或 空白后的 `#` 之后全部丢弃。
-    private static func stripHashComment(_ line: String) -> String {
+    /// 去掉 `#` 注释：行首 `#` 或 空白后的 `#` 之后全部丢弃（引号内的 `#` 保留）。
+    static func stripHashComment(_ line: String) -> String {
         let chars = Array(line)
         var inSingle = false
         var inDouble = false
@@ -284,8 +295,8 @@ enum ManifestParsers {
 
     // MARK: - 分词 / 框架标记
 
-    /// 把依赖名切成小写 token：按非字母数字切，并拆 camelCase（"SwiftUI" -> swift,ui）。
-    private static func tokens(of name: String) -> [String] {
+    /// 把依赖名切成小写 token：按非字母数字切，并拆 camelCase（"SwiftUI" -> swift, ui）。
+    static func tokens(of name: String) -> [String] {
         let chars = Array(name)
         var result: [String] = []
         var current = ""
@@ -307,10 +318,10 @@ enum ManifestParsers {
             current.append(Character(ch.lowercased()))
         }
         if !current.isEmpty { result.append(current) }
-        return result
+        return result.filter { !$0.isEmpty }
     }
 
-    private static func containsPhrase(_ tokens: [String], _ phrase: [String]) -> Bool {
+    static func containsPhrase(_ tokens: [String], _ phrase: [String]) -> Bool {
         guard !phrase.isEmpty, tokens.count >= phrase.count else { return false }
         for start in 0...(tokens.count - phrase.count) {
             if Array(tokens[start..<(start + phrase.count)]) == phrase { return true }
@@ -318,21 +329,21 @@ enum ManifestParsers {
         return false
     }
 
-    private struct MarkerRule {
+    struct MarkerRule {
         let marker: String
+        /// 空集表示不限生态。
         let ecosystems: Set<DependencyEcosystem>
         let keys: [[String]]
-        /// ecosystems 为空集表示不限生态。
         func matches(_ ecosystem: DependencyEcosystem) -> Bool {
             ecosystems.isEmpty || ecosystems.contains(ecosystem)
         }
     }
 
-    private static let markerRules: [MarkerRule] = [
-        // 前端
+    static let markerRules: [MarkerRule] = [
+        // 前端 / npm
         MarkerRule(marker: "React", ecosystems: [], keys: [["react"]]),
-        MarkerRule(marker: "React Native", ecosystems: [.npm, .maven, .gradle, .unknown], keys: [["react", "native"]]),
         MarkerRule(marker: "React DOM", ecosystems: [.npm, .unknown], keys: [["react", "dom"]]),
+        MarkerRule(marker: "React Native", ecosystems: [.npm, .maven, .gradle, .unknown], keys: [["react", "native"]]),
         MarkerRule(marker: "Redux", ecosystems: [.npm, .unknown], keys: [["redux"], ["rematch"]]),
         MarkerRule(marker: "MobX", ecosystems: [.npm, .unknown], keys: [["mobx"]]),
         MarkerRule(marker: "Vue", ecosystems: [.npm, .unknown], keys: [["vue"]]),
@@ -341,11 +352,11 @@ enum ManifestParsers {
         MarkerRule(marker: "Vite", ecosystems: [.npm, .unknown], keys: [["vite"], ["vitejs"], ["vitest"]]),
         MarkerRule(marker: "Next.js", ecosystems: [.npm, .unknown], keys: [["next"]]),
         MarkerRule(marker: "Nuxt", ecosystems: [.npm, .unknown], keys: [["nuxt"]]),
-        MarkerRule(marker: "Angular", ecosystems: [.npm, .unknown], keys: [["angular"], ["ng", "bootstrap"]]),
+        MarkerRule(marker: "Angular", ecosystems: [.npm, .unknown], keys: [["angular"]]),
         MarkerRule(marker: "Svelte", ecosystems: [.npm, .unknown], keys: [["svelte"]]),
         MarkerRule(marker: "Express", ecosystems: [.npm, .unknown], keys: [["express"]]),
         MarkerRule(marker: "Koa", ecosystems: [.npm, .unknown], keys: [["koa"]]),
-        MarkerRule(marker: "NestJS", ecosystems: [.npm, .unknown], keys: [["nest"], ["nestjs"]]),
+        MarkerRule(marker: "NestJS", ecosystems: [.npm, .unknown], keys: [["nestjs"], ["nest"]]),
         MarkerRule(marker: "TypeScript", ecosystems: [.npm, .unknown], keys: [["typescript"], ["ts", "node"]]),
         MarkerRule(marker: "Electron", ecosystems: [.npm, .unknown], keys: [["electron"]]),
         MarkerRule(marker: "Tailwind CSS", ecosystems: [.npm, .unknown], keys: [["tailwindcss"], ["tailwind", "css"], ["tailwind"]]),
@@ -354,7 +365,7 @@ enum ManifestParsers {
         MarkerRule(marker: "ESLint", ecosystems: [.npm, .unknown], keys: [["eslint"]]),
         MarkerRule(marker: "Prettier", ecosystems: [.npm, .unknown], keys: [["prettier"]]),
         MarkerRule(marker: "Jest", ecosystems: [.npm, .unknown], keys: [["jest"]]),
-        MarkerRule(marker: "Axios", ecosystems: [.npm, .unknown], keys: [["axios"], ["is", "stream"]]),
+        MarkerRule(marker: "Axios", ecosystems: [.npm, .unknown], keys: [["axios"]]),
         MarkerRule(marker: "Lodash", ecosystems: [.npm, .unknown], keys: [["lodash"]]),
         MarkerRule(marker: "Moment.js", ecosystems: [.npm, .unknown], keys: [["moment"]]),
         MarkerRule(marker: "Day.js", ecosystems: [.npm, .unknown], keys: [["dayjs"]]),
@@ -387,9 +398,9 @@ enum ManifestParsers {
         MarkerRule(marker: "HikariCP", ecosystems: [.maven, .gradle, .unknown], keys: [["hikari"]]),
         MarkerRule(marker: "Flyway", ecosystems: [.maven, .gradle, .unknown], keys: [["flyway"]]),
         MarkerRule(marker: "Dubbo", ecosystems: [.maven, .gradle, .unknown], keys: [["dubbo"]]),
-        MarkerRule(marker: "Sentinel", ecosystems: [.maven, .gradle, .unknown], keys: [["sentinel"]]),
-        MarkerRule(marker: "Seata", ecosystems: [.maven, .gradle, .unknown], keys: [["seata"]]),
         MarkerRule(marker: "Nacos", ecosystems: [.maven, .gradle, .unknown], keys: [["nacos"]]),
+        MarkerRule(marker: "Seata", ecosystems: [.maven, .gradle, .unknown], keys: [["seata"]]),
+        MarkerRule(marker: "Sentinel", ecosystems: [.maven, .gradle, .unknown], keys: [["sentinel"]]),
         MarkerRule(marker: "ShardingSphere", ecosystems: [.maven, .gradle, .unknown], keys: [["shardingsphere"], ["sharding", "sphere"]]),
         MarkerRule(marker: "XXL-JOB", ecosystems: [.maven, .gradle, .unknown], keys: [["xxl"]]),
         MarkerRule(marker: "Hutool", ecosystems: [.maven, .gradle, .unknown], keys: [["hutool"]]),
@@ -403,17 +414,16 @@ enum ManifestParsers {
         MarkerRule(marker: "Android Gradle Plugin", ecosystems: [.gradle, .maven], keys: [["android", "tools"], ["gradle", "android"]]),
         MarkerRule(marker: "Android", ecosystems: [.gradle, .maven], keys: [["androidx"], ["android"]]),
         // Swift / ObjC
-        MarkerRule(marker: "SwiftUI", ecosystems: [], keys: [["swift", "ui"]]),
+        MarkerRule(marker: "SwiftUI", ecosystems: [], keys: [["swift", "ui"], ["swiftui"]]),
         MarkerRule(marker: "GRDB", ecosystems: [.swiftPM, .cocoapods, .unknown], keys: [["grdb"]]),
         MarkerRule(marker: "Alamofire", ecosystems: [.swiftPM, .cocoapods, .unknown], keys: [["alamofire"]]),
         MarkerRule(marker: "SnapKit", ecosystems: [.swiftPM, .cocoapods, .unknown], keys: [["snapkit"], ["snap", "kit"]]),
         MarkerRule(marker: "Moya", ecosystems: [.swiftPM, .cocoapods, .unknown], keys: [["moya"]]),
         MarkerRule(marker: "Kingfisher", ecosystems: [.swiftPM, .cocoapods, .unknown], keys: [["kingfisher"]]),
         MarkerRule(marker: "RxSwift", ecosystems: [.swiftPM, .cocoapods, .unknown], keys: [["rx", "swift"], ["rxcocoa"]]),
-        MarkerRule(marker: "Realm", ecosystems: [.swiftPM, .cocoapods, .unknown], keys: [["realm", "swift"], ["realm"]]),
-        MarkerRule(marker: "YYModel", ecosystems: [.cocoapods, .swiftPM, .unknown], keys: [["yy", "model"]]),
+        MarkerRule(marker: "Realm", ecosystems: [.swiftPM, .cocoapods, .unknown], keys: [["realm"]]),
         MarkerRule(marker: "SDWebImage", ecosystems: [.cocoapods, .swiftPM, .unknown], keys: [["sd", "web", "image"], ["web", "image"]]),
-        MarkerRule(marker: "Chart", ecosystems: [.cocoapods, .swiftPM, .unknown], keys: [["charts"], ["dc", "charts"]]),
+        MarkerRule(marker: "YYModel", ecosystems: [.cocoapods, .swiftPM, .unknown], keys: [["yy", "model"]]),
         MarkerRule(marker: "SwiftLint", ecosystems: [.swiftPM, .cocoapods, .unknown], keys: [["swiftlint"]]),
         MarkerRule(marker: "Firebase", ecosystems: [.cocoapods, .swiftPM, .gradle, .npm, .unknown], keys: [["firebase"]]),
         // Go
@@ -422,7 +432,6 @@ enum ManifestParsers {
         MarkerRule(marker: "Fiber", ecosystems: [.go, .unknown], keys: [["fiber"]]),
         MarkerRule(marker: "GORM", ecosystems: [.go, .unknown], keys: [["gorm"]]),
         MarkerRule(marker: "Cobra", ecosystems: [.go, .unknown], keys: [["cobra"]]),
-        MarkerRule(marker: "Zap", ecosystems: [.go, .unknown], keys: [["zap"]]),
         MarkerRule(marker: "Viper", ecosystems: [.go, .unknown], keys: [["viper"]]),
         // Rust
         MarkerRule(marker: "Tokio", ecosystems: [.cargo, .unknown], keys: [["tokio"]]),
@@ -432,16 +441,15 @@ enum ManifestParsers {
         MarkerRule(marker: "Clap", ecosystems: [.cargo, .unknown], keys: [["clap"]]),
         MarkerRule(marker: "Rocket", ecosystems: [.cargo, .unknown], keys: [["rocket"]]),
         MarkerRule(marker: "Anyhow", ecosystems: [.cargo, .unknown], keys: [["anyhow"]]),
-        MarkerRule(marker: "Tracing", ecosystems: [.cargo, .unknown], keys: [["tracing"]]),
         // Python
         MarkerRule(marker: "Django", ecosystems: [.python, .unknown], keys: [["django"]]),
-        MarkerRule(marker: "Django REST Framework", ecosystems: [.python, .unknown], keys: [["rest", "framework"], ["djangorestframework"]]),
+        MarkerRule(marker: "Django REST Framework", ecosystems: [.python, .unknown], keys: [["djangorestframework"], ["rest", "framework"]]),
         MarkerRule(marker: "Flask", ecosystems: [.python, .unknown], keys: [["flask"]]),
         MarkerRule(marker: "FastAPI", ecosystems: [.python, .unknown], keys: [["fastapi"]]),
         MarkerRule(marker: "Uvicorn", ecosystems: [.python, .unknown], keys: [["uvicorn"]]),
         MarkerRule(marker: "Gunicorn", ecosystems: [.python, .unknown], keys: [["gunicorn"]]),
         MarkerRule(marker: "Pydantic", ecosystems: [.python, .unknown], keys: [["pydantic"]]),
-        MarkerRule(marker: "SQLAlchemy", ecosystems: [.python, .unknown], keys: [["sqlalchemy"]]),
+        MarkerRule(marker: "SQLAlchemy", ecosystems: [.python, .unknown], keys: [["sqlalchemy"], ["active", "record"]]),
         MarkerRule(marker: "Alembic", ecosystems: [.python, .unknown], keys: [["alembic"]]),
         MarkerRule(marker: "Celery", ecosystems: [.python, .unknown], keys: [["celery"]]),
         MarkerRule(marker: "NumPy", ecosystems: [.python, .unknown], keys: [["numpy"]]),
@@ -449,19 +457,17 @@ enum ManifestParsers {
         MarkerRule(marker: "SciPy", ecosystems: [.python, .unknown], keys: [["scipy"]]),
         MarkerRule(marker: "Matplotlib", ecosystems: [.python, .unknown], keys: [["matplotlib"]]),
         MarkerRule(marker: "Scikit-learn", ecosystems: [.python, .unknown], keys: [["scikit"]]),
-        MarkerRule(marker: "PyTorch", ecosystems: [.python, .unknown], keys: [["torch"], ["pytorch"]]),
+        MarkerRule(marker: "PyTorch", ecosystems: [.python, .unknown], keys: [["pytorch"], ["torch"]]),
         MarkerRule(marker: "TensorFlow", ecosystems: [.python, .unknown], keys: [["tensorflow"]]),
         MarkerRule(marker: "Jupyter", ecosystems: [.python, .unknown], keys: [["jupyter"], ["ipykernel"], ["ipython"]]),
         MarkerRule(marker: "pytest", ecosystems: [.python, .unknown], keys: [["pytest"]]),
         MarkerRule(marker: "Requests", ecosystems: [.python, .unknown], keys: [["requests"], ["httpx"], ["aiohttp"]]),
         MarkerRule(marker: "Ruff", ecosystems: [.python, .unknown], keys: [["ruff"]]),
         MarkerRule(marker: "Mypy", ecosystems: [.python, .unknown], keys: [["mypy"]]),
-        MarkerRule(marker: "Black", ecosystems: [.python, .unknown], keys: [["black"]]),
         MarkerRule(marker: "Poetry", ecosystems: [.python, .unknown], keys: [["poetry"]]),
         // Ruby
         MarkerRule(marker: "Ruby on Rails", ecosystems: [.ruby, .unknown], keys: [
-            ["rails"], ["railties"], ["activerecord"], ["activesupport"], ["actionpack"], ["actionview"], ["ActiveRecord"]
-                .flatMap { tokens(of: $0) },
+            ["rails"], ["railties"], ["activerecord"], ["activesupport"], ["actionpack"], ["actionview"],
         ]),
         MarkerRule(marker: "RSpec", ecosystems: [.ruby, .unknown], keys: [["rspec"]]),
         MarkerRule(marker: "Sidekiq", ecosystems: [.ruby, .unknown], keys: [["sidekiq"]]),
@@ -469,7 +475,7 @@ enum ManifestParsers {
         MarkerRule(marker: "Devise", ecosystems: [.ruby, .unknown], keys: [["devise"]]),
         MarkerRule(marker: "Nokogiri", ecosystems: [.ruby, .unknown], keys: [["nokogiri"]]),
         // .NET
-        MarkerRule(marker: "ASP.NET Core", ecosystems: [.nuget, .unknown], keys: [["asp", "net"], ["net", "core"]]),
+        MarkerRule(marker: "ASP.NET Core", ecosystems: [.nuget, .unknown], keys: [["aspnetcore"], ["asp", "net"], ["net", "core"]]),
         MarkerRule(marker: "Entity Framework Core", ecosystems: [.nuget, .unknown], keys: [["entity", "framework"]]),
         MarkerRule(marker: "Newtonsoft.Json", ecosystems: [.nuget, .unknown], keys: [["newtonsoft"]]),
         MarkerRule(marker: "Serilog", ecosystems: [.nuget, .unknown], keys: [["serilog"]]),
@@ -481,7 +487,7 @@ enum ManifestParsers {
 
     // MARK: - 锁文件判定表
 
-    private static let lockfileCandidates: [DependencyEcosystem: [String]] = [
+    static let lockfileCandidates: [DependencyEcosystem: [String]] = [
         .npm: [
             "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "pnpm-lock.yml",
             "yarn.lock", "bun.lockb", "bun.lock", "deno.lock",
@@ -490,7 +496,7 @@ enum ManifestParsers {
         .gradle: ["gradle.lockfile", "dependencies.lock"],
         .swiftPM: ["Package.resolved"],
         .python: [
-            "poetry.lock", "Pipfile.lock", "uv.lock", "pdm.lock", "hatch.lock",
+            "poetry.lock", "Pipfile.lock", "uv.lock", "pdm.lock",
             "requirements.lock", "requirements.txt.lock", "conda-lock.json",
         ],
         .go: ["go.sum"],
@@ -540,210 +546,13 @@ extension ManifestParsers {
 // MARK: - Maven / pom.xml
 
 extension ManifestParsers {
-    /// pom.xml -> [DependencyRecord]。name 为 "groupId:artifactId"，
-    /// dependencyManagement 的版本与 <properties> 会代入实际 dependencies 条目。
+    /// pom.xml -> [DependencyRecord]。name 为 "groupId:artifactId"；
+    /// `<properties>` 与 dependencyManagement 的版本会代入实际 dependencies 条目，
+    /// 代不了就保留原文，完全解不出来版本时填 "未声明"。
     static func pomXMLDependencies(_ text: String, manifestPath: String) -> [DependencyRecord] {
         let model = PomDocumentModel(text: text)
         return model.dependencyRecords(manifestPath: manifestPath)
     }
-}
-
-/// pom.xml 的中间模型：properties 表 + dependencyManagement 版本表 + 真实依赖条目。
-private final class PomDocumentModel: NSObject, XMLParserDelegate {
-    private struct Entry {
-        var group: String = ""
-        var artifact: String = ""
-        var version: String = ""
-        var scope: String = ""
-        var fromPlugin: Bool = false
-    }
-
-    private var properties: [String: String] = [:]
-    private var managedVersions: [String: String] = [:]
-    private var rootGroup: String = ""
-    private var rootVersion: String = ""
-    private var rootArtifact: String = ""
-    private var parentGroup: String = ""
-    private var parentVersion: String = ""
-    private var entries: [Entry] = []
-    private var managed: [Entry] = []
-
-    private var stack: [String] = []
-    private var text = ""
-
-    init(text: String) {
-        super.init()
-        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
-        guard let data = normalized.data(using: .utf8) else { return }
-        let parser = XMLParser(data: data)
-        parser.delegate = self
-        // 解析失败时就返回已收集到的部分，绝不抛异常。
-        parser.parse()
-    }
-
-    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?,
-                qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
-        let name = Self.local(elementName)
-        stack.append(name)
-        text = ""
-        if name == "dependency" {
-            entries.append(Entry())
-            if stack.contains("dependencyManagement") { managed.append(entries.removeLast()) }
-        }
-    }
-
-    func parser(_ parser: XMLParser, foundCharacters string: String) {
-        text += string
-    }
-
-    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?,
-                qualifiedName qName: String?) {
-        let name = Self.local(elementName)
-        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let parent = stack.count >= 2 ? stack[stack.count - 2] : ""
-        let isLeaf = !value.isEmpty
-
-        if isLeaf {
-            if parent == "dependency" {
-                let index = stack.contains("dependencyManagement") ? managed.count - 1 : entries.count - 1
-                guard index >= 0 else { break }
-                var entry = stack.contains("dependencyManagement") ? managed[index] : entries[index]
-                entry.fromPlugin = stack.contains("plugin") || stack.contains("plugins")
-                switch name {
-                case "groupId": entry.group = value
-                case "artifactId": entry.artifact = value
-                case "version": entry.version = value
-                case "scope": entry.scope = value
-                default: break
-                }
-                if stack.contains("dependencyManagement") { managed[index] = entry } else { entries[index] = entry }
-            } else if parent == "properties" {
-                properties[name] = value
-            } else if parent == "module" {
-                break // 模块名由 mavenModulePaths(in:) 单独提供
-            } else if stack.count == 2 {
-                switch name {
-                case "groupId": rootGroup = value
-                case "artifactId": rootArtifact = value
-                case "version": rootVersion = value
-                default: break
-                }
-            } else if parent == "parent" {
-                switch name {
-                case "groupId": parentGroup = value
-                case "version": parentVersion = value
-                default: break
-                }
-            }
-        }
-        if !stack.isEmpty { stack.removeLast() }
-        if name == "dependency" { text = ""; return }
-        text = ""
-    }
-
-    private static func local(_ elementName: String) -> String {
-        elementName.split(separator: ":").last.map(String.init) ?? elementName
-    }
-
-    /// 属性 / 内置变量代入；代不了保留原文。
-    private func resolve(_ raw: String) -> String {
-        guard raw.contains("${") else { return raw }
-        var result = raw
-        let pattern = "\\$\\{([^}]*)\\}"
-        // 迭代两轮，支持属性里再引用属性。
-        for _ in 0..<2 {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { break }
-            let ns = result as NSString
-            var replacements: [(NSRange, String)] = []
-            regex.enumerateMatches(in: result, options: [], range: NSRange(location: 0, length: ns.length)) { match, _, _ in
-                guard let match, match.numberOfRanges > 1 else { return }
-                let keyRange = match.range(at: 1)
-                let key = ns.substring(with: keyRange)
-                let fullRange = match.range(at: 0)
-                switch key {
-                case "project.version", "version":
-                    replacements.append((fullRange, result(forVersion: true)))
-                case "project.groupId", "groupId":
-                    replacements.append((fullRange, firstNonEmpty(rootGroup, parentGroup)))
-                case "project.artifactId", "artifactId":
-                    replacements.append((fullRange, rootArtifact))
-                case "project.parent.version":
-                    replacements.append((fullRange, parentVersion))
-                case "project.parent.groupId":
-                    replacements.append((fullRange, parentGroup))
-                default:
-                    if let hit = properties[key] { replacements.append((fullRange, hit)) }
-                }
-            }
-            guard !replacements.isEmpty else { break }
-            var mutable = result
-            for (range, value) in replacements.reversed() {
-                guard let swiftRange = Range(range, in: mutable) else { continue }
-                mutable.replaceSubrange(swiftRange, with: value)
-            }
-            result = mutable
-        }
-        return result
-    }
-
-    private func firstNonEmpty(_ values: String...) -> String {
-        values.first { !$0.isEmpty } ?? ""
-    }
-
-    private func result(forVersion isVersion: Bool) -> String {
-        guard isVersion else { return "" }
-        return firstNonEmpty(rootVersion, properties["revision"], parentVersion)
-    }
-
-    func dependencyRecords(manifestPath: String) -> [DependencyRecord] {
-        // 先建 dependencyManagement 版本表
-        for item in managed {
-            let group = resolve(item.group.isEmpty ? rootGroup : item.group)
-            let artifact = resolve(item.artifact)
-            let version = resolve(item.version)
-            guard !group.isEmpty, !artifact.isEmpty, !version.isEmpty else { continue }
-            managedVersions["\(group):\(artifact)"] = version
-        }
-
-        var records: [DependencyRecord] = []
-        for item in entries {
-            let groupValue = resolve(item.group.isEmpty ? rootGroup : item.group)
-            let artifactValue = resolve(item.artifact)
-            guard !artifactValue.isEmpty else { continue }
-            let key = "\(groupValue):\(artifactValue)"
-            var versionValue = resolve(item.version)
-            if versionValue.isEmpty { versionValue = managedVersions[key] ?? "" }
-            // 管理表里也可能带 ${}，再代一次
-            versionValue = resolve(versionValue)
-            if versionValue.isEmpty { versionValue = PomDocumentModel.placeholder }
-
-            let scope: DependencyScope
-            if item.fromPlugin && item.scope.isEmpty {
-                scope = .build
-            } else {
-                switch item.scope.lowercased() {
-                case "test": scope = .test
-                case "provided": scope = .platform
-                case "runtime", "compile", "system", "", "import": scope = .runtime
-                default: scope = .runtime
-                }
-            }
-            let name = groupValue.isEmpty ? artifactValue : "\(groupValue):\(artifactValue)"
-            records.append(DependencyRecord(
-                name: name,
-                version: versionValue,
-                ecosystem: .maven,
-                scope: scope,
-                manifestPath: manifestPath,
-                latestKnownVersion: nil,
-                versionCheckSource: VersionCheckSource.none,
-                knownVulnerabilities: []
-            ))
-        }
-        return records
-    }
-
-    static let placeholder = "未声明"
 }
 
 // MARK: - Gradle / build.gradle(.kts)
@@ -765,7 +574,7 @@ extension ManifestParsers {
         "androidtestimplementation": .test,
         "androidtestruntimeonly": .test,
         "androidtestannotationprocessor": .test,
-        "kaptest": .test,
+        "kapttest": .test,
         "kaptandroidtest": .test,
         "compileonly": .build,
         "kapt": .build,
@@ -775,7 +584,7 @@ extension ManifestParsers {
         "spotless": .build,
     ]
 
-    private static func gradleScope(for configuration: String) -> DependencyScope? {
+    static func gradleScope(for configuration: String) -> DependencyScope? {
         let key = configuration.lowercased()
         if let known = gradleConfigScopes[key] { return known }
         let isTest = key.contains("test") || key.contains("spec")
@@ -786,72 +595,62 @@ extension ManifestParsers {
         return nil
     }
 
-    /// build.gradle / build.gradle.kts -> [DependencyRecord]。
-    /// 支持 `implementation 'g:a:v'`、`api("g:a:v")`、map 写法、`library("别名","g:a:v")`、`id(...) version "..."`。
+    /// build.gradle / build.gradle.kts / settings.gradle(.kts) -> [DependencyRecord]。
     static func gradleDependencies(_ text: String, manifestPath: String) -> [DependencyRecord] {
         let body = lines(text).map { stripSlashComment($0) }.joined(separator: "\n")
         var records: [DependencyRecord] = []
 
-        // 1) 配置名 + 字符串坐标
-        let coordPattern = "\\b([A-Za-z][A-Za-z0-9_]*)\\s*\\(?\\s*(?:platform\\s*\\(\\s*)?(['\"])([^'\"\\n]+)\\2"
-        for groups in matches(of: coordPattern, in: body) {
-            guard let config = groups[1], let coordinate = groups[3],
-                  let scope = gradleScope(for: config) else { continue }
+        // 1) 配置名 + 字符串坐标：implementation 'g:a:v' / api("g:a:v") / implementation platform("g:a:v")
+        let coordinatePattern = "\\b([A-Za-z][A-Za-z0-9_]*)\\s*\\(?\\s*(?:platform\\s*\\(\\s*)?(['\"])([^'\"\\n]+)\\2"
+        for groups in matches(of: coordinatePattern, in: body) {
+            guard let configuration = groups[safe: 1], let coordinate = groups[safe: 3],
+                  let scope = gradleScope(for: configuration) else { continue }
             guard let (name, version) = gradleCoordinate(coordinate) else { continue }
             records.append(record(name, version, .gradle, scope, manifestPath))
         }
 
         // 2) map 写法：implementation group: 'g', name: 'a', version: 'v'
-        let mapPattern = "\\b([A-Za-z][A-Za-z0-9_]*)\\s*\\(?\\s*group\\s*:\\s*(['\"])([^'\"\\n]+)\\2\\s*,\\s*name\\s*:\\s*(['\"])([^'\"\\n]+)\\4\\s*(?:,\\s*version\\s*:\\s*(['\"])([^'\"\\n]+)\\6)?"
+        let mapPattern = "\\b([A-Za-z][A-Za-z0-9_]*)\\s*\\(?\\s*group\\s*:\\s*(['\"])([^'\"\\n]+)\\2"
+            + "\\s*,\\s*name\\s*:\\s*(['\"])([^'\"\\n]+)\\4\\s*(?:,\\s*version\\s*:\\s*(['\"])([^'\"\\n]+)\\6)?"
         for groups in matches(of: mapPattern, in: body) {
-            guard let config = groups[1], let group = groups[3], let artifact = groups[5],
-                  let scope = gradleScope(for: config) else { continue }
-            let version = groups.count > 7 ? (groups[7] ?? undeclaredVersion) : undeclaredVersion
+            guard let configuration = groups[safe: 1], let group = groups[safe: 3], let artifact = groups[safe: 5],
+                  let scope = gradleScope(for: configuration) else { continue }
+            let version = groups[safe: 7] ?? undeclaredVersion
             records.append(record("\(group):\(artifact)", version, .gradle, scope, manifestPath))
         }
 
-        // 3) 版本目录（settings.gradle 里的 version catalogs）：library("别名", "g:a:v")
-        for groups in matches(of: "\\blibrary\\s*\\(\\s*(['\"])([^'\"\\n]+)\\1\\s*,\\s*(['\"])([^'\"\\n]+)\\3", in: body) {
-            guard let coordinate = groups[4], let (name, version) = gradleCoordinate(coordinate) else { continue }
+        // 3) 版本目录：library("别名", "g:a:v")（现代 Gradle 真正的版本只写在这里）
+        let catalogPattern = "\\blibrary\\s*\\(\\s*(['\"])([^'\"\\n]+)\\1\\s*,\\s*(['\"])([^'\"\\n]+)\\3"
+        for groups in matches(of: catalogPattern, in: body) {
+            guard let coordinate = groups[safe: 4], let (name, version) = gradleCoordinate(coordinate) else { continue }
             records.append(record(name, version, .gradle, .runtime, manifestPath))
         }
 
         // 4) 插件声明：id("org.springframework.boot") version "3.2.0" / kotlin("jvm") version "1.9.22"
         let pluginPattern = "\\b(?:id|kotlin)\\s*\\(?\\s*(['\"])([A-Za-z0-9_.\\-]+)\\1\\s*\\)?\\s+version\\s+(['\"])([^'\"\\n]+)\\3"
         for groups in matches(of: pluginPattern, in: body) {
-            guard let rawID = groups[2], let version = groups[4] else { continue }
-            let name: String
-            if rawID.contains(".") { name = rawID }
-            else { name = "org.jetbrains.kotlin.\(rawID)" }
-            if gradleCoordinate(name) != nil { continue } // 像坐标的（g:a）交给上面的规则
+            guard let rawID = groups[safe: 2], let version = groups[safe: 4] else { continue }
+            let name = rawID.contains(".") ? rawID : "org.jetbrains.kotlin.\(rawID)"
             records.append(record(name, version, .gradle, .build, manifestPath))
         }
-
         return records
     }
 
     /// "g:a:v" / "g:a" / "g:a:v@jar" / "g:a:v:classifier" -> (name, version)；不像坐标返回 nil。
-    private static func gradleCoordinate(_ raw: String) -> (name: String, version: String)? {
-        let coordinate = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    static func gradleCoordinate(_ raw: String) -> (name: String, version: String)? {
+        let coordinate = trim(raw)
         if coordinate.isEmpty || coordinate.contains("://") || coordinate.contains(" ") { return nil }
         if coordinate.hasPrefix("/") || coordinate.hasPrefix("\\") { return nil }
-        var parts = coordinate.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        let parts = coordinate.split(separator: ":", omittingEmptySubsequences: false)
+            .map { component -> String in
+                guard let at = component.firstIndex(of: "@") else { return String(component) }
+                return String(component[..<at])
+            }
         guard parts.count >= 2 else { return nil }
-        parts = parts.map { part in
-            guard let at = part.firstIndex(of: "@") else { return part }
-            return String(part[..<at])
-        }
-        let group = parts[0].trimmingCharacters(in: .whitespaces)
-        let artifact = parts[1].trimmingCharacters(in: .whitespaces)
-        guard !group.isEmpty, !artifact.isEmpty else { return nil }
-        // 至少看着像包名/模块名（含字母）
+        let group = parts[0]
+        let artifact = parts[1]
         guard group.contains(where: { $0.isLetter }), artifact.contains(where: { $0.isLetter }) else { return nil }
-        let version: String
-        if parts.count >= 3, !parts[2].isEmpty {
-            version = parts[2]
-        } else {
-            version = undeclaredVersion
-        }
+        let version = parts.count >= 3 && !parts[2].isEmpty ? parts[2] : undeclaredVersion
         return ("\(group):\(artifact)", version)
     }
 }
@@ -859,7 +658,7 @@ extension ManifestParsers {
 // MARK: - Swift Package Manager / Package.swift
 
 extension ManifestParsers {
-    /// Package.swift -> [DependencyRecord]。`.package(path:)` 是本地模块，不计入。
+    /// Package.swift -> [DependencyRecord]，scope 全为 .runtime。`.package(path:)` 是本地模块，不计入。
     static func swiftPackageDependencies(_ text: String, manifestPath: String) -> [DependencyRecord] {
         let ns = text as NSString
         let needle = ".package("
@@ -870,26 +669,25 @@ extension ManifestParsers {
             let found = ns.range(of: needle, options: [], range: window)
             if found.location == NSNotFound { break }
             let argumentsStart = found.location + found.length
-            guard let argumentsRange = argumentsRange(after: argumentsStart, in: ns) else {
+            guard let argumentsLength = closingArgumentsLength(after: argumentsStart, in: ns) else {
                 searchStart = argumentsStart
                 continue
             }
-            let arguments = ns.substring(with: NSRange(location: argumentsStart, length: argumentsRange))
-            searchStart = argumentsStart + argumentsRange
-            if let entry = swiftPackageEntry(arguments) {
+            let arguments = ns.substring(with: NSRange(location: argumentsStart, length: argumentsLength))
+            searchStart = argumentsStart + argumentsLength
+            let body = stripSlashComment(arguments)
+            if let entry = swiftPackageEntry(body) {
                 records.append(record(entry.name, entry.version, .swiftPM, .runtime, manifestPath))
             }
         }
         return records
     }
 
-    /// 从 `.package(` 之后扫描配对括号，返回参数文本长度；返回 nil 表示括号不配对。
-    private static func argumentsRange(after start: Int, in ns: NSString) -> Int? {
+    /// 从 `.package(` 之后扫描配对括号，返回参数文本长度；括号不配对返回 nil。
+    static func closingArgumentsLength(after start: Int, in ns: NSString) -> Int? {
         var depth = 1
-        var index = start
         var quote: unichar = 0
-        let quoteDouble: unichar = 34
-        let quoteSingle: unichar = 39
+        var index = start
         while index < ns.length {
             let ch = ns.character(at: index)
             if quote != 0 {
@@ -897,8 +695,8 @@ extension ManifestParsers {
                 index += 1
                 continue
             }
-            if ch == quoteDouble || ch == quoteSingle { quote = ch; index += 1; continue }
-            if ch == 40 { depth += 1 }
+            if ch == 34 || ch == 39 { quote = ch }
+            else if ch == 40 { depth += 1 }
             else if ch == 41 {
                 depth -= 1
                 if depth == 0 { return index - start + 1 }
@@ -908,19 +706,18 @@ extension ManifestParsers {
         return nil
     }
 
-    private static func swiftPackageEntry(_ arguments: String) -> (name: String, version: String)? {
-        let url = firstGroup("url\\s*:\\s*([\"'])([^\"'\\n]+)\\1", 2, in: arguments)
-        let identifier = firstGroup("\\bid\\s*:\\s*([\"'])([^\"'\\n]+)\\1", 2, in: arguments)
-        let declaredName = firstGroup("(?:^|[^A-Za-z])name\\s*:\\s*([\"'])([^\"'\\n]+)\\1", 2, in: arguments)
-        // 本地路径依赖属于工程自身模块，跳过
-        if firstGroup("path\\s*:\\s*([\"'])([^\"'\\n]+)\\1", 2, in: arguments) != nil, url == nil, identifier == nil {
-            return nil
+    static func swiftPackageEntry(_ arguments: String) -> (name: String, version: String)? {
+        let url = firstGroup("url\\s*:\\s*(['\"])([^'\"\\n]+)\\1", 2, in: arguments)
+        let identifier = firstGroup("\\bid\\s*:\\s*(['\"])([^'\"\\n]+)\\1", 2, in: arguments)
+        let declaredName = firstGroup("(?:[^A-Za-z])name\\s*:\\s*(['\"])([^'\"\\n]+)\\1", 2, in: arguments)
+        if firstGroup("path\\s*:\\s*(['\"])([^'\"\\n]+)\\1", 2, in: arguments) != nil, url == nil, identifier == nil {
+            return nil // 本地路径依赖
         }
-        var version = firstGroup("\\bfrom\\s*:\\s*([\"'])([^\"'\\n]+)\\1", 2, in: arguments)
-        version = version ?? firstGroup("\\bexact\\s*:\\s*([\"'])([^\"'\\n]+)\\1", 2, in: arguments)
-        version = version ?? firstGroup("([\"'])([0-9][^\"'\\s]*)\\1\\s*\\.\\.\\.", 2, in: arguments)
-        version = version ?? firstGroup("\\brevision\\s*:\\s*([\"'])([^\"'\\n]+)\\1", 2, in: arguments)
-        version = version ?? firstGroup("\\bbranch\\s*:\\s*([\"'])([^\"'\\n]+)\\1", 2, in: arguments)
+        var version = firstGroup("\\bfrom\\s*:\\s*(['\"])([^'\"\\n]+)\\1", 2, in: arguments)
+        version = version ?? firstGroup("\\bexact\\s*:\\s*(['\"])([^'\"\\n]+)\\1", 2, in: arguments)
+        version = version ?? firstGroup("(['\"])([0-9][^'\"\\s]*)\\1\\s*\\.\\.\\.", 2, in: arguments)
+        version = version ?? firstGroup("\\brevision\\s*:\\s*(['\"])([^'\"\\n]+)\\1", 2, in: arguments)
+        version = version ?? firstGroup("\\bbranch\\s*:\\s*(['\"])([^'\"\\n]+)\\1", 2, in: arguments)
 
         let name: String
         if let declaredName, !declaredName.isEmpty {
@@ -937,31 +734,31 @@ extension ManifestParsers {
     }
 
     /// URL -> 包名：末段去掉 .git
-    private static func swiftPackageBasename(_ rawURL: String) -> String {
-        var value = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    static func swiftPackageBasename(_ rawURL: String) -> String {
+        var value = trim(rawURL)
         if let hash = value.firstIndex(of: "#") { value = String(value[..<hash]) }
         if let query = value.firstIndex(of: "?") { value = String(value[..<query]) }
         while value.hasSuffix("/") { value = String(value.dropLast()) }
         var last = value
         if let slash = last.lastIndex(of: "/") { last = String(last[last.index(after: slash)...]) }
-        if let colon = last.lastIndex(of: ":") { last = String(last[last.index(after: colon)...]) }
         if last.lowercased().hasSuffix(".git") { last = String(last.dropLast(4)) }
         return last
     }
 }
 
-// MARK: - Python / requirements.txt + pyproject.toml + Pipfile + setup.py
+// MARK: - Python
 
 extension ManifestParsers {
-    /// requirements.txt -> [DependencyRecord]。名字按 PEP 503 小写归一。
+    /// requirements.txt -> [DependencyRecord]。名字按 PEP 503 小写归一；
+    /// `pkg>=1.2` 取声明的下界 "1.2"；`-r`/`-e`/注释行跳过。
     static func requirementsTxtDependencies(_ text: String, manifestPath: String) -> [DependencyRecord] {
         var records: [DependencyRecord] = []
         for rawLine in lines(text) {
             let line = trim(stripHashComment(rawLine))
             if line.isEmpty { continue }
             if line.hasPrefix("-") { continue } // -r / -e / -c / --index-url …
-            if let record = pythonRequirementRecord(line, scope: .runtime, manifestPath: manifestPath) {
-                records.append(record)
+            if let item = pythonRequirementRecord(line, scope: .runtime, manifestPath: manifestPath) {
+                records.append(item)
             }
         }
         return records
@@ -970,107 +767,99 @@ extension ManifestParsers {
     /// pyproject.toml / Pipfile / setup.py -> [DependencyRecord]（尽力而为）。
     static func pyprojectDependencies(_ text: String, manifestPath: String) -> [DependencyRecord] {
         var records: [DependencyRecord] = []
-        let entries = tomlEntries(in: text)
 
-        for entry in entries {
+        for entry in tomlEntries(in: text) {
             let section = entry.section.lowercased()
             let key = entry.key.lowercased()
+            let value = entry.value
 
-            // setup.py / pyproject 里的数组式声明
-            if section == "project" && key == "dependencies" {
-                for spec in tomlStringList(entry.value) {
-                    if let item = pythonRequirementRecord(spec, scope: .runtime, manifestPath: manifestPath) {
-                        records.append(item)
-                    }
+            if section == "project", key == "dependencies" {
+                for spec in tomlStringList(value) {
+                    appendPython(spec, scope: .runtime, manifestPath: manifestPath, to: &records)
                 }
                 continue
             }
-            if section == "build-system" && key == "requires" {
-                for spec in tomlStringList(entry.value) {
-                    if let item = pythonRequirementRecord(spec, scope: .build, manifestPath: manifestPath) {
-                        records.append(item)
-                    }
+            if section == "build-system", key == "requires" {
+                for spec in tomlStringList(value) {
+                    appendPython(spec, scope: .build, manifestPath: manifestPath, to: &records)
                 }
                 continue
             }
-            if section == "project" && key == "requires-python" {
-                if let version = numericVersionPrefix(entry.value) {
+            if section == "project", key == "requires-python" {
+                if let version = numericVersionPrefix(value) {
                     records.append(record("python", version, .python, .platform, manifestPath))
                 }
                 continue
             }
             if section == "dependency-groups" {
-                for spec in tomlStringList(entry.value) {
-                    if let item = pythonRequirementRecord(spec, scope: .dev, manifestPath: manifestPath) {
-                        records.append(item)
-                    }
+                for spec in tomlStringList(value) {
+                    appendPython(spec, scope: .dev, manifestPath: manifestPath, to: &records)
+                }
+                continue
+            }
+            if section.hasSuffix("optional-dependencies") {
+                for spec in tomlStringList(value) {
+                    appendPython(spec, scope: .dev, manifestPath: manifestPath, to: &records)
                 }
                 continue
             }
 
-            guard let scope = pythonTableScope(section: section, key: key) else { continue }
-            if section.hasSuffix("optional-dependencies") {
-                // [project.optional-dependencies] 的每个键是一个可选组
-                for spec in tomlStringList(entry.value) {
-                    if let item = pythonRequirementRecord(spec, scope: .dev, manifestPath: manifestPath) {
-                        records.append(item)
-                    }
-                }
-                continue
-            }
-            // poetry / Pipfile 风格：name = "^1.2" 或 name = { version = "^1.2" }
+            guard let scope = pythonTableScope(section) else { continue }
+            // poetry / Pipfile 风格：name = "^1.2" 或 name = { version = "^1.2", … }
             let name = key == "python" ? "python" : normalizePythonName(entry.key)
-            guard !name.isEmpty, name != "source" else { continue }
-            let rawVersion: String?
-            if let inline = firstGroup("version\\s*=\\s*([\"'])([^\"'\\n]+)\\1", 2, in: entry.value) {
-                rawVersion = inline
-            } else if entry.value.trimmingCharacters(in: .whitespaces).hasPrefix("{") {
-                rawVersion = nil // 只有 git/path 之类，没有版本
+            guard !name.isEmpty else { continue }
+            let declared: String?
+            if let inline = firstGroup("version\\s*=\\s*(['\"])([^'\"\\n]+)\\1", 2, in: value) {
+                declared = inline
+            } else if trim(value).hasPrefix("{") {
+                declared = nil // 只有 git / path，没写版本
             } else {
-                rawVersion = firstGroup("^\\s*([\"'])([^\"'\\n]+)\\1", 2, in: entry.value)
+                declared = firstGroup("^\\s*(['\"])([^'\"\\n]+)\\1", 2, in: value)
             }
-            if name.isEmpty { continue }
             let version: String
-            if let rawVersion, let extracted = numericVersionPrefix(rawVersion) {
+            if let declared, let extracted = numericVersionPrefix(declared) {
                 version = extracted
-            } else if let rawVersion {
-                version = rawVersion
+            } else if let declared {
+                version = declared
             } else {
                 version = undeclaredVersion
             }
-            let entryScope: DependencyScope = name == "python" ? .platform : scope
-            records.append(record(name, version, .python, entryScope, manifestPath))
+            records.append(record(name, version, .python, name == "python" ? .platform : scope, manifestPath))
         }
 
-        // setup.py 的 install_requires = [ ... ]
+        // setup.py 的 install_requires = [...] / extras_require = {...}
         for groups in matches(of: "install_requires\\s*=\\s*\\[([^\\]]*)\\]", in: text) {
-            guard let body = groups[1] else { continue }
+            guard let body = groups[safe: 1] else { continue }
             for spec in tomlStringList(body) {
-                if let item = pythonRequirementRecord(spec, scope: .runtime, manifestPath: manifestPath) {
-                    records.append(item)
-                }
+                appendPython(spec, scope: .runtime, manifestPath: manifestPath, to: &records)
             }
         }
-        for groups in matches(of: "extras_require\\s*=\\s*\\{(.*?)\\n\\s*\\}", in: text, multiline: true) {
-            guard let body = groups[1] else { continue }
+        for groups in matches(of: "extras_require\\s*=\\s*\\{(.*?)\\n[ \\t]*\\}", in: text,
+                             options: [.dotMatchesLineSeparators]) {
+            guard let body = groups[safe: 1] else { continue }
             for spec in tomlStringList(body) {
-                if let item = pythonRequirementRecord(spec, scope: .dev, manifestPath: manifestPath) {
-                    records.append(item)
-                }
+                appendPython(spec, scope: .dev, manifestPath: manifestPath, to: &records)
             }
         }
         return records
     }
 
-    /// 一条 PEP 508/PEP 440 依赖字符串 -> DependencyRecord
-    private static func pythonRequirementRecord(_ spec: String, scope: DependencyScope, manifestPath: String) -> DependencyRecord? {
+    private static func appendPython(_ spec: String, scope: DependencyScope,
+                                     manifestPath: String, to records: inout [DependencyRecord]) {
+        if let item = pythonRequirementRecord(spec, scope: scope, manifestPath: manifestPath) {
+            records.append(item)
+        }
+    }
+
+    /// 一条 PEP 508 / PEP 440 依赖字符串 -> DependencyRecord
+    static func pythonRequirementRecord(_ spec: String, scope: DependencyScope,
+                                        manifestPath: String) -> DependencyRecord? {
         var value = trim(stripHashComment(spec))
-        if value.isEmpty { return nil }
-        if value.hasPrefix("-") { return nil }
+        if value.isEmpty || value.hasPrefix("-") { return nil }
         if let semicolon = value.firstIndex(of: ";") { value = trim(String(value[..<semicolon])) }
         // 直接引用：name @ https://…
-        if let at = value.range(of: " @ ") {
-            let name = normalizePythonName(String(value[..<at.lowerBound]))
+        if let direct = value.range(of: " @ ") {
+            let name = normalizePythonName(String(value[..<direct.lowerBound]))
             guard !name.isEmpty else { return nil }
             return record(name, undeclaredVersion, .python, scope, manifestPath)
         }
@@ -1079,72 +868,66 @@ extension ManifestParsers {
             return record(normalizePythonName(egg), undeclaredVersion, .python, scope, manifestPath)
         }
         guard let groups = matches(of: "^([A-Za-z0-9][A-Za-z0-9._\\-]*)\\s*(\\[[^\\]]*\\])?\\s*(.*)$", in: value).first,
-              let rawName = groups[1] else { return nil }
+              let rawName = groups[safe: 1] else { return nil }
         let name = normalizePythonName(rawName)
         guard !name.isEmpty else { return nil }
-        let version = numericVersionPrefix(groups[3] ?? "") ?? undeclaredVersion
+        let version = numericVersionPrefix(groups[safe: 3] ?? "") ?? undeclaredVersion
         return record(name, version, .python, scope, manifestPath)
     }
 
-    private static func normalizePythonName(_ raw: String) -> String {
-        let lower = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    static func normalizePythonName(_ raw: String) -> String {
+        let lower = trim(raw).lowercased()
         guard !lower.isEmpty else { return lower }
-        let collapsed = matchesReplaced(lower, pattern: "[-_.]+", with: "-")
-        return collapsed
+        return replaceMatches(lower, pattern: "[-_.]+", with: "-")
     }
 
     /// 从 "^1.2"、">=1.2,<2"、"~> 1.2"、"==1.2.3" 里取声明的下界；取不到返回 nil。
-    private static func numericVersionPrefix(_ raw: String) -> String? {
-        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    static func numericVersionPrefix(_ raw: String) -> String? {
+        let value = trim(raw)
         guard !value.isEmpty else { return nil }
         return firstGroup("([0-9]+(?:\\.[0-9A-Za-z\\-]+)*)", 1, in: value)
     }
 
-    /// 哪些 TOML 段里的 `key = value` 算依赖，以及对应 scope。
-    private static func pythonTableScope(section: String, key: String) -> DependencyScope? {
-        if section.hasSuffix("optional-dependencies") { return .dev }
-        if section == "packages" { return .runtime }
-        if section == "dev-packages" { return .dev }
-        if section == "tool.poetry.dependencies" { return .runtime }
-        if section == "tool.poetry.dev-dependencies" { return .dev }
-        if section == "tool.poetry.group" || section.hasPrefix("tool.poetry.group.") {
-            guard section.hasSuffix(".dependencies") else { return nil }
-            let groupName = section.replacingOccurrences(of: "tool.poetry.group.", with: "")
+    /// 哪些 TOML 段里的 `key = value` 算依赖。
+    static func pythonTableScope(_ section: String) -> DependencyScope? {
+        switch section {
+        case "packages": return .runtime
+        case "dev-packages": return .dev
+        case "tool.poetry.dependencies": return .runtime
+        case "tool.poetry.dev-dependencies": return .dev
+        case "tool.poetry.group.dependencies": return .dev
+        default: break
+        }
+        if section.hasPrefix("tool.poetry.group.") && section.hasSuffix(".dependencies") {
+            let group = section
+                .replacingOccurrences(of: "tool.poetry.group.", with: "")
                 .replacingOccurrences(of: ".dependencies", with: "")
-            return ["dev", "test", "tests", "lint", "docs", "ci", "tools", "typing"].contains(groupName) ? .dev : .runtime
+            let devGroups: Set<String> = ["dev", "test", "tests", "lint", "docs", "ci", "tools", "typing", "quality"]
+            return devGroups.contains(group) ? .dev : .runtime
         }
-        if section.hasSuffix("dependencies") && (section.hasPrefix("tool.pipenv") || section == "dependencies") {
-            return .runtime
-        }
-        _ = key
         return nil
     }
 
-    /// 极简 TOML 扫描：返回 (段名, 键, 原样值)，多行数组/内联表已合并。
-    private static func tomlEntries(in text: String) -> [(section: String, key: String, value: String)] {
+    /// 极简 TOML 扫描：返回 (段名, 键, 原样值)，多行数组 / 内联表已合并成一条。
+    static func tomlEntries(in text: String) -> [(section: String, key: String, value: String)] {
         let rows = lines(text)
         var section = ""
         var result: [(String, String, String)] = []
         var index = 0
         while index < rows.count {
-            let raw = rows[index]
-            let line = trim(stripHashComment(raw))
+            let line = trim(stripHashComment(rows[index]))
             index += 1
             if line.isEmpty { continue }
             if line.hasPrefix("[") {
-                let inner = line.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-                section = trim(inner)
+                section = trim(line.trimmingCharacters(in: CharacterSet(charactersIn: "[]")))
                 continue
             }
             guard let groups = matches(of: "^([A-Za-z0-9_\"'\\.\\-]+)\\s*=(.*)$", in: line).first,
-                  let key = groups[1], let rest = groups[2] else { continue }
+                  let key = groups[safe: 1], let rest = groups[safe: 2] else { continue }
             var value = trim(rest)
-            var balance = bracketBalance(value)
-            while balance > 0 && index < rows.count {
-                let next = rows[index]
+            while bracketBalance(value) > 0, index < rows.count {
+                value += "\n" + trim(stripHashComment(rows[index]))
                 index += 1
-                value += "\n" + trim(stripHashComment(next))
-                balance = bracketBalance(value)
             }
             let cleanKey = key.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
             result.append((section, cleanKey, value))
@@ -1153,7 +936,7 @@ extension ManifestParsers {
     }
 
     /// 引号外的 `[`/`{` 与 `]`/`}` 差值。
-    private static func bracketBalance(_ text: String) -> Int {
+    static func bracketBalance(_ text: String) -> Int {
         var open = 0
         var quote: Character?
         for ch in text {
@@ -1168,48 +951,25 @@ extension ManifestParsers {
         return open
     }
 
-    /// 取出文本里所有引号字符串（数组元素 / 内联字符串都能用）。
-    private static func tomlStringList(_ text: String) -> [String] {
-        matches(of: "([\"'])([^\"'\\n]+)\\1", in: text).compactMap { $0[2] }
-    }
-
-    private static func matchesReplaced(_ text: String, pattern: String, with template: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-        return regex.stringByReplacingMatches(in: text, options: [],
-                                              range: NSRange(location: 0, length: (text as NSString).length),
-                                              withTemplate: template)
+    /// 取出文本里所有引号字符串（数组元素、内联字符串都适用）。
+    static func tomlStringList(_ text: String) -> [String] {
+        quotedStrings(text)
     }
 }
 
 // MARK: - Go / go.mod
 
 extension ManifestParsers {
-    /// go.mod -> [DependencyRecord]。`// indirect` 记为 .unknown。
-    /// 版本去掉 go 特有的 "v" 前缀与 "+incompatible"，以便与 DependencyVersion 的点分比较对齐。
+    /// go.mod -> [DependencyRecord]。`// indirect` 记为 .unknown，其余 .runtime。
+    /// 版本去掉 go 特有的 "v" 前缀与 "+incompatible"，以对齐 DependencyVersion 的点分比较。
     static func goModDependencies(_ text: String, manifestPath: String) -> [DependencyRecord] {
         var records: [DependencyRecord] = []
         var inRequireBlock = false
         var inIgnoredBlock = false
         for rawLine in lines(text) {
             let stripped = trim(stripSlashComment(rawLine))
-            let isCommentOnly = rawLine.trimmingCharacters(in: .whitespaces).hasPrefix("//")
             if stripped.isEmpty { continue }
 
-            if !inRequireBlock && !inIgnoredBlock {
-                if stripped.hasPrefix("require (") || stripped == "require (" {
-                    inRequireBlock = true
-                    continue
-                }
-                if stripped.hasPrefix("replace (") || stripped.hasPrefix("exclude (")
-                    || stripped.hasPrefix("retract") {
-                    inIgnoredBlock = true
-                    continue
-                }
-                if stripped.hasPrefix("module") || stripped.hasPrefix("go ")
-                    || stripped.hasPrefix("toolchain") || stripped.hasPrefix("require //") {
-                    continue
-                }
-            }
             if inIgnoredBlock {
                 if stripped == ")" { inIgnoredBlock = false }
                 continue
@@ -1218,25 +978,32 @@ extension ManifestParsers {
                 inRequireBlock = false
                 continue
             }
+            if !inRequireBlock {
+                if stripped == "require (" || stripped.hasPrefix("require (") { inRequireBlock = true; continue }
+                if stripped.hasPrefix("replace") || stripped.hasPrefix("exclude") || stripped.hasPrefix("retract") {
+                    if stripped.contains("(") { inIgnoredBlock = true }
+                    continue
+                }
+                if stripped.hasPrefix("module") || stripped.hasPrefix("go ") || stripped.hasPrefix("go\t")
+                    || stripped == "go" || stripped.hasPrefix("toolchain") { continue }
+            }
 
             var body = stripped
             if body.hasPrefix("require ") { body = trim(String(body.dropFirst("require ".count))) }
             let columns = body.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
-            guard columns.count >= 1 else { continue }
-            let modulePath = columns[0]
-            guard !modulePath.isEmpty, modulePath != "(", !modulePath.hasPrefix("//") else { continue }
-            var version = columns.count >= 2 ? columns[1] : undeclaredVersion
-            if version == "(" { version = undeclaredVersion }
-            version = goVersion(version)
-            let isIndirect = rawLine.contains("// indirect") || (isCommentOnly && rawLine.contains("indirect"))
-            records.append(record(modulePath, version, .go, isIndirect ? .unknown : .runtime, manifestPath))
+            guard let modulePath = columns.first, !modulePath.isEmpty, modulePath != "(" else { continue }
+            if modulePath.hasPrefix("//") || modulePath.hasPrefix("\"") { continue }
+            let rawVersion = columns.count >= 2 ? columns[1] : undeclaredVersion
+            let isIndirect = rawLine.lowercased().contains("// indirect")
+            records.append(record(modulePath, goVersion(rawVersion), .go,
+                                  isIndirect ? .unknown : .runtime, manifestPath))
         }
         return records
     }
 
-    private static func goVersion(_ raw: String) -> String {
+    static func goVersion(_ raw: String) -> String {
         var value = trim(raw)
-        if value.hasPrefix("v"), value.dropFirst().first.map({ $0.isNumber }) == true {
+        if value.hasPrefix("v"), let first = value.dropFirst().first, first.isNumber {
             value = String(value.dropFirst())
         }
         if let plus = value.firstIndex(of: "+") { value = String(value[..<plus]) }
@@ -1259,15 +1026,16 @@ extension ManifestParsers {
             else { scope = .runtime }
             let name = trim(entry.key)
             guard !name.isEmpty else { continue }
-            let value = entry.value
-            let version: String
-            if let inline = firstGroup("version\\s*=\\s*([\"'])([^\"'\\n]+)\\1", 2, in: value) {
-                version = inline
+            let declared: String?
+            if let inline = firstGroup("version\\s*=\\s*(['\"])([^'\"\\n]+)\\1", 2, in: entry.value) {
+                declared = inline
+            } else if trim(entry.value).hasPrefix("{") {
+                declared = nil
             } else {
-                version = firstGroup("^\\s*([\"'])([^\"'\\n]+)\\1", 2, in: value) ?? undeclaredVersion
+                declared = firstGroup("^\\s*(['\"])([^'\"\\n]+)\\1", 2, in: entry.value)
             }
-            let normalized = trim(version)
-            records.append(record(name, normalized.isEmpty || normalized == "*" ? undeclaredVersion : normalized,
+            let version = trim(declared ?? undeclaredVersion)
+            records.append(record(name, version.isEmpty || version == "*" ? undeclaredVersion : version,
                                   .cargo, scope, manifestPath))
         }
         return records
@@ -1283,55 +1051,51 @@ extension ManifestParsers {
         var depth = 0
         var scopes: [DependencyScope] = []
         for rawLine in lines(text) {
-            let line = trim(stripSlashComment(rawLine))
-            if line.isEmpty || line.hasPrefix("#") { continue }
-            if line == "end" || line.hasPrefix("end ") || line.hasPrefix("end}") {
+            let line = trim(stripHashComment(rawLine))
+            if line.isEmpty { continue }
+            if line == "end" || line.hasPrefix("end ") {
                 if depth > 0 { depth -= 1 }
-                if !scopes.isEmpty, let last = scopes.popLast(), scopes.count > depth {
-                    scopes.append(last)
-                }
                 while scopes.count > depth { scopes.removeLast() }
                 continue
             }
-
             let inherited = scopes.last ?? .runtime
-            if line.hasPrefix("pod ") || line.hasPrefix("pod(") || line.hasPrefix("pod'") || line.hasPrefix("pod\"") {
-                let strings = matches(of: "([\"'])([^\"'\\n]+)\\1", in: line).compactMap { $0[2] }
+            if line.hasPrefix("pod ") || line.hasPrefix("pod(") || line.hasPrefix("pod '") || line.hasPrefix("pod \"") {
+                let strings = quotedStrings(line)
                 guard let name = strings.first, !name.isEmpty else { continue }
-                var scope = inherited
-                if line.contains("testables") { scope = .test }
-                else if let explicit = podVersion(strings.dropFirst()) {
-                    scope = inherited
-                    _ = explicit
-                }
-                let version = podVersion(strings.dropFirst()) ?? undeclaredVersion
+                let scope = (line.contains("testables") || inherited == .test) ? DependencyScope.test : inherited
+                let version = versionConstraint(from: Array(strings.dropFirst())) ?? undeclaredVersion
                 records.append(record(name, version, .cocoapods, scope, manifestPath))
                 continue
             }
-            // 块开启：target 'X' do / def install! / if …
-            let opensBlock = line.hasSuffix(" do") || line.contains(" do ") || line.hasSuffix(" {")
-            if opensBlock {
+            if opensBlock(line) {
                 depth += 1
-                let scope = blockScope(line) ?? inherited
-                scopes.append(scope)
+                scopes.append(blockScope(line) ?? inherited)
             }
         }
         return records
     }
 
-    private static func blockScope(_ line: String) -> DependencyScope? {
-        let strings = matches(of: "([\"'])([^\"'\\n]+)\\1", in: line).compactMap { $0[2] }
-        let lowered = (strings + [line]).map { $0.lowercased() }
-        guard lowered.contains(where: { $0.contains("test") || $0.contains("spec") }) else { return nil }
+    static func blockScope(_ line: String) -> DependencyScope? {
+        let haystack = (quotedStrings(line) + [line]).map { $0.lowercased() }
+        guard haystack.contains(where: { $0.contains("test") || $0.contains("spec") }) else { return nil }
         return .test
     }
 
-    private static func podVersion(_ candidates: ArraySlice<String>) -> String? {
+    static func opensBlock(_ line: String) -> Bool {
+        line.hasSuffix(" do") || line.contains(" do ") || line.hasSuffix(" {")
+    }
+
+    static func quotedStrings(_ line: String) -> [String] {
+        matches(of: "(['\"])([^'\"\\n]+)\\1", in: line).compactMap { ManifestParsers.value(at: 2, in: $0) }
+    }
+
+    /// 从若干候选串里挑出第一个看着像版本约束的（"~> 1.2"、">= 0.9"、"1.2.3"）。
+    static func versionConstraint(from candidates: [String]) -> String? {
         for candidate in candidates {
             let value = trim(candidate)
-            if value.hasPrefix(":") { continue }
-            if value.contains("=>") { continue }
-            if value.first.map({ $0.isNumber || $0 == "~" || $0 == ">" || $0 == "<" || $0 == "=" }) == true {
+            if value.isEmpty || value.hasPrefix(":") || value.contains("=>") { continue }
+            guard let first = value.first else { continue }
+            if first.isNumber || first == "~" || first == ">" || first == "<" || first == "=" {
                 return value
             }
         }
@@ -1342,74 +1106,55 @@ extension ManifestParsers {
 // MARK: - Ruby / Gemfile
 
 extension ManifestParsers {
-    /// Gemfile -> [DependencyRecord]。`group :test/:development/:production` 影响 scope。
+    /// Gemfile -> [DependencyRecord]。`group :test / :development / :production` 段影响 scope。
     static func gemfileDependencies(_ text: String, manifestPath: String) -> [DependencyRecord] {
         var records: [DependencyRecord] = []
         var depth = 0
         var scopes: [DependencyScope] = []
-        var inherited: DependencyScope = .runtime
         for rawLine in lines(text) {
             let line = trim(stripHashComment(rawLine))
             if line.isEmpty { continue }
             if line == "end" || line.hasPrefix("end ") {
                 if depth > 0 { depth -= 1 }
                 while scopes.count > depth { scopes.removeLast() }
-                inherited = scopes.last ?? .runtime
                 continue
             }
-            if let scope = gemGroupScope(line) {
-                inherited = scope
-                depth += 1
-                scopes.append(scope)
-                continue
-            }
-            if gemOpensBlock(line) {
-                depth += 1
-                scopes.append(inherited)
-                continue
-            }
-            if line.hasPrefix("gem ") || line.hasPrefix("gem(") || line.hasPrefix("gem'") || line.hasPrefix("gem\"") {
-                let strings = matches(of: "([\"'])([^\"'\\n]+)\\1", in: line).compactMap { $0[2] }
+            let inherited = scopes.last ?? .runtime
+            if line.hasPrefix("gem ") || line.hasPrefix("gem(") || line.hasPrefix("gem '") || line.hasPrefix("gem \"") {
+                let strings = quotedStrings(line)
                 guard let name = strings.first, !name.isEmpty else { continue }
                 let scope = gemInlineScope(line) ?? inherited
-                let version = gemVersion(strings.dropFirst()) ?? undeclaredVersion
+                let version = versionConstraint(from: Array(strings.dropFirst())) ?? undeclaredVersion
                 records.append(record(name, version, .ruby, scope, manifestPath))
+                continue
+            }
+            if line.hasPrefix("group ") {
+                depth += 1
+                scopes.append(gemGroupScope(line))
+                continue
+            }
+            if opensBlock(line) || line.hasPrefix("if ") {
+                depth += 1
+                scopes.append(inherited)
             }
         }
         return records
     }
 
-    private static func gemGroupScope(_ line: String) -> DependencyScope? {
-        guard line.hasPrefix("group ") else { return nil }
-        let symbols = matches(of: ":([A-Za-z0-9_]+)", in: line).compactMap { $0[1] }
-        let names = symbols.map { $0.lowercased() }
-        if names.contains("test") || names.contains("spec") { return .test }
-        if names.contains("development") || names.contains("dev") { return .dev }
-        if names.contains("production") || names.contains("prod") { return .runtime }
-        return .runtime
-    }
-
-    private static func gemInlineScope(_ line: String) -> DependencyScope? {
-        guard let body = firstGroup("groups?\\s*:\\s*\\[([^\\]]*)\\]", 1, in: line) else { return nil }
-        let symbols = matches(of: ":([A-Za-z0-9_]+)", in: body).compactMap { $0[1] }.map { $0.lowercased() }
+    static func gemGroupScope(_ line: String) -> DependencyScope {
+        let symbols = matches(of: ":([A-Za-z0-9_]+)", in: line).compactMap { $0[safe: 1] }.map { $0.lowercased() }
         if symbols.contains("test") || symbols.contains("spec") { return .test }
         if symbols.contains("development") || symbols.contains("dev") { return .dev }
         if symbols.contains("production") || symbols.contains("prod") { return .runtime }
-        return nil
+        return .runtime
     }
 
-    private static func gemOpensBlock(_ line: String) -> Bool {
-        line.hasSuffix(" do") || line.contains(" do ") || line.hasSuffix(" {") || line.hasPrefix("if ")
-    }
-
-    private static func gemVersion(_ candidates: ArraySlice<String>) -> String? {
-        for candidate in candidates {
-            let value = trim(candidate)
-            if value.contains("=>") { continue }
-            if value.first.map({ $0.isNumber || $0 == "~" || $0 == ">" || $0 == "<" || $0 == "=" }) == true {
-                return value
-            }
-        }
+    static func gemInlineScope(_ line: String) -> DependencyScope? {
+        guard let body = firstGroup("groups?\\s*:\\s*\\[([^\\]]*)\\]", 1, in: line) else { return nil }
+        let symbols = matches(of: ":([A-Za-z0-9_]+)", in: body).compactMap { $0[safe: 1] }.map { $0.lowercased() }
+        if symbols.contains("test") || symbols.contains("spec") { return .test }
+        if symbols.contains("development") || symbols.contains("dev") { return .dev }
+        if symbols.contains("production") || symbols.contains("prod") { return .runtime }
         return nil
     }
 }
@@ -1421,29 +1166,214 @@ extension ManifestParsers {
     static func nugetPackagesConfigDependencies(_ text: String, manifestPath: String) -> [DependencyRecord] {
         var records: [DependencyRecord] = []
         for groups in matches(of: "<package\\b([^>]*?)/?>", in: text) {
-            guard let attributes = groups[1] else { continue }
-            let name = nugetAttribute("id", in: attributes)
-            let version = nugetAttribute("version", in: attributes)
-            guard let name, !name.isEmpty else { continue }
+            guard let attributes = groups[safe: 1] else { continue }
+            guard let name = nugetAttribute("id", in: attributes), !name.isEmpty else { continue }
+            let version = nugetAttribute("version", in: attributes) ?? undeclaredVersion
             let development = (nugetAttribute("developmentDependency", in: attributes) ?? "").lowercased() == "true"
-            records.append(record(name, version ?? undeclaredVersion, .nuget, development ? .dev : .runtime, manifestPath))
+            records.append(record(name, version, .nuget, development ? .dev : .runtime, manifestPath))
         }
         return records
     }
 
-    private static func nugetAttribute(_ key: String, in attributes: String) -> String? {
-        firstGroup("\(key)\\s*=\\s*([\"'])([^\"'\\n]*)\\1", 2, in: attributes)
+    static func nugetAttribute(_ key: String, in attributes: String) -> String? {
+        firstGroup("\(key)\\s*=\\s*(['\"])([^'\"\\n]*)\\1", 2, in: attributes)
     }
 }
 
-// MARK: - 各生态公开入口（契约要求，逐个转发到上面的实现）
+// MARK: - 下标安全访问
 
-extension ManifestParsers {
-    // pomXMLDependencies / gradleDependencies / packageJSONDependencies / swiftPackageDependencies /
-    // requirementsTxtDependencies / pyprojectDependencies / goModDependencies / cargoTomlDependencies /
-    // podfileDependencies / gemfileDependencies / nugetPackagesConfigDependencies
-    // 已分别在上面的对应 extension 中定义，签名与契约一致。
-    static var supportedEcosystems: [DependencyEcosystem] {
-        DependencyEcosystem.allCases.filter { $0 != .unknown }
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}
+
+// MARK: - pom.xml 中间模型
+
+/// pom.xml 的中间模型：`<properties>` 表 + dependencyManagement 版本表 + 真实依赖条目。
+/// 用 XMLParser 走一遍，命名空间前缀会被剥掉；解析中断就返回已收集到的部分，不抛异常。
+private final class PomDocumentModel: NSObject, XMLParserDelegate {
+    struct Entry {
+        var group = ""
+        var artifact = ""
+        var version = ""
+        var scope = ""
+        var fromPlugin = false
+    }
+
+    private var properties: [String: String] = [:]
+    private var rootGroup = ""
+    private var rootArtifact = ""
+    private var rootVersion = ""
+    private var parentGroup = ""
+    private var parentVersion = ""
+    private var entries: [Entry] = []
+    private var managedEntries: [Entry] = []
+    private var stack: [String] = []
+    private var characters = ""
+
+    init(text: String) {
+        super.init()
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+        guard let data = normalized.data(using: .utf8) else { return }
+        let parser = XMLParser(data: data)
+        parser.delegate = self
+        parser.parse()
+    }
+
+    // MARK: XMLParserDelegate
+
+    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?,
+                qualifiedName qName: String?, attributes attributeDict: [String: String]) {
+        let name = Self.localName(elementName)
+        stack.append(name)
+        characters = ""
+        if name == "dependency" {
+            var entry = Entry()
+            entry.fromPlugin = stack.contains("plugin") || stack.contains("plugins")
+            if stack.contains("dependencyManagement") {
+                managedEntries.append(entry)
+            } else {
+                entries.append(entry)
+            }
+        }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        characters += string
+    }
+
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?,
+                qualifiedName qName: String?) {
+        let name = Self.localName(elementName)
+        let value = characters.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parent = stack.count >= 2 ? stack[stack.count - 2] : ""
+        if !value.isEmpty { route(name: name, parent: parent, value: value) }
+        if !stack.isEmpty { stack.removeLast() }
+        characters = ""
+    }
+
+    private func route(name: String, parent: String, value: String) {
+        if parent == "dependency" {
+            let inManagement = stack.contains("dependencyManagement")
+            var list = inManagement ? managedEntries : entries
+            guard !list.isEmpty, var entry = list.popLast() else { return }
+            switch name {
+            case "groupId": entry.group = value
+            case "artifactId": entry.artifact = value
+            case "version": entry.version = value
+            case "scope": entry.scope = value
+            default: return
+            }
+            list.append(entry)
+            if inManagement { managedEntries = list } else { entries = list }
+            return
+        }
+        if parent == "properties" {
+            properties[name] = value
+            return
+        }
+        if parent == "parent" {
+            if name == "groupId" { parentGroup = value }
+            if name == "version" { parentVersion = value }
+            return
+        }
+        if stack.count == 2 {
+            switch name {
+            case "groupId": rootGroup = value
+            case "artifactId": rootArtifact = value
+            case "version": rootVersion = value
+            default: break
+            }
+        }
+    }
+
+    private static func localName(_ elementName: String) -> String {
+        elementName.split(separator: ":").last.map(String.init) ?? elementName
+    }
+
+    // MARK: 属性代入
+
+    /// `${xxx.version}` / `${project.version}` 代入；代不了的那一段保留原文。
+    private func resolve(_ raw: String, depth: Int = 0) -> String {
+        guard depth < 3, raw.contains("${") else { return raw }
+        let chars = Array(raw)
+        var result = ""
+        var index = 0
+        while index < chars.count {
+            if chars[index] == "$", index + 1 < chars.count, chars[index + 1] == "{" {
+                var end = index + 2
+                while end < chars.count, chars[end] != "}" { end += 1 }
+                if end < chars.count {
+                    let key = String(chars[(index + 2)..<end])
+                    if let value = substitution(for: key) {
+                        result += resolve(value, depth: depth + 1)
+                    } else {
+                        result += String(chars[index...end])
+                    }
+                    index = end + 1
+                    continue
+                }
+            }
+            result.append(chars[index])
+            index += 1
+        }
+        return result
+    }
+
+    private func substitution(for key: String) -> String? {
+        if let hit = properties[key], !hit.isEmpty { return hit }
+        switch key {
+        case "project.version", "version":
+            let candidate = rootVersion.isEmpty ? parentVersion : rootVersion
+            return candidate.isEmpty ? nil : candidate
+        case "project.groupId", "groupId":
+            let candidate = rootGroup.isEmpty ? parentGroup : rootGroup
+            return candidate.isEmpty ? nil : candidate
+        case "project.artifactId", "artifactId":
+            return rootArtifact.isEmpty ? nil : rootArtifact
+        case "project.parent.version":
+            return parentVersion.isEmpty ? nil : parentVersion
+        case "project.parent.groupId":
+            return parentGroup.isEmpty ? nil : parentGroup
+        default:
+            return nil
+        }
+    }
+
+    // MARK: 出结果
+
+    func dependencyRecords(manifestPath: String) -> [DependencyRecord] {
+        var managedVersions: [String: String] = [:]
+        for item in managedEntries {
+            let group = resolve(item.group.isEmpty ? rootGroup : item.group)
+            let artifact = resolve(item.artifact)
+            let version = resolve(item.version)
+            guard !group.isEmpty, !artifact.isEmpty, !version.isEmpty else { continue }
+            managedVersions["\(group):\(artifact)"] = version
+        }
+
+        var records: [DependencyRecord] = []
+        for item in entries {
+            let group = resolve(item.group.isEmpty ? rootGroup : item.group)
+            let artifact = resolve(item.artifact)
+            guard !artifact.isEmpty else { continue }
+            var version = resolve(item.version)
+            if version.isEmpty { version = resolve(managedVersions["\(group):\(artifact)"] ?? "") }
+            if version.isEmpty { version = ManifestParsers.undeclaredVersion }
+            let scope: DependencyScope
+            if item.fromPlugin && item.scope.isEmpty {
+                scope = .build
+            } else {
+                switch item.scope.lowercased() {
+                case "test": scope = .test
+                case "provided": scope = .platform
+                default: scope = .runtime
+                }
+            }
+            let name = group.isEmpty ? artifact : "\(group):\(artifact)"
+            records.append(ManifestParsers.record(name, version, .maven, scope, manifestPath))
+        }
+        return records
     }
 }

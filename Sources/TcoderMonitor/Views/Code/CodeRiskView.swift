@@ -17,9 +17,13 @@ struct CodeRiskView: View {
     private static let duplicationRowLimit = 12
     private static let occurrenceLimit = 4
 
-    /// 重复率的两个观感档位：明显 / 值得动手抽取。
+    /// 重复率的两个观感档位：值得动手抽取 / 已属高风险。
     fileprivate static let duplicationNotableRatio = 0.08
     fileprivate static let duplicationHighRatio = 0.15
+    /// 建议区块用到的阈值（判断条件，不是指标值）。
+    private static let manyParameterCount = 6
+    private static let longAverageFunctionLines = 25
+    private static let lowCommentRatio: Double = 0.05
 
     var body: some View {
         ScrollView {
@@ -229,7 +233,7 @@ struct CodeRiskView: View {
                 EmptyStateView(
                     icon: "checkmark.seal",
                     title: "没有上榜函数",
-                    message: "本次扫描没有任何函数达到引擎给出的复杂度上榜条件（共识别 \(NumberFormat.grouped(code.longFunctions)) 个超长函数）。"
+                    message: "本次扫描没有函数达到引擎给出的复杂度上榜条件；参考数字：超长函数 \(NumberFormat.grouped(code.longFunctions)) 个 · 平均函数长度 \(NumberFormat.grouped(code.averageFunctionLength)) 行。"
                 )
                 .frame(minHeight: 110)
             } else {
@@ -395,10 +399,11 @@ struct CodeRiskView: View {
         if !critical.isEmpty {
             let named = critical.prefix(3).map { "\($0.name)（CC \(NumberFormat.grouped($0.cyclomaticComplexity)) · \(NumberFormat.grouped($0.lineCount)) 行 · \(fileName($0.filePath)):\(NumberFormat.grouped($0.startLine))）" }
             let highest = critical.map(\.cyclomaticComplexity).max() ?? 0
+            let lowestOnBoard = code.topComplexFunctions.map(\.cyclomaticComplexity).min() ?? 0
             items.append(CodeRiskSuggestion(
                 icon: "exclamationmark.triangle.fill",
                 tint: Theme.critical,
-                text: "\(NumberFormat.grouped(critical.count)) 个函数被引擎判为严重复杂度，最高圈复杂度 \(NumberFormat.grouped(highest))：" + named.joined(separator: "、") + "。先去掉嵌套：把校验与异常分支改成提前返回，再把成组的分支换成策略表/多态，目标是把单个函数的分支数压到高档阈值以下。"
+                text: "\(NumberFormat.grouped(critical.count)) 个函数被判为严重复杂度，最高圈复杂度 \(NumberFormat.grouped(highest))：" + named.joined(separator: "、") + "。先去掉嵌套：校验与异常分支改成提前返回，再把成组的分支换成策略表/多态；先把分支数压到上榜函数的最低水位 CC \(NumberFormat.grouped(lowestOnBoard)) 以下。"
             ))
         }
 
@@ -408,17 +413,17 @@ struct CodeRiskView: View {
             items.append(CodeRiskSuggestion(
                 icon: "arrow.triangle.branch",
                 tint: Theme.caution,
-                text: "另有 \(NumberFormat.grouped(high.count)) 个函数处于高复杂度档（CC \(NumberFormat.grouped(high.map(\.cyclomaticComplexity).min() ?? 0))~\(NumberFormat.grouped(high.map(\.cyclomaticComplexity).max() ?? 0))）：给它们先补单元测试，再逐个把分支下沉成命名清晰的小函数。"
+                text: "同时有 \(NumberFormat.grouped(high.count)) 个函数处于高复杂度档（CC \(NumberFormat.grouped(high.map(\.cyclomaticComplexity).min() ?? 0))~\(NumberFormat.grouped(high.map(\.cyclomaticComplexity).max() ?? 0))）：先给它们补单元测试，再把分支下沉成命名清晰的小函数。"
             ))
         }
 
         // 4) 参数过多的函数（真实计数）。
-        let manyParams = code.topComplexFunctions.filter { $0.parameterCount >= 6 }
+        let manyParams = code.topComplexFunctions.filter { $0.parameterCount >= Self.manyParameterCount }
         if !manyParams.isEmpty, let worst = manyParams.max(by: { $0.parameterCount < $1.parameterCount }) {
             items.append(CodeRiskSuggestion(
                 icon: "tray.full",
                 tint: Theme.caution,
-                text: "\(NumberFormat.grouped(manyParams.count)) 个上榜函数参数达到或超过 6 个，最多的是 \(worst.name)（\(NumberFormat.grouped(worst.parameterCount)) 个参数 · \(fileName(worst.filePath))）：把成组参数收进一个配置/值类型，调用点会同步变短。"
+                text: "\(NumberFormat.grouped(manyParams.count)) 个上榜函数的参数达到或超过 \(NumberFormat.grouped(Self.manyParameterCount)) 个，最多的是 \(worst.name)（\(NumberFormat.grouped(worst.parameterCount)) 个参数 · \(fileName(worst.filePath)):\(NumberFormat.grouped(worst.startLine))）：把成组参数收进一个配置或值类型，调用点会同步变短。"
             ))
         }
 
@@ -426,7 +431,7 @@ struct CodeRiskView: View {
         if code.longFunctions > 0 {
             items.append(CodeRiskSuggestion(
                 icon: "arrow.up.left.and.arrow.down.right",
-                tint: code.averageFunctionLength > 25 ? Theme.caution : Theme.neutral,
+                tint: code.averageFunctionLength > Self.longAverageFunctionLines ? Theme.caution : Theme.neutral,
                 text: "识别到 \(NumberFormat.grouped(code.longFunctions)) 个超长函数，平均函数长度 \(NumberFormat.grouped(code.averageFunctionLength)) 行：按段落把函数拆成职责单一的私有方法，一个函数只做一件事。"
             ))
         }
@@ -450,11 +455,11 @@ struct CodeRiskView: View {
         }
 
         // 8) 注释率：只在确实偏低时提，数字来自 commentLines / totalLines。
-        if code.totalLines > 0, code.commentRatio < 0.05 {
+        if code.totalLines > 0, code.commentRatio < Self.lowCommentRatio {
             items.append(CodeRiskSuggestion(
                 icon: "text.bubble",
                 tint: Theme.neutral,
-                text: "注释率 \(NumberFormat.percent(code.commentRatio))（\(NumberFormat.grouped(code.commentLines)) / \(NumberFormat.grouped(code.totalLines)) 行）偏低：优先给对外接口和上面点名的复杂函数补说明，不必给直白代码加注释。"
+                text: "注释率 \(NumberFormat.percent(code.commentRatio))（\(NumberFormat.grouped(code.commentLines)) / \(NumberFormat.grouped(code.totalLines)) 行）低于本页 \(NumberFormat.percent(Self.lowCommentRatio, precision: 0)) 的提示线：优先给对外接口和圈复杂度最高的那批函数写意图说明，直白代码不必加注释。"
             ))
         }
 

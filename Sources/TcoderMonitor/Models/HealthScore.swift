@@ -56,7 +56,7 @@ enum HealthDimension: String, CaseIterable, Sendable {
         case .busFactor: return 0.09
         case .stability: return 0.16
         case .dependencies: return 0.10
-        case .testing: return 0.00
+        case .testing: return 0.10
         }
     }
 }
@@ -67,6 +67,7 @@ struct HealthInputs: Sendable {
     var git: GitInsights?
     var logs: LogSummary?
     var dependencies: DependencyReport?
+    var coverage: CoverageMetrics?
     var previousScore: Int?
 
     init(
@@ -74,12 +75,14 @@ struct HealthInputs: Sendable {
         git: GitInsights? = nil,
         logs: LogSummary? = nil,
         dependencies: DependencyReport? = nil,
+        coverage: CoverageMetrics? = nil,
         previousScore: Int? = nil
     ) {
         self.code = code
         self.git = git
         self.logs = logs
         self.dependencies = dependencies
+        self.coverage = coverage
         self.previousScore = previousScore
     }
 
@@ -89,6 +92,7 @@ struct HealthInputs: Sendable {
         if git != nil { dims += [.activity, .busFactor] }
         if logs != nil { dims.append(.stability) }
         if dependencies != nil { dims.append(.dependencies) }
+        if coverage?.hasData == true { dims.append(.testing) }
         return dims
     }
 }

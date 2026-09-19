@@ -63,15 +63,15 @@ final class CodeAnalyzerTests: XCTestCase {
         XCTAssertNotNil(spaced, "正常代码行不得归一化为 nil")
         XCTAssertEqual(tabbed, spaced, "同一行仅缩进不同，归一化结果必须完全相等")
 
-        let firstLiteral = DuplicationEngine.normalize("let a = \"hello world\"", language: "Swift")
-        let secondLiteral = DuplicationEngine.normalize("let b = \"zzz\"", language: "Swift")
+        let firstLiteral = DuplicationEngine.normalize("let amount = \"hello world\"", language: "Swift")
+        let secondLiteral = DuplicationEngine.normalize("let amount = \"zzz\"", language: "Swift")
         XCTAssertNotNil(firstLiteral, "含字符串字面量的代码行不得归一化为 nil")
-        XCTAssertEqual(firstLiteral, secondLiteral, "字符串字面量必须整体替换为占位符")
+        XCTAssertEqual(firstLiteral, secondLiteral, "同一行只有字符串内容不同时，字面量必须整体替换为占位符")
 
-        let firstNumber = DuplicationEngine.normalize("int x = 12;", language: "C")
-        let secondNumber = DuplicationEngine.normalize("int y = 7;", language: "C")
+        let firstNumber = DuplicationEngine.normalize("int count = 12;", language: "C")
+        let secondNumber = DuplicationEngine.normalize("int count = 7;", language: "C")
         XCTAssertNotNil(firstNumber, "含数字字面量的代码行不得归一化为 nil")
-        XCTAssertEqual(firstNumber, secondNumber, "数字字面量必须替换为占位符，标识符差异不得影响指纹")
+        XCTAssertEqual(firstNumber, secondNumber, "数字字面量必须替换为占位符，仅数字不同不得影响指纹")
 
         XCTAssertNil(DuplicationEngine.normalize("", language: "Swift"), "空行必须返回 nil")
         XCTAssertNil(DuplicationEngine.normalize("    ", language: "Swift"), "纯空白行必须返回 nil")
@@ -178,22 +178,22 @@ final class CodeAnalyzerTests: XCTestCase {
         XCTAssertEqual(file.blankLineCount, counted.blank, "blankLineCount 必须与逐行 kind 统计一致")
         XCTAssertEqual(file.commentLineCount, counted.comment, "commentLineCount 必须与逐行 kind 统计一致")
         XCTAssertEqual(file.codeLineCount, counted.code, "codeLineCount 必须与逐行 kind 统计一致")
-        XCTAssertEqual(file.totalLineCount, 13, "fixture 行数是确定的，分类器不得吞行或造行")
-        XCTAssertEqual(file.blankLineCount, 3, "fixture 里写了 3 个空行")
-        XCTAssertEqual(file.commentLineCount, 5, "fixture 里写了 5 行注释（块注释 + Javadoc 星号行 + 行注释）")
-        XCTAssertEqual(file.codeLineCount, 5, "fixture 里写了 5 行代码（含行尾注释行与块注释夹代码行）")
+        XCTAssertEqual(file.totalLineCount, 11, "fixture 行数是确定的，分类器不得吞行或造行")
+        XCTAssertEqual(file.blankLineCount, 1, "fixture 里写了 1 个空行")
+        XCTAssertEqual(file.commentLineCount, 6, "fixture 里写了 6 行注释（跨行块注释 3 行 + 2 行行注释 + 1 行 TODO 注释）")
+        XCTAssertEqual(file.codeLineCount, 4, "fixture 里写了 4 行代码（含行尾注释行与被块注释夹住的代码行）")
 
         for (offset, line) in file.lines.enumerated() {
             XCTAssertEqual(line.number, offset + 1, "行号必须从 1 开始连续递增")
         }
         XCTAssertEqual(file.lines.first?.kind, .comment, "首行是块注释，必须判为 comment")
         XCTAssertEqual(file.lines.first?.text, "/* 块注释第一行", "行文本必须原样保留")
-        XCTAssertEqual(kindOfLine(in: file, containing: "tail"), .code, "行尾注释所在的行必须判为 code")
+        XCTAssertEqual(kindOfLine(in: file, containing: "x_tail"), .code, "行尾注释所在的行必须判为 code")
         XCTAssertEqual(kindOfLine(in: file, containing: "y = 2"), .code, "块注释夹在中间的行必须判为 code")
         XCTAssertEqual(kindOfLine(in: file, containing: "x += 1"), .code, "块注释后仍有代码的行必须判为 code")
         XCTAssertEqual(kindOfLine(in: file, containing: "说明"), .comment, "Javadoc 风格的 * 行必须判为 comment")
 
-        XCTAssertGreaterThanOrEqual(file.todoCount, 2, "fixture 写了 2 个 TODO，计数不得少")
+        XCTAssertEqual(file.todoCount, 2, "同一行的两个 TODO 必须各计一次")
         XCTAssertEqual(file.fixmeCount, 2, "FIXME 计数必须与 fixture 中写的数量一致")
     }
 
@@ -549,7 +549,7 @@ final class CodeAnalyzerTests: XCTestCase {
     /* 块注释第一行
     *  说明 tail 无关词
     */
-    // TODO: 接入真实鉴权
+    // TODO: 接入真实鉴权  TODO: 补一条同行第二个标记
 
     let value = 1
     int x_tail = 1; // tail

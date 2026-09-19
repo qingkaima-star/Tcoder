@@ -62,7 +62,7 @@ struct CodeMetricsView: View {
                 label: "代码文件",
                 value: NumberFormat.grouped(code.totalFiles),
                 unit: "个",
-                caption: "主语言 \(code.primaryLanguage) · 扫描于 \(DateFormat.sinceDescription(code.scannedAt))",
+                caption: fileTileCaption(code),
                 tint: Theme.accent,
                 systemImage: "doc.text"
             )
@@ -70,7 +70,7 @@ struct CodeMetricsView: View {
                 label: "代码行数",
                 value: NumberFormat.grouped(code.codeLines),
                 unit: "行",
-                caption: "总行数 \(NumberFormat.grouped(code.totalLines)} · 代码占 \(NumberFormat.percent(shareOf(code.codeLines, code), precision: 0))",
+                caption: codeTileCaption(code),
                 tint: Theme.healthy,
                 systemImage: "text.alignleft"
             )
@@ -78,7 +78,7 @@ struct CodeMetricsView: View {
                 label: "注释行数",
                 value: NumberFormat.grouped(code.commentLines),
                 unit: "行",
-                caption: "注释率 \(NumberFormat.percent(code.commentRatio))（分母为总行数 \(NumberFormat.grouped(code.totalLines))）",
+                caption: commentTileCaption(code),
                 tint: Theme.caution,
                 systemImage: "text.bubble"
             )
@@ -86,11 +86,32 @@ struct CodeMetricsView: View {
                 label: "空行数",
                 value: NumberFormat.grouped(code.blankLines),
                 unit: "行",
-                caption: "空行占 \(NumberFormat.percent(shareOf(code.blankLines, code), precision: 0)) · 注释率 \(NumberFormat.percent(code.commentRatio, precision: 0))",
+                caption: blankTileCaption(code),
                 tint: Theme.neutral,
                 systemImage: "rectangle.dashed"
             )
         }
+    }
+
+    // MARK: - Tile captions（拆出来避免多层字符串嵌套）
+
+    private func fileTileCaption(_ code: CodeMetrics) -> String {
+        "主语言 " + code.primaryLanguage + " · 扫描于 " + DateFormat.sinceDescription(code.scannedAt)
+    }
+
+    private func codeTileCaption(_ code: CodeMetrics) -> String {
+        "总行数 " + NumberFormat.grouped(code.totalLines)
+            + " · 代码占 " + NumberFormat.percent(shareOf(code.codeLines, code), precision: 0)
+    }
+
+    private func commentTileCaption(_ code: CodeMetrics) -> String {
+        "注释率 " + NumberFormat.percent(code.commentRatio)
+            + "（分母为总行数 " + NumberFormat.grouped(code.totalLines) + " 行）"
+    }
+
+    private func blankTileCaption(_ code: CodeMetrics) -> String {
+        "空行占 " + NumberFormat.percent(shareOf(code.blankLines, code), precision: 0)
+            + " · 注释率 " + NumberFormat.percent(code.commentRatio, precision: 0)
     }
 
     // MARK: - Totals & language mix
@@ -330,18 +351,23 @@ struct CodeMetricsView: View {
 
     // MARK: - Path helpers
 
+    private var projectRoot: String { report?.project.path ?? "" }
+
     private func shareOf(_ lines: Int, _ code: CodeMetrics) -> Double {
         guard code.totalLines > 0 else { return 0 }
         return Double(lines) / Double(code.totalLines)
     }
+}
 
-    private func fileName(_ path: String) -> String {
+// MARK: - Formatting shared by the two code pages（写在本目录内，不进 Theme.swift）
+
+enum CodeViewFormat {
+    static func fileName(_ path: String) -> String {
         URL(fileURLWithPath: path).lastPathComponent
     }
 
     /// 相对项目根目录的路径；未命中根目录时退回原始路径。
-    private func relativePath(_ path: String) -> String {
-        let root = report?.project.path ?? ""
+    static func relativePath(_ path: String, root: String) -> String {
         if !root.isEmpty, path.hasPrefix(root) {
             var rest = String(path.dropFirst(root.count))
             if rest.hasPrefix("/") { rest.removeFirst() }
@@ -350,30 +376,34 @@ struct CodeMetricsView: View {
         return path
     }
 
-    /// 目录尾部：省略中间目录，最多保留末尾 3 段。
-    private func directoryTail(_ path: String) -> String {
-        let parts = relativePath(path).split(separator: "/").map(String.init)
+    /// 展示用路径尾部：目录过多时省略中间段，只保留末尾 `keep` 段（含文件名）。
+    static func pathTail(_ path: String, root: String, keep: Int = 3) -> String {
+        let parts = relativePath(path, root: root).split(separator: "/").map(String.init)
+        guard parts.count > keep + 1 else { return relativePath(path, root: root) }
+        return "…/" + parts.suffix(keep).joined(separator: "/")
+    }
+
+    /// 只取目录部分，同样省略中间段。
+    static func directoryTail(_ path: String, root: String, keep: Int = 3) -> String {
+        let parts = relativePath(path, root: root).split(separator: "/").map(String.init)
         guard parts.count > 1 else { return "项目根目录" }
         let directories = parts.dropLast()
-        let keep = 3
         if directories.count > keep + 1 {
             return "…/" + directories.suffix(keep).joined(separator: "/")
         }
         return directories.joined(separator: "/")
     }
 
-    private func resolvedURL(for hotspot: FileHotspot) -> URL {
-        resolvedURL(hotspot.path)
+    /// 扫描器给的是绝对路径；万一是相对路径就按项目根补齐，保证 Finder 动作可用。
+    static func resolvedURL(_ path: String, root: String) -> URL {
+        if path.hasPrefix("/") { return URL(fileURLWithPath: path) }
+        if !root.isEmpty { return URL(fileURLWithPath: root).appendingPathComponent(path) }
+        return URL(fileURLWithPath: path)
     }
 
-    private func resolvedURL(_ path: String) -> URL {
-        if path.hasPrefix("/") {
-            return URL(fileURLWithPath: path)
-        }
-        if let base = report?.project.path, !base.isEmpty {
-            return URL(fileURLWithPath: base).appendingPathComponent(path)
-        }
-        return URL(fileURLWithPath: path)
+    static func duration(_ durationMs: Int) -> String {
+        guard durationMs >= 1_000 else { return "\(NumberFormat.grouped(durationMs)) 毫秒" }
+        return String(format: "%.2f 秒", Double(durationMs) / 1_000)
     }
 }
 

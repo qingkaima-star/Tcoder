@@ -16,12 +16,14 @@ enum DemoData {
         report.git = gitInsights
         report.logs = logSummary
         report.dependencies = dependencyReport
+        report.coverage = coverageMetrics
         report.health = WeightedHealthScorer().score(
             HealthInputs(
                 code: report.code,
                 git: report.git,
                 logs: report.logs,
                 dependencies: report.dependencies,
+                coverage: report.coverage,
                 previousScore: 81
             )
         )
@@ -29,6 +31,25 @@ enum DemoData {
         store.upsertReport(report)
         store.recordScore(report.health?.overall ?? 0, for: project.id, projectName: project.name)
     }
+
+    // MARK: Coverage
+
+    private static let coverageMetrics: CoverageMetrics = {
+        CoverageMetrics(reports: [
+            CoverageReport(
+                path: "coverage/lcov.info", kind: .unit, toolName: "lcov",
+                linesCovered: 14_230, linesTotal: 18_244,
+                branchesCovered: 5_820, branchesTotal: 9_100,
+                methodsCovered: 1_910, methodsTotal: 2_340
+            ),
+            CoverageReport(
+                path: "server/target/site/jacoco/jacoco.xml", kind: .integration, toolName: "JaCoCo",
+                linesCovered: 4_120, linesTotal: 7_620,
+                branchesCovered: 1_240, branchesTotal: 3_050,
+                methodsCovered: 520, methodsTotal: 980
+            ),
+        ], scannedFileCount: 2)
+    }()
 
     // MARK: Code
 

@@ -127,6 +127,7 @@ struct ProjectReport: Codable, Sendable {
     var git: GitInsights?
     var logs: LogSummary?
     var dependencies: DependencyReport?
+    var coverage: CoverageMetrics?
     var health: HealthScore?
     var generatedAt: Date = Date()
 

@@ -92,12 +92,15 @@ enum GitLogParser {
     static func parse(_ output: String) -> [ParsedCommit] {
         guard !output.isEmpty else { return [] }
 
+        // 关键坑：Swift 里 "\r\n" 是**一个**扩展字素簇，`split(separator: "\n")` 切不开
+        // CRLF 文本（实测会把整段当成一行）。先把 CRLF 折叠成 LF，再按 LF 切。
+        let text = output.replacingOccurrences(of: "\r\n", with: "\n")
+
         var commits: [ParsedCommit] = []
         var pending: ParsedCommit?
 
-        for rawLine in output.split(separator: "\n", omittingEmptySubsequences: false) {
-            var line = String(rawLine)
-            if line.hasSuffix("\r") { line.removeLast() }        // 容忍 CRLF
+        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(trimTrailingNewlines(rawLine))     // 残余裸 CR（老 Mac 行尾）
 
             // \x1e 只会出现在头行末尾；按它切开后，含 \x1f 的那段才是头。
             for piece in line.split(separator: recordSeparator, omittingEmptySubsequences: false) {
@@ -141,8 +144,7 @@ enum GitLogParser {
 
     /// 一行 numstat（`新增\t删除\t路径`）-> 变更；无法识别时返回 nil。
     static func numstatLine(_ line: String) -> ParsedFileChange? {
-        var text = Substring(line)
-        if text.hasSuffix("\r") { text = text.dropLast() }
+        let text = trimTrailingNewlines(Substring(line))
 
         // 路径本身不会含裸 tab（git 会引用成 \t），所以最多切两刀，第三段整段是路径。
         let parts = text.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
@@ -379,13 +381,27 @@ enum GitLogParser {
         // 尾部只允许空白，否则视为不是 ISO 串。
         guard trimWhitespace(String(decoding: bytes[index...], as: UTF8.self)).isEmpty else { return nil }
 
-        guard month >= 1, month <= 12, day >= 1, day <= 31,
+        guard month >= 1, month <= 12, day >= 1, day <= daysInMonth(year: year, month: month),
               hour <= 23, minute <= 59, second <= 60 else { return nil }
 
         let days = daysFromCivil(year: year, month: month, day: day)
         let localSeconds = days * secondsInDay
             + Double(hour * 3_600 + minute * 60 + second) + fraction
         return (Date(timeIntervalSince1970: localSeconds - Double(offsetSeconds)), offsetSeconds)
+    }
+
+    /// 该年该月的天数（proleptic 公历；闰年规则 4/100/400）。
+    private static func daysInMonth(year: Int, month: Int) -> Int {
+        switch month {
+        case 1, 3, 5, 7, 8, 10, 12: return 31
+        case 4, 6, 9, 11: return 30
+        case 2: return isLeapYear(year) ? 29 : 28
+        default: return 0
+        }
+    }
+
+    private static func isLeapYear(_ year: Int) -> Bool {
+        (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
     }
 
     /// 公历 -> 1970-01-01 起的天数（Howard Hinnant 算法，避开任何 Calendar）。
@@ -397,7 +413,7 @@ enum GitLogParser {
         let monthIndex = month > 2 ? month - 3 : month + 9
         let dayOfYear = (153 * monthIndex + 2) / 5 + day - 1                      // [0, 365]
         let dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100          // [0, 146096]
-        return Double(era * 146_097 + dayOfEra - 719_468)
+        return Double(era * 146_097 + dayOfEra + dayOfYear - 719_468)
     }
 
     // MARK: 时区工具（一律按作者自己的偏移，不用本机时区）
@@ -452,6 +468,16 @@ enum GitLogParser {
 
     private static func trimWhitespace(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 逐个标量地削掉尾部换行。不能只看 `hasSuffix("\r")`：Swift 里 `"\r\n"` 是一个
+    /// 字素簇，`last` 拿到的是整个 CR+LF，与 `"\r"` 或 `"\n"` 都不相等。
+    private static func trimTrailingNewlines(_ text: Substring) -> Substring {
+        var trimmed = text
+        while let scalar = trimmed.unicodeScalars.last, scalar == "\n" || scalar == "\r" {
+            trimmed = trimmed.dropLast()
+        }
+        return trimmed
     }
 
     private static func clamp(_ value: Int, _ lower: Int, _ upper: Int) -> Int {

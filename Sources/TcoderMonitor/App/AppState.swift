@@ -13,6 +13,7 @@ final class AppState {
     private let gitAnalyzer = ShellGitAnalyzer()
     private let logAnalyzer = FileLogAnalyzer()
     private let dependencyAnalyzer = ManifestDependencyAnalyzer()
+    private let coverageAnalyzer = CoverageAnalyzer()
     private let healthScorer = WeightedHealthScorer()
 
     var selectedProjectID: UUID? {
@@ -118,23 +119,27 @@ final class AppState {
         let gitAnalyzer = self.gitAnalyzer
         let logAnalyzer = self.logAnalyzer
         let dependencyAnalyzer = self.dependencyAnalyzer
+        let coverageAnalyzer = self.coverageAnalyzer
 
         Task.detached(priority: .userInitiated) { [weak self] in
             async let code = Self.attempt("代码扫描") { try await codeAnalyzer.analyze(root: root, options: .default) }
             async let git = Self.attempt("Git 分析") { try await gitAnalyzer.analyze(repositoryURL: root) }
             async let logs = Self.attempt("日志分析") { try await logAnalyzer.analyze(projectRoot: root, extraLogURLs: logURLs, withinDays: windowDays) }
             async let deps = Self.attempt("依赖分析") { try await dependencyAnalyzer.analyze(projectRoot: root, allowNetwork: network) }
+            async let coverage = Self.attempt("覆盖率读取") { try await coverageAnalyzer.analyze(projectRoot: root, options: .default) }
 
             let codeResult = await code
             let gitResult = await git
             let logResult = await logs
             let depsResult = await deps
+            let coverageResult = await coverage
 
             let inputs = HealthInputs(
                 code: codeResult.value,
                 git: gitResult.value,
                 logs: logResult.value,
                 dependencies: depsResult.value,
+                coverage: coverageResult.value,
                 previousScore: previousScore
             )
 
@@ -145,6 +150,7 @@ final class AppState {
                 merged.git = gitResult.value
                 merged.logs = logResult.value
                 merged.dependencies = depsResult.value
+                merged.coverage = coverageResult.value
                 merged.health = self.healthScorer.score(inputs)
                 merged.generatedAt = Date()
 
@@ -153,6 +159,7 @@ final class AppState {
                 if let error = gitResult.error { problems.append(error) }
                 if let error = logResult.error { problems.append(error) }
                 if let error = depsResult.error { problems.append(error) }
+                if let error = coverageResult.error { problems.append(error) }
 
                 self.store.upsertReport(merged)
                 if let score = merged.health?.overall {
