@@ -168,10 +168,19 @@ final class WeightedHealthScorer: HealthScoringProviding {
 
         case .dependencies:
             guard let deps = inputs.dependencies, deps.totalDependencies > 0 else { return nil }
+            // 「零漏洞」要先证明查过才算数：没联网时封顶 B 档，不白送 A。
+            let evidence = VulnerabilityEvidence.classify(deps)
             let curve = HealthCurves.dependencyHealth(vulnerableCount: deps.vulnerableCount,
                                                       outdatedCount: deps.outdatedCount,
-                                                      totalDependencies: deps.totalDependencies)
-            if deps.vulnerableCount == 0 { strengths.append("未发现已知漏洞依赖") }
+                                                      totalDependencies: deps.totalDependencies,
+                                                      evidence: evidence)
+            if deps.vulnerableCount == 0 {
+                switch evidence {
+                case .verified: strengths.append("已完成漏洞核对，未发现已知漏洞")
+                case .unchecked: recommendations.append("开启「联网核对」后重扫，才能给出可信的依赖安全结论")
+                case .degraded: recommendations.append("漏洞核对未完成，开启联网后重扫一次")
+                }
+            }
             if deps.vulnerableCount > 0 {
                 issues.append("\(deps.vulnerableCount) 个已知漏洞，\(deps.outdatedCount) 个版本过旧")
                 recommendations.append("先升级带严重漏洞的依赖，再统一处理过期版本")

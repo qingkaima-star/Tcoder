@@ -55,12 +55,16 @@ struct DependenciesView: View {
 
     private func summaryGrid(_ deps: DependencyReport) -> some View {
         let total = max(1, deps.totalDependencies)
+        let allRecords = deps.ecosystems.flatMap(\.dependencies)
+        // 「查过且没问题」和「根本没数据可查」是两回事：内置快照只覆盖 npm/Maven/Python/Go/Cargo
+        // 等生态，RubyGems、CocoaPods、NuGet 一条都没有，此时 vulnerableCount=0 只代表未判定。
+        let checked = allRecords.filter { $0.versionCheckSource != .none }.count
         return LazyVGrid(columns: Self.metricColumns, spacing: 12) {
             MetricTile(
                 label: "依赖总数",
                 value: NumberFormat.grouped(deps.totalDependencies),
                 unit: "项",
-                caption: "覆盖 \(deps.ecosystems.count) 个生态",
+                caption: "清单直接声明，不含锁文件解析出的传递依赖 · \(deps.ecosystems.count) 个生态",
                 tint: Theme.accent,
                 systemImage: "shippingbox.fill"
             )
@@ -83,11 +87,22 @@ struct DependenciesView: View {
                 label: "漏洞数",
                 value: NumberFormat.grouped(deps.vulnerableCount),
                 unit: "条",
-                caption: deps.vulnerableCount > 0 ? "命中内置快照与安全公告" : "未发现已知漏洞",
-                tint: Theme.color(for: deps.riskLevel),
+                caption: vulnerabilityCaption(deps, checked: checked, total: deps.totalDependencies),
+                tint: deps.vulnerableCount > 0 ? Theme.color(for: deps.riskLevel)
+                    : (checked > 0 ? Theme.healthy : Theme.neutral),
                 systemImage: "exclamationmark.shield.fill"
             )
         }
+    }
+
+    /// 0 条漏洞有三种含义，必须分开说：查过且干净 / 只查了一部分 / 根本没数据可查。
+    private func vulnerabilityCaption(_ deps: DependencyReport, checked: Int, total: Int) -> String {
+        if deps.vulnerableCount > 0 { return "命中内置快照与安全公告" }
+        if checked == 0 { return "\(NumberFormat.grouped(total)) 项均无版本数据可比对，未做判定" }
+        if checked < total {
+            return "\(NumberFormat.grouped(checked)) / \(NumberFormat.grouped(total)) 项已比对，未发现已知漏洞"
+        }
+        return "全部 \(NumberFormat.grouped(total)) 项已比对，未发现已知漏洞"
     }
 
     private func overviewCard(_ deps: DependencyReport) -> some View {
@@ -136,7 +151,8 @@ struct DependenciesView: View {
         ) {
             VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 14) {
-                    StatLine(label: "锁文件", value: eco.lockfileName ?? "未发现")
+                    StatLine(label: "锁文件",
+                             value: eco.lockfileName.map { "\($0)（只说明可复现，未计入依赖数）" } ?? "未发现")
                     StatLine(label: "依赖", value: NumberFormat.grouped(eco.dependencies.count))
                     Spacer(minLength: 0)
                 }
