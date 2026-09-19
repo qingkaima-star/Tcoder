@@ -259,6 +259,15 @@ fileprivate struct SourceSkipPlan {
         excludedDirectories.contains { path.hasPrefix($0 + "/") }
     }
 
+    /// 该路径落在哪个被剔除目录之下，取**最顶层**那个作为根因（`vendor` 而不是 `vendor/portable-ruby/4.0.5_1`）。
+    /// 台账要回答的就是「vendor/ 一共丢了多少行」，归到叶子目录上就没法看了。
+    func excludedAnchor(for path: String) -> String? {
+        let hits = excludedDirectories.filter { path.hasPrefix($0 + "/") }
+        guard let top = hits.min(by: { $0.count < $1.count }) else { return nil }
+        let name = (top as NSString).lastPathComponent
+        return name.isEmpty ? top : name
+    }
+
     /// 返回 true 表示该目录整体剔除；由调用方执行 skipDescendants，避免在此处写死枚举器类型
     mutating func consume(_ url: URL) -> Bool {
         let relative = SourceFileClassifier.relativePath(for: url, root: root)
@@ -387,9 +396,10 @@ final class SourceTreeScanner {
                 result.skipLedger.record(.notARegularFile, path: url.path, bytes: bytes, rule: nil)
                 continue
             }
-            if plan.isInsideExcluded(url.path) {
-                result.skipLedger.record(.excludedDirectoryContent, path: url.path, bytes: bytes, rule: nil)
-                auditLines(of: url, bytes: bytes, reason: .excludedDirectoryContent, into: &result.skipLedger)
+            if let anchor = plan.excludedAnchor(for: url.path) {
+                result.skipLedger.record(.excludedDirectoryContent, path: url.path, bytes: bytes, rule: anchor)
+                auditLines(of: url, bytes: bytes, reason: .excludedDirectoryContent,
+                           into: &result.skipLedger, anchor: anchor)
                 continue
             }
 
@@ -495,14 +505,18 @@ final class SourceTreeScanner {
         bucket.files += fileCount
         bucket.bytes += totalBytes
         bucket.lines += totalLines
-        bucket.rules[(url.lastPathComponent as NSString).pathExtension.lowercased(), default: 0] += 1
+        // 没有后缀的包状目录（如 `.bundle`）用目录名当键，否则台账会出现空键、读不出根因。
+        let ext = (url.lastPathComponent as NSString).pathExtension.lowercased()
+        let key = ext.isEmpty ? url.lastPathComponent : ext
+        bucket.rules[key, default: 0] += 1
+        bucket.lineRules[key, default: 0] += totalLines
         if bucket.samples.count < SourceSkipLedger.sampleLimit { bucket.samples.append(url.path) }
         ledger.buckets[reason] = bucket
     }
 
     /// 审计模式专用：把被剔除文件的真实行数读出来。非审计模式（预算 0）直接返回，零额外 I/O。
     private func auditLines(of url: URL, bytes: Int64, reason: SourceSkipReason,
-                            into ledger: inout SourceSkipLedger) {
+                            into ledger: inout SourceSkipLedger, anchor: String? = nil) {
         guard auditing else { return }
         guard bytes > 0 else { return }
         let remaining = ledger.remainingAuditBytes(within: auditLineBudget)
@@ -513,7 +527,7 @@ final class SourceTreeScanner {
         guard let data = try? Data(contentsOf: url) else { return }
         var lines = 0
         for byte in data where byte == 0x0A { lines += 1 }
-        ledger.recordAuditedLines(reason, lines: lines, bytes: Int64(data.count))
+        ledger.recordAuditedLines(reason, lines: lines, bytes: Int64(data.count), anchor: anchor)
     }
 
     /// 枚举用的根：把「自身是目录符号链接」的 root 换成解析后的真实目录（见 `scan(root:)` 的说明）。
