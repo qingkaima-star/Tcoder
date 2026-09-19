@@ -52,11 +52,21 @@ echo "==> provenance: rev=${GIT_REV} branch=${GIT_BRANCH} clean=${GIT_CLEAN}"
 echo "    pre-sign binary sha256=${BIN_SHA}"
 
 echo "==> ad-hoc codesign"
-codesign --force --deep --sign - --timestamp=none "${APP_DIR}" >/dev/null 2>&1 || \
-  codesign --force --sign - "${APP_DIR}/Contents/MacOS/${APP_NAME}"
+# The two paths below produce byte-different binaries, so which one ran is
+# part of the provenance — never let it degrade silently.
+if codesign --force --deep --sign - --timestamp=none "${APP_DIR}"; then
+  SIGN_PATH=bundle-deep
+else
+  SIGN_PATH=binary-only
+  echo "!! 整包签名失败，降级为只签主二进制：Info.plist 的 TCODER* 溯源键不在签名保护范围内"
+  codesign --force --sign - "${APP_DIR}/Contents/MacOS/${APP_NAME}" \
+    || { echo "!! 主二进制签名也失败，产物不可交付"; exit 1; }
+fi
+echo "    codesign path: ${SIGN_PATH}"
 
-# Codesigning rewrites the Mach-O, so the delivered binary's hash only exists now
-# and cannot be stored inside the signed bundle. Emit an external manifest instead.
+# Measured: `codesign --force --deep` rewrites the nested Mach-O, and ad-hoc
+# signing is not byte-stable across runs, so the delivered hash only exists after
+# this point and cannot be stored inside the signed bundle. External manifest.
 SIGNED_SHA=$(shasum -a 256 "${APP_DIR}/Contents/MacOS/${APP_NAME}" | cut -d' ' -f1)
 MANIFEST="${OUT_DIR}/RELEASE_MANIFEST.env"
 {
@@ -67,6 +77,7 @@ MANIFEST="${OUT_DIR}/RELEASE_MANIFEST.env"
   echo "TCODER_GIT_CLEAN=\"${GIT_CLEAN}\""
   echo "TCODER_BUILD_TIMESTAMP=\"${BUILD_TS}\""
   echo "TCODER_CONFIG=\"${CONFIG}\""
+  echo "TCODER_CODESIGN_PATH=\"${SIGN_PATH}\""
   echo "TCODER_APP_PATH=\"${OUT_DIR}/${BUNDLE_NAME}\""
   echo "TCODER_BINARY_SHA256=\"${SIGNED_SHA}\""
   echo "TCODER_INFO_PLIST_SHA256=\"$(shasum -a 256 "${PLIST}" | cut -d' ' -f1)\""
