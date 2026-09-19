@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import TcoderMonitor
 
@@ -147,6 +148,54 @@ final class ShellDesignTests: XCTestCase {
         }
     }
 
+    // MARK: - 侧栏数字列（第二轮目视结论 2）
+
+    /// 抖动有两个来源，第二条是 `.monospacedDigit()` 管不到的：
+    /// `NumberFormat.compact` 的结果本身会跨位数变宽（`9k`→`20k`→`182k`），
+    /// 会把右边的「健康 61」整格推走。所以每个读数还要占一个**右对齐定宽格**。
+    /// 这里用 AppKit 真实排版量宽度，确认那两个格真的装得下最坏情况。
+    func testSidebarMetricColumnsAreWideEnoughForTheWorstCase() {
+        let widestLineCount = "182k 行"
+        let widestHealth = "健康 100"
+        XCTAssertGreaterThanOrEqual(
+            ShellLayout.lineCountColumnWidth,
+            Self.width(of: widestLineCount),
+            "「\(widestLineCount)」会被截掉；定宽格必须容得下最坏读数")
+        XCTAssertGreaterThanOrEqual(
+            ShellLayout.healthColumnWidth,
+            Self.width(of: widestHealth),
+            "「\(widestHealth)」会被截掉")
+        // 定宽格的代价是白占横向空间，所以也不许比最坏情况宽出一整倍。
+        XCTAssertLessThan(ShellLayout.lineCountColumnWidth, Self.width(of: widestLineCount) * 2)
+        XCTAssertLessThan(ShellLayout.healthColumnWidth, Self.width(of: widestHealth) * 2)
+    }
+
+    /// 侧栏读数必须显式带 monospacedDigit 字体，而不是靠外层 `.font` 经 environment 传入
+    /// （后者与 modifier 先后顺序有关，正是上一轮"已经加了 monospacedDigit 却仍在抖"的成因之一）。
+    func testSidebarReadoutsUseExplicitMonospacedDigitFont() throws {
+        let url = Self.packageRoot.appendingPathComponent(
+            "Sources/TcoderMonitor/Views/Shell/ProjectSidebar.swift")
+        let text = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(text.contains("label.font.monospacedDigit()"),
+                      "侧栏读数格必须逐字写明 monospacedDigit，不接受靠 environment 继承")
+        XCTAssertTrue(text.contains("alignment: .trailing"),
+                      "定宽格要右对齐，单位「行」的位置才不动")
+    }
+
+    /// 用系统排版真实量一段文字的宽度（label 档 = 11pt）。不启动 App。
+    private static func width(of text: String) -> CGFloat {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
+        ]
+        return ceil((text as NSString).size(withAttributes: attributes).width)
+    }
+
+    /// 包根。测试文件在 `Tests/TcoderMonitorTests/` 下，回溯三级。
+    private static let packageRoot: URL = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()   // TcoderMonitorTests
+        .deletingLastPathComponent()   // Tests
+        .deletingLastPathComponent()   // TcoderMonitor
+
     // MARK: - 外壳层防漂移：闸门与令牌只能有一个落点
 
     func testShellFilesKeepAvailabilityGateAndTokensInDesignLayer() throws {
@@ -165,13 +214,9 @@ final class ShellDesignTests: XCTestCase {
                       "外壳页面出现散写的玻璃闸门 / 裸值 / 旧色入口：\n\(offenders.joined(separator: "\n"))")
     }
 
-    /// 本流名下的外壳文件。`Tests` 与 `Sources` 同级，从 `#filePath` 回溯到包根。
+    /// 本流名下的外壳文件。路径公式与上面共用 `Self.packageRoot`。
     private func shellLayerSources() throws -> [(name: String, text: String)] {
-        let views = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()   // TcoderMonitorTests
-            .deletingLastPathComponent()   // Tests
-            .deletingLastPathComponent()   // TcoderMonitor
-            .appendingPathComponent("Sources/TcoderMonitor/Views")
+        let views = Self.packageRoot.appendingPathComponent("Sources/TcoderMonitor/Views")
         var result: [(String, String)] = []
         for name in ["RootView.swift", "ProjectDetailView.swift", "DashboardView.swift"] {
             result.append((name, try read(views.appendingPathComponent(name))))

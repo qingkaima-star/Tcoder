@@ -12,9 +12,15 @@ import Foundation
 enum LogDiscovery {
 
     /// 项目内发现 + ~/Library/Logs/<项目名>/ + ~/Library/Logs/DiagnosticReports/*.ips
+    ///
+    /// `withinDays` 对**三个发现来源一起生效**（<= 0 表示不限制）：日志页把窗口写在工具栏上，
+    /// 只裁崩溃报告、把工程日志与 ~/Library/Logs 全量收进来，等于「7 天」下面摆着全部历史。
+    /// 按 mtime 裁剪是上界而不是近似：一个 90 天没被写过的文件不可能含最近 7 天的新条目。
+    /// 修改时间读不到的文件按「无法证明在窗口内」处理，与 `.ips` 那条规则同一个口径。
     static func discover(projectRoot: URL, projectName: String, withinDays: Int, maxFiles: Int) -> [DiscoveredLog] {
         guard maxFiles > 0 else { return [] }
         var unique: [String: DiscoveredLog] = [:]
+        let cutoff: Date? = withinDays > 0 ? Date().addingTimeInterval(-Double(withinDays) * 86_400) : nil
 
         func register(_ url: URL) {
             let key = canonicalPath(of: url)
@@ -22,6 +28,7 @@ enum LogDiscovery {
             let values = attributes(of: url)
             guard values.isFile else { return }
             let modified = values.modifiedAt ?? Date.distantPast
+            if let cutoff, modified < cutoff { return }
             unique[key] = DiscoveredLog(url: URL(fileURLWithPath: key),
                                         role: role(for: url, in: projectRoot),
                                         sizeBytes: values.sizeBytes,

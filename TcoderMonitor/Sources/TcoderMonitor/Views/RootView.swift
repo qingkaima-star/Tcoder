@@ -23,25 +23,31 @@ struct RootView: View {
         .navigationSplitViewStyle(.balanced)
     }
 
-    /// 窗口工具栏不自造背景：macOS 26 的系统工具栏本身就是玻璃，
-    /// 这里塞自定义材质只会跟系统抢同一层（[LG]）。符号一律走 `IconName`，
-    /// 「重新分析」用 `arrow.clockwise`，采样刷新用 `arrow.triangle.2.circlepath`，
-    /// 两个语义不再混用（WS-I §7.2 冲突 1）。
+    /// 顶栏本身由系统在 macOS 26 上画成玻璃，这里不自造窗口背景（[LG]）；
+    /// 但**按钮要主动升到控件层**，否则它是普通边框控件，跟侧栏选中行、导航条
+    /// 那两枚玻璃胶囊不是一套材质（第二轮目视结论 3）。
+    /// 多个玻璃控件用 `mergedGlassChrome` 归并折射，这也是 [LG] 的明确要求。
+    ///
+    /// 符号一律走 `IconName`：「重新分析」`arrow.clockwise`，采样刷新
+    /// `arrow.triangle.2.circlepath`，两个语义不再混用（WS-I §7.2 冲突 1）。
     @ToolbarContentBuilder
     private var detailToolbar: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            Button {
-                state.scanSelected()
-            } label: {
-                Label("重新分析", systemImage: IconName.reanalyze.rawValue)
-            }
-            .disabled(state.isScanning || state.selectedProject == nil)
-            .help("对当前项目重新执行全部分析器")
-        }
-        if state.isScanning {
-            ToolbarItem(placement: .primaryAction) {
-                ProgressOverlay(phase: state.phase,
-                                projectName: state.selectedProject?.name ?? "当前项目")
+        ToolbarItemGroup(placement: .primaryAction) {
+            mergedGlassChrome(spacing: Theme.Spacing.xs) {
+                Button {
+                    state.scanSelected()
+                } label: {
+                    Label("重新分析", systemImage: IconName.reanalyze.rawValue)
+                }
+                .buttonStyle(.plain)
+                .glassButtonStyle(.bordered)
+                .disabled(state.isScanning || state.selectedProject == nil)
+                .help("对当前项目重新执行全部分析器")
+
+                if state.isScanning {
+                    ProgressOverlay(phase: state.phase,
+                                    projectName: state.selectedProject?.name ?? "当前项目")
+                }
             }
         }
     }

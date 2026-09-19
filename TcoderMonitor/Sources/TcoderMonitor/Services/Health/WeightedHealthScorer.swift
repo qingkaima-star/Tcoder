@@ -78,23 +78,33 @@ final class WeightedHealthScorer: HealthScoringProviding {
             //   1) 分析器给出全仓均值 → 直接用，样本口径后缀不再需要；
             //   2) 没有全仓均值但有热点榜 → 退回热点榜均值，detail 必须标明是样本口径；
             //   3) 两者都没有 → 「一个函数都没测到」，本维度不参与评分。
-            //      注意第 3 支必须按「有没有测到东西」判，不能只看 analyzedFunctionCount：
-            //      分母 >0 但榜单为空时热点均值会算成 0，曲线会把「没测到」当成复杂度 0 给满分，
+            //      注意第 3 支必须按「有没有真的数到函数」判，不能只看 `averageCyclomaticComplexity`
+            //      是否非空：落盘报告与外部输入都能长成「均值守着 0、分母却是 0」的自相矛盾形状，
+            //      而曲线拿到 functionCount == 0 会给满分 100（HealthCurves.complexity 的兜底支），
             //      那正是这条诚实原则要挡住的。与 `.testing` 的 `coverage.hasData` 同源。
             // WS-A 自 `f55e4a0` 起真的在填这两个字段（真实仓库 self-scan：均值 4.13、分母 1134），
             // 所以有函数的仓库现在走第①支；第③支留给「一个函数都没测到」的空目录/纯资源目录。
             let hotspots = code.topComplexFunctions
-            guard code.averageCyclomaticComplexity != nil || !hotspots.isEmpty else { return nil }
+            let hasRepoMean = code.averageCyclomaticComplexity != nil && code.analyzedFunctionCount > 0
+            guard hasRepoMean || !hotspots.isEmpty else { return nil }
             let highRisk = hotspots.filter { $0.cyclomaticComplexity >= 16 }.count
             let worst = hotspots.map(\.cyclomaticComplexity).max() ?? 0
-            let hasRepoMean = code.averageCyclomaticComplexity != nil
-            let mean = code.averageCyclomaticComplexity
-                ?? (hotspots.isEmpty ? 0
-                    : Double(hotspots.map(\.cyclomaticComplexity).reduce(0, +)) / Double(hotspots.count))
+            // 口径与 `notingRepoScope` / `notingSample` 的选择保持一致：
+            // 只有「均值非空且分母 >0」才算全仓普查口径，否则退回热点榜口径。
+            let mean: Double
+            if hasRepoMean, let repoMean = code.averageCyclomaticComplexity {
+                mean = repoMean
+            } else {
+                mean = hotspots.isEmpty
+                    ? 0
+                    : Double(hotspots.map(\.cyclomaticComplexity).reduce(0, +)) / Double(hotspots.count)
+            }
             let curve = HealthCurves.complexity(averageCC: mean, highRiskCount: highRisk, maxCC: worst,
                                                 functionCount: max(code.analyzedFunctionCount, hotspots.count))
-            if curve.score >= 85 { strengths.append("函数复杂度可控（最高 CC \(worst)）") }
-            if curve.score <= 60 {
+            // 「最高 CC」与「N 个函数 ≥16」都只能在热点榜**有内容**时说：`worst` 在榜单为空时
+            // 取的是 `?? 0`，那不是测量值。全仓均值口径不受影响，它自己在 detail 里。
+            if curve.score >= 85, !hotspots.isEmpty { strengths.append("函数复杂度可控（最高 CC \(worst)）") }
+            if curve.score <= 60, !hotspots.isEmpty {
                 issues.append("\(highRisk) 个函数圈复杂度 ≥16，最高 \(worst)")
                 recommendations.append("优先拆分最高复杂度函数，用早返回替代嵌套分支")
             }
@@ -103,9 +113,15 @@ final class WeightedHealthScorer: HealthScoringProviding {
                 : notingSample(curve, hotspots.count)
 
         case .duplication:
-            guard let code = inputs.code else { return nil }
+            // 重复率的分母是代码行。一行代码都没扫到时 `duplicationRatio` 必然是 0，
+            // 而 0% 在这里是「没东西可比」，不是「比过、很干净」——曲线的 100 分兜底支
+            // 与「重复代码率低」这句优点都别被这个 0 喂出来。
+            guard let code = inputs.code, code.codeLines > 0 else { return nil }
             let curve = HealthCurves.duplication(ratio: code.duplicationRatio, codeLines: code.codeLines)
-            if curve.score >= 85 { strengths.append(String(format: "重复代码率低（%.1f%%）", code.duplicationRatio * 100)) }
+            // 优点宣称不得越过曲线自己承认的置信度下限（同一条 200 行，见 `HealthCurves.smallSampleCodeLines`）。
+            if curve.score >= 85, code.codeLines >= HealthCurves.smallSampleCodeLines {
+                strengths.append(String(format: "重复代码率低（%.1f%%）", code.duplicationRatio * 100))
+            }
             if curve.score <= 60 {
                 issues.append(String(format: "重复代码 %.1f%%，共 %d 处重复块",
                                      code.duplicationRatio * 100, code.duplicatedBlocks.count))
@@ -128,7 +144,9 @@ final class WeightedHealthScorer: HealthScoringProviding {
             return curve
 
         case .documentation:
-            guard let code = inputs.code else { return nil }
+            // 注释占比的分母是 totalLines；0 行时曲线给的是 50 分「无源码可评估」占位值，
+            // 让一个占位值参与加权（并把在场维度的权重摊薄）等于把没扫到当成中等水平。
+            guard let code = inputs.code, code.totalLines > 0 else { return nil }
             let curve = HealthCurves.documentation(commentRatio: code.commentRatio,
                                                    todoCount: code.todoCount, fixmeCount: code.fixmeCount,
                                                    totalLines: code.totalLines)
