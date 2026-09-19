@@ -24,10 +24,32 @@ final class ProjectStore {
 
     var storageDirectory: URL
 
+    /// 支持目录的解析规则，抽成纯函数以便单测（`TCODER_SUPPORT_DIR` 是本轮为 UI 取证加的隔离入口）。
+    ///
+    /// 为什么要有这个开关：`~/Library/Application Support/TcoderMonitor` 与 `defaults` 域
+    /// `com.tcoder.monitor` 全机唯一，所以任何第二个实例都会与正在运行的实例互相回写覆盖
+    /// （AGENTS §7 因此规定"同一时刻只允许一个人启动 App 做验证"）。那条约束直接卡死了
+    /// 九页截图取证：本机只要还留着旧实例，取证脚本就必须拒绝跑。
+    /// 允许换一个**绝对路径**的支持目录后，取证实例可以写到 /tmp 下自己的沙箱里，
+    /// 既不碰用户的项目列表，也不再需要 `e2e_check.sh` 那套"先清空再还原"的危险动作
+    /// （那把脚本历史上真清掉过一次用户状态）。
+    ///
+    /// 只接受绝对路径：相对路径会随进程 CWD 变化而写到意想不到的地方，那比没有这个开关更糟。
+    static func resolveStorageDirectory(environment: [String: String],
+                                        applicationSupport base: URL) -> URL {
+        let fallback = base.appendingPathComponent("TcoderMonitor", isDirectory: true)
+        guard let override = environment["TCODER_SUPPORT_DIR"], override.isEmpty == false else {
+            return fallback
+        }
+        guard override.hasPrefix("/") else { return fallback }
+        return URL(fileURLWithPath: override, isDirectory: true)
+    }
+
     init() {
         let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        storageDirectory = base.appendingPathComponent("TcoderMonitor", isDirectory: true)
+        storageDirectory = ProjectStore.resolveStorageDirectory(
+            environment: ProcessInfo.processInfo.environment, applicationSupport: base)
         try? fileManager.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
         load()
     }
