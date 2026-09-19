@@ -10,6 +10,20 @@ WINLIST="$PWD/scripts/winlist.swift"
 OUT="${1:-/tmp/tcoder-pages}"
 SECTIONS=("总览" "代码规模" "复杂度风险" "Git 洞察" "贡献者" "性能监控" "错误日志" "依赖分析" "健康评分")
 
+# 前置 0（放在构建之前，被拦时不白跑一次编译）：
+# Application Support 与 defaults 域全机唯一，任何非本包实例都可能在退出时回写污染数据，
+# 现在拍图拍到的是脏数据。规约禁止向进程发信号，所以只能拒拍并交人工 Cmd+Q。
+if [ "${ALLOW_EXTRA_INSTANCES:-0}" != "1" ]; then
+  STRAY=$(pgrep -x TcoderMonitor || true)
+  if [ -n "${STRAY}" ]; then
+    echo "!! 检测到 $(echo "${STRAY}" | wc -l | tr -d ' ') 个非本包 TcoderMonitor 实例：pid $(echo ${STRAY} | tr '\n' ' ')"
+    echo "!! 它们与本包共用 ~/Library/Application Support/TcoderMonitor，此时截图必脏 —— 拒绝取证。"
+    echo "!! 请人工 Cmd+Q 后重试（本脚本不向任何进程发信号）。确需强拍：ALLOW_EXTRA_INSTANCES=1"
+    exit 1
+  fi
+  echo "==> 前置 0 通过：无其他 TcoderMonitor 实例"
+fi
+
 # 取证门禁：截图前必须从当前源码重新构建并跑绿测试。
 # 曾经因为拿旧 dist 二进制截图，把九张几乎同尺寸的图当成"九页均已验证"。
 # 九张图尺寸几乎一致，就是取了旧二进制的最直接破绽。
