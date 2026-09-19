@@ -24,6 +24,9 @@ struct ScannedSourceFile: Sendable {
     var codeLineCount: Int
     var todoCount: Int
     var fixmeCount: Int
+    /// 文件行数超过 `maximumLineCount` 时为 true：该文件只有前 20 万行进入统计。
+    /// 没有这个标志，`totalLines` 会看起来像全量（WS-D 诚实性审计 P1 #7 的一条）。
+    var lineCountTruncated: Bool = false
 
     var totalLineCount: Int { lines.count }
 }
@@ -68,8 +71,10 @@ final class SourceFileClassifier {
         }
         if segments.last?.isEmpty == true { segments.removeLast() }
         // 病态大文件只保留前 20 万行，其后的行不进入任何统计
+        var truncatedToLineCap = false
         if segments.count > Self.maximumLineCount {
             segments = Array(segments[0..<Self.maximumLineCount])
+            truncatedToLineCap = true
         }
 
         var walker = SourceLineWalker(language: language)
@@ -110,7 +115,8 @@ final class SourceFileClassifier {
             commentLineCount: comment,
             codeLineCount: code,
             todoCount: todo,
-            fixmeCount: fixme
+            fixmeCount: fixme,
+            lineCountTruncated: truncatedToLineCap
         )
     }
 
@@ -238,6 +244,8 @@ struct SourceScanResult: Sendable {
     var skippedFileCount: Int = 0
     var scannedFileCount: Int = 0
     var truncatedByMaxFiles: Bool = false
+    /// 有多少个文件因为超过 20 万行上限只统计了前 20 万行（`CodeMetrics.totalLines` 因此不是全量）。
+    var lineTruncatedFileCount: Int = 0
     /// 「为什么丢了这个文件」的台账；见 `SourceSkipLedger`。
     var skipLedger: SourceSkipLedger = SourceSkipLedger()
 }
@@ -544,6 +552,7 @@ final class SourceTreeScanner {
     private func merge(_ files: [ScannedSourceFile], attempted urls: [URL], into result: inout SourceScanResult) {
         result.files.append(contentsOf: files)
         result.scannedFileCount += files.count
+        result.lineTruncatedFileCount += files.filter { $0.lineCountTruncated }.count
         // 候选名单里但最终没出结果的 = 分类阶段读不出内容（权限 / IO / 非目录），逐条记进台账。
         let accepted = Set(files.map { $0.url.path })
         for url in urls where accepted.contains(url.path) == false {

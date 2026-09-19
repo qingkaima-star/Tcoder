@@ -302,7 +302,7 @@ class SelfScanHarnessCase: XCTestCase {
         return "生产代码（Sources/）：\(production.count) 个超限 —— \(tally(production))"
     }
 
-    static func testFileSummary(_ over: [GroundTruthFile]) -> String {
+    static func summaryOfTestFiles(_ over: [GroundTruthFile]) -> String {
         let tests = over.filter { !$0.path.contains("/Sources/") }
         guard !tests.isEmpty else { return "测试代码（Tests/）：0 个超限" }
         return "测试代码（Tests/）：\(tests.count) 个超限 —— \(tally(tests))"

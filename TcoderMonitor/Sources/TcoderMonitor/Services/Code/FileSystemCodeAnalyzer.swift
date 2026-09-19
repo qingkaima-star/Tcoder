@@ -11,7 +11,86 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         self.fallbackOptions = options
     }
 
+    /// 一次扫描的「看到了多少、被哪条上限切掉了多少」。
+    ///
+    /// 背景（WS-D 诚实性审计 P1 #7）：扫描器本来就维护 `truncatedByMaxFiles` /
+    /// `visitedFileCount` / `skippedFileCount`，但原先 `analyze` 只取 `scan.files`，
+    /// 四个字段连同「2MB 单文件上限、30 项 skipDirectories、扩展名白名单、20 万行/文件截断」
+    /// 一起被丢掉，UI 于是把一份**部分测量**呈现成完整测量。这里一个都不再丢。
+    ///
+    /// 契约缺口：`CodeMetrics` 没有承接字段（Models 是冻结区），所以视图现在还读不到它 ——
+    /// 已把中文化的 `limitationSummary` 备好后交给总工决定接入点。
+    struct CodeScanCoverage: Sendable {
+        var visitedEntryCount: Int
+        var includedFileCount: Int
+        var skippedFileCount: Int
+        var truncatedByMaxFiles: Bool
+        var maxFiles: Int
+        var maxFileBytes: Int
+        /// 超过 20 万行、只统计了前 20 万行的文件数
+        var lineTruncatedFileCount: Int
+        /// 归一化行数触到重复检测滑窗上限（2 万行/文件）而被丢弃后半部分的文件数
+        var filesHittingDuplicateLineCap: Int
+        /// 因每指纹片段预算而未展开成明细片段的拷贝窗口数
+        var duplicateFragmentsDroppedByBudget: Int
+        /// 榜单截断到 20 块时丢掉的块数与它们覆盖的行数
+        var duplicateBlocksDroppedByCap: Int
+        var duplicateLinesOutsideReportedBlocks: Int
+        var skipLedger: SourceSkipLedger = SourceSkipLedger()
+
+        /// 有任一**上限**真的生效过 ⇒ 这份数字是部分测量，UI 不得当成全量展示。
+        /// 注意不含「按规则主动排除」：跳过 vendor/二进制是范围定义，不是被截断。
+        var isPartial: Bool {
+            truncatedByMaxFiles || lineTruncatedFileCount > 0 || skippedFileCount > 0
+                || filesHittingDuplicateLineCap > 0 || duplicateFragmentsDroppedByBudget > 0
+                || duplicateBlocksDroppedByCap > 0
+        }
+
+        /// 有多少条目是按规则排除的（范围问题），与「被上限切掉」分开报，两件事混在一起用户就没法判断偏差方向。
+        var excludedEntryCount: Int { skipLedger.skippedFileTotal }
+        var excludedLineCount: Int { skipLedger.skippedLineTotal }
+
+        /// 逐条带真实数字的限制说明，供横幅/脚注直接展示。
+        var limitationSummary: [String] {
+            var lines: [String] = []
+            if truncatedByMaxFiles {
+                lines.append("达到单次扫描文件上限 \(NumberFormat.grouped(maxFiles))，其余文件未读，结果偏小。")
+            }
+            if lineTruncatedFileCount > 0 {
+                lines.append("\(NumberFormat.grouped(lineTruncatedFileCount)) 个文件超过 20 万行，只统计了前 20 万行。")
+            }
+            if skippedFileCount > 0 {
+                lines.append("\(NumberFormat.grouped(skippedFileCount)) 个文件被跳过（超过 \(ByteFormat.string(UInt64(maxFileBytes))) 单文件上限、二进制或语言表未收录）。")
+            }
+            if skipLedger.skippedFileTotal > 0 {
+                let top = skipLedger.topLineRules(.excludedDirectoryContent)
+                lines.append("另有 \(NumberFormat.grouped(skipLedger.skippedFileTotal)) 个条目按规则未纳入统计"
+                    + (top.isEmpty ? "。" : "，按行数排序：\(top)。"))
+            }
+            if filesHittingDuplicateLineCap > 0 {
+                lines.append("\(NumberFormat.grouped(filesHittingDuplicateLineCap)) 个文件的重复检测只看前 2 万归一化行。")
+            }
+            if duplicateFragmentsDroppedByBudget > 0 || duplicateBlocksDroppedByCap > 0 {
+                lines.append("重复率按全量命中计算，但明细榜单截断到 20 块、片段展开受指纹预算限制"
+                    + "（本次未展开 \(NumberFormat.grouped(duplicateFragmentsDroppedByBudget)) 处拷贝、"
+                    + "未列出 \(NumberFormat.grouped(duplicateBlocksDroppedByCap)) 个块 / "
+                    + "\(NumberFormat.grouped(duplicateLinesOutsideReportedBlocks)) 行）。")
+            }
+            return lines
+        }
+    }
+
     func analyze(root: URL, options: ScanOptions) async throws -> CodeMetrics {
+        try await analyzeWithCoverage(root: root, options: options).metrics
+    }
+
+    struct AnalysisOutcome: Sendable {
+        var metrics: CodeMetrics
+        var coverage: CodeScanCoverage
+    }
+
+    /// 与 `analyze` 同一次遍历、同一批数据，额外带回覆盖度；不重复扫描。
+    func analyzeWithCoverage(root: URL, options: ScanOptions) async throws -> AnalysisOutcome {
         let startedAt = Date()
 
         var isDirectory: ObjCBool = false
@@ -40,7 +119,21 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             duplication: duplication,
             to: &metrics
         )
-        return metrics
+        let coverage = CodeScanCoverage(
+            visitedEntryCount: scan.visitedFileCount,
+            includedFileCount: scan.scannedFileCount,
+            skippedFileCount: scan.skippedFileCount,
+            truncatedByMaxFiles: scan.truncatedByMaxFiles,
+            maxFiles: options.maxFiles,
+            maxFileBytes: options.maxFileBytes,
+            lineTruncatedFileCount: scan.lineTruncatedFileCount,
+            filesHittingDuplicateLineCap: duplication.filesHittingLineCap,
+            duplicateFragmentsDroppedByBudget: duplication.fragmentsDroppedByBudget,
+            duplicateBlocksDroppedByCap: duplication.blocksDroppedByCap,
+            duplicateLinesOutsideReportedBlocks: duplication.linesOutsideReportedBlocks,
+            skipLedger: scan.skipLedger
+        )
+        return AnalysisOutcome(metrics: metrics, coverage: coverage)
     }
 
     /// 兼容无参构造（AppState 用的就是 `FileSystemCodeAnalyzer()`）。

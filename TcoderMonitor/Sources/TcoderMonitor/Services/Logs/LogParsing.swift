@@ -57,6 +57,11 @@ struct LogFileReading: Sendable {
     var truncated: Bool = false
     var events: [LogEvent] = []
     var parseErrors: Int = 0
+    /// 一次都没读成功（打不开，或声明有内容却一行都没读到）。
+    /// **必须与 `totalLines == 0` 的「读到尽头确实没有行」区分开**：
+    /// 前者是「没核对」，后者是「核对过、零命中」；把前者混进 scannedFiles 会让
+    /// 一次权限不足换来一张 all-clear（`LogSummary.hasData` 认 scannedFiles 非空）。
+    var readFailed: Bool = false
 }
 
 struct LogAggregate: Sendable {
@@ -83,7 +88,10 @@ enum LogReader {
         var reading = LogFileReading(url: log.url, role: log.role, sizeBytes: log.sizeBytes,
                                      modifiedAt: log.modifiedAt)
         guard maxBytes > 0, maxLines > 0 else { return reading }
-        guard let handle = try? FileHandle(forReadingFrom: log.url) else { return reading }
+        guard let handle = try? FileHandle(forReadingFrom: log.url) else {
+            reading.readFailed = true
+            return reading
+        }
         defer { try? handle.close() }
 
         var size = log.sizeBytes
@@ -166,6 +174,11 @@ enum LogReader {
         reading.totalLines = builder.lineCount
         reading.linesRead = builder.lineCount
         reading.events = builder.events
+        // 文件声明有内容、却一行都没读出来：这不是「空的」，这是没读进来。
+        // 不标成读取失败，就会被当成「核对过、零命中」参与后续结论。
+        if reading.totalLines == 0 && reading.sizeBytes > 0 {
+            reading.readFailed = true
+        }
         return reading
     }
 }

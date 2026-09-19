@@ -283,6 +283,31 @@ enum DependencyNetworkLookup {
         note = note.map { $0 + "；" + text } ?? text
     }
 
+    /// 报告说明里有没有**自述**「npm 侧有包没拿到结果」。
+    ///
+    /// 这四条措辞都是 npm 路径独有（逐包失败计数、整体硬超时、全军覆没、并发窗口耗尽时间预算）。
+    /// 全量成功时 note 是 `在线查询已完成（OSV + npm registry）`，紧跟 "npm registry" 的是全角括号
+    /// 而不是全角冒号，所以不会被误判成缺口 —— 误判会把真缺陷跳过去。
+    /// 用途：让在线用例把「网络根本没给数据」和「给了数据却没归因」分开处理，前者跳过、后者必须失败。
+    /// 已知不覆盖：`maxNpmPackages` 截断说明（不含上述措辞）。
+    static func npmShortfallDisclosed(in note: String) -> Bool {
+        note.contains("npm registry：")
+            || note.contains("npm registry 查询超过")
+            || note.contains("npm registry 全部")
+            || note.contains("达到时间预算")
+    }
+
+    /// OSV 侧的同款判据：说明里有没有自述「有公告没查成 / 没来得及展开」。
+    /// 成功说明是 `在线查询已完成（OSV + npm registry）`，不含下列任何一条措辞。
+    static func osvShortfallDisclosed(in note: String) -> Bool {
+        note.contains("OSV：")
+            || note.contains("OSV 查询超过")
+            || note.contains("OSV 批量接口不可用")
+            || note.contains("OSV 详情：")
+            || note.contains("个 OSV 请求失败")
+            || note.contains("OSV 不支持其生态")
+    }
+
     /// 硬超时保护：超时返回 `.timedOut`，调用方既不抛错也不会卡住。
     enum DeadlineResult<Value: Sendable>: Sendable {
         case value(Value)

@@ -1,0 +1,253 @@
+import SwiftUI
+
+// MARK: - 分量表的算术（纯函数，单测直接钉）
+//
+// 评分器给的 `weight` 可能是原始权重、也可能已归一，两者都要能落地：
+// 缺失维度不参与，所以在场维度的权重按 Σ 归一 —— 那才是综合分真正乘的数。
+// 这套口径以前散在视图里，现在集中成一处，页面只负责画。
+
+struct ScoreRow: Identifiable {
+    let component: ScoreComponent
+    /// 内置权重表里的原始权重（自定义维度为 nil）。
+    let baseWeight: Double?
+    /// 本次实际乘数（归一化后）。
+    let effectiveWeight: Double
+    let contribution: Double
+
+    var id: String { component.name }
+    var score: Int { component.score }
+    var name: String { DimensionDisplay.name(component.name) }
+    /// 这一维度满分可得多少。
+    var fullMarks: Double { effectiveWeight * 100 }
+    /// 它把综合分拖下去多少。
+    var lostPoints: Double { effectiveWeight * Double(100 - component.score) }
+}
+
+enum HealthBreakdown {
+    /// 维度名就是 `HealthDimension.rawValue`，匹配上才有「原始权重」可比。
+    static func baseWeight(of component: ScoreComponent) -> Double? {
+        guard let dimension = HealthDimension(rawValue: component.name), dimension.defaultWeight > 0 else { return nil }
+        return dimension.defaultWeight
+    }
+
+    static func effectiveWeight(_ component: ScoreComponent) -> Double {
+        component.weight > 0 ? component.weight : (baseWeight(of: component) ?? 0)
+    }
+
+    /// 按拖累程度升序：贡献最低者在前，和 Xcode / Instruments 的排序习惯一致。
+    static func rows(for health: HealthScore) -> [ScoreRow] {
+        let present = health.components.reduce(0) { $0 + effectiveWeight($1) }
+        guard present > 0 else { return [] }
+        return health.components.map { component in
+            let weight = effectiveWeight(component) / present
+            return ScoreRow(component: component,
+                            baseWeight: baseWeight(of: component),
+                            effectiveWeight: weight,
+                            contribution: Double(component.score) * weight)
+        }.sorted { lhs, rhs in
+            if abs(lhs.contribution - rhs.contribution) > 0.001 { return lhs.contribution < rhs.contribution }
+            return lhs.score < rhs.score
+        }
+    }
+
+    static func sumOfContributions(_ rows: [ScoreRow]) -> Double {
+        rows.reduce(0) { $0 + $1.contribution }
+    }
+
+    /// 分量之和与综合分对不上（>1.5）说明归一化或取整口径不同，必须写出来而不是假装能加出来。
+    static func isSumConsistent(_ sum: Double, with overall: Int) -> Bool {
+        abs(sum - Double(overall)) <= 1.5
+    }
+
+    /// 有默认权重、但这次没算出来的维度。
+    static func missingDimensions(of health: HealthScore) -> [HealthDimension] {
+        let present = Set(health.components.map(\.name))
+        return HealthDimension.allCases.filter { $0.defaultWeight > 0 && !present.contains($0.rawValue) }
+    }
+
+    /// 摊分说明：只在原始权重被改动时给出，格式「重复代码率 13%→16%」。
+    static func shiftNotes(_ rows: [ScoreRow]) -> [String] {
+        rows.compactMap { row in
+            guard let base = row.baseWeight, abs(base - row.effectiveWeight) >= 0.005 else { return nil }
+            return "\(row.name) \(NumberFormat.percent(base, precision: 0))→\(NumberFormat.percent(row.effectiveWeight, precision: 0))"
+        }
+    }
+}
+
+// MARK: - 显示名映射
+
+/// 模型里的 `HealthDimension.duplication.rawValue` 是「重复度」（冻结契约），
+/// 规范词是「重复代码率」——所以在视图层建映射，不动模型（《40 WS-H》§13.2）。
+enum DimensionDisplay {
+    static let overrides: [String: String] = ["重复度": "重复代码率"]
+
+    static func name(_ raw: String) -> String { overrides[raw] ?? raw }
+    static func name(_ dimension: HealthDimension) -> String { name(dimension.rawValue) }
+}
+
+// MARK: - 缺失维度的原因
+
+enum MissingDimensionReason {
+    /// 维度 ↔ 产出它的分析器中文名（与 `AppState.failedSections` 写入的字面量一致）。
+    static let analyzerLabel: [HealthDimension: String] = [
+        .codeQuality: "代码扫描", .complexity: "代码扫描", .duplication: "代码扫描", .documentation: "代码扫描",
+        .activity: "Git 分析", .busFactor: "Git 分析",
+        .stability: "错误日志",
+        .dependencies: "依赖分析",
+        .testing: "测试覆盖率",
+    ]
+
+    /// 未评分**不参与也不得按 0 显示**，所以这里给的是原因，不是一个分数（验收点 6）。
+    static func text(for dimension: HealthDimension, report: ProjectReport?) -> String {
+        guard let analyzer = analyzerLabel[dimension] else { return "该维度不在内置口径里，本次未参与计分。" }
+        if let report, report.failedSections.contains(analyzer) {
+            return "上次扫描「\(analyzer)」失败，本维度没有输入。"
+        }
+        if report == nil {
+            return "还没有扫描结果，「\(analyzer)」未运行。"
+        }
+        switch dimension {
+        case .codeQuality, .complexity, .duplication, .documentation:
+            return report?.code == nil ? "「\(analyzer)」没有产出代码指标。" : "「\(analyzer)」完成但该分量未产出。"
+        case .activity, .busFactor:
+            return report?.git == nil ? "该目录不是 Git 仓库，或未取到提交历史。" : "「\(analyzer)」完成但该分量未产出。"
+        case .stability:
+            guard let logs = report?.logs else { return "尚未分析日志。" }
+            return logs.hasData ? "「\(analyzer)」完成但该分量未产出。" : "未发现可读的日志文件。"
+        case .dependencies:
+            return report?.dependencies == nil ? "未识别到依赖清单。" : "「\(analyzer)」完成但该分量未产出。"
+        case .testing:
+            return report?.coverage?.hasData == true
+                ? "「\(analyzer)」完成但该分量未产出。"
+                : "该项目没有产出覆盖率报告，不参与计分。"
+        }
+    }
+}
+
+// MARK: - 分量表视图
+
+struct HealthComponentTable: View {
+    let health: HealthScore
+    let report: ProjectReport?
+
+    private static let barHeight: CGFloat = 4
+
+    private var rows: [ScoreRow] { HealthBreakdown.rows(for: health) }
+    private var sum: Double { HealthBreakdown.sumOfContributions(rows) }
+
+    var body: some View {
+        GlassSection("维度分量",
+                     subtitle: "综合分 = Σ(得分 × 归一化权重) · 按拖累程度排序，贡献最低者在前",
+                     icon: .health,
+                     trailing: AnyView(StatLine(label: "合计", value: Live.fixed(sum, digits: 1)))) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                table
+                Divider()
+                missingBlock
+                if !HealthBreakdown.isSumConsistent(sum, with: health.overall) {
+                    NoteLine("分量合计 \(Live.fixed(sum, digits: 1)) 与综合分 \(health.overall) 有出入，通常是评分器的归一化或取整口径不同。",
+                             role: Theme.Semantic.warning, icon: .riskWarning)
+                }
+            }
+        }
+    }
+
+    private var table: some View {
+        Grid(alignment: .trailing, horizontalSpacing: Theme.Spacing.sm, verticalSpacing: Theme.Spacing.xs) {
+            GridRow {
+                TableHeaderCell("维度", width: DataColumn.dimension, trailing: false)
+                    .gridColumnAlignment(.leading)
+                TableHeaderCell("得分", width: DataColumn.score + DataColumn.scoreGauge,
+                                help: "该维度 0~100 分，条形按同一比例")
+                TableHeaderCell("权重", width: DataColumn.weight, help: "本次实际乘数（缺失维度的权重已摊到在场维度）")
+                TableHeaderCell("贡献", width: DataColumn.contribution, help: "得分 × 归一化权重")
+                TableHeaderCell("详情").flexCell().gridColumnAlignment(.leading)
+            }
+            Divider().gridCellColumns(5)
+            ForEach(rows) { row in
+                rowView(row)
+            }
+        }
+    }
+
+    private func rowView(_ row: ScoreRow) -> some View {
+        let role = Theme.Semantic.role(forScore: row.score)
+        return GridRow(alignment: .top) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                Text(row.name).font(Theme.Typo.label.font).lineLimit(1)
+                RiskBadge(risk: row.component.risk, showIcon: false)
+            }
+            .frame(width: DataColumn.dimension, alignment: .leading)
+
+            HStack(spacing: Theme.Spacing.xxs) {
+                MiniBarGauge(fraction: Double(row.score) / 100,
+                             tint: role.graphicColor,
+                             height: Self.barHeight)
+                    .frame(width: DataColumn.scoreGauge)
+                LiveNumber(String(row.score), tier: Theme.Typo.monoSmall,
+                           tint: role.textColor)
+                    .numberCell(DataColumn.score)
+            }
+
+            LiveNumber(NumberFormat.percent(row.effectiveWeight, precision: 0),
+                       tier: Theme.Typo.monoSmall)
+                .numberCell(DataColumn.weight)
+                .help(weightHelp(row))
+
+            LiveNumber(Live.fixed(row.contribution, digits: 1), tier: Theme.Typo.monoSmall,
+                       tint: role.textColor)
+                .numberCell(DataColumn.contribution)
+                .help("满分可得 \(Live.fixed(row.fullMarks, digits: 1))，这一维度拖了 \(Live.fixed(row.lostPoints, digits: 1)) 分")
+
+            Text(row.component.detail)
+                .font(Theme.Typo.narrative.font)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .flexCell()
+                .help(row.component.detail)
+        }
+    }
+
+    private func weightHelp(_ row: ScoreRow) -> String {
+        guard let base = row.baseWeight else {
+            return "该维度不在内置权重表里，直接采用评分器给出的权重。"
+        }
+        return "原始权重 \(NumberFormat.percent(base, precision: 0)) → 本次实际乘数 "
+            + NumberFormat.percent(row.effectiveWeight, precision: 1)
+            + "（缺失维度的权重等比摊到在场维度）"
+    }
+
+    // MARK: 缺失维度
+
+    @ViewBuilder
+    private var missingBlock: some View {
+        let missing = HealthBreakdown.missingDimensions(of: health)
+        let notes = HealthBreakdown.shiftNotes(rows)
+        if missing.isEmpty {
+            NoteLine("这次扫描的输入覆盖了全部可计分维度，权重未做摊分。测试覆盖只在项目真的产出了覆盖率报告时参与计分。")
+        } else {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                Text("缺失维度 \(NumberFormat.grouped(missing.count)) 项")
+                    .font(Theme.Typo.cardTitle.font)
+                ForEach(missing, id: \.rawValue) { dimension in
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+                        ThemedIcon(.unverified, role: .badge)
+                            .foregroundStyle(Theme.Semantic.warning.textColor)
+                        Text("\(DimensionDisplay.name(dimension))：")
+                            .font(Theme.Typo.label.font)
+                        Text(MissingDimensionReason.text(for: dimension, report: report))
+                            .font(Theme.Typo.label.font)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                    }
+                }
+                Text("缺失维度不参与计分、不按 0 计入，其权重已按比例摊到在场维度。"
+                     + (notes.isEmpty ? "" : "（\(notes.joined(separator: " · "))）"))
+                    .font(Theme.Typo.microLabel.font)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}

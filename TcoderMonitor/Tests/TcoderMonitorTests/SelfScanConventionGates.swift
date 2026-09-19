@@ -244,28 +244,53 @@ final class SelfScanConventionGates: SelfScanHarnessCase {
             + " 健康分=\(Int(scored))%（被 \(git.totalCommits - git.commitsAnalyzed) 个合并提交稀释）")
     }
 
-    // MARK: - 缺陷钉：占比的分子不许用被截断的榜单
+    // MARK: - 巨大文件榜截断的机制测试（不依赖仓库当下有没有债）
 
-    /// **缺陷钉（WS-R）**：代码质量维度里"巨大文件占比"的分子是被 `prefix(20)`
-    /// 截断后的榜单条数，不是真实超限文件数。本仓库真实 `>400` 行的有 23 个，
-    /// 分子却按 20 算——占比被系统性低估，且**文件越多低估得越狠**。
-    /// （`FileSystemCodeAnalyzer.swift:151` 截断，`hugeFiles.count` 随后被当普查数用。）
-    // ⚠️ 本条断言的是**缺陷现状**，不是期望值。期望值 = 分子用真实超限文件数：
-    //    真实占比 trueRatio 应当进 detail，而不是榜单截断值 cappedRatio。
-    func testPinned_HugeFileRatioUsesTruncatedListAsNumerator() async throws {
-        let code = try await selfScan().code
-        let truthOverMedium = try independentSwiftLineCounts().filter { $0.lines > Self.mediumFileLines }.count
-        let cappedCount = code.hugeFiles.count
+    /// 工具的巨大文件榜被 `prefix(20)` 截断（`FileSystemCodeAnalyzer.swift:151`），
+    /// 而代码质量维度拿 `hugeFiles.count` 当普查分子。
+    ///
+    /// 上一版这条是"钉仓库现状"，WS-V 把超长文件拆完后前提就塌了（真实 >400 行
+    /// 的文件数掉到正好等于截断上限 20，低估看不出来）。那是**守卫找错对象**：
+    /// 它在盯"债还在不在"，而不是"工具能不能数"。
+    /// 这里改成自己造债——合成 25 个 >400 行文件，工具只许报 20 个——
+    /// "拿榜单条数当分子必然少算"就被永久钉住，仓库拆到多干净都不影响它。
+    func testHugeFileListTruncationUnderstatesACensus() async throws {
+        let fileCount = 25
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tcoder-wsj-truncation-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
 
-        XCTAssertGreaterThan(truthOverMedium, cappedCount,
-                             "真实超限文件数已经不多于榜单条数，截断不再骗人，删掉这条钉")
-        XCTAssertEqual(cappedCount, 20, "榜单截断长度变了，本钉与 48 号笔记要同步")
+        for index in 0..<fileCount {
+            // 每个文件 420 行：函数声明 1 行 + 注释 418 行 + 收尾 1 行，稳过 400 这条线。
+            var body = "func sample\(index)() {\n"
+            body += String(repeating: "// 占位行\n", count: 418)
+            body += "}\n"
+            try body.write(to: dir.appendingPathComponent("Sample\(index).swift"),
+                           atomically: true, encoding: .utf8)
+        }
 
-        let cappedRatio = 100 * Double(cappedCount) / Double(code.totalFiles)
-        let trueRatio = 100 * Double(truthOverMedium) / Double(code.totalFiles)
-        print("【巨大文件占比】榜单截断=\(String(format: "%.1f", cappedRatio))%"
-            + " 真实=\(String(format: "%.1f", trueRatio))%（\(truthOverMedium) 个 >\(Self.mediumFileLines) 行）")
-        XCTAssertLessThan(cappedRatio, trueRatio - 1,
-                          "截断带来的低估不足 1 个百分点时，这条钉可以删")
+        var collected: [GroundTruthFile] = []
+        try collectSwiftFiles(in: dir, into: &collected)
+        let truthOverMedium = collected.filter { $0.lines > Self.mediumFileLines }.count
+        XCTAssertEqual(truthOverMedium, fileCount,
+                       "夹具应当造出 \(fileCount) 个 >\(Self.mediumFileLines) 行文件，实得 \(truthOverMedium)")
+
+        let metrics = try await FileSystemCodeAnalyzer().analyze(root: dir, options: .default)
+        XCTAssertEqual(metrics.hugeFiles.count, 20,
+                       "榜单截断长度变了（现在 \(metrics.hugeFiles.count)），本测试与 48 号笔记要同步")
+        XCTAssertLessThan(metrics.hugeFiles.count, truthOverMedium,
+                          "工具报出的巨大文件数不再少于真实值——截断已被修掉，"
+                        + "请把本条改成 XCTAssertEqual(metrics.hugeFiles.count, truthOverMedium)")
+
+        // 少算的那几个会怎样进评分：分子用榜单条数就低报占比。
+        let cappedRatio = Double(metrics.hugeFiles.count) / Double(metrics.totalFiles)
+        let trueRatio = Double(truthOverMedium) / Double(metrics.totalFiles)
+        XCTAssertLessThan(cappedRatio, trueRatio - 0.05,
+                          "占比低估不足 5 个百分点，说明分子已不再取截断榜单，删掉这条")
+        print("【榜单截断机制】夹具真实 >\(Self.mediumFileLines) 行 \(truthOverMedium) 个，"
+            + "工具 hugeFiles 只报 \(metrics.hugeFiles.count) 个；分子若用榜单 = "
+            + "\(String(format: "%.1f", cappedRatio * 100))%，真实 = "
+            + "\(String(format: "%.1f", trueRatio * 100))%")
     }
 }

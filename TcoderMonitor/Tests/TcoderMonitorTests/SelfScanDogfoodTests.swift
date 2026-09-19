@@ -48,7 +48,7 @@ final class SelfScanDogfoodTests: SelfScanHarnessCase {
         **闸门不降、基线不改**——还债方式是各自拆自己那份，不是把这条改绿。
 
         \(Self.productionSummary(over))
-        \(Self.testFileSummary(over))
+        \(Self.summaryOfTestFiles(over))
         逐个清单（行数 → 该目录现归属 → 路径）：
         \(Self.hugeFileRoster(over))
         """)
