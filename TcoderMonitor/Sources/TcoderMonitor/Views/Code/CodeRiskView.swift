@@ -90,7 +90,7 @@ struct CodeRiskView: View {
                 HStack(spacing: 14) {
                     StatLine(label: "最大文件", value: "\(NumberFormat.grouped(code.largestFileLineCount)) 行")
                     StatLine(label: "超长函数", value: NumberFormat.grouped(code.longFunctions))
-                    StatLine(label: "平均函数长度", value: "\(NumberFormat.grouped(code.averageFunctionLength)) 行")
+                    StatLine(label: "平均函数长度（仅 ≥2 行）", value: "\(NumberFormat.grouped(code.averageFunctionLength)) 行")
                 }
                 .font(.caption)
 
