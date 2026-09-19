@@ -1,260 +1,87 @@
 import SwiftUI
 
-/// Chief-engineer owned design system. Every workstream renders through these tokens
-/// and components so parallel UI work still looks like one product.
-enum Theme {
-    static let accent = Color(red: 0.36, green: 0.55, blue: 1.0)
-    static let healthy = Color(red: 0.19, green: 0.72, blue: 0.30)
-    static let caution = Color(red: 0.91, green: 0.64, blue: 0.24)
-    static let danger = Color(red: 0.89, green: 0.35, blue: 0.23)
-    static let critical = Color(red: 0.70, green: 0.15, blue: 0.12)
-    static let neutral = Color(red: 0.56, green: 0.56, blue: 0.58)
+/// Tcoder 设计系统的**兼容转发层**。
+///
+/// 令牌与组件本身已经全部搬到 `Sources/TcoderMonitor/Design/**`：
+///   - `Theme.Semantic` / `Theme.Palette` / `Theme.Typo` / `Theme.Spacing`
+///     / `Theme.Radius` / `Theme.Stroke` / `Theme.Elevation` / `Theme.Layout` / `Theme.Chart`
+///     → `Design/ThemeTokens.swift`、`Design/ColorToken.swift`
+///   - `GlassCard` / `GlassSection` / `GlassToolbar` / `GlassButton` / `SemanticBadge`
+///     → `Design/GlassComponents.swift`，闸门在 `Design/Glass.swift`
+///   - `SectionCard` / `MetricTile` / `RiskBadge` / `SeverityBadge` / `MiniBarGauge`
+///     / `EmptyStateView` / `ProgressOverlay` / `IconName` / `ThemedIcon`
+///     → `Design/SharedComponents.swift`、`Design/IconTokens.swift`
+///
+/// **下面这一层 `deprecated` 转发是临时桥**：九个页面此刻仍在被 WS-A/B/C 并行改写，
+/// 一次性把 `Theme.accent` 这类入口抽掉会让他们的在途改动全线编译不过。
+/// 总工的拆桥路径：各页重样时把旧名换成新语义名（IDE 的 deprecation 提示就是工单），
+/// 全仓 `Theme\.(accent|healthy|caution|danger|critical|neutral|cardBackground|subtleBackground|gridLine|mono(Small|Body)|metricNumber|heroNumber|color\(for)` 归零后，
+/// 删掉本文件里的 `// MARK: - 兼容转发` 整段即可，Design/** 不需要跟着改。
+enum Theme {}
 
-    static let cardBackground = Color(nsColor: .controlBackgroundColor)
-    static let subtleBackground = Color(nsColor: .windowBackgroundColor)
+// MARK: - 兼容转发（临时桥，勿新增用法）
 
-    static let gridLine = Color.primary.opacity(0.08)
+extension Theme {
+    // 旧色彩入口 → 语义色的**文字层**。
+    // 注意这是一次有意的观感变化：旧值是单档裸 RGB，深色模式下普遍不到 4.5:1；
+    // 转发到 `text` 层之后，浅深两套都到达标线（见 DesignTokenTests）。
+    @available(*, deprecated, message: "改用 Theme.Semantic.accent.textColor（交互层用 Color.accentColor）")
+    static var accent: Color { Semantic.accent.textColor }
 
+    @available(*, deprecated, message: "改用 Theme.Semantic.success.textColor")
+    static var healthy: Color { Semantic.success.textColor }
+
+    @available(*, deprecated, message: "改用 Theme.Semantic.warning.textColor")
+    static var caution: Color { Semantic.warning.textColor }
+
+    @available(*, deprecated, message: "改用 Theme.Semantic.danger.textColor")
+    static var danger: Color { Semantic.danger.textColor }
+
+    @available(*, deprecated, message: "改用 Theme.Semantic.critical.textColor")
+    static var critical: Color { Semantic.critical.textColor }
+
+    @available(*, deprecated, message: "改用 Theme.Semantic.neutral.textColor")
+    static var neutral: Color { Semantic.neutral.textColor }
+
+    @available(*, deprecated, message: "改用 Theme.Palette.Surface.card")
+    static var cardBackground: Color { Palette.Surface.card }
+
+    @available(*, deprecated, message: "改用 Theme.Palette.Surface.window")
+    static var subtleBackground: Color { Palette.Surface.window }
+
+    @available(*, deprecated, message: "改用 Theme.Palette.Surface.separator（内容卡已不再用描边分层）")
+    static var gridLine: Color { Palette.Surface.separator }
+
+    @available(*, deprecated, message: "改用 Theme.Semantic.role(for:).textColor")
     static func color(for risk: RiskLevel) -> Color {
-        switch risk {
-        case .none: return neutral
-        case .low: return healthy
-        case .medium: return caution
-        case .high: return danger
-        case .critical: return critical
-        }
+        Semantic.role(for: risk).textColor
     }
 
+    @available(*, deprecated, message: "改用 Theme.Semantic.role(forScore:)（已去蓝档、改单调；nil 走 neutral）")
     static func color(forScore score: Int) -> Color {
-        switch score {
-        case 85...: return healthy
-        case 70..<85: return accent
-        case 55..<70: return caution
-        default: return danger
-        }
+        Semantic.role(forScore: score).textColor
     }
 
-    static let monoSmall = Font.system(.caption, design: .monospaced)
-    static let monoBody = Font.system(.body, design: .monospaced)
-    static let metricNumber = Font.system(size: 26, weight: .semibold, design: .rounded)
-    static let heroNumber = Font.system(size: 48, weight: .bold, design: .rounded)
+    // 旧字号入口 → 排版令牌。`metricNumber` 26→28、`heroNumber` 48→40，
+    // 并且两处都从 `.rounded` 退回 SF 默认 + monospacedDigit（WS-H §4.1）。
+    @available(*, deprecated, message: "改用 Theme.Typo.monoSmall.font")
+    static var monoSmall: Font { Typo.monoSmall.font }
+
+    @available(*, deprecated, message: "改用 Theme.Typo.monoBody.font")
+    static var monoBody: Font { Typo.monoBody.font }
+
+    @available(*, deprecated, message: "改用 Theme.Typo.metricNumber.font")
+    static var metricNumber: Font { Typo.metricNumber.font }
+
+    @available(*, deprecated, message: "改用 Theme.Typo.heroMetric.font")
+    static var heroNumber: Font { Typo.heroMetric.font }
 }
 
-enum IconName: String {
-    case code = "curlybraces"
-    case git = "arrow.triangle.branch"
-    case people = "person.2.fill"
-    case pulse = "waveform.path.ecg"
-    case logs = "doc.text.magnifyingglass"
-    case package = "shippingbox.fill"
-    case health = "checkmark.shield.fill"
-    case dashboard = "square.grid.2x2.fill"
-}
-
-// MARK: - Reusable components
-
-struct SectionCard<Content: View>: View {
-    var title: String
-    var subtitle: String?
-    var icon: String?
-    var trailing: AnyView?
-    @ViewBuilder var content: Content
-
-    init(
-        _ title: String,
-        subtitle: String? = nil,
-        icon: String? = nil,
-        trailing: AnyView? = nil,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.title = title
-        self.subtitle = subtitle
-        self.icon = icon
-        self.trailing = trailing
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        if let icon {
-                            Image(systemName: icon)
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Theme.accent)
-                        }
-                        Text(title).font(.headline)
-                    }
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer(minLength: 8)
-                trailing
-            }
-            content
-        }
-        .padding(14)
-        .background(Theme.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Theme.gridLine, lineWidth: 1)
-        )
-    }
-}
-
-struct MetricTile: View {
-    var label: String
-    var value: String
-    var unit: String?
-    var caption: String?
-    var tint: Color = Theme.accent
-    var systemImage: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 5) {
-                if let systemImage {
-                    Image(systemName: systemImage)
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(tint)
-                }
-                Text(label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(value)
-                    .font(Theme.metricNumber)
-                    .foregroundStyle(tint)
-                    .contentTransition(.numericText())
-                if let unit {
-                    Text(unit).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            if let caption {
-                Text(caption).font(.caption2).foregroundStyle(.tertiary).lineLimit(2)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(Theme.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Theme.gridLine, lineWidth: 1)
-        )
-    }
-}
-
-struct RiskBadge: View {
-    var risk: RiskLevel
-    var showIcon: Bool = true
-
-    var body: some View {
-        HStack(spacing: 3) {
-            if showIcon {
-                Image(systemName: risk == .none ? "checkmark.circle" : "exclamationmark.triangle.fill")
-                    .font(.system(size: 8, weight: .bold))
-            }
-            Text("风险 \(risk.rawValue)")
-        }
-        .font(.system(size: 10, weight: .semibold))
-        .foregroundStyle(Theme.color(for: risk))
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .background(Theme.color(for: risk).opacity(0.14), in: Capsule())
-    }
-}
-
-struct SeverityBadge: View {
-    var severity: LogSeverity
-
-    var body: some View {
-        Text(severity.rawValue)
-            .font(.system(size: 9, weight: .bold, design: .monospaced))
-            .foregroundStyle(Color(hex: severity.colorHex))
-            .padding(.horizontal, 5)
-            .padding(.vertical, 2)
-            .background(Color(hex: severity.colorHex).opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
-    }
-}
-
-struct MiniBarGauge: View {
-    var fraction: Double
-    var tint: Color = Theme.accent
-    var height: CGFloat = 6
-
-    var body: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Theme.gridLine)
-                Capsule()
-                    .fill(tint)
-                    .frame(width: max(2, proxy.size.width * min(max(fraction, 0), 1)))
-            }
-        }
-        .frame(height: height)
-    }
-}
-
-struct EmptyStateView: View {
-    var icon: String = "tray"
-    var title: String
-    var message: String
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 26, weight: .light))
-                .foregroundStyle(.tertiary)
-            Text(title).font(.headline).foregroundStyle(.secondary)
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, minHeight: 140)
-        .padding(24)
-    }
-}
-
-struct ProgressOverlay: View {
-    var phase: AnalysisPhase
-    var projectName: String
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ProgressView().controlSize(.small)
-            Text("\(projectName) · \(phase.label)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(.regularMaterial, in: Capsule())
-    }
-}
-
-extension AnalysisPhase {
-    var label: String {
-        switch self {
-        case .idle: return "空闲"
-        case .code: return "正在扫描代码规模…"
-        case .git: return "正在分析 Git 历史…"
-        case .logs: return "正在解析错误日志…"
-        case .dependencies: return "正在检查依赖…"
-        case .health: return "正在计算健康评分…"
-        case .finished: return "分析完成"
-        case .failed: return "分析失败"
-        }
-    }
-}
+// MARK: - 仍在使用的非设计工具
 
 extension Color {
+    /// 仅供 `Models` 里以字符串形式冻结的 `colorHex` 兜底解析。
+    /// 视图层请走 `Theme.Semantic.role(for:)`，不要新写 `Color(hex:)`。
     init(hex: String) {
         let cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "#", with: "")

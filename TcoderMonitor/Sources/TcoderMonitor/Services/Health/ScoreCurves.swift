@@ -1,12 +1,36 @@
 import Foundation
 
 /// 健康评分标定曲线：每个维度的分数都由显式锚点线性折算，保证「分数可解释、依据可对外承诺」。
-/// 纯函数、无 I/O、无状态；加权与落盘由调用方（WeightedHealthScorer）负责。
+/// 纯函数、无 I/O、无状态；加权与文案派生由调用方（`WeightedHealthScorer`）负责。
 ///
-/// 接线状态（WS-C 记录）：`WeightedHealthScorer` 已由总工程师落地为自带的经验公式，
-/// 因此本文件目前**只被 HealthScoreTests 覆盖，不在产线评分路径上**。
-/// 这里的锚点表是产品规约里点名要的那份（重复度 12.5%→75、注释 2%~15% 最佳、
-/// 一人包揽 70%+ 重扣、narrative 40~80 字），接线时把评分器各维度改成调用 `HealthCurves.xxx` 即可。
+/// 接线状态（WS-C 记录）：本文件在产线评分路径上 —— `WeightedHealthScorer.evaluate(...)`
+/// 的 9 个维度全部调用这里的曲线（`e676fad` 起），`HealthScoreTests` A~G 是它的回归契约。
+/// 锚点表是产品规约点名要的那份（重复度 12.5%→75、注释 2%~15% 最佳、一人包揽 70%+ 重扣、
+/// narrative 40~80 字）。改锚点等于改对外承诺，必须连测试一起改。
+
+/// 漏洞核对的证据状态。依赖健康这一维最容易虚报：
+/// 「没查过漏洞库」和「查了、确实零命中」在数据上长得一样（都是 0 个漏洞），
+/// 但只有后者配计分。与 `.testing` 的 `coverage.hasData`、
+/// `.complexity` 的「无函数证据不参与评分」是同一条原则：**没有证据 ≠ 好证据**。
+///
+/// 判据一律走契约里的派生态 `DependencyReport.hasVulnerabilityCoverage`，
+/// 不去猜 `networkLookupNote` 的文案。
+enum VulnerabilityEvidence: String, Sendable, Equatable {
+    /// 已核对且零命中，或内置规则已有命中 —— 结论可信，参与评分。
+    case verified
+    /// 压根没核对（未联网且内置规则无命中）—— 本维度不参与评分。
+    case unchecked
+    /// 尝试过但没查完（部分包查询失败）—— 零命中时不敢说干净，不参与评分。
+    case degraded
+
+    /// 从服务层产出判定证据状态。纯函数，便于单测钉住三种输入。
+    static func classify(_ report: DependencyReport) -> VulnerabilityEvidence {
+        // 已有正向发现时绝不缺席：把已知漏洞整个维度摘掉会让带 CVE 的仓库分数反而变高。
+        if report.vulnerableCount > 0 { return .verified }
+        guard report.hasVulnerabilityCoverage else { return .unchecked }
+        return report.networkLookupNote.contains("失败") ? .degraded : .verified
+    }
+}
 
 struct CurveResult: Sendable, Equatable {
     var score: Double
@@ -235,7 +259,11 @@ enum HealthCurves {
 
     // MARK: - 依赖健康
 
-    static func dependencyHealth(vulnerableCount: Int, outdatedCount: Int, totalDependencies: Int) -> CurveResult {
+    /// 依赖健康曲线。**只在 `VulnerabilityEvidence == .verified` 时调用**：
+    /// 未核对/核对未完成时由评分器让整个维度缺席，而不是在这里给个打折的分数——
+    /// 「零漏洞」既可能是查过之后干净，也可能压根没查，曲线分不出这两种。
+    static func dependencyHealth(vulnerableCount: Int, outdatedCount: Int,
+                                 totalDependencies: Int) -> CurveResult {
         if totalDependencies == 0 {
             return CurveResult(score: 100, detail: "未发现依赖清单", risk: .none)
         }
@@ -255,9 +283,9 @@ enum HealthCurves {
         else { risk = .critical }
         let detail = joined([
             "依赖 \(whole(totalDependencies)) 个",
-            "漏洞 \(whole(vulnerable)) 个",
+            vulnerable > 0 ? "漏洞 \(whole(vulnerable)) 个" : "漏洞核对零命中",
             "落后 \(whole(outdatedCount)) 个占 \(percent(outdatedRatio))",
-            deducted > 0 ? "扣 \(decimal(deducted)) 分" : ""
+            deducted > 0 ? "扣 \(decimal(deducted)) 分" : "",
         ])
         return CurveResult(score: score, detail: detail, risk: risk)
     }

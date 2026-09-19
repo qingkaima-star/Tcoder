@@ -20,15 +20,24 @@ final class WeightedHealthScorer: HealthScoringProviding {
         }
 
         if components.isEmpty {
+            // 全部候选维度都因缺证据而缺席时，不能拿「请先添加项目」这套引导文案把真实原因盖掉：
+            // 项目可能扫得好好的（比如已经列出 52 个依赖），只是这一维度不敢计分。
+            let guidance = "先在侧栏「添加项目」选择本地仓库目录，或点右上角「重新分析」采集指标。"
+            let keptRecommendations = recommendations.isEmpty ? [guidance] : recommendations
+            let keptIssues = issues.isEmpty ? ["尚无可用指标"] : issues
+            let narrative = inputs.availableDimensions.isEmpty
+                ? "尚无可用指标，无法给出健康评分；选择项目目录后会自动完成采集。"
+                : "已采集到输入，但\(inputs.availableDimensions.map(\.rawValue).joined(separator: "、"))"
+                    + "各维度都缺少可计分证据，本次不给出综合分，避免把没测到当成好结果。"
             return HealthScore(
                 computedAt: Date(),
                 overall: 0,
                 previousOverall: inputs.previousScore,
                 components: [],
                 strengths: [],
-                issues: ["尚无可用指标"],
-                recommendations: ["先在侧栏「添加项目」选择本地仓库目录，或点右上角「重新分析」采集指标。"],
-                narrative: "尚无可用指标，无法给出健康评分；选择项目目录后会自动完成采集。",
+                issues: Array(keptIssues.prefix(5)),
+                recommendations: Array(keptRecommendations.prefix(5)),
+                narrative: narrative,
                 generatedByAI: false
             )
         }
@@ -72,8 +81,8 @@ final class WeightedHealthScorer: HealthScoringProviding {
             //      注意第 3 支必须按「有没有测到东西」判，不能只看 analyzedFunctionCount：
             //      分母 >0 但榜单为空时热点均值会算成 0，曲线会把「没测到」当成复杂度 0 给满分，
             //      那正是这条诚实原则要挡住的。与 `.testing` 的 `coverage.hasData` 同源。
-            // WS-A 尚未填这两个字段、且没报热点时，全仓真实扫描会走第 3 支、复杂度暂时缺席
-            // （HealthView 的「缺失维度」会列出来），这是刻意的，不是漏算。
+            // WS-A 自 `f55e4a0` 起真的在填这两个字段（真实仓库 self-scan：均值 4.13、分母 1134），
+            // 所以有函数的仓库现在走第①支；第③支留给「一个函数都没测到」的空目录/纯资源目录。
             let hotspots = code.topComplexFunctions
             guard code.averageCyclomaticComplexity != nil || !hotspots.isEmpty else { return nil }
             let highRisk = hotspots.filter { $0.cyclomaticComplexity >= 16 }.count
@@ -89,7 +98,9 @@ final class WeightedHealthScorer: HealthScoringProviding {
                 issues.append("\(highRisk) 个函数圈复杂度 ≥16，最高 \(worst)")
                 recommendations.append("优先拆分最高复杂度函数，用早返回替代嵌套分支")
             }
-            return hasRepoMean ? curve : notingSample(curve, hotspots.count)
+            return hasRepoMean ? notingRepoScope(curve, functionCount: code.analyzedFunctionCount,
+                                                 sampleCount: hotspots.count)
+                : notingSample(curve, hotspots.count)
 
         case .duplication:
             guard let code = inputs.code else { return nil }
@@ -159,7 +170,14 @@ final class WeightedHealthScorer: HealthScoringProviding {
             let curve = HealthCurves.stability(errorsPerKLoc: perKloc, crashCount: logs.crashCount,
                                                fatalCount: logs.fatalCount, exceptionCount: logs.exceptionCount,
                                                totalLinesScanned: logs.totalLinesScanned)
-            if logs.crashCount == 0 && perKloc < 0.5 { strengths.append("近期无崩溃，错误密度低") }
+            // 一行日志都没扫到时不得写「近期无崩溃」——那是把「没看到」说成「没有」。
+            // 曲线那边已经如实标了「未扫描到运行日志，本维度按默认值计」，
+            // 优点卡必须跟它一个口径，否则同一份报告自己打自己脸。
+            if logs.totalLinesScanned > 0, logs.crashCount == 0, perKloc < 0.5 {
+                strengths.append("已扫描 \(NumberFormat.grouped(logs.totalLinesScanned)) 行日志，未见崩溃")
+            } else if logs.totalLinesScanned == 0 {
+                recommendations.append("当前没有可扫描的日志，运行稳定性按默认值计；放入 Logs/error.log 或附加日志文件后才有结论。")
+            }
             if let worst = logs.topErrors.first, worst.count >= 10 {
                 issues.append("\(worst.displayMessage) 出现 \(worst.count) 次（最近 \(worst.lastSeenDescription)）")
                 recommendations.append("优先修复 Top Errors 首位，它通常掩盖了下游连锁异常")
@@ -168,11 +186,28 @@ final class WeightedHealthScorer: HealthScoringProviding {
 
         case .dependencies:
             guard let deps = inputs.dependencies, deps.totalDependencies > 0 else { return nil }
+            // 「零漏洞」有两种可能：查过之后干净，或者压根没查。没查过就不参与评分，
+            // 绝不能把「没核对」渲染成「依赖零风险」——那是拿收费点换假绿灯。
+            switch VulnerabilityEvidence.classify(deps) {
+            case .unchecked:
+                let uncovered = deps.uncoveredEcosystemNames
+                recommendations.append(uncovered.isEmpty
+                    ? "未做在线漏洞核对，依赖健康本维度暂不计分；开启「联网核对」后重扫才有结论。"
+                    : "未做在线漏洞核对，依赖健康本维度暂不计分（内置规则未覆盖：\(uncovered.joined(separator: "、"))）。")
+                return nil
+            case .degraded:
+                recommendations.append("漏洞核对未完成（部分包查询失败），依赖健康本维度暂不计分；重跑联网核对后再计。")
+                return nil
+            case .verified:
+                break
+            }
             let curve = HealthCurves.dependencyHealth(vulnerableCount: deps.vulnerableCount,
                                                       outdatedCount: deps.outdatedCount,
                                                       totalDependencies: deps.totalDependencies)
-            if deps.vulnerableCount == 0 { strengths.append("未发现已知漏洞依赖") }
-            if deps.vulnerableCount > 0 {
+            if deps.vulnerableCount == 0 {
+                // 走到这里说明确实核对过，这句安全背书才有依据。
+                strengths.append("已完成漏洞核对，\(deps.totalDependencies) 个依赖零命中")
+            } else {
                 issues.append("\(deps.vulnerableCount) 个已知漏洞，\(deps.outdatedCount) 个版本过旧")
                 recommendations.append("先升级带严重漏洞的依赖，再统一处理过期版本")
             }
@@ -207,6 +242,16 @@ final class WeightedHealthScorer: HealthScoringProviding {
     private func notingSample(_ curve: CurveResult, _ sampleCount: Int) -> CurveResult {
         guard sampleCount > 0 else { return curve }
         return CurveResult(score: curve.score, detail: curve.detail + "（热点样本 \(sampleCount) 个的均值）",
+                           risk: curve.risk)
+    }
+
+    /// 第①支的 detail 是**混合口径**：均值来自全仓普查，但 `CC≥16` 个数与最大 CC 只能从
+    /// 截断到 20 条的热点榜里数（`Models` 没给全仓分布）。不写清楚就会被读成「全仓有 N 个
+    /// 函数 CC≥16」，而那个 N 实际上只是榜内计数——这是扣分项，报小了会高估健康度。
+    private func notingRepoScope(_ curve: CurveResult, functionCount: Int, sampleCount: Int) -> CurveResult {
+        let meanScope = functionCount > 0 ? "均值为全仓 \(functionCount) 个函数" : "均值为全仓"
+        let riskScope = sampleCount > 0 ? "；CC≥16 与最大 CC 只统计热点榜前 \(sampleCount) 个" : ""
+        return CurveResult(score: curve.score, detail: curve.detail + "（\(meanScope)\(riskScope)）",
                            risk: curve.risk)
     }
 
