@@ -7,6 +7,16 @@ import SwiftUI
 // 变成有类型的常量。双层色（graphic / text）是为同时满足 WS-H §10 的两条验收线，
 // 依据见 `SemanticRole` 注释与笔记 42。
 
+// MARK: - 缺证据占位（三态句式）
+
+extension Theme {
+    /// WS-H §7.3 的三态：有数据 = 真值（**含真 0**）；查了但是空的 = `0` + 「未发现」；
+    /// 没查 / 查失败 = 下面这个占位。把第三态写成 0，就是把"没证据"伪装成"结论"。
+    enum Placeholder {
+        static let missingValue = "--"
+    }
+}
+
 // MARK: - 表面与透明度
 
 extension Theme {

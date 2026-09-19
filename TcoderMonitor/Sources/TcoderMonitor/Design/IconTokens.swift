@@ -128,6 +128,9 @@ enum IconName: String, CaseIterable {
     case emptyTray = "tray"
     case emptyUnknown = "doc.questionmark"
 
+    /// 「根本没查所以没有命中」——WS-D 诚实线专用，绝不可与 `noRisk`（真核对过的无风险）混用
+    case unverified = "questionmark.circle"
+
     // — 既有条目的兼容别名：rawValue 曾直接是 .fill 形态，导航层现改由 selected 驱动
     case pulse = "waveform.path.ecg"
 
@@ -142,6 +145,8 @@ enum IconName: String, CaseIterable {
             return .badge
         case .emptyTray, .emptyUnknown:
             return .hero
+        case .unverified:
+            return .badge
         default:
             return .inlineText
         }
