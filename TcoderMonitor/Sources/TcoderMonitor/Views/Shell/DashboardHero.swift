@@ -8,10 +8,12 @@ import SwiftUI
 //      换成登记表里的对勾与三角，才是「已确认」与「需注意」的双通道。
 
 struct HealthRing: View {
-    /// nil = 未评分。必须画成空心灰环 + `--`，不能画成 0 分。
+    /// nil = 未评分。必须画成空心灰圈 + `--`，不能画成 0 分。
     var score: Int?
     var grade: HealthGrade?
     var trend: Int?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let role = Theme.Semantic.role(forScore: score)
@@ -26,14 +28,26 @@ struct HealthRing: View {
                             style: StrokeStyle(lineWidth: ShellLayout.ringLineWidth,
                                                lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                    .animation(.smooth, value: score)
+                    // WS-H §10：动效可关。环形补间只是让分数变化不那么突兀，
+                    // 开了「减弱动态效果」就不该还转。
+                    .animation(reduceMotion ? nil : .smooth, value: score)
             }
             readout(role: role)
         }
         .padding(Theme.Spacing.md)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("健康评分")
-        .accessibilityValue(score.map { "\($0) 分" } ?? Theme.Placeholder.missingValue)
+        .accessibilityValue(accessibilitySummary)
+    }
+
+    /// 环心里三处信息（分数、等级、趋势）在视觉上并排，读屏要一次说全，
+    /// 否则会只念一个数字、把「A」和「+3」丢掉。
+    private var accessibilitySummary: String {
+        guard let score else { return Theme.Placeholder.missingValue }
+        var parts = ["\(score) 分"]
+        if let grade { parts.append("\(grade.rawValue) 级") }
+        if let trend, trend != 0 { parts.append("较上次 \(NumberFormat.signed(trend))") }
+        return parts.joined(separator: "，")
     }
 
     private func readout(role: Theme.SemanticRole) -> some View {

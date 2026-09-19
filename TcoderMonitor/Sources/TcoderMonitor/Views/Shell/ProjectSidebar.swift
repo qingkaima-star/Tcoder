@@ -179,6 +179,10 @@ struct LiveCPUBadge: View {
                 .font(Theme.Typo.monoSmall.font)
         }
         .foregroundStyle(.secondary)
+        // 合并成一个元素：否则读屏会把图标、数字、间隔点念成四段碎片。
+        // 这里刻意**不**再套 `.accessibilityLabel`——那会覆盖掉合并来的数值，
+        // 只剩一句「本机实时 CPU」，等于把读数从读屏里拿走。
+        .accessibilityElement(children: .combine)
         .help("本机实时 CPU / 已用内存")
     }
 }

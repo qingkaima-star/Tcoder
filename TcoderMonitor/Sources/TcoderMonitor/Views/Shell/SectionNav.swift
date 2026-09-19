@@ -67,22 +67,33 @@ struct SectionNavBar: View {
     var reportAvailable: Bool
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            mergedGlassChrome(spacing: Theme.Spacing.xxs) {
-                HStack(spacing: Theme.Spacing.xxs) {
-                    ForEach(DetailSection.allCases) { section in
-                        SectionNavChip(
-                            section: section,
-                            isSelected: section == selection,
-                            isEnabled: section.isReachable(reportAvailable: reportAvailable)
-                        ) {
-                            withAnimation(.snappy) { selection = section }
+        // 用菜单「前往」或持久化恢复选中靠后的页时，必须把那一枚滚进视野——
+        // 否则选中态在横向滚动区外，键盘与读屏用户会「选中了但看不见」。
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                mergedGlassChrome(spacing: Theme.Spacing.xxs) {
+                    HStack(spacing: Theme.Spacing.xxs) {
+                        ForEach(DetailSection.allCases) { section in
+                            SectionNavChip(
+                                section: section,
+                                isSelected: section == selection,
+                                isEnabled: section.isReachable(reportAvailable: reportAvailable)
+                                    // 当前页永远保持可用态：把「正在看的一枚」画成禁用灰，
+                                    // 读屏会念出「已禁用」而屏幕上它明明是选中的。
+                                    || section == selection
+                            ) {
+                                withAnimation(.snappy) { selection = section }
+                            }
+                            .id(section)
                         }
                     }
                 }
+                // 玻璃/材质都带外投影，不上下留白会在滚动容器边缘被切出一道硬边。
+                .padding(.vertical, Theme.Spacing.xxs)
             }
-            // 玻璃/材质都带外投影，不上下留白会在滚动容器边缘被切出一道硬边。
-            .padding(.vertical, Theme.Spacing.xxs)
+            .onChange(of: selection) { _, target in
+                proxy.scrollTo(target, anchor: .center)
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("页面切换")

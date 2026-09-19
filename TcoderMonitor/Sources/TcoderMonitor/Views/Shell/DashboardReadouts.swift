@@ -122,6 +122,8 @@ struct LanguageBar: View {
                 .foregroundStyle(.secondary)
                 .frame(width: DashboardLayout.shareValueColumnWidth, alignment: .trailing)
         }
+        // 条形本身不承载语义（旁边已有名称与百分比），合并后读屏是一句「Swift 45%」。
+        .accessibilityElement(children: .combine)
     }
 
     /// 分类色取自全站唯一的一套图表色板（`Theme.Chart`），并且**必须稳定**。
