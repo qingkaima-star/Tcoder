@@ -7,16 +7,6 @@ import SwiftUI
 // 变成有类型的常量。双层色（graphic / text）是为同时满足 WS-H §10 的两条验收线，
 // 依据见 `SemanticRole` 注释与笔记 42。
 
-// MARK: - 缺证据占位（三态句式）
-
-extension Theme {
-    /// WS-H §7.3 的三态：有数据 = 真值（**含真 0**）；查了但是空的 = `0` + 「未发现」；
-    /// 没查 / 查失败 = 下面这个占位。把第三态写成 0，就是把"没证据"伪装成"结论"。
-    enum Placeholder {
-        static let missingValue = "--"
-    }
-}
-
 // MARK: - 表面与透明度
 
 extension Theme {
@@ -37,6 +27,12 @@ extension Theme {
             static let gradientBottom = 0.50
             /// badge / 标签半透明同色底（WS-H §9）
             static let badgeFill = 0.15
+            /// 行级淡底色：徽标底再弱一档，避免整屏表格被高饱和色块盖住
+            static let rowFill = 0.075
+            /// 密集实时曲线的面积顶色。WS-H §5.4 的 0.30 在 96–110pt 高的实时曲线上
+            /// 过浓（WS-M 重样时实测改到 0.16 并留了「待回归规范」的注释）。
+            /// 这里收成一档有名有姓的强度，页面不必再造常量；默认档是否换成它交总工。
+            static let gradientAreaSoft = 0.16
             /// 图表面积渐变的收尾值
             static let gradientFloor = 0.02
         }
@@ -203,51 +199,6 @@ extension Theme {
     }
 }
 
-// MARK: - 图表序列色板（全 App 唯一一套）
-
-extension Theme {
-    /// WS-H §5.4 的 8 色分类板，取代 DashboardView 的 6 个裸 RGB 与 ContributorsView 的 8 个裸 hex。
-    /// 规范要求的「资源目录动态色 + 增强对比第三套」需要 `Package.swift` 声明 resources
-    /// （那是冻结区，WS-G 无权改），所以先落成代码内 light/dark 双层动态色，
-    /// 增强对比档作为契约缺口交总工。
-    enum Chart {
-        static let palette: [ColorTokenPair] = [
-            ColorTokenPair(light: ColorToken(hex: 0x0A82FF), dark: ColorToken(hex: 0x0A84FF)), // 主/自身数据
-            ColorTokenPair(light: ColorToken(hex: 0x34C759), dark: ColorToken(hex: 0x30D158)), // 正向
-            ColorTokenPair(light: ColorToken(hex: 0xFF9F0A), dark: ColorToken(hex: 0xFFD60A)), // 关注
-            ColorTokenPair(light: ColorToken(hex: 0xFF3B30), dark: ColorToken(hex: 0xFF453A)), // 风险
-            ColorTokenPair(light: ColorToken(hex: 0xAF52DE), dark: ColorToken(hex: 0xBF5AF2)), // 分类 A
-            ColorTokenPair(light: ColorToken(hex: 0xFF2D55), dark: ColorToken(hex: 0xFF375F)), // 分类 B
-            ColorTokenPair(light: ColorToken(hex: 0x64D2FF), dark: ColorToken(hex: 0x64D2FF)), // 分类 C
-            ColorTokenPair(light: ColorToken(hex: 0xA2845E), dark: ColorToken(hex: 0xAC8E68)), // 分类 D
-        ]
-
-        static var count: Int { palette.count }
-
-        static func pair(at index: Int) -> ColorTokenPair {
-            // Swift 的 % 对负数返回负值，直接下标会 panic；这里显式归一。
-            let wrapped = ((index % palette.count) + palette.count) % palette.count
-            return palette[wrapped]
-        }
-
-        /// 取序列色（自动回绕，跟随深浅外观）。
-        static func color(at index: Int) -> Color {
-            pair(at: index).color
-        }
-
-        /// 曲线面积渐变：顶到底同色 0.30 → 0.02（WS-H §5.4）。
-        static func areaGradient(at index: Int) -> LinearGradient {
-            let color = self.color(at: index)
-            return LinearGradient(
-                stops: [
-                    .init(color: color.opacity(Theme.Palette.Opacity.gradientTop), location: 0),
-                    .init(color: color.opacity(Theme.Palette.Opacity.gradientFloor), location: 1),
-                ],
-                startPoint: .top, endPoint: .bottom)
-        }
-    }
-}
-
 // MARK: - 间距 / 圆角 / 描边 / 高度 / 版面
 
 extension Theme {
@@ -329,6 +280,29 @@ extension Theme {
         static let minHitTarget: CGFloat = 20
         /// 空态卡最小高度：低于这个高度，"这里什么都没有"会被读成"这里没渲染"
         static let emptyMinHeight: CGFloat = 140
+
+        // ↓ 本轮补：三条流重样时都在页面里自造了这些尺寸，说明缺档，不是缺自觉
+        /// 数据表行高。WS-L / WS-M 各定过一套，收敛成一档。
+        static let rowHeightTable: CGFloat = 28
+        /// 紧凑行（读数列、图例行）。
+        static let rowHeightCompact: CGFloat = 22
+        /// 侧栏项目行：图标 + 主标题 + 副标题，低于 40 会挤。
+        static let rowHeightSidebar: CGFloat = 40
+        /// 曲线纵轴刻度列宽（放得下三位数 + 收窄轴的小数）。
+        static let axisLabelWidth: CGFloat = 38
+        /// 图例色点边长。WS-L 曾借 `Radius.sm`(6) 当尺寸用——值对但语义错，单列一档。
+        static let legendSwatchSide: CGFloat = 6
+
+        /// 占比条的三列定宽（取 WS-L 72/96 与 WS-M 56 的实测值，避免每页各量一次）。
+        static let shareLabelWidth: CGFloat = 96
+        static let sharePercentWidth: CGFloat = 44
+        static let shareCountWidth: CGFloat = 56
+
+        /// 量表高度三档（WS-H §9：分量表 4、tile 内 5–6）。
+        /// 收在这儿，页面里就不该再有 `height: 5` / `height: 6` 各写各的。
+        static let gaugeSection: CGFloat = 4
+        static let gaugeInline: CGFloat = 5
+        static let gaugeMetric: CGFloat = 6
     }
 }
 
@@ -372,6 +346,11 @@ extension Theme {
         /// 微标签/表头/坐标轴。**全仓文字下限**，不得再有更小的档。
         static let microLabel = TypeToken(name: "microLabel", size: 10, weight: .medium, design: .default, monospacedDigits: false, lineSpacing: 2)
 
+        /// 11pt 等宽：表格里放代码标识符（函数名、文件名、依赖名）用。
+        /// 存在理由：WS-L 重样时点名「设计系统没有 11pt 等宽档」，只能从 `label`(11) 借字号
+        /// 再换成等宽字面——那等于在页面里造了一档令牌。层级靠颜色与字重区分，不靠再缩字号。
+        static let monoLabel = TypeToken(name: "monoLabel", size: 11, weight: .medium, design: .monospaced, monospacedDigits: true, lineSpacing: 2)
+
         // 等宽数据面（路径、PID、代码、日志）
         static let monoBody = TypeToken(name: "monoBody", size: 13, weight: .regular, design: .monospaced, monospacedDigits: true, lineSpacing: 2)
         static let monoSmall = TypeToken(name: "monoSmall", size: 10, weight: .regular, design: .monospaced, monospacedDigits: true, lineSpacing: 2)
@@ -379,10 +358,11 @@ extension Theme {
         static let all: [TypeToken] = [
             heroMetric, metricNumber, metricMid,
             pageTitle, cardTitle, body, narrative, label, microLabel,
-            monoBody, monoSmall,
+            monoBody, monoSmall, monoLabel,
         ]
 
         /// 承载实时数字的档位——单测据此守住 monospacedDigit。
-        static let numericTiers: [TypeToken] = [heroMetric, metricNumber, metricMid, monoBody, monoSmall]
+        static let numericTiers: [TypeToken] = [heroMetric, metricNumber, metricMid,
+                                                 monoBody, monoSmall, monoLabel]
     }
 }

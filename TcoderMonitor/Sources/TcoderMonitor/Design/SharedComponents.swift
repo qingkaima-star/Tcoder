@@ -134,6 +134,27 @@ struct MetricTile: View {
     /// 缺证据时的显示值。纯函数，供单测钉住。
     static func displayValue(_ raw: String?) -> String { raw ?? Theme.Placeholder.missingValue }
 
+    /// 三态入口。`evidence` 收 `Theme.Evidence`：这里**没有**「随手给个 String + 绿色」的
+    /// 写法，所以「没扫过」在类型上就没法被写成 0。
+    /// 用新 label `evidence:` 而不是重载 `value:`：WS-L 已经在
+    /// `Views/CodeGit/CodeGitDesignKit.swift` 里给 `MetricTile` 加了两个 extension init，
+    /// 同形入口会在 merge 时重声明、把全仓编译弄红。
+    init(
+        label: String,
+        evidence: Theme.Evidence,
+        unit: String? = nil,
+        caption: String? = nil,
+        role: Theme.SemanticRole = Theme.Semantic.neutral,
+        glyph: IconName? = nil
+    ) {
+        self.init(label: label,
+                  value: evidence.isAbsent ? nil : evidence.displayText,
+                  unit: unit,
+                  caption: caption ?? (evidence.isAbsent ? "尚未分析" : nil),
+                  tint: evidence.role(role).textColor,
+                  systemImage: glyph.map { IconAvailability.resolve($0) })
+    }
+
     /// 无值时是否强制中性色（忽略调用方给的倾向色）。
     /// 单独抽成谓词是为了可测——`Color` 由动态 `NSColor` 包出来，两次取值不相等。
     static func forcesNeutralTint(for raw: String?) -> Bool { raw == nil }
@@ -226,6 +247,25 @@ struct MiniBarGauge: View {
             }
         }
         .frame(height: height)
+    }
+}
+
+extension Theme {
+    /// 量表也归"数值展示组件"：`fraction?` 为 nil 时给空轨道 + 中性色，
+    /// 而不是画一条 0% 的彩色条——0% 是一条结论，nil 是没测到。
+    enum Gauge {
+        /// 缺测时是否强制中性。单列成谓词是为了可测——
+        /// 动态 `NSColor` 包出的 `Color` 两次取值不相等，拿它断言测不出东西。
+        static func forcesNeutral(fraction: Double?) -> Bool { fraction == nil }
+
+        static func bar(fraction: Double?,
+                        role: Theme.SemanticRole = Theme.Semantic.neutral,
+                        height: CGFloat = Theme.Layout.gaugeMetric) -> MiniBarGauge {
+            MiniBarGauge(fraction: fraction ?? 0,
+                         tint: fraction == nil ? Theme.Semantic.neutral.graphicColor
+                                               : role.graphicColor,
+                         height: height)
+        }
     }
 }
 
