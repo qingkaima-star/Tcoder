@@ -38,6 +38,12 @@ fail=0
 # 更糟的是并发交错把文件写成了二进制，grep 直接报 `Binary file matches`，
 # 那一次的 ✅ 等于没有任何依据。
 SLUG=$(printf '%s' "$BRANCH" | tr -c 'A-Za-z0-9._-' '_')
+# 开工瞬间就把 commit 钉死：后面回执文件名用它，merge_stream 再拿分支头来对。
+GATED_SHA=$(git rev-parse "$BRANCH" 2>/dev/null)
+if [ -z "$GATED_SHA" ]; then
+  echo "==> ❌ 解析不到分支 $BRANCH 的 commit，拒绝体检"
+  exit 2
+fi
 RUN_TAG="$(date +%s)-$$"
 BUILD_LOG="/tmp/premerge-${SLUG}-build.log"
 TEST_LOG="/tmp/premerge-${SLUG}-test.log"
@@ -116,10 +122,16 @@ if [ -n "$CREATED" ]; then
 fi
 
 if [ "$fail" = "0" ]; then
+  # 回执必须**钉在开工那一刻取到的 commit 上**，而不是"分支当前指向"。
+  # 2026-09-20 实测漏过一次：门禁跑在 ed58dd5 上，负责人期间又交了 dfa6be3，
+  # 我随后 merge 的是**没被体检过**的那个头。回执按 sha 命名，
+  # merge_stream.sh 只认与分支头完全同号的回执，漂移就拒。
   if [ "$SKIP" = "1" ]; then
     echo "==> ⚠ $BRANCH 编译体检通过（**未跑测试**），可合入；合入后必须由 main 的全量 test 兜底"
+    : > "/tmp/premerge-pass-${SLUG}-${GATED_SHA}.buildonly.ok"
   else
     echo "==> ✅ $BRANCH 可以合入 main"
+    printf '%s\n' "$SUMMARY" > "/tmp/premerge-pass-${SLUG}-${GATED_SHA}.ok"
   fi
 else
   echo "==> ❌ $BRANCH 不可合入。请让负责人自己跑双绿后再来。"
