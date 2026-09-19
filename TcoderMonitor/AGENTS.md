@@ -234,6 +234,26 @@ WS-L 另背一条**功能性诚实修正**（不是美化）：界面显示"提�
 
 
 
+## 4.6 文档里的代码引用怎么写（2026-09-20 由 #29 定，机器校验）
+
+**只写符号，不写行号。** `README.md` 与 `docs/使用说明.md` 里指向代码的锚点，允许两种形状：
+
+- `类型.成员` —— 例 `HealthRing.readout`
+- `文件名.类型.成员` —— 首段是 `Sources/**` 里的**文件名去后缀**，用来消歧同名类型，
+  例 `ContributorRows.ContributorRow.body`（Views 层 `body` 遍地都是，光写 `ContributorRow.body` 不够定位）
+
+`Foo.swift:123` 这种**行号引用一律不要新增**：Views 层一天改三轮，行号必腐烂，
+而且腐烂是静默的（读到的人照着错行去找，找不到也不报错）。
+确需指到某一行的约束（例如冻结区的阈值定义），写成
+`` `File.swift` 的 `SomeType.someMember` ``（符号在反引号里，行号不要出现）。
+
+两种形状都由 `Tests/TcoderMonitorTests/DocReferenceRatchetTests.swift` 机器校验，它会：
+断言两份文档都真被读到、符号与行号两类分母各自 > 0、且死引用集合与基线**逐条相等**（只减不增）。
+所以：**新增死锚点会让测试变红**；确需豁免就加进 `knownDeadAnchors` 并**在注释里写清"为什么死"**，
+不许为了变绿删断言，也不许把校验器不认识的写法塞回"已知失效"里充数
+（#29 第一次交回时就是这样把 33 条活锚点登记成了死锚）。
+
+
 ## 5. 工作日志（Obsidian，边做边写）
 
 库：`/Users/one/Documents/Obsidian Vault/Tcoder 项目监控/`
