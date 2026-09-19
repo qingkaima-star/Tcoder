@@ -57,10 +57,10 @@ enum DetailSection: String, CaseIterable, Identifiable, Sendable {
 
 // MARK: - 导航条
 
-/// 九页切换条。属**控件层**，所以是全 App 第一处真玻璃落点：
-/// 只有选中的那一枚吃 `.chrome` 表面（macOS 26 = 系统玻璃，更早 = 材质 + 顶缘高光 + 发丝描边），
-/// 未选中项不给任何底，让「一枚浮起来的胶囊」自己交代当前位置 —— 比给每枚描边更接近系统观感，
-/// 也满足 [LG]「去掉多余描边、让系统决定背景」。
+/// 九页切换条。属**控件层**，所以是全 App 第一处真玻璃落点。
+/// 材质规则与侧栏项目行完全一致：未选中 = 内容层内嵌材质，选中 = 升到控件层吃
+/// `.chrome`（macOS 26 系统玻璃，更早 = 材质 + 顶缘高光 + 发丝描边）。
+/// 一排小胶囊像 Safari 标签栏，而不是九枚描边按钮——描边只留给需要强边界的地方。
 struct SectionNavBar: View {
     @Binding var selection: DetailSection
     /// false = 还没有报告。需要报告的页在此时禁用，而不是让用户点进一张空卡。
@@ -128,7 +128,7 @@ private struct SectionNavChip: View {
 
     @ViewBuilder
     private var chipLabel: some View {
-        let label = HStack(spacing: Theme.Spacing.xxs) {
+        HStack(spacing: Theme.Spacing.xxs) {
             // 变体表意：选中态换 fill 符号（WS-H §6.1 规则 3）
             ThemedIcon(section.iconName, role: .badge, selected: isSelected)
             Text(section.title).font(Theme.Typo.label.font)
@@ -138,11 +138,9 @@ private struct SectionNavChip: View {
         .padding(.vertical, Theme.Spacing.xs)
         .frame(minHeight: Theme.Layout.minHitTarget)
         .contentShape(Capsule())
-
-        if isSelected {
-            label.surface(layer: .chrome, shape: .capsule)
-        } else {
-            label
-        }
+        // 第二轮（目视结论 3）：未选中不再是裸文字，而是和内容层一样的内嵌材质，
+        // 选中才升到控件层吃玻璃——**与侧栏项目行、顶栏按钮同一条规则**，
+        // 三处于是同一套材质语言，而不是导航条单独发明一种。
+        .surface(layer: isSelected ? .chrome : .contentInset, shape: .capsule)
     }
 }
