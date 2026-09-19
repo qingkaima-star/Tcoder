@@ -12,16 +12,19 @@ struct GitInsightsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 if let git = report?.git {
+                    repositorySourceSection(git)
+                    truncationSection(git)
                     metricGrid(git)
                     trendSection(git)
                     activitySection(git)
                     repositorySection(git)
+                    nestedCandidatesSection(git)
                     recentCommitsSection(git)
                 } else {
                     EmptyStateView(
                         icon: "arrow.triangle.branch",
                         title: "尚未分析 Git 历史",
-                        message: "选择一个本地仓库目录后点击「重新分析」。\n分析完成后这里会显示提交趋势、24×7 活跃分布与最近提交记录。"
+                        message: "选择一个本地仓库目录后点击「重新分析」。\n分析完成后这里会显示提交趋势、24×7 活跃分布与最近提交记录。\n\(ShellGitAnalyzer.attemptedLocationsText(upward: ShellGitAnalyzer.maxUpwardHops, nested: ShellGitAnalyzer.maxNestedDepth))。"
                     )
                     .frame(maxWidth: .infinity, minHeight: 280)
                 }
@@ -29,6 +32,63 @@ struct GitInsightsView: View {
             .padding(16)
         }
         .scrollContentBackground(.hidden)
+    }
+
+    // MARK: - Where this repository came from
+
+    /// 「分析的是哪个仓、怎么找到的」必须一眼可见：只要定位结果偏离了用户所选目录，
+    /// 就用横幅说清楚，绝不静默地拿另一个仓库的数字冒充。
+    private func repositorySourceSection(_ git: GitInsights) -> some View {
+        let root = git.resolvedRepositoryRoot ?? ""
+        let selected = report?.project.path ?? ""
+        let relocated = git.discoveryMode != .selectedDirectory
+            || (!root.isEmpty && ShellGitAnalyzer.canonicalPath(root) != ShellGitAnalyzer.canonicalPath(selected))
+        return Group {
+            if relocated {
+                BannerRow(text: "Git 仓库：\(root) · \(discoveryCaption(git))",
+                          style: git.discoveryMode == .nestedSubdirectory ? .warning : .info)
+            } else {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                    Text("Git 仓库：\(root.isEmpty ? "来源未记录（旧数据，重新分析后可见）" : root)")
+                        .font(Theme.monoSmall)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                    Text("· \(discoveryCaption(git))")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private func discoveryCaption(_ git: GitInsights) -> String {
+        switch git.discoveryMode {
+        case .selectedDirectory: return "所选目录即仓库"
+        case .parentDirectory: return "向上 \(git.discoveryHops) 层找到（所选目录在仓库内部）"
+        case .nestedSubdirectory: return "向下 \(git.discoveryHops) 层找到（所选目录本身不是仓库）"
+        case .none: return "未找到仓库"
+        }
+    }
+
+    /// 窗口没盖住全部历史时，先声明清楚再给数字：否则用户会把「最近 2 万条」当成全量人均分布。
+    @ViewBuilder
+    private func truncationSection(_ git: GitInsights) -> some View {
+        if git.historyTruncated {
+            BannerRow(text: "提交统计只覆盖最近 \(NumberFormat.grouped(git.commitsAnalyzed)) 条非合并提交"
+                + "（仓库共 \(NumberFormat.grouped(git.totalCommits)) 条，含合并）。"
+                + "下面的提交趋势、活跃时段与作者占比都只是这段窗口的分布，不代表全部历史。",
+                      style: .warning)
+        }
+    }
+
+    private func windowSuffix(_ git: GitInsights) -> String {
+        git.historyTruncated ? " · 仅覆盖已分析的 \(NumberFormat.grouped(git.commitsAnalyzed)) 条" : ""
     }
 
     // MARK: - Top metrics
@@ -39,12 +99,12 @@ struct GitInsightsView: View {
                 label: "总提交数",
                 value: NumberFormat.grouped(git.totalCommits),
                 unit: "次",
-                caption: "日均 \(String(format: "%.2f", git.commitsPerDay)) 次 · 项目 \(NumberFormat.grouped(git.projectAgeDays)) 天",
+                caption: commitsCaption(git),
                 tint: Theme.accent,
                 systemImage: "arrow.triangle.branch"
             )
             MetricTile(
-                label: "项目年龄",
+                label: git.historyTruncated ? "窗口跨度" : "项目年龄",
                 value: NumberFormat.grouped(git.projectAgeDays),
                 unit: "天",
                 caption: ageCaption(git),
@@ -59,7 +119,7 @@ struct GitInsightsView: View {
                 systemImage: "clock.arrow.circlepath"
             )
             MetricTile(
-                label: "活跃作者",
+                label: git.historyTruncated ? "窗口内作者" : "活跃作者",
                 value: NumberFormat.grouped(git.activeAuthorCount),
                 unit: "人",
                 caption: topAuthorCaption(git),
@@ -69,11 +129,31 @@ struct GitInsightsView: View {
         }
     }
 
+    /// 被截断时，「总提交数」是真值、其余统计只是窗口，两者不能混为一谈。
+    private func commitsCaption(_ git: GitInsights) -> String {
+        if git.historyTruncated {
+            let share = git.totalCommits > 0
+                ? NumberFormat.percent(Double(git.commitsAnalyzed) / Double(git.totalCommits), precision: 0)
+                : "0%"
+            return "已分析最近 \(NumberFormat.grouped(git.commitsAnalyzed)) 条（占全部 \(share)）· 窗口内日均 \(String(format: "%.2f", windowCommitsPerDay(git))) 次"
+        }
+        return "日均 \(String(format: "%.2f", git.commitsPerDay)) 次 · 项目 \(NumberFormat.grouped(git.projectAgeDays)) 天"
+    }
+
+    /// 只按已分析窗口算日均：`GitInsights.commitsPerDay` 拿「含 merge 的真值总数 ÷ 窗口跨度」，
+    /// 截断时会虚高一个量级，所以这里必须自己算。
+    private func windowCommitsPerDay(_ git: GitInsights) -> Double {
+        guard let first = git.firstCommitAt, let last = git.lastCommitAt else { return 0 }
+        let days = max(1, Int(last.timeIntervalSince(first) / 86_400))
+        return Double(git.commitsAnalyzed) / Double(days)
+    }
+
     private func ageCaption(_ git: GitInsights) -> String {
         guard let first = git.firstCommitAt else { return "首次提交时间未知" }
         let start = DateFormat.dayMonth.string(from: first)
-        guard let last = git.lastCommitAt else { return "首次提交 \(start)" }
-        return "\(start) → \(DateFormat.dayMonth.string(from: last))"
+        let suffix = git.historyTruncated ? "（窗口起点，非仓库首次提交）" : ""
+        guard let last = git.lastCommitAt else { return "首次提交 \(start)\(suffix)" }
+        return "\(start) → \(DateFormat.dayMonth.string(from: last))\(suffix)"
     }
 
     private func latestCommitCaption(_ git: GitInsights) -> String {
@@ -84,9 +164,11 @@ struct GitInsightsView: View {
     }
 
     private func topAuthorCaption(_ git: GitInsights) -> String {
-        guard let top = git.topAuthor, git.totalCommits > 0 else { return "暂无作者统计" }
-        let share = Double(top.commits) / Double(git.totalCommits)
-        return "Top: \(top.name) \(NumberFormat.percent(share, precision: 0))"
+        // 分母必须同样是窗口口径，否则截断时会把人均占比压到失真。
+        guard let top = git.topAuthor, git.commitsAnalyzed > 0 else { return "暂无作者统计" }
+        let share = Double(top.commits) / Double(git.commitsAnalyzed)
+        let scope = git.historyTruncated ? "窗口内" : "Top"
+        return "\(scope): \(top.name) \(NumberFormat.percent(share, precision: 0))"
     }
 
     // MARK: - Commit trend
@@ -97,7 +179,7 @@ struct GitInsightsView: View {
             // Buckets produced by one analysis always share a granularity.
             SectionCard(
                 "提交趋势",
-                subtitle: "按 \(gitBucketLabel(granularity)) 分桶 · 共 \(git.commitsPerPeriod.count) 桶",
+                subtitle: "按 \(gitBucketLabel(granularity)) 分桶 · 共 \(git.commitsPerPeriod.count) 桶\(windowSuffix(git))",
                 icon: "chart.bar.xaxis"
             ) {
                 GitCommitTrendChart(buckets: git.commitsPerPeriod, granularity: granularity)
@@ -120,7 +202,7 @@ struct GitInsightsView: View {
     private func activitySection(_ git: GitInsights) -> some View {
         SectionCard(
             "24×7 活跃分布",
-            subtitle: "按小时 × 星期的近似强度（数据源只有边际分布）",
+            subtitle: "按小时 × 星期的近似强度（数据源只有边际分布）\(windowSuffix(git))",
             icon: "circle.grid.square"
         ) {
             if git.activityByHour.allSatisfy({ $0 == 0 }) && git.activityByWeekday.allSatisfy({ $0 == 0 }) {
@@ -175,6 +257,31 @@ struct GitInsightsView: View {
                     StatLine(label: "分析时刻", value: DateFormat.full.string(from: git.analyzedAt))
                     StatLine(label: "首次提交", value: git.firstCommitAt.map { DateFormat.full.string(from: $0) } ?? "未知")
                     Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    // MARK: - Nested repositories found underneath
+
+    /// 所选目录本身不是仓库、下面又躺着好几个仓库时，把全部候选摊开给用户看，
+    /// 并说明当前分析的是哪一个 —— 让他自己决定要不要单独添加某个。
+    @ViewBuilder
+    private func nestedCandidatesSection(_ git: GitInsights) -> some View {
+        if git.nestedCandidates.count > 1 {
+            SectionCard(
+                "所选目录下发现 \(git.nestedCandidates.count) 个仓库",
+                subtitle: "当前只分析了提交数最多的那一个；如需单独分析其中某个，直接把它添加为项目",
+                icon: "square.stack.3d.down.right"
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(git.nestedCandidates) { candidate in
+                        GitNestedCandidateRow(candidate: candidate,
+                                              isAnalyzed: candidate.path == git.resolvedRepositoryRoot)
+                        if candidate.id != git.nestedCandidates.last?.id {
+                            Divider().opacity(0.4)
+                        }
+                    }
                 }
             }
         }
@@ -243,6 +350,47 @@ private struct GitCommitRow: View {
                 Text(NumberFormat.signed(-commit.deletions))
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(Theme.danger)
+            }
+        }
+    }
+}
+
+/// 一个「藏在所选目录下面」的候选仓库。
+private struct GitNestedCandidateRow: View {
+    var candidate: NestedRepositoryCandidate
+    var isAnalyzed: Bool
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: isAnalyzed ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isAnalyzed ? Theme.accent : Theme.neutral)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 5) {
+                    Text(candidate.directoryName).font(.caption).lineLimit(1)
+                    if isAnalyzed {
+                        Text("当前分析对象")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Theme.accent.opacity(0.14), in: Capsule())
+                    }
+                }
+                Text(candidate.path)
+                    .font(Theme.monoSmall)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 1) {
+                Text("\(NumberFormat.grouped(candidate.commitCount)) 次提交")
+                    .font(.system(size: 10, design: .monospaced))
+                Text("\(candidate.branch.isEmpty ? "无分支" : candidate.branch) · \(candidate.lastCommitAt.map { LogRecency.describe($0) } ?? "无提交")")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
             }
         }
     }

@@ -334,7 +334,7 @@ struct CodeMetricsView: View {
                 HStack(spacing: 14) {
                     StatLine(label: "重复块", value: NumberFormat.grouped(code.duplicatedBlocks.count))
                     StatLine(label: "超长函数", value: NumberFormat.grouped(code.longFunctions))
-                    StatLine(label: "平均函数长度", value: "\(NumberFormat.grouped(code.averageFunctionLength)) 行")
+                    StatLine(label: "平均函数长度（仅 ≥2 行）", value: "\(NumberFormat.grouped(code.averageFunctionLength)) 行")
                     StatLine(label: "复杂度上榜函数", value: NumberFormat.grouped(code.topComplexFunctions.count))
                 }
                 .font(.caption)
