@@ -133,6 +133,31 @@ Tests/TcoderMonitorTests/Health*Tests.swift
 
 同一工作流内的子代理之间也必须**按文件名切分**，任何人不得改别人的文件。
 
+### 20:38 工作树制扩充流（见 §7）
+
+| 流 | 负责域 | 可写路径 |
+|---|---|---|
+| WS-D 诚实性审计 | 只读找虚报/假数据/暗示调用 AI | **仅** Obsidian `20 WS-D 诚实性审计.md`；不得改任何代码 |
+| WS-E 发布工程 | 打包、二进制==HEAD 证明、九页取证 | `scripts/build_app.sh`、`scripts/verify_pages.sh`、Obsidian `30`；**不得改 `Sources/**`** |
+| WS-F 夹具实验室 | 多清单/多格式覆盖率真值验证 | 新建 `Tests/TcoderMonitorTests/ManifestLabFixtureTests.swift`；**不得改 `Sources/**`** |
+| **WS-G 设计系统基座** | 令牌、玻璃组件库、排版与语义色 | **`App/Theme.swift`（原总工冻结区，现移交 WS-G）**、新建 `Design/**`、`Tests/.../DesignTokenTests.swift`；**不得改 `Views/**` 页面、`Services/**`、`Models/**`、`Package.swift`** |
+| WS-H 设计规范 | 栅格/字号/色板/SF Symbols/中文文案规范 | **仅** Obsidian `40 WS-H 设计语言规范.md`；不写码 |
+| WS-I 设计债审计 | 硬编码值/魔法数/不统一写法清单 | **仅** Obsidian `45 WS-I 设计债清单.md`；不写码、**不启动 App** |
+| WS-J 自食其果 | 用 Tcoder 扫 Tcoder，按自报结论修真问题 | 报告点名的 `Services/**`；**碰别人目录先停下报总工**；不得改 `Models/**`、`Package.swift`、阈值定义 |
+
+### 三条横切约束（设计与 dogfooding 流尤其注意）
+
+1. **部署下限 macOS 14 不变**。Liquid Glass API 是 macOS 26 才有的，
+   一律集中在设计系统里走 `if #available(macOS 26.0, *)` + 材质兜底，
+   **页面里禁止散写可用性判断**，也禁止为此把 `Package.swift` 抬到 26。
+   实测哪些 API 可用见 Obsidian `35 已验证设计能力基线.md`（用编译探针验的，
+   静态 grep SDK 桩文件会得出错误结论）。
+2. **同一时刻只允许一个人启动 App**。`Application Support` 与 `defaults` 域全机唯一，
+   不随工作树隔离。跑 UI 取证前先 `pgrep -x TcoderMonitor` 确认为 0。
+   所以 WS-H/WS-I/WS-J 一律**不启动 App**，用测试驱动分析器取数。
+3. **阈值不许为了刷分而动**。巨大文件行数、复杂度榜长度这类定义属冻结区；
+   把阈值放宽让自己变好看，等于把工具废掉。
+
 ## 4. 视图约定
 
 - 视图 struct 名与初始化签名已冻结：`XxxView(report: ProjectReport?)`。内部自己取子字段。
