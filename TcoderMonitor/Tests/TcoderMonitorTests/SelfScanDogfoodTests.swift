@@ -407,6 +407,60 @@ final class SelfScanDogfoodTests: XCTestCase {
             + String(format: "%.1f", census.hotspotMean))
     }
 
+    // MARK: - 复杂度引擎口径探针（最小可复现夹具，建在 /tmp 下用完即删）
+
+    /// 把只含一种语法的最小函数喂给 `ComplexityEngine`，看它各加几分。
+    /// 目的：判定"平均圈复杂度 26.3"里有多少是真实判定，多少是口径通胀。
+    func testComplexityEngineBranchCountingConvention() async throws {
+        let fixture = #"""
+        import Foundation
+        func plain() -> Int {
+            return 1
+        }
+        func oneIf(_ flag: Bool) -> Int {
+            if flag { return 2 }
+            return 1
+        }
+        func oneNilCoalesce(_ dict: [String: Int]) -> Int {
+            return dict["k"] ?? 0
+        }
+        func failableCast(_ raw: Any) -> Int {
+            let box = raw as? [String: Int]
+            return box?.count ?? 0
+        }
+        func oneTernary(_ flag: Bool) -> Int {
+            return flag ? 1 : 2
+        }
+        """#
+
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tcoder-wsj-cc-probe", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("Probe.swift")
+        try fixture.write(to: file, atomically: true, encoding: .utf8)
+
+        let files = await SourceTreeScanner(options: .default).scan(root: dir).files
+        let measured = ComplexityEngine.functions(in: files[0])
+        let byName = Dictionary(uniqueKeysWithValues: measured.map { ($0.name, $0.complexity) })
+
+        func cc(_ name: String) -> Int { byName[name] ?? -1 }
+        print("【引擎口径】plain=\(cc("plain")) oneIf=\(cc("oneIf")) "
+            + "nilCoalesce=\(cc("oneNilCoalesce")) failableCast=\(cc("failableCast")) "
+            + "ternary=\(cc("oneTernary"))")
+
+        XCTAssertEqual(cc("plain"), 1, "无分支函数必须是 1，否则整个榜单口径都不可信")
+        XCTAssertEqual(cc("oneIf"), 2, "单个 if 应当 +1")
+        XCTAssertEqual(cc("oneNilCoalesce"), 2, "?? 算一次判定；数字变了说明 Swift 口径被动过")
+        XCTAssertEqual(cc("oneTernary"), 2, "三元算一次判定，且不重复计数")
+        // 这一条是**口径与阈值不匹配**的证据：一个 2 行、线性、无嵌套的函数，
+        // 仅仅因为写了 as? / ?. / ?? 就被判 CC=4。`parseIstanbulSummary` 27 行
+        // 被测成 CC=24 并打上[高]风险，根因就在这里——阈值 highFunctionComplexity=21
+        // 是按经典 McCabe 标定的，而计数口径把可选值语法糖也记成了判定。
+        XCTAssertEqual(cc("failableCast"), 4,
+                       "as?/?. 与 ?? 各算一次判定。若你收紧了口径，请把本条与 48 号笔记一起更新")
+    }
+
     // MARK: - git 独立基线（只读命令）
 
     private func gitCountCommits() throws -> Int {
