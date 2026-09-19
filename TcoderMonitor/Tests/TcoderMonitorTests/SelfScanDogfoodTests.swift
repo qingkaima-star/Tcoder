@@ -57,20 +57,62 @@ final class SelfScanDogfoodTests: SelfScanHarnessCase {
 
     /// 这是"分数必须自己变好"的机械保证：新增一个 800+ 行文件会让这条测试变红。
     /// 把某个文件改小的人应当**同时**把下面的上限调低——棘轮只许往紧里拧。
+    ///
+    /// **`ceiling = 0` 的来由**：WS-V 把最后三个超限测试文件拆完，
+    /// main `2f0e9e0` 上实测 `Sources+Tests 共 159 个 .swift / 超 800 行的 0 个`，
+    /// 所以按"只往紧拧"的规矩把 9 降到 0。800 这个**阈值本身一个字没动**（冻结区）。
+    ///
+    /// 别把这条读成"仓库从此不许有长文件"或"这条测试不再需要债"：它只管**不新增**。
+    /// "工具到底能不能数出超限文件"改由 `SelfScanHugeFileMechanismTests` 用合成夹具
+    /// 双向证明（超线的必须被看见、未超线的不得被误报）——上一版守卫把靶子立在
+    /// "仓库恰好欠着债"上，债还上了它就假，那是找错对象。
     func testRepositoryDoesNotGrowMoreHugeFiles() async throws {
         let over = try independentSwiftLineCounts()
             .filter { $0.lines > Self.toolHighFileLines }
             .sorted { $0.lines > $1.lines }
-        let ceiling = 9
+        let ceiling = 0
         XCTAssertLessThanOrEqual(over.count, ceiling, """
-        800 行以上的文件从 \(ceiling) 个涨到了 \(over.count) 个（当前最大 \(over.first?.lines ?? 0) 行）。
-        **闸门不降、基线不改**——还债方式是各自拆自己那份，不是把这条改绿。
+        新增了 \(over.count) 个超 \(Self.toolHighFileLines) 行的文件（合法上限 \(ceiling) 个，
+        当前最大 \(over.first?.lines ?? 0) 行）。
+        **闸门不降、阈值不动**——把文件拆开才是修复，改这里的数字不是。
 
         \(Self.productionSummary(over))
         \(Self.summaryOfTestFiles(over))
         逐个清单（行数 → 该目录现归属 → 路径）：
         \(Self.hugeFileRoster(over))
         """)
+    }
+
+    /// **派工单文案的元测试**。`ceiling` 降到 0 之后，仓库干净时那段失败信息
+    /// 永远不会被触发——一段没人见过的报错文案，等于没有文案。
+    /// 所以直接拿合成清单调用那三个渲染函数，断言它指名道姓：
+    /// 路径、行数、归属三者都必须出现，认不出归属的必须显式写"认领"而不是留空。
+    func testHugeFileTicketNamesEveryOffender() {
+        let sample = [
+            GroundTruthFile(path: "/repo/TcoderMonitor/Sources/TcoderMonitor/Services/Code/Wide.swift", lines: 1_500),
+            GroundTruthFile(path: "/repo/TcoderMonitor/Tests/TcoderMonitorTests/LogWideTests.swift", lines: 912),
+        ]
+
+        let roster = Self.hugeFileRoster(sample)
+        XCTAssertTrue(roster.contains("1500"), "派工单必须列出实际行数：\(roster)")
+        XCTAssertTrue(roster.contains("912"), "派工单必须列出每一个超限文件，不能只报总数：\(roster)")
+        XCTAssertTrue(roster.contains("Wide.swift") && roster.contains("LogWideTests.swift"),
+                      "派工单必须给出文件路径：\(roster)")
+        XCTAssertTrue(roster.contains("WS-R"), "Services/Code 应归口 WS-R：\(roster)")
+        XCTAssertTrue(roster.contains("WS-C"), "Tests/Log* 应归口 WS-C：\(roster)")
+
+        let production = Self.productionSummary([sample[0]])
+        XCTAssertTrue(production.contains("生产代码（Sources/）：1 个超限"),
+                      "生产/测试必须分栏报数：\(production)")
+        XCTAssertTrue(Self.productionSummary([]).contains("已达标"),
+                      "生产代码干净时要如实说达标，别只报个 0")
+        XCTAssertTrue(Self.summaryOfTestFiles([sample[1]]).contains("测试代码（Tests/）：1 个超限"),
+                      "测试文件的超限要单独归栏：\(Self.summaryOfTestFiles([sample[1]]))")
+
+        // 认不出归属时不许留空——空字符串会让派工单看起来像"没人欠债"。
+        let stranger = Self.owner(ofPath: "/repo/TcoderMonitor/Misc/WhoOwnsThis.swift")
+        XCTAssertTrue(stranger.contains("认领") || stranger.contains("未归属"),
+                      "认不出归属必须显式标注，不能返回空串：\"\(stranger)\"")
     }
 
     // MARK: - 防作弊门 3：复杂度榜不得为空，且必须覆盖独立数出的高复杂度函数
