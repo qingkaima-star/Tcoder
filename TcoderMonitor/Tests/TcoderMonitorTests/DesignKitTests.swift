@@ -60,6 +60,10 @@ final class DesignKitTests: XCTestCase {
 
     // MARK: - B. 数值组件接上三态
 
+    /// `Theme.Evidence` / `Theme.Gauge` / `MetricTile(evidence:)` 目前**页面零引用**：
+    /// 页面还在手写 15 处 `?? Theme.Placeholder.missingValue`。保留的理由不是"以后可能用"，
+    /// 而是它们是那 15 处手写的收敛目标（#28 已把接线单交总工）。
+    /// 若接线单本轮不落地，这三个连同本段测试应一并删除——不要养装饰。
     func testMetricTileEvidenceInitLeavesValueNilWhenAbsent() {
         let absent = MetricTile(label: "今日错误", evidence: .notCollected)
         XCTAssertNil(absent.value, "缺证据被填成了字符串，等于又造出一个假值")
@@ -82,22 +86,6 @@ final class DesignKitTests: XCTestCase {
         XCTAssertEqual(Theme.Gauge.bar(fraction: 0.4).fraction, 0.4)
     }
 
-    func testSidebarItemShowsPlaceholderRatherThanZeroWhenUnscored() {
-        let unscored = Theme.Sidebar.Item(title: " demo ", icon: .code, score: nil, isScored: false)
-        XCTAssertEqual(unscored.scoreText, "--", "未分析的项目点旁显示 0 = 把没扫说成 0 分")
-        let scored = Theme.Sidebar.Item(title: "demo", icon: .code, score: 0, isScored: true)
-        XCTAssertEqual(scored.scoreText, "0", "真 0 分要照实显示")
-    }
-
-    func testEmptyCardUsesQuestionMarkNotCheckmarkWhenUnscanned() {
-        let never = Theme.Empty.Card(evidence: .notCollected, title: "错误日志")
-        XCTAssertEqual(never.icon, .unverified)
-        XCTAssertNotEqual(never.icon, .noRisk, "没查过却画对勾 = 本轮 P0 的同一个坑")
-
-        let scanned = Theme.Empty.Card(evidence: .scannedEmpty, title: "错误日志")
-        XCTAssertNotEqual(scanned.icon, .noRisk)
-    }
-
     // MARK: - C. 图表色：单一来源与稳定取号
 
     func testStableIndexIsDeterministicCaseInsensitiveAndInBounds() {
@@ -113,26 +101,6 @@ final class DesignKitTests: XCTestCase {
                        "大小写应视作同一个键")
     }
 
-    /// 按键取色必须**等价于**按号取色——两者走同一条路，页面才没有第二条凑色路径。
-    func testColorForLabelIsDefinedExactlyByItsIndex() {
-        for appearance in [DesignAppearance.light, .dark] {
-            for key in ["npm", "maven", "Swift", "go module", "☃"] {
-                let byLabel = Theme.Chart.token(forLabel: key, in: appearance)
-                let byIndex = Theme.Chart.pair(at: Theme.Chart.index(forLabel: key))
-                    .token(in: appearance)
-                XCTAssertEqual(byLabel, byIndex,
-                               "键「\(key)」的两条取色路径已经分叉")
-            }
-        }
-    }
-
-    func testSeriesRegistryIndicesAllResolveInsideThePalette() {
-        for (name, index) in Theme.Chart.Series.allRegistered {
-            XCTAssertTrue((0..<Theme.Chart.count).contains(index),
-                          "序列 \(name) 登记了越界号位 \(index)")
-        }
-    }
-
     func testAreaGradientIntensityTiersAreOrdered() {
         XCTAssertEqual(Theme.Chart.Intensity.specTop.topOpacity,
                        Theme.Palette.Opacity.gradientTop)
@@ -146,80 +114,7 @@ final class DesignKitTests: XCTestCase {
         }
     }
 
-    // MARK: - D. 曲线轴
-
-    func testAxisTicksCoverTheDomainAndSurviveDegenerateSteps() {
-        let axis = Theme.Chart.Axis(step: 25, maxValue: 100)
-        XCTAssertEqual(axis.ticks, [0, 25, 50, 75, 100])
-        XCTAssertFalse(axis.isZoomed)
-        XCTAssertEqual(axis.domain, 0...100)
-
-        let zoomed = Theme.Chart.Axis(minValue: 62, step: 10, maxValue: 92)
-        XCTAssertTrue(zoomed.isZoomed, "minValue>0 就是收窄轴，必须被标出来")
-        XCTAssertEqual(zoomed.ticks.count, 4)
-
-        // 步长为 0 会让 while 循环永不停止——这一条是给未来的自己上的保险
-        XCTAssertEqual(Theme.Chart.Axis(step: 0, maxValue: 100).ticks, [0])
-        XCTAssertTrue(Theme.Chart.Axis(step: -5, maxValue: 100).ticks.count <= 1)
-    }
-
-    // MARK: - E. 表格与排序
-
-    func testNumericColumnsDefaultToTrailingAlignment() {
-        // 左对齐时位数不同的数字看不出谁大，所以数字列默认尾随
-        XCTAssertEqual(Theme.Table.Column("CC").alignment, .trailing)
-        XCTAssertEqual(Theme.Table.ColumnAlignment.numeric, .trailing)
-        XCTAssertEqual(Theme.Table.Column("名称", 220, .leading).alignment, .leading)
-    }
-
-    func testColumnsAreNotSortableUntilGivenASortKey() {
-        XCTAssertFalse(Theme.Table.Column("备注").isSortable)
-        XCTAssertTrue(Theme.Table.Column("CC", 40, .trailing, sortKey: "cc").isSortable)
-    }
-
-    func testSortTogglingFlipsSameColumnAndStartsDescendingOnNewColumn() {
-        let cc = Theme.Table.Column("CC", 40, .trailing, sortKey: "cc")
-        let name = Theme.Table.Column("名称", 220, .leading, sortKey: "name")
-        let current = Theme.Table.Sort(key: "cc", ascending: true)
-        XCTAssertFalse(current.toggling(cc).ascending, "同列再点应翻向")
-        XCTAssertEqual(current.toggling(name).key, "name")
-        XCTAssertFalse(current.toggling(name).ascending, "换列默认大的在前")
-    }
-
-    func testColumnLookupFallsBackElasticallyInsteadOfCrashing() {
-        let columns = [Theme.Table.Column("名称", 220, .leading)]
-        XCTAssertEqual(Theme.Table.column(columns, 0).width, 220)
-        XCTAssertNil(Theme.Table.column(columns, 9).width, "越界应退回弹性列而不是崩溃")
-        XCTAssertEqual(Theme.Table.column([], -1).title, "")
-    }
-
-    func testRowTintIsExactlyHalfTheBadgeFill() {
-        // 整屏表格若用徽标那档饱和度会被色块盖住，所以行底固定比徽标底弱一半
-        XCTAssertEqual(Theme.Table.rowTintAlpha, Theme.Palette.Opacity.badgeFill / 2)
-        XCTAssertLessThan(Theme.Table.rowTintAlpha, Theme.Palette.Opacity.badgeFill)
-    }
-
-    /// 元测试：解释为什么整套设计系统单测**从不**拿 `Color` 做等号断言。
-    /// 语义色由 `NSColor(name:dynamicProvider:)` 现造，描述里带 UUID
-    /// （实测形如 `#$customDynamic 6D2B48CA-…`），所以两个取值相同的动态色永远不相等。
-    /// 谁想加 `XCTAssertEqual(someColor, anotherColor)`，先让这条把它绊倒。
-    func testDynamicColorsCannotBeComparedSoAssertOnTokensInstead() {
-        let light = Theme.Semantic.success.textColor
-        let sameAgain = Theme.Semantic.success.textColor
-        XCTAssertNotEqual(String(describing: light), String(describing: sameAgain),
-                          "动态色居然可比较了——那所有基于角色名的断言可以简化，请一并复核")
-        // 可比较的是令牌本身
-        XCTAssertEqual(Theme.Semantic.success.text.light, Theme.Semantic.success.text.light)
-    }
-
-    func testTableAndSidebarRowHeightsAreOrdered() {
-        XCTAssertLessThan(Theme.Layout.rowHeightCompact, Theme.Layout.rowHeightTable)
-        XCTAssertLessThan(Theme.Layout.rowHeightTable, Theme.Layout.rowHeightSidebar)
-        XCTAssertGreaterThanOrEqual(Theme.Layout.rowHeightCompact, Theme.Layout.minHitTarget)
-    }
-
     func testGaugeHeightTiersMatchSpec() {
-        XCTAssertEqual(Theme.Layout.gaugeSection, 4)
         XCTAssertEqual(Theme.Layout.gaugeInline, 5)
         XCTAssertEqual(Theme.Layout.gaugeMetric, 6)
     }

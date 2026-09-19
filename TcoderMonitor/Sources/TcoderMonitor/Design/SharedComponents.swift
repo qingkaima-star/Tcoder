@@ -6,63 +6,13 @@ import SwiftUI
 // 这样基座换血时 11 个页面不需要同时改。内部实现已全部改走令牌与 `surface()`。
 
 /// 给登记表之外的裸符号名套上同一套图标规则。
-/// 存在是因为 `EmptyStateView` / `SectionCard` 的 `icon:` 参数至今收字符串
-/// （`"doc.text"`、`"waveform"` 这类没进 `IconName` 的名字）；重样时应把它们收进登记表，
-/// 届时这个口子可以关掉。
+/// 存在是因为 `EmptyStateView` 的 `icon:` 参数至今收字符串（`"doc.text"`、`"waveform"`
+/// 这类没进 `IconName` 的名字）；重样时应把它们收进登记表，届时这个口子可以关掉。
 extension Image {
     func themeIcon(_ role: IconRole) -> some View {
         self.font(role.font)
             .symbolRenderingMode(.hierarchical)
             .accessibilityHidden(true)
-    }
-}
-
-/// 分区卡（旧入口）。玻璃化版本是 `GlassSection`，它多一个 `IconName` 参数；
-/// 这个壳保留 `icon: String?` 以兼容现有调用点。
-struct SectionCard<Content: View>: View {
-    var title: String
-    var subtitle: String?
-    var icon: String?
-    var trailing: AnyView?
-    @ViewBuilder var content: Content
-
-    init(
-        _ title: String,
-        subtitle: String? = nil,
-        icon: String? = nil,
-        trailing: AnyView? = nil,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.title = title
-        self.subtitle = subtitle
-        self.icon = icon
-        self.trailing = trailing
-        self.content = content()
-    }
-
-    var body: some View {
-        GlassCard(spacing: Theme.Spacing.sm) {
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                    HStack(spacing: Theme.Spacing.xs) {
-                        if let icon {
-                            Image(systemName: icon)
-                                .themeIcon(.cardHeader)
-                                .foregroundStyle(Theme.Semantic.accent.textColor)
-                        }
-                        Text(title).font(Theme.Typo.cardTitle.font)
-                    }
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(Theme.Typo.label.font)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer(minLength: Theme.Spacing.xs)
-                trailing
-            }
-            content
-        }
     }
 }
 
