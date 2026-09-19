@@ -72,20 +72,34 @@ fi
 # 所以这里必须**正向断言**跑掉了多少例、失败了多少例，取不到汇总行就判失败。
 if [ "$fail" = "0" ]; then
   SUMMARY=$(grep -aE "Executed [0-9]+ tests?" "$TEST_LOG" | tail -1)
-  RAN=$(printf '%s' "$SUMMARY" | sed -nE 's/.*Executed ([0-9]+) tests?.*/\1/p')
-  FAILED=$(printf '%s' "$SUMMARY" | sed -nE 's/.*with ([0-9]+) failures?.*/\1/p')
-  if [ -z "$RAN" ] || [ -z "$FAILED" ]; then
+  if [ -z "$SUMMARY" ]; then
     echo "  ❌ 测试日志里没有汇总行，无法证明跑过测试（取不到数字＝没跑）"
     tail -5 "$TEST_LOG"
     fail=1
-  elif [ "$RAN" -le 0 ]; then
-    echo "  ❌ 实际执行 0 例，禁止合并：没有任何测试被跑到"
-    fail=1
-  elif [ "$FAILED" != "0" ]; then
-    echo "  ❌ ${FAILED} 例失败（共 ${RAN} 例），禁止合并"
-    fail=1
   else
-    echo "  ✅ 全绿：${RAN} 例执行、0 失败"
+    RAN=$(printf '%s' "$SUMMARY" | sed -nE 's/.*Executed ([0-9]+) tests.*/\1/p')
+    # 失败数必须取**紧邻 failures 的那个数字**。xctest 有两种真实措辞：
+    #   Executed 378 tests, with 6 tests skipped and 0 failures (0 unexpected)
+    #   Executed 8 tests, with 0 failures (0 unexpected)
+    # 上一版按 "with ([0-9]+) failures" 取，被中间的 "6 tests skipped and" 挡住，
+    # 于是把两个本来全绿的分支判红（方向没错，但结论是假的、消息还误导人）。
+    FAILED=$(printf '%s' "$SUMMARY" | sed -nE 's/.*[^0-9]([0-9]+) failures?.*/\1/p')
+    UNEXPECTED=$(printf '%s' "$SUMMARY" | sed -nE 's/.*[^0-9]([0-9]+) unexpected.*/\1/p')
+    echo "  汇总行：$SUMMARY"
+  fi
+  if [ "$fail" = "0" ]; then
+    if [ -z "$RAN" ] || [ -z "$FAILED" ]; then
+      echo "  ❌ 汇总行取不到用例数/失败数，按未验证处理"
+      fail=1
+    elif [ "$RAN" -le 0 ]; then
+      echo "  ❌ 实际执行 0 例，禁止合并：没有任何测试被跑到"
+      fail=1
+    elif [ "$FAILED" != "0" ] || [ "${UNEXPECTED:-0}" != "0" ]; then
+      echo "  ❌ ${FAILED} 例失败 / ${UNEXPECTED:-?} 例意外（共 ${RAN} 例），禁止合并"
+      fail=1
+    else
+      echo "  ✅ 全绿：${RAN} 例执行、0 失败"
+    fi
   fi
 fi
 
