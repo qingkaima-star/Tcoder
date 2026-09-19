@@ -141,7 +141,14 @@ struct DashboardView: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(code.languages.prefix(5)) { share in
-                        LanguageBar(share: share)
+                        // 占比条统一走基座件：全仓原本有三套（我的 LanguageBar、
+                        // WS-L 的 DataShareBarRow、基座的 Theme.Share.Row），
+                        // 基座那套正是为取代前两套而建却零引用。取色也必须走基座的
+                        // 稳定键入口，页面不再自带一份哈希。
+                        Theme.Share.Row(
+                            label: share.language,
+                            fraction: share.share,
+                            percentText: NumberFormat.percent(share.share, precision: 0))
                     }
                     HStack(spacing: Theme.Spacing.md) {
                         StatLine(label: "文件", value: NumberFormat.grouped(code.totalFiles))
