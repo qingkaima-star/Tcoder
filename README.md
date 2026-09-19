@@ -38,10 +38,17 @@ open "dist/Tcoder Monitor.app"
 
 ```bash
 # 端到端：预置一个真实目录让 App 自动扫描，再把落盘的测量结果读回来逐项核对
+# （会先备份并自动还原你现有的项目列表；有其他实例在跑时会拒绝执行以免污染结果）
 ./scripts/e2e_check.sh /path/to/repo
 
-# 九个页面逐页截图取证（取证前会先确认构建为绿）
+# 九个页面逐页截图取证。开头硬门禁：从当前源码重建 + 测试必须跑绿，
+# 否则 exit 1 —— 避免拿旧 dist 二进制截出九张"看着可信"的废图。
 ./scripts/verify_pages.sh
+
+# 真实仓库取证（默认跳过，因为要对 59 万行做全量分析）：
+# 断言的是诚实性——提交总数不得是截断采样值、不在仓库根也要认出父仓库、
+# 无覆盖率报告时 hasData 必须为 false 而不是 0%。
+TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenceTests
 ```
 
 ## 数据与隐私

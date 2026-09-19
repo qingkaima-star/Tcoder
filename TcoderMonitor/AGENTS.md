@@ -45,6 +45,18 @@ cd /Users/one/Documents/Tcoder/TcoderMonitor
 若要暂存未完成工作，用带说明的 `git stash push -m "..."` 并**同时**存一份
 `git diff > .inflight/<名字>.patch`，别只靠队列里的消息通知总工。
 
+**补充（20:34 实测教训）：`Tests/TcoderMonitorTests/**` 是同一个编译单元。**
+你写的测试文件哪怕生产代码全对，只要它编译不过，
+**全仓所有工作流就都跑不了 `test`**——别人会以为是自己的代码坏了。
+所以提交前额外跑一次这条（它比整轮 test 快得多，专门用来验证测试模块可编译）：
+
+```bash
+./scripts/locked_build.sh build --build-tests   # 必须零 error 才算可以停笔
+```
+
+新开的取证/集成测试文件记得带 `@testable import TcoderMonitor`（缺了会报
+"cannot find 'XxxAnalyzer' in scope"，看着像别人的代码坏了，其实是你自己的文件）。
+
 ## 2. 构建纪律（最重要）
 
 `swift build` 的 `.build` 目录**不支持并发**。多个会话同时编译会互相打坏。

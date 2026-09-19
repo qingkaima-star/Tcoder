@@ -15,3 +15,6 @@ Package.resolved
 *.pem
 *.p12
 *.jks
+
+# swiftc -typecheck 的临时产物目录（并行自查时生成，不该入库）
+.tc-typecheck/
