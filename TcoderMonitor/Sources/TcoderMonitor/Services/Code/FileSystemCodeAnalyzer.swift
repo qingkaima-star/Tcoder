@@ -48,6 +48,20 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         try await analyze(root: root, options: fallbackOptions)
     }
 
+    /// 剔除台账：回答「扫出来的文件比 `find` 少，少掉的那些各是被哪条规则剔掉的」。
+    /// `countSkippedLines = true` 进入审计模式，会额外读出被剔除文件的真实行数（要读盘，
+    /// 受 `SourceSkipLedger.defaultAuditBudget` 字节预算约束）；默认只记条数与字节数，零额外 I/O。
+    ///
+    /// 契约缺口：`CodeMetrics` 目前没有承载台账的字段，所以视图拿不到它，只能由这个入口单独取。
+    func skipLedger(root: URL, options: ScanOptions, countSkippedLines: Bool = false) async throws -> SourceSkipLedger {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw AnalysisError.notDirectory(root.path)
+        }
+        let budget = countSkippedLines ? Int64(SourceSkipLedger.defaultAuditBudget) : 0
+        return await SourceTreeScanner(options: options, auditLineBudget: budget).scan(root: root).skipLedger
+    }
+
     // MARK: - Aggregation
 
     private func apply(
@@ -98,6 +112,14 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         metrics.averageFunctionLength = allFunctions.isEmpty
             ? 0
             : Int((Double(allFunctions.map(\.lineCount).reduce(0, +)) / Double(allFunctions.count)).rounded())
+        // 全仓真均值，不是热点榜均值：健康评分的复杂度曲线按「所有被识别函数的平均圈复杂度」标定，
+        // 代进 topComplexFunctions 的均值会随仓库规模失真（仓库越大、上榜越是极端值、分数越低）。
+        // 一个函数都没识别出来时给 nil 而不是 0 —— 「没有函数」是未知，不是「极简」，
+        // 给 0 会把纯脚本仓/配置仓的复杂度分量评成满分。
+        metrics.analyzedFunctionCount = allFunctions.count
+        metrics.averageCyclomaticComplexity = allFunctions.isEmpty
+            ? nil
+            : Double(allFunctions.map(\.complexity).reduce(0, +)) / Double(allFunctions.count)
 
         metrics.duplicationRatio = duplication.ratio
         metrics.duplicatedBlocks = duplication.blocks

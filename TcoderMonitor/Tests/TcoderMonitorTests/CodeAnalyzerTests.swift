@@ -1273,4 +1273,189 @@ final class CodeAnalyzerTests: XCTestCase {
         XCTAssertTrue(ComplexityEngine.functions(in: declFile).isEmpty,
                       "无函数体的声明不构成函数：\(ComplexityEngine.functions(in: declFile))")
     }
+
+    // MARK: - N. 全仓平均圈复杂度（评分曲线的分母）
+
+    /// 契约新字段必须是**全部被识别函数**的均值，而不是热点榜（前 20）的均值。
+    /// 合成一个「1 个 21 分支的巨型函数 + 24 个平凡函数」的仓库：
+    /// 全仓均值 = (21 + 24×1) / 25 = 1.8，热点榜均值 = (21 + 19×1) / 20 = 2.0 —— 方向必须是热点榜偏高。
+    func testWholeRepositoryAverageComplexityIsNotTheHotspotAverage() async throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+        var source = "func monster(a: Int) -> Int {\n"
+        for index in 1...20 { source += "    if a > \(index) { return \(index) }\n" }
+        source += "    return 0\n}\n"
+        for index in 0..<24 { source += "func trivial\(index)(a: Int) -> Int {\n    return a\n}\n" }
+        _ = try write(source + "\n", to: "Sized.swift", in: root)
+
+        let metrics = try await FileSystemCodeAnalyzer().analyze(root: root, options: options(maxFiles: 100))
+        XCTAssertEqual(metrics.analyzedFunctionCount, 25, "分母必须是全部被识别函数：\(metrics.analyzedFunctionCount)")
+        XCTAssertEqual(metrics.totalFiles, 1)
+        let average = try XCTUnwrap(metrics.averageCyclomaticComplexity, "有函数时均值不得为 nil")
+        XCTAssertEqual(average, Double(21 + 24) / 25, accuracy: 1e-9, "全仓均值算法不符")
+        let hotspots = metrics.topComplexFunctions.map(\.cyclomaticComplexity)
+        XCTAssertFalse(hotspots.isEmpty, "热点榜必须有内容")
+        let hotspotAverage = Double(hotspots.reduce(0, +)) / Double(hotspots.count)
+        XCTAssertGreaterThan(hotspotAverage, average,
+                             "热点榜均值必须高于全仓均值，否则说明字段取错了来源：\(hotspots)")
+        XCTAssertEqual(hotspotAverage, Double(21 + 19) / 20, accuracy: 1e-9)
+    }
+
+    /// `analyzedFunctionCount == 0` 时均值必须是 nil，不是 0：
+    /// 「没识别到函数」是未知，给 0 分会把纯数据/配置仓的复杂度分量评成满分。
+    func testAverageComplexityIsNilWhenNoFunctionIsRecognized() async throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+        _ = try write("{\"a\": 1,\n\"b\": 2}\n", to: "data.json", in: root)
+        _ = try write("# 标题\n\n正文一行\n", to: "README.md", in: root)
+
+        let metrics = try await FileSystemCodeAnalyzer().analyze(root: root, options: options(maxFiles: 100))
+        XCTAssertEqual(metrics.totalFiles, 2, "两个数据文件都要进入统计")
+        XCTAssertGreaterThan(metrics.codeLines, 0, "行数统计本身必须是真实的")
+        XCTAssertEqual(metrics.analyzedFunctionCount, 0)
+        XCTAssertNil(metrics.averageCyclomaticComplexity, "零函数必须是 nil，不能是 0")
+        XCTAssertTrue(metrics.topComplexFunctions.isEmpty)
+    }
+
+    /// 字段是 Optional 是为了持久化兼容：JSON 往返必须保住 nil 与数值的区分。
+    func testAverageComplexityRoundTripsThroughJSON() throws {
+        var empty = CodeMetrics()
+        empty.analyzedFunctionCount = 0
+        empty.averageCyclomaticComplexity = nil
+        let unknown = try JSONDecoder().decode(CodeMetrics.self, from: JSONEncoder().encode(empty))
+        XCTAssertNil(unknown.averageCyclomaticComplexity, "nil 不能被解码成 0")
+        XCTAssertEqual(unknown.analyzedFunctionCount, 0)
+
+        var known = CodeMetrics()
+        known.analyzedFunctionCount = 25
+        known.averageCyclomaticComplexity = 1.8
+        let decoded = try JSONDecoder().decode(CodeMetrics.self, from: JSONEncoder().encode(known))
+        XCTAssertEqual(decoded.averageCyclomaticComplexity ?? 0, 1.8, accuracy: 1e-9)
+        XCTAssertEqual(decoded.analyzedFunctionCount, 25)
+    }
+
+    // MARK: - O. 根路径归一化口径（钉死 flaky：/tmp 是 /private/tmp 的符号链接）
+
+    /// `resolvingSymlinksInPath()` 与 `canonicalPathKey` 只对**已存在**的路径生效，
+    /// 所以旧版 `relativePath` 在 `/tmp/x` 不存在时判不到同一个根、在存在时才判得到 ——
+    /// 用例因此会随文件系统残留状态时好时坏（e2e 默认夹具就在 /tmp/tcoder-fixture）。
+    /// 现在统一走「字面别名形态」这一档：不 stat、同一输入永远同一输出，两种方向都要钉住。
+    func testRelativePathIsIndependentOfFileSystemState() throws {
+        // 两个路径都不存在
+        let missing = SourceFileClassifier.relativePath(
+            for: URL(fileURLWithPath: "/private/tmp/wsa-definitely-missing/KeepMe/Kept.swift"),
+            root: URL(fileURLWithPath: "/tmp/wsa-definitely-missing"))
+        XCTAssertEqual(missing, "KeepMe/Kept.swift", "根不存在时必须仍能判定同根（反方向见下）")
+        let reversed = SourceFileClassifier.relativePath(
+            for: URL(fileURLWithPath: "/tmp/wsa-definitely-missing/KeepMe/Kept.swift"),
+            root: URL(fileURLWithPath: "/private/tmp/wsa-definitely-missing/KeepMe/Kept.swift").deletingLastPathComponent())
+        XCTAssertEqual(reversed, "Kept.swift", "反方向（URL 是别名形态、根是 private 形态）同样必须命中")
+
+        // 同一条输入重复调用必须稳定（纯函数）
+        let again = SourceFileClassifier.relativePath(
+            for: URL(fileURLWithPath: "/private/tmp/wsa-definitely-missing/KeepMe/Kept.swift"),
+            root: URL(fileURLWithPath: "/tmp/wsa-definitely-missing"))
+        XCTAssertEqual(again, missing, "relativePath 必须是纯函数，不得依赖文件系统状态")
+
+        // 夹具真实存在时结论必须一致，「不存在」与「存在」两种文件系统状态不得给出不同口径
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+        _ = try write("let a = 1\n", to: "KeepMe/Kept.swift", in: root)
+        let existing = SourceFileClassifier.relativePath(
+            for: root.appendingPathComponent("KeepMe/Kept.swift"), root: root)
+        XCTAssertEqual(existing, "KeepMe/Kept.swift")
+    }
+
+    /// 字面别名形态表：只有系统固定的那四个前缀参与，普通目录不得被改写。
+    func testLexicalAliasFormsOnlyCoverSystemPrivateAliases() {
+        XCTAssertEqual(SourceFileClassifier.lexicalAliasForms(ofPath: "/tmp/x/y").sorted(),
+                       ["/private/tmp/x/y", "/tmp/x/y"])
+        XCTAssertEqual(SourceFileClassifier.lexicalAliasForms(ofPath: "/private/var/folders/a").sorted(),
+                       ["/private/var/folders/a", "/var/folders/a"])
+        XCTAssertEqual(SourceFileClassifier.lexicalAliasForms(ofPath: "/etc/hosts").count, 2)
+        XCTAssertEqual(SourceFileClassifier.lexicalAliasForms(ofPath: "/Users/one/x"), ["/Users/one/x"],
+                       "非别名目录不得凭空造形态")
+        XCTAssertEqual(SourceFileClassifier.lexicalAliasForms(ofPath: "/private/cores/x"),
+                       ["/private/cores/x"], "private 下的非别名目录不得去掉 private")
+    }
+
+    // MARK: - P. 剔除台账：每丢掉一个条目都要说清是被哪条规则丢的
+
+    /// 夹具根里一次摆齐七种剔除理由，台账必须逐条对上，且「纳入 + 剔除 == 遍历到的文件数」。
+    func testSkipLedgerAttributesEveryRejectedEntry() async throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+        _ = try write("let kept = 1\n", to: "Keep.swift", in: root)
+        _ = try write("no extension at all\n", to: "LICENSE", in: root)
+        _ = try write("plain prose\n", to: "notes.txt", in: root)
+        _ = try write("fake image bytes\n", to: "logo.png", in: root)
+        _ = try write("let hidden = 1\n", to: ".secret.swift", in: root)
+        _ = try write(String(repeating: "let line = 1\n", count: 300), to: "huge.swift", in: root)
+        _ = try write("let vendored = 1\n", to: "vendor/Pkg.swift", in: root)
+        _ = try write("let deep = 1\nlet two = 2\n", to: "vendor/nested/Deep.swift", in: root)
+        let link = root.appendingPathComponent("link.swift")
+        try? fm.removeItem(at: link)
+        try fm.createSymbolicLink(at: link, withDestinationURL: root.appendingPathComponent("Keep.swift"))
+
+        let opts = options(maxFileBytes: 2_000, skipDirectories: ["vendor"],
+                           binaryExtensions: ["png"], includeHidden: false)
+
+        // —— 正常扫描（不审计）：零额外读盘，只记条数与字节
+        let plain = await SourceTreeScanner(options: opts).scan(root: root)
+        XCTAssertEqual(plain.scannedFileCount, 1, "只有 Keep.swift 应被纳入：\(plain.files.map(\.relativePath))")
+        XCTAssertEqual(plain.skippedFileCount + plain.scannedFileCount, plain.visitedFileCount,
+                       "visited 必须等于纳入 + 剔除")
+        let ledger = plain.skipLedger
+        XCTAssertEqual(ledger.buckets[.missingExtension]?.files, 1, "LICENSE 无后缀")
+        XCTAssertEqual(ledger.buckets[.unsupportedExtension]?.files, 1, "notes.txt 语言表里没有")
+        XCTAssertEqual(ledger.buckets[.binaryExtension]?.files, 1, "logo.png 命中二进制后缀")
+        XCTAssertEqual(ledger.buckets[.oversize]?.files, 1, "huge.swift 超过 maxFileBytes")
+        XCTAssertEqual(ledger.buckets[.hiddenEntry]?.files, 1, ".secret.swift 是隐藏项")
+        XCTAssertEqual(ledger.buckets[.symbolicLink]?.files, 1, "link.swift 是软链接")
+        XCTAssertEqual(ledger.buckets[.skippedDirectory]?.files, 1, "vendor 整棵被剔除（根因只记一次）")
+        XCTAssertEqual(ledger.buckets[.excludedDirectoryNested]?.files ?? 0, 0,
+                       "正常扫描掐了子树，vendor/nested 这一层根本不该被看到")
+        XCTAssertEqual(ledger.buckets[.excludedDirectoryContent]?.files ?? 0, 0,
+                       "正常扫描对被剔除目录掐子树，子树里的文件不该被逐个看到")
+        XCTAssertEqual(ledger.skippedFileTotal, 7, "台账覆盖的条目数（含 visited 之外的隐藏/软链接/目录）")
+        XCTAssertFalse(ledger.cappedRemaining, "maxFiles 未命中，不得谎报截断")
+        XCTAssertEqual(ledger.buckets[.binaryExtension]?.rules["png"], 1, "规则项要落到具体后缀上")
+
+        // —— 审计模式：额外数出被剔除文件的真实行数，把「少掉的行数」完整解释掉
+        let audited = await SourceTreeScanner(options: opts,
+                                             auditLineBudget: SourceSkipLedger.defaultAuditBudget).scan(root: root)
+        let audit = audited.skipLedger
+        XCTAssertEqual(audit.buckets[.excludedDirectoryContent]?.files, 2, "审计模式要展开被剔除目录逐文件归因")
+        XCTAssertEqual(audit.buckets[.excludedDirectoryContent]?.lines, 3,
+                       "vendor/Pkg.swift 1 行 + vendor/nested/Deep.swift 2 行")
+        XCTAssertEqual(audit.buckets[.excludedDirectoryNested]?.files, 1, "vendor/nested 记成嵌套目录，根因仍是 vendor")
+        XCTAssertEqual(audit.buckets[.skippedDirectory]?.files, 1, "根因条数不能被嵌套目录稀释")
+        XCTAssertEqual(audit.buckets[.oversize]?.lines, 300, "超限文件的 300 行要能对上")
+        XCTAssertEqual(audit.buckets[.hiddenEntry]?.lines, 0, "隐藏项一律不读内容（可能是 .env 之类）")
+        XCTAssertFalse(audit.linesBudgetExhausted, "夹具远小于预算，不得报预算耗尽")
+        XCTAssertEqual(audit.skippedLineTotal,
+                       (audit.buckets.values.map(\.lines).reduce(0, +)), "台账自洽")
+        XCTAssertGreaterThan(audit.auditedBytes, 0)
+
+        // 同一份夹具：审计与否，纳入集合必须完全一致（审计只多加统计，不改判定）
+        XCTAssertEqual(Set(audited.files.map(\.relativePath)), Set(plain.files.map(\.relativePath)))
+    }
+
+    /// `analyze` 的公开入口也要能单独取台账；不存在的目录必须照旧抛错。
+    func testSkipLedgerEntryPointAndMissingRootError() async throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+        _ = try write("let a = 1\n", to: "A.swift", in: root)
+        _ = try write("prose\n", to: "readme.txt", in: root)
+        let ledger = try await FileSystemCodeAnalyzer().skipLedger(root: root, options: options())
+        XCTAssertEqual(ledger.buckets[.unsupportedExtension]?.files, 1)
+
+        do {
+            _ = try await FileSystemCodeAnalyzer().skipLedger(
+                root: root.appendingPathComponent("never-created"), options: options())
+            XCTFail("不存在的目录必须抛 notDirectory")
+        } catch let error as AnalysisError {
+            guard case .notDirectory = error else { return XCTFail("错误类型不对：\(error)") }
+        }
+    }
 }
