@@ -131,6 +131,15 @@ struct ProjectReport: Codable, Sendable {
     var health: HealthScore?
     var generatedAt: Date = Date()
 
+    /// Set once a scan has been attempted, even if some analyzers failed. Without this
+    /// a partially-failed report looks "never scanned" and the app either re-scans
+    /// forever or never retries.
+    var attemptedAt: Date?
+    /// Chinese labels of analyzers that failed during the last attempt.
+    var failedSections: [String] = []
+
+    var hasBeenScanned: Bool { attemptedAt != nil }
+
     init(project: MonitoredProject) {
         self.project = project
     }

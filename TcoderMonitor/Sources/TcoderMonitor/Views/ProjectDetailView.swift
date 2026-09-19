@@ -26,16 +26,20 @@ struct ProjectDetailView: View {
             if let target = note.object as? DetailSection { sectionRaw = target.rawValue }
         }
         .onChange(of: state.selectedProjectID) { _, _ in
-            if let project = state.selectedProject, !project.isDemo, state.store.report(for: project)?.code == nil {
-                state.scan(project: project)
-            }
+            maybeAutoScan()
         }
         .onAppear {
-            if let project = state.selectedProject, !project.isDemo,
-               state.store.report(for: project)?.code == nil {
-                state.scan(project: project)
-            }
+            maybeAutoScan()
         }
+    }
+
+    /// Scan only when this project has never been attempted. Keying off a missing
+    /// section instead would re-scan forever whenever one analyzer legitimately
+    /// cannot produce data (a folder that simply isn't a git repo).
+    private func maybeAutoScan() {
+        guard let project = state.selectedProject, !project.isDemo else { return }
+        guard state.store.report(for: project)?.hasBeenScanned == false else { return }
+        state.scan(project: project)
     }
 
     private var header: some View {

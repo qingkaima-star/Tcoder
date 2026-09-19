@@ -23,7 +23,7 @@ struct DashboardView: View {
                     topErrorsCard
                 }
                 if let error = state.lastError {
-                    BannerRow(text: error, style: .warning)
+                    failureBanner(error)
                 }
             }
             .padding(16)
@@ -178,6 +178,35 @@ struct DashboardView: View {
                 EmptyStateView(icon: "waveform", title: "正在采集…", message: "首个采样点到达后显示曲线。")
             }
         }
+    }
+
+    /// Partial failures must be actionable: naming which analyzers failed and offering
+    /// a retry, instead of leaving a stale report that never self-heals.
+    private func failureBanner(_ message: String) -> some View {
+        let failed = report?.failedSections ?? []
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Theme.caution)
+                .font(.system(size: 12))
+            VStack(alignment: .leading, spacing: 3) {
+                if !failed.isEmpty {
+                    Text("未能完成：\(failed.joined(separator: "、"))")
+                        .font(.caption.weight(.semibold))
+                    Text(message)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(message).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 8)
+            Button("重试") { state.scanSelected() }
+                .controlSize(.small)
+                .disabled(state.isScanning)
+        }
+        .padding(10)
+        .background(Theme.caution.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.caution.opacity(0.3)))
     }
 
     /// Test coverage only appears when the repository actually publishes a report,

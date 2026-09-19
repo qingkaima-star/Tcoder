@@ -153,13 +153,16 @@ final class AppState {
                 merged.coverage = coverageResult.value
                 merged.health = self.healthScorer.score(inputs)
                 merged.generatedAt = Date()
+                merged.attemptedAt = Date()
 
                 var problems: [String] = []
-                if let error = codeResult.error { problems.append(error) }
-                if let error = gitResult.error { problems.append(error) }
-                if let error = logResult.error { problems.append(error) }
-                if let error = depsResult.error { problems.append(error) }
-                if let error = coverageResult.error { problems.append(error) }
+                var failed: [String] = []
+                if let error = codeResult.error { problems.append(error); failed.append("代码扫描") }
+                if let error = gitResult.error { problems.append(error); failed.append("Git 分析") }
+                if let error = logResult.error { problems.append(error); failed.append("错误日志") }
+                if let error = depsResult.error { problems.append(error); failed.append("依赖分析") }
+                if let error = coverageResult.error { problems.append(error); failed.append("测试覆盖率") }
+                merged.failedSections = failed
 
                 self.store.upsertReport(merged)
                 if let score = merged.health?.overall {
