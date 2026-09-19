@@ -37,10 +37,16 @@ import XCTest
 ///
 /// ## 已知缺陷留档
 ///
-/// 下面这些「设计期望」在 HEAD 上实测不成立。默认轮次断言**当前真实行为**并打印缺陷，
-/// 以免把红灯留给并行同事（AGENTS.md §1.5）；用
-/// `TCODER_F_STRICT_CONTRACT=1 ./scripts/locked_build.sh test --filter ManifestLabFixtureTests`
-/// 一次性打开全部严格断言。缺陷修好合入后，应当删掉 else 分支、把严格断言变成默认。
+/// 本文件最初按切出点 `7347e09` 写下一批「缺陷留档」断言（钉的是当时的错误行为）。
+/// WS-A `f55e4a0`（全仓均复杂度）与 WS-B `bf71131`（Git 探测与窗口报数）修好之后，
+/// 这些位置已经**反向钉成回归护栏**：`analyzedFunctionCount` = 手算账本 18、
+/// `averageCyclomaticComplexity` = 49/18、`commitsAnalyzed` = 9、
+/// `discoveryMode` = `.selectedDirectory`、`resolvedRepositoryRoot` = 夹具根。
+///
+/// 剩下三处仍未修，默认轮次按现状断言并打印，
+/// `TCODER_F_STRICT_CONTRACT=1` 换成设计期望（应当变红）：
+/// caret 版本被虚报过旧、跨清单同坐标被并成一条漏洞、`Package.swift` 的
+/// `.branch("x")` 方法形式丢版本。三处都修好后请删掉 `strictContract` 与本节。
 final class ManifestLabFixtureTests: XCTestCase {
 
     /// 整棵树 + git 历史对全类只造一次：每个用例重造 40 个文件与 21 次 git 调用，
@@ -507,18 +513,25 @@ final class ManifestLabFixtureTests: XCTestCase {
         print("两处设计克隆：Java 块 \(clonedPair?.lineCount ?? 0) 行"
             + " pom 块 \(blockPair("pom.xml", "pom.xml")?.lineCount ?? 0) 行")
 
-        // 契约缺口：CodeMetrics.swift:32,35 声明了「全仓平均复杂度 + 分母」，
-        // 但 FileSystemCodeAnalyzer.apply 里现成的 allFunctions 从未回填这两个字段
-        // （全仓 grep 只有声明处命中，UI 与评分也无人读取）-> 恒为 nil / 0。
-        if strictContract {
-            XCTAssertGreaterThan(code.analyzedFunctionCount, 10, "分母必须是全仓函数数")
-            XCTAssertNotNil(code.averageCyclomaticComplexity)
-        } else {
-            XCTAssertEqual(code.analyzedFunctionCount, 0, "HEAD 缺陷留档：字段从未被赋值")
-            XCTAssertNil(code.averageCyclomaticComplexity)
-            print("【已知缺陷】analyzedFunctionCount=0 / averageCyclomaticComplexity=nil"
-                + "，见 CodeMetrics.swift:32-35 与 FileSystemCodeAnalyzer.swift:96-100")
-        }
+        // 全仓平均圈复杂度（WS-A f55e4a0 修好后的回归护栏）：
+        // 分母是被识别出的函数数，均值 = 49/18。
+        // 手算账本（逐函数照夹具正文数分支，1 基准 + 判定构造）：
+        //   Java 9 个：routeOrder 17、currentLane 3、lookup 3、clampLimit 3、clampLimit 3、
+        //             validate 2、loadPrice 2、charge 2(catch)、Order 构造 1
+        //   Go   2 个：main 3(for+if)、CurrentState 2(if)
+        //   Swift 2 个：init 1、describe(using:) 1
+        //   Rust 2 个：lane_weight 2(match)、main 1
+        //   Python 2 个：is_low 1、reorder_point 1
+        //   TypeScript 1 个：summarize 1
+        //   ——合计 18 个函数、49 点。单行函数（`public long id() { return id; }`、
+        //   `func New() *Reader { return &Reader{} }` 等 7 个）被 ComplexityEngine 的
+        //   minFunctionLines = 2 挡在分母之外，这也是口径的一部分，钉在这里。
+        XCTAssertEqual(code.analyzedFunctionCount, 18, "被识别函数数必须等于手算账本 18")
+        XCTAssertEqual(code.topComplexFunctions.count, code.analyzedFunctionCount,
+                       "夹具函数总数低于榜单上限 20，热点榜就是全量，两者必须相等")
+        let mean = try require(code.averageCyclomaticComplexity, "均值不得再是 nil")
+        XCTAssertEqual(mean, 49.0 / 18.0, accuracy: 1e-9,
+                       "全仓均值必须等于手算的 49/18=2.7222…，不得拿热点榜均值顶替")
         XCTAssertTrue(code.overallRisk >= .low)
     }
 
@@ -676,34 +689,23 @@ final class ManifestLabFixtureTests: XCTestCase {
         XCTAssertEqual(git.activityByHour.reduce(0, +), git.totalCommits)
         XCTAssertEqual(git.activityByWeekday.reduce(0, +), git.totalCommits)
 
-        // 契约缺口：GitInsights.swift:45,47 定义了「实际解析窗口」与「是否截断」，
-        // 但 ShellGitAnalyzer.makeInsights 从不赋值（全仓 grep 只有声明处命中）
-        // -> 恒为 commitsAnalyzed = 0、historyTruncated = false，
-        //    大仓库被 `git log -n 20000` 截断时 UI 也无从得知统计只是采样。
-        if strictContract {
-            XCTAssertEqual(git.commitsAnalyzed, 9)
-        } else {
-            XCTAssertEqual(git.commitsAnalyzed, 0, "HEAD 缺陷留档：窗口字段从未被赋值")
-            print("【已知缺陷】commitsAnalyzed 恒 0 / historyTruncated 恒 false，见 GitInsights.swift:45-47")
-        }
+        // 窗口报数（WS-B bf71131 修好后的回归护栏）：
+        // 夹具是我造的，真值就是 9 次提交、0 个 merge，所以窗口 == 全量、不得标记截断。
+        // 这条与 RealRepositoryEvidenceTests 的 Homebrew 用例（50,666 提交 / 窗口 20,000 /
+        // truncated = true）正好构成两个方向：小仓库不许虚报截断，大仓库不许把采样当全量。
+        XCTAssertEqual(git.commitsAnalyzed, 9, "解析窗口必须报真实条数，不能回落到默认 0")
+        XCTAssertEqual(git.totalCommits, git.commitsAnalyzed, "无 merge 的小仓库里两者应当相等")
         XCTAssertFalse(git.historyTruncated, "9 条提交全在窗口内，不得标记截断")
 
-        // 设计期望：夹具自身就是仓库根 -> .selectedDirectory。
-        // HEAD 实测 .none —— `ShellGitAnalyzer.makeInsights`（ShellGitAnalyzer.swift:94-117）
-        // 从头到尾没给 discoveryMode / resolvedRepositoryRoot 赋值，
-        // 而 Models/GitInsights.swift:30 的默认值是 .none（文案「未找到仓库」）。
-        if strictContract {
-            XCTAssertEqual(git.discoveryMode, .selectedDirectory,
-                           "所选目录即仓库时 discoveryMode 必须是 .selectedDirectory")
-            XCTAssertEqual(git.resolvedRepositoryRoot, root.path)
-            XCTAssertEqual(git.discoveryHops, 0)
-            XCTAssertTrue(git.nestedCandidates.isEmpty)
-        } else {
-            XCTAssertEqual(git.discoveryMode, .none,
-                           "HEAD 缺陷留档：分析器从不赋值，实际落到默认值 .none")
-            XCTAssertNil(git.resolvedRepositoryRoot)
-            print("【已知缺陷】discoveryMode=.none（设计期望 .selectedDirectory），见 ShellGitAnalyzer.swift:94-117")
-        }
+        // 探测回写：夹具目录自己就是仓库根 -> 必须是「所选目录即仓库」，
+        // 且解析出的根与 0 跳都如实写进结果，UI 才能告诉用户「我分析的是哪个仓」。
+        XCTAssertEqual(git.discoveryMode, .selectedDirectory,
+                       "所选目录即仓库时 discoveryMode 必须是 .selectedDirectory")
+        XCTAssertEqual(git.resolvedRepositoryRoot, root.path,
+                       "解析出的仓库根必须就是夹具根")
+        XCTAssertEqual(git.discoveryHops, 0)
+        XCTAssertTrue(git.nestedCandidates.isEmpty,
+                      "夹具里没有第二层仓库，嵌套候选必须为空，实得 \(git.nestedCandidates.map(\.path))")
     }
 
     /// 非仓库目录必须抛错，不能返回一个 totalCommits == 0 的「成功」对象冒充证据。
@@ -1606,8 +1608,11 @@ fileprivate enum LabTree {
         // fsmonitor 守护、自动 gc 都可能让子进程占住管道，把一次 commit 拖到超时。
         let safeDefaults = ["-c", "commit.gpgsign=false", "-c", "core.fsmonitor=false", "-c", "gc.auto=0"]
         let started = Date()
+        // 超时给到 40s：bash 里单条 commit 实测 30ms，但全量 302 例并发跑时
+        // Shell.blockingRun 会把个别 commit 拖到十几秒（隔离跑同一批只要 0.4s），
+        // 卡在 20s 上会让本用例变成随机红。
         let result = Shell.blockingRun("git", arguments: safeDefaults + arguments,
-                                       workingDirectory: root, timeout: 20, environment: environment)
+                                       workingDirectory: root, timeout: 40, environment: environment)
         let seconds = Date().timeIntervalSince(started)
         if seconds > 1 {
             print("【WS-F】git \(arguments.first ?? "") 耗时 \(String(format: "%.1f", seconds))s")
