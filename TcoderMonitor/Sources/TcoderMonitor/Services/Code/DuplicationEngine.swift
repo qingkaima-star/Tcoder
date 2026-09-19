@@ -5,6 +5,17 @@ struct DuplicationResult: Sendable {
     var duplicatedCodeLines: Int
     var totalCodeLines: Int
     var blocks: [DuplicatedBlock]
+
+    // MARK: 覆盖度（WS-D 诚实性审计 P1 #8：预算造成的低估原先只活在源码注释里）
+
+    /// 因每指纹片段预算（`DupLex.maxOccurrencesPerHash` / `maxRunsPerFileAndHash`）
+    /// 而未展开成片段、因而不出现在 `blocks` 明细里的拷贝窗口数。ratio 已包含它们，明细没有。
+    var fragmentsDroppedByBudget: Int = 0
+    /// 归一化行数触到 `maxWindowedLines` 而被丢弃后半部分的文件数 —— 这些文件后半段的克隆不参与检测。
+    var filesHittingLineCap: Int = 0
+    /// 按行数降序截断到 `maxBlocks` 时被丢掉的克隆块数，以及它们覆盖的代码行数。
+    var blocksDroppedByCap: Int = 0
+    var linesOutsideReportedBlocks: Int = 0
 }
 
 enum DuplicationEngine {
@@ -80,6 +91,7 @@ enum DuplicationEngine {
 
         var scan = ScanState(fileCount: files.count, windowBudget: totalCodeLines)
         var syntaxCache = [String: DupLex.LineSyntax]()
+        var filesHittingLineCap = 0
 
         for (fileIndex, file) in files.enumerated() {
             let syntax: DupLex.LineSyntax
@@ -97,9 +109,10 @@ enum DuplicationEngine {
             var chunks = [UInt8]()
             chunks.reserveCapacity(min(file.lines.count, maxWindowedLines) * 24)
 
+            var hitCap = false
             for line in file.lines {
                 guard line.kind == .code else { continue }
-                guard numbers.count < maxWindowedLines else { break }
+                guard numbers.count < maxWindowedLines else { hitCap = true; break }
                 guard let bytes = DupLex.normalizeBytes(line.text, syntax: syntax) else { continue }
                 starts.append(chunks.count)
                 lengths.append(bytes.count)
@@ -107,6 +120,7 @@ enum DuplicationEngine {
                 numbers.append(line.number)
             }
 
+            if hitCap { filesHittingLineCap += 1 }
             let lineCount = numbers.count
             var hashes = [UInt64]()
             if lineCount >= windowSize {
@@ -143,6 +157,8 @@ enum DuplicationEngine {
         // 相对量；把预算开大并不能补这个洞（要补得给每文件建 hash→偏移全量索引，代价是内存）。
         var blocks: [DuplicatedBlock] = []
         blocks.reserveCapacity(maxBlocks)
+        var blocksDroppedByCap = 0
+        var linesOutsideReportedBlocks = 0
 
         for fileIndex in 0..<files.count {
             let hashes = scan.hashesByFile[fileIndex]
@@ -216,7 +232,12 @@ enum DuplicationEngine {
         // 契约缺口不能改 Models，这里按 id 去重后再截断到 20：**只削明细榜单，不动 ratio**。
         var seenIDs = Set<String>()
         blocks = blocks.filter { seenIDs.insert($0.id).inserted }
-        if blocks.count > maxBlocks { blocks.removeSubrange(maxBlocks...) }
+        if blocks.count > maxBlocks {
+            let dropped = blocks[maxBlocks...]
+            blocksDroppedByCap = dropped.count
+            linesOutsideReportedBlocks = dropped.map(\.lineCount).reduce(0, +)   // 明细外的行数（下方统一算）
+            blocks = Array(blocks.prefix(maxBlocks))
+        }
 
         let ratio = totalCodeLines == 0
             ? 0
@@ -224,7 +245,11 @@ enum DuplicationEngine {
         return DuplicationResult(ratio: ratio,
                                  duplicatedCodeLines: duplicatedCodeLines,
                                  totalCodeLines: totalCodeLines,
-                                 blocks: blocks)
+                                 blocks: blocks,
+                                 fragmentsDroppedByBudget: scan.droppedFragments,
+                                 filesHittingLineCap: filesHittingLineCap,
+                                 blocksDroppedByCap: blocksDroppedByCap,
+                                 linesOutsideReportedBlocks: linesOutsideReportedBlocks)
     }
 }
 
@@ -292,6 +317,9 @@ fileprivate struct ScanState {
         consumed.append([Bool](repeating: false, count: hashes.count))
     }
 
+    /// 因预算被拒登记的窗口数（配对用不上，明细也就看不见它们）
+    var droppedFragments = 0
+
     mutating func register(hash: UInt64, fileIndex: Int, windowStart: Int) {
         var group = registered[hash] ?? []
         // 同一文件的片段在组里一定是连续的一段、并且总在尾部（登记按「逐文件、文件内逐窗口」
@@ -306,7 +334,10 @@ fileprivate struct ScanState {
         }
         // 每个指纹最多留 `DupLex.maxOccurrencesPerHash` 处、单个文件最多留 `DupLex.maxRunsPerFileAndHash` 处，
         // 再多的拷贝仍然会被 ratio 覆盖到（它们与已存锚点同一段克隆），只是不再展开。
-        guard group.count < DupLex.maxOccurrencesPerHash, sameFile < DupLex.maxRunsPerFileAndHash else { return }
+        guard group.count < DupLex.maxOccurrencesPerHash, sameFile < DupLex.maxRunsPerFileAndHash else {
+            droppedFragments += 1
+            return
+        }
         group.append(Occurrence(fileIndex: fileIndex, windowStart: windowStart))
         registered[hash] = group
     }
