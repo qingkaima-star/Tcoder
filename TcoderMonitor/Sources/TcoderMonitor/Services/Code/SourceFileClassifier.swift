@@ -120,6 +120,10 @@ enum SourceLanguageCatalog {
                      blockStart: "<!--", blockEnd: "-->", docDelimiters: []),
         LanguageRule(language: "Gradle", extensions: ["gradle", "groovy"], linePrefixes: ["//"],
                      blockStart: "/*", blockEnd: "*/", docDelimiters: []),
+        // protobuf 只有 `//` 行注释，没有块注释语法；语言名保持与其余条目同样的英文专名写法
+        // （`LanguageShare.language` 是直接展示的字段，口径与 DemoData 一致）。
+        LanguageRule(language: "Protocol Buffers", extensions: ["proto"], linePrefixes: ["//"],
+                     blockStart: nil, blockEnd: nil, docDelimiters: []),
         LanguageRule(language: "Properties", extensions: ["properties"], linePrefixes: ["#", "!"],
                      blockStart: nil, blockEnd: nil, docDelimiters: []),
         LanguageRule(language: "Perl", extensions: ["pl", "pm"], linePrefixes: ["#"],
@@ -391,13 +395,68 @@ final class SourceFileClassifier {
         )
     }
 
+    /// 以 root 为基准算相对路径。
+    ///
+    /// 不变式（三条同时成立）：
+    /// 1. 返回值里**绝不含 `..` 路径段**，也不含前导 `/`；
+    /// 2. 只要 url 落在 root 之下（原始路径前缀成立，或两者各自解析符号链接后的
+    ///    canonical / 完全解析路径前缀成立），返回值就是那段相对路径；
+    /// 3. 所有形态的前缀判定都不成立（url 真的在 root 之外）才退化为 `lastPathComponent`。
+    ///
+    /// 纯函数：不读写任何可变全局状态，同一对输入在同一进程内输出稳定（形态顺序固定）。
     static func relativePath(for url: URL, root: URL) -> String {
-        let rootPath = root.path
+        // 第一步用原始路径：绝大多数调用（枚举器给出的路径与调用方 root 同前缀）在这里就命中，
+        // 一次系统调用都不多做。
+        if let relative = relativePath(urlPath: url.path, rootPath: root.path) { return relative }
+
+        // 第二步按归一化形态交叉再试。Darwin 的 `FileManager` 目录枚举器返回的是**已解析符号链接**
+        // 的路径（`/tmp/...` → `/private/tmp/...`、`/var/...` → `/private/var/...`），而调用方传进来的
+        // root 往往是原始路径；不归一化就会让前缀匹配整体失败、相对路径退化成裸文件名，进而：
+        // (a) 依赖相对路径的 `skipDirectories` 带斜杠项（默认名单里的 `Resources/raw`）永远命不中；
+        // (b) UI 上不同目录的同名文件显示成同一条路径。
+        let urlForms = pathForms(of: url)
+        let rootForms = pathForms(of: root)
+        for urlForm in urlForms {
+            for rootForm in rootForms {
+                if let relative = relativePath(urlPath: urlForm, rootPath: rootForm) { return relative }
+            }
+        }
+        return url.lastPathComponent
+    }
+
+    /// 一个 URL 的路径形态（原始路径在前，去重后依序尝试，保证输出稳定）：
+    /// - `URL.path` 原始形态；
+    /// - `URLResourceKey.canonicalPathKey`：解析 `/var → /private/var`、`/tmp → /private/tmp` 这类
+    ///   **前缀**软链接（注意本 SDK 只有 `canonicalPathKey`，没有 `canonicalItemPathKey`；
+    ///   路径不存在时 Foundation 返回 nil，于是自然落回原始形态）；
+    /// - `resolvingSymlinksInPath()`：`canonicalPathKey` 不解析**末段**组件，root 自身就是目录
+    ///   软链接时只有它能对齐（实测 `/tmp/x/repoclink` → canonical 仍是 repoclink、resolved 才是真实仓库）。
+    /// 只在原始前缀判定失败后才走到这里，实测每次查询约 1.6 µs。
+    private static func pathForms(of url: URL) -> [String] {
+        var forms = [url.path]
+        if let canonical = canonicalPath(of: url), forms.contains(canonical) == false { forms.append(canonical) }
+        let resolved = url.resolvingSymlinksInPath().path
+        if forms.contains(resolved) == false { forms.append(resolved) }
+        return forms
+    }
+
+    /// 纯字符串前缀剥离；不成立（含 `..` 逃逸、剥完为空）返回 nil 交给调用方继续判定。
+    private static func relativePath(urlPath: String, rootPath: String) -> String? {
         let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
-        let filePath = url.path
-        guard filePath.hasPrefix(prefix) else { return url.lastPathComponent }
-        let trimmed = String(filePath.dropFirst(prefix.count))
-        return trimmed.isEmpty ? url.lastPathComponent : trimmed
+        guard urlPath.hasPrefix(prefix) else { return nil }
+        let trimmed = String(urlPath.dropFirst(prefix.count))
+        guard trimmed.isEmpty == false else { return nil }
+        // 只挡真正的 `..` 路径段，不误伤 `a..b.swift` 这类合法文件名。
+        guard trimmed.hasPrefix("../") == false, trimmed.hasSuffix("/..") == false,
+              trimmed.contains("/../") == false else { return nil }
+        return trimmed
+    }
+
+    /// 本 SDK 只有 `URLResourceKey.canonicalPathKey`（没有 `canonicalItemPathKey`）。
+    private static func canonicalPath(of url: URL) -> String? {
+        guard let path = try? url.resourceValues(forKeys: [.canonicalPathKey]).canonicalPath,
+              path.isEmpty == false else { return nil }
+        return path
     }
 }
 
@@ -476,7 +535,8 @@ fileprivate struct SourceSkipPlan {
 ///   代价：以符号链接形式引入的源码文件不计入统计——刻意选择「跳过」而不是「按真实文件读」，
 ///   因为后者需要对每个文件做 realpath 包含性判定，且本机存在指向仓库外大资产目录的 symlink。
 /// - `skipDirectories`（纯目录名 / 含斜杠的相对路径 / 已剔除目录的子树）整棵子树被跳过，不计入 visited。
-/// - 达到 `maxFiles` 立即停止并置 `truncatedByMaxFiles`。
+/// - 达到 `maxFiles` 立即停止收集；`truncatedByMaxFiles` **只在其后确实还有候选文件未处理**时才置位，
+///   因此「候选数恰好等于 maxFiles」不会被误报成截断。
 /// - 不可读、超限、非候选文件计入 `skippedFileCount`；任何错误都不抛异常。
 final class SourceTreeScanner {
     private let options: ScanOptions
@@ -492,8 +552,13 @@ final class SourceTreeScanner {
 
     func scan(root: URL) async -> SourceScanResult {
         var result = SourceScanResult()
+        // root 自身可能是目录符号链接，而 Darwin 的 `enumerator(at:)` **不跟随作为根的软链接**
+        // （实测：/tmp 下软链接指向本仓库 → 枚举 0 项，`atPath:` 变体同样 0 项），
+        // 那样整次扫描会静默返回空结果、UI 显示成「空项目」。这里把枚举基准换成解析后的根；
+        // 解析失败或不是目录时原样退回，行为与改动前一致。
+        let scanRoot = Self.enumerationRoot(for: root)
         var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory),
+        guard FileManager.default.fileExists(atPath: scanRoot.path, isDirectory: &isDirectory),
               isDirectory.boolValue else { return result }
 
         // `.isDirectoryKey` 必须在列：URLResourceValues 只回填请求过的键，
@@ -503,15 +568,17 @@ final class SourceTreeScanner {
         if options.includeHidden == false { enumerationOptions.insert(.skipsHiddenFiles) }
 
         guard let enumerator = FileManager.default.enumerator(
-            at: root,
+            at: scanRoot,
             includingPropertiesForKeys: keys,
             options: enumerationOptions,
             errorHandler: { _, _ in true }
         ) else { return result }
 
-        var plan = SourceSkipPlan(root: root, options: options)
+        var plan = SourceSkipPlan(root: scanRoot, options: options)
         var batch: [URL] = []
         var candidateCount = 0
+        // 达到上限后进入「探测模式」：只判断后面是否还有候选文件，用来如实置 truncatedByMaxFiles。
+        var probingForRemainingCandidates = false
 
         while let url = enumerator.nextObject() as? URL {
             if Task.isCancelled { break }
@@ -532,6 +599,16 @@ final class SourceTreeScanner {
             if values?.isRegularFile == false { continue }
             if plan.isInsideExcluded(url.path) { continue }
 
+            // 探测模式：这些文件没有被读、也没有被计入任何计数，只用来判断「还有没有候选文件」。
+            // 一发现确实还有未处理的候选文件，就确认「真的截断了」并立即收工。
+            if probingForRemainingCandidates {
+                if isCandidate(url, values: values) {
+                    result.truncatedByMaxFiles = true
+                    break
+                }
+                continue
+            }
+
             result.visitedFileCount += 1
             guard isCandidate(url, values: values) else {
                 result.skippedFileCount += 1
@@ -543,18 +620,28 @@ final class SourceTreeScanner {
             if batch.count >= Self.batchSize {
                 let urls = batch
                 batch.removeAll(keepingCapacity: true)
-                let files = await Self.classifyConcurrently(urls: urls, root: root, options: options)
+                let files = await Self.classifyConcurrently(urls: urls, root: scanRoot, options: options)
                 merge(files, attempted: urls.count, into: &result)
             }
-            if candidateCount >= options.maxFiles {
-                result.truncatedByMaxFiles = true
-                break
-            }
+            // `candidateCount == maxFiles` 本身不代表丢过文件：恰好等于上限的目录一个文件都不该少。
+            // 因此命中上限时先不置位，只继续廉价探测是否有下一个候选文件。
+            if candidateCount >= options.maxFiles { probingForRemainingCandidates = true }
         }
 
-        let files = await Self.classifyConcurrently(urls: batch, root: root, options: options)
+        let files = await Self.classifyConcurrently(urls: batch, root: scanRoot, options: options)
         merge(files, attempted: batch.count, into: &result)
         return result
+    }
+
+    /// 枚举用的根：把「自身是目录符号链接」的 root 换成解析后的真实目录（见 `scan(root:)` 的说明）。
+    /// 非软链接、解析结果与原路径相同、或解析后不是目录时一律原样返回，保证行为不回退。
+    private static func enumerationRoot(for root: URL) -> URL {
+        let resolved = root.resolvingSymlinksInPath()
+        guard resolved.path != root.path else { return root }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else { return root }
+        return resolved
     }
 
     private func merge(_ files: [ScannedSourceFile], attempted urlCount: Int, into result: inout SourceScanResult) {

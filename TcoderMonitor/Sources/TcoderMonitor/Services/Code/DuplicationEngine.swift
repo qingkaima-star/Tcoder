@@ -11,10 +11,13 @@ enum DuplicationEngine {
 
     static let windowSize: Int = 6
 
-    /// 归一化后长度低于此值（UTF-8 字节，见 `normalizeBytes` 末尾阈值注释）的行一律丢弃。
+    /// 归一化后长度低于此值的行一律丢弃。**单位是 UTF-8 字节**（`normalizeBytes` 走字节管线，
+    /// 折出来的占位符全是 ASCII，所以按字节量最贴近指纹的真实成本）。
     /// 取 4 的依据：标识符已折成 `I`，4 字节刚好放过 `i = N`、`I ( I )` 这类最短有效语句，
     /// 而 `}`、`);`、`})`、`I I`（`return keep`）这些 1~3 字节样板行全部落榜。
-    static let minSignificantRunes: Int = 4
+    /// 注意：这条只是**指纹通道**的入门门槛；对外的 `normalize(_:language:)` 还额外要求
+    /// ≥3 个含字母/数字的词元（见下面 `normalize` 的注释），所以 `normalize("i = N")` 是 nil。
+    static let minNormalizedBytes: Int = 4
 
     /// 单文件参与滑窗的归一化行数上限：超长文件（生成的/打包的）会吃掉整轮预算，硬截断。
     private static let maxWindowedLines = 20_000
@@ -27,11 +30,11 @@ enum DuplicationEngine {
     static func normalize(_ text: String, language: String) -> String? {
         guard let bytes = normalizeBytes(text, syntax: buildLineSyntax(language: language)) else { return nil }
         let result = String(decoding: bytes, as: UTF8.self)
-        // Lines carrying almost no information (`}`, `x`, `a + b`,
-        // `return totalPayable`) must not participate in fingerprinting, otherwise
-        // every file in the repository "duplicates" every other one and the
-        // duplication ratio is pure noise. Real statements keep >= 3 word tokens
-        // (`let totalAmount = N` -> let/totalAmount/N).
+        // 对外的「这一行算不算有效代码行」判据，比指纹通道更严一档：
+        // 指纹通道只要行长/词元数达标（`normalizeBytes` 末尾三条），这里再要求 ≥3 个
+        // 含字母或数字的词元，`a + b`（`I + I`，2 个）与 `return totalPayable`（`I I`）
+        // 因此对外为 nil。两档不一致是刻意的：把 3 词元规则并回指纹通道实测会把
+        // Homebrew 的重复行从 7820 掉到 1699（-78%），召回损失远大于噪声收益。
         let informativeTokens = result.split(separator: " ").filter { token in
             token.contains { $0.isLetter || $0.isNumber }
         }.count
@@ -40,15 +43,36 @@ enum DuplicationEngine {
 
     // MARK: - Analysis
 
-    /// 全库重复检测。
-    /// - `ratio` = 被重复片段覆盖的代码行数 / 全部代码行数（同一行只算一次，注释行与空行不进分母）。
-    /// - `blocks` 按覆盖行数降序取前 20 个，是 ratio 的**明细样本**；ratio 统计的是全部命中，
-    ///   不受 20 个上限约束（否则大仓库的重复率会被榜单截断人为压低）。
+    /// 全库重复检测。**统计口径（与 `CodeMetrics.codeLines` 对齐）：**
+    /// - 分母 `totalCodeLines` = 全部文件里 `kind == .code` 的行数之和，逐行等价于
+    ///   `Σ file.codeLineCount`（注释行与空行不进分母；归一化丢掉的样板行**仍算分母**，
+    ///   否则「全仓库都是 `}` 和空行」会被算成 0 行代码而虚报重复率）。
+    /// - 分子 `duplicatedCodeLines` = 所有命中克隆覆盖到的代码行的**并集**大小：
+    ///   同一行被多个块覆盖只计一次，因此恒有 `duplicatedCodeLines <= totalCodeLines`，
+    ///   且 `ratio == Double(duplicatedCodeLines) / Double(totalCodeLines)`（不做二次截断）。
+    /// - 克隆**包括同一文件内部的粘贴拷贝**（同一路径、不同 `startLine` 的两个片段），
+    ///   与 jscpd / PMD-CPD 的常规口径一致：文件内部复制粘贴同样是维护风险。
+    /// - `blocks` 是 ratio 的**明细样本**（按 `lineCount` 降序取前 20，且只收「至少新增一行
+    ///   未被覆盖的重复行」的块），ratio 统计全部命中、不受 20 上限约束，否则大仓库的
+    ///   重复率会被榜单截断人为压低。
+    /// - `block.lineCount` 是**归一化后的代码行数**（滑窗只吃代码行），不是源码首末行跨度：
+    ///   中间夹了注释/空行时，`startLine + lineCount` 会越过克隆的真实末行。
+    ///   冻结的 `DuplicatedFragment` 没有终点行字段，这是契约缺口（见工作日志）。
     static func analyze(_ files: [ScannedSourceFile]) -> DuplicationResult {
+        // 扫描器并发分类，`files` 的到达顺序每次运行都可能不同，而这里的贪婪锚点式扫描
+        // 结果依赖处理顺序（同一棵树的 ratio 会在 ±0.2% 之间抖）。先按路径规范化排序，
+        // 保证同一输入永远给出同样的 ratio / 同样的榜单，也让指纹预算留下「哪几个文件」是确定的。
+        let files = files.sorted { lhs, rhs in
+            if lhs.relativePath != rhs.relativePath { return lhs.relativePath < rhs.relativePath }
+            return lhs.url.path < rhs.url.path
+        }
+
         var totalCodeLines = 0
         for file in files {
             for line in file.lines where line.kind == .code { totalCodeLines += 1 }
         }
+        // 只有一个文件时整体不参评：冻结单测把「单文件 → ratio 0」写成了验收口径
+        // （`testUnrelatedFilesReportNoDuplication`），因此纯单文件项目的内部粘贴不计。
         guard files.count >= 2, totalCodeLines >= windowSize * 2 else {
             return DuplicationResult(ratio: 0, duplicatedCodeLines: 0, totalCodeLines: totalCodeLines, blocks: [])
         }
@@ -95,8 +119,9 @@ enum DuplicationEngine {
             }
             scan.beginFile(numbers: numbers, hashes: hashes)
 
-            // 每个窗口都登记指纹（带每指纹/每文件预算），只作为「这个 6 行在别的文件也出现过」
-            // 的配对索引；长克隆靠 hashesByFile 现场延长，不为同一克隆重复存多条记录。
+            // 每个窗口都登记指纹（带每指纹/每文件预算），只作为「这 6 行别处也出现过」的配对索引；
+            // 别处包括**同一文件的另一处**（内部粘贴）。长克隆靠 hashesByFile 现场延长，
+            // 不为同一克隆重复存多条记录。
             var windowStart = 0
             while windowStart < hashes.count {
                 scan.register(hash: hashes[windowStart], fileIndex: fileIndex, windowStart: windowStart)
@@ -104,9 +129,11 @@ enum DuplicationEngine {
             }
         }
 
-        // 逐文件顺序扫窗口：碰到一个尚未归入任何克隆、且在别的文件里也出现过的指纹，
-        // 就以它为锚点，挑延长得最长的配对把整段克隆吃掉 —— 相邻/重叠窗口由此合并成一个长块，
-        // 每个克隆只展开一次，整体代价与窗口数线性。
+        // 逐文件顺序扫窗口：碰到一个尚未归入任何克隆、且在别处（别的文件，或同一文件的另一段）
+        // 也出现过的指纹，就以它为锚点，挑延长得最长的配对把整段克隆吃掉 —— 相邻/重叠窗口由此
+        // 合并成一个长块，每个克隆只展开一次，整体代价与窗口数线性。
+        // 同文件配对额外要求两段窗口不重叠（`candidate.windowStart >= windowStart + windowSize`）：
+        // 否则相邻窗口永远互为克隆，整段代码会被自己「复制」成无限长。
         var blocks: [DuplicatedBlock] = []
         blocks.reserveCapacity(maxBlocks)
 
@@ -120,7 +147,8 @@ enum DuplicationEngine {
 
                 var best: Occurrence?
                 var bestExtent = -1
-                for candidate in group where candidate.fileIndex != fileIndex {
+                for candidate in group where candidate.fileIndex != fileIndex
+                    || candidate.windowStart >= windowStart + windowSize {
                     let extra = scan.growClone(from: windowStart, in: fileIndex,
                                                to: candidate.windowStart, in: candidate.fileIndex)
                     if extra > bestExtent {
@@ -159,6 +187,11 @@ enum DuplicationEngine {
                 return lhs.id < rhs.id
             }
         }
+        // 冻结的 `DuplicatedBlock.id` 只由「出现文件集合 + lineCount」拼成，两个长度相同的
+        // 不同克隆会撞同一个 id（SwiftUI ForEach 会报 duplicate identifiers 并错乱 diff）。
+        // 契约缺口不能改 Models，这里按 id 去重后再截断到 20：**只削明细榜单，不动 ratio**。
+        var seenIDs = Set<String>()
+        blocks = blocks.filter { seenIDs.insert($0.id).inserted }
         if blocks.count > maxBlocks { blocks.removeSubrange(maxBlocks...) }
 
         let ratio = totalCodeLines == 0
@@ -173,22 +206,31 @@ enum DuplicationEngine {
 
 // MARK: - Tuning thresholds
 
-/// 归一化后最短行长见 `DuplicationEngine.minSignificantRunes`
-/// 单词元行（`} catch {` 这类）至少要 8 字节才值得进窗口
-fileprivate let minSignificantBytes = 8
-/// 纯标点行（0 词元）必丢；1~2 词元的短行由上面 `minSignificantBytes` 那条规则处理，
+/// 指纹通道的最短归一化行长见 `DuplicationEngine.minNormalizedBytes`（当前 4 字节）。
+/// 单词元行（`} catch {` 这类）至少要 8 字节才值得进窗口 —— 这类样板行若进窗口，
+/// 任何两个文件都会撞出海量伪重复。
+fileprivate let minBytesForSingleTokenLine = 8
+/// 纯标点行（0 词元）必丢；1~2 词元的短行由上面 `minBytesForSingleTokenLine` 那条规则处理，
 /// 这样 `import Foundation`（`I I`）之类的两词一行不会被整片当成噪声误伤。
 fileprivate let minTokenCount = 1
 /// 单个指纹最多记录多少个片段（跨文件 + 同文件内部重复共用同一预算），超出即丢弃，内存换精度。
-/// 与 `maxFragmentsPerBlock` 取同值：记下的片段都会出现在明细里，榜单与统计不打架。
-fileprivate let maxOccurrencesPerHash = 6
-/// 同一份指纹在单个文件里最多记几个片段（再多就是同一次拷贝的重复展开）
-fileprivate let maxRunsPerFileAndHash = 2
+/// 这是**配对索引**的预算，不是榜单预算（榜单上限是下面 `maxFragmentsPerBlock`）：
+/// 一个片段被记下来，只保证「它能当锚点的配对候选」，能不能进某个块另说。
+/// 取 12 / 每文件 4 的实测依据（Homebrew 20.4 万代码行）：6/2 时 ratio 9.88%、12/4 时 10.64%、
+/// 64/16 时 10.96%（放开预算只多 2.9% 相对量），耗时 89 → 94ms、峰值内存 62MB 不变；
+/// 91200 行全等文件的极端树 6/2 与 256/64 的 ratio 完全相同（256/64 慢 30%），故不取更大值。
+fileprivate let maxOccurrencesPerHash = 12
+/// 同一份指纹在单个文件里最多记几个片段：内部粘贴 2 处以上时要留够互配余地
+/// （同文件配对要求两段不重叠，见 `analyze` 的锚点循环），否则第三次以后的拷贝会被挤掉。
+fileprivate let maxRunsPerFileAndHash = 4
 /// 一个块至少要有一到二成行逐字一致才算「拷贝粘贴」（6 行的最小块 = ≥2 行原文相同）。
 /// 低于此值说明两边只是 token 形状相同，视图上会显示成「相似度 0% 的 35 行重复」这种没意义的答案。
+/// Homebrew 实测：阈值取 0 时重复行 17372、取 0.2 时 7820（口径：跨文件）、取 0.4 时 6496 ——
+/// 0.2 保留了绝大部分真克隆又砍掉一半纯形状巧合，故维持 0.2。
 fileprivate let minCloneSimilarity = 0.2
 fileprivate let maxFragmentsPerBlock = 6
 fileprivate let runsCapacityCap = 300_000
+
 
 // MARK: - Byte helpers
 
@@ -307,7 +349,22 @@ fileprivate struct LineSyntax {
     var lineCommentPrefixes: [[UInt8]] = []
     var blockStart: [UInt8]?
     var blockEnd: [UInt8]?
+    /// 没有任何行注释前缀的语言（Markdown / HTML / XML / Vue / CSS / JSON）都是
+    /// 「正文型」文件：这种语言里一行纯散文（只有词元、没有代码结构符）不该被当成代码参与指纹。
+    var needsStructureByte = false
 }
+
+/// 「代码结构符」：出现其一才算结构/语句行，而不是自然语言句子。
+/// 刻意不含 `,` `.` `'` `-` —— 散文里满地都是。
+private let structureBytes: Set<UInt8> = [
+    0x3D,                                     // =
+    0x28, 0x29,                               // ( )
+    0x7B, 0x7D,                               // { }
+    0x5B, 0x5D,                               // [ ]
+    0x3C, 0x3E,                               // < >
+    0x3A, 0x3B,                               // : ;
+    0x7C, 0x26, 0x2F,                         // | & /
+]
 
 private let singleQuoteDelimiters: [[UInt8]] = [[0x22], [0x27], [0x60]]
 
@@ -338,7 +395,8 @@ fileprivate func buildLineSyntax(language: String) -> LineSyntax {
     return LineSyntax(stringDelimiters: delimiters,
                       lineCommentPrefixes: prefixes,
                       blockStart: start,
-                      blockEnd: end)
+                      blockEnd: end,
+                      needsStructureByte: prefixes.isEmpty)
 }
 
 // MARK: - Line normalization
@@ -366,12 +424,17 @@ fileprivate func normalizeBytes(_ text: String, syntax: LineSyntax) -> [UInt8]? 
             continue
         }
 
-        let lastByte: UInt8 = out.isEmpty ? spaceByte : out[out.count - 1]
+        // 「是不是又一个词元的开头」只能看**源码里的前一个字节**：归一化输出会折叠空白，
+        // 于是 `x = 1 // note` 里 `//` 的前一个输出字节是 `N`（标识符字符），按输出口径判定
+        // 就会漏掉行内注释、把注释文字折成 `// I` 留在指纹里（两份逐字相同的代码只要注释
+        // 不同就撞不上，是 type-1 漏报）。第 0 列视作空白，因此整行注释照样归 nil。
+        let prevByte: UInt8 = i == 0 ? spaceByte : src[i - 1]
 
         // 行注释从它在行内出现的位置起整段截断（含第 0 列，注释行因此归一化为 nil）。
         // 之所以不用担心 `#include`：C 系语言的行注释前缀是 `//`，目录里没有任何语言把 `#` 之外的
-        // 预处理符号列为前缀；只有 PHP 的 `#[属性]` 会被当注释丢掉，属于已知精度损失。
-        if !isIdentByte(lastByte),
+        // 预处理符号列为前缀；只有 PHP 的 `#[属性]` 会被当注释丢掉，属于已知精度损失
+        // （实际上这类行在上游 `SourceFileClassifier` 就被判成注释行，压根进不到这里，见汇报）。
+        if !isIdentByte(prevByte),
            syntax.lineCommentPrefixes.contains(where: { hasPrefix($0, at: i, in: src) }) {
             break
         }
@@ -403,7 +466,10 @@ fileprivate func normalizeBytes(_ text: String, syntax: LineSyntax) -> [UInt8]? 
             continue
         }
 
-        let startsNumber = !isIdentByte(lastByte)
+        // 数字的开头同样按源码上下文判定：`foo bar 123` 里的 `123` 前一个是空白，
+        // 就该折成 `N` 而不是被当成标识符续字符折成 `I`（否则「数字」与「标识符」在指纹里
+        // 撞成同一个词元，会造出「形状恰好相同」的伪克隆）。
+        let startsNumber = !isIdentByte(prevByte)
             && (isDigitByte(b) || (b == dotByte && i + 1 < count && isDigitByte(src[i + 1])))
         if startsNumber {
             if pendingSpace { out.append(spaceByte) }
@@ -432,15 +498,20 @@ fileprivate func normalizeBytes(_ text: String, syntax: LineSyntax) -> [UInt8]? 
     }
 
     // 阈值（全部只看归一化后的产物，因此与标识符长短无关）：
-    // 1. 长度 < `minSignificantRunes`(4) 的行一律丢弃：`}`、`);`、`})`、`return keep`(`I I`)；
+    // 1. 长度 < `minNormalizedBytes`(4) 的行一律丢弃：`}`、`);`、`})`、`return keep`(`I I`)；
     // 2. 纯标点（0 词元）丢弃：`}) {`、`];`；
-    // 3. 只有 1 个词元且长度 < `minSignificantBytes`(8) 的行丢弃：`} catch {`、`} else {`、`foo();`。
-    //    这类样板行若进窗口，任何两个文件都会撞出海量伪重复。
-    if out.count < DuplicationEngine.minSignificantRunes { return nil }
+    // 3. 只有 1 个词元且长度 < `minBytesForSingleTokenLine`(8) 的行丢弃：`} catch {`、`} else {`、`foo();`。
+    // 4. 正文型语言（没有行注释前缀：Markdown / HTML / XML / Vue / CSS / JSON）里，一行必须
+    //    带个代码结构符才算数，否则 README 里抄来的一段散文会被当成「重复代码」上报
+    //    （实测：两份 README 共用一段正文，改前 ratio 81.8%、9 行「重复块」；改后 0%）。
+    // 对外的 `normalize` 在此之上还叠一条「≥3 个含字母数字的词元」，两档差别的说明见那里。
+    if out.count < DuplicationEngine.minNormalizedBytes { return nil }
     if tokenRuns < minTokenCount { return nil }
-    if tokenRuns < 2 && out.count < minSignificantBytes { return nil }
+    if tokenRuns < 2 && out.count < minBytesForSingleTokenLine { return nil }
+    if syntax.needsStructureByte, !out.contains(where: { structureBytes.contains($0) }) { return nil }
     return out
 }
+
 
 // MARK: - Window fingerprint
 
@@ -535,7 +606,8 @@ fileprivate struct ScanState {
         return extra
     }
 
-    /// 同一锚点指纹在其它文件里的出现位置，只要整段窗口序列都对得上，就并进同一个块。
+    /// 同一锚点指纹在**别处**的出现位置（别的文件，或同一文件里不重叠的另一段），
+    /// 只要整段窗口序列都对得上，就并进同一个块。
     func extraMembers(of hash: UInt64, anchor: CloneFragment, extent: Int) -> [CloneFragment] {
         guard let group = registered[hash] else { return [] }
         guard anchor.fileIndex >= 0, anchor.fileIndex < hashesByFile.count else { return [] }
@@ -544,7 +616,9 @@ fileprivate struct ScanState {
         var result: [CloneFragment] = []
         result.reserveCapacity(maxFragmentsPerBlock)
         for item in group {
-            guard item.fileIndex != anchor.fileIndex else { continue }
+            // 与锚点循环同样的「同文件必须不重叠」约束，否则会把相邻窗口当成第二份拷贝。
+            if item.fileIndex == anchor.fileIndex,
+               item.windowStart < anchor.windowStart + DuplicationEngine.windowSize { continue }
             guard result.count < maxFragmentsPerBlock else { break }
             guard item.fileIndex >= 0, item.fileIndex < hashesByFile.count else { continue }
             let other = hashesByFile[item.fileIndex]
@@ -567,17 +641,15 @@ fileprivate struct ScanState {
     mutating func commitClone(anchor: CloneFragment, partner: CloneFragment, members: [CloneFragment],
                               extent: Int, files: [ScannedSourceFile]) -> DuplicatedBlock? {
         var picked: [CloneFragment] = [anchor]
-        var seenFiles = [anchor.fileIndex]
+        var seenFragments = Set<String>(["\(anchor.fileIndex):\(anchor.windowStart)"])
         for candidate in [partner] + members {
             guard candidate.fileIndex >= 0, candidate.fileIndex < files.count else { continue }
-            guard seenFiles.contains(candidate.fileIndex) == false else { continue }
             guard candidate.windowStart >= 0,
                   candidate.windowStart < numbersByFile[candidate.fileIndex].count else { continue }
-            seenFiles.append(candidate.fileIndex)
+            // 同一文件里的不同片段是合法的第二次拷贝，只按「文件 + 起点窗口」去重。
+            guard seenFragments.insert("\(candidate.fileIndex):\(candidate.windowStart)").inserted else { continue }
             picked.append(candidate)
         }
-        // 块必须跨文件命中（验收口径 + 冻结单测断言）：只在一个文件里自我重复的片段不成块，
-        // 也不计入 ratio，否则「一个文件抄了自己三遍」会被当成拷贝粘贴上报。
         guard picked.count >= 2 else { return nil }
 
         let size = DuplicationEngine.windowSize
@@ -609,6 +681,14 @@ fileprivate struct ScanState {
             return nil
         }
 
+        // 「零新增覆盖」的块直接丢掉（但窗口照例消费掉）：同一族克隆常常被不同锚点各报一次，
+        // 长的先上榜、短的后上榜，短块的所有行早已被长块覆盖。留着它既不改变 ratio，
+        // 又白占 20 个明细位里的一格，榜单里还会出现两个几乎一样的块。
+        if kept.allSatisfy({ fragment in addsNoCoverage(fragment, extent: extent) }) {
+            for fragment in kept { markConsumed(fragment, extent: extent) }
+            return nil
+        }
+
         for fragment in kept {
             markConsumed(fragment, extent: extent)
             markCoverage(fragment, extent: extent)
@@ -616,6 +696,20 @@ fileprivate struct ScanState {
         return DuplicatedBlock(occurrences: occurrences,
                                lineCount: lineCount,
                                similarity: min(max(similarity, 0), 1))
+    }
+
+    /// 这段片段覆盖的窗口是不是**全部**已经被别的块覆盖过（用于丢掉零新增覆盖的冗余块）。
+    private func addsNoCoverage(_ fragment: CloneFragment, extent: Int) -> Bool {
+        guard fragment.fileIndex >= 0, fragment.fileIndex < covered.count else { return false }
+        let flags = covered[fragment.fileIndex]
+        var index = max(fragment.windowStart, 0)
+        let stop = min(fragment.windowStart + extent + DuplicationEngine.windowSize, flags.count)
+        guard index < stop else { return false }
+        while index < stop {
+            if flags[index] == false { return false }
+            index += 1
+        }
+        return true
     }
 
     private func fragmentOf(_ fragment: CloneFragment, files: [ScannedSourceFile]) -> DuplicatedFragment {

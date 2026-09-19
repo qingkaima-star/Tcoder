@@ -80,9 +80,9 @@ struct SystemSampler: Sendable {
                 previous: previous.diskReadBytes, current: current.diskReadBytes, elapsed: elapsed)
             snapshot.diskWriteBytesPerSecond = Self.bytesPerSecond(
                 previous: previous.diskWriteBytes, current: current.diskWriteBytes, elapsed: elapsed)
-            snapshot.networkInBytesPerSecond = Self.bytesPerSecond(
+            snapshot.networkInBytesPerSecond = Self.bytesPerSecondHandling32BitWrap(
                 previous: previous.networkInBytes, current: current.networkInBytes, elapsed: elapsed)
-            snapshot.networkOutBytesPerSecond = Self.bytesPerSecond(
+            snapshot.networkOutBytesPerSecond = Self.bytesPerSecondHandling32BitWrap(
                 previous: previous.networkOutBytes, current: current.networkOutBytes, elapsed: elapsed)
         }
 
@@ -144,6 +144,25 @@ extension SystemSampler {
         guard rate.isFinite, rate >= 0 else { return 0 }
         let ceiling = 1e18  // 远超真实 NVMe/网卡带宽，纯防 Double→UInt64 转换溢出
         if rate >= ceiling { return UInt64.max }
+        return UInt64(rate)
+    }
+
+    /// 高于此值就当不可能是真实网卡流量（约 400 Gb/s），用来识破假回绕。
+    static let plausibleMaxBytesPerSecond: Double = 50_000_000_000
+
+    /// 网卡累计量在本进程只有 32 位精度（见 `networkBytes`），多接口求和等价于一个 32 位计数器，
+    /// 每 4 GiB 归零一次。这里把跨零点的两帧按「补一个 2^32」还原真实增量；
+    /// 还原后的速率不合理（比如接口被重建）才退回 0，而不是每几小时冒一个假 0。
+    static func bytesPerSecondHandling32BitWrap(previous: UInt64, current: UInt64,
+                                                elapsed: TimeInterval) -> UInt64 {
+        guard elapsed > 0, elapsed.isFinite else { return 0 }
+        if current >= previous {
+            return bytesPerSecond(previous: previous, current: current, elapsed: elapsed)
+        }
+        let wrap = UInt64(UInt32.max) + 1
+        guard previous <= wrap else { return 0 }
+        let rate = Double((wrap - previous) + current) / elapsed
+        guard rate.isFinite, rate >= 0, rate <= plausibleMaxBytesPerSecond else { return 0 }
         return UInt64(rate)
     }
 
@@ -257,57 +276,34 @@ enum BlockStorageSampler {
 // MARK: - 网络累计字节
 
 private extension SystemSampler {
-    /// 全机网卡累计字节数，走 `sysctl(NET_RT_IFLIST2)` —— 与 `netstat -ib` / `top` 同源。
+    /// 全机网卡累计字节数（排除 lo0）。
     ///
-    /// 为什么不用 getifaddrs：AF_LINK 的 `ifa_data` 实际指向 32 位 `if_data`，
-    /// 单接口每 4 GiB 归零一次。本机 en0 真值 51,379,793,857 字节，用 `if_data` 读到的是
-    /// 4,418,535,305（截断值），把它当累计量做两次差就会周期性算出 0 甚至负数；
-    /// 强转成 `if_data64` 读同一块内存更糟（实测入向直接读出 0）。
-    /// `if_msghdr2.ifm_data` 才是内核给的 64 位计数。
+    /// 已实测确认的限制：**本进程拿到的字节计数只有 32 位精度**。
+    /// `getifaddrs` 的 AF_LINK `ifa_data` 是 32 位 `if_data`；换成 `netstat` 同源的
+    /// `sysctl(NET_RT_IFLIST2)` 后，编译出的二进制在 `if_msghdr2.ifm_data.ifi_ibytes`
+    /// （偏移 96）读到的仍是 `00 6c b8 f7 00 00 00 00` 这种高 32 位为零的形态 ——
+    /// 同一时刻 en0 真值 51,407,925,337，我们只能读到 4,156,058,624（低 32 位）。
+    /// 既然两条路精度相同，保留实现更简单、不做裸内存遍历的 getifaddrs。
+    /// 截断的后果由 `bytesPerSecondHandling32BitWrap` 处理：单接口每 4 GiB 归零一次，
+    /// 跨零点那一帧补一个 2^32 还原真实增量，还原后速率不合理才退化为 0。
     static func networkBytes() -> (inbound: UInt64, outbound: UInt64) {
-        var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0]
-        var length = 0
-        guard sysctl(&mib, 6, nil, &length, nil, 0) == 0, length > 0 else { return (0, 0) }
-        // 接口数在两次 sysctl 之间可能增加，多留一屏余量，不够时本轮直接放弃。
-        var buffer = Data(count: length + 8192)
-        let written = buffer.withUnsafeMutableBytes { raw -> Int32 in
-            sysctl(&mib, 6, raw.baseAddress, &length, nil, 0)
-        }
-        guard written == 0, length > 0, length <= buffer.count else { return (0, 0) }
+        var first: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&first) == 0 else { return (0, 0) }
+        defer { freeifaddrs(first) }
 
         var inbound: UInt64 = 0
         var outbound: UInt64 = 0
-        let infoSpan = MemoryLayout<if_msghdr2>.stride
-        buffer.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
-            guard let base = raw.baseAddress else { return }
-            var offset = 0
-            // 报文长度与类型是整条路由消息的共同前缀（u_short + u_char + u_char），
-            // 而 NET_RT_IFLIST2 里除了 160 字节的 IFINFO2 还混着 60 字节左右的地址消息，
-            // 所以只能先按 4 字节前缀取长度，够长才当成 if_msghdr2 解析。
-            while offset + 4 <= length {
-                let cursor = base.advanced(by: offset)
-                let messageLength = Int(cursor.loadUnaligned(as: u_short.self))
-                guard messageLength >= 4, offset + messageLength <= length else { break }
-                let messageType = cursor.loadUnaligned(fromByteOffset: 3, as: UInt8.self)
-                if Int32(messageType) == RTM_IFINFO2, messageLength >= infoSpan {
-                    let info = cursor.loadUnaligned(as: if_msghdr2.self)
-                    if !isLoopbackInterface(info.ifm_index) {
-                        inbound &+= info.ifm_data.ifi_ibytes
-                        outbound &+= info.ifm_data.ifi_obytes
-                    }
-                }
-                offset += messageLength
-            }
+        var cursor = first
+        while let entry = cursor?.pointee {
+            cursor = entry.ifa_next
+            // lo0 是回环，本机 247 GiB，算进去会把流量凭空翻几十倍。
+            guard let address = entry.ifa_addr, Int32(address.pointee.sa_family) == AF_LINK else { continue }
+            if let name = entry.ifa_name, String(cString: name) == "lo0" { continue }
+            guard let data = entry.ifa_data else { continue }
+            let stats = data.assumingMemoryBound(to: if_data.self).pointee
+            inbound &+= UInt64(stats.ifi_ibytes)
+            outbound &+= UInt64(stats.ifi_obytes)
         }
         return (inbound, outbound)
-    }
-
-    /// lo0 是回环，算进去会凭空造出一倍流量；名字查不到时宁可保留该接口，
-    /// 免得静默漏掉真网卡（差一个接口就是差几 GB）。
-    static func isLoopbackInterface(_ index: u_short) -> Bool {
-        guard index > 0 else { return true }
-        var nameBuffer = [CChar](repeating: 0, count: Int(IF_NAMESIZE))
-        guard if_indextoname(UInt32(index), &nameBuffer) != nil else { return false }
-        return String(cString: nameBuffer) == "lo0"
     }
 }

@@ -1,4 +1,17 @@
+# 构建产物
 .build/
 dist/
-*.xcodeproj
+*.o
+*.swiftpm/
+Package.resolved
+
+# 过程遗留
+.inflight/
 .DS_Store
+
+# 本地凭据（永不入库）
+.env
+.env.*
+*.pem
+*.p12
+*.jks

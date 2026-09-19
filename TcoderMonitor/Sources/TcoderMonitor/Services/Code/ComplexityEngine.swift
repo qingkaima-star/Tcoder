@@ -21,6 +21,8 @@ enum ComplexityEngine {
     private static let maxCandidatesPerFile = 20_000
     /// 多行签名时向后找第一个 `{` 的最大跨度
     private static let maxSignatureLookahead = 8
+    /// 缩进签名的跨行窗口：只在「括号还没配平」时往后走，配平即停，放大窗口没有误并风险
+    private static let maxSignatureContinuationLines = 64
     /// 超过该长度的行视为压缩产物/数据行，不做签名匹配
     private static let maxLineLengthForMatch = 4_000
     /// 无括号语言的函数体最大跨度
@@ -66,13 +68,19 @@ enum ComplexityEngine {
                     signatureEnd = span.brace
                 }
             case .indentation:
-                closing = indentedEnd(start: line, src.cleaned)
+                signatureEnd = multiLineSignatureEnd(start: line, src.cleaned, closingChars: [":"])
+                closing = indentedEnd(start: line, signatureEnd: signatureEnd, cleaned: src.cleaned)
             case .rubyEnd:
+                // Ruby 的边界靠同级 `end` 判定，不受跨行签名影响；这里只把签名行对齐，
+                // 好让 `def foo(\n a,\n b\n)` 这种跨行参数表也数得出参数。
+                signatureEnd = multiLineSignatureEnd(start: line, src.cleaned, closingChars: [")"])
                 closing = rubyEnd(start: line, src.cleaned)
             case .none:
                 break
             }
             guard let endLine = closing else { line += 1; continue }
+            // 防御：签名行绝不能越过闭合行，否则下面的 line...signatureEnd 区间会当场 trap
+            if signatureEnd > endLine { signatureEnd = endLine }
 
             let count = endLine - line + 1
             if count >= minFunctionLines, count <= maxFunctionLines {
@@ -101,7 +109,13 @@ enum ComplexityEngine {
     /// 从签名里括号内的参数列表推断参数个数。
     static func parameterCount(from signature: String) -> Int {
         let chars = Array(signature)
-        guard let open = chars.firstIndex(of: "(") else { return 0 }
+        // Objective-C 的关键字选择器不是「一个括号里的逗号列表」，先按形状分流
+        if let objc = objectiveCSelectorParameterCount(chars) { return objc }
+        guard var open = chars.firstIndex(of: "(") else { return 0 }
+        // Go 方法的接收者括号排在参数表之前，不跳过的话每个方法都被算成 1 个参数
+        if isGoReceiverParen(chars, open: open), let next = nextParenOpen(chars, after: open) {
+            open = next
+        }
         var depth = 0
         var angle = 0
         var commas = 0
@@ -147,19 +161,109 @@ enum ComplexityEngine {
         return commas + 1
     }
 
+    /// `func (recv) name(` —— 只有 Go 方法满足这个形状：左括号之前仅仅是一个 `func`，
+    /// 右括号之后紧跟「标识符 + 左括号」。Swift 的 `func f(a: Int) -> (Int, String)`
+    /// （返回类型是元组）、C++ 的 `size() const`、JS 的 `function (a)` 都对不上后半截，
+    /// 因此不会被误判成接收者。
+    private static func isGoReceiverParen(_ chars: [Character], open: Int) -> Bool {
+        guard open < chars.count else { return false }
+        let head = String(chars[0..<open]).trimmingCharacters(in: .whitespaces)
+        guard head == "func" else { return false }
+        guard let close = matchingClose(chars, open: open) else { return false }
+        var index = skipSpaces(chars, from: close + 1)
+        guard index < chars.count, isIdentifierCharacter(chars[index]) else { return false }
+        while index < chars.count, isIdentifierCharacter(chars[index]) { index += 1 }
+        index = skipSpaces(chars, from: index)
+        return index < chars.count && chars[index] == "("
+    }
+
+    private static func nextParenOpen(_ chars: [Character], after: Int) -> Int? {
+        guard let close = matchingClose(chars, open: after) else { return nil }
+        var index = close + 1
+        while index < chars.count {
+            if chars[index] == "(" { return index }
+            index += 1
+        }
+        return nil
+    }
+
+    private static func skipSpaces(_ chars: [Character], from: Int) -> Int {
+        var index = from
+        while index < chars.count, chars[index] == " " || chars[index] == "\t" { index += 1 }
+        return index
+    }
+
+    /// 第 open 个左括号配平的右括号位置（括号/方括号/花括号一起算深度，字符串内容跳过）。
+    private static func matchingClose(_ chars: [Character], open: Int) -> Int? {
+        guard open < chars.count, chars[open] == "(" else { return nil }
+        var depth = 0
+        var index = open
+        var quote: Character?
+        while index < chars.count {
+            let c = chars[index]
+            if let q = quote {
+                if c == "\\", index + 1 < chars.count { index += 2; continue }
+                if c == q { quote = nil }
+                index += 1
+                continue
+            }
+            switch c {
+            case "\"", "'": quote = c
+            case "(", "[", "{": depth += 1
+            case ")", "]", "}":
+                depth -= 1
+                if depth <= 0 { return index }
+            default: break
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    /// Objective-C 方法 `- (instancetype)initWithName:(NSString *)name flag:(BOOL)flag`：
+    /// 第一个括号是**返回类型**，参数个数等于关键字选择器里顶层 `:` 的个数。
+    /// 只对 `-`/`+` 开头、紧跟返回类型括号、再跟标识符的形状生效，其余返回 nil 走通用逻辑。
+    private static func objectiveCSelectorParameterCount(_ chars: [Character]) -> Int? {
+        var index = skipSpaces(chars, from: 0)
+        guard index < chars.count, chars[index] == "-" || chars[index] == "+" else { return nil }
+        index = skipSpaces(chars, from: index + 1)
+        guard index < chars.count, chars[index] == "(" else { return nil }
+        guard let close = matchingClose(chars, open: index) else { return nil }
+        index = skipSpaces(chars, from: close + 1)
+        // 选择器必须以标识符开头（`- (void)foo:`）；`- (int)a - (int)b` 这类表达式不是签名
+        guard index < chars.count, chars[index].isLetter || chars[index] == "_" else { return nil }
+        var depth = 0
+        var colons = 0
+        while index < chars.count {
+            let c = chars[index]
+            if c == "(" || c == "[" || c == "{" {
+                depth += 1
+            } else if c == ")" || c == "]" || c == "}" {
+                if depth > 0 { depth -= 1 }
+            } else if c == ":", depth == 0 {
+                colons += 1
+            }
+            index += 1
+        }
+        return colons
+    }
+
     // MARK: Complexity
 
     /// 所有可能出现在关键字正则里的词；具体语言再按 branchKeywords 取子集。
+    /// 注意 `require` 不在列：它在任何受支持语言里都不是判定构造
+    /// （JS/TS 的 `require("x")` 是模块导入、PHP/Ruby 的是 include），
+    /// 早先收进关键字会让每个 `const fs = require("fs")` 凭空 +1 复杂度。
     private static let allBranchKeywords: Set<String> = [
         "else if", "if", "elif", "elseif", "foreach", "for", "while", "until",
-        "case", "when", "catch", "except", "rescue", "guard", "require",
+        "case", "when", "catch", "except", "rescue", "guard",
         "loop", "match", "repeat", "and", "or",
     ]
 
     /// 单一关键字正则：一次匹配 + 关键字集合过滤，比按语言现编译正则快得多。
     private static let branchKeywordExpression = try? NSRegularExpression(
         pattern: "\\b(?:else[ \\t]+if|elseif|elif|foreach|for|while|until|case|when|catch|except"
-            + "|rescue|guard|require|loop|match|repeat|and|or|if)\\b",
+            + "|rescue|guard|loop|match|repeat|and|or|if)\\b",
         options: []
     )
 
@@ -167,8 +271,12 @@ enum ComplexityEngine {
         var total = 1
         let keywords = profile.branchKeywords.isEmpty ? allBranchKeywords : profile.branchKeywords
         for rawLine in lines {
-            // 预处理指令行（#if DEBUG / #include）不计入，避免平台分支被当成逻辑分支
-            if rawLine.isEmpty || rawLine.first == "#" { continue }
+            // 预处理指令行（#if DEBUG / #include）不计入，避免平台分支被当成逻辑分支。
+            // 必须跳过行首空白再判断：真实代码里的 `#if` 绝大多数带缩进
+            // （Swift 的 #if os(...) 在函数体里、ObjC 的 #ifdef 在方法里），
+            // 只看 first 的话 `    #if A && B` 会凭空给函数加一次 if。
+            guard let head = rawLine.firstIndex(where: { $0 != " " && $0 != "\t" }) else { continue }
+            if rawLine[head] == "#" { continue }
             if let re = branchKeywordExpression {
                 let text = rawLine as NSString
                 let matches = re.matches(in: rawLine, options: [], range: NSRange(location: 0, length: text.length))
@@ -247,40 +355,6 @@ enum ComplexityEngine {
     private static func isIdentifierCharacter(_ c: Character) -> Bool {
         c.isLetter || c.isNumber || c == "_"
     }
-
-#if CE_DEBUG
-    static func ceDebug(_ line: String, language: String) -> String {
-        let profile = profile(for: language)
-        var out = "patterns=\(profile.patterns.count) family=\(profile.family) paren=\(profile.parenOnEveryPattern)\n"
-        for (i, pattern) in profile.patterns.enumerated() {
-            let text = line as NSString
-            let range = NSRange(location: 0, length: text.length)
-            let m = pattern.expression.firstMatch(in: line, options: [], range: range)
-            let g1 = m.flatMap { $0.range(at: 1).location == NSNotFound ? nil : text.substring(with: $0.range(at: 1)) } ?? "nil"
-            out += "  [\(i)] groups=\(pattern.expression.numberOfCaptureGroups) match=\(m != nil) g1=\(g1) pat=\(pattern.expression.pattern)\n"
-        }
-        out += "  name=\(matchSignature(line, profile) ?? "nil")"
-        return out
-    }
-#endif
-
-#if CE_DEBUG
-    static func ceDumpPatterns() {
-        for language in ["Swift", "Java", "Kotlin", "TypeScript", "JavaScript", "Python", "Go", "Rust",
-                         "C", "C++", "Objective-C", "Ruby", "PHP", "Dart", "Gradle", "Shell", "Scala", "Vue"] {
-            let profile = self.profile(for: language)
-            print("\n[\(language)] family=\(profile.family) patterns=\(profile.patterns.count)")
-            for pattern in profile.patterns {
-                let text = pattern.expression.pattern
-                let open = text.filter { $0 == "(" }.count
-                let close = text.filter { $0 == ")" }.count
-                let ob = text.filter { $0 == "[" }.count
-                let cb = text.filter { $0 == "]" }.count
-                print("  groups=\(pattern.expression.numberOfCaptureGroups) parenBal=\(open)-\(close) bracketBal=\(ob)-\(cb) prefix=\(pattern.namePrefix ?? "-") \(text)")
-            }
-        }
-    }
-#endif
 
     // MARK: Signature matching
 
@@ -391,10 +465,50 @@ enum ComplexityEngine {
         return nil
     }
 
-    private static func indentedEnd(start: Int, _ cleaned: [String]) -> Int? {
+    /// 多行签名的结束行（缩进族 Python + Ruby 都用到）：
+    /// Python `def f(` 之后参数逐行铺开时，收尾的 `):` 往往缩进得和 `def` 同级甚至更靠外，
+    /// 按缩进扫块会在签名中间截断（实测 67 行的函数被报成 2 行、CC 从 16 掉到 1、参数从 6 掉到 0）。
+    /// 规则：括号配平回到 0 **且**该行以语言的签名收尾符结尾（Python 是 `:`、Ruby 是 `)`）。
+    /// 单行签名当场返回 start，行为与修复前完全一致。
+    /// 关键约束：这两种语言只在括号没配平时才换行，所以一旦配平而收尾符又不匹配
+    /// （`def f(a): return 1` 这种一行式函数）必须立刻退回 start，
+    /// 绝不能继续往后找——那会把下一条语句整段并进本函数签名。
+    private static func multiLineSignatureEnd(start: Int, _ cleaned: [String], closingChars: [Character]) -> Int {
+        let upper = min(cleaned.count - 1, start + maxSignatureContinuationLines)
+        var depth = 0
+        var cursor = start
+        while cursor <= upper {
+            depth += bracketDelta(cleaned[cursor])
+            if depth <= 0 {
+                // whitespacesAndNewlines：调用方偶尔会传带 \r 的行（CRLF 直通），
+                // 只裁空白的话收尾符判定会被行尾 \r 打断
+                guard let last = cleaned[cursor].trimmingCharacters(in: .whitespacesAndNewlines).last,
+                      closingChars.contains(last) else { return start }
+                return cursor
+            }
+            cursor += 1
+        }
+        return start
+    }
+
+    private static func bracketDelta(_ text: String) -> Int {
+        var delta = 0
+        for c in text {
+            switch c {
+            case "(", "[", "{": delta += 1
+            case ")", "]", "}": delta -= 1
+            default: break
+            }
+        }
+        return delta
+    }
+
+    /// 从签名结束行的下一行起，取到「缩进重新回到 def 那一行或更靠外」为止的整块。
+    /// signatureEnd 之后一行缩进体都没有（抽象声明 / 误匹配）就不算函数，退回 nil。
+    private static func indentedEnd(start: Int, signatureEnd: Int, cleaned: [String]) -> Int? {
         let indent = indentation(of: cleaned[start])
-        var lastBody = start
-        var cursor = start + 1
+        var lastBody = signatureEnd
+        var cursor = signatureEnd + 1
         while cursor < cleaned.count, cursor - start <= maxBodyLookahead {
             let line = cleaned[cursor]
             if line.first == nil { cursor += 1; continue }
@@ -402,7 +516,7 @@ enum ComplexityEngine {
             lastBody = cursor
             cursor += 1
         }
-        return lastBody == start ? nil : lastBody
+        return lastBody == signatureEnd ? nil : lastBody
     }
 
     /// Ruby：只有和 `def` 同级（或更靠外）的 `end` 才是函数收尾。
@@ -768,9 +882,10 @@ enum ComplexityEngine {
         "Swift", "Kotlin", "TypeScript", "JavaScript", "Vue", "Dart",
     ]
 
-    /// 每种语言只统计它真正存在的判定关键字，避免 `require`/`when`/`match` 在别的语言里凑数。
+    /// 每种语言只统计它真正存在的判定关键字，避免 `when`/`match`/`until` 在别的语言里凑数。
+    /// `require` 已被整体移出关键字（见 allBranchKeywords），CommonJS 导入行不再算分支。
     private static func branchKeywords(for language: String) -> Set<String> {
-        let common: Set<String> = ["if", "else if", "for", "while", "until", "case", "catch", "require"]
+        let common: Set<String> = ["if", "else if", "for", "while", "until", "case", "catch"]
         switch language {
         case "Swift":
             return ["if", "else if", "for", "while", "case", "catch", "guard"]
@@ -787,7 +902,7 @@ enum ComplexityEngine {
         case "Ruby":
             return ["if", "elsif", "for", "while", "until", "case", "when", "rescue", "and", "or"]
         case "PHP":
-            return ["if", "elseif", "foreach", "for", "while", "until", "case", "catch", "require"]
+            return ["if", "elseif", "foreach", "for", "while", "until", "case", "catch"]
         case "Shell":
             return ["if", "elif", "for", "while", "until", "case"]
         case "Scala":

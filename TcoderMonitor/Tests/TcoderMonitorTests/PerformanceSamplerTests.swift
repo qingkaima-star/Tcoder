@@ -242,6 +242,32 @@ final class PerformanceSamplerTests: XCTestCase {
                        "没有增量时必须是 0")
     }
 
+    // MARK: - 3b. 网卡 32 位计数回绕
+
+    func testWrapHandlingRestoresDeltaAcrossThe32BitBoundary() {
+        let wrapPoint = UInt64(UInt32.max) + 1
+        // 上一帧 4_290_000_000，本帧跨 4 GiB 归零后剩 5_000_000 → 真实增量 = (2^32 - 前) + 后
+        let rate = SystemSampler.bytesPerSecondHandling32BitWrap(
+            previous: 4_290_000_000, current: 5_000_000, elapsed: 2)
+        let expected = Double((wrapPoint - 4_290_000_000) + 5_000_000) / 2
+        XCTAssertEqual(Double(rate), expected, accuracy: 1, "跨零点必须补一个 2^32 还原增量，而不是报假 0")
+        XCTAssertGreaterThan(rate, 0)
+    }
+
+    func testWrapHandlingRejectsImplausibleJumpAndKeepsPlainDifference() {
+        // previous 很小却突然归零 → 补 2^32 会得出 4 TB/ms 的假速率，判定为计数器重置，退回 0。
+        XCTAssertEqual(
+            SystemSampler.bytesPerSecondHandling32BitWrap(
+                previous: 1_000, current: 0, elapsed: 0.001),
+            0, "还原出的速率不合理时必须退回 0")
+        XCTAssertEqual(SystemSampler.bytesPerSecondHandling32BitWrap(previous: 1_000, current: 5_000, elapsed: 2),
+                       2_000, "current >= previous 时等价于普通 bytesPerSecond")
+        XCTAssertEqual(SystemSampler.bytesPerSecondHandling32BitWrap(previous: 5_000, current: 1_000, elapsed: 0),
+                       0, "elapsed 非正一律 0")
+        XCTAssertGreaterThan(SystemSampler.plausibleMaxBytesPerSecond, 1_000_000_000,
+                             "合理上限至少要高于万兆网卡的字节速率")
+    }
+
     // MARK: - 4. SystemSampler.pressure
 
     func testPressureBelowWarningThresholdIsNormal() {
