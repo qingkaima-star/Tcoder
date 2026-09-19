@@ -44,6 +44,62 @@ final class CoverageProductionScopeTests: XCTestCase {
         "TN:\nSF:\(source)\nFNF:0\nFNH:0\nBRF:0\nBRH:0\nLF:\(found)\nLH:\(hit)\nend_of_record"
     }
 
+    // MARK: - 输入形状量测（决定一份 lcov 有没有「证明口径差」的能力）
+
+    /// 一份报告能同时给出两个口径，不代表它能**演示**两个口径的差异：
+    /// 很多项目只导 target 源码（仓库本地那份 `coverage/lcov.info` 就是这样，
+    /// 全部 `SF:` 都在 `Sources/` 下），此时被排除分母是 0、两个口径数值完全相等。
+    /// 拿这种输入去断言「两口径不等」会把实现没问题的一件事测成红，
+    /// 别人照 README 跑一次取证看到 5 个失败，第一反应会是"#37 坏了"。
+    /// 所以先量形状：**没有证明力就 skip，并把数字写进 skip 原因**，不许静默过关。
+    private struct CaliberEvidence {
+        var input: String
+        var productionPercent: Double
+        var fullPercent: Double
+        var productionDenominator: Int
+        var fullDenominator: Int
+        var excludedLines: Int
+
+        /// true = 这份输入真含被排除的测试/派生记录，才配用来断言口径差。
+        var canProveGap: Bool { excludedLines > 0 }
+
+        var skipReason: String {
+            "输入 `\(input)` 不含任何被排除的测试/派生记录（排除分母 0 行）："
+            + "生产码 \(String(format: "%.2f", productionPercent))% = \(productionDenominator) 行，"
+            + "全口径 \(String(format: "%.2f", fullPercent))% = \(fullDenominator) 行，"
+            + "两个口径完全相等 ⇒ 这份 lcov 演示不了口径差。"
+            + "换一份含 `Tests/`、`PackageTests` 或 `.build` 记录的真实报告再跑。"
+        }
+    }
+
+    private func evidence(from metrics: CoverageMetrics, input: String) throws -> CaliberEvidence {
+        let report = try XCTUnwrap(metrics.reports.first, "lcov 没被解析出报告：\(input)")
+        let production = try XCTUnwrap(metrics.overallLinePercent,
+                                      "生产码口径为 nil，分母被清空了：\(input)")
+        let full = try XCTUnwrap(metrics.allSourcesLinePercent, "全口径为 nil：\(input)")
+        return CaliberEvidence(
+            input: input,
+            productionPercent: production,
+            fullPercent: full,
+            productionDenominator: report.linesTotal,
+            fullDenominator: report.allLinesTotal ?? report.linesTotal,
+            excludedLines: (report.allLinesTotal ?? report.linesTotal) - report.linesTotal)
+    }
+
+    /// 把一份 lcov 落到临时目录交给真分析器读，顺带打印用的是哪份输入。
+    private func metricsWritingLCov(_ text: String, labeled input: String) async throws -> CoverageMetrics {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("tcoder-cov-self-\(UUID().uuidString)", isDirectory: true)
+        let captured = dir
+        addTeardownBlock { try? FileManager.default.removeItem(at: captured) }
+        try FileManager.default.createDirectory(
+            at: dir.appendingPathComponent("coverage"), withIntermediateDirectories: true)
+        try text.write(to: dir.appendingPathComponent("coverage/lcov.info"),
+                       atomically: true, encoding: .utf8)
+        print("【#37 输入】\(input)（\(text.split(separator: "\n").filter { $0.hasPrefix("SF:") }.count) 条 SF: 记录）")
+        return try await CoverageAnalyzer().analyze(projectRoot: dir, options: .default)
+    }
+
     // MARK: - 口径本身：双向元测试
 
     /// 四条排除条件各自都要命中，且**不许误伤**生产码/普通源码。
@@ -263,31 +319,24 @@ final class CoverageProductionScopeTests: XCTestCase {
     /// 喂给评分器，打印两者的百分比与「测试覆盖」分量得分——这是 #37 的验收读数。
     /// 不断言某个具体分数：`HealthCurves.coverage` 一个阈值都没改，
     /// 分数下降本身就是预期结果。
+    ///
+    /// #39：输入形状不具备证明力时先 skip（原因里带两个口径的数字），
+    /// 而不是把"这份 lcov 只含 Sources"报成实现坏了。
     func testRealSelfScanLCovReportsBothCalibers() async throws {
         let path = ProcessInfo.processInfo.environment["TCODER_SELF_LCOV"] ?? ""
         try XCTSkipUnless(!path.isEmpty, "需显式给一份真 lcov：TCODER_SELF_LCOV=<路径>")
         let text = try String(contentsOf: URL(fileURLWithPath: path), encoding: .utf8)
+        let metrics = try await metricsWritingLCov(text, labeled: path)
+        let report = try XCTUnwrap(metrics.reports.first, "真 lcov 没被解析出报告：\(path)")
+        let evidence = try evidence(from: metrics, input: path)
 
-        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("tcoder-cov-self-\(UUID().uuidString)", isDirectory: true)
-        let captured = dir
-        addTeardownBlock { try? FileManager.default.removeItem(at: captured) }
-        try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent("coverage"), withIntermediateDirectories: true)
-        try text.write(to: dir.appendingPathComponent("coverage/lcov.info"),
-                       atomically: true, encoding: .utf8)
-
-        let metrics = try await CoverageAnalyzer().analyze(projectRoot: dir, options: .default)
-        let report = try XCTUnwrap(metrics.reports.first, "真 lcov 没被解析出报告")
-        let production = try XCTUnwrap(metrics.overallLinePercent, "生产码口径为 nil 说明分母被清空了")
-        let full = try XCTUnwrap(metrics.allSourcesLinePercent)
-
-        // 分母守卫：两个口径都要真量到东西，且生产码分母更小（否则排除没生效）。
-        XCTAssertGreaterThan(report.linesTotal, 1_000, "生产码分母异常小：\(report.linesTotal)")
-        XCTAssertGreaterThan(report.allLinesTotal ?? 0, report.linesTotal,
-                             "全量分母没有大于生产码分母，测试码根本没被排除")
-        XCTAssertGreaterThan(full, production,
-                             "真 lcov 里全口径不高于生产码口径，说明这条口径在本仓库没起作用")
+        // 分母守卫：生产码分母必须真有真实规模。太小 = 指错文件，这是真错，不 skip。
+        XCTAssertGreaterThan(evidence.productionDenominator, 1_000,
+                             "生产码分母异常小：\(evidence.productionDenominator)（\(path)）")
+        // 只有「这份输入压根没有测试码记录」才算无证明力 -> skip，并把数字摊开。
+        try XCTSkipUnless(evidence.canProveGap, evidence.skipReason)
+        XCTAssertGreaterThan(evidence.fullPercent, evidence.productionPercent,
+                             "有被排除的记录却两个口径相等，说明排除没真的作用到分母上：\(path)")
 
         // 同一份证据，改前/改后两种喂法。
         var asBefore = report
@@ -302,13 +351,14 @@ final class CoverageProductionScopeTests: XCTestCase {
         let testingAfter = try XCTUnwrap(
             scoreAfter.components.first { $0.name == HealthDimension.testing.rawValue })
 
-        print("【#37 真 lcov】改前（全口径）\(String(format: "%.2f", full))%"
+        print("【#37 真 lcov】输入 \(path)")
+        print("【#37 真 lcov】改前（全口径）\(String(format: "%.2f", evidence.fullPercent))%"
             + " \(report.allLinesCovered ?? 0)/\(report.allLinesTotal ?? 0)"
             + " → 测试覆盖分量 \(testingBefore.score) 分")
-        print("【#37 真 lcov】改后（生产码）\(String(format: "%.2f", production))%"
+        print("【#37 真 lcov】改后（生产码）\(String(format: "%.2f", evidence.productionPercent))%"
             + " \(report.linesCovered)/\(report.linesTotal)"
             + " → 测试覆盖分量 \(testingAfter.score) 分；被排除的测试/派生分母 "
-            + "\((report.allLinesTotal ?? 0) - report.linesTotal) 行")
+            + "\(evidence.excludedLines) 行")
         XCTAssertLessThan(testingAfter.score, testingBefore.score,
                           "换了更严的口径而评分分量没下降，说明评分还在读全口径")
     }
@@ -327,19 +377,16 @@ final class CoverageProductionScopeTests: XCTestCase {
         try XCTSkipUnless(!path.isEmpty, "需显式给一份真 lcov：TCODER_SELF_LCOV=<路径>")
 
         // 覆盖率：从临时目录读真 lcov。
-        let covDir = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("tcoder-health-\(UUID().uuidString)", isDirectory: true)
-        let captured = covDir
-        addTeardownBlock { try? FileManager.default.removeItem(at: captured) }
-        try FileManager.default.createDirectory(
-            at: covDir.appendingPathComponent("coverage"), withIntermediateDirectories: true)
-        try String(contentsOf: URL(fileURLWithPath: path), encoding: .utf8)
-            .write(to: covDir.appendingPathComponent("coverage/lcov.info"),
-                   atomically: true, encoding: .utf8)
-        let coverage = try await CoverageAnalyzer()
-            .analyze(projectRoot: covDir, options: .default)
+        let coverage = try await metricsWritingLCov(
+            try String(contentsOf: URL(fileURLWithPath: path), encoding: .utf8), labeled: path)
+        let evidence = try evidence(from: coverage, input: path)
+        XCTAssertGreaterThan(evidence.productionDenominator, 1_000,
+                             "生产码分母异常小：\(evidence.productionDenominator)（\(path)）")
+        // #39：先判证明力，再花真实仓库扫描的代价——无证明力的输入不该跑完四个分析器
+        // 才 skip，也不该在"总分必须下降"上报红。
+        try XCTSkipUnless(evidence.canProveGap, evidence.skipReason)
 
-        // 其余五类证据：真实仓库根（与自扫同一口径）。
+        // 其余四类证据：真实仓库根（与自扫同一口径）。
         let root = Self.repoRoot
         let code = try await FileSystemCodeAnalyzer().analyze(root: root, options: .default)
         let git = try await ShellGitAnalyzer().analyze(repositoryURL: root)
@@ -354,16 +401,14 @@ final class CoverageProductionScopeTests: XCTestCase {
         asBefore.scopeGranularity = .aggregateOnly
 
         let scorer = WeightedHealthScorer()
-        let inputs = HealthInputs(code: code, git: git, logs: logs, dependencies: deps,
-                                  coverage: coverage)
-        let after = scorer.score(inputs)
+        let after = scorer.score(HealthInputs(code: code, git: git, logs: logs,
+                                              dependencies: deps, coverage: coverage))
         let before = scorer.score(HealthInputs(code: code, git: git, logs: logs,
                                                dependencies: deps,
                                                coverage: CoverageMetrics(reports: [asBefore])))
         let testingAfter = try XCTUnwrap(after.components.first { $0.name == HealthDimension.testing.rawValue })
         let testingBefore = try XCTUnwrap(before.components.first { $0.name == HealthDimension.testing.rawValue })
 
-        XCTAssertGreaterThan(coverage.reports.first?.linesTotal ?? 0, 1_000, "生产码分母异常小")
         XCTAssertLessThan(after.overall, before.overall,
                           "换了更严的口径而总分没降，说明评分仍在读全口径")
         XCTAssertLessThan(testingAfter.score, testingBefore.score)
@@ -372,10 +417,55 @@ final class CoverageProductionScopeTests: XCTestCase {
                        before.components.filter { $0.name != HealthDimension.testing.rawValue }.map(\.score),
                        "非覆盖率维度的分数也变了，说明两边喂的不是同一份仓库证据")
 
+        print("【#37 总分】输入 \(path)，排除分母 \(evidence.excludedLines) 行")
         print("【#37 总分】同一仓库真实证据：改前（全口径 "
-            + String(format: "%.2f", coverage.allSourcesLinePercent ?? -1) + "%）总分 \(before.overall)"
+            + String(format: "%.2f", evidence.fullPercent) + "%）总分 \(before.overall)"
             + "、测试覆盖分量 \(testingBefore.score)；改后（生产码 "
-            + String(format: "%.2f", coverage.overallLinePercent ?? -1) + "%）总分 \(after.overall)"
+            + String(format: "%.2f", evidence.productionPercent) + "%）总分 \(after.overall)"
             + "、测试覆盖分量 \(testingAfter.score)")
+    }
+
+    // MARK: - ⑨ #39：证明力判据本身要在默认轮里被守住
+
+    /// 不依赖任何外部文件：合成两份形状不同的 lcov，验证 `CaliberEvidence`
+    /// 这个「有没有证明力」的判据本身是对的两边——含测试码的必须
+    /// `canProveGap == true` 且排除行数 == 手算值；只含 Sources 的必须
+    /// `canProveGap == false`（真产物用例就该对它 skip，而不是报红）。
+    /// 少了这条，skip 分支就是一次没人跑过的写死出口：哪天它退化成"永远 skip"，
+    /// 上面两条真产物用例会静默变成永久绿。
+    func testProofPowerJudgementHoldsBothWays() async throws {
+        // 有证明力：生产码 200 行（命中 80）+ 测试码 100 行（命中 95）+ .build 副本 50 行（命中 50）。
+        let mixed = try await metrics(fromLCov: [
+            record("/repo/Sources/A.swift", found: 200, hit: 80),
+            record("/repo/Tests/ATests.swift", found: 100, hit: 95),
+            record("/repo/.build/checkouts/Gen.swift", found: 50, hit: 50),
+        ])
+        let mixedEvidence = try evidence(from: mixed, input: "合成：含 Tests 与 .build")
+        XCTAssertEqual(mixedEvidence.excludedLines, 150, "被排除的分母必须恰好是 100 + 50")
+        XCTAssertEqual(mixedEvidence.productionDenominator, 200)
+        XCTAssertEqual(mixedEvidence.fullDenominator, 350)
+        XCTAssertTrue(mixedEvidence.canProveGap,
+                      "这份输入明明有口径差却判成无证明力，等于把真产物用例变成永久 skip")
+        XCTAssertEqual(mixedEvidence.productionPercent, 40, accuracy: 0.001, "80/200")
+        XCTAssertEqual(mixedEvidence.fullPercent, 64.2857, accuracy: 0.001, "225/350")
+        XCTAssertNotEqual(mixedEvidence.productionPercent, mixedEvidence.fullPercent)
+
+        // 无证明力：仓库本地那种「只导 target 源码」的报告，形状完全合法。
+        let productionOnly = try await metrics(fromLCov: [
+            record("/repo/Sources/A.swift", found: 200, hit: 80),
+            record("/repo/Sources/B.swift", found: 100, hit: 60),
+        ])
+        let weak = try evidence(from: productionOnly, input: "合成：只含 Sources")
+        XCTAssertEqual(weak.excludedLines, 0)
+        XCTAssertFalse(weak.canProveGap,
+                       "没有测试码记录却判成有证明力，真产物用例就会在合法输入上报红")
+        XCTAssertEqual(weak.productionPercent, weak.fullPercent, accuracy: 0.0001)
+        XCTAssertTrue(weak.skipReason.contains("排除分母 0 行"),
+                      "skip 原因必须讲清为什么证不了：\(weak.skipReason)")
+        XCTAssertTrue(weak.skipReason.contains("46.67") && weak.skipReason.contains("300"),
+                      "skip 原因要带实际数字（140/300 = 46.67%，两个口径都是 300 分母）：\(weak.skipReason)")
+        print("【#39 证明力】含 Tests 的输入排除 \(mixedEvidence.excludedLines) 行 → 可证；"
+            + "只含 Sources 的输入排除 0 行 → 判无证明力")
+        print("【#39 skip 原因样例】\(weak.skipReason)")
     }
 }
