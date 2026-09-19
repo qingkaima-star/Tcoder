@@ -200,3 +200,7 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
   ```
   也就是说把测试代码从分母里摘出去，**这个项目的自评降了 1 分**——
   分数变低是这次修改预期的、正确的结果，不是回归。
+  另外，覆盖率产物是仓库自己生成的本地文件（`TcoderMonitor/coverage/` 被 gitignore、
+  没有 git 历史），所以读数旁边会写**报告年龄**：
+  多份报告按**最旧那份**说新鲜度，取不到时间的报告单独计数，
+  整批都没有时间时显示「报告为未知生成时间（不按新鲜数据计）」而不是干脆不显示（#38）。
