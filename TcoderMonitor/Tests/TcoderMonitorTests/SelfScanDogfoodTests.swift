@@ -178,31 +178,61 @@ final class SelfScanDogfoodTests: XCTestCase {
             + "（分母 \(metrics.analyzedFunctionCount)）")
     }
 
-    // MARK: - 防作弊门 4：Git 结论必须与 git 命令对得上
+    // MARK: - 防作弊门 4：Git 结论必须与 git 命令**同口径**对得上
 
+    /// 上一版这条**断言本身是错的**：它拿"作者和 ≥ 含 merge 全量"比，
+    /// 把一个完全正确的结果（作者和 44 == 非合并全量 44）判成"漏计 10 人"，
+    /// 而那 10 个其实是 merge 提交——分析器跑的一贯是 `git log --no-merges`。
+    /// 现在两侧各按自己口径比，并额外钉住"含 merge 与不含 merge 是两个量"。
     func testGitSelfReportMatchesGitGroundTruth() async throws {
         let git = try await selfScan().git
         XCTAssertTrue(git.isRepository, "工作树的 .git 是个 gitdir 文件，工具必须照样认出来")
 
-        let truthCommits = try gitCountCommits()
-        XCTAssertEqual(git.totalCommits, truthCommits,
-                       "totalCommits 与 `git rev-list --count HEAD` 不一致")
+        let allCount = try revListCount([])
+        let nonMergeCount = try revListCount(["--no-merges"])
+        let mergeCount = try revListCount(["--merges"])
 
+        XCTAssertEqual(git.totalCommits, allCount,
+                       "totalCommits 必须等于 `git rev-list --count HEAD`（含 merge）")
+
+        // 作者榜的正确基线是**非合并**口径，而且必须和分析器自己声明的窗口自洽。
         let authorSum = git.authors.reduce(0) { $0 + $1.commits }
-        XCTAssertGreaterThanOrEqual(authorSum, truthCommits,
-                                    "各作者提交数之和少于全量，说明有人被漏计")
+        XCTAssertEqual(authorSum, git.commitsAnalyzed,
+                       "每个被解析的提交都恰有一位作者：作者和 \(authorSum) 应等于 commitsAnalyzed "
+                     + "\(git.commitsAnalyzed)；对不上才是真的漏人")
+        XCTAssertLessThan(git.commitsAnalyzed, ShellGitAnalyzer.maxCommits,
+                          "窗口上限 \(ShellGitAnalyzer.maxCommits) 用尽，下面的全量对齐不再成立")
+        XCTAssertEqual(git.commitsAnalyzed, nonMergeCount,
+                       "窗口没被用满时，commitsAnalyzed 必须等于 `rev-list --count --no-merges HEAD`")
+
+        // 含 merge 与不含 merge 必须分开：谁冒充谁都会撞这里。
+        XCTAssertEqual(allCount - nonMergeCount, mergeCount,
+                       "含 merge 与非 merge 之差必须正好等于 merge 提交数")
+        XCTAssertGreaterThan(mergeCount, 0,
+                             "本仓库历史里有 merge 提交；若为 0，说明夹具形态变了，本门的意义要重新评估")
 
         let top = git.authors.max { $0.commits < $1.commits }
         let share = Double(top?.commits ?? 0) / Double(max(1, authorSum))
         print("【Git 自检】仓库根=\(git.resolvedRepositoryRoot ?? "nil") 模式=\(git.discoveryMode.rawValue) "
-            + "提交=\(git.totalCommits)(窗口 \(git.commitsAnalyzed)，截断=\(git.historyTruncated)) "
+            + "含merge=\(git.totalCommits) 非merge=\(git.commitsAnalyzed) merge=\(mergeCount) "
             + "作者=\(git.authors.count) 最大占比=\(String(format: "%.0f%%", share * 100)) "
-            + "BusFactor风险=\(git.busFactorRisk.rawValue)")
+            + "BusFactor风险=\(git.busFactorRisk.rawValue) 截断旗=\(git.historyTruncated)")
 
-        // 交叉验证 WS-C 那句 "单一作者承担 72% 提交"：以 git 为准，工具不许虚报集中度。
+        // 复核 WS-C 那句 "单一作者承担 72% 提交"：基线同样只认非合并 + 邮箱口径。
         let truthShare = try independentTopAuthorShare()
-        XCTAssertEqual(share, truthShare, accuracy: 0.05,
-                       "工具算的作者集中度与 `git shortlog` 差 5 个点以上")
+        XCTAssertEqual(share, truthShare, accuracy: 0.01,
+                       "工具的作者集中度与 `git log --no-merges --format=%aE` 差 1 个点以上")
+
+        // 钉（WS-B）：`historyTruncated = commitsAnalyzed < totalCommits` 比的是两个口径
+        // （非合并窗口 vs 含 merge 全量），于是**只要仓库有 merge 提交它就永远为真**——
+        // 而上面刚证明过窗口没被用满、非合并历史已被完整解析（commitsAnalyzed == 非合并全量）。
+        // 后果是 Git 页对每个有合并历史的仓库都拉一次警告横幅：
+        // `GitInsightsView.swift:82-87`「提交统计只覆盖最近 N 条…不代表全部历史」。
+        // WS-B 改成真判据（如 commitsAnalyzed >= 窗口上限，或比对
+        // `rev-list --count --no-merges HEAD`）之后，请把这里翻正为 XCTAssertFalse。
+        XCTAssertTrue(git.historyTruncated,
+                      "截断旗不再被 merge 污染了？改成 XCTAssertFalse，"
+                    + "并确认 GitInsightsView.swift:82 的横幅只在真截断时出现")
     }
 
     // MARK: - 防作弊门 5：评分链路诚实性
@@ -493,21 +523,30 @@ final class SelfScanDogfoodTests: XCTestCase {
 
     // MARK: - git 独立基线（只读命令）
 
-    private func gitCountCommits() throws -> Int {
-        let output = try runGit(["rev-list", "--count", "HEAD"])
-        return Int(output.trimmingCharacters(in: .whitespacesAndNewlines)) ?? -1
+    /// `git rev-list --count HEAD`，可带 `--no-merges` / `--merges` 取不同口径。
+    private func revListCount(_ filter: [String]) throws -> Int {
+        let output = try runGit(["rev-list", "--count"] + filter + ["HEAD"])
+        guard let count = Int(output.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            throw AnalysisError.empty("git rev-list --count \(filter) 输出不可解析：\(output)")
+        }
+        return count
     }
 
-    /// 用 `git shortlog -sn HEAD` 独立算出最大作者的提交占比。
+    /// 按**作者邮箱**独立算最大作者占比：`%aE` + `--no-merges`，与分析器同口径。
+    /// 刻意不用 `git shortlog -sn`——那个按**姓名**分组，而本仓库有两个姓名
+    /// （`Tcoder Team` 与 `WS-B Git与依赖`）共用 `dev@tcoder.local`。
+    /// 用姓名口径量出来的 top 是 68%，工具按邮箱归并给的是 72%，
+    /// 差 4 个点会被 5 个点的容差吞掉——等于这条门白设。
     private func independentTopAuthorShare() throws -> Double {
-        let output = try runGit(["shortlog", "-sn", "HEAD"])
-        let counts = output.split(separator: "\n").compactMap { line -> Int? in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            let head = trimmed.split(separator: "\t").first ?? Substring(trimmed)
-            return Int(head.trimmingCharacters(in: .whitespaces))
+        let output = try runGit(["log", "--no-merges", "--format=%aE", "HEAD"])
+        var counts: [String: Int] = [:]
+        for line in output.split(separator: "\n") {
+            let email = line.trimmingCharacters(in: .whitespaces)
+            guard !email.isEmpty else { continue }
+            counts[email, default: 0] += 1
         }
-        guard let top = counts.max(), !counts.isEmpty else { return 0 }
-        return Double(top) / Double(counts.reduce(0, +))
+        guard let top = counts.values.max(), !counts.isEmpty else { return 0 }
+        return Double(top) / Double(counts.values.reduce(0, +))
     }
 
     private func runGit(_ arguments: [String]) throws -> String {
