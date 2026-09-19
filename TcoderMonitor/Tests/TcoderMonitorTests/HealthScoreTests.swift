@@ -552,6 +552,13 @@ final class HealthScoreTests: XCTestCase {
                       "detail 必须引用全仓均值，实得 \(complexity.detail)")
         XCTAssertFalse(complexity.detail.contains("热点样本"),
                        "已有全仓均值时不得再挂样本口径后缀，实得 \(complexity.detail)")
+        // 均值的来源必须写明是全仓多少个函数，否则「平均圈复杂度 4」读起来像凭空冒出来的。
+        XCTAssertTrue(complexity.detail.contains("均值为全仓 420 个函数"),
+                      "detail 必须标明均值的全仓分母，实得 \(complexity.detail)")
+        // CC≥16 个数与最大 CC 只能从截断的热点榜数出来，混在同一句里必须标出榜内口径，
+        // 否则会被读成「全仓有 N 个函数 CC≥16」——那是把风险报小。
+        XCTAssertTrue(complexity.detail.contains("CC≥16 与最大 CC 只统计热点榜前"),
+                      "混合口径必须逐项标明统计范围，实得 \(complexity.detail)")
         // 热点榜均值是 9（只有 1 个 CC 9 的函数），全仓均值 4 应当明显更高。
         var noMean = code
         noMean.averageCyclomaticComplexity = nil

@@ -81,8 +81,8 @@ final class WeightedHealthScorer: HealthScoringProviding {
             //      注意第 3 支必须按「有没有测到东西」判，不能只看 analyzedFunctionCount：
             //      分母 >0 但榜单为空时热点均值会算成 0，曲线会把「没测到」当成复杂度 0 给满分，
             //      那正是这条诚实原则要挡住的。与 `.testing` 的 `coverage.hasData` 同源。
-            // WS-A 尚未填这两个字段、且没报热点时，全仓真实扫描会走第 3 支、复杂度暂时缺席
-            // （HealthView 的「缺失维度」会列出来），这是刻意的，不是漏算。
+            // WS-A 自 `f55e4a0` 起真的在填这两个字段（真实仓库 self-scan：均值 4.13、分母 1134），
+            // 所以有函数的仓库现在走第①支；第③支留给「一个函数都没测到」的空目录/纯资源目录。
             let hotspots = code.topComplexFunctions
             guard code.averageCyclomaticComplexity != nil || !hotspots.isEmpty else { return nil }
             let highRisk = hotspots.filter { $0.cyclomaticComplexity >= 16 }.count
@@ -98,7 +98,9 @@ final class WeightedHealthScorer: HealthScoringProviding {
                 issues.append("\(highRisk) 个函数圈复杂度 ≥16，最高 \(worst)")
                 recommendations.append("优先拆分最高复杂度函数，用早返回替代嵌套分支")
             }
-            return hasRepoMean ? curve : notingSample(curve, hotspots.count)
+            return hasRepoMean ? notingRepoScope(curve, functionCount: code.analyzedFunctionCount,
+                                                 sampleCount: hotspots.count)
+                : notingSample(curve, hotspots.count)
 
         case .duplication:
             guard let code = inputs.code else { return nil }
@@ -240,6 +242,16 @@ final class WeightedHealthScorer: HealthScoringProviding {
     private func notingSample(_ curve: CurveResult, _ sampleCount: Int) -> CurveResult {
         guard sampleCount > 0 else { return curve }
         return CurveResult(score: curve.score, detail: curve.detail + "（热点样本 \(sampleCount) 个的均值）",
+                           risk: curve.risk)
+    }
+
+    /// 第①支的 detail 是**混合口径**：均值来自全仓普查，但 `CC≥16` 个数与最大 CC 只能从
+    /// 截断到 20 条的热点榜里数（`Models` 没给全仓分布）。不写清楚就会被读成「全仓有 N 个
+    /// 函数 CC≥16」，而那个 N 实际上只是榜内计数——这是扣分项，报小了会高估健康度。
+    private func notingRepoScope(_ curve: CurveResult, functionCount: Int, sampleCount: Int) -> CurveResult {
+        let meanScope = functionCount > 0 ? "均值为全仓 \(functionCount) 个函数" : "均值为全仓"
+        let riskScope = sampleCount > 0 ? "；CC≥16 与最大 CC 只统计热点榜前 \(sampleCount) 个" : ""
+        return CurveResult(score: curve.score, detail: curve.detail + "（\(meanScope)\(riskScope)）",
                            risk: curve.risk)
     }
 
