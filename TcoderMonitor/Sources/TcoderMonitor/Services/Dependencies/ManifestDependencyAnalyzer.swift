@@ -214,7 +214,7 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
     static func offlineCaveat(for report: DependencyReport) -> String {
         let records = report.ecosystems.flatMap(\.dependencies)
         let skipped = records.filter { KnownVulnerability.comparableCore($0.version) == nil }.count
-        var parts = ["未联网核对：漏洞判定只依据内置快照（覆盖 npm / Maven / Python）"]
+        var parts = ["未联网核对：漏洞判定只依据内置快照（覆盖 npm / Maven / Python），\(DependencySnapshot.asOfText)"]
         let uncovered = ecosystemsWithoutOfflineRules(in: report)
         if !uncovered.isEmpty {
             parts.append("本次未覆盖生态：\(uncovered.joined(separator: "、"))")
@@ -281,9 +281,12 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
         if !osv.note.isEmpty { notes.append(osv.note) }
 
         report.networkLookupPerformed = attempted > 0
-        report.networkLookupNote = notes.isEmpty
+        // 在线路径同样要靠内置快照兜底（`applyBundledKnowledge` 是无条件跑的：内置 CVE 命中
+        // 与 registry 没答的包的版本数据都来自它），所以这里也必须说清快照是哪天的。
+        // 补句只加信息：`noteAppended` 不含「失败」，不动 `VulnerabilityEvidence.classify` 的判据。
+        report.networkLookupNote = DependencySnapshot.noteAppended(to: notes.isEmpty
             ? (attempted > 0 ? "在线查询已完成（OSV + npm registry）" : "本项目没有可在线查询的生态（SwiftPM / CocoaPods 不在 OSV 覆盖范围内）")
-            : notes.joined(separator: "；")
+            : notes.joined(separator: "；"))
     }
 
     /// 把 registry 取回的最新版本写回记录，并把来源**一并**归因为在线源。
