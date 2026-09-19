@@ -21,3 +21,7 @@ Package.resolved
 
 # 每工作流独立工作树（AGENTS.md §7），不入库
 .worktrees/
+
+# 本地 `swift test --enable-code-coverage` + llvm-cov 导出的真实覆盖率报告。
+# 不入库：它是生成物、每次跑测试都会变；入库会让"自扫"读到一份与当前代码无关的旧报告。
+TcoderMonitor/coverage/
