@@ -13,27 +13,21 @@ struct HealthView: View {
     @Environment(AppState.self) private var state
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                header
-                if let health = report?.health {
-                    if health.components.isEmpty {
-                        HealthNoInputCard(health: health)
-                    } else {
-                        HealthHero(health: health)
-                        HealthComponentTable(health: health, report: report)
-                        HealthAdviceGrid(health: health)
-                    }
-                    HealthTrendCard(health: report?.health, points: historyPoints)
+        Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthDense) {
+            header
+            if let health = report?.health {
+                if health.components.isEmpty {
+                    HealthNoInputCard(health: health)
                 } else {
-                    HealthNotScoredCard()
+                    HealthHero(health: health)
+                    HealthComponentTable(health: health, report: report)
+                    HealthAdviceGrid(health: health)
                 }
+                HealthTrendCard(health: report?.health, points: historyPoints)
+            } else {
+                HealthNotScoredCard()
             }
-            .padding(Theme.Spacing.md)
-            .frame(maxWidth: Theme.Layout.maxWidthDense)
-            .frame(maxWidth: .infinity)
         }
-        .scrollContentBackground(.hidden)
     }
 
     private var header: some View {
@@ -137,11 +131,10 @@ struct HealthHero: View {
 
             HeuristicClaimLine()
 
-            HStack(spacing: Theme.Spacing.md) {
-                StatLine(label: "本次", value: String(health.overall))
-                StatLine(label: "上次", value: health.previousOverall.map(String.init) ?? "无记录")
-                StatLine(label: "计算于", value: DateFormat.sinceDescription(health.computedAt))
-                Spacer(minLength: 0)
+            Theme.Readout.Bar {
+                Theme.Readout.Field("本次", String(health.overall))
+                Theme.Readout.Field("上次", health.previousOverall.map(String.init) ?? "无记录")
+                Theme.Readout.Field("计算于", DateFormat.sinceDescription(health.computedAt))
             }
             Text(DateFormat.full.string(from: health.computedAt))
                 .font(Theme.Typo.monoSmall.font)
@@ -186,7 +179,7 @@ struct HealthNoInputCard: View {
                             .foregroundStyle(.secondary)
                             .lineSpacing(Theme.Typo.narrative.lineSpacing)
                             .fixedSize(horizontal: false, vertical: true)
-                        StatLine(label: "计算于", value: DateFormat.sinceDescription(health.computedAt))
+                        Theme.Readout.Field("计算于", DateFormat.sinceDescription(health.computedAt))
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
