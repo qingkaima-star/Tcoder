@@ -166,7 +166,7 @@ final class PerformanceSamplerTests: XCTestCase {
     // 口径为总工实测后的版本：used = total - (free + speculative + purgeable) * pageSize，
     // 与活动监视器一致（inactive 是文件缓存但被算作已用，所以不能只加 active+wired+compressed）。
 
-    func testMemoryUsedBytesMatchesActivityMonitorFormulaOnRealPageCounts() {
+    func testMemoryUsedBytesMatchesActivityMonitorFormulaOnRealPageCounts() throws {
         // 本机实测（48 GiB、page 16384）：free 59454 / speculative 20714 / purgeable 9795
         let total = UInt64(51_539_607_552)
         let counters = memory(pageSize: 16_384, active: 757_410, inactive: 736_816,
@@ -174,7 +174,8 @@ final class PerformanceSamplerTests: XCTestCase {
                               free: 59_454, speculative: 20_714, purgeable: 9_795)
         let reclaimablePages = 59_454 + 20_714 + 9_795
         let expected = total - UInt64(reclaimablePages) * 16_384
-        let used = SystemSampler.memoryUsedBytes(counters, totalBytes: total)
+        let used = try XCTUnwrap(SystemSampler.memoryUsedBytes(counters, totalBytes: total),
+                                 "可用读数必须算得出已用，返回 nil 等于把真数据也判成缺证据")
         XCTAssertEqual(used, expected, "已用内存必须等于 total - (free+speculative+purgeable)*pageSize")
         // 46.62 GiB / 48 GiB —— 与同一时刻 `top` 的 "PhysMem: 44G~47G used" 同量级。
         XCTAssertEqual(Double(used) / Double(total), 0.9714, accuracy: 0.001,
@@ -198,22 +199,31 @@ final class PerformanceSamplerTests: XCTestCase {
                        "reclaimable = (50000+10+5)*1000")
     }
 
-    func testMemoryUsedBytesFallsBackWhenReclaimableExceedsTotal() {
+    func testMemoryUsedBytesFallsBackWhenReclaimableExceedsTotal() throws {
         // 页计数瞬时不一致（唤醒、休眠、计数器抖动）时必须退化成加法口径而不是下溢成天文数字。
         let counters = memory(pageSize: 16_384, active: 720_505, wired: 341_465,
                               compressed: 1_300_992, free: 9_000_000, speculative: 0, purgeable: 0)
-        let used = SystemSampler.memoryUsedBytes(counters, totalBytes: 51_539_607_552)
+        let used = try XCTUnwrap(SystemSampler.memoryUsedBytes(counters, totalBytes: 51_539_607_552),
+                                 "可用读数必须算得出已用")
         let fallback = (720_505 + 341_465 + 1_300_992) * 16_384
         XCTAssertEqual(used, UInt64(fallback), "必须退化为 (active+wired+compressed)*pageSize")
         XCTAssertLessThanOrEqual(used, 51_539_607_552, "绝不得超过物理总量")
     }
 
-    func testMemoryUsedBytesNeverExceedsTotalAndIsZeroSafe() {
-        let zeroPage = memory(pageSize: 0, active: 720_505, wired: 341_465, compressed: 1_300_992)
-        XCTAssertEqual(SystemSampler.memoryUsedBytes(zeroPage, totalBytes: 1_000_000), 1_000_000,
-                       "pageSize 为 0 时 reclaimable 为 0，退化为「全量已用」而不是崩溃")
-        XCTAssertEqual(SystemSampler.memoryUsedBytes(zeroPage, totalBytes: 0), 0,
-                       "总量为 0 必须返回 0")
+    /// 这一条原来钉的是缺陷本身：`XCTAssertEqual(memoryUsedBytes(全 0 页计数, total), total)`，
+    /// 注释写着「退化为全量已用而不是崩溃」。那次「退化」就是 WS-D 审计 P1 的根因——
+    /// 一次内核调用失败被算成内存 100% 占满。现在缺证据由 `nil` 表达，两种不可能输入都判缺失。
+    func testUnusablePageCountersYieldNoNumberInsteadOfFullMemory() {
+        let total: UInt64 = 1_000_000
+        let zeroPageSize = memory(pageSize: 0, active: 720_505, wired: 341_465, compressed: 1_300_992)
+        XCTAssertNil(SystemSampler.memoryUsedBytes(zeroPageSize, totalBytes: total),
+                     "页大小为 0 时所有字节换算都会塌成 0，绝不能返回「全量已用」")
+        XCTAssertNil(SystemSampler.memoryUsedBytes(VmCounters(pageSize: 16_384), totalBytes: total),
+                     "页计数全 0 == 没有读数，不是空闲页为 0")
+        XCTAssertNil(SystemSampler.memoryUsedBytes(nil, totalBytes: total),
+                     "缺读数必须原样传上去，不能在算术里被补成一个数")
+        XCTAssertNil(SystemSampler.memoryUsedBytes(VmCounters(pageSize: 16_384, active: 1), totalBytes: 0),
+                     "总量为 0 时占比无意义，不得给数")
     }
 
     // MARK: - 3. SystemSampler.bytesPerSecond
@@ -533,12 +543,13 @@ final class PerformanceSamplerTests: XCTestCase {
 
     // MARK: - 11. 真实读取的结构合理性烟测（不断言任何具体数值）
 
-    func testSamplerReadProducesStructurallySaneCounters() {
+    func testSamplerReadProducesStructurallySaneCounters() throws {
         let sampler = SystemSampler()
         let first = sampler.read()
         let second = sampler.read()
         XCTAssertGreaterThanOrEqual(first.cores.count, 1, "至少要有一个核的 tick")
-        XCTAssertGreaterThan(first.vm.pageSize, 0, "pageSize 必须是来自公开 sysctl 的正数")
+        let vm = try XCTUnwrap(first.vm, "本机 host_statistics64 应当成功；nil 说明测试环境异常")
+        XCTAssertGreaterThan(vm.pageSize, 0, "pageSize 必须是来自公开 sysctl 的正数")
         XCTAssertGreaterThan(first.timestamp.timeIntervalSince1970, 1_700_000_000, "时间戳必须是近期时间")
 
         let snapshot = sampler.snapshot(previous: first, current: second, processCount: 3)
