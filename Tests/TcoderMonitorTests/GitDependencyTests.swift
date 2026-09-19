@@ -1,0 +1,873 @@
+import XCTest
+@testable import TcoderMonitor
+
+// WS-B · 子代理5（测试）：Git 解析/聚合 + 依赖清单解析 + 内置漏洞快照的纯函数覆盖。
+//
+// 说明：
+// * 本文件只依赖契约 A/B/C 与冻结模型（GitInsights.swift / DependencyReport.swift）以及
+//   已存在的 GitAggregation，不做任何网络请求、不 shell out、不读他人仓库。
+// * 需要 git 文本的地方全部是文件内手写的模拟输出，其结构与真实
+//   `git log --pretty=format:%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1e --numstat` 完全一致
+//   （已在 /tmp 下自建的临时仓库里实测过换行与分隔符位置）。
+// * 所有 Date 都由 timeIntervalSince1970 硬编码，绝不依赖本机时区。
+
+// MARK: - 夹具
+
+private enum Fixture {
+
+    /// 2026-09-14 是周一，其 UTC 零点。
+    static let mondayUTC: TimeInterval = 1_789_344_000
+    /// 2026-09-19T00:30:00Z（周六）。
+    static let sat0030UTC: TimeInterval = 1_789_777_800
+
+    /// 真实 git 的 sha 是 40 位十六进制，夹具保持同样形状，避免测试依赖「短 sha 也能过」。
+    static let shaA = String(repeating: "a", count: 40)
+    static let shaB = String(repeating: "b", count: 40)
+    static let shaC = String(repeating: "c", count: 40)
+
+    /// 相对周一 UTC 零点的第 `days` 天、再加 `seconds` 秒。
+    static func utc(days: Int, seconds: Int = 0) -> Date {
+        Date(timeIntervalSince1970: mondayUTC + Double(days * 86_400 + seconds))
+    }
+
+    static func change(_ path: String,
+                       additions: Int = 1,
+                       deletions: Int = 0,
+                       isBinary: Bool = false,
+                       renameFrom: String? = nil) -> ParsedFileChange {
+        ParsedFileChange(path: path, additions: additions, deletions: deletions,
+                         isBinary: isBinary, renameFrom: renameFrom)
+    }
+
+    static func commit(sha: String,
+                       date: Date,
+                       author: String = "tcoder",
+                       email: String = "dev@tcoder.local",
+                       offset: Int = 0,
+                       subject: String = "chore: 占位提交",
+                       changes: [ParsedFileChange] = []) -> ParsedCommit {
+        ParsedCommit(sha: sha, authorName: author, authorEmail: email, date: date,
+                     authorOffsetSeconds: offset, subject: subject, changes: changes)
+    }
+
+    /// 拼一段真实 git 输出：头部（5 字段 + \u{1e}）、若干 numstat 行、块间空行。
+    static func block(sha: String,
+                      iso: String,
+                      subject: String,
+                      rows: [String],
+                      author: String = "tcoder",
+                      email: String = "dev@tcoder.local") -> String {
+        let header = [sha, author, email, iso, subject].joined(separator: "\u{1F}")
+        let body = rows.isEmpty ? "" : rows.joined(separator: "\n") + "\n"
+        return header + "\u{1E}\n" + body + "\n"
+    }
+
+    static func record(name: String,
+                       version: String,
+                       ecosystem: DependencyEcosystem = .npm,
+                       scope: DependencyScope = .runtime,
+                       manifest: String = "package.json",
+                       latest: String? = nil,
+                       source: VersionCheckSource = .none,
+                       vulns: [String] = []) -> DependencyRecord {
+        DependencyRecord(name: name, version: version, ecosystem: ecosystem, scope: scope,
+                         manifestPath: manifest, latestKnownVersion: latest,
+                         versionCheckSource: source, knownVulnerabilities: vulns)
+    }
+
+    static func names(_ list: [DependencyRecord]) -> Set<String> { Set(list.map { $0.name }) }
+
+    static func found(_ list: [DependencyRecord], _ name: String) -> DependencyRecord? {
+        list.first { $0.name == name }
+    }
+
+    static let pkgJSON = """
+    {
+      "name": "tcoder-web",
+      "dependencies": { "react": "^18.3.1", "lodash": "4.17.15" },
+      "devDependencies": { "vite": "^5.0.0" },
+      "optionalDependencies": { "fsevents": "2.3.3" }
+    }
+    """
+
+    static let pomXML = """
+    <project>
+      <modelVersion>4.0.0</modelVersion>
+      <properties>
+        <spring.version>5.3.30</spring.version>
+        <guava.version>32.1.3-jre</guava.version>
+      </properties>
+      <modules>
+        <module>api</module>
+        <module>service-core</module>
+      </modules>
+      <dependencies>
+        <dependency>
+          <groupId>org.springframework</groupId>
+          <artifactId>spring-core</artifactId>
+          <version>${spring.version}</version>
+          <scope>test</scope>
+        </dependency>
+        <dependency>
+          <groupId>com.google.guava</groupId>
+          <artifactId>guava</artifactId>
+          <version>${guava.version}</version>
+        </dependency>
+      </dependencies>
+    </project>
+    """
+}
+
+// MARK: - 契约 A：GitLogParser
+
+final class GitLogParserTests: XCTestCase {
+
+    func testParseReturnsOneCommitPerHeader() {
+        let output = Fixture.block(sha: Fixture.shaA,
+                                   iso: "2026-09-19T08:30:00+08:00",
+                                   subject: "feat: 新增登录页与鉴权",
+                                   rows: ["10\t2\tSources/App.swift"])
+            + Fixture.block(sha: Fixture.shaB,
+                            iso: "2026-09-18T21:00:00-05:00",
+                            subject: "fix: 修掉中文标题乱码",
+                            rows: ["1\t1\tREADME.md"])
+
+        let commits = GitLogParser.parse(output)
+        XCTAssertEqual(commits.count, 2, "两个头部必须解析出两次提交")
+        XCTAssertEqual(commits[0].sha, Fixture.shaA, "sha 取自第一个字段")
+        XCTAssertEqual(commits[0].subject, "feat: 新增登录页与鉴权", "中文 subject 必须原样保留")
+        XCTAssertEqual(commits[0].authorName, "tcoder", "作者名取自第二个字段")
+        XCTAssertEqual(commits[0].authorEmail, "dev@tcoder.local", "邮箱取自第三个字段")
+        XCTAssertEqual(commits[0].authorOffsetSeconds, 28_800, "+08:00 必须是 28800 秒")
+        XCTAssertEqual(commits[0].date.timeIntervalSince1970, Fixture.sat0030UTC, accuracy: 0.5,
+                       "带偏移的 ISO8601 必须换算成同一绝对时刻")
+        XCTAssertEqual(commits[1].authorOffsetSeconds, -18_000, "-05:00 必须是 -18000 秒")
+    }
+
+    func testParseAttachesNumstatRowsToOwningCommit() {
+        let output = Fixture.block(sha: Fixture.shaA, iso: "2026-09-19T08:30:00+08:00",
+                                   subject: "feat: 多文件",
+                                   rows: ["10\t2\tSources/App.swift", "-\t-\tAssets/logo.png"])
+            + Fixture.block(sha: Fixture.shaB, iso: "2026-09-18T21:00:00-05:00",
+                            subject: "docs: 只改文档", rows: ["1\t1\tREADME.md"])
+
+        let commits = GitLogParser.parse(output)
+        XCTAssertEqual(commits.count, 2, "块数必须正确")
+        XCTAssertEqual(commits[0].changes.map { $0.path }, ["Sources/App.swift", "Assets/logo.png"],
+                       "numstat 行必须挂在它上面的那个提交上")
+        XCTAssertEqual(commits[1].changes.map { $0.path }, ["README.md"], "第二个提交不得吞掉前一个提交的行")
+    }
+
+    func testParseMarksBinaryRows() throws {
+        let parsed = try XCTUnwrap(GitLogParser.numstatLine("-\t-\tAssets/logo.png"),
+                                   "二进制占位行必须被解析")
+        XCTAssertEqual(parsed.path, "Assets/logo.png", "二进制行仍要取出路径")
+        XCTAssertTrue(parsed.isBinary, "-\\t- 必须标记为二进制")
+        XCTAssertEqual(parsed.additions, 0, "二进制行增量记 0")
+        XCTAssertEqual(parsed.deletions, 0, "二进制行减量记 0")
+    }
+
+    func testNumstatLineParsesOrdinaryRow() throws {
+        let parsed = try XCTUnwrap(GitLogParser.numstatLine("7\t3\tSources/Views/RootView.swift"),
+                                   "普通 numstat 行必须解析")
+        XCTAssertEqual(parsed.additions, 7, "第一列是新增行数")
+        XCTAssertEqual(parsed.deletions, 3, "第二列是删除行数")
+        XCTAssertEqual(parsed.path, "Sources/Views/RootView.swift", "第三列是路径")
+        XCTAssertFalse(parsed.isBinary, "数字行不是二进制")
+        XCTAssertNil(parsed.renameFrom, "普通行没有重命名来源")
+    }
+
+    func testNumstatLineHandlesBraceRenameForm() throws {
+        let parsed = try XCTUnwrap(GitLogParser.numstatLine("0\t0\tSources/App/{Alpha.swift => Beta.swift}"),
+                                   "花括号重命名行必须解析")
+        XCTAssertEqual(parsed.path, "Sources/App/Beta.swift", "path 必须是新路径（含公共前缀）")
+        XCTAssertEqual(parsed.renameFrom, "Sources/App/Alpha.swift", "renameFrom 必须是旧路径（含公共前缀）")
+    }
+
+    func testNumstatLineHandlesFullRenameForm() throws {
+        let parsed = try XCTUnwrap(GitLogParser.numstatLine("0\t0\tOldName.txt => NewName.txt"),
+                                   "整路径重命名行必须解析")
+        XCTAssertEqual(parsed.path, "NewName.txt", "path 必须是箭头右侧")
+        XCTAssertEqual(parsed.renameFrom, "OldName.txt", "renameFrom 必须是箭头左侧")
+    }
+
+    func testNumstatLineRejectsNonNumstatText() {
+        let header = ["sha", "tcoder", "dev@tcoder.local", "2026-09-19T08:30:00+08:00", "feat: x"]
+            .joined(separator: "\u{1F}")
+        XCTAssertNil(GitLogParser.numstatLine(header), "含 \\u{1f} 的头部行不是 numstat 行")
+        XCTAssertNil(GitLogParser.numstatLine("only-one-column"), "没有制表符的行必须返回 nil")
+        XCTAssertNil(GitLogParser.numstatLine("1\t2"), "列数不足的行必须返回 nil")
+        XCTAssertNil(GitLogParser.numstatLine(""), "空行必须返回 nil")
+    }
+
+    func testParseDropsBlockWithTooFewFields() {
+        let dirty = [Fixture.shaC, "tcoder", "dev@tcoder.local"].joined(separator: "\u{1F}") + "\u{1E}\n"
+        let good = Fixture.block(sha: Fixture.shaA, iso: "2026-09-19T08:30:00+08:00",
+                                 subject: "chore: 干净提交", rows: ["1\t0\tA.swift"])
+        let commits = GitLogParser.parse(dirty + good)
+        XCTAssertEqual(commits.count, 1, "字段数不足的脏块必须整体丢弃")
+        XCTAssertEqual(commits[0].sha, Fixture.shaA, "干净块不得被脏块带偏")
+    }
+
+    func testParseEmptyAndSeparatorOnlyOutput() {
+        XCTAssertEqual(GitLogParser.parse(""), [], "空字符串必须解析成空数组")
+        XCTAssertEqual(GitLogParser.parse("\n\n"), [], "只有换行必须解析成空数组")
+        XCTAssertEqual(GitLogParser.parse("\u{1E}\n\u{1E}\n"), [], "只有记录分隔符必须解析成空数组")
+    }
+
+    func testParseToleratesTrailingSeparatorAndEmptyCommit() {
+        let output = Fixture.block(sha: Fixture.shaA, iso: "2026-09-19T08:30:00+08:00",
+                                   subject: "chore: 空提交", rows: []) + "\u{1E}"
+        let commits = GitLogParser.parse(output)
+        XCTAssertEqual(commits.count, 1, "末尾多出的分隔符不得产生幽灵提交")
+        XCTAssertEqual(commits[0].filesChanged, 0, "无 numstat 行的提交 filesChanged 为 0")
+    }
+
+    func testComputedSumsOnParsedCommit() {
+        let commit = Fixture.commit(sha: "sha-sum", date: Fixture.utc(days: 0), changes: [
+            Fixture.change("Sources/A.swift", additions: 10, deletions: 2),
+            Fixture.change("Sources/B.swift", additions: 5, deletions: 1),
+            Fixture.change("Assets/x.png", isBinary: true),
+        ])
+        XCTAssertEqual(commit.additions, 15, "additions 是所有变更之和")
+        XCTAssertEqual(commit.deletions, 3, "deletions 是所有变更之和")
+        XCTAssertEqual(commit.filesChanged, 3, "filesChanged 是变更条目数（含二进制）")
+    }
+}
+
+// MARK: - 契约 A：时区与邮箱归一
+
+final class GitTimezoneTests: XCTestCase {
+
+    func testParseAuthorTimestampWithPositiveOffset() {
+        guard let parsed = GitLogParser.parseAuthorTimestamp("2026-09-19T08:30:00+08:00") else {
+            return XCTFail("+08:00 形式必须解析成功")
+        }
+        XCTAssertEqual(parsed.date.timeIntervalSince1970, Fixture.sat0030UTC, accuracy: 0.5,
+                       "+08:00 的本地时刻必须折算回同一个 UTC 瞬间")
+        XCTAssertEqual(parsed.offsetSeconds, 28_800, "偏移秒数必须带符号")
+    }
+
+    func testParseAuthorTimestampWithNegativeHalfHourOffset() {
+        guard let parsed = GitLogParser.parseAuthorTimestamp("2026-09-19T00:30:00-05:30") else {
+            return XCTFail("-05:30 形式必须解析成功")
+        }
+        XCTAssertEqual(parsed.offsetSeconds, -19_800, "半小时负偏移必须支持")
+        XCTAssertEqual(parsed.date.timeIntervalSince1970, 1_789_797_600, accuracy: 0.5,
+                       "-05:30 换算后的绝对时刻必须正确")
+    }
+
+    func testParseAuthorTimestampWithZuluAndExplicitZero() {
+        let zulu = GitLogParser.parseAuthorTimestamp("2026-09-19T00:30:00Z")
+        XCTAssertEqual(zulu?.offsetSeconds, 0, "Z 结尾必须当作 0 偏移")
+        XCTAssertEqual(zulu?.date.timeIntervalSince1970, Fixture.sat0030UTC, accuracy: 0.5,
+                       "Z 形式必须解析出正确瞬间")
+        let explicit = GitLogParser.parseAuthorTimestamp("2026-09-19T00:30:00+00:00")
+        XCTAssertEqual(explicit?.date.timeIntervalSince1970, Fixture.sat0030UTC, accuracy: 0.5,
+                       "+00:00 与 Z 必须等价")
+    }
+
+    func testParseAuthorTimestampRejectsGarbage() {
+        XCTAssertNil(GitLogParser.parseAuthorTimestamp("昨天下午"), "非 ISO8601 文本必须返回 nil")
+        XCTAssertNil(GitLogParser.parseAuthorTimestamp(""), "空字符串必须返回 nil")
+        XCTAssertNil(GitLogParser.parseAuthorTimestamp("2026-09-19"), "缺少时间部分必须返回 nil")
+    }
+
+    func testLocalHourFollowsAuthorOffset() {
+        let instant = Date(timeIntervalSince1970: Fixture.sat0030UTC)  // 2026-09-19T00:30Z
+        XCTAssertEqual(GitLogParser.localHour(of: instant, offsetSeconds: 0), 0, "Z 时区是 0 时")
+        XCTAssertEqual(GitLogParser.localHour(of: instant, offsetSeconds: 28_800), 8, "+08:00 是 8 时")
+        XCTAssertEqual(GitLogParser.localHour(of: instant, offsetSeconds: -18_000), 19,
+                       "-05:00 是前一天 19 时")
+        XCTAssertEqual(GitLogParser.localHour(of: instant, offsetSeconds: 50_400), 14,
+                       "+14:00 是 14 时")
+    }
+
+    func testLocalWeekdayMondayFirstShiftsWithOffset() {
+        let instant = Date(timeIntervalSince1970: Fixture.sat0030UTC)  // UTC 周六
+        XCTAssertEqual(GitLogParser.localWeekdayMondayFirst(of: instant, offsetSeconds: 0), 5,
+                       "周六在 Monday-first 下索引为 5")
+        XCTAssertEqual(GitLogParser.localWeekdayMondayFirst(of: instant, offsetSeconds: 28_800), 5,
+                       "+08:00 仍在周六")
+        XCTAssertEqual(GitLogParser.localWeekdayMondayFirst(of: instant, offsetSeconds: -18_000), 4,
+                       "负偏移跨到前一天 -> 周五索引 4")
+        XCTAssertEqual(GitLogParser.localWeekdayMondayFirst(of: instant, offsetSeconds: 50_400), 6,
+                       "+14:00 跨到次日 -> 周日索引 6")
+        let monday = Date(timeIntervalSince1970: Fixture.mondayUTC)
+        XCTAssertEqual(GitLogParser.localWeekdayMondayFirst(of: monday, offsetSeconds: 0), 0,
+                       "周一必须是 0")
+    }
+
+    func testNormalizeEmailFoldsCaseAndGmailAlias() {
+        XCTAssertEqual(GitLogParser.normalizeEmail("Dev@TCoder.Local"), "dev@tcoder.local",
+                       "邮箱必须整体小写化")
+        XCTAssertEqual(GitLogParser.normalizeEmail("tcoder+wsbreview@gmail.com"), "tcoder@gmail.com",
+                       "gmail 的 +alias 必须被折叠")
+        XCTAssertEqual(GitLogParser.normalizeEmail("tcoder@gmail.com"),
+                       GitLogParser.normalizeEmail("TCoder+QA@GMAIL.com"),
+                       "同一人的不同写法必须归一到同一 key")
+    }
+}
+
+// MARK: - GitAggregation（已存在实现的回归保护）
+
+final class GitAggregationTests: XCTestCase {
+
+    private var commits: [ParsedCommit] {
+        [
+            Fixture.commit(sha: "c1", date: Fixture.utc(days: 0, seconds: 3_600),
+                           author: "张三", email: "dev@tcoder.local", offset: 3_600,
+                           subject: "feat: 一",
+                           changes: [Fixture.change("Sources/App/A.swift", additions: 10, deletions: 4),
+                                     Fixture.change("docs/guide.md", additions: 2, deletions: 1)]),
+            Fixture.commit(sha: "c2", date: Fixture.utc(days: 1, seconds: 7_200),
+                           author: "zhang san", email: "Dev@TCoder.Local", offset: 3_600,
+                           subject: "feat: 二",
+                           changes: [Fixture.change("Sources/App/A.swift", additions: 1, deletions: 1),
+                                     Fixture.change("Sources/Views/B.swift", additions: 3, deletions: 0),
+                                     Fixture.change("scripts/run.sh", additions: 4, deletions: 2)]),
+            Fixture.commit(sha: "c3", date: Fixture.utc(days: 2, seconds: 100),
+                           author: "李四", email: "li.si@tcoder.local", offset: -18_000,
+                           subject: "fix: 三",
+                           changes: [Fixture.change("Tests/C.swift", additions: 5, deletions: 5),
+                                     Fixture.change("root.md", additions: 1, deletions: 0)]),
+        ]
+    }
+
+    func testAuthorStatsMergesByNormalizedEmail() throws {
+        let stats = GitAggregation.authorStats(from: commits)
+        XCTAssertEqual(stats.count, 2, "同一 email（大小写不同/name 不同）必须合成 1 位作者")
+        let merged = try XCTUnwrap(stats.first { $0.email == "dev@tcoder.local" }, "归一化 email 作为 key")
+        XCTAssertEqual(merged.commits, 2, "该邮箱下 2 次提交")
+        XCTAssertEqual(merged.additions, 14, "additions 必须累加")
+        XCTAssertEqual(merged.deletions, 7, "deletions 必须累加")
+        XCTAssertEqual(merged.filesTouched, 4, "filesTouched 是不同文件数，重复文件只算一次")
+    }
+
+    func testAuthorStatsTakesNameFromChronologicallyLastCommit() throws {
+        let outOfOrder = [commits[2], commits[0], commits[1]]
+        let stats = GitAggregation.authorStats(from: outOfOrder)
+        let merged = try XCTUnwrap(stats.first { $0.email == "dev@tcoder.local" }, "找不到归并后的作者")
+        XCTAssertEqual(merged.name, "zhang san", "name 取时间最晚那次，且与数组顺序无关")
+        let first = try XCTUnwrap(merged.firstCommitAt, "firstCommitAt 必须有值")
+        XCTAssertEqual(first.timeIntervalSince1970,
+                       Fixture.utc(days: 0, seconds: 3_600).timeIntervalSince1970, accuracy: 0.5,
+                       "firstCommitAt 取最早一次")
+        let last = try XCTUnwrap(merged.lastCommitAt, "lastCommitAt 必须有值")
+        XCTAssertEqual(last.timeIntervalSince1970,
+                       Fixture.utc(days: 1, seconds: 7_200).timeIntervalSince1970, accuracy: 0.5,
+                       "lastCommitAt 取最晚一次")
+    }
+
+    func testAuthorStatsActivityByHourUsesAuthorTimezone() throws {
+        let stats = GitAggregation.authorStats(from: commits)
+        let zhang = try XCTUnwrap(stats.first { $0.email == "dev@tcoder.local" }, "作者缺失")
+        XCTAssertEqual(zhang.activityByHour.count, 24, "每位作者的直方图长度必须是 24")
+        XCTAssertEqual(zhang.activityByHour.reduce(0, +), 2, "作者直方图之和等于其提交数")
+        XCTAssertEqual(zhang.topDirectories.count, 3, "作者 topDirectories 只保留前 3")
+        XCTAssertEqual(zhang.topDirectories["Sources"], 2, "第一位目录计数正确")
+        XCTAssertNil(zhang.topDirectories["Tests"], "不属于该作者的目录不得出现")
+    }
+
+    func testAuthorStatsEmptyInput() {
+        XCTAssertEqual(GitAggregation.authorStats(from: []), [], "空输入必须返回空数组")
+    }
+
+    func testActivityByHourLengthAndTotal() {
+        let hours = GitAggregation.activityByHour(from: commits)
+        XCTAssertEqual(hours.count, 24, "小时直方图固定 24 桶")
+        XCTAssertEqual(hours.reduce(0, +), commits.count, "直方图之和等于提交数")
+        XCTAssertEqual(hours[1], 1, "+01:00 下 c1 落在本地 1 时")
+    }
+
+    func testActivityByWeekdayLengthAndTotal() {
+        let weekdays = GitAggregation.activityByWeekday(from: commits)
+        XCTAssertEqual(weekdays.count, 7, "星期直方图固定 7 桶")
+        XCTAssertEqual(weekdays.reduce(0, +), commits.count, "直方图之和等于提交数")
+        XCTAssertEqual(weekdays[0], 1, "周一（索引 0）1 次提交")
+    }
+
+    func testDistinctFileCountIgnoresRepeats() {
+        XCTAssertEqual(GitAggregation.distinctFileCount(from: commits), 6,
+                       "同一文件被多次提交只算一次")
+        XCTAssertEqual(GitAggregation.distinctFileCount(from: []), 0, "空输入返回 0")
+    }
+
+    func testTopDirectoriesLimitAndRootBucket() {
+        let top = GitAggregation.topDirectories(for: commits, limit: 3)
+        XCTAssertEqual(top["Sources"], 3, "Sources 下 3 个变更")
+        XCTAssertEqual(top["docs"], 1, "docs 计数正确")
+        XCTAssertEqual(top["(root)"], 1, "无斜杠的路径必须落到 (root)")
+        XCTAssertNil(top["Tests"], "limit 之外的目录不得出现")
+        XCTAssertEqual(GitAggregation.topDirectories(for: commits, limit: 0).count, 0,
+                       "limit <= 0 返回空字典")
+        XCTAssertEqual(GitAggregation.topDirectories(for: [], limit: 3).count, 0, "空输入返回空字典")
+    }
+
+    func testGranularityThresholds() {
+        let first = Fixture.utc(days: 0)
+        XCTAssertEqual(GitAggregation.granularity(forFirst: first,
+                                                  last: Fixture.utc(days: 30)), .day, "30 天仍是 .day")
+        XCTAssertEqual(GitAggregation.granularity(forFirst: first,
+                                                  last: Fixture.utc(days: 31)), .week, "31 天升到 .week")
+        XCTAssertEqual(GitAggregation.granularity(forFirst: first,
+                                                  last: Fixture.utc(days: 200)), .week, "200 天仍是 .week")
+        XCTAssertEqual(GitAggregation.granularity(forFirst: first,
+                                                  last: Fixture.utc(days: 201)), .month, "201 天升到 .month")
+        XCTAssertEqual(GitAggregation.granularity(forFirst: nil, last: first), .day, "缺少端点退回 .day")
+        XCTAssertEqual(GitAggregation.granularity(forFirst: first, last: nil), .day, "缺少端点退回 .day")
+    }
+
+    func testDayBucketsZeroFillAndAscendingOrder() {
+        let calendar = GitAggregation.defaultCalendar()
+        let picked = [commits[0], commits[2]]  // 周一与周三，中间空一天
+        let buckets = GitAggregation.buckets(from: picked, granularity: .day, calendar: calendar)
+        XCTAssertEqual(buckets.count, 3, "首尾之间的空必须补零桶")
+        XCTAssertEqual(buckets[1].commits, 0, "中间那天提交数为 0")
+        XCTAssertEqual(buckets[0].date.timeIntervalSince1970, Fixture.utc(days: 0).timeIntervalSince1970,
+                       accuracy: 0.5, ".day 桶起点对齐当天零点")
+        XCTAssertEqual(buckets[2].date.timeIntervalSince1970, Fixture.utc(days: 2).timeIntervalSince1970,
+                       accuracy: 0.5, "最后一个桶是第三天")
+        let ascending = buckets.zippered(buckets.dropFirst()) { $0.date < $1.date }
+        XCTAssertTrue(ascending, "桶必须按时间升序")
+        XCTAssertEqual(buckets[0].additions, 12, "桶内 additions 为该桶提交之和")
+        XCTAssertEqual(buckets.map { $0.granularity }, Array(repeating: BucketGranularity.day, count: 3),
+                       "粒度必须回传")
+        XCTAssertEqual(GitAggregation.buckets(from: [], granularity: .day, calendar: calendar), [],
+                       "空输入返回空数组")
+    }
+
+    func testRecentCommitsKeepsOrderAndCapsAtLimit() {
+        let recent = GitAggregation.recentCommits(from: commits, limit: 2)
+        XCTAssertEqual(recent.map { $0.sha }, ["c1", "c2"], "只取前 N 个且保持入参顺序")
+        XCTAssertEqual(recent[0].subject, "feat: 一", "subject 原样映射")
+        XCTAssertEqual(recent[0].email, "dev@tcoder.local", "email 原样映射（不做归一化）")
+        XCTAssertEqual(recent[0].filesChanged, 2, "filesChanged 取变更条目数")
+        XCTAssertEqual(recent[0].additions, 12, "additions 求和")
+        XCTAssertEqual(GitAggregation.recentCommits(from: commits, limit: 0).count, commits.count,
+                       "limit <= 0 返回全部")
+        XCTAssertEqual(GitAggregation.recentCommits(from: [], limit: 5), [], "空输入返回空数组")
+    }
+}
+
+private extension Array {
+    /// 相邻元素两两比较的辅助函数（避免在测试里写循环 + 强制解包）。
+    func zippered(_ tail: Array<Element>, _ predicate: (Element, Element) -> Bool) -> Bool {
+        guard count == tail.count + 1 || tail.count == count - 1 else { return false }
+        for index in tail.indices {
+            guard let leading = self[safe: index], let following = tail[safe: index] else { return false }
+            if !predicate(leading, following) { return false }
+        }
+        return true
+    }
+}
+
+private extension Collection {
+    subscript(safe index: Index) -> Element? { indices.contains(index) ? self[index] : nil }
+}
+
+// MARK: - 契约 B：ManifestParsers
+
+final class ManifestParserTests: XCTestCase {
+
+    func testPackageJSONThreeScopes() {
+        let deps = ManifestParsers.packageJSONDependencies(Fixture.pkgJSON, manifestPath: "package.json")
+        XCTAssertEqual(Fixture.names(deps), ["react", "lodash", "vite", "fsevents"], "四个依赖都要抓到")
+        XCTAssertEqual(Fixture.found(deps, "react")?.scope, .runtime, "dependencies 是运行时")
+        XCTAssertTrue(Fixture.found(deps, "react")?.isDevDependency == false, "运行时依赖不得标记为 dev")
+        XCTAssertEqual(Fixture.found(deps, "vite")?.scope, .dev, "devDependencies 是开发")
+        XCTAssertTrue(Fixture.found(deps, "vite")?.isDevDependency == true, "isDevDependency 与 scope 一致")
+        XCTAssertTrue(Fixture.found(deps, "fsevents")?.isDevDependency == false,
+                      "optionalDependencies 不是开发依赖")
+        XCTAssertTrue(Fixture.found(deps, "lodash")?.version.contains("4.17.15") == true, "版本号要抓到")
+        XCTAssertEqual(deps.first?.ecosystem, .npm, "生态必须是 npm")
+    }
+
+    func testPackageJSONMalformedReturnsEmptyList() {
+        XCTAssertEqual(ManifestParsers.packageJSONDependencies("{ not json ",
+                                                              manifestPath: "package.json"), [],
+                       "非法 JSON 必须返回空数组而不是崩溃")
+        XCTAssertEqual(ManifestParsers.packageJSONDependencies("", manifestPath: "package.json"), [],
+                       "空文本必须返回空数组")
+    }
+
+    func testPomXMLSubstitutesPropertiesAndScope() {
+        let deps = ManifestParsers.pomXMLDependencies(Fixture.pomXML, manifestPath: "pom.xml")
+        XCTAssertEqual(Fixture.names(deps), ["org.springframework:spring-core", "com.google.guava:guava"],
+                       "命名必须是 group:artifact")
+        XCTAssertEqual(Fixture.found(deps, "org.springframework:spring-core")?.version, "5.3.30",
+                       "${spring.version} 必须被 properties 代入")
+        XCTAssertEqual(Fixture.found(deps, "org.springframework:spring-core")?.scope, .test,
+                       "<scope>test</scope> 必须映射为测试")
+        XCTAssertEqual(Fixture.found(deps, "com.google.guava:guava")?.version, "32.1.3-jre",
+                       "第二个属性也要代入")
+        XCTAssertEqual(Fixture.found(deps, "com.google.guava:guava")?.scope, .runtime,
+                       "无 scope 标签时默认运行时")
+    }
+
+    func testMavenModulePathsExtraction() {
+        let paths = ManifestParsers.mavenModulePaths(in: Fixture.pomXML)
+        XCTAssertEqual(paths.count, 2, "只抽取两个 <module>")
+        XCTAssertEqual(Set(paths), ["api", "service-core"], "模块名正确")
+        XCTAssertFalse(paths.contains { $0.isEmpty }, "不得产出空模块名")
+        XCTAssertEqual(ManifestParsers.mavenModulePaths(in: "<project></project>"), [], "无 modules 返回空")
+    }
+
+    func testGradleBothStringSyntaxesAndTestConfiguration() {
+        let text = """
+        dependencies {
+            implementation 'com.google.guava:guava:33.0.0-jre'
+            implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.20")
+            testImplementation 'junit:junit:4.13.2'
+            // implementation 'com.example:skipped:1.0.0'
+        }
+        """
+        let deps = ManifestParsers.gradleDependencies(text, manifestPath: "build.gradle")
+        XCTAssertEqual(Fixture.names(deps),
+                       ["com.google.guava:guava", "org.jetbrains.kotlin:kotlin-stdlib", "junit:junit"],
+                       "单引号与括号形式都要解析，注释行跳过")
+        XCTAssertEqual(Fixture.found(deps, "com.google.guava:guava")?.version, "33.0.0-jre", "版本取第三段")
+        XCTAssertEqual(Fixture.found(deps, "junit:junit")?.scope, .test, "testImplementation 是测试")
+        XCTAssertEqual(Fixture.found(deps, "org.jetbrains.kotlin:kotlin-stdlib")?.scope, .runtime,
+                       "implementation 是运行时")
+        XCTAssertEqual(deps.first?.ecosystem, .gradle, "生态必须是 gradle")
+    }
+
+    func testSwiftPackageFromAndExactStripGitSuffix() {
+        let text = """
+        // swift-tools-version:5.9
+        import PackageDescription
+        let package = Package(
+            name: "TcoderKit",
+            dependencies: [
+                .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
+                .package(url: "https://github.com/tcoder/Kit.git", exact: "2.0.0"),
+            ]
+        )
+        """
+        let deps = ManifestParsers.swiftPackageDependencies(text, manifestPath: "Package.swift")
+        XCTAssertEqual(deps.count, 2, "两个 .package 都要抓到")
+        XCTAssertTrue(deps.allSatisfy { !$0.name.hasSuffix(".git") }, "name 必须去掉 .git 后缀")
+        XCTAssertTrue(deps.contains { $0.name.hasSuffix("swift-log") }, "第一个包名以 swift-log 结尾")
+        XCTAssertTrue(deps.contains { $0.name.hasSuffix("Kit") }, "第二个包名以 Kit 结尾")
+        XCTAssertTrue(deps.contains { $0.version.contains("1.5.0") }, "from: 语义版本要抓到")
+        XCTAssertTrue(deps.contains { $0.version.contains("2.0.0") }, "exact: 语义版本要抓到")
+        XCTAssertEqual(deps.first?.ecosystem, .swiftPM, "生态必须是 swiftPM")
+    }
+
+    func testRequirementsTxtSkipsCommentsAndReferences() {
+        let text = """
+        # Tcoder 后端依赖
+        flask==2.3.3
+        requests>=2.31.0
+
+        -r base.txt
+        --index-url https://pypi.tcoder.local/simple
+        """
+        let deps = ManifestParsers.requirementsTxtDependencies(text, manifestPath: "requirements.txt")
+        XCTAssertEqual(Fixture.names(deps), ["flask", "requests"], "注释、空行、-r/--index-url 全部跳过")
+        XCTAssertEqual(Fixture.found(deps, "flask")?.version, "2.3.3", "== 取精确版本")
+        XCTAssertEqual(Fixture.found(deps, "requests")?.version, "2.31.0", ">= 取约束右侧版本")
+        XCTAssertEqual(deps.first?.ecosystem, .python, "生态必须是 python")
+    }
+
+    func testGoModRequireBlock() {
+        let text = """
+        module tcoder.local/monitor
+
+        go 1.22
+
+        require (
+        \tgithub.com/gin-gonic/gin v1.9.1
+        \tgolang.org/x/net v0.17.0
+        )
+        """
+        let deps = ManifestParsers.goModDependencies(text, manifestPath: "go.mod")
+        XCTAssertEqual(Fixture.names(deps), ["github.com/gin-gonic/gin", "golang.org/x/net"],
+                       "require 块内两条依赖都要抓到")
+        XCTAssertTrue(Fixture.found(deps, "golang.org/x/net")?.version.hasSuffix("0.17.0") == true,
+                      "版本必须解析出来")
+        XCTAssertEqual(deps.first?.ecosystem, .go, "生态必须是 go")
+    }
+
+    func testCargoTomlThreeSections() {
+        let text = """
+        [package]
+        name = "tcoder-monitor"
+
+        [dependencies]
+        serde = "1.0.190"
+
+        [dev-dependencies]
+        tempfile = "3.8.1"
+
+        [build-dependencies]
+        cc = "1.0.83"
+        """
+        let deps = ManifestParsers.cargoTomlDependencies(text, manifestPath: "Cargo.toml")
+        XCTAssertEqual(Fixture.names(deps), ["serde", "tempfile", "cc"], "三个 section 都要解析")
+        XCTAssertEqual(Fixture.found(deps, "serde")?.version, "1.0.190", "版本正确")
+        XCTAssertEqual(Fixture.found(deps, "serde")?.scope, .runtime, "[dependencies] 是运行时")
+        XCTAssertEqual(Fixture.found(deps, "tempfile")?.scope, .dev, "[dev-dependencies] 是开发")
+        XCTAssertEqual(Fixture.found(deps, "cc")?.scope, .build, "[build-dependencies] 是构建")
+        XCTAssertEqual(deps.first?.ecosystem, .cargo, "生态必须是 cargo")
+    }
+
+    func testLockfileNameDetectionForKnownLockfiles() {
+        XCTAssertEqual(ManifestParsers.lockfileName(for: .npm, in: ["package.json", "package-lock.json"]),
+                       "package-lock.json", "npm 默认锁文件")
+        XCTAssertEqual(ManifestParsers.lockfileName(for: .npm, in: ["package.json", "yarn.lock"]),
+                       "yarn.lock", "yarn 锁文件")
+        XCTAssertEqual(ManifestParsers.lockfileName(for: .npm, in: ["pnpm-lock.yaml", "package.json"]),
+                       "pnpm-lock.yaml", "pnpm 锁文件")
+        XCTAssertEqual(ManifestParsers.lockfileName(for: .gradle, in: ["build.gradle", "gradle.lockfile"]),
+                       "gradle.lockfile", "gradle 锁文件")
+        XCTAssertEqual(ManifestParsers.lockfileName(for: .cocoapods, in: ["Podfile", "Podfile.lock"]),
+                       "Podfile.lock", "CocoaPods 锁文件")
+        XCTAssertEqual(ManifestParsers.lockfileName(for: .cargo, in: ["Cargo.toml", "Cargo.lock"]),
+                       "Cargo.lock", "cargo 锁文件")
+        XCTAssertEqual(ManifestParsers.lockfileName(for: .go, in: ["go.mod", "go.sum"]),
+                       "go.sum", "go 校验文件")
+        XCTAssertNil(ManifestParsers.lockfileName(for: .npm, in: ["package.json"]), "无锁文件返回 nil")
+    }
+
+    func testFrameworkMarkersFromDependencyNames() {
+        let web = ManifestParsers.frameworkMarkers(ecosystem: .npm,
+                                                  dependencyNames: ["react", "react-dom", "vite", "lodash"])
+        XCTAssertTrue(web.contains("React"), "react 必须给出 React 标记")
+        XCTAssertTrue(web.contains("Vite"), "vite 必须给出 Vite 标记")
+        let server = ManifestParsers.frameworkMarkers(
+            ecosystem: .maven,
+            dependencyNames: ["org.springframework.boot:spring-boot-starter-web"])
+        XCTAssertTrue(server.contains("Spring Boot"), "spring-boot-starter 必须给出 Spring Boot 标记")
+        XCTAssertEqual(ManifestParsers.frameworkMarkers(ecosystem: .npm,
+                                                        dependencyNames: ["left-pad"]), [],
+                       "无框架特征时返回空数组")
+    }
+
+    func testManifestFileNameEcosystemLookup() {
+        XCTAssertEqual(ManifestFileName.ecosystem(for: "package.json"), .npm, "package.json -> npm")
+        XCTAssertEqual(ManifestFileName.ecosystem(for: "pom.xml"), .maven, "pom.xml -> maven")
+        XCTAssertEqual(ManifestFileName.ecosystem(for: "build.gradle.kts"), .gradle, "kts -> gradle")
+        XCTAssertEqual(ManifestFileName.ecosystem(for: "Package.swift"), .swiftPM, "Package.swift -> swiftPM")
+        XCTAssertEqual(ManifestFileName.ecosystem(for: "requirements.txt"), .python, "requirements -> python")
+        XCTAssertEqual(ManifestFileName.ecosystem(for: "go.mod"), .go, "go.mod -> go")
+        XCTAssertEqual(ManifestFileName.ecosystem(for: "Cargo.toml"), .cargo, "Cargo.toml -> cargo")
+        XCTAssertEqual(ManifestFileName.ecosystem(for: "Podfile"), .cocoapods, "Podfile -> CocoaPods")
+        XCTAssertNil(ManifestFileName.ecosystem(for: "README.md"), "未知文件名返回 nil")
+        XCTAssertNil(ManifestFileName.ecosystem(for: ""), "空文件名返回 nil")
+    }
+
+    func testAllManifestNamesCoversEveryEcosystem() {
+        let names = ManifestFileName.allManifestNames
+        for expected in ["package.json", "pom.xml", "build.gradle", "Package.swift",
+                         "requirements.txt", "go.mod", "Cargo.toml", "Podfile"] {
+            XCTAssertTrue(names.contains(expected), "清单名集合缺少 \(expected)")
+        }
+        XCTAssertFalse(names.contains("README.md"), "集合里不得混入非清单文件")
+    }
+
+    func testParseDispatchesOnManifestName() {
+        let parsed = ManifestParsers.parse(text: Fixture.pkgJSON, manifestPath: "package.json",
+                                           directoryRelativePath: "web",
+                                           directoryListing: ["package.json", "yarn.lock"])
+        guard let parsed else { return XCTFail("package.json 必须被分派到 npm 解析器") }
+        XCTAssertEqual(parsed.ecosystem, .npm, "生态由文件名决定")
+        XCTAssertEqual(parsed.manifestRelativePath, "package.json", "清单相对路径原样回传")
+        XCTAssertEqual(parsed.directoryRelativePath, "web", "目录相对路径原样回传")
+        XCTAssertEqual(parsed.lockfileName, "yarn.lock", "锁文件由目录清单推出")
+        XCTAssertTrue(parsed.frameworkMarkers.contains("React"), "框架标记要带上")
+        XCTAssertEqual(parsed.dependencies.count, 4, "依赖数量正确")
+    }
+
+    func testParseReturnsNilForUnrelatedFileName() {
+        XCTAssertNil(ManifestParsers.parse(text: "hello", manifestPath: "notes.txt",
+                                           directoryRelativePath: "", directoryListing: ["notes.txt"]),
+                     "非清单文件名必须返回 nil")
+        XCTAssertNil(ManifestParsers.parse(text: "", manifestPath: "",
+                                           directoryRelativePath: "", directoryListing: []),
+                     "空文件名必须返回 nil")
+    }
+
+    func testParseHandlesPomInSubdirectory() {
+        let parsed = ManifestParsers.parse(text: Fixture.pomXML, manifestPath: "backend/pom.xml",
+                                           directoryRelativePath: "backend",
+                                           directoryListing: ["pom.xml"])
+        guard let parsed else { return XCTFail("子目录里的 pom.xml 也要能解析") }
+        XCTAssertEqual(parsed.ecosystem, .maven, "生态必须是 maven")
+        XCTAssertEqual(parsed.directoryRelativePath, "backend", "子目录路径要保留")
+        XCTAssertEqual(parsed.dependencies.count, 2, "maven 依赖数正确")
+    }
+}
+
+// MARK: - 契约 C：内置快照与离线漏洞
+
+final class DependencySnapshotTests: XCTestCase {
+
+    func testSnapshotMetadataIsSane() {
+        XCTAssertGreaterThan(DependencySnapshot.bundledEntryCount, 0, "内置快照不得为空")
+        XCTAssertGreaterThan(DependencySnapshot.snapshotDate.timeIntervalSince1970, 1_600_000_000,
+                             "快照日期必须晚于 2020 年")
+        XCTAssertLessThan(DependencySnapshot.snapshotDate.timeIntervalSince1970, 4_000_000_000,
+                          "快照日期不得是离谱的未来时间")
+    }
+
+    func testLatestKnownVersionHitsNpmSnapshot() {
+        XCTAssertEqual(DependencySnapshot.latestKnownVersion(ecosystem: .npm, name: "lodash"), "4.17.21",
+                       "lodash 最新已知版本必须是 4.17.21")
+    }
+
+    func testLatestKnownVersionUnknownPackageIsNil() {
+        XCTAssertNil(DependencySnapshot.latestKnownVersion(ecosystem: .npm,
+                                                           name: "tcoder-definitely-not-real"),
+                     "不存在的包必须返回 nil")
+        XCTAssertNil(DependencySnapshot.latestKnownVersion(ecosystem: .npm, name: ""),
+                     "空包名必须返回 nil")
+    }
+
+    func testLatestKnownVersionSharedAcrossMavenAndGradle() {
+        let maven = DependencySnapshot.latestKnownVersion(ecosystem: .maven, name: "com.alibaba:fastjson")
+        let gradle = DependencySnapshot.latestKnownVersion(ecosystem: .gradle, name: "com.alibaba:fastjson")
+        XCTAssertNotNil(maven, "maven 坐标必须命中快照")
+        XCTAssertEqual(gradle, maven, "gradle 与 maven 坐标互通")
+    }
+
+    func testMatchesFlagsVulnerableLodash() {
+        XCTAssertEqual(VulnerabilitySource.matches(ecosystem: .npm, name: "lodash",
+                                                   version: "4.17.15").count, 1,
+                       "lodash 4.17.15 必须命中 1 条漏洞")
+        XCTAssertTrue(VulnerabilitySource.matches(ecosystem: .npm, name: "lodash",
+                                                  version: "4.17.21").isEmpty,
+                      "lodash 4.17.21 是修复版本，不得命中")
+    }
+
+    func testMatchesFlagsMavenCoordinates() {
+        XCTAssertFalse(VulnerabilitySource.matches(ecosystem: .maven, name: "com.alibaba:fastjson",
+                                                   version: "1.2.68").isEmpty,
+                       "fastjson 1.2.68 必须命中")
+        XCTAssertFalse(VulnerabilitySource.matches(ecosystem: .maven,
+                                                   name: "commons-collections:commons-collections",
+                                                   version: "3.2.1").isEmpty,
+                       "commons-collections 3.2.1 必须命中")
+        XCTAssertFalse(VulnerabilitySource.matches(ecosystem: .maven,
+                                                   name: "io.jsonwebtoken:jjwt",
+                                                   version: "0.9.1").isEmpty,
+                       "jjwt 0.9.1 必须命中")
+    }
+
+    func testMatchesSkipsFixedVersions() {
+        XCTAssertTrue(VulnerabilitySource.matches(ecosystem: .maven,
+                                                  name: "org.apache.logging.log4j:log4j-core",
+                                                  version: "2.20.0").isEmpty,
+                      "log4j-core 2.20.0 已修复，不得命中")
+        XCTAssertTrue(VulnerabilitySource.matches(ecosystem: .npm, name: "axios",
+                                                  version: "1.6.0").isEmpty,
+                      "新版 axios 不得命中")
+        XCTAssertTrue(VulnerabilitySource.matches(ecosystem: .npm, name: "tcoder-not-real",
+                                                  version: "1.0.0").isEmpty,
+                      "不存在的包不得命中")
+    }
+
+    func testMatchesHandlesLog4jAndAxiosLegacyVersions() {
+        XCTAssertFalse(VulnerabilitySource.matches(ecosystem: .maven,
+                                                   name: "org.apache.logging.log4j:log4j-core",
+                                                   version: "2.14.1").isEmpty,
+                       "log4j-core 2.14.1 必须命中")
+        XCTAssertFalse(VulnerabilitySource.matches(ecosystem: .npm, name: "axios",
+                                                   version: "0.21.1").isEmpty,
+                       "axios 0.21.1 必须命中")
+    }
+
+    func testKnownVulnerabilityAffectsBoundary() {
+        let hits = VulnerabilitySource.matches(ecosystem: .npm, name: "lodash", version: "4.17.15")
+        guard let first = hits.first else { return XCTFail("lodash 4.17.15 应有命中") }
+        XCTAssertTrue(first.affects(version: "4.17.20"), "受影响区间内为 true")
+        XCTAssertFalse(first.affects(version: "4.17.21"), "修复版本本身为 false")
+    }
+
+    func testOfflineVulnerabilitiesAggregatesSamePackageVersions() {
+        let records = [
+            Fixture.record(name: "lodash", version: "4.17.15", manifest: "package.json"),
+            Fixture.record(name: "lodash", version: "4.17.20", manifest: "web/package.json"),
+            Fixture.record(name: "lodash", version: "4.17.21", manifest: "app/package.json"),
+        ]
+        let vulns = VulnerabilitySource.offlineVulnerabilities(for: records)
+        XCTAssertEqual(vulns.count, 1, "同一包的多条命中必须聚合成 1 条")
+        let lodash = vulns[0]
+        XCTAssertEqual(lodash.package, "lodash", "包名正确")
+        XCTAssertEqual(lodash.ecosystem, .npm, "生态正确")
+        XCTAssertEqual(lodash.affectedDependencies.count, 2, "只有两个旧版本被计入")
+        XCTAssertFalse(lodash.affectedDependencies.contains { $0.isEmpty }, "受影响项不得为空串")
+    }
+
+    func testOfflineVulnerabilitiesCarryCVEIdentifiers() {
+        let records = [
+            Fixture.record(name: "lodash", version: "4.17.15", manifest: "package.json"),
+            Fixture.record(name: "com.alibaba:fastjson", version: "1.2.68",
+                           ecosystem: .maven, manifest: "pom.xml"),
+            Fixture.record(name: "org.apache.logging.log4j:log4j-core", version: "2.14.1",
+                           ecosystem: .maven, manifest: "server/pom.xml"),
+            Fixture.record(name: "axios", version: "0.21.1", manifest: "web/package.json"),
+        ]
+        let vulns = VulnerabilitySource.offlineVulnerabilities(for: records)
+        XCTAssertTrue(Set(["lodash", "com.alibaba:fastjson",
+                           "org.apache.logging.log4j:log4j-core", "axios"])
+                        .isSubset(of: Set(vulns.map { $0.package })),
+                  "四个有漏洞的包都要出现在结果里")
+        for vuln in vulns {
+            XCTAssertFalse(vuln.cveIdentifiers.isEmpty, "\(vuln.package) 的 CVE 列表不得为空")
+            XCTAssertTrue(vuln.cveIdentifiers.allSatisfy { $0.hasPrefix("CVE-") },
+                          "\(vuln.package) 的编号必须是 CVE 格式")
+            XCTAssertFalse(vuln.vulnerableRange.isEmpty, "受影响区间描述不得为空")
+            XCTAssertFalse(vuln.summary.isEmpty, "摘要不得为空")
+            XCTAssertGreaterThan(vuln.severity.rank, RiskLevel.none.rank, "严重级别不得是「无」")
+        }
+    }
+
+    func testOfflineVulnerabilitiesEmptyForCleanInput() {
+        let records = [
+            Fixture.record(name: "lodash", version: "4.17.21", manifest: "package.json"),
+            Fixture.record(name: "tcoder-not-real", version: "1.0.0", manifest: "package.json"),
+        ]
+        XCTAssertEqual(VulnerabilitySource.offlineVulnerabilities(for: records), [],
+                       "干净依赖必须返回空数组")
+        XCTAssertEqual(VulnerabilitySource.offlineVulnerabilities(for: []), [],
+                       "空输入必须返回空数组")
+    }
+
+    func testBundledAdvisoriesDescribeAffectedPackages() {
+        let advisories = VulnerabilitySource.bundledAdvisories(
+            for: [Fixture.record(name: "lodash", version: "4.17.15", manifest: "package.json")])
+        XCTAssertFalse(advisories.isEmpty, "lodash 旧版本必须有公告")
+        let advisory = advisories[0]
+        XCTAssertFalse(advisory.id.isEmpty, "公告 id 不得为空")
+        XCTAssertFalse(advisory.summary.isEmpty, "公告标题不得为空")
+        XCTAssertFalse(advisory.source.isEmpty, "公告来源不得为空")
+        XCTAssertEqual(advisory.ecosystem, .npm, "公告生态正确")
+        XCTAssertTrue(advisory.affectedPackages.contains { $0.contains("lodash") },
+                      "受影响包必须包含 lodash")
+    }
+
+    func testBundledAdvisoriesEmptyForCleanInput() {
+        XCTAssertEqual(VulnerabilitySource.bundledAdvisories(for: [
+            Fixture.record(name: "lodash", version: "4.17.21", manifest: "package.json"),
+        ]), [], "无漏洞时不得杜撰公告")
+    }
+
+    func testVersionIsOlderEdgeCases() {
+        XCTAssertFalse(DependencyVersion.isOlder(current: "1.0.0-SNAPSHOT", than: "1.0.0"),
+                       "-SNAPSHOT 后缀必须被截掉后比较")
+        XCTAssertTrue(DependencyVersion.isOlder(current: "^1.2.3", than: "1.2.4"),
+                      "以 ^ 开头的范围串归一化为 0，视为落后")
+        XCTAssertFalse(DependencyVersion.isOlder(current: "1.2.3", than: "^1.2.4"),
+                       "反向比较时 latest 归一化为 0，不得判为落后")
+        XCTAssertTrue(DependencyVersion.isOlder(current: "", than: "1.0.0"), "空串归一化为 [0]")
+        XCTAssertTrue(DependencyVersion.isOlder(current: "abc", than: "1.0.0"), "纯字母归一化为 [0]")
+        XCTAssertFalse(DependencyVersion.isOlder(current: "1.0.0.0.0.0.0", than: "1.0.0"),
+                       "多出的零段不得判为落后")
+        XCTAssertTrue(DependencyVersion.isOlder(current: "1.0.0.0.0.0.2", than: "1.0.0.0.0.0.3"),
+                      "超长段数要逐位比较")
+        XCTAssertEqual(DependencyVersion.normalize("2.0"), [2, 0], "normalize 行为冻结")
+        XCTAssertEqual(DependencyVersion.normalize("!!"), [0], "非数字段归一化为 0")
+    }
+}

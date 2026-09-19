@@ -11,6 +11,11 @@ enum DuplicationEngine {
 
     static let windowSize: Int = 6
 
+    /// 归一化后长度低于此值的行一律丢弃（见 `normalizeBytes` 末尾阈值注释）。
+    /// 取 4 的依据：`normalizeBytes` 输出的是 UTF-8 字节序列，4 字节刚好放过 `x = 1` 这类
+    /// 最短有效语句，而 `}`、`);`、`})` 这些 1~3 字节样板行全部落榜。
+    static let minSignificantRunes: Int = 4
+
     /// 单文件参与滑窗的归一化行数上限：超长文件（生成的/打包的）会吃掉整轮预算，硬截断。
     private static let maxWindowedLines = 20_000
     private static let maxBlocks = 20
@@ -25,6 +30,10 @@ enum DuplicationEngine {
 
     // MARK: - Analysis
 
+    /// 全库重复检测。
+    /// - `ratio` = 被重复片段覆盖的代码行数 / 全部代码行数（同一行只算一次，注释行与空行不进分母）。
+    /// - `blocks` 按覆盖行数降序取前 20 个，是 ratio 的**明细样本**；ratio 统计的是全部命中，
+    ///   不受 20 个上限约束（否则大仓库的重复率会被榜单截断人为压低）。
     static func analyze(_ files: [ScannedSourceFile]) -> DuplicationResult {
         var totalCodeLines = 0
         for file in files {
@@ -78,8 +87,6 @@ enum DuplicationEngine {
 
         var blocks: [DuplicatedBlock] = []
         blocks.reserveCapacity(maxBlocks)
-        var fragmentCache = [Int: CachedFragments]()
-        fragmentCache.reserveCapacity(min(scan.duplicatedRuns.count, 4096))
 
         for (hash, extras) in scan.duplicatedRuns {
             guard let first = scan.firstSeen[hash] else { continue }
@@ -92,28 +99,31 @@ enum DuplicationEngine {
 
             var runs: [Occurrence] = [first]
             runs.append(contentsOf: extras)
+            // 块必须跨文件命中（验收口径 + 单测断言）：同文件内部重复只作为额外片段挂在
+            // 已跨文件命中的 hash 上，绝不单独成块。
+            guard Set(runs.map { $0.fileIndex }).count >= 2 else { continue }
             runs.sort { $0.fileIndex < $1.fileIndex }
 
-            var lineCount = 0
-            var dominantIndex = 0
-            for (offset, run) in runs.enumerated() where run.codeLineCount > lineCount {
-                lineCount = run.codeLineCount
-                dominantIndex = offset
+            // lineCount 取最长片段；similarity 如实反映「各片段是否等长」——
+            // 归一化后逐行完全一致（同一指纹），所以等长即 1.0，短片段的多余行数不虚报。
+            var longest = 0
+            var shortest = Int.max
+            for run in runs {
+                let count = run.codeLineCount
+                if count > longest { longest = count }
+                if count < shortest { shortest = count }
             }
+            let lineCount = longest
             guard lineCount >= windowSize else { continue }
 
-            let dominant = runs[dominantIndex]
-            let occurrences: [DuplicatedFragment]
-            if let cached = fragmentCache[dominant.fileIndex], cached.lineCount == lineCount {
-                occurrences = cached.fragments
-            } else {
-                occurrences = fragmentsOfRuns(runs, files: files)
-                fragmentCache[dominant.fileIndex] = CachedFragments(lineCount: lineCount, fragments: occurrences)
-            }
-            // 每个 occurrence 来自不同文件，故 count >= 2 恒成立；空数组只可能是路径越界。
+            let occurrences = fragmentsOfRuns(runs, files: files)
+            // 每个 occurrence 至少要落在两个不同文件上，否则不构成跨文件重复。
             guard occurrences.count >= 2 else { continue }
+            let similarity = shortest >= longest
+                ? 1
+                : min(max(Double(shortest) / Double(longest), 0), 1)
 
-            blocks.append(DuplicatedBlock(occurrences: occurrences, lineCount: lineCount, similarity: 1))
+            blocks.append(DuplicatedBlock(occurrences: occurrences, lineCount: lineCount, similarity: similarity))
         }
 
         var duplicatedCodeLines = 0
@@ -147,17 +157,14 @@ enum DuplicationEngine {
 
 // MARK: - Tuning thresholds
 
-fileprivate let minNormalizedLength = 4
+/// 归一化行最短长度见 `DuplicationEngine.minSignificantRunes`
 fileprivate let minSignificantBytes = 8
 fileprivate let minTokenCount = 2
-fileprivate let maxFilesPerHash = 6
+/// 单个指纹最多记录多少个片段（跨文件 + 同文件内部重复共用同一预算），超出即丢弃，内存换精度。
+/// 与 `maxFragmentsPerBlock` 取同值：记下的片段都会出现在明细里，榜单与统计不打架。
+fileprivate let maxOccurrencesPerHash = 6
 fileprivate let maxFragmentsPerBlock = 6
 fileprivate let firstSeenCapacityCap = 300_000
-
-fileprivate struct CachedFragments {
-    var lineCount: Int
-    var fragments: [DuplicatedFragment]
-}
 
 // MARK: - Byte helpers
 
@@ -464,11 +471,15 @@ fileprivate struct ScanState {
 
         if var stored = firstSeen[hash] {
             if stored.fileIndex == fileIndex {
-                // 同文件相邻窗口：链式延长已存位置，不额外占内存；同文件自我重复不计入 ratio（产品口径）。
+                // 同文件相邻窗口：链式延长已存位置，不额外占内存。
                 if windowStart == stored.lastWindowStart + 1 {
                     stored.lastWindowStart = windowStart
                     stored.endLine = numbers[windowStart + size - 1]
                     firstSeen[hash] = stored
+                } else if duplicatedRuns[hash] != nil {
+                    // 该指纹已经跨文件命中，同文件的非相邻出现也记成额外片段：
+                    // 文件内部自我重复同样是被覆盖的代码行，只是不单独成块。
+                    appendRun(hash: hash, fileIndex: fileIndex, windowStart: windowStart)
                 }
                 return
             }
@@ -487,21 +498,22 @@ fileprivate struct ScanState {
         let size = DuplicationEngine.windowSize
         guard var runs = duplicatedRuns[hash] else { return }
         let numbers = numbersByFile[fileIndex]
+        let endLine = numbers[windowStart + size - 1]
 
         for index in runs.indices where runs[index].fileIndex == fileIndex {
-            // 同文件里非相邻的第二个重复块不再记录，内存换精度。
-            guard windowStart == runs[index].lastWindowStart + 1 else { return }
+            // 同一文件的窗口只有在与前一片段首尾相接时才延长它；不相接的另起一个片段。
+            guard windowStart == runs[index].lastWindowStart + 1 else { continue }
             runs[index].lastWindowStart = windowStart
-            runs[index].endLine = numbers[windowStart + size - 1]
+            runs[index].endLine = endLine
             duplicatedRuns[hash] = runs
             return
         }
 
-        guard runs.count < maxFilesPerHash else { return }
+        guard runs.count < maxOccurrencesPerHash else { return }
         runs.append(Occurrence(fileIndex: fileIndex,
                                windowStart: windowStart,
                                startLine: numbers[windowStart],
-                               endLine: numbers[windowStart + size - 1]))
+                               endLine: endLine))
         duplicatedRuns[hash] = runs
     }
 }

@@ -109,7 +109,9 @@ struct DependenciesView: View {
                     StatLine(label: "联网查询", value: deps.networkLookupPerformed ? "是" : "否")
                     StatLine(
                         label: "版本来源",
-                        value: deps.ecosystems.contains(where: { $0.dependencies.contains { $0.versionCheckSource == .onlineRegistry } }) ? "含在线源" : "仅内置快照"
+                        value: deps.ecosystems.contains { eco in
+                            eco.dependencies.contains { $0.versionCheckSource == .onlineRegistry }
+                        } ? "含在线源" : "仅内置快照"
                     )
                     Spacer(minLength: 0)
                 }
@@ -311,44 +313,29 @@ private struct DependencyTableHeader: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            column("依赖（\(NumberFormat.grouped(count))）", width: nil, alignment: .leading)
-            column("声明版本", width: DependencyRow.versionWidth, alignment: .trailing)
-            column("已知最新", width: DependencyRow.latestWidth, alignment: .trailing)
-            column("作用域", width: DependencyRow.scopeWidth, alignment: .trailing)
-            column("状态", width: DependencyRow.statusWidth, alignment: .trailing)
+            Text("依赖（\(NumberFormat.grouped(count))）")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("声明版本").frame(width: DepColumns.version, alignment: .trailing)
+            Text("已知最新").frame(width: DepColumns.latest, alignment: .trailing)
+            Text("作用域").frame(width: DepColumns.scope, alignment: .trailing)
+            Text("状态").frame(width: DepColumns.status, alignment: .trailing)
         }
-    }
-
-    private func column(_ text: String, width: CGFloat?, alignment: HorizontalAlignment) -> some View {
-        Text(text)
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(.tertiary)
-            .frame(width: width, alignment: alignment == .leading ? .leading : .trailing)
-            .modifier(FlexibleWidth(enabled: width == nil, alignment: alignment))
+        .font(.system(size: 9, weight: .semibold))
+        .foregroundStyle(.tertiary)
     }
 }
 
-private struct FlexibleWidth: ViewModifier {
-    var enabled: Bool
-    var alignment: HorizontalAlignment
-
-    func body(content: Content) -> some View {
-        if enabled {
-            content.frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
-        } else {
-            content
-        }
-    }
+/// 列宽在表头与数据行之间共用（文件级 private 对本文件所有类型可见）。
+private enum DepColumns {
+    static let version: CGFloat = 78
+    static let latest: CGFloat = 78
+    static let scope: CGFloat = 46
+    static let status: CGFloat = 60
 }
 
 private struct DependencyRow: View {
     let record: DependencyRecord
     let vulnerableCount: Int
-
-    static let versionWidth: CGFloat = 78
-    static let latestWidth: CGFloat = 78
-    static let scopeWidth: CGFloat = 46
-    static let statusWidth: CGFloat = 60
 
     var body: some View {
         HStack(spacing: 8) {
@@ -362,23 +349,23 @@ private struct DependencyRow: View {
             Text(record.version)
                 .font(Theme.monoSmall)
                 .foregroundStyle(.secondary)
-                .frame(width: Self.versionWidth, alignment: .trailing)
+                .frame(width: DepColumns.version, alignment: .trailing)
             Text(record.latestKnownVersion ?? "—")
                 .font(Theme.monoSmall)
-                .foregroundStyle(record.latestKnownVersion == nil ? Color.tertiary : Color.primary)
-                .frame(width: Self.latestWidth, alignment: .trailing)
+                .foregroundStyle(record.latestKnownVersion == nil ? Color.secondary : Color.primary)
+                .frame(width: DepColumns.latest, alignment: .trailing)
             Text(record.scope.rawValue)
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
-                .frame(width: Self.scopeWidth, alignment: .trailing)
+                .frame(width: DepColumns.scope, alignment: .trailing)
             Text(statusText)
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(statusTint)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
                 .background(statusTint.opacity(0.14), in: RoundedRectangle(cornerRadius: 3))
-                .frame(width: Self.statusWidth, alignment: .trailing)
-                .help("版本数据来源：\(record.versionCheckSource.rawValue)")
+                .frame(width: DepColumns.status, alignment: .trailing)
+                .help("版本数据来源：\(record.versionCheckSource.rawValue)；共 \(NumberFormat.grouped(vulnerableCount)) 条已知漏洞")
         }
     }
 

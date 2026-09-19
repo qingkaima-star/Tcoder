@@ -1,17 +1,9 @@
 import XCTest
-
-// 仓库在并行合并期间由 MonaMonitor 改名为 TcoderMonitor，两个模块名都放行。
-#if canImport(MonaMonitor)
-@testable import MonaMonitor
-#elseif canImport(TcoderMonitor)
 @testable import TcoderMonitor
-#endif
 
 final class CodeAnalyzerTests: XCTestCase {
 
-    private static let legacyRepositoryPath = "/Users/one/Documents/Tcoder/MonaMonitor"
-    private static let fallbackRepositoryPath = "/opt/homebrew/Library/Homebrew"
-    private static let largeRepositoryPath = "/Users/one/Documents/nebulaflow"
+    private static let largeRepositoryPath = "/opt/homebrew/Library/Homebrew"
 
     private static var packageRootPath: String {
         URL(fileURLWithPath: #filePath)
@@ -498,7 +490,7 @@ final class CodeAnalyzerTests: XCTestCase {
     // MARK: - Helpers
 
     private static func realRepositoryRoot() throws -> URL {
-        let candidates = [packageRootPath, legacyRepositoryPath, fallbackRepositoryPath]
+        let candidates = [packageRootPath, Self.largeRepositoryPath]
         for path in candidates {
             var isDirectory: ObjCBool = false
             if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue {

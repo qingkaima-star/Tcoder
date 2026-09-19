@@ -162,11 +162,36 @@ fileprivate let sourceLanguageRuleByName: [String: LanguageRule] = {
 
 // MARK: - Line classification state machine
 
-fileprivate struct SourceSyntaxProfile {
+fileprivate struct SourceSyntaxProfile: Sendable {
     var linePrefixes: [[Character]] = []
     var blockStart: [Character]?
     var blockEnd: [Character]?
     var docDelimiters: [[Character]] = []
+
+    init(language: String) {
+        linePrefixes = SourceLanguageCatalog.lineCommentPrefixes(for: language).map { Array($0) }
+        if let (start, end) = SourceLanguageCatalog.blockCommentDelimiters(for: language) {
+            blockStart = Array(start)
+            blockEnd = Array(end)
+        }
+        docDelimiters = SourceLanguageCatalog.docStringDelimiters(for: language).map { Array($0) }
+    }
+}
+
+/// 语言 → Character 规则表，进程内构造一次。
+/// maxFiles 默认 6 万，逐文件重建这张表（Array(Character) 拆分 + 目录查表）就是纯浪费。
+fileprivate let sourceSyntaxProfileByLanguage: [String: SourceSyntaxProfile] = {
+    let languages = SourceLanguageCatalog.supportedLanguages
+    var index: [String: SourceSyntaxProfile] = [:]
+    index.reserveCapacity(languages.count + 8)
+    for language in languages where index[language] == nil {
+        index[language] = SourceSyntaxProfile(language: language)
+    }
+    return index
+}()
+
+fileprivate func sourceSyntaxProfile(for language: String) -> SourceSyntaxProfile {
+    sourceSyntaxProfileByLanguage[language] ?? SourceSyntaxProfile(language: language)
 }
 
 fileprivate enum SourceCommentMode {
@@ -184,14 +209,7 @@ fileprivate struct SourceLineWalker {
     private var mode: SourceCommentMode = .plain
 
     init(language: String) {
-        var built = SourceSyntaxProfile()
-        built.linePrefixes = SourceLanguageCatalog.lineCommentPrefixes(for: language).map { Array($0) }
-        if let (start, end) = SourceLanguageCatalog.blockCommentDelimiters(for: language) {
-            built.blockStart = Array(start)
-            built.blockEnd = Array(end)
-        }
-        built.docDelimiters = SourceLanguageCatalog.docStringDelimiters(for: language).map { Array($0) }
-        profile = built
+        profile = sourceSyntaxProfile(for: language)
     }
 
     mutating func kind(for chars: inout [Character]) -> SourceLineKind {
@@ -289,6 +307,10 @@ fileprivate struct SourceLineWalker {
 
 // MARK: - Classifier
 
+/// 单文件分类器。不变式：
+/// 1. `totalLines == blankLines + commentLines + codeLines`（每行只落一个桶，行号从 1 连续）；
+/// 2. 任何 IO / 解码失败都以 `nil` 返回，绝不抛异常打断整次扫描；
+/// 3. 符号链接文件一律不读（见 `SourceTreeScanner.scan`），因此这里读到的字节必然在仓库树内。
 final class SourceFileClassifier {
     private let options: ScanOptions
     private static let maximumLineCount = 200_000
@@ -300,7 +322,10 @@ final class SourceFileClassifier {
     func classify(url: URL, root: URL) -> ScannedSourceFile? {
         let ext = url.pathExtension.lowercased()
         guard let language = SourceLanguageCatalog.language(forExtension: ext) else { return nil }
-        let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .isSymbolicLinkKey])
+        // 双保险：调用方已经过滤过符号链接，这里再拦一次，保证不存在
+        // “通过符号链接读到仓库树之外的文件” 这条路径。
+        if values?.isSymbolicLink == true { return nil }
         if values?.isRegularFile == false { return nil }
         if let size = values?.fileSize, size > options.maxFileBytes { return nil }
         guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else { return nil }
@@ -338,9 +363,13 @@ final class SourceFileClassifier {
             case .comment: comment += 1
             case .code: code += 1
             }
-            let uppercased = text.uppercased()
-            todo += sourceMarkerOccurrences(of: "TODO", in: uppercased)
-            fixme += sourceMarkerOccurrences(of: "FIXME", in: uppercased)
+            // TODO/FIXME 只在代码行与注释行里数（空行不可能含标记，顺带省掉一次 uppercased）；
+            // 大小写不敏感按子串计次。`FIXME` 不含 `TODO` 子串，因此不会被算成 TODO。
+            if kind != .blank {
+                let uppercased = text.uppercased()
+                todo += sourceMarkerOccurrences(of: "TODO", in: uppercased)
+                fixme += sourceMarkerOccurrences(of: "FIXME", in: uppercased)
+            }
             lines.append(SourceLine(number: offset + 1, text: text, kind: kind))
         }
 
@@ -417,6 +446,16 @@ fileprivate struct SourceSkipPlan {
     }
 }
 
+/// 目录树遍历 + 文件级并发分类。
+///
+/// 遍历不变式（验收口径）：
+/// - **绝不读取任何符号链接**（目录链接不进入、文件链接不读）。这样返回的每个 path 都由
+///   root 之下的真实目录项拼成，不可能逃逸到仓库树之外，也不可能踩到自环目录。
+///   代价：以符号链接形式引入的源码文件不计入统计——刻意选择「跳过」而不是「按真实文件读」，
+///   因为后者需要对每个文件做 realpath 包含性判定，且本机存在指向仓库外大资产目录的 symlink。
+/// - `skipDirectories`（纯目录名 / 含斜杠的相对路径 / 已剔除目录的子树）整棵子树被跳过，不计入 visited。
+/// - 达到 `maxFiles` 立即停止并置 `truncatedByMaxFiles`。
+/// - 不可读、超限、非候选文件计入 `skippedFileCount`；任何错误都不抛异常。
 final class SourceTreeScanner {
     private let options: ScanOptions
     // ScanOptions.defaultBinaryExtensions 里有 `dSYM` 这类混合大小写，比较前先统一小写
@@ -435,7 +474,9 @@ final class SourceTreeScanner {
         guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory),
               isDirectory.boolValue else { return result }
 
-        let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey, .isSymbolicLinkKey, .nameKey]
+        // `.isDirectoryKey` 必须在列：URLResourceValues 只回填请求过的键，
+        // 漏掉它会让目录判定恒为 nil，skipDirectories / 符号链接兜底全部失效。
+        let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey, .fileSizeKey, .isSymbolicLinkKey, .nameKey]
         var enumerationOptions: FileManager.DirectoryEnumerationOptions = [.skipsPackageDescendants]
         if options.includeHidden == false { enumerationOptions.insert(.skipsHiddenFiles) }
 
@@ -454,11 +495,14 @@ final class SourceTreeScanner {
             if Task.isCancelled { break }
             let values = try? url.resourceValues(forKeys: Set(keys))
 
-            // 符号链接一律跳过：本机有指向仓库外大资产目录的 symlink，跟随就是事故
-            if values?.isSymbolicLink == true { continue }
+            // 符号链接：目录链接先掐掉子树再跳过（不跟随 = 不逃逸、不死循环），文件链接直接跳过。
+            if values?.isSymbolicLink == true {
+                if values?.isDirectory == true { enumerator.skipDescendants() }
+                continue
+            }
 
             if values?.isDirectory == true {
-                // Darwin Foundation 的枚举器只有 skipDescendants()（skipSubdirectoryDescendants 是 corelibs 独有）
+                // Darwin Foundation 的枚举器只有 skipDescendants()（skipSubtree 是 corelibs-foundation 独有）
                 if plan.consume(url) { enumerator.skipDescendants() }
                 continue
             }

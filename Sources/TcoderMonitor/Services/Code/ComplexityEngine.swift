@@ -79,7 +79,7 @@ enum ComplexityEngine {
                     startLine: line + 1,
                     lineCount: count,
                     parameterCount: parameterCount(from: signature),
-                    complexity: complexity(ofCleanedLines: Array(src.cleaned[line...endLine]), profile)
+                    complexity: complexity(ofCleanedLines: Array(src.cleaned[line...endLine]), profile: profile)
                 ))
             }
             line = endLine + 1
@@ -92,7 +92,7 @@ enum ComplexityEngine {
         guard !lines.isEmpty else { return 1 }
         let profile = profile(for: language)
         let cleaned = sanitize(lines, profile).cleaned
-        return complexity(ofCleanedLines: cleaned, profile)
+        return complexity(ofCleanedLines: cleaned, profile: profile)
     }
 
     /// 从签名里括号内的参数列表推断参数个数。
@@ -146,37 +146,41 @@ enum ComplexityEngine {
 
     // MARK: Complexity
 
-    private static let branchKeywords = [
-        "else if", "if", "elif", "elseif", "foreach", "for", "until", "while",
+    /// 所有可能出现在关键字正则里的词；具体语言再按 branchKeywords 取子集。
+    private static let allBranchKeywords: Set<String> = [
+        "else if", "if", "elif", "elseif", "foreach", "for", "while", "until",
         "case", "when", "catch", "except", "rescue", "guard", "require",
+        "loop", "match", "repeat", "and", "or",
     ]
-    private static let keywordStopLines: Set<String> = ["in", "of"]
 
+    /// 单一关键字正则：一次匹配 + 关键字集合过滤，比按语言现编译正则快得多。
     private static let branchKeywordExpression = try? NSRegularExpression(
-        pattern: "\\b(?:else[ \\t]+if|elseif|elif|foreach|for|while|until|case|when|catch|except|rescue|guard|require|if)\\b",
+        pattern: "\\b(?:else[ \\t]+if|elseif|elif|foreach|for|while|until|case|when|catch|except"
+            + "|rescue|guard|require|loop|match|repeat|and|or|if)\\b",
         options: []
     )
 
     private static func complexity(ofCleanedLines lines: [String], profile: LangProfile) -> Int {
         var total = 1
+        let keywords = profile.branchKeywords.isEmpty ? allBranchKeywords : profile.branchKeywords
         for rawLine in lines {
             // 预处理指令行（#if DEBUG / #include）不计入，避免平台分支被当成逻辑分支
             if rawLine.isEmpty || rawLine.first == "#" { continue }
             if let re = branchKeywordExpression {
                 let text = rawLine as NSString
                 let matches = re.matches(in: rawLine, options: [], range: NSRange(location: 0, length: text.length))
-                for match in matches where keywordStopLines.contains(text.substring(with: match.range)) == false {
+                for match in matches where keywords.contains(text.substring(with: match.range)) {
                     total += 1
                 }
             }
-            total += branchSymbols(in: Array(rawLine))
+            total += branchSymbols(in: Array(rawLine), profile: profile)
         }
         return max(1, total)
     }
 
     // 三元 `?` 的判定是纯启发式：Swift/Kotlin/Dart 里 `Int?` 满天飞，所以额外要求
     // 「冒号出现在该 ? 之后」，否则 `let x: Int? = 5` 会被误计一次。
-    private static func branchSymbols(in chars: [Character]) -> Int {
+    private static func branchSymbols(in chars: [Character], profile: LangProfile) -> Int {
         guard !chars.isEmpty else { return 0 }
         var lastColon = -1
         for (offset, c) in chars.enumerated() where c == ":" { lastColon = offset }
@@ -192,25 +196,47 @@ enum ComplexityEngine {
         var count = 0
         while index < n {
             let c = chars[index]
-            if c == "&", index + 1 < n, chars[index + 1] == "&" { count += 1; index += 2; continue }
-            if c == "|", index + 1 < n, chars[index + 1] == "|" { count += 1; index += 2; continue }
+            if c == "&", profile.countsLogicalSymbols, index + 1 < n, chars[index + 1] == "&" {
+                count += 1; index += 2; continue
+            }
+            if c == "|", profile.countsLogicalSymbols, index + 1 < n, chars[index + 1] == "|" {
+                count += 1; index += 2; continue
+            }
             if c == "?" {
-                if index + 1 < n, chars[index + 1] == "?" { count += 1; index += 2; continue }
+                if profile.countsNullCoalescing, index + 1 < n, chars[index + 1] == "?" { count += 1; index += 2; continue }
+                // `?.` 可选链本身就是一次判定分支
+                if profile.countsOptionalChaining, index + 1 < n, chars[index + 1] == "." { count += 1; index += 2; continue }
                 if index + 1 < n, chars[index + 1] == "." { index += 1; continue }
                 if index > 0, chars[index - 1] == "?" { index += 1; continue }
                 let followedByWhitespace = index + 1 < n && (chars[index + 1] == " " || chars[index + 1] == "\t")
-                if followedByWhitespace, lastColon > index, hasAssignment || hasReturn || hasParen {
+                if profile.countsTernary, followedByWhitespace, lastColon > index,
+                   hasAssignment || hasReturn || hasParen {
                     count += 1
                 }
                 index += 1
                 continue
             }
-            if c == "r", hasReturn == false, chars[index...].prefix(6) == "return".prefix(6) {
+            if c == "r", hasReturn == false, isKeywordAt(chars, index, "return") {
                 hasReturn = true
             }
             index += 1
         }
         return count
+    }
+
+    /// chars[at...] 是否以 keyword 开头且前后不是标识符字符（避免 returnValue 触发 return）。
+    private static func isKeywordAt(_ chars: [Character], _ at: Int, _ keyword: String) -> Bool {
+        let letters = Array(keyword)
+        guard !letters.isEmpty, at + letters.count <= chars.count else { return false }
+        guard chars[at...].prefix(letters.count).elementsEqual(letters) else { return false }
+        if at > 0, isIdentifierCharacter(chars[at - 1]) { return false }
+        let next = at + letters.count
+        if next < chars.count, isIdentifierCharacter(chars[next]) { return false }
+        return true
+    }
+
+    private static func isIdentifierCharacter(_ c: Character) -> Bool {
+        c.isLetter || c.isNumber || c == "_"
     }
 
     // MARK: Signature matching
@@ -275,6 +301,8 @@ enum ComplexityEngine {
         var cursor = start
         var braceLine = -1
         while cursor < n {
+            // 未闭合的候选必须硬收敛：单次扫描不超过 maxFunctionLines，避免整文件退化成 O(N²)
+            if cursor - start > maxFunctionLines { return nil }
             if cursor > start, !src.balancedBefore[cursor - 1] { return nil }
             if braceLine < 0 {
                 if profile.allowTrailingSemicolonEnd == false, src.cleaned[cursor].contains(";") { return nil }
@@ -377,20 +405,24 @@ enum ComplexityEngine {
         var closes = [Int]()
         closes.reserveCapacity(lines.count)
         var state = LexState()
-        var depth = 0
-        var balanced = [Bool](repeating: true, count: lines.count)
 
+        var prefix = [Int](repeating: 0, count: lines.count + 1)
         for (index, line) in lines.enumerated() {
             let out = sanitizeLine(line, profile, &state)
-            balanced[index] = depth > -3
             cleaned.append(out.text)
             opens.append(out.opens)
             closes.append(out.closes)
-            depth = max(0, depth + out.opens - out.closes)
+            prefix[index + 1] = prefix[index] + out.opens - out.closes
         }
-        var prefix = [Int](repeating: 0, count: lines.count + 1)
-        for i in 0..<lines.count {
-            prefix[i + 1] = prefix[i] + opens[i] - closes[i]
+
+        // balancedBefore[i]：第 i 行之前累计花括号从未跌破 -3。跌破说明有字符串/注释被误判
+        // 导致深度错位（heredoc、正则字面量里的 `}`），此后的函数边界不可信，直接放弃候选，
+        // 免得 curlyEnd 在错位的深度上扫到文件尾。容忍 3 层是为了放过零星噪声。
+        var balanced = [Bool](repeating: true, count: lines.count)
+        var lowest = 0
+        for index in 0..<lines.count {
+            if prefix[index] < lowest { lowest = prefix[index] }
+            balanced[index] = lowest > -3
         }
         return SanitizedSource(cleaned: cleaned, opens: opens, closes: closes, prefix: prefix, balancedBefore: balanced)
     }
@@ -790,7 +822,7 @@ enum ComplexityEngine {
         let modifiers = "(?:(?:public|private|internal|fileprivate|open|static|class|final|override|"
             + "mutating|nonmutating|nonisolated|isolated|async|throws|rethrows|lazy|@\\w+(?:\\([^()]*\\))?)[ \\t]+)*"
         return SignaturePattern(
-            "^\(head)\(modifiers)func[ \\t]+([A-Za-z_]\\w*)[ \\t]*(?:<[^<>()]*>)?[ \\t]*\("
+            "^\(head)\(modifiers)func[ \\t]+([A-Za-z_]\\w*)[ \\t]*(?:<[^<>()]*>)?[ \\t]*\\("
         )
     }
 

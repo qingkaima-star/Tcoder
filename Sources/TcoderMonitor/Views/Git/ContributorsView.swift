@@ -71,7 +71,7 @@ struct ContributorsView: View {
                 label: "累计变更",
                 value: NumberFormat.compact(git.totalAdditions + git.totalDeletions),
                 unit: "行",
-                caption: "\(NumberFormat.signed(git.totalAdditions)} / \(NumberFormat.signed(-git.totalDeletions))",
+                caption: "\(NumberFormat.signed(git.totalAdditions)) / \(NumberFormat.signed(-git.totalDeletions))",
                 tint: Theme.neutral,
                 systemImage: "arrow.up.arrow.down"
             )
@@ -196,7 +196,7 @@ private struct BusFactorBanner: View {
             return "尚无提交作者统计，无法评估 Bus Factor。"
         }
         let share = NumberFormat.percent(Double(top.commits) / Double(git.totalCommits), precision: 0)
-        let name = top.name.isEmpty ? top.email : top.name
+        let name = displayName(top)
         switch risk {
         case .critical:
             return "100% 依赖单人：\(share) 的提交来自 \(name)，活跃作者仅 \(git.activeAuthorCount) 人，属于严重单点风险。"
@@ -267,9 +267,7 @@ private struct ContributorRow: View {
         totalCommits > 0 ? Double(author.commits) / Double(totalCommits) : 0
     }
 
-    private var title: String {
-        author.name.isEmpty ? (author.email.isEmpty ? "未知作者" : author.email) : author.name
-    }
+    private var title: String { displayName(author) }
 
     private var subtitle: String {
         author.email.isEmpty ? "无邮箱记录" : author.email
