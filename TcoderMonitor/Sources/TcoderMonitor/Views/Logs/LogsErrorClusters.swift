@@ -40,7 +40,8 @@ struct LogsErrorClustersCard: View {
         } else if let logs {
             // ② 查了但空的句式：给出扫过的行数，让「0」成为一个结论而不是空白。
             EmptyStateView(icon: IconName.noRisk.rawValue,
-                           title: "已完成扫描，未发现错误级别日志",
+                           // 三态句式全站只有一个出处：WS-K 在 Views/Shell 里定的 ShellCopy。
+                           title: ShellCopy.scannedButFoundNone("错误级别日志"),
                            message: "本次扫了 \(NumberFormat.grouped(logs.totalLinesScanned)) 行，"
                                + "没有命中错误、异常或崩溃级别的行。")
         }
