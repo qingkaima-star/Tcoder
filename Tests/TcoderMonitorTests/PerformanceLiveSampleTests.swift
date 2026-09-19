@@ -41,9 +41,10 @@ final class PerformanceLiveSampleTests: XCTestCase {
         print("负载 = \(String(format: "%.2f", snapshot.loadAverage1)) /"
             + " \(String(format: "%.2f", snapshot.loadAverage5)) /"
             + " \(String(format: "%.2f", snapshot.loadAverage15))")
-        print("进程数 = \(snapshot.processCount)（sysctl 全系统）· 可查询 \(ProcessInspector.visibleProcessCount())"
-            + " · 开机 \(Int(snapshot.uptimeSeconds / 3600)) 小时"
-            + " · 温度 \(snapshot.thermalState.rawValue)")
+        print("进程数 = \(snapshot.processCount)（本测试把 sweep 结果当 processCount 传进去）"
+            + " · 全系统 \(ProcessInspector.processCount())（sysctl，与 top 同源）"
+            + " · 可查询 \(ProcessInspector.visibleProcessCount())"
+            + " · 开机 \(Int(snapshot.uptimeSeconds / 3600)) 小时 · 温度 \(snapshot.thermalState.rawValue)")
         XCTAssertGreaterThan(snapshot.cpuUsage, 0, "烧了 0.2 秒真实 CPU，占用率不得为 0")
 
         XCTAssertEqual(snapshot.cpuCoreCount, coreCount)

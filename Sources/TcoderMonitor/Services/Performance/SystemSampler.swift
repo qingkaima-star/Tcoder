@@ -257,26 +257,57 @@ enum BlockStorageSampler {
 // MARK: - 网络累计字节
 
 private extension SystemSampler {
-    /// getifaddrs 累加 AF_LINK 字节数；lo0 是回环，算进去会凭空造出流量。
+    /// 全机网卡累计字节数，走 `sysctl(NET_RT_IFLIST2)` —— 与 `netstat -ib` / `top` 同源。
+    ///
+    /// 为什么不用 getifaddrs：AF_LINK 的 `ifa_data` 实际指向 32 位 `if_data`，
+    /// 单接口每 4 GiB 归零一次。本机 en0 真值 51,379,793,857 字节，用 `if_data` 读到的是
+    /// 4,418,535,305（截断值），把它当累计量做两次差就会周期性算出 0 甚至负数；
+    /// 强转成 `if_data64` 读同一块内存更糟（实测入向直接读出 0）。
+    /// `if_msghdr2.ifm_data` 才是内核给的 64 位计数。
     static func networkBytes() -> (inbound: UInt64, outbound: UInt64) {
-        var first: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&first) == 0 else { return (0, 0) }
-        defer { freeifaddrs(first) }
+        var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0]
+        var length = 0
+        guard sysctl(&mib, 6, nil, &length, nil, 0) == 0, length > 0 else { return (0, 0) }
+        // 接口数在两次 sysctl 之间可能增加，多留一屏余量，不够时本轮直接放弃。
+        var buffer = Data(count: length + 8192)
+        let written = buffer.withUnsafeMutableBytes { raw -> Int32 in
+            sysctl(&mib, 6, raw.baseAddress, &length, nil, 0)
+        }
+        guard written == 0, length > 0, length <= buffer.count else { return (0, 0) }
 
         var inbound: UInt64 = 0
         var outbound: UInt64 = 0
-        var cursor = first
-        while let entry = cursor?.pointee {
-            cursor = entry.ifa_next
-            guard let address = entry.ifa_addr, Int32(address.pointee.sa_family) == AF_LINK else { continue }
-            if let name = entry.ifa_name, String(cString: name) == "lo0" { continue }
-            guard let data = entry.ifa_data else { continue }
-            // libc 给的是 32 位 if_data（不是 if_data64），单接口每 4 GiB 归零一次；
-            // 归零那一帧 current < previous，由 bytesPerSecond 退化成 0。
-            let stats = data.assumingMemoryBound(to: if_data.self).pointee
-            inbound &+= UInt64(stats.ifi_ibytes)
-            outbound &+= UInt64(stats.ifi_obytes)
+        let infoSpan = MemoryLayout<if_msghdr2>.stride
+        buffer.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+            guard let base = raw.baseAddress else { return }
+            var offset = 0
+            // 报文长度与类型是整条路由消息的共同前缀（u_short + u_char + u_char），
+            // 而 NET_RT_IFLIST2 里除了 160 字节的 IFINFO2 还混着 60 字节左右的地址消息，
+            // 所以只能先按 4 字节前缀取长度，够长才当成 if_msghdr2 解析。
+            while offset + 4 <= length {
+                let cursor = base.advanced(by: offset)
+                let messageLength = Int(cursor.loadUnaligned(as: u_short.self))
+                guard messageLength >= 4, offset + messageLength <= length else { break }
+                let messageType = cursor.loadUnaligned(fromByteOffset: 3, as: UInt8.self)
+                if Int32(messageType) == RTM_IFINFO2, messageLength >= infoSpan {
+                    let info = cursor.loadUnaligned(as: if_msghdr2.self)
+                    if !isLoopbackInterface(info.ifm_index) {
+                        inbound &+= info.ifm_data.ifi_ibytes
+                        outbound &+= info.ifm_data.ifi_obytes
+                    }
+                }
+                offset += messageLength
+            }
         }
         return (inbound, outbound)
+    }
+
+    /// lo0 是回环，算进去会凭空造出一倍流量；名字查不到时宁可保留该接口，
+    /// 免得静默漏掉真网卡（差一个接口就是差几 GB）。
+    static func isLoopbackInterface(_ index: u_short) -> Bool {
+        guard index > 0 else { return true }
+        var nameBuffer = [CChar](repeating: 0, count: Int(IF_NAMESIZE))
+        guard if_indextoname(UInt32(index), &nameBuffer) != nil else { return false }
+        return String(cString: nameBuffer) == "lo0"
     }
 }

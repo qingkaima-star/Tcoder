@@ -1041,7 +1041,7 @@ enum ComplexityEngine {
 
     private static var goFunction: SignaturePattern {
         // Go 1.18+ 泛型：`func Map[K comparable, V any](...)` 的类型参数表夹在名字和 `(` 之间
-        SignaturePattern(#"^func[ \t]*(?:\([^()]*\)[ \t]*)?([A-Za-z_]\w*)[ \t]*(?:\[[^\]\n]*\])?[ \t]*\("#)
+        SignaturePattern(#"^func[ \t]*(?:\([^()]*\)[ \t]*)?([A-Za-z_]\w*)[ \t]*(?:\[(?:[^\]\[\n]|\[[^\]\n]*\])*\])?[ \t]*\("#)
     }
 
     private static var rustFunction: SignaturePattern {
@@ -1057,7 +1057,7 @@ enum ComplexityEngine {
 
     private static var rubyFunction: SignaturePattern {
         SignaturePattern(
-            #"^[ \t]*def[ \t]+([A-Za-z_]\w*[?!=]?|\[\]=[\]]?|[!~<>=+\-*/%|&^]+)[ \t]*(?:\(|$|;)"#,
+            #"^[ \t]*def[ \t]+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*[?!=]?|\[\]=[\]]?|[!~<>=+\-*/%|&^]+)[ \t]*(?:\(|$|;)"#,
             needsParen: false
         )
     }

@@ -64,7 +64,11 @@ enum ProcessInspector {
     }
 
     /// 本用户可逐进程查询指标的进程数。
+    /// 注意 `proc_listallpids(nil, 0)` 的返回值只是缓冲区容量建议，实测 254 而真实只能取回 83，
+    /// 所以这里以实际枚举结果为准。
     static func visibleProcessCount() -> Int {
+        let enumerated = listAllPids().count
+        if enumerated > 0 { return enumerated }
         let bytes = proc_listallpids(nil, 0)
         guard bytes > 0 else { return 0 }
         return Int(bytes) / pidStride
