@@ -10,14 +10,23 @@ final class PerformanceDisplayTests: XCTestCase {
 
     // MARK: - 构造真实形状的读数
 
-    private func snapshot(used: UInt64, total: UInt64, cpu: Double = 0.25, cores: Int = 8) -> SystemSnapshot {
+    private func snapshot(used: UInt64, total: UInt64, cpu: Double = 0.25, cores: Int = 8,
+                          pressure: MemoryPressure = .normal) -> SystemSnapshot {
         var snap = SystemSnapshot()
         snap.memoryUsedBytes = used
         snap.memoryTotalBytes = total
+        snap.memoryPressure = pressure
         snap.cpuUsage = cpu
         snap.cpuCoreCount = cores
         snap.processCount = 400
         return snap
+    }
+
+    /// 走真实引擎，拿到 WS-C `8333852` 定义的「读不到页计数」那条快照长什么样。
+    private func engineSnapshotWithFailedVmRead() -> SystemSnapshot {
+        var counters = SystemCounters()
+        counters.vm = VmCounters()          // 七项页计数全 0 = host_statistics64 失败的形状
+        return SystemSampler().snapshot(previous: nil, current: counters, processCount: 400)
     }
 
     private func context(_ snap: SystemSnapshot?, frames: Int = 3, paused: Bool = false) -> SampleContext {
@@ -62,19 +71,43 @@ final class PerformanceDisplayTests: XCTestCase {
         XCTAssertNil(SystemReadings.cpuFraction(context(nil)))
     }
 
-    /// WS-D 抛过的真问题：引擎读 vm_statistics 失败时返回全零页计数，
-    /// 于是「已用 = 总量」，界面会画出一个 100% 占满的红色内存。视图层必须接住。
-    func testFailedMemoryReadNeverRendersAsFullUsage() {
-        let suspicious = context(snapshot(used: 16_000, total: 16_000))
-        XCTAssertNil(SystemReadings.memoryUsedBytes(suspicious))
-        XCTAssertNil(SystemReadings.memoryFraction(suspicious))
-        XCTAssertNil(SystemReadings.memoryPressure(suspicious), "压力由同一个可疑分母推导，必须一起作废")
-        XCTAssertNotNil(SystemReadings.memoryGapReason(suspicious))
+    /// 端到端接住 WS-C 的修复：引擎把失败落成「压力 unknown + 已用 0 + 总量真值」，
+    /// 视图必须渲染成 `--` 并给原因，而不是「0 B · 占 0% · 正常」（那比假 100% 更安心，也更错）。
+    func testFailedVmReadFromTheRealEngineRendersAsMissing() {
+        let failed = engineSnapshotWithFailedVmRead()
+        XCTAssertEqual(failed.memoryPressure, .unknown, "WS-C 的信号是 .unknown，本测试依赖它")
+        XCTAssertEqual(failed.memoryUsedBytes, 0)
+        XCTAssertGreaterThan(failed.memoryTotalBytes, 0, "总量是另一次独立读取，应当带真值")
 
+        let ctx = context(failed)
+        XCTAssertNil(SystemReadings.memoryUsedBytes(ctx))
+        XCTAssertNil(SystemReadings.memoryFraction(ctx))
+        XCTAssertNil(SystemReadings.memoryPressure(ctx))
+        let reason = SystemReadings.memoryGapReason(ctx) ?? ""
+        XCTAssertTrue(reason.contains("页计数") || reason.contains("host_statistics"), "空态要说清原因，得到的是「\(reason)」")
+    }
+
+    /// 反方向也要钉住：真的用满（空闲+推测+可清除确实为 0）必须照实显示。
+    /// 我上一版把「已用 ≥ 总量」当假读数压掉，会把最该报警的一帧藏成 `--`。
+    func testGenuineFullMemoryIsShownNotSuppressed() {
+        let full = context(snapshot(used: 16_000, total: 16_000, pressure: .critical))
+        XCTAssertEqual(SystemReadings.memoryUsedBytes(full), 16_000)
+        XCTAssertEqual(SystemReadings.memoryFraction(full), 1.0)
+        XCTAssertNil(SystemReadings.memoryGapReason(full))
+        XCTAssertEqual(LoadLevel.role(for: SystemReadings.memoryFraction(full)).name, "danger")
+    }
+
+    func testZeroUsedBytesCountsAsNoEvidence() {
+        let zero = context(snapshot(used: 0, total: 16_000))
+        XCTAssertNil(SystemReadings.memoryUsedBytes(zero))
+        XCTAssertNotNil(SystemReadings.memoryGapReason(zero))
+    }
+
+    func testHealthyMemoryKeepsItsNumbersAndGapReasonStaysSilent() {
         let healthy = context(snapshot(used: 9_000, total: 16_000))
         XCTAssertEqual(SystemReadings.memoryUsedBytes(healthy), 9_000)
         XCTAssertNil(SystemReadings.memoryGapReason(healthy))
-        XCTAssertTrue(SystemReadings.memoryGapReason(context(nil)) == nil)
+        XCTAssertNil(SystemReadings.memoryGapReason(context(nil)))
     }
 
     func testMemoryCaliberIsStatedInWords() {
@@ -86,9 +119,11 @@ final class PerformanceDisplayTests: XCTestCase {
 
     func testUntrustedMemoryPointsAreDroppedFromTheCurve() {
         let points = [snapshot(used: 8_000, total: 16_000),
-                      snapshot(used: 16_000, total: 16_000),
+                      snapshot(used: 0, total: 16_000, pressure: .unknown),
+                      snapshot(used: 16_000, total: 16_000, pressure: .critical),
                       snapshot(used: 9_000, total: 16_000)]
-        XCTAssertEqual(SystemReadings.trustedMemoryPoints(points).count, 2)
+        // 只剔「没证据」的那一帧；真用满的一帧要留在曲线上。
+        XCTAssertEqual(SystemReadings.trustedMemoryPoints(points).count, 3)
         XCTAssertEqual(SystemReadings.rejectedMemoryPoints(points), 1,
                        "剔除了几个点必须数得出来，不能悄悄丢")
     }

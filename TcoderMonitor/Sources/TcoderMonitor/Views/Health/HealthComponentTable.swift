@@ -65,13 +65,101 @@ enum HealthBreakdown {
         return HealthDimension.allCases.filter { $0.defaultWeight > 0 && !present.contains($0.rawValue) }
     }
 
-    /// 摊分说明：只在原始权重被改动时给出，格式「重复代码率 13%→16%」。
-    static func shiftNotes(_ rows: [ScoreRow]) -> [String] {
+    /// 内置权重表里所有可计分维度的合计。**实测是 1.10 而不是 1.00**，
+    /// 所以「九维全在场」时每个乘数也已经被整体折算过 —— 不能拿它当「没摊分」的证据。
+    static var tableWeightSum: Double {
+        HealthDimension.allCases.reduce(0) { $0 + $1.defaultWeight }
+    }
+
+    /// 本次在场维度的表权重合计（缺席的那些不在里面）。
+    static func presentTableSum(_ rows: [ScoreRow]) -> Double {
+        rows.compactMap(\.baseWeight).reduce(0, +)
+    }
+
+    /// 「本次乘数与设计占比不一致」的**原因**，判不出来就说判不出来。
+    ///
+    /// 这里曾是总工点出的那条矛盾：`weightHelp` 无条件写「缺失维度的权重已摊到在场维度」，
+    /// 而同一页另一句又写「权重未做摊分」——两句在 `defaultWeight` 合计 110% 的事实下
+    /// 都不必然成立。现在文案由下面这个枚举驱动，每种原因各说各的话。
+    static func shiftCause(for row: ScoreRow, rows: [ScoreRow], missingCount: Int) -> WeightShiftCause {
+        guard let base = row.baseWeight else { return .scorerOnly }
+        let tableSum = Self.tableWeightSum
+        let presentSum = Self.presentTableSum(rows)
+        guard tableSum > 0, presentSum > 0 else { return .unexplained }
+
+        let asIntended = base / tableSum          // 无缺席时应有的占比（含整体折算）
+        let renormalized = base / presentSum      // 缺席摊分后应有的占比
+        let eps = Self.shareTolerance
+
+        let tableNormalized = abs(base - row.effectiveWeight) > eps
+        let matchesAsIntended = abs(asIntended - row.effectiveWeight) <= eps
+        let matchesRenormalized = abs(renormalized - row.effectiveWeight) <= eps
+
+        if missingCount > 0 { return matchesRenormalized ? .missingDimensions : .unexplained }
+        if matchesAsIntended { return tableNormalized ? .tableNormalization : .asIntended }
+        return .unexplained
+    }
+
+    /// 权重格 hover 的唯一文案出口。每句只陈述这一行能证实的部分。
+    static func weightTooltip(for row: ScoreRow, rows: [ScoreRow], missingCount: Int) -> String {
+        let published = NumberFormat.percent(row.effectiveWeight, precision: 1)
+        guard let base = row.baseWeight else {
+            return "该维度不在内置权重表里，直接采用评分器给出的权重 \(published)。"
+        }
+        let raw = NumberFormat.percent(base, precision: 1)
+        let tableSumText = NumberFormat.percent(Self.tableWeightSum, precision: 0)
+        switch shiftCause(for: row, rows: rows, missingCount: missingCount) {
+        case .scorerOnly:
+            return "该维度不在内置权重表里，直接采用评分器给出的权重 \(published)。"
+        case .asIntended:
+            return "本次乘数 \(published)，与内置表原始权重 \(raw) 一致。"
+        case .tableNormalization:
+            return "内置权重表合计 \(tableSumText)，评分器发布前整体折算：原始 \(raw) → 本次乘数 \(published)。本次没有维度缺席。"
+        case .missingDimensions:
+            // 两个合计数一起给：在场合计里已经含着「表本身不到 100%」这一层，不再为它单开一个分支。
+            return "\(missingCount) 个维度缺席，份额按在场维度等比摊入：原始 \(raw) → 本次乘数 \(published)"
+                + "（在场维度表权重合计 \(NumberFormat.percent(Self.presentTableSum(rows), precision: 0))，全表合计 \(tableSumText)）。"
+        case .unexplained:
+            return "本次乘数 \(published) 与内置表口径（原始 \(raw)、表合计 \(tableSumText)、缺席 \(missingCount) 项）对不上，界面以评分器发布值为准。"
+        }
+    }
+
+    /// 卡底那行总结。措辞随「有没有缺席」「表合计是不是 100%」两个事实变，
+    /// 不再固定宣称任何一种。
+    static func normalizationSummary(rows: [ScoreRow], missingCount: Int) -> String {
+        let tableSum = Self.tableWeightSum
+        let notes = shiftNotes(rows, missingCount: missingCount)
+        if missingCount == 0 {
+            let head = "输入覆盖全部 \(rows.count) 个可计分维度，没有维度缺席"
+            if abs(tableSum - 1) > shareTolerance {
+                return head + "；但内置权重表合计 \(NumberFormat.percent(tableSum, precision: 0))，评分器发布前已整体折算，故各乘数不等于表内原始值。"
+            }
+            return head + "；权重未做摊分，乘数即表内原始值。"
+        }
+        return "缺失 \(missingCount) 个维度不参与计分、也不按 0 计入，其份额已按在场维度等比摊入。"
+            + (notes.isEmpty ? "" : "（\(notes.joined(separator: " · "))）")
+    }
+
+    /// 折算说明列表：只列乘数确实偏离表内原始值的维度。
+    static func shiftNotes(_ rows: [ScoreRow], missingCount: Int) -> [String] {
         rows.compactMap { row in
-            guard let base = row.baseWeight, abs(base - row.effectiveWeight) >= 0.005 else { return nil }
+            guard let base = row.baseWeight,
+                  abs(base - row.effectiveWeight) > shareTolerance else { return nil }
             return "\(row.name) \(NumberFormat.percent(base, precision: 0))→\(NumberFormat.percent(row.effectiveWeight, precision: 0))"
         }
     }
+
+    /// 占比比对容差：0.5 个百分点。小于它的差异不值得在文案里单独归因。
+    static let shareTolerance = 0.005
+}
+
+/// `weightTooltip` 的分支依据。每种原因一句不同的话，避免「无条件宣称」。
+enum WeightShiftCause: Hashable {
+    case scorerOnly
+    case asIntended
+    case tableNormalization
+    case missingDimensions
+    case unexplained
 }
 
 // MARK: - 显示名映射
@@ -132,6 +220,7 @@ struct HealthComponentTable: View {
 
 
     private var rows: [ScoreRow] { HealthBreakdown.rows(for: health) }
+    private var missingCount: Int { HealthBreakdown.missingDimensions(of: health).count }
     private var sum: Double { HealthBreakdown.sumOfContributions(rows) }
 
     var body: some View {
@@ -209,12 +298,7 @@ struct HealthComponentTable: View {
     }
 
     private func weightHelp(_ row: ScoreRow) -> String {
-        guard let base = row.baseWeight else {
-            return "该维度不在内置权重表里，直接采用评分器给出的权重。"
-        }
-        return "原始权重 \(NumberFormat.percent(base, precision: 0)) → 本次实际乘数 "
-            + NumberFormat.percent(row.effectiveWeight, precision: 1)
-            + "（缺失维度的权重等比摊到在场维度）"
+        HealthBreakdown.weightTooltip(for: row, rows: rows, missingCount: missingCount)
     }
 
     // MARK: 缺失维度
@@ -222,9 +306,9 @@ struct HealthComponentTable: View {
     @ViewBuilder
     private var missingBlock: some View {
         let missing = HealthBreakdown.missingDimensions(of: health)
-        let notes = HealthBreakdown.shiftNotes(rows)
         if missing.isEmpty {
-            NoteLine("这次扫描的输入覆盖了全部可计分维度，权重未做摊分。测试覆盖只在项目真的产出了覆盖率报告时参与计分。")
+            NoteLine(HealthBreakdown.normalizationSummary(rows: rows, missingCount: 0)
+                     + "测试覆盖只在项目真的产出了覆盖率报告时参与计分。")
         } else {
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 Text("缺失维度 \(NumberFormat.grouped(missing.count)) 项")
@@ -241,8 +325,7 @@ struct HealthComponentTable: View {
                         Spacer(minLength: 0)
                     }
                 }
-                Text("缺失维度不参与计分、不按 0 计入，其权重已按比例摊到在场维度。"
-                     + (notes.isEmpty ? "" : "（\(notes.joined(separator: " · "))）"))
+                Text(HealthBreakdown.normalizationSummary(rows: rows, missingCount: missing.count))
                     .font(Theme.Typo.microLabel.font)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
