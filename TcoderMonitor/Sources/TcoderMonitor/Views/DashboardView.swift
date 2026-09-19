@@ -277,6 +277,14 @@ struct DashboardView: View {
                 Text(coverageCaliberLine(coverage))
                     .font(Theme.Typo.microLabel.font.monospacedDigit())
                     .foregroundStyle(.tertiary)
+                // #38：这些读数是把几份本地报告合起来算的，而报告本身是 .gitignore 挡着的
+                // 本地产物——不写「哪天生成的」，一份几天前的 lcov 就能长期冒充新鲜数据进健康分。
+                // 多份报告按最旧那份说（见 `CoverageMetrics.generationSummaryText`）。
+                if let generation = coverage.generationSummaryText {
+                    Text(generation)
+                        .font(Theme.Typo.microLabel.font.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
                 if let branch = coverage.overallBranchPercent {
                     Text("分支覆盖 \(Self.percentOf100(branch, precision: 1)) · 来源 "
                          + coverage.reports.map { $0.toolName }.joined(separator: " / "))

@@ -78,18 +78,29 @@ final class CoverageAnalyzer: CoverageProviding {
 
         switch name {
         case "lcov.info", "lcov.dat":
-            return parseLCov(text: text, url: url)
+            return fill(url: url, with: parseLCov(text: text, url: url))
         case "coverage-summary.json":
-            return parseIstanbulSummary(text: text, url: url)
+            return fill(url: url, with: parseIstanbulSummary(text: text, url: url))
         case "jacoco.xml", "jacocoTestReport.xml":
-            return parseJaCoCo(text: text, url: url)
+            return fill(url: url, with: parseJaCoCo(text: text, url: url))
         case "coverage.xml":
-            return parseCoveragePy(text: text, url: url)
+            return fill(url: url, with: parseCoveragePy(text: text, url: url))
         case "clover.xml":
-            return parseClover(text: text, url: url)
+            return fill(url: url, with: parseClover(text: text, url: url))
         default:
             return nil
         }
+    }
+
+    /// 五种格式的解析器都不关心「这份文件是哪天的」，所以在这里统一补一次：
+    /// 生成时间取报告文件**自身的 mtime**——这是唯一不用相信解析器的证据来源。
+    /// 读不到就留 nil，由 `CoverageReport.generationText` 明说「未知生成时间」，
+    /// 绝不允许拿本次分析时刻顶替（那等于把陈旧报告洗成新数据）。
+    private func fill(url: URL, with report: CoverageReport?) -> CoverageReport? {
+        guard var filled = report else { return nil }
+        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+        filled.generatedAt = values?.contentModificationDate
+        return filled
     }
 
     /// lcov 是唯一带**源文件粒度**的格式（每条记录一个 `SF:`），所以只有它能真的

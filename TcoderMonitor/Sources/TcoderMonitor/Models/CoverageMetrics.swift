@@ -80,6 +80,31 @@ struct CoverageMetrics: Codable, Equatable, Sendable {
     /// 至少有一份报告能按源文件区分口径。假 = 生产码数字其实等同全量，界面必须说明。
     var scopeIsSeparated: Bool { reports.contains { $0.isScopeSeparated } }
 
+    /// 「这些读数有多新（或多旧）」的一句总说明，多份报告时按**最旧**那份说。
+    ///
+    /// 口径：加权总分是把几份报告合起来算的，所以它的新鲜度只能等于最陈旧那份的新鲜度；
+    /// 说成"最新的那份"就是拿好消息骗人。没有生成时间的报告**单独计数**（失败面往大报），
+    /// 一份都没有时间时整句退化成「未知生成时间」，而不是干脆不显示。
+    var generationSummaryText: String? {
+        guard reports.isEmpty == false else { return nil }
+        let dated = reports.compactMap { $0.generatedAt }
+        let undated = reports.count - dated.count
+
+        var text: String
+        if let oldest = dated.min() {
+            text = "最旧报告生成于 \(DateFormat.full.string(from: oldest))（\(DateFormat.sinceDescription(oldest))）"
+        } else {
+            text = "报告为未知生成时间（不按新鲜数据计）"
+        }
+        if undated > 0 && dated.isEmpty == false {
+            text += "，另 \(undated) 份无生成时间"
+        }
+        if reports.count > 1 {
+            text += "·共 \(reports.count) 份"
+        }
+        return text
+    }
+
     var overallBranchPercent: Double? {
         let scored = reports.filter { $0.branchesTotal != nil && ($0.branchesTotal ?? 0) > 0 }
         guard !scored.isEmpty else { return nil }
@@ -133,6 +158,23 @@ struct CoverageReport: Codable, Equatable, Identifiable, Sendable {
     var allBranchesCovered: Int?
     var allBranchesTotal: Int?
     var scopeGranularity: ScopeGranularity?
+
+    /// 这份报告**是什么时候生成的**（取自报告文件自身的 mtime）。
+    ///
+    /// 为什么必须有：覆盖率产物是仓库自己生成的本地文件（`.gitignore` 挡着、没有 git 历史），
+    /// 一份几天前的 lcov 与一份刚刚跑出来的 lcov 在界面上长得一模一样，
+    /// 于是陈旧数据可以长期冒充新鲜结论进健康评分（#38，与内置快照的 #25 同族）。
+    ///
+    /// **必须 Optional**：同上面那批字段一条理由。拿不到时间时是「未知」，
+    /// 由 `generationText` 明说，绝不当成新鲜。
+    /// 与 #35 的分别：这里的时分级的是文件系统真实记录的分钟，不是我们替用户编的精度。
+    var generatedAt: Date?
+
+    /// 面向用户的一句「这份报告是哪生成的」。未知就直说未知，不挤出时间、也不说"最新"。
+    var generationText: String {
+        guard let generatedAt else { return "报告为未知生成时间（不按新鲜数据计）" }
+        return "报告生成于 \(DateFormat.full.string(from: generatedAt))（\(DateFormat.sinceDescription(generatedAt))）"
+    }
 
     var id: String { path }
 
