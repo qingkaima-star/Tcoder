@@ -28,7 +28,7 @@ Apple Silicon 原生 macOS App（Swift + SwiftUI），对本地开发项目做�
 | 贡献者 | 提交/增删/占比排行、每人活跃时段、Bus Factor 风险 |
 | 性能监控 | 本机 CPU/内存/磁盘/网络实时曲线 + Top 进程 + **工程进程组**（按匹配模式汇总某服务的 CPU/RAM/Threads/Open Files） |
 | 错误日志 | 解析 `Logs/error.log`、`crash.log`、macOS `.ips`；今日错误/崩溃/异常/警告、Top Errors 聚类（次数、首次、最近） |
-| 依赖分析 | `package.json` / `pom.xml` / `build.gradle(.kts)` / `Package.swift` / `requirements.txt` / `pyproject.toml` / `go.mod` / `Cargo.toml` / `Podfile` / `Gemfile`；版本过旧与已知漏洞，可选在线查 OSV.dev 与 npm registry |
+| 依赖分析 | `package.json` / `pom.xml` / `build.gradle(.kts)` / `settings.gradle(.kts)` / `Package.swift` / `requirements.txt`（含 `requirements-*.txt`、`dev-requirements.txt` 派生名）/ `pyproject.toml` / `setup.py` / `Pipfile` / `go.mod` / `Cargo.toml` / `Podfile` / `Gemfile` / `packages.config` —— 共 16 个精确文件名外加派生规则，以 `ManifestFileName.table` 与 `ecosystem(for:)` 的派生名规则为准（`Sources/TcoderMonitor/Services/Dependencies/ManifestParsers.swift:36-60`）；版本过旧与已知漏洞，可选在线查 OSV.dev 与 npm registry |
 | 健康评分 | 9 维加权评分与优点/问题/建议。**启发式本地计算，未调用任何外部模型**，界面已如实标注 |
 
 > 上表是开发向速览。逐页「给我看什么 / 数字怎么算的 / 什么时候会不准」见
