@@ -42,39 +42,102 @@ final class ShellDesignTests: XCTestCase {
                        "数字位的占符是全仓约定，改它要同步九页与笔记 40")
     }
 
-    // MARK: - ② 分类色必须稳定
+    // MARK: - ② 分类色只有一个入口，且跨调用路径同号
 
-    func testStableIndexIsInRangeAndReproducible() {
-        for count in [1, 6, 8] {
-            for name in ["Swift", "Objective-C", "Python", "Ruby", "Go", "Rust", ""] {
-                let slot = LanguageBar.stableIndex(name, count: count)
-                XCTAssertTrue((0..<count).contains(slot), "\(name) → \(slot) 越界（count=\(count)）")
-                XCTAssertEqual(slot, LanguageBar.stableIndex(name, count: count))
+    /// #32 的契约：`Theme.Chart` 的号位是全仓唯一真相。
+    /// 同一 label 经**两条调用路径**——按键入口 `token(forLabel:)` 与
+    /// 号位入口 `pair(at: index(forLabel:))`（后者正是 `Theme.Share.Row` 默认取色走的链路）
+    /// ——必须落到同一个色值本体，浅深两套各自一致。否则「同色=同类」只在单页内成立。
+    func testChartLabelColorAgreesAcrossBothCallPaths() {
+        let labels = ["Swift", "Objective-C", "Python", "Ruby", "Go", "Rust", "张三", ""]
+        for label in labels {
+            for appearance in DesignAppearance.allCases {
+                let byLabel = Theme.Chart.token(forLabel: label, in: appearance)
+                let byIndex = Theme.Chart.pair(at: Theme.Chart.index(forLabel: label))
+                    .token(in: appearance)
+                XCTAssertEqual(byLabel.sRGBHex, byIndex.sRGBHex,
+                               "「\(label)」在 \(appearance) 下两条取色路径号位不一致")
+                XCTAssertFalse(byLabel.sRGBHex.isEmpty)
             }
         }
-        XCTAssertEqual(LanguageBar.stableIndex("Swift", count: 0), 0, "count 为 0 时不得崩溃")
     }
 
-    func testStableIndexSeparatesTheLanguagesThisRepoActuallyReports() {
-        // 只要不是「所有名字都映到同一格」，色板才有余地表达「同色=同语言」。
-        let names = ["Swift", "Objective-C", "Python", "Ruby", "Go", "Rust"]
-        let slots = Set(names.map { LanguageBar.stableIndex($0, count: Theme.Chart.count) })
-        XCTAssertGreaterThanOrEqual(slots.count, 4,
-                                    "六门语言在 \(Theme.Chart.count) 色板里挤成 \(slots.count) 格，色板失去表意能力")
-    }
-
-    func testLanguageColorIsIndependentOfSwiftHashValue() {
-        // 旧写法是 `abs(share.language.hashValue) % palette.count`。
-        // 这里把「稳定哈希 ≠ Swift 的每进程随机哈希」这一条钉成断言：
-        // 只有当两者偶发同值时才会漏判，所以用一组长度与字符都不同的键来撞。
-        let keys = ["Swift", "swift", "Swift ", "Objective-C", "C", "TypeScript", "Kotlin"]
-        let drifted = keys.filter {
-            let stable = LanguageBar.stableIndex($0, count: Theme.Chart.count)
-            let unstable = abs($0.hashValue) % Theme.Chart.count
-            return stable == unstable
+    /// 号位会变（换算法就整体换位），**不变的是「同名必同号」**。
+    /// 这条钉住我上一版的缺陷：自己那份哈希走 `utf8` 且不 `lowercased()`，
+    /// 于是 `Swift` 与 `swift` 分到不同号位、中文名因字节序 ≠ 码点序而错位。
+    /// 大小写等价本身已由 WS-G 在 `DesignKitTests:112` 钉死，这里不重复，
+    /// 只补「越界」与「挤成一格」两条我这页真正依赖的性质。
+    func testChartLabelIndexIsInRangeAndSeparatesRealLanguages() {
+        for name in ["Swift", "Objective-C", "Python", "Ruby", "Go", "Rust", "张三", ""] {
+            XCTAssertTrue((0..<Theme.Chart.count).contains(Theme.Chart.index(forLabel: name)),
+                          "「\(name)」号位越界")
+            XCTAssertEqual(Theme.Chart.index(forLabel: name), Theme.Chart.index(forLabel: name),
+                           "同一名字两次取号不同 = 又引入了每进程随机播种")
         }
-        XCTAssertLessThan(drifted.count, keys.count,
-                          "全部键都与随机 hashValue 同值，说明 stableIndex 退化成了 hashValue")
+        let languages = ["Swift", "Objective-C", "Python", "Ruby", "Go", "Rust"]
+        let slots = Set(languages.map { Theme.Chart.index(forLabel: $0) })
+        XCTAssertGreaterThanOrEqual(slots.count, 3,
+                                    "六门语言挤成 \(slots.count) 格，色板失去表意能力")
+    }
+
+    /// 防再犯：本流名下文件的**代码**里不许再有第二份稳定哈希，也不许回到 `hashValue`。
+    /// （WS-L 的 `CodeGitCategoryColor` 把 0 号让给「合计行」、成员落在 1..n，
+    /// 是它有意的号位策略，属另一条口径，不在本断言范围内——已单独报总工。）
+    func testShellLayerNeverReimplementsTheStableHash() throws {
+        for (name, text) in try shellLayerSources() {
+            let code = Self.strippingComments(text)
+            for needle in Self.hashFingerprint {
+                XCTAssertFalse(code.contains(needle),
+                               "\(name) 的代码里出现了 \(needle)：分类色取号必须走 Theme.Chart")
+            }
+        }
+    }
+
+    /// 剥注释这件事会把守卫悄悄变成**永真绿**（剥多了就什么都扫不到）。
+    /// 所以给它配一条机制测试：正例必须留、反例必须掉，两边都钉住。
+    /// （本仓的扫描型断言上一轮就空转过一次，见《48》与 `CodeGitRestyleTests:546` 的自述。）
+    func testCommentStrippingKeepsCodeAndDropsProse() {
+        let sample = """
+        let a = Theme.accent          // 旧入口 Theme.accent 已废弃
+        // glassEffect 只允许住在 Design/Glass.swift
+        let b = 0xcbf29ce484222325
+        """
+        let stripped = Self.strippingComments(sample)
+        XCTAssertTrue(stripped.contains("Theme.accent"),
+                      "代码里的 Theme.accent 被剥掉了，守卫会假绿")
+        XCTAssertTrue(stripped.contains("0xcbf2"),
+                      "代码里的哈希指纹被剥掉了，守卫会假绿")
+        XCTAssertFalse(stripped.contains("glassEffect"),
+                       "注释里的 glassEffect 没被剥掉，守卫会因文字判红")
+        XCTAssertFalse(stripped.contains("已废弃"),
+                       "行尾注释没切干净——那说明剥的是整行，代码会被一起丢掉")
+        XCTAssertEqual(stripped.components(separatedBy: "\n").count, 3,
+                       "剥注释不该改变行数（少一行说明整行被误删）。"
+                           + "注意这里必须用 components 而不是 split：split 默认会丢掉空行，"
+                           + "而整行注释剥完就正好是空行。")
+    }
+
+    /// 扫描集不能是空的：空集会让上面两条源码守卫同时假绿。
+    func testShellSourceScanActuallySeesTheFiles() throws {
+        let sources = try shellLayerSources()
+        XCTAssertEqual(sources.count, 8, "外壳应是 3 个页面文件 + Shell/ 下 5 个分件")
+        for (name, text) in sources {
+            XCTAssertFalse(text.isEmpty, "\(name) 读出来是空的，扫描等于没扫")
+            XCTAssertGreaterThan(text.count, 200, "\(name) 内容异常短")
+        }
+    }
+
+    /// 稳定哈希与随机哈希的指纹。只用于**代码**，注释里讲历史会提到这些词，
+    /// 所以上面要先剥注释——第一版我没剥，结果被自己写的说明文字判红一次。
+    private static let hashFingerprint = ["0xcbf2", "0xCBF2", "hashValue", "unicodeScalars"]
+
+    /// 剥掉行注释。局限：不处理块注释与字符串里的 `//`；
+    /// 本流文件里这几枚 needle 都不会出现在字符串字面量中，够用。
+    private static func strippingComments(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            guard let cut = line.range(of: "//") else { return String(line) }
+            return String(line[..<cut.lowerBound])
+        }.joined(separator: "\n")
     }
 
     // MARK: - ③ 导航图标：存在性与变体语言
@@ -199,13 +262,15 @@ final class ShellDesignTests: XCTestCase {
     // MARK: - 外壳层防漂移：闸门与令牌只能有一个落点
 
     func testShellFilesKeepAvailabilityGateAndTokensInDesignLayer() throws {
-        let sources = try shellLayerSources()
         var offenders: [String] = []
-        for (name, text) in sources {
+        for (name, text) in try shellLayerSources() {
+            // 同样先剥注释：这些 needle 会以"历史说明"的形式出现在注释里，
+            // 扫到文字不是扫到问题（同一类假阳性我在下一条测试里刚踩过一次）。
+            let code = Self.strippingComments(text)
             for needle in ["#available", "glassEffect", ".system(size:",
                            "Color(red:", "Color(hex:", "Theme.accent",
                            "Theme.cardBackground", "Theme.gridLine", "Theme.heroNumber"] {
-                if text.contains(needle) {
+                if code.contains(needle) {
                     offenders.append("\(name): \(needle)")
                 }
             }

@@ -3,18 +3,17 @@ import SwiftUI
 
 /// 总览页专属尺寸。基座 `Theme.Layout` 里没有这些档，
 /// 放这里是为了让 `DashboardView` 及其分件里不再流通裸数字（WS-I §2.6）。
+///
+/// 占比条的三档尺寸（名称列 / 百分比列 / 条厚）已随 `LanguageBar` 一起删除：
+/// 基座 `Theme.Share.Row` 用 `Theme.Layout.shareLabelWidth` / `sharePercentWidth` /
+/// `gaugeInline` 自己管，页面再留一份就是第二套真相。
 enum DashboardLayout {
-    /// 语言占比条的名称列。72 是「Objective-C」这类长名在一行内的下限。
-    static let shareNameColumnWidth: CGFloat = 72
-    /// 占比数字列。等宽数字 + 定宽，实时刷新时条形才不会左右晃。
-    static let shareValueColumnWidth: CGFloat = 40
     /// hero 区评分环的原始尺寸。页面把它放进 `GlassCard` 里再自适应拉宽。
+    /// `HealthView`（WS-M）也在用这一对，改动要同步那页。
     static let heroRingWidth: CGFloat = 170
     static let heroRingHeight: CGFloat = 150
     /// hero 右侧结论区与环之间的间隙。
     static let heroGap: CGFloat = Theme.Spacing.sm
-    /// 占比条厚度。WS-H §9 只给了两档：分量表 4、tile 内 5–6。
-    static let gaugeHeight: CGFloat = 6
 }
 
 // MARK: - 统计读数行
@@ -102,52 +101,11 @@ extension View {
 }
 
 // MARK: - 语言 / 占比条
-
-struct LanguageBar: View {
-    var share: LanguageShare
-
-    var body: some View {
-        HStack(spacing: Theme.Spacing.xs) {
-            Text(share.language)
-                .font(Theme.Typo.microLabel.font)
-                .frame(width: DashboardLayout.shareNameColumnWidth, alignment: .leading)
-                .lineLimit(1)
-            MiniBarGauge(
-                fraction: share.share,
-                tint: Self.color(for: share.language),
-                height: DashboardLayout.gaugeHeight
-            )
-            Text(NumberFormat.percent(share.share, precision: 0))
-                .font(Theme.Typo.microLabel.font.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: DashboardLayout.shareValueColumnWidth, alignment: .trailing)
-        }
-        // 条形本身不承载语义（旁边已有名称与百分比），合并后读屏是一句「Swift 45%」。
-        .accessibilityElement(children: .combine)
-    }
-
-    /// 分类色取自全站唯一的一套图表色板（`Theme.Chart`），并且**必须稳定**。
-    ///
-    /// 旧写法是 `palette[abs(share.language.hashValue) % palette.count]`，而 Swift 的
-    /// `hashValue` 每进程随机播种 —— 同一门语言每次启动换一个颜色（WS-I §2.1① 判为
-    /// 设计缺陷，实际上是功能缺陷：色板失去了「同色=同语言」的表意能力）。
-    /// FNV-1a 与 `ContributorsView` 里的做法一致；那份实现属 WS-L 文件，等总工把它下沉到
-    /// `Design/` 后两处合并。
-    static func color(for language: String) -> Color {
-        Theme.Chart.color(at: stableIndex(language, count: Theme.Chart.count))
-    }
-
-    /// 稳定哈希取色位。纯函数，供单测钉住「同名同色、跨进程不变」。
-    static func stableIndex(_ key: String, count: Int) -> Int {
-        guard count > 0 else { return 0 }
-        var hash: UInt64 = 0xcbf29ce484222325
-        for byte in key.utf8 {
-            hash ^= UInt64(byte)
-            hash = hash &* 0x100000001b3
-        }
-        return Int(hash % UInt64(count))
-    }
-}
+//
+// 这里原本住着一份 `LanguageBar`（含自带的 FNV-1a `stableIndex`），已按 #28 / #32 删除：
+// 占比条改走基座 `Theme.Share.Row`，取色走 `Theme.Chart.color(forLabel:)`。
+// 留两份哈希的后果是「同名同色」只在单页内成立——`Swift` 与 `swift` 会分到不同号位，
+// 中文名字也因 UTF-8 字节序 ≠ unicodeScalars 码点序而错位。
 
 // MARK: - CPU 历史曲线
 
