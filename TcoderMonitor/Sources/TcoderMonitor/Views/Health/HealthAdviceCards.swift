@@ -107,9 +107,10 @@ struct HealthTrendCard: View {
     private var readoutStrip: some View {
         let scores = points.map { Double($0.score) }
         HStack(spacing: Theme.Spacing.md) {
-            StatLine(label: "最高", value: scores.max().map { String(format: "%.0f", $0) } ?? Live.missing)
-            StatLine(label: "最低", value: scores.min().map { String(format: "%.0f", $0) } ?? Live.missing)
-            StatLine(label: "均值", value: Self.average(scores).map { String(format: "%.1f", $0) } ?? Live.missing)
+            // 一律走 Live.fixed：nil → `--`，不给「无历史」编一个 0 分。
+            StatLine(label: "最高", value: Live.fixed(scores.max(), digits: 0))
+            StatLine(label: "最低", value: Live.fixed(scores.min(), digits: 0))
+            StatLine(label: "均值", value: Live.fixed(Self.average(scores), digits: 1))
             StatLine(label: "跨度", value: "\(NumberFormat.grouped(spanDays)) 天")
             Spacer(minLength: 0)
         }
