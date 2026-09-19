@@ -21,14 +21,15 @@ Apple Silicon 原生 macOS App（Swift + SwiftUI），对本地开发项目做�
 
 | 页面 | 产出 |
 |---|---|
-| 总览 Dashboard | 健康评分环、CPU/内存/今日错误/最近提交、代码规模与语言占比、实时性能曲线、最近提交、Top Errors、测试覆盖率 |
+| 总览 Dashboard | 健康评分环、CPU/内存/今日错误/最近提交、代码规模与语言占比、实时性能曲线、最近提交、高频错误、测试覆盖率 |
 | 代码规模 | 文件数、总行/空行/注释行/有效代码行、语言占比、TODO·FIXME、最大文件 |
 | 复杂度风险 | 巨大文件与中文拆分建议、圈复杂度最高的函数、重复代码率与重复块明细 |
 | Git 洞察 | 提交数、项目年龄、提交趋势、24×7 活跃热力（按作者自己的时区）、分支与 HEAD |
 | 贡献者 | 提交/增删/占比排行、每人活跃时段、Bus Factor 风险 |
-| 性能监控 | 本机 CPU/内存/磁盘/网络实时曲线 + Top 进程 + **工程进程组**（按匹配模式汇总某服务的 CPU/RAM/Threads/Open Files） |
-| 错误日志 | 解析 `Logs/error.log`、`crash.log`、macOS `.ips`；今日错误/崩溃/异常/警告、Top Errors 聚类（次数、首次、最近） |
-| 依赖分析 | `package.json` / `pom.xml` / `build.gradle(.kts)` / `settings.gradle(.kts)` / `Package.swift` / `requirements.txt`（含 `requirements-*.txt`、`dev-requirements.txt` 派生名）/ `pyproject.toml` / `setup.py` / `Pipfile` / `go.mod` / `Cargo.toml` / `Podfile` / `Gemfile` / `packages.config` —— 共 16 个精确文件名外加派生规则，以 `ManifestFileName.table` 与 `ecosystem(for:)` 的派生名规则为准（`Sources/TcoderMonitor/Services/Dependencies/ManifestParsers.swift:36-60`）；版本过旧与已知漏洞，可选在线查 OSV.dev 与 npm registry |
+| 性能监控 | 本机 CPU/内存/磁盘/网络实时曲线 + 进程占用排行 + **进程分组**（按匹配模式汇总某服务的 CPU/RAM/Threads/Open Files；旧称「工程进程组」，卡标题已随《40 WS-H》§1.3 收口） |
+| 错误日志 | 解析 `Logs/error.log`、`crash.log`、macOS `.ips`；今日错误/崩溃/异常/警告、高频错误聚类（次数、首次、最近；旧称 Top Errors） |
+| 依赖分析 | `package.json` / `pom.xml` / `build.gradle(.kts)` / `settings.gradle(.kts)` / `Package.swift` / `requirements.txt`（含 `requirements-*.txt`、`dev-requirements.txt` 派生名）/ `pyproject.toml` / `setup.py` / `Pipfile` / `go.mod` / `Cargo.toml` / `Podfile` / `Gemfile` / `packages.config` —— 共 16 个精确文件名外加派生规则，以 `ManifestFileName.table` 与 `ecosystem(for:)` 的派生名规则为准（`Sources/TcoderMonitor/Services/Dependencies/ManifestParsers.swift:34-62`，
+其中 `enum ManifestFileName` 在 `:34`、`table` 在 `:36-53`、派生判定在 `ecosystem(for:)` `:55-62`）；版本过旧与已知漏洞，可选在线查 OSV.dev 与 npm registry |
 | 健康评分 | 9 维加权评分与优点/问题/建议。**启发式本地计算，未调用任何外部模型**，界面已如实标注 |
 
 > 上表是开发向速览。逐页「给我看什么 / 数字怎么算的 / 什么时候会不准」见
