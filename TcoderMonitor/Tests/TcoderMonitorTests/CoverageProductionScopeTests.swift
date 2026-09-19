@@ -17,6 +17,14 @@ import XCTest
 /// 规则本身有**双向**元测试（该排除的排除了，不该误伤的一个不许误伤）。
 final class CoverageProductionScopeTests: XCTestCase {
 
+    /// 仓库根（与 `SelfScanDogfoodTests` 同一算法）：本文件 → Tests → TcoderMonitor → 工作树根。
+    /// 只给「真实证据的健康分对照」那条用例用。
+    private static let repoRoot: URL = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+
     // MARK: - 夹具
 
     private func metrics(fromLCov records: [String]) async throws -> CoverageMetrics {
@@ -303,5 +311,71 @@ final class CoverageProductionScopeTests: XCTestCase {
             + "\((report.allLinesTotal ?? 0) - report.linesTotal) 行")
         XCTAssertLessThan(testingAfter.score, testingBefore.score,
                           "换了更严的口径而评分分量没下降，说明评分还在读全口径")
+    }
+
+    /// #37 真正要交的那个结论：**同一个仓库**，口径切换前后的健康总分各是多少。
+    ///
+    /// 为什么要单独一条：仓库里并没有提交的覆盖率报告，自扫的 `coverage.hasData`
+    /// 本来是 false、`.testing` 维度从不参与自身评分——拿"总分 73 → 73"来交差是空话。
+    /// 这里把真 lcov 接进同一套仓库证据（代码/Git/日志/依赖都扫真实仓库），
+    /// 再分别按改前（全口径）与改后（生产码）评一次分，才叫"切换前后"。
+    ///
+    /// 刻意**不往仓库里放 `coverage/lcov.info`**：那会污染工作树、还可能被误提交。
+    /// 覆盖率从临时目录读，其余五个分析器照 `SelfScanDogfoodTests` 的组法跑真实仓库根。
+    func testRepoWideHealthScoreBeforeAndAfterTheCaliberSwitch() async throws {
+        let path = ProcessInfo.processInfo.environment["TCODER_SELF_LCOV"] ?? ""
+        try XCTSkipUnless(!path.isEmpty, "需显式给一份真 lcov：TCODER_SELF_LCOV=<路径>")
+
+        // 覆盖率：从临时目录读真 lcov。
+        let covDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("tcoder-health-\(UUID().uuidString)", isDirectory: true)
+        let captured = covDir
+        addTeardownBlock { try? FileManager.default.removeItem(at: captured) }
+        try FileManager.default.createDirectory(
+            at: covDir.appendingPathComponent("coverage"), withIntermediateDirectories: true)
+        try String(contentsOf: URL(fileURLWithPath: path), encoding: .utf8)
+            .write(to: covDir.appendingPathComponent("coverage/lcov.info"),
+                   atomically: true, encoding: .utf8)
+        let coverage = try await CoverageAnalyzer()
+            .analyze(projectRoot: covDir, options: .default)
+
+        // 其余五类证据：真实仓库根（与自扫同一口径）。
+        let root = Self.repoRoot
+        let code = try await FileSystemCodeAnalyzer().analyze(root: root, options: .default)
+        let git = try await ShellGitAnalyzer().analyze(repositoryURL: root)
+        let logs = try await FileLogAnalyzer()
+            .analyze(projectRoot: root, extraLogURLs: [], withinDays: 30)
+        let deps = try await ManifestDependencyAnalyzer()
+            .analyze(projectRoot: root, allowNetwork: false)
+
+        var asBefore = coverage.reports[0]
+        asBefore.linesCovered = asBefore.allLinesCovered ?? asBefore.linesCovered
+        asBefore.linesTotal = asBefore.allLinesTotal ?? asBefore.linesTotal
+        asBefore.scopeGranularity = .aggregateOnly
+
+        let scorer = WeightedHealthScorer()
+        let inputs = HealthInputs(code: code, git: git, logs: logs, dependencies: deps,
+                                  coverage: coverage)
+        let after = scorer.score(inputs)
+        let before = scorer.score(HealthInputs(code: code, git: git, logs: logs,
+                                               dependencies: deps,
+                                               coverage: CoverageMetrics(reports: [asBefore])))
+        let testingAfter = try XCTUnwrap(after.components.first { $0.name == HealthDimension.testing.rawValue })
+        let testingBefore = try XCTUnwrap(before.components.first { $0.name == HealthDimension.testing.rawValue })
+
+        XCTAssertGreaterThan(coverage.reports.first?.linesTotal ?? 0, 1_000, "生产码分母异常小")
+        XCTAssertLessThan(after.overall, before.overall,
+                          "换了更严的口径而总分没降，说明评分仍在读全口径")
+        XCTAssertLessThan(testingAfter.score, testingBefore.score)
+        // 分母守卫：其余维度必须两边完全同源，差值才只可能来自口径。
+        XCTAssertEqual(after.components.filter { $0.name != HealthDimension.testing.rawValue }.map(\.score),
+                       before.components.filter { $0.name != HealthDimension.testing.rawValue }.map(\.score),
+                       "非覆盖率维度的分数也变了，说明两边喂的不是同一份仓库证据")
+
+        print("【#37 总分】同一仓库真实证据：改前（全口径 "
+            + String(format: "%.2f", coverage.allSourcesLinePercent ?? -1) + "%）总分 \(before.overall)"
+            + "、测试覆盖分量 \(testingBefore.score)；改后（生产码 "
+            + String(format: "%.2f", coverage.overallLinePercent ?? -1) + "%）总分 \(after.overall)"
+            + "、测试覆盖分量 \(testingAfter.score)")
     }
 }
