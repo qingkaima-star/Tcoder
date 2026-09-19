@@ -1,0 +1,300 @@
+import Foundation
+import XCTest
+@testable import TcoderMonitor
+
+/// WS-M 性能页显示层的纯函数契约。
+///
+/// 这一页是杀手功能，也是最容易在「数据跳动」时撒谎的地方，所以判据全部下沉成
+/// 可断言的纯函数：缺证据 → `--`、真 0 → 数字、轴 → 台阶、空态 → 分得清三种原因。
+final class PerformanceDisplayTests: XCTestCase {
+
+    // MARK: - 构造真实形状的读数
+
+    private func snapshot(used: UInt64, total: UInt64, cpu: Double = 0.25, cores: Int = 8) -> SystemSnapshot {
+        var snap = SystemSnapshot()
+        snap.memoryUsedBytes = used
+        snap.memoryTotalBytes = total
+        snap.cpuUsage = cpu
+        snap.cpuCoreCount = cores
+        snap.processCount = 400
+        return snap
+    }
+
+    private func context(_ snap: SystemSnapshot?, frames: Int = 3, paused: Bool = false) -> SampleContext {
+        SampleContext(snapshot: snap, historyCount: snap == nil ? 0 : frames, isPaused: paused)
+    }
+
+    private func process(pid: Int32, cpu: Double = 0, memory: UInt64 = 1024,
+                         threads: Int, files: Int) -> ProcessSnapshot {
+        ProcessSnapshot(pid: pid, name: "p\(pid)", cpuUsage: cpu, memoryBytes: memory,
+                        threadCount: threads, openFileCount: files, startTime: nil,
+                        commandLine: "/usr/bin/p\(pid)", parentPID: 1)
+    }
+
+    // MARK: - 三态：缺证据不给数字
+
+    func testMissingEvidenceRendersAsPlaceholderNotZero() {
+        XCTAssertEqual(Live.percent(nil), "--")
+        XCTAssertEqual(Live.grouped(nil), "--")
+        XCTAssertEqual(Live.cores(nil), "--")
+        XCTAssertEqual(Live.bytes(nil), "--")
+        XCTAssertEqual(Live.rate(nil), "--")
+        XCTAssertEqual(Live.bitRate(nil), "--")
+        XCTAssertEqual(Live.fixed(nil, digits: 1), "--")
+        XCTAssertTrue(Live.forcesNeutral("--"))
+        XCTAssertFalse(Live.forcesNeutral("0"))
+    }
+
+    func testRealZeroSurvivesThePlaceholderLayer() {
+        // 真 0 是结论，必须原样显示成 0，不能被 `--` 吞掉。
+        XCTAssertEqual(Live.grouped(0), "0")
+        XCTAssertEqual(Live.percent(0, precision: 0), "0%")
+        XCTAssertEqual(Live.cores(0), "0.00")
+    }
+
+    func testCPUAndRatesNeedTwoFramesBeforeTheyGiveAnyNumber() {
+        let snap = snapshot(used: 8_000, total: 16_000)
+        XCTAssertNil(SystemReadings.cpuFraction(context(snap, frames: 1)),
+                     "只有一个样本时 CPU 差分无从算起，不能报 0%")
+        XCTAssertNil(SystemReadings.diskBytesPerSecond(context(snap, frames: 1)))
+        XCTAssertNil(SystemReadings.networkBytesPerSecond(context(snap, frames: 1)))
+        XCTAssertEqual(SystemReadings.cpuFraction(context(snap, frames: 2)), 0.25)
+        XCTAssertNil(SystemReadings.cpuFraction(context(nil)))
+    }
+
+    /// WS-D 抛过的真问题：引擎读 vm_statistics 失败时返回全零页计数，
+    /// 于是「已用 = 总量」，界面会画出一个 100% 占满的红色内存。视图层必须接住。
+    func testFailedMemoryReadNeverRendersAsFullUsage() {
+        let suspicious = context(snapshot(used: 16_000, total: 16_000))
+        XCTAssertNil(SystemReadings.memoryUsedBytes(suspicious))
+        XCTAssertNil(SystemReadings.memoryFraction(suspicious))
+        XCTAssertNil(SystemReadings.memoryPressure(suspicious), "压力由同一个可疑分母推导，必须一起作废")
+        XCTAssertNotNil(SystemReadings.memoryGapReason(suspicious))
+
+        let healthy = context(snapshot(used: 9_000, total: 16_000))
+        XCTAssertEqual(SystemReadings.memoryUsedBytes(healthy), 9_000)
+        XCTAssertNil(SystemReadings.memoryGapReason(healthy))
+        XCTAssertTrue(SystemReadings.memoryGapReason(context(nil)) == nil)
+    }
+
+    func testMemoryCaliberIsStatedInWords() {
+        XCTAssertTrue(SystemReadings.memoryCaliber.contains("空闲"))
+        XCTAssertTrue(SystemReadings.memoryCaliber.contains("可清除"))
+        XCTAssertTrue(SystemReadings.memoryCaliber.contains("剩余可用"),
+                      "必须明写这不是「剩余可用」，否则用户会当成磁盘余量读")
+    }
+
+    func testUntrustedMemoryPointsAreDroppedFromTheCurve() {
+        let points = [snapshot(used: 8_000, total: 16_000),
+                      snapshot(used: 16_000, total: 16_000),
+                      snapshot(used: 9_000, total: 16_000)]
+        XCTAssertEqual(SystemReadings.trustedMemoryPoints(points).count, 2)
+        XCTAssertEqual(SystemReadings.rejectedMemoryPoints(points), 1,
+                       "剔除了几个点必须数得出来，不能悄悄丢")
+    }
+
+    func testCoresInUseConvertsMachineShareIntoCoreEquivalent() {
+        XCTAssertEqual(SystemReadings.coresInUse(context(snapshot(used: 8, total: 16, cpu: 0.25, cores: 8))), 2.0)
+        XCTAssertNil(SystemReadings.coresInUse(context(snapshot(used: 8, total: 16), frames: 1)))
+    }
+
+    // MARK: - 进程级在场性
+
+    func testZeroThreadsAndHandlesMeanNotMeasuredRatherThanNone() {
+        let blind = process(pid: 1, threads: 0, files: 0)
+        XCTAssertNil(ProcessMetric.threads(of: blind))
+        XCTAssertNil(ProcessMetric.openFiles(of: blind))
+
+        let measured = process(pid: 2, threads: 12, files: 87)
+        XCTAssertEqual(ProcessMetric.threads(of: measured), 12)
+        XCTAssertEqual(ProcessMetric.openFiles(of: measured), 87)
+    }
+
+    func testGroupTotalsRefuseToSumAnEntirelyUnmeasuredSet() {
+        let group = ProcessGroupSnapshot(
+            group: TrackedProcessGroup(title: "后端", matchPattern: "java"),
+            matchedProcesses: [process(pid: 1, threads: 0, files: 0),
+                               process(pid: 2, threads: 8, files: 40)])
+        XCTAssertEqual(ProcessMetric.groupThreads(of: group), 8)
+        XCTAssertEqual(ProcessMetric.groupOpenFiles(of: group), 40)
+        XCTAssertEqual(ProcessMetric.threadsCovered(in: group), 1, "1/2 个进程取到，覆盖度要数得出来")
+        XCTAssertEqual(ProcessMetric.openFilesCovered(in: group), 1)
+
+        let allBlind = ProcessGroupSnapshot(
+            group: TrackedProcessGroup(title: "内核态", matchPattern: "kernel_task"),
+            matchedProcesses: [process(pid: 0, threads: 0, files: 0)])
+        XCTAssertNil(ProcessMetric.groupThreads(of: allBlind))
+        XCTAssertNil(ProcessMetric.groupOpenFiles(of: allBlind))
+    }
+
+    // MARK: - 着色：一色一义 + 缺证据不给倾向色
+
+    func testLoadLevelsAreMonotonicAndNeverUseInteractionBlue() {
+        XCTAssertEqual(LoadLevel.role(for: nil).name, "neutral")
+        XCTAssertEqual(LoadLevel.role(for: 0.1).name, "success")
+        XCTAssertEqual(LoadLevel.role(for: 0.61).name, "warning")
+        XCTAssertEqual(LoadLevel.role(for: 0.9).name, "danger")
+        XCTAssertNotEqual(LoadLevel.role(for: 0.1).name, "accent",
+                          "蓝只表示交互 / 选中，不能兼任「负载正常」")
+    }
+
+    func testProcessCPUColorOnlyAppearsAboveOneFullCore() {
+        XCTAssertEqual(PerformanceProcessTableCard.cpuLevel(cores: nil), .absent)
+        XCTAssertEqual(PerformanceProcessTableCard.cpuLevel(cores: 0.4), .idle)
+        XCTAssertEqual(PerformanceProcessTableCard.cpuLevel(cores: 1.2), .busy)
+        XCTAssertEqual(PerformanceProcessTableCard.cpuLevel(cores: 2.0), .heavy)
+    }
+
+    // MARK: - 空态句式（验收点 5：没匹配到 ≠ 没开启监控）
+
+    func testGroupEmptyStateSeparatesNoMatchFromMonitoringOff() {
+        let empty = ProcessGroupSnapshot(group: TrackedProcessGroup(title: "后端", matchPattern: "java"),
+                                        matchedProcesses: [])
+        let filled = ProcessGroupSnapshot(group: TrackedProcessGroup(title: "后端", matchPattern: "java"),
+                                         matchedProcesses: [process(pid: 5, threads: 4, files: 20)])
+
+        XCTAssertEqual(PerformanceGroupCard.matchState(context: context(nil), group: empty),
+                       .waitingFirstSample)
+        XCTAssertEqual(PerformanceGroupCard.matchState(
+            context: context(snapshot(used: 8, total: 16), paused: true), group: empty),
+            .pausedWithoutMatch)
+        XCTAssertEqual(PerformanceGroupCard.matchState(
+            context: context(snapshot(used: 8, total: 16)), group: empty), .noMatch)
+        XCTAssertEqual(PerformanceGroupCard.matchState(
+            context: context(snapshot(used: 8, total: 16), paused: true), group: filled), .matched,
+            "命中了就不算空态，哪怕采样已经暂停")
+
+        // 徽标文字必须互不相同，并排两张卡才分得出来（截图复核问题 4）。
+        let badges: Set<String> = [.waitingFirstSample, .pausedWithoutMatch, .noMatch, .matched]
+            .map { PerformanceGroupCard.badgeText(for: $0) }
+            .reduce(into: Set<String>()) { $0.insert($1) }
+        XCTAssertEqual(badges.count, 4, "四种状态共用一个徽标文字就等于没区分")
+        XCTAssertEqual(PerformanceGroupCard.badgeRole(for: .noMatch).name, "neutral",
+                       "零命中是「没有」，不是「危险」，不能上红")
+        XCTAssertEqual(PerformanceGroupCard.badgeRole(for: .pausedWithoutMatch).name, "warning")
+    }
+
+    func testZeroMatchCopyAlwaysEndsWithANextStep() {
+        for state in [GroupMatchState.waitingFirstSample, .pausedWithoutMatch, .noMatch] {
+            let copy = PerformanceGroupCard.copy(for: state, pattern: "java", totalProcesses: 512)
+            XCTAssertFalse(copy.title.isEmpty, "\(state) 必须有一句现状")
+            XCTAssertFalse(copy.message.isEmpty, "\(state) 必须有一句原因")
+            XCTAssertFalse(copy.nextStep.isEmpty, "\(state) 必须给下一步，不能只留白")
+        }
+        XCTAssertTrue(PerformanceGroupCard.copy(for: .pausedWithoutMatch, pattern: "java", totalProcesses: 512)
+                      .message.contains("暂停"))
+        XCTAssertTrue(PerformanceGroupCard.copy(for: .noMatch, pattern: "java", totalProcesses: 512)
+                      .message.contains("java"))
+        XCTAssertTrue(PerformanceGroupCard.copy(for: .noMatch, pattern: "java", totalProcesses: nil)
+                      .message.contains("--"), "连全系统进程数都没采到时，句子里也要用 --")
+    }
+
+    // MARK: - uptime
+
+    func testUptimeTextGranularityAndMissing() {
+        XCTAssertEqual(PerformanceSystemTiles.uptimeText(3 * 86_400 + 4 * 3_600), "3 天 4 小时")
+        XCTAssertEqual(PerformanceSystemTiles.uptimeText(3_700), "1 小时 1 分")
+        XCTAssertEqual(PerformanceSystemTiles.uptimeText(180), "3 分")
+        XCTAssertEqual(PerformanceSystemTiles.uptimeText(nil), "--")
+        XCTAssertEqual(PerformanceSystemTiles.uptimeText(-1), "--")
+    }
+
+    // MARK: - 轴：只跳台阶，不逐帧改
+
+    func testAxisIsStableForNearbyPeaks() {
+        XCTAssertEqual(ChartScale.axis(peak: 4.0), ChartScale.axis(peak: 4.1),
+                       "峰值小幅波动就换轴，曲线会整体上下跳动")
+        XCTAssertEqual(ChartScale.axis(peak: 4.0), ChartAxis(step: 2, maxValue: 6))
+        XCTAssertEqual(ChartScale.axis(peak: 4.0).ticks, [0, 2, 4, 6],
+                       "最后一个刻度必须正好落在轴顶，否则图上会出现悬空的留白")
+    }
+
+    /// 步长必须落在 {1,2,2.5,5}×10ⁿ 上，且「只抬不降、抬幅不超过 2 倍」——
+    /// 这才是轴不抖的充要条件。上一版把允许集写成字面量表，漏了 1 以下的档位，
+    /// 于是一次循环刷出 271 条假红；换成通用判据后同一循环只有一条断言。
+    func testNiceStepOnlyUsesTheLadder() {
+        for candidate in stride(from: 0.03, through: 600, by: 0.37) {
+            let step = ChartScale.niceStep(candidate)
+            XCTAssertTrue(isLadderStep(step), "出现了台阶外的步长 \(step)（候选 \(candidate)）")
+            XCTAssertGreaterThanOrEqual(step, candidate - 1e-12, "步长不能小于候选，否则轴顶会被数据捅破")
+            XCTAssertLessThanOrEqual(step, candidate * 2 + 1e-12, "步长最多抬一档，抬太狠曲线会被压扁")
+        }
+        XCTAssertEqual(ChartScale.niceStep(0), 1)
+        XCTAssertEqual(ChartScale.niceStep(.nan), 1)
+    }
+
+    private func isLadderStep(_ value: Double) -> Bool {
+        guard value > 0, value.isFinite else { return false }
+        let unit = value / pow(10, floor(log10(value)))
+        return [1.0, 2.0, 2.5, 5.0, 10.0].contains { abs(unit / $0 - 1) < 1e-6 }
+    }
+
+    // MARK: - 计数轴与百分比轴（总工截图复核问题 1 / 3）
+
+    func testCountAxisNeverPrintsFractionalCounts() {
+        // 峰值 1 条时通用台阶会给 0.5 步长 → 标签打成 0,0,1,1,2,2。计数轴必须锁到整数。
+        let axis = ChartScale.countAxis(peak: 1)
+        XCTAssertEqual(axis.step, 1)
+        XCTAssertTrue(axis.ticks.allSatisfy { $0 == $0.rounded() }, "\(axis.ticks)")
+        XCTAssertEqual(ChartScale.countAxis(peak: 0).ticks, ChartScale.countAxis(peak: 0).ticks)
+        XCTAssertTrue(ChartScale.countAxis(peak: 0).ticks.allSatisfy { $0 == $0.rounded() })
+        XCTAssertTrue(ChartScale.countAxis(peak: 250).ticks.allSatisfy { $0 == $0.rounded() })
+    }
+
+    func testPercentAxisStaysAtZeroOriginUntilTheCurveIsPinnedHigh() {
+        XCTAssertEqual(ChartScale.adaptivePercentAxis(peakPercent: nil), ChartScale.percentAxis)
+        XCTAssertEqual(ChartScale.adaptivePercentAxis(peakPercent: 42), ChartScale.percentAxis)
+        XCTAssertFalse(ChartScale.percentAxis.isZoomed)
+
+        let mid = ChartScale.adaptivePercentAxis(peakPercent: 72)
+        XCTAssertEqual(mid.minValue, 50)
+        XCTAssertTrue(mid.isZoomed)
+
+        let high = ChartScale.adaptivePercentAxis(peakPercent: 96)
+        XCTAssertEqual(high.minValue, 75)
+        XCTAssertEqual(high.maxValue, 100)
+        XCTAssertTrue(high.ticks.last == 100)
+        XCTAssertTrue(high.domainText.contains("75"), "收窄过就必须把下限写在轴说明里")
+    }
+
+    func testRelativeTimeAxisRescuesTheSingleClockLabelCase() {
+        // 5 点 × 1.5 秒 = 7.5 秒的窗口里，`22:22` 只会剩下一个刻度。
+        XCTAssertTrue(ChartScale.usesRelativeAxis(windowSeconds: 7.5, pointCount: 5))
+        XCTAssertFalse(ChartScale.usesRelativeAxis(windowSeconds: 135, pointCount: 90))
+        XCTAssertEqual(ChartScale.relativeSecondsText(Date(timeIntervalSince1970: 1_000), reference: Date(timeIntervalSince1970: 1_007)), "-7s")
+        XCTAssertEqual(ChartScale.relativeSecondsText(Date(timeIntervalSince1970: 1_007), reference: Date(timeIntervalSince1970: 1_007)), "现在")
+    }
+
+    func testAxisGrowsMonotonicallyAndNeverInverts() {
+        var previous = 0.0
+        for peak in stride(from: 0.5, through: 400, by: 0.5) {
+            let axis = ChartScale.axis(peak: peak)
+            XCTAssertGreaterThanOrEqual(axis.maxValue, previous, "轴不能随峰值增大而缩回去")
+            XCTAssertGreaterThan(axis.maxValue, peak, "峰值必须落在轴内，留白是刻意的")
+            XCTAssertGreaterThan(axis.step, 0)
+            previous = axis.maxValue
+        }
+    }
+
+    func testPercentAxisIsFixedAtAHundred() {
+        XCTAssertEqual(ChartScale.percentAxis.maxValue, 100)
+        XCTAssertEqual(ChartScale.percentAxis.ticks, [0, 25, 50, 75, 100])
+    }
+
+    func testStrideComesFromAFixedLadder() {
+        XCTAssertEqual(ChartScale.secondsStride(windowSeconds: 135), 30)
+        XCTAssertTrue([5, 15, 30, 60, 120, 300, 600, 1800].contains(ChartScale.secondsStride(windowSeconds: 600)))
+        XCTAssertEqual(ChartScale.dayStride(spanDays: 7), 2)
+        XCTAssertEqual(ChartScale.dayStride(spanDays: 30), 5)
+        XCTAssertEqual(ChartScale.dayStride(spanDays: -3), 1)
+    }
+
+    func testDegeneratePeaksStillProduceADrawableAxis() {
+        for peak in [0, -5, Double.infinity, Double.nan] {
+            let axis = ChartScale.axis(peak: peak)
+            XCTAssertGreaterThan(axis.maxValue, 0)
+            XCTAssertGreaterThan(axis.step, 0)
+            XCTAssertTrue(axis.maxValue.isFinite)
+        }
+    }
+}
