@@ -129,10 +129,10 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
 
 ## 已知限制
 
-- **内置示例项目的样例数字在六个页面不带任何「示例」标记**：
-  只有侧栏徽标（`Views/Shell/ProjectSidebar.swift:97-100`）与性能页标签
-  （`Views/Performance/PerformanceView.swift:50`）会说明它是示例，
-  总览 / 代码规模 / 复杂度风险 / Git 洞察 / 贡献者 / 健康评分 六页 `isDemo` 零引用。
+- **内置示例项目的样例数字在六个页面不带任何「示例」标记**。标记现共四处：
+  侧栏 `Views/Shell/ProjectSidebar.swift:219-222`、性能监控 `PerformanceView.swift:75-76`、
+  错误日志 `Views/Logs/LogsView.swift:50-51`、健康评分 `Views/Health/HealthView.swift:44-45`；
+  **总览 / 代码规模 / 复杂度风险 / Git 洞察 / 贡献者 / 依赖分析** 六页 `isDemo` 零引用。
   数值全来自 `Services/Demo/DemoData.swift` 的写死样例。
 - `git log` 撞上 60 秒硬超时（`Services/Git/ShellGitAnalyzer.swift:53`）时本轮 Git 结果整块置空，
   **上一轮成功的 Git 数据不会被保留**（`App/AppState.swift:148-150` 每次新建报告），
@@ -140,7 +140,6 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
 - 内置离线漏洞规则共 10 条，只覆盖 npm / Maven / Python
   （`Services/Dependencies/VulnerabilitySource.swift:69-222`）；
   SwiftPM 与 CocoaPods 连在线核对也不支持（`DependencyNetworkLookup.swift:39`）。
-
 - 无 root 时逐进程指标只覆盖当前用户可见的进程；进程总数走 `sysctl(KERN_PROC_ALL)`，与 `top`/`ps -A` 同源。
 - 内存口径为 `total - (free + speculative + purgeable)`，与活动监视器一致。
 - 首次扫描 `~/Documents`、`~/Desktop` 下的目录时 macOS 可能弹一次文件访问授权。
