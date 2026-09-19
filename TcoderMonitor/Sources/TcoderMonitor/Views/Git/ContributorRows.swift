@@ -117,12 +117,13 @@ struct ContributorRow: View {
                             + "触达 \(NumberFormat.grouped(author.filesTouched)) 个文件")
                     Text(author.lastActiveDescription)
                         .font(Theme.Typo.microLabel.font)
+                        .monospacedDigit()
                         .foregroundStyle(.tertiary)
                 }
             }
 
             HStack(spacing: Theme.Spacing.sm) {
-                MiniBarGauge(fraction: share ?? 0, tint: tint, height: 5)
+                MiniBarGauge(fraction: share ?? 0, tint: tint, height: DataGaugeHeight.inline)
                     .frame(maxWidth: .infinity)
                 Text(share.map { NumberFormat.percent($0, precision: 1) }
                      ?? Theme.Placeholder.missingValue)
@@ -184,6 +185,7 @@ struct ContributorDirectoryChips: View {
         if directories.isEmpty {
             Text("未记录目录")
                 .font(Theme.Typo.microLabel.font)
+                .monospacedDigit()
                 .foregroundStyle(.tertiary)
         } else {
             HStack(spacing: Theme.Spacing.xs) {
@@ -209,6 +211,9 @@ struct ContributorHourRow: View {
     let tint: Color
 
     private static let height: CGFloat = Theme.Layout.minHitTarget
+    /// 有提交的小时柱从 0.15 起、按峰值线性推到 0.40：两端都取透明度刻度，不再乘自造的系数。
+    private static let idleAlpha = Theme.Palette.Opacity.badgeFill
+    private static let peakAlpha = Theme.Palette.Opacity.gradientMid
     /// 标签列宽：两个汉字 + 余量。
     private static let labelWidth: CGFloat = Theme.Layout.minHitTarget + Theme.Spacing.xxs
 
@@ -216,6 +221,7 @@ struct ContributorHourRow: View {
         HStack(spacing: Theme.Spacing.xs) {
             Text("时段")
                 .font(Theme.Typo.microLabel.font)
+                .monospacedDigit()
                 .foregroundStyle(.tertiary)
                 .frame(width: Self.labelWidth, alignment: .leading)
             HStack(alignment: .bottom, spacing: Theme.Stroke.emphasis) {
@@ -238,7 +244,7 @@ struct ContributorHourRow: View {
         let ratio = Double(value) / Double(peak)
         RoundedRectangle(cornerRadius: Theme.Radius.none, style: .continuous)
             .fill(value == 0 ? Theme.Palette.Surface.separator
-                             : tint.opacity(Theme.Palette.Opacity.gradientMid * (0.4 + ratio)))
+                             : tint.opacity(Self.idleAlpha + (Self.peakAlpha - Self.idleAlpha) * ratio))
             .frame(maxWidth: .infinity)
             .frame(height: value == 0 ? Theme.Stroke.emphasis
                                       : max(Theme.Stroke.emphasis, Self.height * CGFloat(ratio)))
