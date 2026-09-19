@@ -41,6 +41,8 @@ struct SourceSkipLedger: Sendable {
         var lines: Int = 0
         /// 命中的具体规则项：目录名、后缀、超限阈值等 → 次数。
         var rules: [String: Int] = [:]
+        /// 审计模式下按根因（如被剔除的顶层目录名）累计的行数，回答「vendor/ 丢了多少行」。
+        var lineRules: [String: Int] = [:]
         var samples: [String] = []
 
         var byteDescription: String { ByteFormat.string(UInt64(max(0, bytes))) }
@@ -73,9 +75,17 @@ struct SourceSkipLedger: Sendable {
         buckets[reason] = bucket
     }
 
-    mutating func recordAuditedLines(_ reason: SourceSkipReason, lines: Int, bytes: Int64) {
+    mutating func recordAuditedLines(_ reason: SourceSkipReason, lines: Int, bytes: Int64, anchor: String? = nil) {
         buckets[reason, default: Bucket()].lines += lines
+        if let anchor { buckets[reason, default: Bucket()].lineRules[anchor, default: 0] += lines }
         auditedBytes += bytes
+    }
+
+    /// 行数最多的前几个根因，形如 `vendor=352784`。
+    func topLineRules(_ reason: SourceSkipReason, limit: Int = 6) -> String {
+        let rules = buckets[reason]?.lineRules ?? [:]
+        return rules.sorted { $0.value > $1.value }.prefix(limit)
+            .map { "\(String($0.key.prefix(22)))=\($0.value)" }.joined(separator: " ")
     }
 
     func entries() -> [(reason: SourceSkipReason, bucket: Bucket)] {

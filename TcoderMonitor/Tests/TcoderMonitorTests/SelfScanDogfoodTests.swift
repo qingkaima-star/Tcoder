@@ -117,8 +117,12 @@ final class SelfScanDogfoodTests: XCTestCase {
             guard values.isRegularFile == true, url.pathExtension == "swift" else { continue }
             guard let data = fm.contents(atPath: url.path),
                   let text = String(data: data, encoding: .utf8) else { continue }
-            // 与分析器同口径：按换行切分，行数 = 段数（末段可为空行）。
-            let lines = text.components(separatedBy: "\n").count
+            // 行数按 `wc -l` 的口径数换行符，末尾不成行的一段算一行；
+            // 这样三个来源（wc、分析器的 lines.count、这里）能对上同一个数。
+            // 早先用 components(separatedBy:"\n").count 会整体 +1，
+            // 因为结尾换行会多出一个空段——差 1 行看起来就像两边在量不同的文件。
+            let newlines = text.reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
+            let lines = text.hasSuffix("\n") ? newlines : newlines + 1
             result.append(GroundTruthFile(path: url.path, lines: lines))
         }
     }
@@ -151,13 +155,72 @@ final class SelfScanDogfoodTests: XCTestCase {
     /// 这是"分数必须自己变好"的机械保证：新增一个 800+ 行文件会让这条测试变红。
     /// 把某个文件改小的人应当**同时**把下面的上限调低——棘轮只许往紧里拧。
     func testRepositoryDoesNotGrowMoreHugeFiles() async throws {
-        let over = try independentSwiftLineCounts().filter { $0.lines > Self.toolHighFileLines }
+        let over = try independentSwiftLineCounts()
+            .filter { $0.lines > Self.toolHighFileLines }
+            .sorted { $0.lines > $1.lines }
         let ceiling = 9
         XCTAssertLessThanOrEqual(over.count, ceiling, """
-        800 行以上的文件从 \(ceiling) 个涨到了 \(over.count) 个：
-        \(over.sorted { $0.lines > $1.lines }.map { "\($0.path):\($0.lines)" }.joined(separator: "\n"))
-        新代码不要再堆成巨大文件；若你刚拆掉一个，请把 ceiling 一起调低。
+        800 行以上的文件从 \(ceiling) 个涨到了 \(over.count) 个（当前最大 \(over.first?.lines ?? 0) 行）。
+        **闸门不降、基线不改**——还债方式是各自拆自己那份，不是把这条改绿。
+        谁还差几个：\(Self.ownerTally(over))
+        逐个清单（行数 → 负责人）：
+        \(Self.hugeFileRoster(over))
         """)
+    }
+
+    // MARK: - 超限文件归人（只用于失败信息，不参与判定）
+
+    /// 按 `AGENTS.md` §3 的文件所有权表 + 20:38 扩充流表归口。
+    /// 只影响"这条红该找谁"的可读性，所以宁可粗也别写错：认不出的一律"未归属"。
+    private static func owner(ofPath path: String) -> String {
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        let isTestFile = name.hasSuffix("Tests.swift")
+        switch true {
+        case path.contains("/Sources/TcoderMonitor/Models/"), name == "Package.swift",
+             name == "AppState.swift", name == "TcoderMonitorApp.swift",
+             name == "ServiceContracts.swift", name == "ProjectStore.swift",
+             name == "SharedUtilities.swift", name == "DemoData.swift",
+             name == "RootView.swift", name == "ProjectDetailView.swift", name == "DashboardView.swift",
+             name == "RealRepositoryEvidenceTests.swift", name == "ContractRoundTripTests.swift",
+             name == "CoverageAnalyzerTests.swift":
+            return "总工（冻结区）"
+        case name == "Theme.swift", path.contains("/Sources/TcoderMonitor/Design/"):
+            return "WS-G"
+        case name == "ManifestLabFixtureTests.swift":
+            return "WS-F"
+        case name.hasPrefix("SelfScan"):
+            return "WS-J（本流）"
+        case path.contains("/Services/Code/"), path.contains("/Views/Code/"),
+             isTestFile && name.hasPrefix("Code"):
+            return "WS-A"
+        case path.contains("/Services/Git/"), path.contains("/Services/Dependencies/"),
+             path.contains("/Views/Git/"), path.contains("/Views/Dependencies/"),
+             isTestFile && (name.hasPrefix("Git") || name.hasPrefix("Dependency")):
+            return "WS-B"
+        case path.contains("/Services/Performance/"), path.contains("/Services/Logs/"),
+             path.contains("/Services/Health/"), path.contains("/Views/Performance/"),
+             path.contains("/Views/Logs/"), path.contains("/Views/Health/"),
+             isTestFile && (name.hasPrefix("Performance") || name.hasPrefix("Log")
+                            || name.hasPrefix("Health")):
+            return "WS-C"
+        case path.contains("/Services/Coverage/"):
+            return "WS-J（本流，唯一无主 Services 文件）"
+        default:
+            return "未归属（报总工认领）"
+        }
+    }
+
+    private static func hugeFileRoster(_ over: [GroundTruthFile]) -> String {
+        over.map { file in
+            "  \(String(format: "%5d", file.lines)) 行 → \(owner(ofPath: file.path))\t\(file.path)"
+        }.joined(separator: "\n")
+    }
+
+    private static func ownerTally(_ over: [GroundTruthFile]) -> String {
+        Dictionary(grouping: over, by: { owner(ofPath: $0.path) })
+            .map { "\($0.key) \($0.value.count) 个" }
+            .sorted()
+            .joined(separator: " · ")
     }
 
     // MARK: - 防作弊门 3：复杂度榜不得为空，且必须覆盖独立数出的高复杂度函数
@@ -431,48 +494,93 @@ final class SelfScanDogfoodTests: XCTestCase {
         )
     }
 
-    /// **缺陷钉住测试**：断言的是"现在还错着"这件事，不是"这样对"。
-    /// 每条断言失败信息里都写清了修复后应当改成什么——负责的工作流改完，
-    /// 这条测试会红，逼他把断言翻正，而不是让缺陷悄悄回潮。
+    /// 自扫复核台。**上半段是已经翻正的历史缺陷**（负责人修好后按约定翻正，
+    /// 过程记在 48 号笔记），**下半段是仍在身的缺陷钉**：断言的是"现在还错着"这件事，
+    /// 每条失败信息都写清了修好后该改成什么，谁修谁翻正，不让缺陷悄悄回潮。
     func testKnownSelfScanDefectsArePinned() async throws {
         let scan = try await selfScan()
         let census = try await complexityCensus()
+        let code = scan.code
 
-        // 钉 1（WS-A）：FileSystemCodeAnalyzer 从不给这两个字段赋值，
-        // 于是 e676fad 声称的"改用全仓平均圈复杂度"在真实扫描里永远走不到。
-        XCTAssertEqual(scan.code.analyzedFunctionCount, 0,
-                       "WS-A 已经会填 analyzedFunctionCount 了？很好，请把本断言改成："
-                     + "XCTAssertEqual(code.analyzedFunctionCount, census.functionCount) 并删掉这句注释。")
-        XCTAssertNil(scan.code.averageCyclomaticComplexity,
-                     "WS-C 修好评分口径、WS-A 填上均值后请把本断言改为 "
-                     + "XCTAssertEqual(code.averageCyclomaticComplexity!, census.repoMean, accuracy: 0.01)")
+        // —— 已翻正 1（WS-A `f55e4a0`）：全仓普查的两个字段终于有生产者了。
+        // 基线不是我抄分析器的，而是我自己调 ComplexityEngine 绕开榜单重数一遍。
+        XCTAssertEqual(code.analyzedFunctionCount, census.functionCount,
+                       "analyzedFunctionCount=\(code.analyzedFunctionCount) 与独立普查 "
+                     + "\(census.functionCount) 不一致：要么生产者漏了文件，要么我的走树口径变了")
+        XCTAssertNotNil(code.averageCyclomaticComplexity, "有函数可数时全仓均值不得是 nil")
+        XCTAssertEqual(code.averageCyclomaticComplexity!, census.repoMean, accuracy: 0.01,
+                       "全仓均复杂度与独立普查对不上（测得 "
+                     + "\(code.averageCyclomaticComplexity ?? -1) vs 普查 \(census.repoMean)）")
 
-        // 钉 2（WS-C）：复杂度维度自称用全仓均值，实际用热点样本均值。
-        let complexity = scan.health.components.first { $0.name.contains("复杂度") }
-        XCTAssertNotNil(complexity, "复杂度维度必须存在（它现在的存在方式是缺陷）")
-        XCTAssertTrue(complexity?.detail.contains("热点样本") == true,
-                      "复杂度维度不再写『热点样本』说明已改用全仓均值，请把本断言翻正为"
-                    + " detail 含『全仓』且分数不再依赖 top-20。")
+        // —— 已翻正 2（WS-C + WS-A）：复杂度维度不再拿 top-20 热点均值冒充全仓水位。
+        // 校法刻意**不碰数字字面量**：detail 把 4.098 写成 "4" 还是 "4.1" 是格式化选择，
+        // 拿字符串去比小位数等于用测试绑架实现格式（上一轮就是这么红的：断言 "4.0"，
+        // 而实现如实给出 "4"）。改成三层，各管一件事。
+        let complexity = try XCTUnwrap(scan.health.components.first { $0.name.contains("复杂度") },
+                                       "复杂度维度必须存在")
 
-        // 钉 3（产品口径）：榜单被截断到 20，所以"20 个函数 ≥16"这句话不能当作普查。
-        XCTAssertEqual(scan.code.topComplexFunctions.count, 20,
-                       "榜单条数变了，说明截断口径改了，本测试与汇报里的措辞都要同步")
-        XCTAssertGreaterThanOrEqual(census.atLeast16, scan.code.topComplexFunctions.count,
-                                    "全量普查不可能少于榜单条数")
+        // ① 校**口径声明**：均值必须自称全仓，且不得再出现"热点样本"。
+        XCTAssertTrue(complexity.detail.contains("全仓"),
+                      "复杂度维度没声明均值口径是全仓，当前 detail：\(complexity.detail)")
+        XCTAssertFalse(complexity.detail.contains("热点样本"),
+                       "复杂度维度又拿 top-20 热点样本均值冒充全仓水位了")
 
-        print("【普查 vs 榜单】全仓函数 \(census.functionCount) 个，全仓均复杂度 "
-            + String(format: "%.2f", census.repoMean)
-            + "，≥16 的 \(census.atLeast16) 个，≥21 的 \(census.atLeast21) 个，≥31 的 \(census.atLeast31) 个，最高 \(census.maxValue)"
-            + "；榜单只有 \(scan.code.topComplexFunctions.count) 条、其均值 "
-            + String(format: "%.1f", census.hotspotMean))
+        // ② 要校数值就**先解析再比数**，容差跟着它自己的显示精度走：
+        //    只写整数位就允许 ±0.5，写了一位小数就收紧到 ±0.05。
+        let reported = try XCTUnwrap(reportedRepoMean(in: complexity.detail),
+                                     "detail 里解析不出『平均圈复杂度 <数字>』，数值校验形同虚设")
+        let tolerance = reported.text.contains(".") ? 0.05 : 0.5
+        XCTAssertEqual(reported.value, census.repoMean, accuracy: tolerance,
+                       "detail 报的均值 \(reported.text) 与独立普查 "
+                     + "\(String(format: "%.3f", census.repoMean)) 对不上")
+        XCTAssertLessThan(abs(reported.value - census.repoMean),
+                          abs(reported.value - census.hotspotMean),
+                          "detail 里的均值离热点样本均值 \(census.hotspotMean) 反而更近，疑似又用错口径")
+
+        // ③ **分母也必须上屏**：均值为 4 的可信度完全取决于"4 是多少个函数的 4"，
+        //    不报样本量的均值没有意义。
+        XCTAssertTrue(complexity.detail.contains("\(census.functionCount)"),
+                      "detail 没报出分母（独立普查 \(census.functionCount) 个函数）："
+                    + "不报样本量的均值没有意义。当前 detail：\(complexity.detail)")
+
+        // —— 仍在身（产品口径）：detail 里"N 个函数 CC≥16"数的还是被 prefix(20)
+        //    截断的榜单条数，而真实普查见下面 print。修好后把这条翻正为
+        //    "detail 含 \u{201c}\(census.atLeast16) 个函数\u{201d}"。
+        XCTAssertEqual(code.topComplexFunctions.count, 20,
+                       "榜单截断长度变了，本门与 48 号笔记里的措辞要同步")
+        XCTAssertTrue(complexity.detail.contains("\(code.topComplexFunctions.count) 个函数"),
+                      "detail 不再引用截断条数 \(code.topComplexFunctions.count)，说明普查计数已进契约，"
+                    + "请把本断言改为 detail 含 \"\(census.atLeast16) 个函数\"")
+        XCTAssertGreaterThan(census.atLeast16, code.topComplexFunctions.count,
+                             "全仓 CC≥\(Self.complexFunctionBar) 已经不多于榜单条数，截断不再误导人，"
+                           + "连同上面那条一起删掉")
+
+        print("【普查 vs 榜单】真实 CC≥\(Self.complexFunctionBar) 共 \(census.atLeast16) 个，"
+            + "而工具 detail 报的是 \(code.topComplexFunctions.count) 个（榜单截断条数）")
+    }
+
+    /// 手算可验证的普查门：用一个我能逐个点数函数的最小夹具，
+    /// 确认 `analyzedFunctionCount` / `averageCyclomaticComplexity` 不是"自洽的错数"。
+    /// 夹具 5 个函数、期望复杂度 `1 + 2 + 2 + 4 + 2 = 11`，手算均值 11 ÷ 5 = **2.2**。
+    func testComplexityCensusMatchesHandCountedFixture() async throws {
+        let dir = try makeComplexityProbeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let metrics = try await FileSystemCodeAnalyzer().analyze(root: dir, options: .default)
+
+        XCTAssertEqual(metrics.analyzedFunctionCount, 5,
+                       "夹具里只有 5 个函数，生产者数出来的却不是我手点数的那个")
+        let expectedMean = (1 + 2 + 2 + 4 + 2) / 5.0
+        XCTAssertEqual(metrics.averageCyclomaticComplexity ?? -1, expectedMean, accuracy: 0.01,
+                       "手算全仓均复杂度应为 \(expectedMean)")
+        print("【手算核对】夹具函数 5 个、手算均值 \(expectedMean)，测得 "
+            + "\(metrics.analyzedFunctionCount) 个 / \(metrics.averageCyclomaticComplexity ?? -1)")
     }
 
     // MARK: - 复杂度引擎口径探针（最小可复现夹具，建在 /tmp 下用完即删）
 
-    /// 把只含一种语法的最小函数喂给 `ComplexityEngine`，看它各加几分。
-    /// 目的：判定"平均圈复杂度 26.3"里有多少是真实判定，多少是口径通胀。
-    func testComplexityEngineBranchCountingConvention() async throws {
-        let fixture = #"""
+    /// 5 个函数，每个只含一种语法。手算期望：plain=1、oneIf=2、nilCoalesce=2、
+    /// failableCast=4、oneTernary=2 → 合计 11，均值 11÷5=2.2。
+    private static let probeFixture = #"""
         import Foundation
         func plain() -> Int {
             return 1
@@ -493,12 +601,23 @@ final class SelfScanDogfoodTests: XCTestCase {
         }
         """#
 
+    /// 把那份夹具写到 /tmp（AGENTS.md 允许的临时夹具位置）下，返回目录。
+    /// 先整目录删掉再建，保证"这里只有 5 个函数"这个手算前提不被上一轮污染。
+    private func makeComplexityProbeDirectory() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("tcoder-wsj-cc-probe", isDirectory: true)
+        try? FileManager.default.removeItem(at: dir)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Self.probeFixture.write(to: dir.appendingPathComponent("Probe.swift"),
+                                    atomically: true, encoding: .utf8)
+        return dir
+    }
+
+    /// 把只含一种语法的最小函数喂给 `ComplexityEngine`，看它各加几分。
+    /// 目的：判定"平均圈复杂度"里有多少是真实判定、多少是 Swift 口径通胀。
+    func testComplexityEngineBranchCountingConvention() async throws {
+        let dir = try makeComplexityProbeDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let file = dir.appendingPathComponent("Probe.swift")
-        try fixture.write(to: file, atomically: true, encoding: .utf8)
 
         let files = await SourceTreeScanner(options: .default).scan(root: dir).files
         let measured = ComplexityEngine.functions(in: files[0])
@@ -519,6 +638,19 @@ final class SelfScanDogfoodTests: XCTestCase {
         // 是按经典 McCabe 标定的，而计数口径把可选值语法糖也记成了判定。
         XCTAssertEqual(cc("failableCast"), 4,
                        "as?/?. 与 ?? 各算一次判定。若你收紧了口径，请把本条与 48 号笔记一起更新")
+    }
+
+    /// 从评分 detail 里解析"平均圈复杂度 X"的那个数，**连带它写出来的原文**——
+    /// 原文里有没有小数点决定我们允许多大的比对容差。
+    /// 这样实现方爱保留几位就保留几位，测试只管"这个数是不是全仓均值"。
+    private func reportedRepoMean(in detail: String) -> (value: Double, text: String)? {
+        let pattern = "平均圈复杂度\\s*([0-9]+(?:\\.[0-9]+)?)"
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: detail, range: NSRange(detail.startIndex..., in: detail)),
+              match.numberOfRanges >= 2,
+              let captured = Range(match.range(at: 1), in: detail),
+              let value = Double(detail[captured]) else { return nil }
+        return (value, String(detail[captured]))
     }
 
     // MARK: - git 独立基线（只读命令）

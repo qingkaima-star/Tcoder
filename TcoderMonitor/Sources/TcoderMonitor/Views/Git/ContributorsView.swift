@@ -1,440 +1,241 @@
 import SwiftUI
 
-/// OWNER: WS-B / 子代理4 —— Git 贡献者页。
-/// 全部数据来自 `report?.git`；未分析与「真没有作者」是两种空状态，不渲染 0。
+/// OWNER: WS-L —— Git 贡献者页。
+///
+/// 2026-09-19 重样（WS-L）：头像与占比条的分类色全部改走 `Theme.Chart` 单一色板 +
+/// FNV-1a 稳定哈希（原来是文件里 8 个 `Color(hex:)`，深色模式无变体）；字号、圆角、
+/// 间距、图标全部取自 `Design/` 令牌；「贡献者」表头与术语按 WS-H §1.3 归一。
+/// 占比分母与 Git 洞察页共用 `GitHistoryScope`，两页不会再各说一套。
 struct ContributorsView: View {
     var report: ProjectReport?
 
-    private static let displayLimit = 30
-    private static let metricColumns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
-
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if let git = report?.git {
-                    if git.authors.isEmpty {
-                        EmptyStateView(
-                            icon: "person.2.fill",
-                            title: "该仓库暂无贡献者数据",
-                            message: "仓库可能是空仓库，或历史里只有不带作者信息的合并提交。\n提交一次普通改动后重新分析即可看到排行。"
-                        )
-                        .frame(maxWidth: .infinity, minHeight: 280)
-                    } else {
-                        let authors = sortedAuthors(git)
-                        BusFactorBanner(git: git)
-                        metricGrid(git, authors: authors)
-                        rankingCard(git, authors: authors)
-                        concentrationCard(git, authors: authors)
-                    }
-                } else {
+        DataPageScaffold {
+            if let git = report?.git {
+                if git.authors.isEmpty {
                     EmptyStateView(
-                        icon: "person.2.fill",
-                        title: "尚未分析 Git 历史",
-                        message: "选择一个本地仓库目录后点击「重新分析」。\n分析完成后这里会显示贡献者排行、代码变更量与活跃时段分布。"
+                        icon: .people,
+                        title: "该仓库暂无贡献者数据",
+                        message: "仓库可能是空仓库，或历史里只有不带作者信息的合并提交。\n"
+                            + "提交一次普通改动后重新分析即可看到排行。"
                     )
-                    .frame(maxWidth: .infinity, minHeight: 280)
+                } else {
+                    let authors = ContributorAnalysis.sorted(git.authors)
+                    ContributorBusFactorSection(git: git)
+                    ContributorsMetricGrid(git: git, authors: authors)
+                    ContributorRankingSection(git: git, authors: authors)
+                    ContributorConcentrationSection(git: git, authors: authors)
                 }
-            }
-            .padding(16)
-        }
-        .scrollContentBackground(.hidden)
-    }
-
-    /// 视图自己按提交数排序，不依赖上游数组顺序。
-    private func sortedAuthors(_ git: GitInsights) -> [AuthorStats] {
-        git.authors.sorted {
-            if $0.commits != $1.commits { return $0.commits > $1.commits }
-            return displayName($0) < displayName($1)
-        }
-    }
-
-    // MARK: - Summary tiles
-
-    private func metricGrid(_ git: GitInsights, authors: [AuthorStats]) -> some View {
-        LazyVGrid(columns: Self.metricColumns, spacing: 12) {
-            MetricTile(
-                label: "贡献者",
-                value: NumberFormat.grouped(authors.count),
-                unit: "人",
-                caption: git.historyTruncated
-                    ? "活跃 \(NumberFormat.grouped(git.activeAuthorCount)) 人 · 已分析 \(NumberFormat.grouped(git.commitsAnalyzed)) / \(NumberFormat.grouped(git.totalCommits)) 次提交"
-                    : "活跃 \(NumberFormat.grouped(git.activeAuthorCount)) 人 · 共 \(NumberFormat.grouped(git.totalCommits)) 次提交",
-                tint: Theme.accent,
-                systemImage: "person.2.fill"
-            )
-            MetricTile(
-                label: "头部作者占比",
-                value: topShare(git).map { NumberFormat.percent($0, precision: 0) } ?? "—",
-                caption: git.topAuthor.map { "\(displayName($0)) · \(NumberFormat.grouped($0.commits)) 次" } ?? "无作者数据",
-                tint: Theme.color(for: gitBusFactorRisk(git)),
-                systemImage: "crown.fill"
-            )
-            MetricTile(
-                label: "累计变更",
-                value: NumberFormat.compact(git.totalAdditions + git.totalDeletions),
-                unit: "行",
-                caption: "\(NumberFormat.signed(git.totalAdditions)) / \(NumberFormat.signed(-git.totalDeletions))",
-                tint: Theme.neutral,
-                systemImage: "arrow.up.arrow.down"
-            )
-            MetricTile(
-                label: "近 30 天活跃",
-                value: NumberFormat.grouped(recentlyActive(authors).count),
-                unit: "人",
-                caption: recentlyActiveCaption(authors),
-                tint: Theme.healthy,
-                systemImage: "clock.arrow.circlepath"
-            )
-        }
-    }
-
-    private func topShare(_ git: GitInsights) -> Double? {
-        let base = gitShareBase(git)
-        guard let top = git.topAuthor, base > 0 else { return nil }
-        return Double(top.commits) / Double(base)
-    }
-
-    private func recentlyActive(_ authors: [AuthorStats]) -> [AuthorStats] {
-        authors.filter { author in
-            guard let last = author.lastCommitAt else { return false }
-            return Date().timeIntervalSince(last) <= 30 * 86_400
-        }
-    }
-
-    private func recentlyActiveCaption(_ authors: [AuthorStats]) -> String {
-        let recent = recentlyActive(authors)
-        guard let best = recent.max(by: { ($0.lastCommitAt ?? .distantPast) < ($1.lastCommitAt ?? .distantPast) }) else {
-            return "近 30 天无人提交"
-        }
-        return "最近：\(displayName(best)) · \(best.lastActiveDescription)"
-    }
-
-    // MARK: - Ranking
-
-    private func rankingCard(_ git: GitInsights, authors: [AuthorStats]) -> some View {
-        let shown = Array(authors.prefix(Self.displayLimit))
-        return SectionCard(
-            "贡献者排行",
-            subtitle: "按提交数降序 · 展示 \(shown.count) / \(NumberFormat.grouped(authors.count)) 人",
-            icon: "person.text.rectangle"
-        ) {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(Array(shown.enumerated()), id: \.element.id) { index, author in
-                    ContributorRow(author: author, rank: index + 1, totalCommits: gitShareBase(git))
-                    if index < shown.count - 1 {
-                        Divider().opacity(0.4)
-                    }
-                }
-                if authors.count > Self.displayLimit {
-                    Text("其他 \(NumberFormat.grouped(authors.count - Self.displayLimit)) 位贡献者未展示")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.top, 2)
-                }
-            }
-        }
-    }
-
-    // MARK: - Concentration
-
-    private func concentrationCard(_ git: GitInsights, authors: [AuthorStats]) -> some View {
-        let top = Array(authors.prefix(3))
-        let total = max(1, gitShareBase(git))
-        let topCommits = top.reduce(0) { $0 + $1.commits }
-        return SectionCard(
-            "贡献集中度",
-            subtitle: "Bus Factor \(max(1, top.count)) · 前 3 名合计 \(NumberFormat.percent(Double(topCommits) / Double(total), precision: 0))",
-            icon: "chart.pie.fill"
-        ) {
-            VStack(alignment: .leading, spacing: 9) {
-                ShareBarRow(
-                    label: "前 3 名合计",
-                    detail: "\(NumberFormat.grouped(topCommits)) 次",
-                    fraction: Double(topCommits) / Double(total),
-                    tint: Theme.accent
+            } else {
+                EmptyStateView(
+                    icon: .people,
+                    title: "尚未分析 Git 历史",
+                    message: "选择一个本地仓库目录后点击「重新分析」。\n分析完成后这里会显示贡献者排行、代码变更量与活跃时段分布。"
                 )
-                ForEach(top) { author in
-                    ShareBarRow(
-                        label: displayName(author),
-                        detail: "\(NumberFormat.grouped(author.commits)) 次",
-                        fraction: Double(author.commits) / Double(total),
-                        tint: contributorColor(for: author.email)
-                    )
-                }
-                if git.activeAuthorCount <= 1 {
-                    BannerRow(text: "全部提交仅来自 1 位贡献者，任何离队都会让项目停摆。", style: .error)
-                } else if gitBusFactorRisk(git) >= .high {
-                    BannerRow(
-                        text: "其余 \(NumberFormat.grouped(git.activeAuthorCount - 1)) 位作者合计不足 \(NumberFormat.percent(1 - Double(top.first?.commits ?? 0) / Double(total), precision: 0))，缺少可接手的第二人。",
-                        style: .warning
-                    )
-                }
             }
         }
     }
 }
 
-// MARK: - Bus factor banner
+// MARK: - Bus Factor 结论
 
-private struct BusFactorBanner: View {
+struct ContributorBusFactorSection: View {
     let git: GitInsights
 
     var body: some View {
-        BannerRow(text: message, style: style)
+        DataNotice(text: Self.message(for: git), role: Self.role(for: git),
+                   icon: Self.icon(for: git), iconLabel: "贡献集中度结论")
     }
 
-    private var risk: RiskLevel { gitBusFactorRisk(git) }
-
-    private var style: BannerStyle {
-        switch risk {
-        case .critical, .high: return .error
-        case .medium: return .warning
-        default: return .info
+    static func role(for git: GitInsights) -> Theme.SemanticRole {
+        switch ContributorAnalysis.busFactorRisk(git) {
+        case .critical, .high: return Theme.Semantic.danger
+        case .medium: return Theme.Semantic.warning
+        case .low: return Theme.Semantic.healthy
+        case .none: return Theme.Semantic.neutral
         }
     }
 
-    private var message: String {
-        guard let top = git.topAuthor, gitShareBase(git) > 0 else {
-            return "尚无提交作者统计，无法评估 Bus Factor。"
+    static func icon(for git: GitInsights) -> IconName {
+        switch ContributorAnalysis.busFactorRisk(git) {
+        case .critical, .high: return .riskSevere
+        case .medium: return .riskWarning
+        case .low: return .noRisk
+        case .none: return .unverified
         }
-        let share = NumberFormat.percent(Double(top.commits) / Double(gitShareBase(git)), precision: 0)
-        let name = displayName(top)
-        switch risk {
+    }
+
+    /// 结论句必须带分母口径：单人占比是相对**非合并窗口**算的，不说清就等于借了真值的名。
+    static func message(for git: GitInsights) -> String {
+        let scope = git.commitScope
+        guard let top = git.topAuthor, scope.authorBasis > 0 else {
+            return "没有可用的提交作者统计，无法评估 Bus Factor。"
+        }
+        let share = NumberFormat.percent(Double(top.commits) / Double(scope.authorBasis), precision: 0)
+        let name = ContributorAnalysis.displayName(top)
+        let basis = "（分母 = \(NumberFormat.grouped(scope.authorBasis)) 次非合并提交）"
+        switch ContributorAnalysis.busFactorRisk(git) {
         case .critical:
-            return "100% 依赖单人：\(share) 的提交来自 \(name)，活跃作者仅 \(git.activeAuthorCount) 人，属于严重单点风险。"
+            return "单点风险：\(basis) 全部来自 \(name) 一人，活跃作者仅 "
+                + "\(NumberFormat.grouped(git.activeAuthorCount)) 人。"
         case .high:
-            return "\(share) 的提交由 \(name) 一人完成，存在单点风险。"
+            return "\(share) 的提交由 \(name) 一人完成 \(basis)，存在单点风险。"
         case .medium:
-            return "\(share) 的提交来自 \(name)，建议安排代码评审与交接。"
-        default:
-            return "贡献分布健康：\(git.activeAuthorCount) 位活跃作者，最高占比 \(share)（\(name)）。"
+            return "\(share) 的提交来自 \(name) \(basis)，建议安排代码评审与交接。"
+        case .low:
+            return "贡献分布健康：\(NumberFormat.grouped(git.activeAuthorCount)) 位活跃作者，"
+                + "最高占比 \(share)（\(name)）。"
+        case .none:
+            return "作者样本不足以判断集中度。"
         }
     }
 }
 
-// MARK: - Contributor row
+// MARK: - 指标条
 
-private struct ContributorRow: View {
-    let author: AuthorStats
-    let rank: Int
-    let totalCommits: Int
+struct ContributorsMetricGrid: View {
+    let git: GitInsights
+    let authors: [AuthorStats]
+
+    private static let columns = [GridItem(.adaptive(minimum: Theme.Layout.tileMinWidth),
+                                           spacing: Theme.Spacing.gutter)]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top, spacing: 10) {
-                AvatarBadge(author: author, tint: tint)
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 5) {
-                        Text("#\(rank)")
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                        Text(title).font(.callout.weight(.semibold)).lineLimit(1)
+        let scope = git.commitScope
+        LazyVGrid(columns: Self.columns, spacing: Theme.Spacing.gutter) {
+            MetricTile(
+                label: "贡献者",
+                value: NumberFormat.grouped(authors.count),
+                icon: .people,
+                unit: "人",
+                caption: scope.authorTileCaption(authorCount: git.activeAuthorCount),
+                tint: Theme.Semantic.accent.textColor
+            )
+            MetricTile(
+                label: "头部作者占比",
+                value: Self.topShare(git).map { NumberFormat.percent($0, precision: 0) },
+                icon: .topContributor,
+                caption: git.topAuthor.map {
+                    "\(ContributorAnalysis.displayName($0)) · \(NumberFormat.grouped($0.commits)) 次"
+                } ?? "无作者数据",
+                tint: Theme.Semantic.role(for: ContributorAnalysis.busFactorRisk(git)).textColor
+            )
+            MetricTile(
+                label: "累计变更",
+                value: scope.authorBasis > 0
+                    ? NumberFormat.compact(git.totalAdditions + git.totalDeletions) : nil,
+                unit: "行",
+                caption: "\(NumberFormat.signed(git.totalAdditions)) / "
+                    + "\(NumberFormat.signed(-git.totalDeletions)) · 按非合并提交统计",
+                tint: Theme.Semantic.neutral.textColor
+            )
+            MetricTile(
+                label: "近 30 天活跃",
+                value: NumberFormat.grouped(ContributorAnalysis.recentlyActive(authors).count),
+                symbol: CodeGitSymbol.recency,
+                unit: "人",
+                caption: Self.recentlyActiveCaption(authors),
+                tint: Theme.Semantic.success.textColor
+            )
+        }
+    }
+
+    static func topShare(_ git: GitInsights) -> Double? {
+        let scope = git.commitScope
+        guard let top = git.topAuthor, scope.authorBasis > 0 else { return nil }
+        return Double(top.commits) / Double(scope.authorBasis)
+    }
+
+    static func recentlyActiveCaption(_ authors: [AuthorStats]) -> String {
+        guard let best = ContributorAnalysis.recentlyActive(authors)
+            .max(by: { ($0.lastCommitAt ?? .distantPast) < ($1.lastCommitAt ?? .distantPast) }) else {
+            return "近 30 天无人提交"
+        }
+        return "最近：\(ContributorAnalysis.displayName(best)) · \(best.lastActiveDescription)"
+    }
+}
+
+// MARK: - 排行
+
+struct ContributorRankingSection: View {
+    let git: GitInsights
+    let authors: [AuthorStats]
+
+    static let displayLimit = 30
+
+    var body: some View {
+        let shown = Array(authors.prefix(Self.displayLimit))
+        GlassSection(
+            "贡献者排行",
+            subtitle: "按提交数降序 · 展示 \(NumberFormat.grouped(shown.count)) / "
+                + "\(NumberFormat.grouped(authors.count)) 人 · \(git.commitScope.headline)",
+            icon: .people
+        ) {
+            VStack(spacing: Theme.Spacing.sm) {
+                ForEach(Array(shown.enumerated()), id: \.element.id) { index, author in
+                    ContributorRow(author: author, rank: index + 1, git: git)
+                    if index < shown.count - 1 {
+                        DataRowSeparator()
                     }
-                    Text(subtitle)
-                        .font(.system(size: 9, design: .monospaced))
+                }
+                if authors.count > Self.displayLimit {
+                    Text("另有 \(NumberFormat.grouped(authors.count - Self.displayLimit)) 位贡献者未展示")
+                        .font(Theme.Typo.microLabel.font)
+                        .monospacedDigit()
                         .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    DirectoryChips(directories: topDirectories(author))
-                }
-                Spacer(minLength: 6)
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("\(NumberFormat.grouped(author.commits)) 次")
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    Text("\(NumberFormat.signed(author.additions)) / \(NumberFormat.signed(-author.deletions))")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .help("代码变更量 \(NumberFormat.grouped(author.totalChurn)) 行 · 触达 \(NumberFormat.grouped(author.filesTouched)) 个文件")
-                    Text(author.lastActiveDescription)
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            HStack(spacing: 8) {
-                MiniBarGauge(fraction: share, tint: tint, height: 5)
-                    .frame(maxWidth: .infinity)
-                Text(NumberFormat.percent(share, precision: 1))
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 46, alignment: .trailing)
-            }
-            HourActivityRow(counts: author.activityByHour, tint: tint)
-        }
-        .padding(.vertical, 2)
-    }
-
-    private var tint: Color { contributorColor(for: author.email) }
-
-    private var share: Double {
-        totalCommits > 0 ? Double(author.commits) / Double(totalCommits) : 0
-    }
-
-    private var title: String { displayName(author) }
-
-    private var subtitle: String {
-        author.email.isEmpty ? "无邮箱记录" : author.email
-    }
-
-    /// 字典无序：按次数降序、目录名升序，取前 3 个。
-    private func topDirectories(_ author: AuthorStats) -> [(String, Int)] {
-        author.topDirectories
-            .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
-            .prefix(3)
-            .map { ($0.key, $0.value) }
-    }
-}
-
-private struct AvatarBadge: View {
-    let author: AuthorStats
-    let tint: Color
-
-    var body: some View {
-        Text(initial)
-            .font(.system(size: 13, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(width: 30, height: 30)
-            .background(tint, in: Circle())
-            .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 1))
-            .help("\(author.name.isEmpty ? "未知作者" : author.name) · \(author.email.isEmpty ? "无邮箱" : author.email)")
-    }
-
-    /// 中文取第一个字，拉丁文取首字母大写；空名回退到邮箱首字符。
-    private var initial: String {
-        let name = author.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let first = name.first { return String(first).uppercased() }
-        let email = author.email.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let first = email.first { return String(first).uppercased() }
-        return "?"
-    }
-}
-
-private struct DirectoryChips: View {
-    let directories: [(String, Int)]
-
-    var body: some View {
-        if directories.isEmpty {
-            EmptyView()
-        } else {
-            HStack(spacing: 4) {
-                ForEach(Array(directories.enumerated()), id: \.offset) { _, entry in
-                    Text("\(short(entry.0)) · \(NumberFormat.grouped(entry.1))")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(Theme.neutral)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(Theme.neutral.opacity(0.12), in: Capsule())
-                        .help("\(entry.0) · \(entry.1) 次改动")
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
         }
     }
-
-    private func short(_ path: String) -> String {
-        path.split(separator: "/").last.map(String.init) ?? path
-    }
 }
 
-/// 单成员 24 小时提交分布；高度按该成员自己的峰值归一。
-private struct HourActivityRow: View {
-    let counts: [Int]
-    let tint: Color
+// MARK: - 集中度
 
-    private static let height: CGFloat = 16
+struct ContributorConcentrationSection: View {
+    let git: GitInsights
+    let authors: [AuthorStats]
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text("时段")
-                .font(.system(size: 8))
-                .foregroundStyle(.tertiary)
-                .frame(width: 22, alignment: .leading)
-            HStack(alignment: .bottom, spacing: 2) {
-                ForEach(0..<24, id: \.self) { hour in
-                    bar(for: hour)
+        let scope = git.commitScope
+        let top = Array(authors.prefix(3))
+        let base = max(1, scope.authorBasis)
+        let topCommits = top.reduce(0) { $0 + $1.commits }
+        GlassSection(
+            "贡献集中度",
+            subtitle: "Bus Factor \(NumberFormat.grouped(max(1, top.count))) · 前 3 名合计 "
+                + "\(NumberFormat.percent(Double(topCommits) / Double(base), precision: 0))"
+                + scope.windowSuffix,
+            icon: .chartLine
+        ) {
+            VStack(spacing: Theme.Spacing.xs) {
+                DataTableHeader(columns: DataColumns.shareBar)
+                DataShareBarRow(
+                    label: "前 3 名合计",
+                    detail: "\(NumberFormat.grouped(topCommits)) 次",
+                    fraction: Double(topCommits) / Double(base),
+                    tint: Theme.Chart.color(at: 0)
+                )
+                ForEach(top) { author in
+                    DataShareBarRow(
+                        label: ContributorAnalysis.displayName(author),
+                        detail: "\(NumberFormat.grouped(author.commits)) 次",
+                        fraction: Double(author.commits) / Double(base),
+                        tint: ContributorAnalysis.color(for: author.email)
+                    )
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(height: Self.height)
-    }
-
-    private var peak: Int { max(1, counts.max() ?? 0) }
-
-    @ViewBuilder
-    private func bar(for hour: Int) -> some View {
-        let value = hour < counts.count ? counts[hour] : 0
-        let ratio = Double(value) / Double(peak)
-        RoundedRectangle(cornerRadius: 1, style: .continuous)
-            .fill(value == 0 ? Color.primary.opacity(0.06) : tint.opacity(0.35 + 0.65 * ratio))
-            .frame(maxWidth: .infinity)
-            .frame(height: value == 0 ? 2 : max(3, Self.height * CGFloat(ratio)))
-            .help("\(String(format: "%02d", hour)):00 · \(value) 次提交")
-    }
-}
-
-private struct ShareBarRow: View {
-    let label: String
-    let detail: String
-    let fraction: Double
-    let tint: Color
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text(label)
-                .font(.caption)
-                .lineLimit(1)
-                .frame(width: 96, alignment: .leading)
-            MiniBarGauge(fraction: fraction, tint: tint, height: 6)
-                .frame(maxWidth: .infinity)
-            Text(NumberFormat.percent(fraction, precision: 0))
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .frame(width: 40, alignment: .trailing)
-            Text(detail)
-                .font(.system(size: 9))
-                .foregroundStyle(.tertiary)
-                .frame(width: 58, alignment: .trailing)
+            if git.activeAuthorCount <= 1 {
+                DataNotice(text: "全部提交仅来自 1 位贡献者，任何离队都会让项目停摆。",
+                           role: Theme.Semantic.danger, icon: .riskSevere,
+                           iconLabel: "单人风险")
+            } else if ContributorAnalysis.busFactorRisk(git).rank >= RiskLevel.high.rank {
+                DataNotice(
+                    text: "其余 \(NumberFormat.grouped(git.activeAuthorCount - 1)) 位作者合计不足 "
+                        + "\(NumberFormat.percent(1 - Double(top.first?.commits ?? 0) / Double(base), precision: 0))，"
+                        + "缺少可接手的第二人。",
+                    role: Theme.Semantic.warning, icon: .riskWarning, iconLabel: "交接风险")
+            }
         }
     }
-}
-
-// MARK: - Stable avatar colors
-
-private let contributorPalette: [Color] = [
-    Color(hex: "5C8DFF"), Color(hex: "2FA84F"), Color(hex: "E8A33D"), Color(hex: "D9534F"),
-    Color(hex: "8E6FD8"), Color(hex: "1FA8B8"), Color(hex: "C2589B"), Color(hex: "6F7C91"),
-]
-
-/// 必须跨启动稳定，所以用 FNV-1a；Swift 的 hashValue 每个进程随机化。
-private func contributorColor(for email: String) -> Color {
-    var hash: UInt64 = 0xcbf2_9ce4_8422_2325
-    for scalar in email.lowercased().unicodeScalars {
-        hash ^= UInt64(scalar.value)
-        hash = hash &* 0x0000_0100_0000_01B3
-    }
-    return contributorPalette[Int(hash % UInt64(contributorPalette.count))]
-}
-
-private func displayName(_ author: AuthorStats) -> String {
-    if !author.name.isEmpty { return author.name }
-    return author.email.isEmpty ? "未知作者" : author.email
-}
-
-/// 占比的分母必须和分子同口径：`totalCommits` 是**含 merge 的仓库真值**，而
-/// `AuthorStats.commits` 只数到分析窗口里的非合并提交。历史被截断时两者相除会把
-/// 人均占比压到失真（50,666 条的仓里，窗口内的头号作者会被显示成 6%），
-/// 所以一律退回 `commitsAnalyzed`；旧数据没有该字段时（=0）才用 totalCommits 兜底。
-private func gitShareBase(_ git: GitInsights) -> Int {
-    git.commitsAnalyzed > 0 ? git.commitsAnalyzed : git.totalCommits
-}
-
-/// 与 `GitInsights.busFactorRisk` 同一套阈值，但分母换成窗口口径 —— 模型是冻结的，
-/// 它用 totalCommits 做分母，截断时会系统性低估集中度风险。
-private func gitBusFactorRisk(_ git: GitInsights) -> RiskLevel {
-    let base = gitShareBase(git)
-    guard let top = git.topAuthor, base > 0 else { return .none }
-    let share = Double(top.commits) / Double(base)
-    if git.activeAuthorCount <= 1 && base > 50 { return .critical }
-    if share > 0.7 { return .high }
-    if share > 0.5 { return .medium }
-    return .low
 }
