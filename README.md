@@ -156,8 +156,15 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
   以及 `Gemfile`、`bin/brew` 这类无后缀可执行脚本），不是漏算或多算。
 - **Git 指标**：提交总数与 `git rev-list --count HEAD` 逐位一致；增删行数与同窗口
   `git log --no-merges --numstat` 的聚合**一字不差**（`+1672258/-1347981`）。
-  作者数按 email 去重后与 `git` 仍差 1（工具 617 / git 618），
-  **归并规则尚未在界面或文档中声明**，这是当前已知未结项。
+  作者数**已解释，不是误差**：分析器按 `normalizeEmail` 归一后的邮箱去重
+  （`GitLogParser.swift`：去尖括号、去空白、转小写，且对 `gmail.com` / `googlemail.com`
+  剥掉 `+alias` 后缀）。Homebrew 窗口内 618 个原始邮箱里有且仅有一对
+  `tomhu1096+gpg@gmail.com` 与 `tomhu1096@gmail.com` 被归并为同一人，因此工具给 **617**；
+  复现命令：
+  `git log --no-merges -n 20000 --format=%aE | sort -u | wc -l` → 618，套上上述归一 → 617。
+  两个必须一起读的口径提醒：作者数只在 **`-n 20000` 采样窗口**内统计（全历史非合并
+  为 35,907 次提交、1,331 个姓名），且**按姓名去重只有 587**——所以任何"作者数对不对"的
+  讨论都要先说清是姓名口径还是邮箱口径、窗口口径还是全历史口径。
 - **运行时指标**：与活动监视器 / `top` / `ps` 的可比性由 `PerformanceLiveSampleTests`
   三条用例钉住（采样可与活动监视器比、进程组与真实进程匹配、磁盘吞吐是差值而非累计量）。
 - **覆盖率**：与 `llvm-cov` 逐位一致——自扫时两边都给出 `10618/23611`。
