@@ -56,6 +56,25 @@ else
   exit 1
 fi
 
+# 0.5) 回执只证明"**那个头**被测过"，不证明"**合并后的组合**被测过"。
+# 2026-09-20 实例：WS-V 的门禁头 `ad97f0d` 不含刚合进 main 的 #38 代码（`b256d91`），
+# 于是 `572e6e0` 这个结果此前从未整体跑过全量——两条流并发落地时必然出现这种组合。
+# 判据：合并前的 main 必须是被测头的祖先；不是就说明被测头缺 main 上的新提交。
+MAIN_BEFORE=$(git rev-parse main)
+if ! git merge-base --is-ancestor "$MAIN_BEFORE" "$TIP" 2>/dev/null; then
+  MISSING=$(git rev-list --count "$TIP".."$MAIN_BEFORE")
+  if [ "${MERGE_ALLOW_STALE_BASE:-0}" = "1" ]; then
+    echo "==> ⚠ 被测头 ${TIP:0:7} 落后 main ${MISSING} 个提交，合并后的组合未被整体测过；"
+    echo "    MERGE_ALLOW_STALE_BASE=1 已放行 ⇒ **必须**立刻在 main 上跑全量 test 兜底。"
+  else
+    echo "==> ❌ 被测头落后于 main：${TIP:0:7} 缺 ${MISSING} 个 main 上的提交。"
+    echo "    回执只证明那个头自己绿，不证明「它 + main 新提交」的组合绿过。"
+    echo "    正解（两条命令）：在负责人树里 git merge main && ./scripts/premerge_check.sh $BRANCH"
+    echo "    （确知是纯文档改动：MERGE_ALLOW_STALE_BASE=1 …，并承诺合完补跑全量 test）"
+    exit 1
+  fi
+fi
+
 # 1) 合并前 main 必须是干净的
 DIRTY=$(git status --porcelain | wc -l | tr -d ' ')
 if [ "$DIRTY" != "0" ]; then
