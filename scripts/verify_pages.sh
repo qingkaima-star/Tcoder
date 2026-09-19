@@ -1,0 +1,34 @@
+#!/bin/bash
+# 逐页截图取证：让 App 以指定页面启动，抓窗口截图，确认九个视图都真的渲染出内容。
+# 依赖 ProjectDetailView 的 @AppStorage("selectedDetailSection")。
+set -uo pipefail
+cd "$(dirname "$0")/.."
+
+APP="dist/Tcoder Monitor.app"
+OUT="${1:-/tmp/tcoder-pages}"
+SECTIONS=("总览" "代码规模" "复杂度风险" "Git 洞察" "贡献者" "性能监控" "错误日志" "依赖分析" "健康评分")
+
+mkdir -p "$OUT"
+rm -f "$OUT"/*.png
+
+for name in "${SECTIONS[@]}"; do
+  osascript -e 'tell application id "com.tcoder.monitor" to quit' 2>/dev/null || true
+  sleep 1
+  defaults write com.tcoder.monitor selectedDetailSection -string "$name"
+  defaults write com.tcoder.monitor ApplePersistenceIgnoreState -bool YES
+  open "$APP"
+  sleep 7
+  PID=$(pgrep -x TcoderMonitor | head -1 || true)
+  if [ -z "$PID" ]; then echo "  $name -> !! 启动失败"; continue; fi
+  WIN=$(xcrun swift /tmp/winlist.swift "$PID" 2>/dev/null | head -1 | cut -f1)
+  if [ -z "$WIN" ]; then echo "  $name -> !! 无窗口"; continue; fi
+  file="$OUT/${name}.png"
+  screencapture -x -o -l"$WIN" "$file" 2>/dev/null
+  size=$(stat -f '%z' "$file" 2>/dev/null || echo 0)
+  # 空白窗口和渲染出内容的窗口，PNG 体积差得很远，用它做粗筛
+  echo "  $name -> ${size} 字节"
+done
+
+osascript -e 'tell application id "com.tcoder.monitor" to quit' 2>/dev/null || true
+defaults delete com.tcoder.monitor selectedDetailSection 2>/dev/null || true
+echo "截图目录: $OUT"

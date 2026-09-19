@@ -2,7 +2,16 @@ import SwiftUI
 
 struct ProjectDetailView: View {
     @Environment(AppState.self) private var state
-    @State private var section: DetailSection = .overview
+    @AppStorage("selectedDetailSection") private var sectionRaw: String = DetailSection.overview.rawValue
+
+    private var section: DetailSection { DetailSection(rawValue: sectionRaw) ?? .overview }
+
+    private var sectionBinding: Binding<DetailSection> {
+        Binding(
+            get: { DetailSection(rawValue: sectionRaw) ?? .overview },
+            set: { sectionRaw = $0.rawValue }
+        )
+    }
 
     var body: some View {
         @Bindable var state = state
@@ -14,7 +23,7 @@ struct ProjectDetailView: View {
         }
         .background(Theme.subtleBackground)
         .onReceive(NotificationCenter.default.publisher(for: .requestSelectSection)) { note in
-            if let target = note.object as? DetailSection { section = target }
+            if let target = note.object as? DetailSection { sectionRaw = target.rawValue }
         }
         .onChange(of: state.selectedProjectID) { _, _ in
             if let project = state.selectedProject, !project.isDemo, state.store.report(for: project)?.code == nil {
@@ -53,7 +62,7 @@ struct ProjectDetailView: View {
 
             Spacer()
 
-            Picker("视图", selection: $section) {
+            Picker("视图", selection: sectionBinding) {
                 ForEach(DetailSection.allCases) { item in
                     Label(item.title, systemImage: item.icon).tag(item)
                 }

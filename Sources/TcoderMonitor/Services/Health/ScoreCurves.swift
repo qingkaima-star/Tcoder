@@ -2,6 +2,11 @@ import Foundation
 
 /// 健康评分标定曲线：每个维度的分数都由显式锚点线性折算，保证「分数可解释、依据可对外承诺」。
 /// 纯函数、无 I/O、无状态；加权与落盘由调用方（WeightedHealthScorer）负责。
+///
+/// 接线状态（WS-C 记录）：`WeightedHealthScorer` 已由总工程师落地为自带的经验公式，
+/// 因此本文件目前**只被 HealthScoreTests 覆盖，不在产线评分路径上**。
+/// 这里的锚点表是产品规约里点名要的那份（重复度 12.5%→75、注释 2%~15% 最佳、
+/// 一人包揽 70%+ 重扣、narrative 40~80 字），接线时把评分器各维度改成调用 `HealthCurves.xxx` 即可。
 
 struct CurveResult: Sendable, Equatable {
     var score: Double

@@ -98,27 +98,40 @@ final class PerformanceLiveSampleTests: XCTestCase {
     }
 
     /// 进程组：内置的 java/node/mysqld/redis/nginx 是通用名，本机有几个就算几个，不伪造。
+    /// 做两轮 sweep（中间烧一点 CPU），第一轮的 CPU 恒为 0，只有第二轮才验证得出「核当量」这条链路。
     func testLiveProcessGroupsMatchRealProcesses() throws {
-        let sweep = ProcessInspector.sweep(previous: [:], elapsed: 1.5)
+        let warmup = ProcessInspector.sweep(previous: [:], elapsed: 0.4)
+        let warmupAt = Date()
+        let burnStart = Date()
+        var sink = 0.0
+        while Date().timeIntervalSince(burnStart) < 0.3 { sink += sin(sink + 1) }
+        XCTAssertGreaterThan(sink, 0)
+        let gap = max(0.05, Date().timeIntervalSince(warmupAt))
+        let sweep = ProcessInspector.sweep(previous: warmup.states, elapsed: gap)
         let groups = ProcessInspector.groupSnapshots(for: TrackedProcessGroup.builtInDefaults,
                                                     processes: sweep.processes)
         XCTAssertEqual(groups.count, TrackedProcessGroup.builtInDefaults.count,
                        "没有匹配的组也必须出现在结果里，视图才能显示「未检测到」")
-        print("=== 工程进程组 ===")
+        print("=== 工程进程组（第二轮采样，间隔 \(String(format: "%.2f", gap)) 秒） ===")
         for snapshot in groups {
             let ram = ByteFormat.string(snapshot.totalMemoryBytes, precision: 1)
-            let cpu = String(format: "%.2f", snapshot.totalCPU)
+            let cpu = String(format: "%.3f", snapshot.totalCPU)
             print("  \(snapshot.group.title)（匹配 \(snapshot.group.matchPattern)）: "
                 + "\(snapshot.processCount) 进程 · CPU \(cpu) 核 · RAM \(ram)"
                 + " · Threads \(snapshot.totalThreads) · Open Files \(snapshot.totalOpenFiles)")
         }
         let matched = groups.filter { $0.processCount > 0 }
         XCTAssertFalse(matched.isEmpty, "本机常驻至少会有 node 或 java 一类进程；若全空需复查匹配逻辑")
+        // 第二轮必须能量出非零核当量（本测试进程自身就在烧 CPU，node/java 家族至少有一个动过）。
+        XCTAssertGreaterThan(sweep.processes.reduce(0.0) { $0 + $1.cpuUsage }, 0,
+                             "两轮差值必须算出真实 CPU 占用，否则「某服务 CPU 45%」这条链路是断的")
         for snapshot in groups {
             XCTAssertEqual(snapshot.totalThreads,
                            snapshot.matchedProcesses.reduce(0) { $0 + $1.threadCount })
             XCTAssertEqual(snapshot.totalOpenFiles,
                            snapshot.matchedProcesses.reduce(0) { $0 + $1.openFileCount })
+            XCTAssertEqual(snapshot.totalMemoryBytes,
+                           snapshot.matchedProcesses.reduce(UInt64(0)) { $0 + $1.memoryBytes })
         }
     }
 

@@ -428,14 +428,13 @@ struct LogsView: View {
             VStack(spacing: 5) {
                 scannedFilesHeader
                 Divider().opacity(0.5)
-                ScrollView {
-                    VStack(spacing: 5) {
-                        ForEach(shown) { file in
-                            scannedFilesRow(file)
-                        }
+                // 不再嵌一层 ScrollView：套在页面 ScrollView 里会抢滚轮，
+                // 行数已经由 fileRowLimit 截断，超出部分用下面一行说明。
+                VStack(spacing: 5) {
+                    ForEach(shown) { file in
+                        scannedFilesRow(file)
                     }
                 }
-                .frame(maxHeight: 280)
                 if sorted.count > shown.count {
                     Text("另有 \(sorted.count - shown.count) 个文件未列出")
                         .font(.system(size: 9))

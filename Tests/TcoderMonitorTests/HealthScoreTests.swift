@@ -444,14 +444,12 @@ final class HealthScoreTests: XCTestCase {
         let score = WeightedHealthScorer().score(HealthInputs())
         XCTAssertEqual(score.overall, 0, "无任何维度数据时不得凭空给分")
         XCTAssertTrue(score.components.isEmpty, "无输入时不得编造维度分量，实际 \(score.components.map(\.name))")
+        XCTAssertFalse(score.recommendations.isEmpty, "即便无数据也要给出下一步建议")
+        XCTAssertFalse(score.narrative.isEmpty, "即便无数据也要给出结论文案")
         XCTAssertFalse(score.generatedByAI, "结论文案由规则拼装，不得声称 AI 生成")
         XCTAssertEqual(score.grade, .e)
         XCTAssertNil(score.previousOverall)
         XCTAssertNil(score.trendDelta)
-        // 实测行为：无输入时 recommendations / narrative 都是空串集合 —— 评分器只报有依据的话。
-        // 引导文案由 HealthView 的 EmptyStateView 负责。契约缺口已记进 WS-C 笔记。
-        XCTAssertTrue(score.recommendations.isEmpty || !score.recommendations.isEmpty,
-                      "无数据时是否给建议两种实现都可接受，此处只要求不崩")
     }
 
     func testScorerNormalisesWeightsForCodeOnlyInputs() {
@@ -460,36 +458,35 @@ final class HealthScoreTests: XCTestCase {
         XCTAssertEqual(Set(result.components.map(\.name)), expectedNames, "只有 code 时必须恰好产出 4 个代码维度")
         XCTAssertEqual(result.components.count, 4)
 
-        // 实测口径：ScoreComponent.weight 带的是**原始** defaultWeight，
-        // 归一化发生在综合分里（overall = Σ(score·w) / Σw）。两者数学等价。
+        // 契约：对外发布的 weight 自己就要归一到 1.0，消费方 Σ(score·weight) 能复现 overall。
         let weightSum = result.components.reduce(0) { $0 + $1.weight }
-        XCTAssertEqual(weightSum, 0.53, accuracy: 1e-6, "4 个代码维度的原始权重和应为 0.53，实际 \(weightSum)")
+        XCTAssertEqual(weightSum, 1.0, accuracy: 1e-6, "分量权重必须归一化到 1.0，实际 \(weightSum)")
 
+        // 归一化基数 = 这 4 个维度默认权重之和 0.53（0.14+0.18+0.13+0.08）。
+        let base = 0.53
         for component in result.components {
             guard let dimension = HealthDimension.allCases.first(where: { $0.rawValue == component.name }) else {
                 return XCTFail("分量名 \(component.name) 不是合法的 HealthDimension.rawValue")
             }
-            XCTAssertEqual(component.weight, dimension.defaultWeight, accuracy: 1e-6,
-                           "\(component.name) 的 weight 应等于该维度的 defaultWeight")
-            // 视图拿去画的「有效乘数」= 原始权重 / Σ权重。
-            XCTAssertEqual(component.weight / weightSum, dimension.defaultWeight / 0.53, accuracy: 1e-6)
+            XCTAssertEqual(component.weight, dimension.defaultWeight / base, accuracy: 1e-6,
+                           "\(component.name) 的权重应为 defaultWeight/0.53")
         }
         XCTAssertTrue((0...100).contains(result.overall))
     }
 
     func testScorerNormalisesWeightsForLogAndDependencyOnlyInputs() {
         let result = WeightedHealthScorer().score(HealthInputs(logs: healthyLogs(), dependencies: cleanDependencies()))
-        // 实测行为：运行稳定性同时要 code（要算「每千行代码错误数」），所以只有 logs 时它不出分量；
-        // availableDimensions 里却有它 —— 这个不一致已作为契约缺口记进 WS-C 笔记。
-        XCTAssertTrue(result.components.contains { $0.name == HealthDimension.dependencies.rawValue },
-                      "依赖健康必须在场，实际 \(result.components.map(\.name))")
-        XCTAssertFalse(result.components.contains { $0.name == HealthDimension.complexity.rawValue },
-                       "没有 code 输入就不得凭空造出复杂度分量")
+        XCTAssertEqual(
+            Set(result.components.map(\.name)),
+            Set([HealthDimension.stability, .dependencies].map(\.rawValue)),
+            "只有 logs + dependencies 时应产出运行稳定性与依赖健康（availableDimensions 里有它就必须有分量）"
+        )
+        let weightSum = result.components.reduce(0) { $0 + $1.weight }
+        XCTAssertEqual(weightSum, 1.0, accuracy: 1e-6, "两维度集合的权重和仍须归一化为 1.0，实际 \(weightSum)")
         for component in result.components {
             XCTAssertFalse(component.detail.isEmpty, "\(component.name) 必须有说明文案")
             XCTAssertGreaterThanOrEqual(component.weight, 0)
         }
-        XCTAssertTrue((0...100).contains(result.overall))
     }
 
     func testScorerProducesEightComponentsForFullInputs() {
@@ -507,6 +504,38 @@ final class HealthScoreTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(component.score, 0)
             XCTAssertLessThanOrEqual(component.score, 100)
             XCTAssertEqual(component.weightedContribution, Double(component.score) * component.weight, accuracy: 1e-9)
+        }
+    }
+
+    /// `.testing` 维度（总工追加）：项目真有覆盖率报告时才参与计分，且必须出现在分量里；
+    /// 没有报告时既不得扣分也不得分，更不能凭空造一个分量出来。
+    func testScorerIncludesTestingDimensionOnlyWhenCoverageExists() {
+        let coverage = CoverageMetrics(reports: [
+            CoverageReport(path: "/tmp/tcoder-cov/lcov.info", kind: .unit, toolName: "lcov",
+                           linesCovered: 780, linesTotal: 1_000,
+                           branchesCovered: 300, branchesTotal: 500,
+                           methodsCovered: 0, methodsTotal: 0),
+        ])
+        let scorer = WeightedHealthScorer()
+        var inputs = fullInputs()
+        inputs.coverage = coverage
+        let withCoverage = scorer.score(inputs)
+        let without = scorer.score(fullInputs())
+        let testingName = HealthDimension.testing.rawValue
+
+        XCTAssertTrue(withCoverage.components.contains { $0.name == testingName },
+                      "有覆盖率报告时必须产出「\(testingName)」分量，实际 \(withCoverage.components.map(\.name))")
+        XCTAssertFalse(without.components.contains { $0.name == testingName },
+                       "没有覆盖率报告不得凭空造出「\(testingName)」分量")
+        XCTAssertEqual(without.components.count + 1, withCoverage.components.count,
+                       "加入第 9 个维度只应多出一个分量，其余维度不受影响")
+        XCTAssertEqual(withCoverage.components.reduce(0) { $0 + $1.weight }, 1.0, accuracy: 1e-6,
+                       "加入新维度后权重仍须归一到 1.0")
+
+        if let testing = withCoverage.components.first(where: { $0.name == testingName }) {
+            XCTAssertGreaterThan(testing.score, 55, "78% 行覆盖率不该被判成低分，实得 \(testing.score)")
+            XCTAssertLessThan(testing.score, 100, "78% 不得判成满分")
+            XCTAssertFalse(testing.detail.isEmpty, "分量必须带可解释的数字依据")
         }
     }
 
@@ -566,9 +595,8 @@ final class HealthScoreTests: XCTestCase {
         let result = WeightedHealthScorer().score(fullInputs())
         XCTAssertLessThanOrEqual(result.strengths.count, 5, "优点最多 5 条")
         XCTAssertLessThanOrEqual(result.issues.count, 5, "问题最多 5 条")
-        // 实测行为：healthyCode + activeGit 的这份输入没有触发任何建议，建议条数可为 0。
-        // 「有短板才提建议」是可接受的口径，视图侧对空列表显示「本次无」。
-        XCTAssertGreaterThanOrEqual(result.recommendations.count, 0)
+        // 实测行为：一条短板都没触发时评分器会补一条「保持节奏」的兜底建议，所以这里要求非空。
+        XCTAssertFalse(result.recommendations.isEmpty, "至少给 1 条建议")
         XCTAssertLessThanOrEqual(result.recommendations.count, 5, "建议最多 5 条")
         for text in result.strengths + result.issues + result.recommendations {
             XCTAssertFalse(text.trimmingCharacters(in: .whitespaces).isEmpty, "文案条目不得为空串")
