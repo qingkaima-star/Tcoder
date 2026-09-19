@@ -21,6 +21,19 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     var longFunctions: Int = 0
     var averageFunctionLength: Int = 0
 
+    /// Repo-wide mean cyclomatic complexity over **every** function the analyzer
+    /// recognized, not the mean of the hotspot list. `topComplexFunctions` is a
+    /// capped ranking, so averaging it inflates the score non-monotonically with
+    /// repo size; consumers that need a repo average must not substitute it.
+    ///
+    /// Optional because `ProjectStore` decodes persisted reports with `try?` —
+    /// a missing key on a non-optional field would silently discard the user's
+    /// previously saved reports instead of failing loudly.
+    var averageCyclomaticComplexity: Double?
+    /// Denominator behind `averageCyclomaticComplexity`. Zero means the analyzer
+    /// recognized no functions at all, which is "unknown", not "simple".
+    var analyzedFunctionCount: Int = 0
+
     /// 0...1 — share of code lines that fall inside a duplicated block.
     var duplicationRatio: Double = 0
     var duplicatedBlocks: [DuplicatedBlock] = []
