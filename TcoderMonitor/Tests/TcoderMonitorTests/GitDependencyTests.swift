@@ -531,6 +531,33 @@ final class ManifestParserTests: XCTestCase {
         XCTAssertEqual(sub.directoryRelativePath, "backend", "子目录路径要保留")
         XCTAssertEqual(sub.dependencies.count, 2, "maven 依赖数正确")
     }
+    /// Ruby 生态的计数口径：只数 Gemfile 里直接声明的 `gem`，**不**展开 Gemfile.lock 的
+    /// 传递依赖树。Homebrew 实测是 44（直接声明）对 90（lock 里含传递），两者必须分得清。
+    func testGemfileCountsDirectDeclarationsNotLockTree() {
+        let gemfile = """
+        source "https://rubygems.org"
+        ruby "~> 4.0.0"
+        gem "rake"
+        group :doc do
+          gem "ronn", require: false
+        end
+        # gem "disabled-in-comment"
+        #disallowed = ["bundler"]
+        group :test do
+          gem "minitest", "~> 5.0"
+          gem "rubocop", "1.2"
+        end
+        """
+        let deps = ManifestParsers.gemfileDependencies(gemfile, manifestPath: "Gemfile")
+        XCTAssertEqual(Fixture.names(deps), Set(["rake", "ronn", "minitest", "rubocop"]),
+                       "只收直接声明的 gem：注释里的、disallowed 列表、ruby 版本都不算依赖")
+        XCTAssertEqual(deps.count, 4, "4 条直接声明，不展开锁文件")
+        XCTAssertEqual(Fixture.found(deps, "ronn")?.scope, .dev, "group :doc 属开发分组")
+        XCTAssertEqual(Fixture.found(deps, "minitest")?.scope, .test, "group :test 归测试")
+        XCTAssertEqual(ManifestParsers.lockfileName(for: .ruby, in: ["Gemfile", "Gemfile.lock"]),
+                       "Gemfile.lock", "锁文件要单独报出来，但它是口径说明不是依赖数")
+    }
+
 }
 
 // MARK: - 契约 C：内置快照与离线漏洞
@@ -647,6 +674,7 @@ final class DependencySnapshotTests: XCTestCase {
         XCTAssertEqual(DependencyVersion.normalize("2.0"), [2, 0], "normalize 行为冻结")
     }
 }
+
 
 // MARK: - 契约 D：仓库定位（ShellGitAnalyzer 的三级发现）
 //
