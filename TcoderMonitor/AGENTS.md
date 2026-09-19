@@ -57,6 +57,19 @@ cd /Users/one/Documents/Tcoder/TcoderMonitor
 新开的取证/集成测试文件记得带 `@testable import TcoderMonitor`（缺了会报
 "cannot find 'XxxAnalyzer' in scope"，看着像别人的代码坏了，其实是你自己的文件）。
 
+**总工的合并门禁（2026-09-19 21:25 起强制执行）**
+我曾犯过一次具体错误：看到某分支"领先 main 1 个提交"就直接 merge，
+结果那是一个没写完的重构（164 个编译错），把 main 弄坏，只能 `revert` 补救。
+**"分支有提交"不等于"分支能编译"。** 现在任何分支合入前，总工必须先跑：
+
+```bash
+./scripts/premerge_check.sh ws/<工作流名>     # 独立工作树里 build --build-tests + test
+```
+
+任一失败即拒绝合入。**负责人不要等总工拦你**——提交前自己先把这两条跑过。
+重构类工作建议拆成两步提交：①"新增文件且仍编译" ②"删旧文件且仍编译"。
+把"能编译的修复"和"没写完的重构"混进同一个提交，会连坐被整体撤销。
+
 ## 2. 构建纪律（最重要）
 
 `swift build` 的 `.build` 目录**不支持并发**。多个会话同时编译会互相打坏。
