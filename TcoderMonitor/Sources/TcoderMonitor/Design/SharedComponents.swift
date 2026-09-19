@@ -84,27 +84,6 @@ struct MetricTile: View {
     /// 缺证据时的显示值。纯函数，供单测钉住。
     static func displayValue(_ raw: String?) -> String { raw ?? Theme.Placeholder.missingValue }
 
-    /// 三态入口。`evidence` 收 `Theme.Evidence`：这里**没有**「随手给个 String + 绿色」的
-    /// 写法，所以「没扫过」在类型上就没法被写成 0。
-    /// 用新 label `evidence:` 而不是重载 `value:`：WS-L 已经在
-    /// `Views/CodeGit/CodeGitDesignKit.swift` 里给 `MetricTile` 加了两个 extension init，
-    /// 同形入口会在 merge 时重声明、把全仓编译弄红。
-    init(
-        label: String,
-        evidence: Theme.Evidence,
-        unit: String? = nil,
-        caption: String? = nil,
-        role: Theme.SemanticRole = Theme.Semantic.neutral,
-        glyph: IconName? = nil
-    ) {
-        self.init(label: label,
-                  value: evidence.isAbsent ? nil : evidence.displayText,
-                  unit: unit,
-                  caption: caption ?? (evidence.isAbsent ? "尚未分析" : nil),
-                  tint: evidence.role(role).textColor,
-                  systemImage: glyph.map { IconAvailability.resolve($0) })
-    }
-
     /// 无值时是否强制中性色（忽略调用方给的倾向色）。
     /// 单独抽成谓词是为了可测——`Color` 由动态 `NSColor` 包出来，两次取值不相等。
     static func forcesNeutralTint(for raw: String?) -> Bool { raw == nil }
@@ -117,33 +96,21 @@ struct MetricTile: View {
 
 /// 风险徽标。**色 + 文字 + 图标三通道**，不只靠颜色表意（WS-H §10）。
 ///
-/// ⚠️ `verified` 是 WS-G P0：`RiskLevel.none` 有两义——
-/// 「真核对过、确认没有风险」（代码规模、复杂度等维度）与
-/// 「根本没查所以没有命中」（依赖漏洞离线默认态，见 `DependencyReport.hasVulnerabilityCoverage`）。
-/// 前者该画对勾，后者画对勾就是**把"我们没查"渲染成"我们查了、是安全的"**。
-/// 所以这里不全局改对勾，而是多一个显式入参，由调用方（WS-B 在 `DependenciesView`、
-/// WS-C 在 `WeightedHealthScorer`）按契约降级。
+/// 分级符号按 WS-H §6.4：无=勾、低/中=三角、高/严重=八边形（更高警戒）。
+/// ⚠️ 曾有过一个 `verified:` 入参用来把「没查」降级成问号徽标，#28 里删了：
+/// 页面零调用，依赖页的诚实性实际由 `DependencySafetyVerdict` + `IconName.unverified` 承担。
+/// 若哪天又要这条机制，别复活旧壳——按《42》「占位文本收敛清单」一次性把三态收进类型。
 struct RiskBadge: View {
     var risk: RiskLevel
     var showIcon: Bool = true
-    /// false = 该维度没真正核对过（离线未核验 / 未启用）。必须走中性"未核对"态。
-    var verified: Bool = true
 
     var body: some View {
-        let p = Self.presentation(risk: risk, verified: verified)
-        SemanticBadge(p.text, role: p.role, icon: showIcon ? p.icon : nil)
+        SemanticBadge(
+            "风险 \(risk.rawValue)",
+            role: Theme.Semantic.role(for: risk),
+            icon: showIcon ? RiskBadge.icon(for: risk) : nil)
     }
 
-    /// 徽章显示内容做成纯函数，好让单测能钉住"未核对不得出现对勾"这条诚实线。
-    static func presentation(risk: RiskLevel, verified: Bool = true)
-        -> (text: String, role: Theme.SemanticRole, icon: IconName) {
-        guard verified else {
-            return ("未核对", Theme.Semantic.neutral, .unverified)
-        }
-        return ("风险 \(risk.rawValue)", Theme.Semantic.role(for: risk), icon(for: risk))
-    }
-
-    /// 分级符号按 WS-H §6.4：无=勾、低/中=三角、高/严重=八边形（更高警戒）。
     static func icon(for risk: RiskLevel) -> IconName {
         switch risk {
         case .none: return .noRisk
@@ -181,7 +148,8 @@ struct MiniBarGauge: View {
     var tint: Color
     var height: CGFloat
 
-    init(fraction: Double, tint: Color = Theme.Semantic.accent.graphicColor, height: CGFloat = 6) {
+    init(fraction: Double, tint: Color = Theme.Semantic.accent.graphicColor,
+                height: CGFloat = Theme.Layout.gaugeMetric) {
         self.fraction = fraction
         self.tint = tint
         self.height = height
@@ -197,25 +165,6 @@ struct MiniBarGauge: View {
             }
         }
         .frame(height: height)
-    }
-}
-
-extension Theme {
-    /// 量表也归"数值展示组件"：`fraction?` 为 nil 时给空轨道 + 中性色，
-    /// 而不是画一条 0% 的彩色条——0% 是一条结论，nil 是没测到。
-    enum Gauge {
-        /// 缺测时是否强制中性。单列成谓词是为了可测——
-        /// 动态 `NSColor` 包出的 `Color` 两次取值不相等，拿它断言测不出东西。
-        static func forcesNeutral(fraction: Double?) -> Bool { fraction == nil }
-
-        static func bar(fraction: Double?,
-                        role: Theme.SemanticRole = Theme.Semantic.neutral,
-                        height: CGFloat = Theme.Layout.gaugeMetric) -> MiniBarGauge {
-            MiniBarGauge(fraction: fraction ?? 0,
-                         tint: fraction == nil ? Theme.Semantic.neutral.graphicColor
-                                               : role.graphicColor,
-                         height: height)
-        }
     }
 }
 

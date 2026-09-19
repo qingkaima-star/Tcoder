@@ -315,36 +315,6 @@ final class DesignTokenTests: XCTestCase {
 
     // MARK: - L. 缺证据不得渲染成结论（WS-G P0 + WS-I §3.4）
 
-    /// P0 本体：`RiskLevel.none` 在离线默认态下几乎对所有项目成立
-    /// （`riskLevel` 只看 `vulnerableCount`），所以对勾会把"我们没查"画成"我们查了、是安全的"。
-    func testUnverifiedRiskBadgeNeverDrawsACheckmark() {
-        for risk in RiskLevel.allCases {
-            let p = RiskBadge.presentation(risk: risk, verified: false)
-            XCTAssertNotEqual(p.icon, .noRisk,
-                              "未核对态下的 \(risk.rawValue) 仍然画出了对勾")
-            XCTAssertEqual(p.role.name, "neutral", "未核对必须走中性色，不得带倾向")
-            XCTAssertEqual(p.text, "未核对")
-        }
-    }
-
-    /// 反向保险：`.none` 也被代码规模/复杂度等维度复用，那里的"无风险"是**真结论**，
-    /// 不能因为 P0 被一起改掉。
-    func testVerifiedNoRiskBadgeStillEarnsItsCheckmark() {
-        let p = RiskBadge.presentation(risk: .none, verified: true)
-        XCTAssertEqual(p.icon, .noRisk, "真核对过的无风险不该被降级成问号")
-        XCTAssertEqual(p.text, "风险 无")
-    }
-
-    /// 「无风险」与「未核对」共用 neutral 色（RiskLevel.none 本就映射到 neutral），
-    /// 所以区分必须落在**图标 + 文字**这两个通道上——这正是 WS-H §10「不许只靠颜色表意」。
-    func testNoRiskAndUnverifiedAreToldApartByIconAndTextNotByColor() {
-        let clean = RiskBadge.presentation(risk: .none, verified: true)
-        let unknown = RiskBadge.presentation(risk: .none, verified: false)
-        XCTAssertEqual(clean.role.name, unknown.role.name, "两者同色是预期，别把它当 bug 改")
-        XCTAssertNotEqual(clean.icon, unknown.icon)
-        XCTAssertNotEqual(clean.text, unknown.text)
-    }
-
     func testUnverifiedIconIsRegisteredAndDistinctFromNoRisk() {
         XCTAssertNotEqual(IconName.unverified.rawValue, IconName.noRisk.rawValue)
         XCTAssertNotNil(NSImage(systemSymbolName: IconName.unverified.rawValue,

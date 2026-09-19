@@ -5,7 +5,7 @@ import SwiftUI
 /// 令牌与组件本身已经全部搬到 `Sources/TcoderMonitor/Design/**`：
 ///   - `Theme.Semantic` / `Theme.Palette` / `Theme.Typo` / `Theme.Spacing`
 ///     / `Theme.Radius` / `Theme.Stroke` / `Theme.Elevation` / `Theme.Layout` / `Theme.Chart`
-///     → `Design/ThemeTokens.swift`、`Design/ColorToken.swift`
+///     → `Design/ThemeTokens.swift`、`Design/ColorToken.swift`、`Design/ChartTokens.swift`
 ///   - `GlassCard` / `GlassSection` / `GlassToolbar` / `GlassButton` / `SemanticBadge`
 ///     → `Design/GlassComponents.swift`，闸门在 `Design/Glass.swift`
 ///   - `MetricTile` / `RiskBadge` / `SeverityBadge` / `MiniBarGauge`
