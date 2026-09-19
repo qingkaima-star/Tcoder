@@ -122,27 +122,34 @@ final class CoverageAnalyzer: CoverageProviding {
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let total = root["total"] as? [String: Any] else { return nil }
 
-        func metric(_ key: String) -> (pct: Double, covered: Int, total: Int)? {
-            guard let entry = total[key] as? [String: Any] else { return nil }
-            let covered = (entry["covered"] as? Int) ?? 0
-            let count = (entry["total"] as? Int) ?? 0
-            let pct = (entry["pct"] as? Double) ?? (count > 0 ? Double(covered) / Double(count) * 100 : 0)
-            return (pct, covered, count)
-        }
-
-        let lines = metric("lines") ?? metric("statements")
-        guard let resolved = lines, resolved.total > 0 else { return nil }
-        let branches = metric("branches")
-        let functions = metric("functions")
+        // 两级判断不能合并成一次回退：lines 桶**存在但为 0** 时不认 statements，
+        // 只有 lines 缺失才回退。合起来会把"零覆盖"悄悄报成 83% 覆盖。
+        guard let lines = Self.istanbulCounter(total["lines"]) ?? Self.istanbulCounter(total["statements"]),
+              lines.total > 0 else { return nil }
+        let branches = Self.istanbulCounter(total["branches"])
+        let functions = Self.istanbulCounter(total["functions"])
         return CoverageReport(
             path: url.path,
             kind: Self.classify(url: url),
             toolName: "istanbul / nyc",
-            linesCovered: resolved.covered, linesTotal: resolved.total,
+            linesCovered: lines.covered, linesTotal: lines.total,
             branchesCovered: branches?.covered ?? 0,
-            branchesTotal: (branches?.total ?? 0) > 0 ? branches?.total : nil,
+            branchesTotal: Self.positiveTotal(of: branches),
             methodsCovered: functions?.covered ?? 0, methodsTotal: functions?.total ?? 0
         )
+    }
+
+    /// istanbul 的一个计数桶。`pct` 故意不读：`CoverageReport` 从不消费它
+    /// （百分比由 `linePercent` 现场派生），原来那次 `??` 加三元只是白加判定分。
+    private static func istanbulCounter(_ entry: Any?) -> (covered: Int, total: Int)? {
+        guard let bucket = entry as? [String: Any] else { return nil }
+        return (covered: bucket["covered"] as? Int ?? 0, total: bucket["total"] as? Int ?? 0)
+    }
+
+    /// 分支总数为 0 视作"这份报告没统计分支"，返回 nil 而不是 0/0。
+    private static func positiveTotal(of counter: (covered: Int, total: Int)?) -> Int? {
+        guard let counter, counter.total > 0 else { return nil }
+        return counter.total
     }
 
     private func parseJaCoCo(text: String, url: URL) -> CoverageReport? {
