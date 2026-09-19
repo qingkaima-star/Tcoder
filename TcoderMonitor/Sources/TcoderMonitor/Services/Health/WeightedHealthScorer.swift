@@ -20,15 +20,24 @@ final class WeightedHealthScorer: HealthScoringProviding {
         }
 
         if components.isEmpty {
+            // 全部候选维度都因缺证据而缺席时，不能拿「请先添加项目」这套引导文案把真实原因盖掉：
+            // 项目可能扫得好好的（比如已经列出 52 个依赖），只是这一维度不敢计分。
+            let guidance = "先在侧栏「添加项目」选择本地仓库目录，或点右上角「重新分析」采集指标。"
+            let keptRecommendations = recommendations.isEmpty ? [guidance] : recommendations
+            let keptIssues = issues.isEmpty ? ["尚无可用指标"] : issues
+            let narrative = inputs.availableDimensions.isEmpty
+                ? "尚无可用指标，无法给出健康评分；选择项目目录后会自动完成采集。"
+                : "已采集到输入，但\(inputs.availableDimensions.map(\.rawValue).joined(separator: "、"))"
+                    + "各维度都缺少可计分证据，本次不给出综合分，避免把没测到当成好结果。"
             return HealthScore(
                 computedAt: Date(),
                 overall: 0,
                 previousOverall: inputs.previousScore,
                 components: [],
                 strengths: [],
-                issues: ["尚无可用指标"],
-                recommendations: ["先在侧栏「添加项目」选择本地仓库目录，或点右上角「重新分析」采集指标。"],
-                narrative: "尚无可用指标，无法给出健康评分；选择项目目录后会自动完成采集。",
+                issues: Array(keptIssues.prefix(5)),
+                recommendations: Array(keptRecommendations.prefix(5)),
+                narrative: narrative,
                 generatedByAI: false
             )
         }
@@ -159,7 +168,14 @@ final class WeightedHealthScorer: HealthScoringProviding {
             let curve = HealthCurves.stability(errorsPerKLoc: perKloc, crashCount: logs.crashCount,
                                                fatalCount: logs.fatalCount, exceptionCount: logs.exceptionCount,
                                                totalLinesScanned: logs.totalLinesScanned)
-            if logs.crashCount == 0 && perKloc < 0.5 { strengths.append("近期无崩溃，错误密度低") }
+            // 一行日志都没扫到时不得写「近期无崩溃」——那是把「没看到」说成「没有」。
+            // 曲线那边已经如实标了「未扫描到运行日志，本维度按默认值计」，
+            // 优点卡必须跟它一个口径，否则同一份报告自己打自己脸。
+            if logs.totalLinesScanned > 0, logs.crashCount == 0, perKloc < 0.5 {
+                strengths.append("已扫描 \(NumberFormat.grouped(logs.totalLinesScanned)) 行日志，未见崩溃")
+            } else if logs.totalLinesScanned == 0 {
+                recommendations.append("当前没有可扫描的日志，运行稳定性按默认值计；放入 Logs/error.log 或附加日志文件后才有结论。")
+            }
             if let worst = logs.topErrors.first, worst.count >= 10 {
                 issues.append("\(worst.displayMessage) 出现 \(worst.count) 次（最近 \(worst.lastSeenDescription)）")
                 recommendations.append("优先修复 Top Errors 首位，它通常掩盖了下游连锁异常")
@@ -168,20 +184,28 @@ final class WeightedHealthScorer: HealthScoringProviding {
 
         case .dependencies:
             guard let deps = inputs.dependencies, deps.totalDependencies > 0 else { return nil }
-            // 「零漏洞」要先证明查过才算数：没联网时封顶 B 档，不白送 A。
-            let evidence = VulnerabilityEvidence.classify(deps)
+            // 「零漏洞」有两种可能：查过之后干净，或者压根没查。没查过就不参与评分，
+            // 绝不能把「没核对」渲染成「依赖零风险」——那是拿收费点换假绿灯。
+            switch VulnerabilityEvidence.classify(deps) {
+            case .unchecked:
+                let uncovered = deps.uncoveredEcosystemNames
+                recommendations.append(uncovered.isEmpty
+                    ? "未做在线漏洞核对，依赖健康本维度暂不计分；开启「联网核对」后重扫才有结论。"
+                    : "未做在线漏洞核对，依赖健康本维度暂不计分（内置规则未覆盖：\(uncovered.joined(separator: "、"))）。")
+                return nil
+            case .degraded:
+                recommendations.append("漏洞核对未完成（部分包查询失败），依赖健康本维度暂不计分；重跑联网核对后再计。")
+                return nil
+            case .verified:
+                break
+            }
             let curve = HealthCurves.dependencyHealth(vulnerableCount: deps.vulnerableCount,
                                                       outdatedCount: deps.outdatedCount,
-                                                      totalDependencies: deps.totalDependencies,
-                                                      evidence: evidence)
+                                                      totalDependencies: deps.totalDependencies)
             if deps.vulnerableCount == 0 {
-                switch evidence {
-                case .verified: strengths.append("已完成漏洞核对，未发现已知漏洞")
-                case .unchecked: recommendations.append("开启「联网核对」后重扫，才能给出可信的依赖安全结论")
-                case .degraded: recommendations.append("漏洞核对未完成，开启联网后重扫一次")
-                }
-            }
-            if deps.vulnerableCount > 0 {
+                // 走到这里说明确实核对过，这句安全背书才有依据。
+                strengths.append("已完成漏洞核对，\(deps.totalDependencies) 个依赖零命中")
+            } else {
                 issues.append("\(deps.vulnerableCount) 个已知漏洞，\(deps.outdatedCount) 个版本过旧")
                 recommendations.append("先升级带严重漏洞的依赖，再统一处理过期版本")
             }
