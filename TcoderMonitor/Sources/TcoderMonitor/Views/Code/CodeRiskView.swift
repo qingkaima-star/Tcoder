@@ -55,6 +55,7 @@ struct CodeRiskOverviewSection: View {
                 Text("口径：\(NumberFormat.grouped(code.totalFiles)) 个文件 · "
                     + "\(NumberFormat.grouped(code.codeLines)) 行有效代码 · 主语言 \(code.primaryLanguage)")
                     .font(Theme.Typo.narrative.font)
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .lineSpacing(Theme.Typo.narrative.lineSpacing)
 
@@ -128,6 +129,7 @@ struct CodeDuplicationSection: View {
 
                 Text(CodeRiskAnalysis.duplicationCaption(code))
                     .font(Theme.Typo.microLabel.font)
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
 
                 DataRowSeparator()
@@ -154,6 +156,7 @@ struct CodeDuplicationSection: View {
                     if code.duplicatedBlocks.count > shownCount {
                         Text("另有 \(NumberFormat.grouped(code.duplicatedBlocks.count - shownCount)) 个重复块未列出。")
                             .font(Theme.Typo.microLabel.font)
+                            .monospacedDigit()
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -197,6 +200,7 @@ struct CodeComplexitySection: View {
                 }
                 Text("点击行在 Finder 中定位源文件，行尾图标用默认应用打开。")
                     .font(Theme.Typo.microLabel.font)
+                    .monospacedDigit()
                     .foregroundStyle(.tertiary)
                     .padding(.top, Theme.Spacing.xxs)
             }

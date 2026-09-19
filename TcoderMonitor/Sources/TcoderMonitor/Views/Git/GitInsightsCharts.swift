@@ -38,7 +38,8 @@ struct GitCommitTrendChart: View {
             AxisMarks(values: .automatic(desiredCount: 6)) { _ in
                 AxisGridLine().foregroundStyle(Theme.Palette.Surface.separator)
                 AxisValueLabel(format: axisFormat, centered: false)
-                    .font(Theme.Typo.microLabel.font)
+                    // AxisMark 链上没有 .monospacedDigit()，所以走已开等宽数字的字体档。
+                    .font(CodeGitType.number(Theme.Typo.microLabel))
             }
         }
         .chartYAxis {
@@ -93,6 +94,7 @@ struct GitActivityHeatmap: View {
                 HStack(spacing: Theme.Spacing.xxs) {
                     Text(Self.weekdayNames[weekday])
                         .font(Theme.Typo.microLabel.font)
+                        .monospacedDigit()
                         .foregroundStyle(.secondary)
                         .frame(width: Self.rowLabelWidth, alignment: .leading)
                     ForEach(0..<24, id: \.self) { hour in
@@ -162,6 +164,7 @@ struct GitCommitRow: View {
                     + "\(LogRecency.describe(commit.date)) · "
                     + "\(DateFormat.full.string(from: commit.date))")
                     .font(Theme.Typo.microLabel.font)
+                    .monospacedDigit()
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -238,6 +241,7 @@ struct GitNestedCandidateRow: View {
 
             Text(candidate.lastCommitAt.map { LogRecency.describe($0) } ?? "无提交")
                 .font(Theme.Typo.microLabel.font)
+                .monospacedDigit()
                 .foregroundStyle(.tertiary)
                 .tableCell(DataColumns.column(columns, 3))
         }

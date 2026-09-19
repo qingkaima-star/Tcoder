@@ -254,6 +254,7 @@ struct DependencyRow: View {
 
             Text(record.scope.rawValue)
                 .font(Theme.Typo.microLabel.font)
+                .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .tableCell(DataColumns.column(columns, 3))
 
@@ -291,6 +292,7 @@ struct VulnerabilityRow: View {
                     }
                     Text(item.source)
                         .font(Theme.Typo.microLabel.font)
+                        .monospacedDigit()
                         .foregroundStyle(.tertiary)
                     if !item.aliases.isEmpty {
                         Text(item.aliases.prefix(2).joined(separator: " "))
@@ -301,6 +303,7 @@ struct VulnerabilityRow: View {
                 }
                 Text(item.summary)
                     .font(Theme.Typo.narrative.font)
+                    .monospacedDigit()
                     .lineSpacing(Theme.Typo.narrative.lineSpacing)
                     .lineLimit(2)
                 Text(Self.targetsLine(item))
@@ -312,6 +315,7 @@ struct VulnerabilityRow: View {
                 if let advice = item.advice {
                     Text(advice)
                         .font(Theme.Typo.narrative.font)
+                        .monospacedDigit()
                         .foregroundStyle(Self.adviceRole(item).textColor)
                         .lineLimit(2)
                 }

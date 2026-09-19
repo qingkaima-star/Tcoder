@@ -181,6 +181,7 @@ struct ContributorRankingSection: View {
                 if authors.count > Self.displayLimit {
                     Text("另有 \(NumberFormat.grouped(authors.count - Self.displayLimit)) 位贡献者未展示")
                         .font(Theme.Typo.microLabel.font)
+                        .monospacedDigit()
                         .foregroundStyle(.tertiary)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }

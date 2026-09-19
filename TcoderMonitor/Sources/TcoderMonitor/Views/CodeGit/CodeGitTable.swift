@@ -126,6 +126,7 @@ struct DataTableHeader: View {
                 ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
                     Text(column.title)
                         .font(Theme.Typo.microLabel.font)
+                        .monospacedDigit()
                         .foregroundStyle(.secondary)
                         .tableCell(DataColumns.column(columns, index))
                 }
@@ -172,6 +173,7 @@ struct DataFieldRow: View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
             Text(label)
                 .font(Theme.Typo.label.font)
+                .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Spacer(minLength: Theme.Spacing.sm)
@@ -184,7 +186,7 @@ struct DataFieldRow: View {
 
     @ViewBuilder
     private var valueText: some View {
-        let base = Text(value).foregroundStyle(valueColor ?? Color.primary)
+        let base = Text(value).monospacedDigit().foregroundStyle(valueColor ?? Color.primary)
         switch style {
         case .number:
             base.font(CodeGitType.metric)
@@ -228,13 +230,16 @@ struct DataReadout: View {
                 .font(CodeGitType.readoutLabel)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .monospacedDigit()
             Text(value)
                 .font(CodeGitType.metric)
                 .foregroundStyle(role?.textColor ?? Color.primary)
                 .lineLimit(1)
+                .monospacedDigit()
             if let caption {
                 Text(caption)
                     .font(Theme.Typo.microLabel.font)
+                    .monospacedDigit()
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
@@ -284,6 +289,7 @@ struct DataShareBarRow: View {
                 }
                 Text(label)
                     .font(Theme.Typo.label.font)
+                    .monospacedDigit()
                     .lineLimit(1)
                     .truncationMode(.middle)
                 MiniBarGauge(fraction: fraction, tint: tint, height: DataGaugeHeight.inline)
@@ -354,6 +360,7 @@ struct DataNotice: View {
             .foregroundStyle(role.textColor)
             Text(text)
                 .font(Theme.Typo.narrative.font)
+                .monospacedDigit()
                 .lineSpacing(Theme.Typo.narrative.lineSpacing)
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -211,6 +211,7 @@ struct DependencyEcosystemSection: View {
                     HStack(alignment: .center, spacing: Theme.Spacing.xs) {
                         Text("框架标记")
                             .font(Theme.Typo.microLabel.font)
+                            .monospacedDigit()
                             .foregroundStyle(.secondary)
                         ForEach(eco.frameworkMarkers, id: \.self) { marker in
                             SemanticBadge(marker, role: Theme.Semantic.neutral)
@@ -237,6 +238,7 @@ struct DependencyTable: View {
         if sorted.isEmpty {
             Text("该清单没有解析出可枚举的依赖项。")
                 .font(Theme.Typo.narrative.font)
+                .monospacedDigit()
                 .foregroundStyle(.secondary)
         } else {
             VStack(spacing: Theme.Spacing.xxs) {
@@ -335,6 +337,7 @@ struct NetworkOptionsCard: View {
                 }
                 Text(Self.statusCaption(allowNetwork: allowNetwork))
                     .font(Theme.Typo.narrative.font)
+                    .monospacedDigit()
                     .foregroundStyle(allowNetwork
                         ? Theme.Semantic.warning.textColor
                         : Theme.Semantic.neutral.textColor)

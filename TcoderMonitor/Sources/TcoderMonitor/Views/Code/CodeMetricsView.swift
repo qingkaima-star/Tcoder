@@ -177,6 +177,7 @@ struct CodeScaleSection: View {
             if let note = CodeMetricsView.mergedNote(code, head: CodeMetricsView.languageHeadCount) {
                 Text(note)
                     .font(Theme.Typo.microLabel.font)
+                    .monospacedDigit()
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -235,6 +236,7 @@ struct CodeInvariantRow: View {
         HStack(spacing: Theme.Spacing.xxs) {
             Text(label)
                 .font(Theme.Typo.microLabel.font)
+                .monospacedDigit()
                 .foregroundStyle(.secondary)
             Text(NumberFormat.grouped(value))
                 .font(CodeGitType.metric)
@@ -284,6 +286,7 @@ struct CodeMarkersSection: View {
 
                 Text(Self.markerNote(code))
                     .font(Theme.Typo.narrative.font)
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .lineSpacing(Theme.Typo.narrative.lineSpacing)
                     .fixedSize(horizontal: false, vertical: true)
@@ -340,6 +343,8 @@ struct CodeHotspotSection: View {
                     if code.hugeFiles.count > rows.count {
                         Text("另有 \(NumberFormat.grouped(code.hugeFiles.count - rows.count)) 个未展示")
                             .font(Theme.Typo.microLabel.font)
+                            .monospacedDigit()
+                            .monospacedDigit()
                             .foregroundStyle(.tertiary)
                     }
                 }
