@@ -166,6 +166,44 @@ final class RealRepositoryEvidenceTests: XCTestCase {
                       "依赖数 \(deps.totalDependencies) 与 Gemfile(44 直接声明)/Gemfile.lock(90 含传递) 都对不上，需核口径")
     }
 
+    // MARK: - 日志分析器必须有真实日志来源
+    //
+    // 上面那条只断言 Homebrew 上 crashCount == 0，那是在证明"空态诚实"，
+    // 并没有证明日志分析器真能解析出真实数字。本 App 自己崩过，
+    // `~/Library/Logs/DiagnosticReports/TcoderMonitor-*.ips` 是现成的真实输入，
+    // 而且正是当初 `ByteFormat.bitRate` 那个 `%s` 段错误留下的现场。
+    // 用 `extraLogURLs` 显式喂进去（这是契约里给"用户自选文件"留的正规入口），
+    // 断言解析出非零的真实崩溃计数与可读签名。
+    func testLogAnalyzerParsesRealDiagnosticReports() async throws {
+        let url = try requireRealRepo()
+        let reports = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library/Logs/DiagnosticReports", isDirectory: true)
+        let samples = ((try? FileManager.default.contentsOfDirectory(at: reports,
+                                                                    includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.lastPathComponent.hasPrefix("TcoderMonitor-") && $0.pathExtension == "ips" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        guard !samples.isEmpty else {
+            throw XCTSkip("本机没有本 App 的 .ips 诊断报告，跳过真实日志取证")
+        }
+
+        let logs = try await FileLogAnalyzer().analyze(
+            projectRoot: url, extraLogURLs: samples, withinDays: 30)
+
+        XCTAssertGreaterThan(logs.totalLinesScanned, 0, "真实报告不可能一行都没扫到")
+        XCTAssertFalse(logs.topErrors.isEmpty, "真实崩溃必须聚出至少一条 Top Error")
+        guard let signature = logs.topErrors.first?.signature else { return }
+        XCTAssertFalse(signature.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        // 诚实性：签名必须是可读的崩溃语义，而不是裸 JSON 或机器字段堆。
+        XCTAssertFalse(signature.contains("\"bug_type\""),
+                       "签名里漏出了 .ips 机器字段，说明标题归一没生效")
+        XCTAssertFalse(signature.contains("Incident Identifier"),
+                       "签名里漏出了事件标识符")
+
+        print("【日志取证】真实 .ips \(samples.count) 份 · crash=\(logs.crashCount) "
+              + "error=\(logs.errorCount) 扫描行数=\(logs.totalLinesScanned) "
+              + "首条签名=\(signature.prefix(90))")
+    }
+
     // MARK: - 评分链路：只用真实测得的输入
 
     func testHealthScoreOnRealRepositoryInputs() async throws {

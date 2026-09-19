@@ -1,561 +1,202 @@
 import SwiftUI
-import Charts
 
-/// OWNER: Workstream C / 子代理「健康评分视图」—— 工程健康评分页。
+/// OWNER: WS-M / 健康评分页（未来收费点，视觉分量最重的一页）。
 ///
 /// 口径：综合分是「各维度得分 × 归一化权重」的加权和，全部由本机规则算出，
-/// 不访问网络、不调用任何外部模型（契约里 `HealthScore.generatedByAI` 恒为 false，
-/// 界面文案也就固定写「启发式加权计算，未调用外部模型」）。
-/// 缺数据一律走 `EmptyStateView`，不用 0 分冒充真实结果。
+/// 不访问网络、不调用任何外部模型（契约里 `HealthScore.generatedByAI` 恒为 false）。
+/// 这条声明在本页**常驻**，因为它决定用户敢不敢为这个分数付费。
+///
+/// 缺数据的维度不参与计分也不得显示 0 分，必须在原位说明原因（验收点 6）。
 struct HealthView: View {
     var report: ProjectReport?
 
     @Environment(AppState.self) private var state
 
-    // MARK: 布局常量（不是指标）
-
-    private static let dimensionWidth: CGFloat = 118
-    private static let scoreNumberWidth: CGFloat = 26
-    private static let scoreGaugeWidth: CGFloat = 44
-    private static let weightColumnWidth: CGFloat = 44
-    private static let contributionColumnWidth: CGFloat = 44
-    private static let listColumns = [GridItem(.adaptive(minimum: 232), spacing: 12)]
-
-    /// 等级 B 的分数线，与 `HealthGrade.init(score:)` 保持一致。
-    private static let gradeBLine = 70.0
-
-    private static let heuristicClaim = "启发式加权计算，未调用外部模型"
-
-    /// 参与计分的维度数（`defaultWeight == 0` 的维度本来就不计分）。
-    private static var scorableDimensionCount: Int {
-        HealthDimension.allCases.filter { $0.defaultWeight > 0 }.count
-    }
-
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                header
                 if let health = report?.health {
                     if health.components.isEmpty {
-                        noInputCard(health)
+                        HealthNoInputCard(health: health)
                     } else {
-                        heroRow(health)
-                        componentTable(health)
-                        overviewRow(health)
+                        HealthHero(health: health)
+                        HealthComponentTable(health: health, report: report)
+                        HealthAdviceGrid(health: health)
                     }
-                    trendCard(health)
+                    HealthTrendCard(health: report?.health, points: historyPoints)
                 } else {
-                    missingScoreState
+                    HealthNotScoredCard()
                 }
             }
-            .padding(16)
+            .padding(Theme.Spacing.md)
+            .frame(maxWidth: Theme.Layout.maxWidthDense)
+            .frame(maxWidth: .infinity)
         }
         .scrollContentBackground(.hidden)
     }
 
-    // MARK: - 尚未评分
-
-    private var missingScoreState: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            EmptyStateView(
-                icon: "checkmark.shield",
-                title: "尚未计算健康评分",
-                message: "选择项目目录后点「重新分析」，会综合代码规模、复杂度、重复度、Git 活跃度、运行日志与依赖状况给出 0~100 分。"
-            )
-            .frame(maxWidth: .infinity, minHeight: 250)
-
-            heuristicLine
-        }
-    }
-
-    // MARK: - Hero
-
-    private func heroRow(_ health: HealthScore) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            HealthRing(
-                score: health.overall,
-                grade: health.grade,
-                trend: health.trendDelta
-            )
-            .frame(width: 200, height: 180)
-            .frame(maxWidth: .infinity)
-            .background(Theme.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Theme.gridLine, lineWidth: 1)
-            )
-
-            VStack(alignment: .leading, spacing: 9) {
-                HStack(spacing: 6) {
-                    Text("工程健康评分").font(.caption).foregroundStyle(.secondary)
-                    Text("等级 \(health.grade.rawValue)")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Theme.color(forScore: health.overall))
-                    Spacer(minLength: 4)
-                    trendText(health)
-                }
-
-                if !health.narrative.isEmpty {
-                    Text(health.narrative)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    Text("本次评分没有附带文字结论。")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-
-                heuristicLine
-
-                HStack(spacing: 14) {
-                    StatLine(label: "本次", value: "\(health.overall)")
-                    StatLine(label: "上次", value: health.previousOverall.map(String.init) ?? "无记录")
-                    StatLine(label: "维度", value: "\(health.components.count)/\(Self.scorableDimensionCount)")
-                    StatLine(label: "计算于", value: DateFormat.sinceDescription(health.computedAt))
-                    Spacer(minLength: 4)
-                }
-                .font(.caption)
-
-                Text(DateFormat.full.string(from: health.computedAt))
-                    .font(Theme.monoSmall)
-                    .foregroundStyle(.tertiary)
-
-                if health.generatedByAI {
-                    // 契约里这个标记恒为 false；真出现时如实提示口径冲突，
-                    // 但绝不把本页说成调用过外部模型。
-                    BannerRow(
-                        text: "上游把这条评分标记为外部模型产物，与本页口径不一致：Tcoder 只做本机启发式加权计算，不调用外部模型。请重新分析后再看。",
-                        style: .warning
-                    )
-                }
-
-                scanRow
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
+            ThemedIcon(.health, role: .navigation)
+                .foregroundStyle(Theme.Semantic.accent.textColor)
+            Text("健康评分").font(Theme.Typo.pageTitle.font)
+            if report?.project.isDemo == true {
+                SemanticBadge("示例", role: Theme.Semantic.info)
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Theme.gridLine, lineWidth: 1)
-            )
+            Spacer(minLength: Theme.Spacing.sm)
+            ScanControls()
         }
     }
 
-    @ViewBuilder
-    private func trendText(_ health: HealthScore) -> some View {
-        if let delta = health.trendDelta {
-            let tint = delta > 0 ? Theme.healthy : (delta < 0 ? Theme.danger : Theme.neutral)
-            HStack(spacing: 3) {
-                Image(systemName: delta > 0 ? "arrow.up.right" : (delta < 0 ? "arrow.down.right" : "arrow.right"))
-                    .font(.system(size: 9, weight: .bold))
-                Text("较上次 \(NumberFormat.signed(delta)) 分")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-            }
-            .foregroundStyle(tint)
-            .help("上次综合分 \(health.previousOverall.map(String.init) ?? "无记录") → 本次 \(health.overall)")
-        }
+    private var historyPoints: [ScoreHistoryPoint] {
+        guard let projectID = report?.project.id ?? state.selectedProject?.id else { return [] }
+        return state.store.scoreHistory(for: projectID)
     }
+}
 
-    private var heuristicLine: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 5) {
-            Image(systemName: "info.circle")
-                .font(.system(size: 9))
-                .foregroundStyle(Theme.neutral)
-            Text(Self.heuristicClaim)
-                .font(.system(size: 10))
+// MARK: - 口径声明与重算入口
+
+/// 「启发式加权、未调用外部模型」这句声明。三处复用，所以只写一遍。
+struct HeuristicClaimLine: View {
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+            ThemedIcon(.info, role: .badge).foregroundStyle(Theme.Semantic.neutral.textColor)
+            Text(Self.claim)
+                .font(Theme.Typo.label.font)
                 .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
         }
         .help("综合分 = Σ(维度得分 × 归一化权重)，全部由本机规则从扫描结果算出，不访问网络，也不调用任何外部模型。")
     }
 
-    private var scanRow: some View {
-        HStack(spacing: 8) {
-            Button {
+    static let claim = "启发式加权计算，未调用外部模型"
+}
+
+struct ScanControls: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        GlassToolbar {
+            GlassButton("重新分析", icon: .reanalyze,
+                        isEnabled: !state.isScanning && state.selectedProject != nil) {
                 state.scanSelected()
-            } label: {
-                Label("重新分析", systemImage: "arrow.clockwise")
             }
-            .controlSize(.small)
-            .disabled(state.isScanning || state.selectedProject == nil)
-            .help("重新扫描当前项目并按同一口径重算评分")
-
             if state.isScanning {
-                ProgressView().controlSize(.small)
-                Text(state.phase.label).font(.system(size: 10)).foregroundStyle(.tertiary)
-            }
-
-            Spacer(minLength: 0)
-        }
-    }
-
-    // MARK: - 无可用输入（评分为 0 且没有任何分量）
-
-    private func noInputCard(_ health: HealthScore) -> some View {
-        SectionCard(
-            "工程健康评分",
-            subtitle: "本次没有任何维度输入，综合分 0 只代表「无数据」",
-            icon: IconName.health.rawValue
-        ) {
-            VStack(alignment: .leading, spacing: 10) {
-                EmptyStateView(
-                    icon: "circle.dotted",
-                    title: "无可用输入",
-                    message: "代码、Git、日志与依赖四类数据都没能取到，因此一个维度也没算出来。这里不显示 0 分环，以免被当成真实的健康度。"
-                )
-                .frame(maxWidth: .infinity, minHeight: 120)
-
-                if !health.narrative.isEmpty {
-                    Text(health.narrative)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: Theme.Spacing.xxs) {
+                    ProgressView().controlSize(.small)
+                    Text(state.phase.label).font(Theme.Typo.label.font).foregroundStyle(.secondary)
                 }
-
-                HStack(spacing: 14) {
-                    StatLine(label: "计算于", value: DateFormat.sinceDescription(health.computedAt))
-                    StatLine(label: "维度", value: "0/\(Self.scorableDimensionCount)")
-                    Spacer(minLength: 4)
-                }
-                .font(.caption)
-
-                heuristicLine
-                scanRow
-            }
-        }
-    }
-
-    // MARK: - 维度分量表
-
-    private func componentTable(_ health: HealthScore) -> some View {
-        // 评分器给出的是原始权重，综合分按「缺失维度权重等比摊到在场维度」归一化后才是真正乘数。
-        let weights = normalizedWeights(for: health)
-        let contribution: (ScoreComponent) -> Double = {
-            Double($0.score) * (weights[$0.name] ?? $0.weight)
-        }
-        // 拖累最大的排最前：贡献分越低越靠前。
-        let rows = health.components.sorted { lhs, rhs in
-            let left = contribution(lhs), right = contribution(rhs)
-            if abs(left - right) > 0.001 { return left < right }
-            return lhs.score < rhs.score
-        }
-        let sum = health.components.reduce(0) { $0 + contribution($1) }
-        let missing = missingDimensions(of: health)
-        let notes = normalizationNotes(for: health)
-
-        return SectionCard(
-            "维度分量",
-            subtitle: "综合分 = Σ(得分 × 归一化权重) · 按拖累程度排序，贡献最低者在前",
-            icon: IconName.health.rawValue,
-            trailing: AnyView(StatLine(label: "合计", value: String(format: "%.1f", sum)))
-        ) {
-            VStack(alignment: .leading, spacing: 10) {
-                Grid(alignment: .topLeading, horizontalSpacing: 10, verticalSpacing: 7) {
-                    GridRow {
-                        headerCell("维度", width: Self.dimensionWidth, alignment: .leading)
-                        headerCell("得分", width: nil, alignment: .trailing)
-                            .gridColumnAlignment(.trailing)
-                        headerCell("权重", width: nil, alignment: .trailing)
-                            .gridColumnAlignment(.trailing)
-                        headerCell("贡献", width: nil, alignment: .trailing)
-                            .gridColumnAlignment(.trailing)
-                        headerCell("详情", width: nil, alignment: .leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    Divider().gridCellColumns(5).opacity(0.5)
-
-                    ForEach(rows) { component in
-                        GridRow {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(component.name)
-                                    .font(.system(size: 11, weight: .medium))
-                                    .lineLimit(1)
-                                RiskBadge(risk: component.risk, showIcon: false)
-                            }
-                            .frame(width: Self.dimensionWidth, alignment: .leading)
-
-                            HStack(spacing: 5) {
-                                MiniBarGauge(
-                                    fraction: Double(component.score) / 100,
-                                    tint: Theme.color(forScore: component.score),
-                                    height: 4
-                                )
-                                .frame(width: Self.scoreGaugeWidth)
-
-                                Text("\(component.score)")
-                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(Theme.color(forScore: component.score))
-                                    .frame(width: Self.scoreNumberWidth, alignment: .trailing)
-                            }
-
-                            Text(NumberFormat.percent(weights[component.name] ?? component.weight, precision: 0))
-                                .font(Theme.monoSmall)
-                                .foregroundStyle(.secondary)
-                                .frame(minWidth: Self.weightColumnWidth, alignment: .trailing)
-                                .help(weightHelp(for: component, in: health))
-
-                            Text(String(format: "%.1f", contribution(component)))
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(Theme.color(forScore: component.score))
-                                .frame(minWidth: Self.contributionColumnWidth, alignment: .trailing)
-                                .help(contributionHelp(component, weights: weights))
-
-                            Text(component.detail)
-                                .font(.system(size: 9))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .help(component.detail)
-                        }
-                    }
-                }
-
-                Divider().opacity(0.5)
-
-                if missing.isEmpty {
-                    Text("这次扫描的输入覆盖了全部可计分维度，权重未做摊分。测试覆盖只在项目真的产出了覆盖率报告时参与计分。")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                } else {
-                    Text("缺失维度：\(missing.map(\.rawValue).joined(separator: "、"))")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.caution)
-                    Text("缺失维度不参与计分也不得分，其权重已按比例摊到在场维度。\(notes)")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if abs(sum - Double(health.overall)) > 1.5 {
-                    // 分量之和与综合分对不上时说明清楚，不假装表格能直接加出总分。
-                    Text("分量合计 \(String(format: "%.1f", sum)) 与综合分 \(health.overall) 有出入，通常是评分器的归一化或取整口径不同。")
-                        .font(.caption2)
-                        .foregroundStyle(Theme.caution)
-                }
-            }
-        }
-    }
-
-    private func headerCell(_ title: String, width: CGFloat?, alignment: Alignment) -> some View {
-        Text(title)
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(.secondary)
-            .frame(width: width, alignment: alignment)
-    }
-
-    /// 贡献格的满分与缺口：满分 = 归一化权重 × 100，缺口就是这一维度把综合分拖下去的量。
-    private func contributionHelp(_ component: ScoreComponent, weights: [String: Double]) -> String {
-        let weight = weights[component.name] ?? component.weight
-        let full = weight * 100
-        let lost = weight * Double(100 - component.score)
-        return "满分可得 \(String(format: "%.1f", full))，这一维度拖了 \(String(format: "%.1f", lost)) 分"
-    }
-
-    // MARK: 权重口径
-
-    /// 维度名就是 `HealthDimension.rawValue`，匹配上才有「原始权重」可比。
-    private func baseWeight(of component: ScoreComponent) -> Double? {
-        guard let dimension = HealthDimension(rawValue: component.name), dimension.defaultWeight > 0 else { return nil }
-        return dimension.defaultWeight
-    }
-
-    /// 评分器可能已经归一过，也可能给的是原始权重；两者都要能落地。
-    private func effectiveWeight(_ component: ScoreComponent) -> Double {
-        component.weight > 0 ? component.weight : (baseWeight(of: component) ?? 0)
-    }
-
-    /// 缺失维度不参与，所以在场维度的权重按 Σ 归一 —— 这才是综合分真正乘的那个数。
-    private func normalizedWeights(for health: HealthScore) -> [String: Double] {
-        let present = health.components.reduce(0) { $0 + effectiveWeight($1) }
-        guard present > 0 else { return [:] }
-        var result: [String: Double] = [:]
-        for component in health.components { result[component.name] = effectiveWeight(component) / present }
-        return result
-    }
-
-    /// 有默认权重、但这次没算出来的维度。
-    private func missingDimensions(of health: HealthScore) -> [HealthDimension] {
-        let present = Set(health.components.map(\.name))
-        return HealthDimension.allCases.filter { $0.defaultWeight > 0 && !present.contains($0.rawValue) }
-    }
-
-    private func normalizationNotes(for health: HealthScore) -> String {
-        let weights = normalizedWeights(for: health)
-        let notes: [String] = health.components.compactMap { component in
-            guard let base = baseWeight(of: component), let used = weights[component.name] else { return nil }
-            guard abs(base - used) >= 0.005 else { return nil }
-            return "\(component.name) \(NumberFormat.percent(base, precision: 0))→\(NumberFormat.percent(used, precision: 0))"
-        }
-        return notes.isEmpty ? "" : "（\(notes.joined(separator: " · "))）"
-    }
-
-    private func weightHelp(for component: ScoreComponent, in health: HealthScore) -> String {
-        guard let base = baseWeight(of: component) else {
-            return "该维度不在内置权重表里，直接采用评分器给出的权重。"
-        }
-        let used = normalizedWeights(for: health)[component.name] ?? component.weight
-        return "原始权重 \(NumberFormat.percent(base, precision: 0)) → 本次实际乘数 "
-            + NumberFormat.percent(used, precision: 1)
-            + "（缺失维度的权重等比摊到在场维度）"
-    }
-
-    // MARK: - 优点 / 问题 / 建议
-
-    private func overviewRow(_ health: HealthScore) -> some View {
-        LazyVGrid(columns: Self.listColumns, spacing: 12) {
-            itemCard(
-                "优点",
-                items: health.strengths,
-                symbol: "plus.circle.fill",
-                tint: Theme.healthy,
-                subtitle: health.strengths.isEmpty ? "没有识别到突出项" : "本次评分里做得好的地方"
-            )
-            itemCard(
-                "问题",
-                items: health.issues,
-                symbol: "minus.circle.fill",
-                tint: Theme.danger,
-                subtitle: health.issues.isEmpty ? "没有识别到风险项" : "拉低综合分的地方"
-            )
-            itemCard(
-                "建议",
-                items: health.recommendations,
-                symbol: "arrow.right.circle.fill",
-                tint: Theme.accent,
-                subtitle: health.recommendations.isEmpty ? "没有派生建议" : "由上面的数字按规则派生"
-            )
-        }
-    }
-
-    private func itemCard(
-        _ title: String,
-        items: [String],
-        symbol: String,
-        tint: Color,
-        subtitle: String
-    ) -> some View {
-        SectionCard(title, subtitle: subtitle) {
-            if items.isEmpty {
-                Text("本次无")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 10)
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                        Label(item, systemImage: symbol)
-                            .font(.caption)
-                            .foregroundStyle(tint)
-                            .lineLimit(3)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - 历史趋势
-
-    private var projectID: UUID? {
-        report?.project.id ?? state.selectedProject?.id
-    }
-
-    private var historyPoints: [ScoreHistoryPoint] {
-        guard let projectID else { return [] }
-        return state.store.scoreHistory(for: projectID)
-    }
-
-    private func trendCard(_ health: HealthScore) -> some View {
-        let points = historyPoints
-        let scores = points.map { Double($0.score) }
-        let average = scores.isEmpty ? 0 : scores.reduce(0, +) / Double(scores.count)
-        let span = points.count >= 2
-            ? (Calendar.current.dateComponents([.day], from: points.first!.date, to: points.last!.date).day ?? 0)
-            : 0
-
-        return SectionCard(
-            "评分趋势",
-            subtitle: "共 \(points.count) 个历史点",
-            icon: "chart.line.uptrend.xyaxis"
-        ) {
-            if points.count >= 2 {
-                HealthTrendChart(points: points, gradeBLine: Self.gradeBLine)
-                    .frame(height: 150)
-
-                HStack(spacing: 14) {
-                    StatLine(label: "最高", value: String(format: "%.0f", scores.max() ?? 0))
-                    StatLine(label: "最低", value: String(format: "%.0f", scores.min() ?? 0))
-                    StatLine(label: "均值", value: String(format: "%.1f", average))
-                    StatLine(label: "跨度", value: "\(span) 天")
-                    Spacer(minLength: 4)
-                }
-                .font(.caption)
-
-                if let last = points.last, last.score != health.overall {
-                    Text("历史末点 \(last.score) 与本次 \(health.overall) 不一致：可能是旧记录，或本次评分尚未落盘。")
-                        .font(.caption2)
-                        .foregroundStyle(Theme.caution)
-                }
-            } else {
-                EmptyStateView(
-                    icon: "chart.line.uptrend.xyaxis",
-                    title: "历史点不足",
-                    message: "至少完成两次分析后可以看到趋势。"
-                )
-                .frame(maxWidth: .infinity, minHeight: 100)
             }
         }
     }
 }
 
-// MARK: - 趋势图
+// MARK: - Hero：分数环 + 结论
 
-/// 历史点全部来自本机落盘的评分记录；这里只连线，不做任何外推。
-private struct HealthTrendChart: View {
-    let points: [ScoreHistoryPoint]
-    let gradeBLine: Double
+struct HealthHero: View {
+    let health: HealthScore
 
     var body: some View {
-        Chart(points) { point in
-            LineMark(
-                x: .value("时间", point.date),
-                y: .value("分数", Double(point.score))
-            )
-            .interpolationMethod(.monotone)
-            .foregroundStyle(Theme.accent)
-            .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
-
-            PointMark(
-                x: .value("时间", point.date),
-                y: .value("分数", Double(point.score))
-            )
-            .foregroundStyle(Theme.color(forScore: point.score))
-            .symbolSize(32)
-
-            RuleMark(y: .value("及格", gradeBLine))
-                .foregroundStyle(Theme.caution.opacity(0.75))
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                .annotation(position: .top, alignment: .leading) {
-                    Text("B 级线")
-                        .font(.system(size: 8))
-                        .foregroundStyle(.secondary)
-                }
-        }
-        .chartYScale(domain: 0...100)
-        .chartYAxis {
-            AxisMarks(values: [0, 40, 55, 70, 85, 100]) { _ in
-                AxisGridLine().foregroundStyle(Theme.gridLine)
-                AxisValueLabel().font(.system(size: 8))
+        GlassSection("综合评分", subtitle: subtitle, icon: .health) {
+            HStack(alignment: .top, spacing: Theme.Spacing.lg) {
+                HealthScoreRing(score: health.overall,
+                                grade: health.grade,
+                                trend: health.trendDelta)
+                    .frame(width: HealthScoreRing.canvasWidth, height: HealthScoreRing.canvasHeight)
+                    .surface(layer: .contentInset, shape: .rounded(Theme.Radius.md))
+                narrativeColumn
+            }
+            if health.generatedByAI {
+                // 契约里这个标记恒为 false；真出现时如实提示口径冲突，绝不把本页说成调用过外部模型。
+                BannerRow(text: "上游把这条评分标记为外部模型产物，与本页口径不一致：Tcoder 只做本机启发式加权计算，不调用外部模型。请重新分析后再看。",
+                          style: .warning)
             }
         }
-        .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 4)) { _ in
-                AxisGridLine().foregroundStyle(Theme.gridLine)
-                // 固定 POSIX locale，避免中文系统下刻度被写成「月」字挤压间距。
-                AxisValueLabel(format: .dateTime.locale(Locale(identifier: "en_US_POSIX")).month(.defaultDigits).day(), centered: false)
-                    .font(.system(size: 8))
+    }
+
+    private var subtitle: String {
+        let scorable = HealthDimension.allCases.filter { $0.defaultWeight > 0 }.count
+        return "综合分 \(health.overall) /100 · 等级 \(health.grade.rawValue) · \(health.components.count)/\(scorable) 个维度参与计分"
+    }
+
+    private var narrativeColumn: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            if health.narrative.isEmpty {
+                Text("本次评分没有附带文字结论。")
+                    .font(Theme.Typo.narrative.font)
+                    .foregroundStyle(.tertiary)
+                    .lineSpacing(Theme.Typo.narrative.lineSpacing)
+            } else {
+                Text(health.narrative)
+                    .font(Theme.Typo.narrative.font)
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(Theme.Typo.narrative.lineSpacing)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HeuristicClaimLine()
+
+            HStack(spacing: Theme.Spacing.md) {
+                StatLine(label: "本次", value: String(health.overall))
+                StatLine(label: "上次", value: health.previousOverall.map(String.init) ?? "无记录")
+                StatLine(label: "计算于", value: DateFormat.sinceDescription(health.computedAt))
+                Spacer(minLength: 0)
+            }
+            Text(DateFormat.full.string(from: health.computedAt))
+                .font(Theme.Typo.monoSmall.font)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - 两种「没有分数」必须分开
+
+struct HealthNotScoredCard: View {
+    var body: some View {
+        GlassSection("综合评分", subtitle: "尚未计算，不给分也不着色", icon: .health) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                EmptyStateView(icon: IconName.health.rawValue,
+                               title: "尚未计算健康评分",
+                               message: "选择项目目录后点「重新分析」，会综合代码规模、复杂度、重复代码率、Git 活跃度、运行日志与依赖状况给出 0~100 分。")
+                HeuristicClaimLine()
+            }
+        }
+    }
+}
+
+/// 跑完了但一个维度都没算出来：0 分是「没数据」，不是「很差」。
+struct HealthNoInputCard: View {
+    let health: HealthScore
+
+    var body: some View {
+        GlassSection("综合评分", subtitle: "无可用输入", icon: .health) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                HStack(alignment: .top, spacing: Theme.Spacing.lg) {
+                    HealthScoreRing(score: nil, grade: nil, trend: nil)
+                        .frame(width: HealthScoreRing.canvasWidth, height: HealthScoreRing.canvasHeight)
+                        .surface(layer: .contentInset, shape: .rounded(Theme.Radius.md))
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        Text("本次没有任何维度输入，因此不给综合分。")
+                            .font(Theme.Typo.body.font)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("这里刻意不画一个 0 分红环：0 分会被读成「这个项目很差」，而事实是「没有可算的数据」。")
+                            .font(Theme.Typo.narrative.font)
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(Theme.Typo.narrative.lineSpacing)
+                            .fixedSize(horizontal: false, vertical: true)
+                        StatLine(label: "计算于", value: DateFormat.sinceDescription(health.computedAt))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if !health.narrative.isEmpty {
+                    Text(health.narrative)
+                        .font(Theme.Typo.narrative.font)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HeuristicClaimLine()
             }
         }
     }
