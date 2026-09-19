@@ -2,7 +2,12 @@ import SwiftUI
 
 // MARK: - 读数 / 占比 / 提示 / 侧栏 / 页面骨架
 //
-// 都是"各页一定会要、基座却没有"的行级组件：上一轮之前三条流一边等基座一边自己造，
+// 只保留**有真实调用方**的三件：`Readout.Field`(12) / `Readout.Bar`(2) /
+// `Share.Row`(2) / `Page.Scaffold`(3)。#28 里删掉了 `Readout.Metric`（页面用 `DataReadout`，
+// 41 处）、`Notice`（页面用 `DataNotice`）、`Sidebar.Item`（WS-K 自绘）、`Empty.Card`
+// （WS-M 有 `HealthNotScoredCard`/`HealthNoInputCard`）——它们零引用，留着就是装饰。
+//
+// 上一轮的背景是：三条流不能改 Design，只能各自造，
 // 结果同一个「标签 + 数字」在三页长出三种实现（WS-L `DataFieldRow`/`DataReadout`、
 // WS-M `LiveNumber`、WS-K `StatLine`）。这里给一套并集，并且把**缺证据必须中性**
 // 焊进类型：要显示数字就得走 `Theme.Evidence`，拿不到"随手一个 String + 绿色"。
@@ -72,58 +77,6 @@ extension Theme {
                 case .text:
                     Text(value).font(Theme.Typo.body.font)
                 }
-            }
-        }
-
-        /// 一行统计读数：标签在上、数字在下。用于趋势图上方交代峰值/均值/区间。
-        /// `evidence` 收 `Theme.Evidence`：`nil` 值在这里根本表达不出来，
-        /// 所以"没扫过"不可能被误写成 0 或绿色结论。
-        struct Metric: View {
-            var label: String
-            var evidence: Theme.Evidence
-            var unit: String?
-            var caption: String?
-            var role: Theme.SemanticRole
-            var tier: Theme.TypeToken
-
-            init(_ label: String,
-                 evidence: Theme.Evidence,
-                 unit: String? = nil,
-                 caption: String? = nil,
-                 role: Theme.SemanticRole = Theme.Semantic.neutral,
-                 tier: Theme.TypeToken = Theme.Typo.metricMid) {
-                self.label = label
-                self.evidence = evidence
-                self.unit = unit
-                self.caption = caption
-                self.role = role
-                self.tier = tier
-            }
-
-            var body: some View {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                    Text(label)
-                        .font(Theme.Typo.label.font)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
-                        Text(evidence.displayText)
-                            .font(tier.font)
-                            .foregroundStyle(evidence.tint(role))
-                            .contentTransition(.numericText())
-                        if let unit {
-                            Text(unit).font(Theme.Typo.microLabel.font).foregroundStyle(.secondary)
-                        }
-                    }
-                    if let caption {
-                        Text(caption)
-                            .font(Theme.Typo.microLabel.font)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityElement(children: .combine)
             }
         }
 
@@ -220,179 +173,6 @@ extension Theme {
                     }
                 }
                 .frame(minHeight: Theme.Layout.rowHeightCompact)
-                .accessibilityElement(children: .combine)
-            }
-        }
-    }
-
-    /// 页面内的口径 / 告警提示条。取代 `BannerRow`
-    /// （它自带 `.system(size: 12)` 图标、`cornerRadius: 8`、`opacity(0.10)/(0.30)` 描边，
-    /// 三处都是《45》§2.2/§2.5 点名的漂移值）。**不加描边**：分层靠色底 + 间距。
-    enum Notice {
-        struct Bar: View {
-            var text: String
-            var role: Theme.SemanticRole
-            var icon: IconName
-            var iconLabel: String?
-
-            init(_ text: String, role: Theme.SemanticRole = Theme.Semantic.info,
-                 icon: IconName = .info, iconLabel: String? = nil) {
-                self.text = text
-                self.role = role
-                self.icon = icon
-                self.iconLabel = iconLabel
-            }
-
-            var body: some View {
-                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
-                    ThemedIcon(icon, role: .inlineText, label: iconLabel)
-                        .foregroundStyle(role.textColor)
-                    Text(text)
-                        .font(Theme.Typo.narrative.font)
-                        .monospacedDigit()
-                        .lineSpacing(Theme.Typo.narrative.lineSpacing)
-                        .foregroundStyle(.primary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, Theme.Spacing.md)
-                .padding(.vertical, Theme.Spacing.sm)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(role.badgeFill(),
-                            in: RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
-                .accessibilityElement(children: .combine)
-            }
-        }
-
-        /// 行内轻量口径标签：给曲线轴、表头这类位置补一句"这数字是怎么来的"。
-        static func inline(_ text: String, role: Theme.SemanticRole = Theme.Semantic.info) -> some View {
-            Text(text)
-                .font(Theme.Typo.microLabel.font)
-                .monospacedDigit()
-                .foregroundStyle(role.textColor)
-                .padding(.horizontal, Theme.Spacing.xxs)
-                .background(role.badgeFill(), in: Capsule())
-                .accessibilityLabel(text)
-        }
-    }
-
-    /// 侧栏项目行。`HealthDot` 的三态是这里的诚实性关键：
-    /// 没扫过的项目必须是**灰色空心圈**，不能是 0 分的实心红点
-    /// （WS-I §3.4 点名的 `RootView:150` 缺陷）。
-    enum Sidebar {
-        struct Item: View {
-            var title: String
-            var subtitle: String?
-            var icon: IconName
-            var score: Int?
-            var isScored: Bool
-            var isSelected: Bool
-
-            init(title: String, subtitle: String? = nil, icon: IconName,
-                 score: Int?, isScored: Bool = true, isSelected: Bool = false) {
-                self.title = title
-                self.subtitle = subtitle
-                self.icon = icon
-                self.score = score
-                self.isScored = isScored
-                self.isSelected = isSelected
-            }
-
-            var body: some View {
-                HStack(spacing: Theme.Spacing.xs) {
-                    ThemedIcon(icon, role: .inlineText, selected: isSelected)
-                        .foregroundStyle(isSelected ? Theme.Semantic.accent.textColor
-                                                     : Theme.Semantic.neutral.textColor)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(title).font(Theme.Typo.body.font).lineLimit(1)
-                        if let subtitle {
-                            Text(subtitle)
-                                .font(Theme.Typo.microLabel.font)
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(1)
-                        }
-                    }
-                    Spacer(minLength: Theme.Spacing.xs)
-                    healthDot
-                }
-                .frame(minHeight: Theme.Layout.rowHeightSidebar)
-                .contentShape(Rectangle())
-                .accessibilityElement(children: .combine)
-            }
-
-            /// 未评分显示 `--`，**不显示 0**：0 分是结论，`--` 是没证据。
-            var scoreText: String {
-                isScored ? (score.map(String.init) ?? Theme.Placeholder.missingValue)
-                          : Theme.Placeholder.missingValue
-            }
-
-            /// 三态：未评分=空心中性圈；有分=实心按单调色阶着色。
-            @ViewBuilder
-            private var healthDot: some View {
-                let side: CGFloat = 10
-                if !isScored {
-                    Circle()
-                        .strokeBorder(Theme.Semantic.neutral.graphicColor,
-                                      lineWidth: Theme.Stroke.separator)
-                        .frame(width: side, height: side)
-                        .accessibilityLabel("尚未分析")
-                } else {
-                    let role = Theme.Semantic.role(forScore: score)
-                    Circle()
-                        .fill(role.graphicColor)
-                        .frame(width: side, height: side)
-                        .accessibilityLabel(isScored
-                                            ? "健康评分 \(scoreText)"
-                                            : "尚未分析，评分 \(scoreText)")
-                }
-            }
-        }
-    }
-
-    /// 三态空态卡。与 `EmptyStateView`（"这里什么都没有"）的分工：这个组件负责说清
-    /// **为什么没有**——没扫、还是扫过确实空。两者图标不同
-    /// （`questionmark.circle` vs `tray`），前者绝不能画成对勾或绿色。
-    enum Empty {
-        struct Card: View {
-            var evidence: Theme.Evidence
-            var title: String
-            var message: String?
-
-            init(evidence: Theme.Evidence, title: String, message: String? = nil) {
-                self.evidence = evidence
-                self.title = title
-                self.message = message
-            }
-
-            var icon: IconName {
-                switch evidence {
-                case .measured, .scannedEmpty: return .emptyTray
-                case .notCollected: return .unverified       // 没查 = 问号，不是对勾
-                }
-            }
-
-            var defaultCopy: String {
-                switch evidence {
-                case .measured: return "暂无内容"
-                case .scannedEmpty: return Theme.Evidence.scannedEmptyCopy + "相关条目"
-                case .notCollected: return "尚未分析，先运行一次扫描"
-                }
-            }
-
-            var body: some View {
-                VStack(spacing: Theme.Spacing.xs) {
-                    ThemedIcon(icon, role: .hero)
-                        .foregroundStyle(Theme.Semantic.neutral.graphicColor)
-                    Text(title).font(Theme.Typo.cardTitle.font).foregroundStyle(.secondary)
-                    Text(message ?? defaultCopy)
-                        .font(Theme.Typo.label.font)
-                        .monospacedDigit()
-                        .foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center)
-                        .lineSpacing(Theme.Typo.label.lineSpacing)
-                }
-                .frame(maxWidth: .infinity, minHeight: Theme.Layout.emptyMinHeight)
-                .padding(Theme.Spacing.xl)
                 .accessibilityElement(children: .combine)
             }
         }

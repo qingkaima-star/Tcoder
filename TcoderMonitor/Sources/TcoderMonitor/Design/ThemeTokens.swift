@@ -7,6 +7,20 @@ import SwiftUI
 // 变成有类型的常量。双层色（graphic / text）是为同时满足 WS-H §10 的两条验收线，
 // 依据见 `SemanticRole` 注释与笔记 42。
 
+// MARK: - 缺证据占位（三态句式里"没查/失败"那一态的字面）
+
+extension Theme {
+    /// WS-H §7.3 三态：有数据 = 真值（**含真 0**）；查了但空 = `0` + 「未发现」；
+    /// 没查 / 查失败 = 下面这个占位。把第三态写成 0，就是把"没证据"伪装成"结论"。
+    ///
+    /// 注：本轮 #28 删掉了配套的 `Theme.Evidence` 类型（页面零引用），
+    /// 全仓现有 **15 处**手写 `?? Theme.Placeholder.missingValue` 等散布点，
+    /// 已逐处列进《42》末节「占位文本收敛清单」，供 #34 直接当工单。
+    enum Placeholder {
+        static let missingValue = "--"
+    }
+}
+
 // MARK: - 表面与透明度
 
 extension Theme {
@@ -27,8 +41,6 @@ extension Theme {
             static let gradientBottom = 0.50
             /// badge / 标签半透明同色底（WS-H §9）
             static let badgeFill = 0.15
-            /// 行级淡底色：徽标底再弱一档，避免整屏表格被高饱和色块盖住
-            static let rowFill = 0.075
             /// 密集实时曲线的面积顶色。WS-H §5.4 的 0.30 在 96–110pt 高的实时曲线上
             /// 过浓（WS-M 重样时实测改到 0.16 并留了「待回归规范」的注释）。
             /// 这里收成一档有名有姓的强度，页面不必再造常量；默认档是否换成它交总工。
@@ -282,14 +294,8 @@ extension Theme {
         static let emptyMinHeight: CGFloat = 140
 
         // ↓ 本轮补：三条流重样时都在页面里自造了这些尺寸，说明缺档，不是缺自觉
-        /// 数据表行高。WS-L / WS-M 各定过一套，收敛成一档。
-        static let rowHeightTable: CGFloat = 28
         /// 紧凑行（读数列、图例行）。
         static let rowHeightCompact: CGFloat = 22
-        /// 侧栏项目行：图标 + 主标题 + 副标题，低于 40 会挤。
-        static let rowHeightSidebar: CGFloat = 40
-        /// 曲线纵轴刻度列宽（放得下三位数 + 收窄轴的小数）。
-        static let axisLabelWidth: CGFloat = 38
         /// 图例色点边长。WS-L 曾借 `Radius.sm`(6) 当尺寸用——值对但语义错，单列一档。
         static let legendSwatchSide: CGFloat = 6
 
@@ -298,9 +304,8 @@ extension Theme {
         static let sharePercentWidth: CGFloat = 44
         static let shareCountWidth: CGFloat = 56
 
-        /// 量表高度三档（WS-H §9：分量表 4、tile 内 5–6）。
+        /// 量表高度两档（WS-H §9：tile 内 5–6）。
         /// 收在这儿，页面里就不该再有 `height: 5` / `height: 6` 各写各的。
-        static let gaugeSection: CGFloat = 4
         static let gaugeInline: CGFloat = 5
         static let gaugeMetric: CGFloat = 6
     }
