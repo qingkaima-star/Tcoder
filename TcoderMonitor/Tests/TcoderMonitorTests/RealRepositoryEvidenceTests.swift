@@ -20,11 +20,17 @@ final class RealRepositoryEvidenceTests: XCTestCase {
     private static let largeRepo = "/opt/homebrew/Library/Homebrew"
     private static let largeRepoGitRoot = "/opt/homebrew"
 
-    // 权威基线，20:12 用系统工具独立测得（不是从 App 里抄的）。
+    // 权威基线，20:12 与 20:49 用系统工具独立测得（不是从 App 里抄的）。
+    //
+    // 注意口径：必须用**排除 vendor/ 与 .git/** 的可对比数字。
+    // 我最初误用 `git ls-files` 的 3,144 与含 vendor 的 592,452 .rb 行，
+    // 而 vendor/ 单独就有 352,784 行是被正确跳过的第三方代码——
+    // 拿它当基准会把一次正常的扫描误判成 22% 漏扫。
     private static let truthCommits = 50_666          // git rev-list --count HEAD
-    private static let truthRubyLines = 592_452       // find *.rb | cat | wc -l
-    private static let truthTodoOccurrences = 299     // grep -o TODO（出现次数）
-    private static let truthFixmeOccurrences = 52
+    private static let truthRubyLinesExclVendor = 239_668
+    private static let truthSourceFilesExclVendor = 1_798
+    private static let truthTodoExclVendor = 87       // grep -o，出现次数
+    private static let truthFixmeExclVendor = 16
 
     private func requireRealRepo() throws -> URL {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["TCODER_REAL_REPO"] == "1",
@@ -83,16 +89,21 @@ final class RealRepositoryEvidenceTests: XCTestCase {
         let code = try await FileSystemCodeAnalyzer().analyze(root: url, options: .default)
         let seconds = Date().timeIntervalSince(started)
 
-        XCTAssertGreaterThan(code.totalFiles, 2_000, "该树有 3 千多个被跟踪文件")
-        XCTAssertGreaterThan(code.totalLines, 400_000, "仅 .rb 就有 59 万行")
+        XCTAssertGreaterThanOrEqual(code.totalFiles, Self.truthSourceFilesExclVendor,
+                                    "扫描到的文件数少于实际存在的受支持源码文件数，疑似漏扫")
+        XCTAssertGreaterThan(code.totalLines, 150_000, "量级 sanity 检查")
 
-        // 语言占比必须认得 Ruby，且行数与 find 实测同量级（±20%，容许分类口径差）。
+        // 语言占比必须认得 Ruby。行数与 find 实测同量级——容差 ±25%，
+        // 因为 skip 规则（bin/dist/out/target/logs/pub/vendor…）合法地会再吃掉一部分，
+        // 而这部分差值应当由 WS-A 的 skip 台账解释，不该由本断言假装不存在。
         let ruby = code.languages.first { $0.language.lowercased().contains("ruby") }
         XCTAssertNotNil(ruby, "语言分布里必须有 Ruby")
         if let ruby {
-            let lo = Double(Self.truthRubyLines) * 0.8, hi = Double(Self.truthRubyLines) * 1.2
-            XCTAssertGreaterThanOrEqual(Double(ruby.lineCount), lo, ".rb 行数明显偏低")
-            XCTAssertLessThanOrEqual(Double(ruby.lineCount), hi, ".rb 行数明显偏高")
+            let base = Double(Self.truthRubyLinesExclVendor)
+            XCTAssertGreaterThanOrEqual(Double(ruby.lineCount), base * 0.75,
+                                        ".rb 行数偏低超过容差，需查 skip 台账")
+            XCTAssertLessThanOrEqual(Double(ruby.lineCount), base * 1.25,
+                                     ".rb 行数偏高，疑似把 vendor/ 第三方代码算了进来")
         }
 
         let avgComplexity = code.averageCyclomaticComplexity.map { String(format: "%.2f", $0) } ?? "nil"
@@ -111,10 +122,13 @@ final class RealRepositoryEvidenceTests: XCTestCase {
             "耗时=\(String(format: "%.1f", seconds))s",
         ].joined(separator: " "))
 
-        // 标记计数与 grep 同量级（词边界会滤掉 todoCount 这类标识符，故不要求精确相等）。
-        let todoRatio = Double(code.todoCount) / Double(Self.truthTodoOccurrences)
-        XCTAssertGreaterThan(todoRatio, 0.5, "TODO 计数与 grep 差得太远，疑似漏统计")
-        XCTAssertLessThan(todoRatio, 1.5, "TODO 计数与 grep 差得太远，疑似重复统计")
+        // 标记计数：带词边界（`todoCount` 这类标识符不计），故不要求与 grep 精确相等。
+        // 20:49 实测 102 vs 87（App 略高，方向待 WS-A 用 skip 台账解释）。
+        let todoRatio = Double(code.todoCount) / Double(Self.truthTodoExclVendor)
+        XCTAssertGreaterThan(todoRatio, 0.75, "TODO 计数远低于 grep，疑似漏统计")
+        XCTAssertLessThan(todoRatio, 1.6, "TODO 计数远高于 grep，疑似重复统计或算进了第三方代码")
+        XCTAssertEqual(code.fixmeCount, Self.truthFixmeExclVendor,
+                       "FIXME 计数与 grep 精确一致，是本轮唯一可钉死 exact 的标记指标")
     }
 
     // MARK: - 缺数据必须诚实为空，不能伪装成好数据
