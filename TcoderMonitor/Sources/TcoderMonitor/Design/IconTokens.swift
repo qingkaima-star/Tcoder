@@ -131,6 +131,25 @@ enum IconName: String, CaseIterable {
     /// 「根本没查所以没有命中」——WS-D 诚实线专用，绝不可与 `noRisk`（真核对过的无风险）混用
     case unverified = "questionmark.circle"
 
+    // — 从 WS-L `CodeGitSymbol` 收编：他们当时只能在页面侧集中命名，因为登记表没这些
+    case openInApp = "arrow.up.forward.app"
+    case calendar = "calendar"
+    case history = "clock.arrow.circlepath"
+    case marker = "flag"
+    case suggestion = "lightbulb"
+    case parameters = "tray.full"
+    case expand = "arrow.up.left.and.arrow.down.right"
+    case comments = "text.bubble"
+    case outdated = "arrow.down.circle"
+    case refactor = "scissors"
+    case verdictClean = "checkmark.seal"
+    case gridDense = "square.grid.3x3"
+
+    // — 表格排序指示（三枚都得有，页面才不会各挑各的箭头）
+    case sortNeutral = "chevron.up.chevron.down"
+    case sortAscending = "arrow.up"
+    case sortDescending = "arrow.down"
+
     // — 既有条目的兼容别名：rawValue 曾直接是 .fill 形态，导航层现改由 selected 驱动
     case pulse = "waveform.path.ecg"
 
@@ -145,8 +164,12 @@ enum IconName: String, CaseIterable {
             return .badge
         case .emptyTray, .emptyUnknown:
             return .hero
-        case .unverified:
+        case .unverified, .sortNeutral, .sortAscending, .sortDescending,
+             .marker, .outdated, .verdictClean:
             return .badge
+        case .openInApp, .calendar, .history, .suggestion, .parameters, .expand,
+             .comments, .refactor, .gridDense:
+            return .inlineText
         default:
             return .inlineText
         }
