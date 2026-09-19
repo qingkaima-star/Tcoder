@@ -25,8 +25,16 @@ final class MachSystemMonitor: SystemMonitoringProviding {
     /// 最近一轮扫到的全量进程，只在内存里留一帧，用来做「按内存排序」的正确排名。
     private(set) var allProcesses: [ProcessSnapshot] = []
 
-    private static let historyCapacity = 600
-    private static let topProcessLimit = 40
+    /// 本轮真正取到指标的进程数。无权限时它小于 `latestSnapshot.processCount`
+    /// （后者是全系统总数），视图要把两者都显示出来，不能拿子集冒充全集。
+    private(set) var measuredProcessCount = 0
+
+    /// 打开文件数枚举被时间预算截断过，进程句柄列要标注「部分」。
+    private(set) var processMetricsTruncated = false
+
+    // 后台采样闭包里要用，标 nonisolated 免得跨 actor 取值。
+    nonisolated private static let historyCapacity = 600
+    nonisolated private static let topProcessLimit = 40
 
     // MARK: Surfaces PerformanceView expects
 
@@ -103,56 +111,88 @@ final class MachSystemMonitor: SystemMonitoringProviding {
 
     @discardableResult
     func sampleNow() -> SystemSnapshot? {
-        tick()
+        // 协议要求「同步算一次并返回」，所以手动刷新就在调用线程跑完（全量 sweep 实测 0–8ms）。
+        // 后台定时器在跑时不抢同一次采样，直接回最近一帧。
+        guard !isSampling else { return latestSnapshot }
+        publish(collectBatch(elapsed: currentElapsed()))
         return latestSnapshot
     }
 
     // MARK: Sampling
 
+    /// 一次采样的产物。nonisolated 才能在后台线程构造后回投主线程。
+    nonisolated private struct SampleBatch {
+        let counters: SystemCounters
+        let sweep: ProcessSweep
+        let snapshot: SystemSnapshot
+        let groupSnapshots: [ProcessGroupSnapshot]
+        let top: [ProcessSnapshot]
+    }
+
+    private func currentElapsed() -> TimeInterval {
+        max(0.05, Date().timeIntervalSince(lastSweepAt))
+    }
+
+    /// 所有 Mach / libproc / sysctl 调用都集中在这里同步执行，由调用方决定在哪个线程跑。
+    private nonisolated static func collect(sampler: SystemSampler,
+                                            previousCounters: SystemCounters?,
+                                            previousProcesses: [Int32: ProcessCPUState],
+                                            groups: [TrackedProcessGroup],
+                                            elapsed: TimeInterval) -> SampleBatch {
+        let counters = sampler.read()
+        let sweep = ProcessInspector.sweep(previous: previousProcesses, elapsed: elapsed)
+        // 总数走 sysctl（与 top / 活动监视器同源）；sweep 只能覆盖本用户可查询的子集。
+        let totalProcesses = ProcessInspector.processCount()
+        let snapshot = sampler.snapshot(previous: previousCounters, current: counters,
+                                        processCount: totalProcesses)
+        let groupSnapshots = ProcessInspector.groupSnapshots(for: groups, processes: sweep.processes)
+        let top = Array(sweep.processes.sorted { $0.cpuUsage > $1.cpuUsage }.prefix(topProcessLimit))
+        return SampleBatch(counters: counters, sweep: sweep, snapshot: snapshot,
+                           groupSnapshots: groupSnapshots, top: top)
+    }
+
+    private func collectBatch(elapsed: TimeInterval) -> SampleBatch {
+        MachSystemMonitor.collect(sampler: sampler, previousCounters: previousCounters,
+                                  previousProcesses: previousProcesses, groups: managedGroups,
+                                  elapsed: elapsed)
+    }
+
+    private func publish(_ batch: SampleBatch) {
+        isSampling = false
+        previousCounters = batch.counters
+        previousProcesses = batch.sweep.states
+        lastSweepAt = Date()
+        latestSnapshot = batch.snapshot
+        topProcesses = batch.top
+        allProcesses = batch.sweep.processes
+        measuredProcessCount = batch.sweep.processes.count
+        processMetricsTruncated = batch.sweep.truncated
+        trackedGroups = batch.groupSnapshots
+        history.append(batch.snapshot)
+        if history.count > Self.historyCapacity {
+            history.removeFirst(history.count - Self.historyCapacity)
+        }
+    }
+
     private func tick() {
-        // 一轮 libproc 全量扫描可能要几百毫秒；没有这把锁的话定时器会叠出多个并发扫描，
+        // 一轮 libproc 全量扫描可能几百毫秒；没有这把锁定时器会叠出多个并发扫描，
         // 既拖慢主线程回投也把 previous 计数搞乱。
         guard !isSampling else { return }
         isSampling = true
 
-        let elapsed = max(0.05, Date().timeIntervalSince(lastSweepAt))
+        let sampler = self.sampler
         let previousCounters = self.previousCounters
         let previousProcesses = self.previousProcesses
         let groups = self.managedGroups
-        let sampler = self.sampler
+        let elapsed = currentElapsed()
 
-        Task.detached(priority: .utility) { [weak self] in
-            let counters = sampler.read()
-            let sweep = ProcessInspector.sweep(previous: previousProcesses, elapsed: elapsed)
-            let snapshot = sampler.snapshot(
-                previous: previousCounters,
-                current: counters,
-                processCount: sweep.processes.count
-            )
-            let groupSnapshots = ProcessInspector.groupSnapshots(
-                for: groups,
-                processes: sweep.processes
-            )
-            let ranked = Array(
-                sweep.processes.sorted { $0.cpuUsage > $1.cpuUsage }
-                    .prefix(MachSystemMonitor.topProcessLimit)
-            )
-
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.isSampling = false
-                self.previousCounters = counters
-                self.previousProcesses = sweep.states
-                self.lastSweepAt = Date()
-                self.latestSnapshot = snapshot
-                self.topProcesses = ranked
-                self.allProcesses = sweep.processes
-                self.trackedGroups = groupSnapshots
-                self.history.append(snapshot)
-                if self.history.count > Self.historyCapacity {
-                    self.history.removeFirst(self.history.count - Self.historyCapacity)
-                }
-            }
+        Task.detached(priority: .utility) {
+            let batch = MachSystemMonitor.collect(sampler: sampler,
+                                                  previousCounters: previousCounters,
+                                                  previousProcesses: previousProcesses,
+                                                  groups: groups,
+                                                  elapsed: elapsed)
+            await MainActor.run { [weak self] in self?.publish(batch) }
         }
     }
 

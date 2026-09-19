@@ -67,8 +67,8 @@ final class PerformanceLiveSampleTests: XCTestCase {
         let topCPU = sweep.processes.sorted { $0.cpuUsage > $1.cpuUsage }.prefix(6)
         let topMemory = sweep.processes.sorted { $0.memoryBytes > $1.memoryBytes }.prefix(6)
         print("=== 进程扫描（只读） ===")
-        print("扫到 \(sweep.processes.count) 个进程 · 耗时 \(String(format: "%.0f", duration * 1000)) 毫秒"
-            + " · proc_listallpids 报 \(ProcessInspector.processCount())")
+        print("扫到 \(sweep.processes.count) 个可查询进程 · 耗时 \(String(format: "%.0f", duration * 1000)) 毫秒"
+            + " · 全系统 \(ProcessInspector.processCount()) 个（sysctl，与 top 同源）")
         print("按 CPU：")
         for process in topCPU {
             print("  pid \(process.pid)  \(process.name)  CPU "

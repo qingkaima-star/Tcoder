@@ -172,8 +172,21 @@ struct PerformanceView: View {
 
     private var sortedProcesses: [ProcessSnapshot] { sortMode == .cpu ? monitor.topProcesses : monitor.processesByMemory }
 
+    /// 无权限时只能对「本用户可查询」的那部分进程取指标，全系统总数走 sysctl。
+    /// 两个数都摊开写，避免用子集的排名冒充全系统的排名。
+    private var processCoverageNote: String {
+        let total = monitor.latestSnapshot?.processCount ?? 0
+        let measured = monitor.measuredProcessCount
+        guard total > 0, measured > 0 else { return "只读展示，不提供任何进程操作" }
+        var note = "只读展示 · 已取指标 \(NumberFormat.grouped(measured)) / 全系统 \(NumberFormat.grouped(total)) 个进程"
+        if monitor.processMetricsTruncated {
+            note += " · 句柄数因时间预算仅覆盖部分进程"
+        }
+        return note
+    }
+
     private var topProcessesCard: some View {
-        SectionCard("Top 进程", subtitle: "只读展示，不提供任何进程操作", icon: "list.bullet", trailing: AnyView(
+        SectionCard("Top 进程", subtitle: processCoverageNote, icon: "list.bullet", trailing: AnyView(
             Picker("排序", selection: $sortMode) {
                 ForEach(PerformanceSortMode.allCases) { mode in Text(mode.title).tag(mode) }
             }

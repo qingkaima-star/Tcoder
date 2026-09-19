@@ -40,6 +40,9 @@ struct LogEvent: Sendable {
     var isCrash: Bool = false
     /// true = 属于上一条事件的多行堆栈 / `Caused by:`，不单独计数
     var isContinuation: Bool = false
+    /// 折叠进来的堆栈头里出现的异常类名。异常类常在级别行的下一行，
+    /// 签名要靠它才能落在 `java.lang.NullPointerException` 而不是前缀文案上。
+    var exceptionToken: String? = nil
 }
 
 struct LogFileReading: Sendable {
@@ -498,11 +501,23 @@ fileprivate struct LogEventBuilder {
                 event.sourceFiles = [file]
                 events[parentIndex].sourceFiles.append(file)
             }
+            if events[parentIndex].exceptionToken == nil, let token = LogLineParser.mainToken(in: line.raw) {
+                events[parentIndex].exceptionToken = token
+            }
             events.append(event)
             return
         }
 
-        guard let severity = line.severity else { return }
+        guard let severity = line.severity else {
+            // 没有级别前缀、但带异常类名的裸行（`java.lang.NullPointerException: ...`）不是新事件：
+            // 它是上一条错误的堆栈头。把类名挂到父事件上，签名才是「异常类名 + 消息」而不是前缀文案。
+            if let parentIndex, LogLineParser.isErrorFamily(events[parentIndex].severity),
+               events[parentIndex].exceptionToken == nil,
+               let token = LogLineParser.mainToken(in: line.raw) {
+                events[parentIndex].exceptionToken = token
+            }
+            return
+        }
         let isCrash = severity == .crash || (role == .crash && LogLineParser.looksLikeCrash(line.raw))
         var event = LogEvent(date: line.date, severity: severity, rawLine: line.raw, message: line.message,
                              sourceLogPath: sourcePath, lineNumber: number, isCrash: isCrash)
@@ -1296,6 +1311,11 @@ enum LogAggregator {
                                  severity: event.severity, message: event.message,
                                  stackFrame: event.stackFrames.first, sourceFile: event.sourceFiles.first)
         if line.message.isEmpty { line.message = oneLine(line.raw, limit: 300) }
+        // 异常类名在堆栈头里时优先用它做主 token（用户口径：签名 = 异常类名 + 归一化消息）。
+        if let token = event.exceptionToken {
+            let normalized = LogLineParser.normalizeMessage(event.message.isEmpty ? event.rawLine : event.message)
+            return normalized.isEmpty ? token : "\(token): \(normalized)"
+        }
         return LogLineParser.signature(for: line)
     }
 }

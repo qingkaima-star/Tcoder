@@ -392,8 +392,12 @@ final class LogAnalysisTests: XCTestCase {
                           file: #filePath, line: #line)
         }
 
-        // 明确项：Exception 关键字归 exception（若实现把它并入 error 也算合理，见上表；此处只断言非 nil）
-        XCTAssertNotNil(LogLineParser.detectSeverity("java.lang.NullPointerException: Cannot invoke"))
+        // 实测口径：没有级别前缀、也没有崩溃特征的裸异常类名行**不单独判级别**。
+        // 它是上一条 ERROR 的堆栈头，由 LogEventBuilder 折叠进父事件（类名走 exceptionToken 进签名），
+        // 若在这里也判成 error/exception，一次故障会被计成两条，错误数直接翻倍。
+        XCTAssertNil(LogLineParser.detectSeverity("java.lang.NullPointerException: Cannot invoke"))
+        XCTAssertNotNil(LogLineParser.detectSeverity("Traceback (most recent call last):"))
+        XCTAssertNotNil(LogLineParser.detectSeverity("Caused by: java.lang.IllegalStateException"))
     }
 
     func testDetectSeverityIgnoresWordsInsideMessageBody() throws {

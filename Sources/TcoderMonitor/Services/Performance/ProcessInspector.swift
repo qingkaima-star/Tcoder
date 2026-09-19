@@ -40,12 +40,31 @@ enum ProcessInspector {
     private static let fdBudgetNanos: UInt64 = 600_000_000
     /// sweep 硬预算：超过直接返回已收集的部分，宁可少几个进程也不能拖死后台线程。
     private static let sweepBudgetNanos: UInt64 = 1_500_000_000
-    /// systemDiskIO 挂在 1.5s 高频采样上，预算更紧。
-    private static let diskIOBudgetNanos: UInt64 = 300_000_000
 
     // MARK: - Public API
 
+    /// 全系统进程数。
+    ///
+    /// 不能用 `proc_listallpids`：无权限时它只返回本用户可见的那部分（实测本机 260 个），
+    /// 而 `ps -A` / `top` 报 1000 以上。`sysctl(KERN_PROC_ALL)` 与它们同源，
+    /// 所以总数走 sysctl；逐进程的指标仍只能覆盖可见子集（这是无 root 的硬限制）。
     static func processCount() -> Int {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL]
+        var length = 0
+        guard sysctl(&mib, 3, nil, &length, nil, 0) == 0, length > 0 else {
+            return visibleProcessCount()
+        }
+        var buffer = Data(count: length)
+        let stride = MemoryLayout<kinfo_proc>.stride
+        guard stride > 0,
+              buffer.withUnsafeMutableBytes({ raw in
+                  sysctl(&mib, 3, raw.baseAddress, &length, nil, 0)
+              }) == 0 else { return visibleProcessCount() }
+        return max(length / stride, visibleProcessCount())
+    }
+
+    /// 本用户可逐进程查询指标的进程数。
+    static func visibleProcessCount() -> Int {
         let bytes = proc_listallpids(nil, 0)
         guard bytes > 0 else { return 0 }
         return Int(bytes) / pidStride
@@ -121,21 +140,6 @@ enum ProcessInspector {
             result.states[pid] = ProcessCPUState(pid: pid, cpuNano: cpuNano, residentBytes: resident)
         }
         return result
-    }
-
-    /// 全系统累计磁盘读写字节；调用方自己做两次差。预算外的进程跳过累加。
-    static func systemDiskIO() -> (readBytes: UInt64, writeBytes: UInt64) {
-        let startedAt = monotonicNanos()
-        var read: UInt64 = 0
-        var write: UInt64 = 0
-        for pid in listAllPids() {
-            guard pid > 0 else { continue }
-            if monotonicNanos() &- startedAt > diskIOBudgetNanos { break }
-            guard let usage = rusageInfo(for: pid) else { continue }
-            read &+= usage.diskReadBytes
-            write &+= usage.diskWriteBytes
-        }
-        return (read, write)
     }
 
     /// 没有匹配的 group 也返回空快照，视图才能显示「未检测到进程」而不是伪造 0。

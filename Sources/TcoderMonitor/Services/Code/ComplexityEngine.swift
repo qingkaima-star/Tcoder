@@ -248,6 +248,22 @@ enum ComplexityEngine {
         c.isLetter || c.isNumber || c == "_"
     }
 
+#if CE_DEBUG
+    static func ceDebug(_ line: String, language: String) -> String {
+        let profile = profile(for: language)
+        var out = "patterns=\(profile.patterns.count) family=\(profile.family) paren=\(profile.parenOnEveryPattern)\n"
+        for (i, pattern) in profile.patterns.enumerated() {
+            let text = line as NSString
+            let range = NSRange(location: 0, length: text.length)
+            let m = pattern.expression.firstMatch(in: line, options: [], range: range)
+            let g1 = m.flatMap { $0.range(at: 1).location == NSNotFound ? nil : text.substring(with: $0.range(at: 1)) } ?? "nil"
+            out += "  [\(i)] groups=\(pattern.expression.numberOfCaptureGroups) match=\(m != nil) g1=\(g1) pat=\(pattern.expression.pattern)\n"
+        }
+        out += "  name=\(matchSignature(line, profile) ?? "nil")"
+        return out
+    }
+#endif
+
     // MARK: Signature matching
 
     private static func matchSignature(_ line: String, _ profile: LangProfile) -> String? {

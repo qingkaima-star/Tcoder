@@ -99,16 +99,28 @@ final class LogFixtureClusterTests: XCTestCase {
         XCTAssertTrue(summary.hasData, "夹具里有两个日志文件，必须扫到内容")
         XCTAssertGreaterThanOrEqual(summary.totalLinesScanned, 25,
                                     "两份夹具合计 25 行，读取行数必须覆盖到")
-        XCTAssertEqual(summary.scannedFiles.count, 2)
+        // 本 App 自己的 ~/Library/Logs/DiagnosticReports/*.ips 也会被一并扫到，所以只断言夹具在里面。
+        let paths = Set(summary.scannedFiles.map(\.path))
+        XCTAssertTrue(paths.contains(where: { $0.hasSuffix("Logs/error.log") }), "夹具 error.log 必须被扫到")
+        XCTAssertTrue(paths.contains(where: { $0.hasSuffix("Logs/crash.log") }), "夹具 crash.log 必须被扫到")
 
-        // 聚类的核心要求：同一种异常不管 orderId / UUID / 时间戳怎么变，都必须合成一个签名。
-        guard let top = summary.topErrors.first else {
-            return XCTFail("Top Errors 为空，说明签名归一化没起作用")
+        // 聚类的核心要求：同一种异常不管 orderId / UUID / 时间戳怎么变，都必须合成一个签名，
+        // 并且签名要落在异常类名上（用户口径），而不是落在前缀文案上。
+        let npe = summary.topErrors.filter { $0.signature.contains("NullPointerException") }
+        XCTAssertFalse(npe.isEmpty, "必须出现以 java.lang.NullPointerException 为主 token 的签名，实得：\(summary.topErrors.map(\.signature))")
+        let merged = npe.reduce(0) { $0 + $1.count }
+        XCTAssertGreaterThanOrEqual(merged, 2, "两次同类 NPE 必须合并计数，实得 \(merged)")
+        XCTAssertEqual(npe.count, 1, "两次 NPE 只能聚成一条签名，实得 \(npe.map(\.signature))")
+        if let cluster = npe.first {
+            XCTAssertFalse(cluster.stackTopFrames.isEmpty, "NPE 签名要带上堆栈顶帧")
+            XCTAssertTrue(cluster.stackTopFrames.contains(where: { $0.contains("OrderService.java:123") }),
+                          "栈顶要含夹具里的抛出点，实得 \(cluster.stackTopFrames)")
+            XCTAssertFalse(cluster.displayMessage.isEmpty)
+            XCTAssertNotNil(cluster.firstSeen)
+            XCTAssertNotNil(cluster.lastSeen)
         }
-        XCTAssertTrue(top.signature.contains("NullPointerException"),
-                      "出现次数最多的应当是 NPE，实得 \(top.signature)")
-        XCTAssertGreaterThanOrEqual(top.count, 2, "两次同类 NPE 必须合并计数，实得 \(top.count)")
-        XCTAssertEqual(Set(summary.topErrors.flatMap(\.stackTopFrames)).count > 0, true)
+        XCTAssertTrue(summary.topErrors.contains(where: { $0.signature.contains("SocketTimeoutException") }),
+                      "超时那一条要单独成签名")
         XCTAssertTrue(summary.affectedFiles.keys.contains("OrderService.java"),
                       "堆栈里的源文件必须被统计到，实得 \(summary.affectedFiles)")
         XCTAssertTrue(summary.affectedFiles.keys.contains("PayClient.java"))

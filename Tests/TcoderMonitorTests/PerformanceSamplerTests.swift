@@ -176,9 +176,9 @@ final class PerformanceSamplerTests: XCTestCase {
         let expected = total - UInt64(reclaimablePages) * 16_384
         let used = SystemSampler.memoryUsedBytes(counters, totalBytes: total)
         XCTAssertEqual(used, expected, "已用内存必须等于 total - (free+speculative+purgeable)*pageSize")
-        // 46.6 GiB / 48 GiB —— 与同一时刻 `top` 的 "PhysMem: 46G used" 对得上。
-        XCTAssertEqual(Double(used) / Double(total), 0.9702, accuracy: 0.001,
-                       "换算成占比必须接近 top 的 46G/48G")
+        // 46.62 GiB / 48 GiB —— 与同一时刻 `top` 的 "PhysMem: 44G~47G used" 同量级。
+        XCTAssertEqual(Double(used) / Double(total), 0.9714, accuracy: 0.001,
+                       "换算成占比必须接近 top 的 PhysMem 口径")
     }
 
     func testMemoryUsedBytesCountsInactivePagesAsUsed() {
@@ -524,9 +524,11 @@ final class PerformanceSamplerTests: XCTestCase {
     func testProcessInspectorEnumerationDoesNotTrap() {
         let count = ProcessInspector.processCount()
         XCTAssertGreaterThanOrEqual(count, 1, "至少能看到当前测试进程自身")
-        let io = ProcessInspector.systemDiskIO()
-        XCTAssertNotEqual(io.readBytes, UInt64.max, "磁盘读必须是真实计数而不是哨兵值")
-        XCTAssertNotEqual(io.writeBytes, UInt64.max, "磁盘写必须是真实计数而不是哨兵值")
+        XCTAssertGreaterThanOrEqual(ProcessInspector.visibleProcessCount(), 1)
+        XCTAssertLessThanOrEqual(ProcessInspector.visibleProcessCount(), count,
+                                "可逐进程查询的子集不可能大于全系统总数")
+        let io = BlockStorageSampler.ioBytes()
+        XCTAssertGreaterThan(io.read + io.write, 0, "IOKit 必须能拿到真实块设备累计量，且不需要 root")
     }
 
     // MARK: - 12. MachSystemMonitor 烟测（@MainActor）

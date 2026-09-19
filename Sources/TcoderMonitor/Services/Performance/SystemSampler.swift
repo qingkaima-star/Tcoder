@@ -53,8 +53,8 @@ struct SystemSampler: Sendable {
             timestamp: timestamp,
             cores: Self.coreTicks(),
             vm: Self.vmCounters(),
-            diskReadBytes: disk.readBytes,
-            diskWriteBytes: disk.writeBytes,
+            diskReadBytes: disk.read,
+            diskWriteBytes: disk.write,
             networkInBytes: network.inbound,
             networkOutBytes: network.outbound
         )
@@ -213,6 +213,7 @@ private extension SystemSampler {
             purgeable: UInt64(stats.purgeable_count)
         )
     }
+}
 
 // MARK: - 块设备吞吐（IOKit）
 
@@ -253,6 +254,11 @@ enum BlockStorageSampler {
     }
 }
 
+// MARK: - 网络累计字节
+
+private extension SystemSampler {
+    /// getifaddrs 累加 AF_LINK 字节数；lo0 是回环，算进去会凭空造出流量。
+    static func networkBytes() -> (inbound: UInt64, outbound: UInt64) {
         var first: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&first) == 0 else { return (0, 0) }
         defer { freeifaddrs(first) }

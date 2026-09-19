@@ -5,7 +5,6 @@ import Foundation
 final class WeightedHealthScorer: HealthScoringProviding {
     func score(_ inputs: HealthInputs) -> HealthScore {
         let available = inputs.availableDimensions
-        guard !available.isEmpty else { return HealthScore(overall: 0) }
 
         var components: [ScoreComponent] = []
         var strengths: [String] = []
@@ -18,20 +17,42 @@ final class WeightedHealthScorer: HealthScoringProviding {
             components.append(component)
         }
 
+        if components.isEmpty {
+            return HealthScore(
+                computedAt: Date(),
+                overall: 0,
+                previousOverall: inputs.previousScore,
+                components: [],
+                strengths: [],
+                issues: ["尚无可用指标"],
+                recommendations: ["先在侧栏「添加项目」选择本地仓库目录，或点右上角「重新分析」采集指标。"],
+                narrative: "尚无可用指标，无法给出健康评分；选择项目目录后会自动完成采集。",
+                generatedByAI: false
+            )
+        }
+
+        // Contract: published component weights must themselves sum to 1.0, so a
+        // consumer recomputing sum(score * weight) reproduces `overall` exactly.
         let totalWeight = components.reduce(0) { $0 + $1.weight }
-        let overall = totalWeight > 0
-            ? Int((components.reduce(0.0) { $0 + Double($1.score) * $1.weight } / totalWeight).rounded())
-            : 0
+        guard totalWeight > 0 else { return HealthScore(overall: 0) }
+        components = components.map { var c = $0; c.weight = c.weight / totalWeight; return c }
+
+        let overall = Int(components.reduce(0.0) { $0 + Double($1.score) * $1.weight }.rounded())
+        let clampedOverall = min(100, max(0, overall))
+
+        if recommendations.isEmpty {
+            recommendations.append("当前无明显短板，保持提交节奏并持续监控新增高复杂度函数。")
+        }
 
         return HealthScore(
             computedAt: Date(),
-            overall: min(100, max(0, overall)),
+            overall: clampedOverall,
             previousOverall: inputs.previousScore,
             components: components.sorted { $0.score < $1.score },
             strengths: Array(strengths.prefix(5)),
             issues: Array(issues.prefix(5)),
             recommendations: Array(recommendations.prefix(5)),
-            narrative: Self.narrative(overall: overall, components: components),
+            narrative: Self.narrative(overall: clampedOverall, components: components),
             generatedByAI: false
         )
     }
@@ -140,8 +161,12 @@ final class WeightedHealthScorer: HealthScoringProviding {
             return component(dimension, score, "\(authors) 位活跃作者，头号占 \(NumberFormat.percent(share, precision: 0))", git.busFactorRisk)
 
         case .stability:
-            guard let logs = inputs.logs, let code = inputs.code else { return nil }
-            let perKloc = Double(logs.errorCount + logs.exceptionCount) / Double(max(code.codeLines, 1)) * 1000
+            guard let logs = inputs.logs else { return nil }
+            // Density needs the code size; without it fall back to absolute counts
+            // rather than dropping the whole dimension (availableDimensions promises it).
+            let lines = inputs.code?.codeLines ?? 0
+            let faults = logs.errorCount + logs.exceptionCount
+            let perKloc = lines > 0 ? Double(faults) / Double(lines) * 1000 : Double(faults)
             var value = 100.0
             value -= perKloc * 6
             value -= Double(logs.crashCount) * 0.9
@@ -152,7 +177,10 @@ final class WeightedHealthScorer: HealthScoringProviding {
                 issues.append("\(worst.displayMessage) 出现 \(worst.count) 次（最近 \(worst.lastSeenDescription)）")
                 recommendations.append("优先修复 Top Errors 首位，它通常掩盖了下游连锁异常")
             }
-            return component(dimension, score, String(format: "每千行 %.2f 个错误，崩溃 %d 次", perKloc, logs.crashCount),
+            let densityText = lines > 0
+                ? String(format: "每千行 %.2f 个错误", perKloc)
+                : "\(faults) 个错误（无代码规模，按绝对值计）"
+            return component(dimension, score, "\(densityText)，崩溃 \(logs.crashCount) 次",
                              logs.overallRisk)
 
         case .dependencies:
