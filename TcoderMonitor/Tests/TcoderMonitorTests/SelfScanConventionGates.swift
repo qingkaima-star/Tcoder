@@ -211,7 +211,9 @@ final class SelfScanConventionGates: SelfScanHarnessCase {
     /// WS-L 已经在视图侧换成 `GitHistoryScope.authorBasis`（`ContributorRows.swift:42-43`
     /// 明写了"模型是冻结的，它拿含合并的 totalCommits 做分母，仓库越大越低估"），
     /// **评分侧还没有**。这里把现状钉住，谁修谁翻正。
-    func testHealthScoreAndGitPageAgreeOnOneConcentrationDenominator() async throws {
+    // ⚠️ 本条断言的是**缺陷现状**，不是期望值。期望值 = 与 Git 页同分母：
+    //    XCTAssertEqual(scored, pageShare, accuracy: 1.0)  ← 修好后换成这行并删掉下面两条。
+    func testPinned_BusFactorDilutedByMergeCommitsInHealthScore() async throws {
         let scan = try await selfScan()
         let git = scan.git
         let scope = GitHistoryScope(git)
@@ -248,7 +250,9 @@ final class SelfScanConventionGates: SelfScanHarnessCase {
     /// 截断后的榜单条数，不是真实超限文件数。本仓库真实 `>400` 行的有 23 个，
     /// 分子却按 20 算——占比被系统性低估，且**文件越多低估得越狠**。
     /// （`FileSystemCodeAnalyzer.swift:151` 截断，`hugeFiles.count` 随后被当普查数用。）
-    func testHugeFileRatioIsNotComputedFromTheTruncatedList() async throws {
+    // ⚠️ 本条断言的是**缺陷现状**，不是期望值。期望值 = 分子用真实超限文件数：
+    //    真实占比 trueRatio 应当进 detail，而不是榜单截断值 cappedRatio。
+    func testPinned_HugeFileRatioUsesTruncatedListAsNumerator() async throws {
         let code = try await selfScan().code
         let truthOverMedium = try independentSwiftLineCounts().filter { $0.lines > Self.mediumFileLines }.count
         let cappedCount = code.hugeFiles.count
