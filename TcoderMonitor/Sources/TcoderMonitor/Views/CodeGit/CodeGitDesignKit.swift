@@ -47,7 +47,14 @@ enum CodeGitType {
     /// 表格与读数条里的数字。等宽数字是硬要求：数字列宽度不能随值变化。
     static func number(_ tier: Theme.TypeToken) -> Font { tier.font.monospacedDigit() }
     /// 读数条的标签档。
-    static let readoutLabel = Theme.Typo.label.font
+    static let readoutLabel = prose(Theme.Typo.label)
+
+    /// 说明性文字的取字入口：一律附等宽数字。
+    ///
+    /// 说明句里常夹着数字（"另有 12 个未展示"、"含 23 次合并"），刷新时这些数字同样会位移；
+    /// 与其逐处记得加 `.monospacedDigit()`，不如让页面取"散文档"时自动带上。
+    /// 数值档（`metricMid` / `metricNumber` / `heroMetric` / `mono*`）本身已开等宽，无需走这里。
+    static func prose(_ tier: Theme.TypeToken) -> Font { tier.font.monospacedDigit() }
     static let metric = number(Theme.Typo.metricMid)
 }
 
@@ -122,14 +129,21 @@ extension EmptyStateView {
 /// 必须稳定：Swift 的 `hashValue` 每进程随机化，拿它取色会让同一语言 / 同一作者
 /// **每次启动换一种颜色**（WS-I §2.1① 点名的缺陷）。这里改用 FNV-1a。
 enum CodeGitCategoryColor {
+    /// 成员序列色从 1 号开始：`Theme.Chart` 的 0 号蓝是"主/自身数据"，
+    /// 占比条里的**合计行**就用它。成员若也能取到 0，就会出现"合计行与某一位成员同色"
+    /// 这种看着像高亮、其实只是撞色的读错。
     static func index(for key: String) -> Int {
         var hash: UInt64 = 0xcbf2_9ce4_8422_2325
         for scalar in key.lowercased().unicodeScalars {
             hash ^= UInt64(scalar.value)
             hash = hash &* 0x0000_0100_0000_01B3
         }
-        return Int(hash % UInt64(max(1, Theme.Chart.count)))
+        let memberSlots = max(1, Theme.Chart.count - 1)
+        return 1 + Int(hash % UInt64(memberSlots))
     }
+
+    /// 合计/自身数据色，恒定取色板 0 号。
+    static let aggregateIndex = 0
 
     static func color(for key: String) -> Color { Theme.Chart.color(at: index(for: key)) }
 }

@@ -408,4 +408,229 @@ final class CodeGitRestyleTests: XCTestCase {
         XCTAssertEqual(DataColumns.column(columns, columns.count).width, nil)
         XCTAssertEqual(DataColumns.column(columns, -1).width, nil)
     }
+
+    // MARK: - 第二轮：口径互斥的三态空态
+
+    func testGitAbsenceStatesAreMutuallyExclusive() {
+        let notRepo = GitInsights(isRepository: false, totalCommits: 0)
+        let empty = GitInsights(isRepository: true, totalCommits: 0)
+        let unparsed = GitInsights(isRepository: true, totalCommits: 62, commitsAnalyzed: 0)
+        XCTAssertEqual(notRepo.commitAbsence, .notARepository)
+        XCTAssertEqual(empty.commitAbsence, .repositoryWithoutCommits)
+        XCTAssertEqual(unparsed.commitAbsence, .commitsUnparsed(total: 62))
+        XCTAssertEqual(GitInsights(isRepository: true, totalCommits: 62,
+                                   commitsAnalyzed: 48).commitAbsence, .available)
+    }
+
+    func testAbsenceWordingsNeverBlendNotApplicableWithMeasuredZero() {
+        let notRepo = GitDataAbsence.notARepository.copy!
+        XCTAssertTrue(notRepo.message.contains("不适用"), notRepo.message)
+        XCTAssertFalse(notRepo.title.contains("还没有提交"),
+                       "不是仓库不能说成「还没有提交」，那是两件事")
+
+        let measured = GitDataAbsence.repositoryWithoutCommits.copy!
+        XCTAssertTrue(measured.message.contains("测得"), measured.message)
+        XCTAssertTrue(measured.title.contains("还没有提交"), measured.title)
+
+        let unparsed = GitDataAbsence.commitsUnparsed(total: 62).copy!
+        XCTAssertTrue(unparsed.message.contains("不给任何结论"), unparsed.message)
+        XCTAssertTrue(unparsed.title.contains("62"), unparsed.title)
+
+        let noAuthors = GitDataAbsence.commitsWithoutAuthors(total: 48).copy!
+        XCTAssertTrue(noAuthors.message.contains("不是「零贡献者」"), noAuthors.message)
+
+        XCTAssertNil(GitDataAbsence.available.copy)
+        XCTAssertFalse(GitDataAbsence.hasDuplicateTitles(),
+                       "四个空态标题必须两两不同，否则等于又合回一句话")
+    }
+
+    func testAuthorAbsenceChainsAfterCommitAbsence() {
+        let noRepo = GitInsights(isRepository: false)
+        XCTAssertEqual(noRepo.authorAbsence, .notARepository, "不是仓库时先说仓库问题")
+        let commitsButNoAuthors = GitInsights(isRepository: true, totalCommits: 62,
+                                              commitsAnalyzed: 48, authors: [])
+        XCTAssertEqual(commitsButNoAuthors.authorAbsence, .commitsWithoutAuthors(total: 48))
+        let withAuthors = GitInsights(isRepository: true, totalCommits: 62, commitsAnalyzed: 48,
+                                      authors: [author("A", "a@x", commits: 48)])
+        XCTAssertEqual(withAuthors.authorAbsence, .available)
+    }
+
+    // MARK: - 第二轮：色板与行节奏
+
+    func testMemberColorsNeverCollideWithTheAggregateBlue() {
+        XCTAssertEqual(CodeGitCategoryColor.aggregateIndex, 0,
+                       "0 号蓝是「主/自身数据」档，合计行与主序列专用")
+        for key in ["a@x", "b@x", "Swift", "Python", "dev@tcoder.local", "", "张三 <z@x>"] {
+            XCTAssertNotEqual(CodeGitCategoryColor.index(for: key),
+                              CodeGitCategoryColor.aggregateIndex,
+                              "\(key) 抢到了合计行的颜色")
+            XCTAssertTrue((0..<Theme.Chart.count).contains(CodeGitCategoryColor.index(for: key)))
+        }
+    }
+
+    /// 等宽与行节奏的覆盖面：承载数字的散文文本必须走 `CodeGitType.prose`（自带等宽数字），
+    /// 而榜单行只能通过 `.dataTableRow()` 拿行高。两处都用源码扫描钉住，防止下一轮又各写各的。
+    func testEveryProseNumberAndRowGoesThroughTheMonospacedHelpers() throws {
+        let rowFiles: Set<String> = [
+            "Code/CodeViewSupport.swift", "Code/CodeRiskRows.swift",
+            "Git/ContributorRows.swift", "Git/GitInsightsCharts.swift",
+            "Dependencies/DependencyVerdictRows.swift",
+        ]
+        let proseTiers = ["label", "microLabel", "narrative", "body", "cardTitle", "pageTitle"]
+        var proseFonts: [String] = []
+        var missingRhythm: [String] = []
+        for file in try wsLSources() {
+            for (index, line) in file.lines.enumerated() {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.starts(with: "//") else { continue }
+                if proseTiers.contains(where: { trimmed.contains(".font(Theme.Typo.\($0).font)") }) {
+                    proseFonts.append("\(file.name):\(index + 1): \(trimmed.prefix(60))")
+                }
+            }
+            if rowFiles.contains(file.name), !file.body.contains(".dataTableRow()") {
+                missingRhythm.append(file.name)
+            }
+        }
+        XCTAssertTrue(proseFonts.isEmpty,
+                      "散文文本要走 CodeGitType.prose，数字才保证等宽：\n\(proseFonts.joined(separator: "\n"))")
+        XCTAssertTrue(missingRhythm.isEmpty,
+                      "这些文件里有榜单行却没引用 .dataTableRow()：\(missingRhythm)")
+    }
+
+    func testRowRhythmComesFromOnePlace() {
+        XCTAssertEqual(DataRowMetrics.verticalPadding, Theme.Spacing.xs)
+        XCTAssertEqual(DataRowMetrics.rowGap, Theme.Spacing.xxs)
+        XCTAssertEqual(DataRowMetrics.cellGap, Theme.Spacing.sm)
+        XCTAssertEqual(DataRowMetrics.minRowHeight,
+                       Theme.Layout.minHitTarget + Theme.Spacing.sm,
+                       "行高下限必须可由令牌复算，不接受孤立数字")
+        XCTAssertGreaterThanOrEqual(DataRowMetrics.minRowHeight, Theme.Layout.minHitTarget)
+    }
+
+    // MARK: - 防回潮棘轮（只扫 WS-L 名下四个目录）
+
+    /// 元测试：证明上面那条棘轮不是空跑。
+    /// 每条禁令都要能被一行合成违例命中，否则扫描会变成"永远绿的假安心"。
+    func testRatchetPatternsActuallyDetectTheirOwnViolations() throws {
+        let samples: [(String, String)] = [
+            ("裸字号", #"        Text(x).font(.system(size: 9))"#),
+            ("Theme 兼容桥旧色彩入口", "        tint: Theme.accent,"),
+            ("Theme.color(for:)", "        .foregroundStyle(Theme.color(for: risk))"),
+            ("裸颜色字面量", #"    Color(hex: "5C8DFF"), Color(red: 0.5, green: 0.5, blue: 0.5)"#),
+            ("自造透明度", "        .background(status.tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 3))"),
+            ("旧分隔线", "                Divider().opacity(0.4)"),
+            ("冻结在 Dashboard 的旧件", "            BannerRow(text: note, style: .warning)"),
+            ("数字 padding", "            .padding(16)"),
+            ("数字 spacing", "        VStack(spacing: 3) {"),
+            ("数字尺寸", "                .frame(width: 4, height: 34)"),
+            ("行内上下留白绕过 dataTableRow", "        .padding(.vertical, Theme.Spacing.xxs)"),
+            ("未登记的裸符号串", #"            Image(systemName: "arrow.up.forward.app")"#),
+            ("页面直取 Typo 档而没走等宽入口", "                    .font(Theme.Typo.microLabel.font)"),
+            ("绕过 dataTableRow 的行内留白", "                VStack(spacing: Theme.Spacing.xs) {"),
+        ]
+        for (name, sample) in samples {
+            XCTAssertTrue(try wsLForbiddenPattern(named: name).firstMatch(
+                in: sample, range: NSRange(location: 0, length: sample.utf16.count)) != nil,
+                "禁令「\(name)」匹配不到它本应抓住的写法：\(sample)")
+        }
+    }
+
+    private func wsLForbiddenPattern(named name: String) throws -> NSRegularExpression {
+        let pattern = try XCTUnwrap(Self.forbiddenRawValues.first { $0.name == name }?.pattern,
+                                    "棘轮里没有这条禁令：\(name)")
+        return try NSRegularExpression(pattern: pattern)
+    }
+
+    /// 视图层禁止出现的写法（WS-I §6 的"零新增"断言，作用域只限 WS-L 名下四个目录）。
+    /// 注释行不算违例：注释里要引用旧值才能说明为什么换掉它。
+    /// `pagesOnly` 的三条只约束页面层——基座 `CodeGit/` 是组件实现点：
+    /// `.padding(.vertical` 与 `.font(Theme.Typo.…)` 正是它对外提供 `dataTableRow()`
+    /// 与 `CodeGitType.prose()` 的地方，在基座里禁掉等于把定义本身删掉。
+    /// 每条禁令都由 `testRatchetPatternsActuallyDetectTheirOwnViolations` 反向验一次，
+    /// 防止界符写错导致扫描空转（本项目上一轮就真的空转过）。
+    static let forbiddenRawValues: [(name: String, pattern: String, pagesOnly: Bool)] = [
+        ("裸字号", #"\.system\(size:"#, false),
+        ("Theme 兼容桥旧色彩入口", #"Theme\.(accent|healthy|caution|danger|critical|neutral|gridLine|cardBackground|subtleBackground|monoSmall|monoBody|metricNumber|heroNumber)\b"#, false),
+        ("Theme.color(for:)", #"Theme\.color\(for"#, false),
+        ("裸颜色字面量", #"Color\((hex|red):"#, false),
+        ("自造透明度", #"\.opacity\(0\.[0-9]"#, false),
+        ("旧分隔线", #"Divider\(\)"#, false),
+        ("冻结在 Dashboard 的旧件", #"(BannerRow|StatLine|LanguageBar)\("#, false),
+        ("数字 padding", #"\.padding\((\.[a-z]+, )?[0-9]"#, false),
+        ("数字 spacing", #"spacing: [0-9]"#, false),
+        ("数字尺寸", #"\b(width|minHeight|maxHeight|height): [0-9]"#, false),
+        ("行内上下留白绕过 dataTableRow", #"\.padding\(\.vertical"#, true),
+        ("未登记的裸符号串", ##"Image\(systemName: ""##, false),
+        ("页面直取 Typo 档而没走等宽入口", #"\.font\(Theme\.Typo\.(label|microLabel|narrative|body|cardTitle|pageTitle)\.font"#, true),
+        ("绕过 dataTableRow 的行内留白", #"VStack\(spacing: Theme\.Spacing"#, true),
+    ]
+
+    /// WS-I §6 提的"零新增"断言，落在本流自己的目录上：
+    /// 视图层不得再出现裸字号/裸色/裸间距/旧兼容桥入口，注释里引用旧值做说明不算违例。
+    func testRestyledPagesCarryNoRawVisualValues() throws {
+        let forbidden = Self.forbiddenRawValues
+        var violations: [String] = []
+        for (name, pattern, pagesOnly) in forbidden {
+            let regex = try NSRegularExpression(pattern: pattern)
+            for file in try wsLSources() where !pagesOnly || !file.name.hasPrefix("CodeGit/") {
+                for (index, line) in file.lines.enumerated() {
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    if trimmed.starts(with: "//") { continue }
+                    if regex.firstMatch(in: trimmed, range: NSRange(location: 0,
+                                                                    length: trimmed.utf16.count)) != nil {
+                        violations.append("\(name) → \(file.name):\(index + 1): \(trimmed.prefix(64))")
+                    }
+                }
+            }
+        }
+        XCTAssertTrue(violations.isEmpty,
+                      "WS-L 名下页面出现回潮值（\(violations.count) 处）：\n" + violations.joined(separator: "\n"))
+    }
+
+    /// 字号下限：本流页面只允许取 `Theme.Typo` 档位，而最低一档 `microLabel` 是 10pt。
+    func testSmallestTypefaceOnMyPagesIsAtLeastTenPoints() throws {
+        XCTAssertGreaterThanOrEqual(Theme.Typo.microLabel.size, 10,
+                                    "低于 10pt 的中文在 macOS 上几乎糊成一团（WS-H §4.2）")
+        let text = try wsLSources().map(\.body).joined(separator: "\n")
+        XCTAssertFalse(text.contains(".caption2"), "语义 .caption2 会掉到 10pt 以下")
+        XCTAssertFalse(text.contains("font(.caption"), "本流页面一律用 Theme.Typo 档位取字")
+    }
+
+    private struct SourceFile { let name: String; let body: String
+        var lines: [String] { body.components(separatedBy: "\n") } }
+
+    private func wsLSources() throws -> [SourceFile] {
+        let views = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // Tests/TcoderMonitorTests
+            .deletingLastPathComponent()   // Tests
+            .deletingLastPathComponent()   // TcoderMonitor
+            .appendingPathComponent("Sources/TcoderMonitor/Views")
+        let fm = FileManager.default
+        var out: [SourceFile] = []
+        for dir in ["Code", "Git", "Dependencies", "CodeGit"] {
+            let url = views.appendingPathComponent(dir)
+            let names = (try? fm.contentsOfDirectory(atPath: url.path)) ?? []
+            for name in names.sorted() where name.hasSuffix(".swift") {
+                let file = url.appendingPathComponent(name)
+                guard let body = try? String(contentsOf: file, encoding: .utf8) else { continue }
+                out.append(SourceFile(name: "\(dir)/\(name)", body: body))
+            }
+        }
+        XCTAssertEqual(out.count, 14, "WS-L 名下应有 14 个视图文件（Code 4 / Git 5 / Dependencies 2 / CodeGit 3），数量变了说明归属被动过")
+        return out
+    }
 }
+
+private extension GitDataAbsence {
+    /// 标题是否出现重复——一旦有人把两种"没有数据"合回一句「……或……」，这里就会红。
+    static func hasDuplicateTitles() -> Bool {
+        let titles: [String] = [
+            GitDataAbsence.notARepository.copy!.title,
+            GitDataAbsence.repositoryWithoutCommits.copy!.title,
+            GitDataAbsence.commitsUnparsed(total: 7).copy!.title,
+            GitDataAbsence.commitsWithoutAuthors(total: 7).copy!.title,
+        ]
+        return Set(titles).count != titles.count
+    }
+}
+

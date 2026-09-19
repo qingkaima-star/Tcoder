@@ -31,7 +31,7 @@ struct GitCommitTrendChart: View {
                 x: .value("时间", bucket.date, unit: calendarUnit),
                 y: .value("提交", bucket.commits)
             )
-            .foregroundStyle(Theme.Chart.color(at: 0))
+            .foregroundStyle(Theme.Chart.color(at: CodeGitCategoryColor.aggregateIndex))
             .cornerRadius(Self.barCorner)
         }
         .chartXAxis {
@@ -87,20 +87,22 @@ struct GitActivityHeatmap: View {
     private static let peakAlpha = Theme.Palette.Opacity.gradientBottom
     /// 星期标签列宽：容纳「周三」两个汉字 + 一字母余量。
     private static let rowLabelWidth = Theme.Spacing.xl
+    /// 矩阵格子的间隙属图表几何，不是榜单行节奏——所以它不走 `DataRowMetrics`，
+    /// 但也不留裸 `VStack(spacing: Theme.Spacing…)`，免得下一个人以为漏了统一。
+    private static let cellGap = Theme.Spacing.xxs
 
     var body: some View {
-        VStack(spacing: Theme.Spacing.xxs) {
+        VStack(spacing: Self.cellGap) {
             ForEach(0..<7, id: \.self) { weekday in
-                HStack(spacing: Theme.Spacing.xxs) {
+                HStack(spacing: Self.cellGap) {
                     Text(Self.weekdayNames[weekday])
-                        .font(Theme.Typo.microLabel.font)
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                         .frame(width: Self.rowLabelWidth, alignment: .leading)
                     ForEach(0..<24, id: \.self) { hour in
                         let strength = intensity(hour: hour, weekday: weekday)
                         Rectangle()
-                            .fill(Theme.Chart.color(at: 0)
+                            .fill(Theme.Chart.color(at: CodeGitCategoryColor.aggregateIndex)
                                 .opacity(Self.idleAlpha + (Self.peakAlpha - Self.idleAlpha) * strength))
                             .frame(maxWidth: .infinity, minHeight: Self.rowLabelWidth)
                             .help("\(Self.weekdayNames[weekday]) \(hour):00 — 近似强度 "
@@ -108,7 +110,7 @@ struct GitActivityHeatmap: View {
                     }
                 }
             }
-            HStack(spacing: Theme.Spacing.xxs) {
+            HStack(spacing: Self.cellGap) {
                 Color.clear.frame(width: Self.rowLabelWidth, height: Theme.Stroke.hairline)
                 ForEach(0..<24, id: \.self) { hour in
                     Text([0, 6, 12, 18].contains(hour) ? "\(hour)" : "")
@@ -149,7 +151,7 @@ struct GitCommitRow: View {
     private var columns: [DataGridColumn] { DataColumns.recentCommits }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
+        HStack(alignment: .firstTextBaseline, spacing: DataRowMetrics.cellGap) {
             Text(String(commit.sha.prefix(7)))
                 .font(CodeGitType.path)
                 .foregroundStyle(Theme.Semantic.accent.textColor)
@@ -158,12 +160,11 @@ struct GitCommitRow: View {
 
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 Text(commit.subject)
-                    .font(Theme.Typo.body.font)
+                    .font(CodeGitType.prose(Theme.Typo.body))
                     .lineLimit(1)
                 Text("\(commit.author.isEmpty ? "未知作者" : commit.author) · "
                     + "\(LogRecency.describe(commit.date)) · "
                     + "\(DateFormat.full.string(from: commit.date))")
-                    .font(Theme.Typo.microLabel.font)
                     .monospacedDigit()
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
@@ -188,7 +189,7 @@ struct GitCommitRow: View {
                 .foregroundStyle(Theme.Semantic.danger.textColor)
                 .tableCell(DataColumns.column(columns, 4))
         }
-        .padding(.vertical, Theme.Spacing.xxs)
+        .dataTableRow()
     }
 }
 
@@ -200,7 +201,7 @@ struct GitNestedCandidateRow: View {
     let columns: [DataGridColumn]
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
+        HStack(alignment: .firstTextBaseline, spacing: DataRowMetrics.cellGap) {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
                 ThemedIcon(isAnalyzed ? .noRisk : .emptyUnknown, role: .badge,
                            label: isAnalyzed ? "当前分析对象" : "未被分析")
@@ -210,7 +211,7 @@ struct GitNestedCandidateRow: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                     HStack(spacing: Theme.Spacing.xs) {
                         Text(candidate.directoryName)
-                            .font(Theme.Typo.body.font)
+                            .font(CodeGitType.prose(Theme.Typo.body))
                             .lineLimit(1)
                         if isAnalyzed {
                             SemanticBadge("当前分析对象", role: Theme.Semantic.accent, icon: .info)
@@ -240,11 +241,10 @@ struct GitNestedCandidateRow: View {
                 .tableCell(DataColumns.column(columns, 2))
 
             Text(candidate.lastCommitAt.map { LogRecency.describe($0) } ?? "无提交")
-                .font(Theme.Typo.microLabel.font)
                 .monospacedDigit()
                 .foregroundStyle(.tertiary)
                 .tableCell(DataColumns.column(columns, 3))
         }
-        .padding(.vertical, Theme.Spacing.xxs)
+        .dataTableRow()
     }
 }

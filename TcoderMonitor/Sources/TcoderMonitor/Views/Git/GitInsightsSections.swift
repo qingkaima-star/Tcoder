@@ -8,6 +8,18 @@ import SwiftUI
 
 // MARK: - 空态
 
+extension GitDataAbsence {
+    /// 数据不在场时的空态视图。三态措辞由 `GitDataAbsence.copy` 决定，
+    /// 页面只负责给"数据在场却仍然没有这一份明细"的兜底说法。
+    @ViewBuilder func emptyState(fallback: () -> EmptyStateView) -> some View {
+        if let copy {
+            EmptyStateView(icon: copy.icon, title: copy.title, message: copy.message)
+        } else {
+            fallback()
+        }
+    }
+}
+
 enum GitInsightsEmptyState {
     static var missingAnalysis: some View {
         EmptyStateView(
@@ -49,12 +61,10 @@ struct GitRepositorySourceSection: View {
                         .textSelection(.enabled)
                     Spacer(minLength: Theme.Spacing.xs)
                     Text(Self.discoveryCaption(git))
-                        .font(Theme.Typo.microLabel.font)
                         .monospacedDigit()
                         .foregroundStyle(.tertiary)
                 }
                 Text(Self.discoveryDetail(git))
-                    .font(Theme.Typo.microLabel.font)
                     .monospacedDigit()
                     .foregroundStyle(.tertiary)
             }
@@ -220,7 +230,6 @@ struct GitActivitySection: View {
             } else {
                 GitActivityHeatmap(hourCounts: git.activityByHour, weekdayCounts: git.activityByWeekday)
                 Text(Self.busiestCaption(git))
-                    .font(Theme.Typo.microLabel.font)
                     .monospacedDigit()
                     .foregroundStyle(.tertiary)
             }
@@ -241,7 +250,7 @@ struct GitRepositoryInfoSection: View {
 
     var body: some View {
         GlassSection("仓库信息", subtitle: "分析于 \(LogRecency.describe(git.analyzedAt))", icon: .git) {
-            VStack(spacing: Theme.Spacing.sm) {
+            VStack(spacing: DataRowMetrics.rowGap) {
                 DataFieldRow(label: "当前分支", value: git.branch.isEmpty ? "未记录" : git.branch,
                              style: .text, valueColor: Theme.Semantic.accent.textColor)
                 DataRowSeparator()
@@ -299,7 +308,7 @@ struct GitNestedCandidatesSection: View {
                 subtitle: "当前只分析了提交数最多的那一个；要单独分析其中某个，直接把它添加为项目",
                 icon: .package
             ) {
-                VStack(spacing: Theme.Spacing.xs) {
+                VStack(spacing: DataRowMetrics.rowGap) {
                     DataTableHeader(columns: Self.columns)
                     ForEach(git.nestedCandidates) { candidate in
                         GitNestedCandidateRow(candidate: candidate,
@@ -329,13 +338,16 @@ struct GitRecentCommitsSection: View {
             icon: .processes
         ) {
             if git.recentCommits.isEmpty {
-                EmptyStateView(
-                    icon: .git,
-                    title: "无提交记录",
-                    message: "该仓库没有任何可读取的提交，或 Git 分析被跳过。"
-                )
+                git.commitAbsence.emptyState {
+                    EmptyStateView(
+                        icon: .unverified,
+                        title: "本次没有取回最近提交明细",
+                        message: "历史里有提交，但提交记录本身没有带回任何一行（旧报告或分析中断都会这样）。\n"
+                            + "趋势与作者统计仍按已解析的部分给出，这里只说明明细缺失。"
+                    )
+                }
             } else {
-                VStack(spacing: Theme.Spacing.xs) {
+                VStack(spacing: DataRowMetrics.rowGap) {
                     DataTableHeader(columns: DataColumns.recentCommits)
                     let rows = Array(git.recentCommits.prefix(Self.displayLimit))
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, commit in

@@ -13,12 +13,10 @@ struct ContributorsView: View {
         DataPageScaffold {
             if let git = report?.git {
                 if git.authors.isEmpty {
-                    EmptyStateView(
-                        icon: .people,
-                        title: "该仓库暂无贡献者数据",
-                        message: "仓库可能是空仓库，或历史里只有不带作者信息的合并提交。\n"
-                            + "提交一次普通改动后重新分析即可看到排行。"
-                    )
+                    git.authorAbsence.emptyState {
+                        EmptyStateView(icon: .people, title: "没有可展示的贡献者",
+                                       message: "作者数据缺失，排行与占比都不成立。")
+                    }
                 } else {
                     let authors = ContributorAnalysis.sorted(git.authors)
                     ContributorBusFactorSection(git: git)
@@ -171,7 +169,7 @@ struct ContributorRankingSection: View {
                 + "\(NumberFormat.grouped(authors.count)) 人 · \(git.commitScope.headline)",
             icon: .people
         ) {
-            VStack(spacing: Theme.Spacing.sm) {
+            VStack(spacing: DataRowMetrics.rowGap) {
                 ForEach(Array(shown.enumerated()), id: \.element.id) { index, author in
                     ContributorRow(author: author, rank: index + 1, git: git)
                     if index < shown.count - 1 {
@@ -180,7 +178,6 @@ struct ContributorRankingSection: View {
                 }
                 if authors.count > Self.displayLimit {
                     Text("另有 \(NumberFormat.grouped(authors.count - Self.displayLimit)) 位贡献者未展示")
-                        .font(Theme.Typo.microLabel.font)
                         .monospacedDigit()
                         .foregroundStyle(.tertiary)
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -208,13 +205,13 @@ struct ContributorConcentrationSection: View {
                 + scope.windowSuffix,
             icon: .chartLine
         ) {
-            VStack(spacing: Theme.Spacing.xs) {
+            VStack(spacing: DataRowMetrics.rowGap) {
                 DataTableHeader(columns: DataColumns.shareBar)
                 DataShareBarRow(
                     label: "前 3 名合计",
                     detail: "\(NumberFormat.grouped(topCommits)) 次",
                     fraction: Double(topCommits) / Double(base),
-                    tint: Theme.Chart.color(at: 0)
+                    tint: Theme.Chart.color(at: CodeGitCategoryColor.aggregateIndex)
                 )
                 ForEach(top) { author in
                     DataShareBarRow(

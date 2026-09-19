@@ -144,3 +144,75 @@ extension GitInsights {
         return Double(author.commits) / Double(base)
     }
 }
+
+// MARK: - "没有数据"到底是哪一种没有
+
+/// `40 WS-H` §7.3 的三态在 Git 页的落点。
+///
+/// 原来两处文案都写成"没有提交记录，**或** Git 分析被跳过"——把"查了是空的"和
+/// "根本没查"塞进同一句话，用户只能自己猜。现在按数据在场情况三分，措辞互斥。
+enum GitDataAbsence: Equatable {
+    /// 该目录不是仓库（或被定位成了非仓库）：不适用，不是零。
+    case notARepository
+    /// 是仓库、分析也跑了，但真的一条提交都没有：这是测得的 0。
+    case repositoryWithoutCommits
+    /// 有提交，但一条都没解析成功（全是合并提交、或时间戳/作者字段读不出）。
+    case commitsUnparsed(total: Int)
+    /// 提交解析出来了，作者字段却一条都没有：作者数据缺失，不是「零贡献者」。
+    case commitsWithoutAuthors(total: Int)
+    /// 数据在场。
+    case available
+
+    var copy: GitAbsenceCopy? {
+        switch self {
+        case .notARepository:
+            return GitAbsenceCopy(
+                icon: .emptyUnknown,
+                title: "该目录不是 Git 仓库",
+                message: "分析器在所选目录及其上下若干层里都没有找到仓库根。\n"
+                    + "这是「不适用」，不是「没有提交」——仓库在别处时请把它单独添加为项目。")
+        case .repositoryWithoutCommits:
+            return GitAbsenceCopy(
+                icon: .noRisk,
+                title: "已完成分析，这个仓库还没有提交",
+                message: "0 次提交是这次测得的结果，不是没扫。\n提交一次普通改动后重新分析，这里就会出现趋势与作者。")
+        case .commitsWithoutAuthors(let total):
+            return GitAbsenceCopy(
+                icon: .unverified,
+                title: "解析到了提交，但没有作者信息",
+                message: "本次解析到 \(NumberFormat.grouped(total)) 次非合并提交，却没有一条带得出作者字段。\n"
+                    + "这是作者数据缺失，不是「零贡献者」，因此排行与占比都不成立。")
+        case .commitsUnparsed(let total):
+            return GitAbsenceCopy(
+                icon: .unverified,
+                title: "有 \(NumberFormat.grouped(total)) 次提交，但一条都没解析出来",
+                message: "通常是历史里全部为合并提交，或提交的作者与时间戳字段读不出来。\n"
+                    + "因此作者、提交趋势与时段分布都不成立，这里不给任何结论。")
+        case .available:
+            return nil
+        }
+    }
+}
+
+struct GitAbsenceCopy {
+    let icon: IconName
+    let title: String
+    let message: String
+}
+
+extension GitInsights {
+    /// 提交层面的在场判定：先看是不是仓库，再看有没有提交，最后看解析没解析出来。
+    var commitAbsence: GitDataAbsence {
+        guard isRepository else { return .notARepository }
+        guard totalCommits > 0 else { return .repositoryWithoutCommits }
+        guard commitsAnalyzed > 0 else { return .commitsUnparsed(total: totalCommits) }
+        return .available
+    }
+
+    /// 作者层面的在场判定（贡献者页空态用它，与提交页的措辞互斥）。
+    var authorAbsence: GitDataAbsence {
+        let commits = commitAbsence
+        guard case .available = commits else { return commits }
+        return authors.isEmpty ? .commitsWithoutAuthors(total: commitsAnalyzed) : .available
+    }
+}

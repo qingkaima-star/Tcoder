@@ -88,7 +88,7 @@ struct ContributorRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
+            HStack(alignment: .firstTextBaseline, spacing: DataRowMetrics.cellGap) {
                 ContributorAvatar(author: author, tint: tint, side: Self.avatarSide)
                 VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                     HStack(spacing: Theme.Spacing.xs) {
@@ -96,7 +96,7 @@ struct ContributorRow: View {
                             .font(CodeGitType.number(Theme.Typo.microLabel))
                             .foregroundStyle(ContributorAnalysis.rankRole(rank).textColor)
                         Text(ContributorAnalysis.displayName(author))
-                            .font(Theme.Typo.body.font.weight(.semibold))
+                            .font(CodeGitType.prose(Theme.Typo.body).weight(.semibold))
                             .lineLimit(1)
                     }
                     Text(ContributorAnalysis.email(author))
@@ -116,13 +116,12 @@ struct ContributorRow: View {
                         .help("代码变更量 \(NumberFormat.grouped(author.totalChurn)) 行 · "
                             + "触达 \(NumberFormat.grouped(author.filesTouched)) 个文件")
                     Text(author.lastActiveDescription)
-                        .font(Theme.Typo.microLabel.font)
                         .monospacedDigit()
                         .foregroundStyle(.tertiary)
                 }
             }
 
-            HStack(spacing: Theme.Spacing.sm) {
+            HStack(spacing: DataRowMetrics.cellGap) {
                 MiniBarGauge(fraction: share ?? 0, tint: tint, height: DataGaugeHeight.inline)
                     .frame(maxWidth: .infinity)
                 Text(share.map { NumberFormat.percent($0, precision: 1) }
@@ -137,7 +136,7 @@ struct ContributorRow: View {
 
             ContributorHourRow(counts: author.activityByHour, tint: tint)
         }
-        .padding(.vertical, Theme.Spacing.xxs)
+        .dataTableRow()
         .accessibilityElement(children: .combine)
         .accessibilityLabel("第 \(rank) 位 \(ContributorAnalysis.displayName(author))，"
             + "\(author.commits) 次提交，新增 \(author.additions) 行，删除 \(author.deletions) 行")
@@ -156,7 +155,7 @@ struct ContributorAvatar: View {
 
     var body: some View {
         Text(Self.initial(author: author))
-            .font(Theme.Typo.cardTitle.font)
+            .font(CodeGitType.prose(Theme.Typo.cardTitle))
             .foregroundStyle(tint)
             .frame(width: side, height: side)
             .background(tint.opacity(Theme.Palette.Opacity.badgeFill), in: Circle())
@@ -184,7 +183,6 @@ struct ContributorDirectoryChips: View {
         let directories = ContributorAnalysis.topDirectories(author)
         if directories.isEmpty {
             Text("未记录目录")
-                .font(Theme.Typo.microLabel.font)
                 .monospacedDigit()
                 .foregroundStyle(.tertiary)
         } else {
@@ -220,7 +218,6 @@ struct ContributorHourRow: View {
     var body: some View {
         HStack(spacing: Theme.Spacing.xs) {
             Text("时段")
-                .font(Theme.Typo.microLabel.font)
                 .monospacedDigit()
                 .foregroundStyle(.tertiary)
                 .frame(width: Self.labelWidth, alignment: .leading)
