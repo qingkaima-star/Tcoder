@@ -181,13 +181,15 @@ final class SelfScanDogfoodTests: SelfScanHarnessCase {
         // 钉（WS-B）：`historyTruncated = commitsAnalyzed < totalCommits` 比的是两个口径
         // （非合并窗口 vs 含 merge 全量），于是**只要仓库有 merge 提交它就永远为真**——
         // 而上面刚证明过窗口没被用满、非合并历史已被完整解析（commitsAnalyzed == 非合并全量）。
-        // 后果是 Git 页对每个有合并历史的仓库都拉一次警告横幅：
-        // `GitInsightsView.swift:82-87`「提交统计只覆盖最近 N 条…不代表全部历史」。
-        // WS-B 改成真判据（如 commitsAnalyzed >= 窗口上限，或比对
+        // 用户可见的那半已被 WS-L 修好：Git 页的口径横幅走
+        // `GitCommitScopeSection.message(for:)`，判据换成 `GitHistoryScope.isWindowTruncated`，
+        // 不再读这个被污染的字段——"每个有合并历史的仓库都拉一次警告"已不成立。
+        // 这里剩的是**模型字段本身**仍按错判据赋值（`ShellGitAnalyzer.makeInsights`）。
+        // WS-B 把它改成真判据（如 commitsAnalyzed >= 窗口上限，或比对
         // `rev-list --count --no-merges HEAD`）之后，请把这里翻正为 XCTAssertFalse。
         XCTAssertTrue(git.historyTruncated,
-                      "截断旗不再被 merge 污染了？改成 XCTAssertFalse，"
-                    + "并确认 GitInsightsView.swift:82 的横幅只在真截断时出现")
+                      "模型字段不再被 merge 污染了？改成 XCTAssertFalse，"
+                    + "并确认横幅配色仍只在 isWindowTruncated 时取 warning")
     }
 
     // MARK: - 防作弊门 5：评分链路诚实性

@@ -208,7 +208,7 @@ final class SelfScanConventionGates: SelfScanHarnessCase {
     /// 分析器用 `git log --no-merges` 统计作者（分母 = 非合并），
     /// 而 `GitInsights.totalCommits` 含合并；协作分布拿含合并的当分母，
     /// 于是每有一次合并工作流合树，评分里的集中度就被稀释一次。
-    /// WS-L 已经在视图侧换成 `GitHistoryScope.authorBasis`（`ContributorRows.swift:42-43`
+    /// WS-L 已经在视图侧换成 `GitHistoryScope.authorBasis`（`ContributorRows.busFactorRisk(_:)`
     /// 明写了"模型是冻结的，它拿含合并的 totalCommits 做分母，仓库越大越低估"），
     /// **评分侧还没有**。这里把现状钉住，谁修谁翻正。
     // ⚠️ 本条断言的是**缺陷现状**，不是期望值。期望值 = 与 Git 页同分母：
@@ -246,7 +246,8 @@ final class SelfScanConventionGates: SelfScanHarnessCase {
 
     // MARK: - 巨大文件榜截断的机制测试（不依赖仓库当下有没有债）
 
-    /// 工具的巨大文件榜被 `prefix(20)` 截断（`FileSystemCodeAnalyzer.swift:151`），
+    /// 工具的巨大文件榜被 `prefix(20)` 截断
+    /// （`FileSystemCodeAnalyzer.hugeFiles(files:functionsPerFile:)` 的收尾），
     /// 而代码质量维度拿 `hugeFiles.count` 当普查分子。
     ///
     /// 上一版这条是"钉仓库现状"，WS-V 把超长文件拆完后前提就塌了（真实 >400 行
