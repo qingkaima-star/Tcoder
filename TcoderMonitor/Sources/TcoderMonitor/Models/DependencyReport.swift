@@ -34,6 +34,29 @@ struct DependencyReport: Codable, Equatable, Sendable {
         }
     }
     var distinctEcosystemNames: [String] { ecosystems.map { $0.ecosystem.displayName } }
+
+    /// Whether "zero vulnerabilities" is an actual finding rather than an absence of checking.
+    ///
+    /// `riskLevel` reads only `vulnerableCount`, so in the default offline state every project
+    /// would otherwise earn a green "无风险" badge, a per-row "正常" marker, and a
+    /// "未发现已知漏洞依赖" line in the paid health score's strengths. Those all assert
+    /// safety on evidence we never gathered.
+    ///
+    /// Consumers that would render an all-clear must branch on this and downgrade to a
+    /// neutral "未核对" state when it is `false`.
+    var hasVulnerabilityCoverage: Bool {
+        networkLookupPerformed || !advisories.isEmpty
+    }
+
+    /// Offline built-in rules only cover npm / Maven / Python, so an unchecking run on any
+    /// other ecosystem is not a clean bill of health — say which ones went unexamined.
+    var uncoveredEcosystemNames: [String] {
+        guard !networkLookupPerformed else { return [] }
+        let covered: Set<String> = ["npm", "maven", "python"]
+        return ecosystems.map { $0.ecosystem.displayName }
+            .filter { !covered.contains($0.lowercased()) }
+    }
+
 }
 
 struct EcosystemReport: Codable, Equatable, Identifiable, Sendable {
