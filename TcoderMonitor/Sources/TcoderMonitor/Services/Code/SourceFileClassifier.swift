@@ -342,6 +342,7 @@ final class SourceTreeScanner {
             errorHandler: { _, _ in true }
         ) else { return result }
 
+        result.skipLedger.linesCounted = auditing
         var plan = SourceSkipPlan(root: scanRoot, options: options)
         var batch: [URL] = []
         var candidateCount = 0
@@ -442,12 +443,23 @@ final class SourceTreeScanner {
 
             result.skippedFileCount += 1
             result.skipLedger.record(rejection.reason, path: url.path, bytes: bytes, rule: rejection.rule)
-            auditLines(of: url, bytes: bytes, reason: rejection.reason, into: &result.skipLedger)
+            let anchor = skipAnchor(reason: rejection.reason, rule: rejection.rule)
+            auditLines(of: url, bytes: bytes, reason: rejection.reason, into: &result.skipLedger, anchor: anchor)
         }
 
         let files = await Self.classifyConcurrently(urls: batch, root: scanRoot, options: options)
         merge(files, attempted: batch, into: &result)
         return result
+    }
+
+    /// 台账的行数归因键：后缀类规则用后缀本身，「无后缀」「超体积上限」这类没有名字可指的给一个稳定标签。
+    private func skipAnchor(reason: SourceSkipReason, rule: String?) -> String? {
+        switch reason {
+        case .missingExtension: return "(无后缀)"
+        case .oversize: return "体积超单文件上限"
+        case .unsupportedExtension, .binaryExtension: return rule
+        default: return rule
+        }
     }
 
     /// 判定一个文件条目是不是候选；返回 nil 表示候选。同时给出命中的具体规则项，供台账归因。
