@@ -31,21 +31,75 @@ cd "$WT/TcoderMonitor" || { echo "!! $WT 下没有 TcoderMonitor"; exit 1; }
 echo "==> 体检分支 $BRANCH（工作树 $WT）"
 
 fail=0
+# 日志必须**按分支隔离**。我曾把两边都写成固定路径 "$TEST_LOG"，
+# 于是并发的两次体检互相覆盖：c-runtime 与 ws/n-npmreg 的结论里打出了
+# 一字不差、连耗时都相同（`in 160.225 (201.499) seconds`）的汇总行——
+# 两个真实测试运行不可能耗时到小数点后三位一致，那说明它们读的是同一份被别人写过的日志。
+# 更糟的是并发交错把文件写成了二进制，grep 直接报 `Binary file matches`，
+# 那一次的 ✅ 等于没有任何依据。
+SLUG=$(printf '%s' "$BRANCH" | tr -c 'A-Za-z0-9._-' '_')
+RUN_TAG="$(date +%s)-$$"
+BUILD_LOG="/tmp/premerge-${SLUG}-build.log"
+TEST_LOG="/tmp/premerge-${SLUG}-test.log"
 # 先只编测试目标：最便宜地暴露"没写完的重构"，不用等整轮 test。
-if ! ./scripts/locked_build.sh build --build-tests > /tmp/premerge-build.log 2>&1; then
+if ! ./scripts/locked_build.sh build --build-tests > "$BUILD_LOG" 2>&1; then
   echo "  ❌ 测试模块编译不过，禁止合并"
-  grep -E "error:" /tmp/premerge-build.log | sed 's|.*/\(Tests\|Sources\)/|\1/|' | sort -u | head -10
+  grep -aE "error:" "$BUILD_LOG" | sed 's|.*/\(Tests\|Sources\)/|\1/|' | sort -u | head -10
   fail=1
 fi
 
 if [ "$fail" = "0" ]; then
-  if ! ./scripts/locked_build.sh test > /tmp/premerge-test.log 2>&1; then
-    echo "  ❌ 测试未通过，禁止合并"
-    grep -E "Executed [0-9]+ tests" /tmp/premerge-test.log | tail -1
-    grep -E "\.swift:[0-9]+: error:" /tmp/premerge-test.log | sed 's|.*/Tests/TcoderMonitorTests/||' | sort -u | head -10
+  # 日志自带本次运行的身份。只有标记**恰好出现一次**，才能证明下面读到的数字
+  # 是这一次跑出来的，而不是别的分支留在同一个文件里的。
+  { echo "PREMERGE-MARK branch=$BRANCH run=$RUN_TAG"
+    ./scripts/locked_build.sh test
+    echo "PREMERGE-RC=$?"; } > "$TEST_LOG" 2>&1
+  MARKS=$(grep -ac "^PREMERGE-MARK branch=$BRANCH run=$RUN_TAG\$" "$TEST_LOG")
+  RC=$(grep -a '^PREMERGE-RC=' "$TEST_LOG" | tail -1 | cut -d= -f2)
+  if [ "$MARKS" != "1" ]; then
+    echo "  ❌ 运行标记出现 ${MARKS} 次（应为 1）：日志被并发覆盖，本次结论不作数"
+    fail=1
+  elif [ "$RC" != "0" ]; then
+    echo "  ❌ 测试未通过（退出码 ${RC:-未取到}），禁止合并"
+    grep -aE "Executed [0-9]+ tests" "$TEST_LOG" | tail -1
+    grep -aE "\.swift:[0-9]+: error:" "$TEST_LOG" | sed 's|.*/Tests/TcoderMonitorTests/||' | sort -u | head -10
+    fail=1
+  fi
+fi
+
+# 退出码 0 并不等于"真的跑过测试"。我差点用一版只看退出码的门禁放行了自己写的
+# `--filter`（名字写错时 xctest 输出 `Executed 0 tests, with 0 failures`，是永真绿）。
+# 所以这里必须**正向断言**跑掉了多少例、失败了多少例，取不到汇总行就判失败。
+if [ "$fail" = "0" ]; then
+  SUMMARY=$(grep -aE "Executed [0-9]+ tests?" "$TEST_LOG" | tail -1)
+  if [ -z "$SUMMARY" ]; then
+    echo "  ❌ 测试日志里没有汇总行，无法证明跑过测试（取不到数字＝没跑）"
+    tail -5 "$TEST_LOG"
     fail=1
   else
-    grep -E "Executed [0-9]+ tests" /tmp/premerge-test.log | tail -1
+    RAN=$(printf '%s' "$SUMMARY" | sed -nE 's/.*Executed ([0-9]+) tests.*/\1/p')
+    # 失败数必须取**紧邻 failures 的那个数字**。xctest 有两种真实措辞：
+    #   Executed 378 tests, with 6 tests skipped and 0 failures (0 unexpected)
+    #   Executed 8 tests, with 0 failures (0 unexpected)
+    # 上一版按 "with ([0-9]+) failures" 取，被中间的 "6 tests skipped and" 挡住，
+    # 于是把两个本来全绿的分支判红（方向没错，但结论是假的、消息还误导人）。
+    FAILED=$(printf '%s' "$SUMMARY" | sed -nE 's/.*[^0-9]([0-9]+) failures?.*/\1/p')
+    UNEXPECTED=$(printf '%s' "$SUMMARY" | sed -nE 's/.*[^0-9]([0-9]+) unexpected.*/\1/p')
+    echo "  汇总行：$SUMMARY"
+  fi
+  if [ "$fail" = "0" ]; then
+    if [ -z "$RAN" ] || [ -z "$FAILED" ]; then
+      echo "  ❌ 汇总行取不到用例数/失败数，按未验证处理"
+      fail=1
+    elif [ "$RAN" -le 0 ]; then
+      echo "  ❌ 实际执行 0 例，禁止合并：没有任何测试被跑到"
+      fail=1
+    elif [ "$FAILED" != "0" ] || [ "${UNEXPECTED:-0}" != "0" ]; then
+      echo "  ❌ ${FAILED} 例失败 / ${UNEXPECTED:-?} 例意外（共 ${RAN} 例），禁止合并"
+      fail=1
+    else
+      echo "  ✅ 全绿：${RAN} 例执行、0 失败"
+    fi
   fi
 fi
 
