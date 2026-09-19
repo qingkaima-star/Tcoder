@@ -10,6 +10,8 @@ FX="${1:-/tmp/tcoder-fixture}"
 SUPPORT="$HOME/Library/Application Support/TcoderMonitor"
 UUID="11111111-2222-3333-4444-555555555555"
 APP="dist/Tcoder Monitor.app"
+# 窗口列举器随仓库走，不放 /tmp：重启即失效会让取证静默退化成"无窗口"
+WINLIST="$PWD/scripts/winlist.swift"
 
 if [ ! -d "$FX" ]; then echo "!! 夹具目录不存在: $FX"; exit 1; fi
 
@@ -72,7 +74,7 @@ if ! grep -q "$UUID" "$SUPPORT/projects.json" 2>/dev/null; then
   echo "!! 预置项目已被回写覆盖，取证不作数"; exit 1
 fi
 
-WIN=$(xcrun swift /tmp/winlist.swift "$PID" 2>/dev/null | head -1 | cut -f1 || true)
+WIN=$(xcrun swift "$WINLIST" "$PID" 2>/dev/null | head -1 | cut -f1 || true)
 if [ -n "$WIN" ]; then
   screencapture -x -o -l"$WIN" /tmp/tcoder_e2e.png && echo "    截图 -> /tmp/tcoder_e2e.png (window $WIN)"
 else
