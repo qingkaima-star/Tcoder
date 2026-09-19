@@ -350,6 +350,10 @@ extension CodeAnalyzerTests {
         _ = try write("puts 1\nputs 2\nputs 3\n", to: "vendor/Deep.rb", in: root)                     // 3 行，排除目录
         _ = try write("project(x)\ninstall(FILES a)\n", to: "sub/CMakeLists.cmake", in: root)         // 2 行，后缀未收录
         _ = try write("MIT\nLicense\n", to: "LICENSE", in: root)                                       // 2 行，无后缀
+        let symlink = root.appendingPathComponent("alias.swift")
+        try? fm.removeItem(at: symlink)
+        try fm.createSymbolicLink(at: symlink, withDestinationURL: root.appendingPathComponent("Keep.swift"))
+        // 软链接刻意不跟随：它进台账但没有行数，正是「行数不适用」与「0 行」必须区分的那一类
 
         let opts = options(skipDirectories: ["vendor"], binaryExtensions: ["png"])
         let outcome = try await FileSystemCodeAnalyzer().analyzeWithCoverage(root: root, options: opts)
@@ -375,6 +379,15 @@ extension CodeAnalyzerTests {
         let plainLines = plain.clearing(linesCounted: false)
         XCTAssertTrue(plainLines.allSatisfy { !$0.contains(" 0 行") && !$0.contains("· 0 行") },
                       "未审计时不得出现「0 行」这种把缺数据当零的写法：\(plainLines)")
+        XCTAssertTrue(plainLines.contains { $0.contains("行数未统计") }, "没数过的桶必须明说：\(plainLines)")
+        // 审计模式下也一样：目录/符号链接/隐藏项这些从不读内容的桶，不得显示「0 行」
+        let audited = try await FileSystemCodeAnalyzer()
+            .skipLedger(root: root, options: opts, countSkippedLines: true)
+        let auditedLines = audited.clearing(linesCounted: true)
+        XCTAssertTrue(auditedLines.contains { $0.contains("符号链接") && $0.contains("行数不适用") },
+                      "\(auditedLines)")
+        XCTAssertFalse(auditedLines.contains { $0.contains("符号链接") && $0.contains(" 0 行") },
+                       "\(auditedLines)")
     }
 
     // MARK: - Q. 覆盖度：上限生效过就不能把结果当全量（WS-D 诚实性审计 P1 #7 / #8）

@@ -30,6 +30,20 @@ enum SourceSkipReason: String, Sendable, CaseIterable {
 }
 
 extension SourceSkipReason {
+    /// 这一类条目的行数到底数没数过：目录本身、符号链接、隐藏项、读不出内容的，
+    /// 一律 false —— 它们显示「0 行」就是把「没数」当成「没有」，正是本工作流反对的那类过头宣称。
+    var linesAreCountable: Bool {
+        switch self {
+        case .excludedDirectoryContent, .missingExtension, .binaryExtension,
+             .unsupportedExtension, .oversize, .prunedPackageContents:
+            return true
+        case .symbolicLink, .hiddenEntry, .skippedDirectory, .excludedDirectoryNested,
+             .notARegularFile, .unreadable, .prunedPackageDir, .prunedHiddenContents,
+             .beyondFileCap:
+            return false
+        }
+    }
+
     /// 展示用中文名。放在类型扩展里而不是散在渲染代码里，保证台账与 UI 用同一套说法。
     var displayName: String {
         switch self {
@@ -121,11 +135,17 @@ struct SourceSkipLedger: Sendable {
     func clearing(topRootCauses: Int = 4, linesCounted: Bool) -> [String] {
         entries().map { reason, bucket in
             var line = "\(reason.displayName) · \(NumberFormat.grouped(bucket.files)) 个条目"
-            if linesCounted {
+            if linesCounted, reason.linesAreCountable {
                 line += " · \(NumberFormat.grouped(bucket.lines)) 行"
+            } else if reason.linesAreCountable {
+                line += " · 行数未统计"
+            } else if case .prunedHiddenContents = reason {
+                line += " · 行数不统计（隐藏项刻意不读内容）"
+            } else {
+                line += " · 行数不适用（不是被读的文件）"
             }
             if bucket.bytes > 0 { line += " · \(bucket.byteDescription)" }
-            if linesCounted, !bucket.lineRules.isEmpty {
+            if linesCounted, reason.linesAreCountable, !bucket.lineRules.isEmpty {
                 let causes = bucket.lineRules.sorted { $0.value > $1.value }.prefix(topRootCauses)
                     .map { "\($0.key) \(NumberFormat.grouped($0.value)) 行" }
                     .joined(separator: "、")
