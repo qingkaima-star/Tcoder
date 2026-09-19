@@ -635,6 +635,102 @@ final class HealthScoreTests: XCTestCase {
         return code
     }
 
+    /// 依赖维度必须区分「没查过」与「查了且零命中」——同一条「没有证据 ≠ 好证据」原则。
+    func testUnverifiedDependencyHealthCannotReachFullMarks() {
+        let unchecked = HealthCurves.dependencyHealth(vulnerableCount: 0, outdatedCount: 0,
+                                                      totalDependencies: 140, evidence: .unchecked)
+        XCTAssertLessThan(unchecked.score, 100, "没联网核对不得给满分")
+        XCTAssertLessThanOrEqual(unchecked.score, Double(VulnerabilityEvidence.uncappedCeiling),
+                                 "未核对必须封顶在 B 档上沿，实得 \(unchecked.score)")
+        XCTAssertTrue(unchecked.detail.contains("未启用漏洞核对"),
+                      "detail 必须写清为什么不是满分，实得 \(unchecked.detail)")
+        XCTAssertNotEqual(unchecked.risk, .none, "没查过就不许报「无风险」，实得 \(unchecked.risk.rawValue)")
+
+        let degraded = HealthCurves.dependencyHealth(vulnerableCount: 0, outdatedCount: 0,
+                                                     totalDependencies: 140, evidence: .degraded)
+        XCTAssertLessThanOrEqual(degraded.score, Double(VulnerabilityEvidence.uncappedCeiling))
+        XCTAssertTrue(degraded.detail.contains("漏洞核对未完成"), "实得 \(degraded.detail)")
+
+        // 唯一能拿满分的第三种：确实查过、确实零命中。
+        let verified = HealthCurves.dependencyHealth(vulnerableCount: 0, outdatedCount: 0,
+                                                     totalDependencies: 140, evidence: .verified)
+        XCTAssertGreaterThan(verified.score, 95, "已核对且零命中应当接近满分，实得 \(verified.score)")
+        XCTAssertFalse(verified.detail.contains("未启用"), "已核对时不得出现未核对措辞")
+
+        // 已有正向发现时不受封顶影响（结论本身就是证据），扣分照常。
+        let found = HealthCurves.dependencyHealth(vulnerableCount: 12, outdatedCount: 0,
+                                                  totalDependencies: 140, evidence: .unchecked)
+        XCTAssertLessThan(found.score, 40, "12 个漏洞必须重扣，实得 \(found.score)")
+        XCTAssertTrue(found.detail.contains("漏洞 12 个"))
+
+        // 默认参数保持旧签名可用（A~G 组的既有调用不受影响）。
+        XCTAssertEqual(HealthCurves.dependencyHealth(vulnerableCount: 0, outdatedCount: 0,
+                                                     totalDependencies: 140).score,
+                       verified.score, accuracy: 1e-9, "缺省证据状态必须是 .verified")
+    }
+
+    /// 服务层字段到证据状态的判定必须是纯函数且覆盖三态。
+    func testVulnerabilityEvidenceClassificationCoversAllServiceShapes() {
+        func report(_ mutate: (inout DependencyReport) -> Void) -> DependencyReport {
+            var deps = DependencyReport(ecosystems: [mavenEcosystem(total: 140, outdated: 0)])
+            mutate(&deps)
+            return deps
+        }
+        // 用户主动关着联网：performed=false 且没有任何说明。
+        XCTAssertEqual(VulnerabilityEvidence.classify(report { _ in () }), .unchecked,
+                       "allowNetwork=false 的默认形态必须判成未核对")
+        // 开了网、查完了。
+        XCTAssertEqual(VulnerabilityEvidence.classify(report {
+            $0.networkLookupPerformed = true
+            $0.networkLookupNote = "在线查询已完成（OSV + npm registry）"
+        }), .verified)
+        // 开了网但部分失败。
+        XCTAssertEqual(VulnerabilityEvidence.classify(report {
+            $0.networkLookupPerformed = true
+            $0.networkLookupNote = "OSV：52 个包中 3 个查询失败"
+        }), .degraded)
+        // 没查成的各种说明写法都不许改变结论：判据只看 performed，不猜 note 文案。
+        // （服务层将来给「用户关着联网」补如实说明是改进，不该反过来改变评分。）
+        for note in ["", "无", "本项目没有可在线查询的生态（SwiftPM / CocoaPods 不在 OSV 覆盖范围内）",
+                     "未启用联网核对"] {
+            XCTAssertEqual(VulnerabilityEvidence.classify(report { $0.networkLookupNote = note }), .unchecked,
+                           "performed=false 时无论 note 怎么写都必须是未核对，note=\(note)")
+        }
+        // 离线规则已有命中：结论本身就是证据，不再封顶。
+        var withVulnerabilities = report { _ in () }
+        withVulnerabilities.advisories = advisories(count: 3)
+        XCTAssertEqual(VulnerabilityEvidence.classify(withVulnerabilities), .verified)
+        XCTAssertEqual(withVulnerabilities.vulnerableCount, 3, "夹具必须真造出 3 个受影响依赖")
+    }
+
+    /// 端到端：评分器拿到的依赖维度不得因为「没联网」而白送高分。
+    func testScorerCapsDependencyDimensionWhenVulnerabilitiesUnchecked() {
+        let scorer = WeightedHealthScorer()
+        let unchecked = scorer.score(HealthInputs(dependencies: cleanDependencies()))
+        guard let offline = unchecked.components.first(where: { $0.name == HealthDimension.dependencies.rawValue }) else {
+            return XCTFail("有依赖清单时依赖健康维度必须在场")
+        }
+        XCTAssertLessThan(offline.score, 100, "没联网核对不得给 100 分")
+        XCTAssertLessThanOrEqual(Double(offline.score), Double(VulnerabilityEvidence.uncappedCeiling),
+                                 "实得 \(offline.score) 分，detail \(offline.detail)")
+        XCTAssertTrue(unchecked.recommendations.contains { $0.contains("联网") },
+                      "必须提示用户开启联网核对，实得 \(unchecked.recommendations)")
+        XCTAssertFalse(unchecked.strengths.contains("未发现已知漏洞依赖"),
+                       "没查过就不该把「未发现漏洞」当优点报出来，实得 \(unchecked.strengths)")
+
+        var checked = cleanDependencies()
+        checked.networkLookupPerformed = true
+        checked.networkLookupNote = "在线查询已完成（OSV + npm registry）"
+        let online = scorer.score(HealthInputs(dependencies: checked))
+        guard let onlineComponent = online.components.first(where: { $0.name == HealthDimension.dependencies.rawValue }) else {
+            return XCTFail("已核对时依赖健康维度必须在场")
+        }
+        XCTAssertGreaterThan(onlineComponent.score, offline.score, "同样零漏洞，查过必须比没查过得分高")
+        XCTAssertGreaterThanOrEqual(onlineComponent.score, 95)
+        XCTAssertTrue(online.strengths.contains { $0.contains("漏洞核对") },
+                      "已核对且干净才配进优点，实得 \(online.strengths)")
+    }
+
     func testScorerOverallNeverRisesWhenInputsGetWorse() {
         let scorer = WeightedHealthScorer()
         // 同一份基线只改一个因子，避免其它维度的噪声干扰单调性。
