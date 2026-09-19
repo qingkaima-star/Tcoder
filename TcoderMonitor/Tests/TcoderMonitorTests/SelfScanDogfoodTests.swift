@@ -9,6 +9,7 @@ import XCTest
 ///
 /// 完整证据转储默认跳过（避免刷屏同事的测试轮次），开法：
 ///   TCODER_SELF_SCAN=1 ./scripts/locked_build.sh test
+final class SelfScanDogfoodTests: SelfScanHarnessCase {
 
     private func hugeFilePaths(in metrics: CodeMetrics) -> Set<String> {
         Set(metrics.hugeFiles.map { URL(fileURLWithPath: $0.path).path })
@@ -51,100 +52,6 @@ import XCTest
         逐个清单（行数 → 该目录现归属 → 路径）：
         \(Self.hugeFileRoster(over))
         """)
-    }
-
-    // MARK: - 超限文件归人（只用于失败信息，不参与判定）
-
-    /// 第二轮（`AGENTS.md` §7 + 总工派工）把目录重切了一遍，所以按**现归属**报：
-    /// `Services/Health|Code|Logs`→WS-R、`Services/Dependencies`→WS-N、`Services/Performance`→WS-C、
-    /// `Views/Root|ProjectDetail|Dashboard`→WS-K、`Views/Code|Git|Dependencies|CodeGit`→WS-L、
-    /// `Views/Performance|Logs|Health|PerfLogs`→WS-M、`Design/**`+`App/Theme.swift`→WS-G。
-    private static func owner(ofPath path: String) -> String {
-        let name = URL(fileURLWithPath: path).lastPathComponent
-        if splitByWSV.contains(name) {
-            return "WS-V（本轮派拆；原文归 \(legacyOwner(ofPath: path))）"
-        }
-        return legacyOwner(ofPath: path)
-    }
-
-    /// 总工 2026-09-19 派给 WS-V 拆的测试文件名单。
-    private static let splitByWSV: Set<String> = [
-        "ManifestLabFixtureTests.swift", "HealthScoreTests.swift",
-        "LogAnalysisTests.swift", "GitDependencyTests.swift",
-    ]
-
-    private static func legacyOwner(ofPath path: String) -> String {
-        let name = URL(fileURLWithPath: path).lastPathComponent
-        // 测试文件按 `AGENTS.md` §3 写在纸面上的 glob 归口（第二轮只重切了
-        // Services/ 与 Views/，Tests/ 仍按原表），别拿目录规则去猜。
-        if name.hasSuffix("Tests.swift") {
-            if name.hasPrefix("Code") { return "WS-A（Tests/Code*）" }
-            if name.hasPrefix("Git") || name.hasPrefix("Dependency") { return "WS-B（Tests/Git*|Dependency*）" }
-            if name.hasPrefix("Log") || name.hasPrefix("Health") || name.hasPrefix("Performance") {
-                return "WS-C（Tests/Log*|Health*|Performance*）"
-            }
-            return "Tests/ 未命中 glob·报总工认领"
-        }
-        switch true {
-        case path.contains("/Sources/TcoderMonitor/Models/"), name == "Package.swift",
-             name == "AppState.swift", name == "TcoderMonitorApp.swift",
-             name == "ServiceContracts.swift", name == "ProjectStore.swift",
-             name == "SharedUtilities.swift", name == "DemoData.swift":
-            return "总工（冻结区）"
-        case name == "Theme.swift", path.contains("/Sources/TcoderMonitor/Design/"):
-            return "WS-G"
-        case name == "RootView.swift", name == "ProjectDetailView.swift", name == "DashboardView.swift":
-            return "WS-K"
-        case path.contains("/Views/Code/"), path.contains("/Views/Git/"),
-             path.contains("/Views/Dependencies/"), path.contains("/Views/CodeGit/"):
-            return "WS-L"
-        case path.contains("/Views/Performance/"), path.contains("/Views/Logs/"),
-             path.contains("/Views/Health/"), path.contains("/Views/PerfLogs/"):
-            return "WS-M"
-        case path.contains("/Services/Health/"), path.contains("/Services/Code/"),
-             path.contains("/Services/Logs/"):
-            return "WS-R"
-        case path.contains("/Services/Dependencies/"):
-            return "WS-N"
-        case path.contains("/Services/Performance/"):
-            return "WS-C"
-        case path.contains("/Services/Coverage/"):
-            return "WS-J（本流，唯一无主 Services 文件）"
-        case path.contains("/scripts/"):
-            return "WS-E（脚本）"
-        default:
-            return "未归属（报总工认领）"
-        }
-    }
-
-    /// 生产代码与测试代码分栏：只看一个合并数字，会分不清"产品又堆坨了"
-    /// 还是"测试文件待拆"——这两件事的责任人和紧迫度完全不同。
-    private static func productionSummary(_ over: [GroundTruthFile]) -> String {
-        let production = over.filter { $0.path.contains("/Sources/") }
-        guard !production.isEmpty else { return "生产代码（Sources/）：0 个超限，已达标" }
-        return "生产代码（Sources/）：\(production.count) 个超限 —— \(tally(production))"
-    }
-
-    private static func testFileSummary(_ over: [GroundTruthFile]) -> String {
-        let tests = over.filter { !$0.path.contains("/Sources/") }
-        guard !tests.isEmpty else { return "测试代码（Tests/）：0 个超限" }
-        return "测试代码（Tests/）：\(tests.count) 个超限 —— \(tally(tests))"
-    }
-
-    private static func tally(_ files: [GroundTruthFile]) -> String {
-        Dictionary(grouping: files, by: { owner(ofPath: $0.path) })
-            .map { "\($0.key) \($0.value.count) 个" }
-            .sorted()
-            .joined(separator: " · ")
-    }
-
-    private static func hugeFileRoster(_ over: [GroundTruthFile]) -> String {
-        let root = Self.repoRoot.path
-        return over.map { file in
-            let relative = file.path.hasPrefix(root)
-                ? String(file.path.dropFirst(root.count + 1)) : file.path
-            return "  \(String(format: "%5d", file.lines)) 行 → \(owner(ofPath: file.path))\t\(relative)"
-        }.joined(separator: "\n")
     }
 
     // MARK: - 防作弊门 3：复杂度榜不得为空，且必须覆盖独立数出的高复杂度函数

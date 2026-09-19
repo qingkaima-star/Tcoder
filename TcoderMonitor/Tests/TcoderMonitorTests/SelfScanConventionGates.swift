@@ -191,4 +191,77 @@ final class SelfScanConventionGates: SelfScanHarnessCase {
         XCTAssertTrue(legacy.headline.contains("旧口径") || legacy.headline.contains("没有记录"),
                       "未知口径必须如实说明：\(legacy.headline)")
     }
+
+    // MARK: - 缺陷钉：同一个集中度在屏幕上不该有两个数
+
+    /// 从文案里抽"某个数 %"这样的百分比，避免去猜实现保留几位、四舍五入还是截断。
+    private func percent(in text: String, after keyword: String) -> Double? {
+        let pattern = "\(keyword)\\s*([0-9]+(?:\\.[0-9]+)?)\\s*%"
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              match.numberOfRanges >= 2,
+              let captured = Range(match.range(at: 1), in: text) else { return nil }
+        return Double(text[captured])
+    }
+
+    /// **缺陷钉（WS-R）**：Git 页与健康分对"单一作者集中度"报出两个数。
+    /// 分析器用 `git log --no-merges` 统计作者（分母 = 非合并），
+    /// 而 `GitInsights.totalCommits` 含合并；协作分布拿含合并的当分母，
+    /// 于是每有一次合并工作流合树，评分里的集中度就被稀释一次。
+    /// WS-L 已经在视图侧换成 `GitHistoryScope.authorBasis`（`ContributorRows.swift:42-43`
+    /// 明写了"模型是冻结的，它拿含合并的 totalCommits 做分母，仓库越大越低估"），
+    /// **评分侧还没有**。这里把现状钉住，谁修谁翻正。
+    func testHealthScoreAndGitPageAgreeOnOneConcentrationDenominator() async throws {
+        let scan = try await selfScan()
+        let git = scan.git
+        let scope = GitHistoryScope(git)
+        let top = try XCTUnwrap(git.authors.max { $0.commits < $1.commits })
+
+        // 真相：与分析器同口径的邮箱归并占比。
+        let truth = try independentTopAuthorShare()
+        let pageShare = 100 * Double(top.commits) / Double(scope.authorBasis)
+        XCTAssertEqual(pageShare / 100, truth, accuracy: 0.01,
+                       "Git 页的占比与 `git log --no-merges --format=%aE` 不一致")
+
+        let diluted = 100 * Double(top.commits) / Double(git.totalCommits)
+        XCTAssertLessThan(diluted, pageShare - 5,
+                          "合并提交已经不多到把两个分母拉开 5 个点，这条钉的前提消失，删掉它")
+
+        let collaboration = try XCTUnwrap(scan.health.components.first { $0.name.contains("协作") },
+                                          "协作分布维度必须存在")
+        let scored = try XCTUnwrap(percent(in: collaboration.detail, after: "最高作者占比"),
+                                   "协作分布 detail 里解析不出『最高作者占比 X%』，本钉失效")
+
+        // ① 评分用的是被稀释的那个数（现状；修好后把下面两行对调）。
+        XCTAssertEqual(scored, diluted, accuracy: 1.0,
+                       "评分不再被合并提交稀释了？把这条改成 XCTAssertEqual(scored, pageShare, accuracy: 1.0)")
+        XCTAssertGreaterThan(abs(scored - pageShare), 5,
+                             "评分与 Git 页已经同分母了——把上面那条翻正，本条删掉。"
+                           + "当前：评分 \(Int(scored))% vs Git 页 \(Int(pageShare))%")
+        print("【集中度两个数】Git 页=\(Int(pageShare))%（等于 git 非合并口径）"
+            + " 健康分=\(Int(scored))%（被 \(git.totalCommits - git.commitsAnalyzed) 个合并提交稀释）")
+    }
+
+    // MARK: - 缺陷钉：占比的分子不许用被截断的榜单
+
+    /// **缺陷钉（WS-R）**：代码质量维度里"巨大文件占比"的分子是被 `prefix(20)`
+    /// 截断后的榜单条数，不是真实超限文件数。本仓库真实 `>400` 行的有 23 个，
+    /// 分子却按 20 算——占比被系统性低估，且**文件越多低估得越狠**。
+    /// （`FileSystemCodeAnalyzer.swift:151` 截断，`hugeFiles.count` 随后被当普查数用。）
+    func testHugeFileRatioIsNotComputedFromTheTruncatedList() async throws {
+        let code = try await selfScan().code
+        let truthOverMedium = try independentSwiftLineCounts().filter { $0.lines > Self.mediumFileLines }.count
+        let cappedCount = code.hugeFiles.count
+
+        XCTAssertGreaterThan(truthOverMedium, cappedCount,
+                             "真实超限文件数已经不多于榜单条数，截断不再骗人，删掉这条钉")
+        XCTAssertEqual(cappedCount, 20, "榜单截断长度变了，本钉与 48 号笔记要同步")
+
+        let cappedRatio = 100 * Double(cappedCount) / Double(code.totalFiles)
+        let trueRatio = 100 * Double(truthOverMedium) / Double(code.totalFiles)
+        print("【巨大文件占比】榜单截断=\(String(format: "%.1f", cappedRatio))%"
+            + " 真实=\(String(format: "%.1f", trueRatio))%（\(truthOverMedium) 个 >\(Self.mediumFileLines) 行）")
+        XCTAssertLessThan(cappedRatio, trueRatio - 1,
+                          "截断带来的低估不足 1 个百分点时，这条钉可以删")
+    }
 }
