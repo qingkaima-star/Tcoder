@@ -27,7 +27,8 @@ final class SelfScanHugeFileMechanismTests: XCTestCase {
             .appendingPathComponent("tcoder-selfscan-mech-\(UUID().uuidString.prefix(8))", isDirectory: true)
         let fm = FileManager.default
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        addTeardownBlock { try? fm.removeItem(at: dir) }
+        // 闭包里现取 FileManager，别把 non-Sendable 的 `fm` 捕获进 @Sendable 的 teardown。
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
 
         // 逐行真写，不用 String(repeating:)：行数必须由「实际落盘的换行」决定，
         // 否则我钉的就是自己拼出来的字符串长度，而不是工具数出来的东西。

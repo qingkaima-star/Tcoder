@@ -340,6 +340,56 @@ extension CodeAnalyzerTests {
         XCTAssertEqual(Set(audited.files.map(\.relativePath)), Set(plain.files.map(\.relativePath)))
     }
 
+    // MARK: - R. 清账：少掉的每一行都要能被指回一条规则
+
+    /// 「比 `find` 少 22%」这类质疑的唯一正经答法：纳入行 + 各条原因剔除行 == 磁盘真实行，逐行对上。
+    func testSkipClearingReconcilesEveryLine() async throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+        _ = try write("let kept = 1\nlet more = 2\n", to: "Keep.swift", in: root)                       // 2 行，纳入
+        _ = try write("puts 1\nputs 2\nputs 3\n", to: "vendor/Deep.rb", in: root)                     // 3 行，排除目录
+        _ = try write("project(x)\ninstall(FILES a)\n", to: "sub/CMakeLists.cmake", in: root)         // 2 行，后缀未收录
+        _ = try write("MIT\nLicense\n", to: "LICENSE", in: root)                                       // 2 行，无后缀
+        let symlink = root.appendingPathComponent("alias.swift")
+        try? fm.removeItem(at: symlink)
+        try fm.createSymbolicLink(at: symlink, withDestinationURL: root.appendingPathComponent("Keep.swift"))
+        // 软链接刻意不跟随：它进台账但没有行数，正是「行数不适用」与「0 行」必须区分的那一类
+
+        let opts = options(skipDirectories: ["vendor"], binaryExtensions: ["png"])
+        let outcome = try await FileSystemCodeAnalyzer().analyzeWithCoverage(root: root, options: opts)
+        XCTAssertEqual(outcome.metrics.totalLines, 2, "只有 Keep.swift 进入指标")
+
+        let ledger = try await FileSystemCodeAnalyzer()
+            .skipLedger(root: root, options: opts, countSkippedLines: true)
+        XCTAssertTrue(ledger.linesCounted, "审计模式必须声明自己数过行数")
+        XCTAssertEqual(ledger.skippedLineTotal, 7, "3 + 2 + 2 行")
+        let diskLines = outcome.metrics.totalLines + ledger.skippedLineTotal
+        XCTAssertEqual(diskLines, 9, "纳入 + 剔除 == 磁盘真实行数，一行不差")
+
+        let clearing = ledger.clearing(linesCounted: true)
+        XCTAssertEqual(clearing.count, ledger.buckets.count, "每条生效过的原因都要出一行")
+        XCTAssertTrue(clearing.contains { $0.contains("排除目录里的文件") && $0.contains("3 行")
+            && $0.contains("vendor 3 行") }, "\(clearing)")
+        XCTAssertTrue(clearing.contains { $0.contains("语言表未收录的后缀") && $0.contains("cmake") }, "\(clearing)")
+        XCTAssertTrue(clearing.contains { $0.contains("无后缀文件") && $0.contains("(无后缀) 2 行") }, "\(clearing)")
+
+        // 非审计模式：行数没数过就必须如实说没数，不许显示 0 行。
+        let plain = try await FileSystemCodeAnalyzer().skipLedger(root: root, options: opts)
+        XCTAssertFalse(plain.linesCounted)
+        let plainLines = plain.clearing(linesCounted: false)
+        XCTAssertTrue(plainLines.allSatisfy { !$0.contains(" 0 行") && !$0.contains("· 0 行") },
+                      "未审计时不得出现「0 行」这种把缺数据当零的写法：\(plainLines)")
+        XCTAssertTrue(plainLines.contains { $0.contains("行数未统计") }, "没数过的桶必须明说：\(plainLines)")
+        // 审计模式下也一样：目录/符号链接/隐藏项这些从不读内容的桶，不得显示「0 行」
+        let audited = try await FileSystemCodeAnalyzer()
+            .skipLedger(root: root, options: opts, countSkippedLines: true)
+        let auditedLines = audited.clearing(linesCounted: true)
+        XCTAssertTrue(auditedLines.contains { $0.contains("符号链接") && $0.contains("行数不适用") },
+                      "\(auditedLines)")
+        XCTAssertFalse(auditedLines.contains { $0.contains("符号链接") && $0.contains(" 0 行") },
+                       "\(auditedLines)")
+    }
+
     // MARK: - Q. 覆盖度：上限生效过就不能把结果当全量（WS-D 诚实性审计 P1 #7 / #8）
 
     /// 被 20 万行/文件上限切过的文件必须留痕，否则 `totalLines` 看起来像全量。
