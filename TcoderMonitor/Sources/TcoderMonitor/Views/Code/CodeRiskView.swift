@@ -96,6 +96,7 @@ struct CodeRiskView: View {
 
                 HStack(spacing: 14) {
                     StatLine(label: "高/严重复杂度函数", value: NumberFormat.grouped(highRiskFunctionCount(code)))
+                    StatLine(label: "平均圈复杂度（全仓）", value: averageComplexityText(code))
                     StatLine(label: "巨大文件", value: NumberFormat.grouped(code.hugeFiles.count))
                     StatLine(label: "重复块", value: NumberFormat.grouped(code.duplicatedBlocks.count))
                 }
@@ -436,6 +437,11 @@ struct CodeRiskView: View {
             ))
         }
 
+        // 6b) 全仓平均圈复杂度与热点榜均值背离 —— 说明平均值被少数巨型函数拉高。
+        if let divergence = relativeComplexitySuggestion(code) {
+            items.append(CodeRiskSuggestion(icon: "chart.bar.xaxis", tint: Theme.neutral, text: divergence))
+        }
+
         // 6) 巨大文件：给出真实行数与建议里的真实结构信息。
         if let largest = code.hugeFiles.max(by: { $0.lineCount < $1.lineCount }) {
             items.append(CodeRiskSuggestion(
@@ -481,6 +487,27 @@ struct CodeRiskView: View {
     // MARK: - Formatting & file actions
 
     private var projectRoot: String { report?.project.path ?? "" }
+
+    /// 一个函数都没识别出来时不能显示 0（那是「极简」的意思），要如实显示未知。
+    private func averageComplexityText(_ code: CodeMetrics) -> String {
+        guard let average = code.averageCyclomaticComplexity else { return "未识别到函数" }
+        return String(format: "%.2f", average) + " · " + NumberFormat.grouped(code.analyzedFunctionCount) + " 个函数"
+    }
+
+    /// 全仓均值与热点榜均值是两回事：仓库越大，上榜的越是极端值，热点均值必然偏高。
+    /// 两者背离到一定程度就说明「平均分被少数巨型函数拉高」，建议按函数而不是按均值处理。
+    private static let hotspotDivergenceFactor = 3.0
+
+    private func relativeComplexitySuggestion(_ code: CodeMetrics) -> String? {
+        guard let average = code.averageCyclomaticComplexity, average > 0 else { return nil }
+        let hotspots = code.topComplexFunctions.map(\.cyclomaticComplexity)
+        guard hotspots.count >= 5 else { return nil }
+        let hotspotAverage = Double(hotspots.reduce(0, +)) / Double(hotspots.count)
+        guard hotspotAverage >= average * Self.hotspotDivergenceFactor else { return nil }
+        return "全仓 \(String(format: "%.2f", average))，但热点榜平均 \(String(format: "%.2f", hotspotAverage))："
+            + "平均值被少数巨型函数拉高（超长函数 \(NumberFormat.grouped(code.longFunctions)) 个），"
+            + "优先拆这几个而不是整体重构：\(hotspots.prefix(3).map(String.init).joined(separator: " / "))。"
+    }
 
     private func highRiskFunctionCount(_ code: CodeMetrics) -> Int {
         code.topComplexFunctions.filter { $0.risk.rank >= RiskLevel.high.rank }.count
