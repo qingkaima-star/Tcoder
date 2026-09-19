@@ -24,6 +24,33 @@ enum ShellLayout {
     /// 实时读数里数字列的定宽。等宽数字仍要定宽，是因为 `ByteFormat` 的
     /// 「1.5 GB / 128 MB」位数不同，不锁宽会把整条侧栏底栏推着走。
     static let liveReadoutColumnWidth: CGFloat = 40
+
+    // MARK: 侧栏行卡片
+
+    /// 行卡最小高度。两行文字（13 semibold + 11 读数）加上下内边距的自然结果，
+    /// 也顺着 macOS 26 列表「行高与内边距更大」的方向（WS-H §2.2）。
+    static let rowMinHeight: CGFloat = 48
+    /// 行卡内边距。行间沟槽由 `List` 自己给，这里只算卡内的。
+    static let rowPadding: CGFloat = Theme.Spacing.sm
+
+    /// 两个读数各占一个**右对齐定宽格**。
+    ///
+    /// 为什么光有 `.monospacedDigit()` 不够：它只保证「每个数字一样宽」，
+    /// 但 `NumberFormat.compact` 的结果本身会跨位数变宽（`9k` → `20k` → `182k`），
+    /// 健康分从两位进三位同理 —— 变宽的那个字符串会把它**右边**的文本整格推走，
+    /// 扫描过程中就能看到「健康 61」在左右跳。定宽右对齐之后邻居位置完全不动，
+    /// 这也是活动监视器数字列的排法（WS-H §2.1）。
+    static let lineCountColumnWidth: CGFloat = 58
+    static let healthColumnWidth: CGFloat = 54
+
+    /// 引导卡最小高度。低于这个高度，「把文件夹拖到这里」会被看成一条被截断的提示，
+    /// 而不是一块可以继续添加项目的区域。
+    static let guideMinHeight: CGFloat = 96
+    /// 已有项目时引导卡收成一行的高度。
+    static let guideCompactHeight: CGFloat = 28
+    /// 引导卡虚线描边的虚实段（2 段循环）。用令牌拼出来，不写裸数字：
+    /// 0.5pt 实线 + 4pt 空档，读起来是「可投放区域」而不是「被截断的边框」。
+    static let guideDash: [CGFloat] = [Theme.Stroke.hairline, Theme.Spacing.xxs]
 }
 
 // MARK: - 缺数据三态句式（WS-H §7.3）
