@@ -433,11 +433,34 @@ final class SourceFileClassifier {
     ///   软链接时只有它能对齐（实测 `/tmp/x/repoclink` → canonical 仍是 repoclink、resolved 才是真实仓库）。
     /// 只在原始前缀判定失败后才走到这里，实测每次查询约 1.6 µs。
     private static func pathForms(of url: URL) -> [String] {
-        var forms = [url.path]
-        if let canonical = canonicalPath(of: url), forms.contains(canonical) == false { forms.append(canonical) }
-        let resolved = url.resolvingSymlinksInPath().path
-        if forms.contains(resolved) == false { forms.append(resolved) }
+        var forms: [String] = []
+        func add(_ candidate: String) { if forms.contains(candidate) == false { forms.append(candidate) } }
+        add(url.path)
+        if let canonical = canonicalPath(of: url) { add(canonical) }
+        add(url.resolvingSymlinksInPath().path)
+        // 文件系统派生的形态只对**存在**的路径有效，最后再补一遍不 stat 的字面别名，
+        // 否则路径里有任何一层还没被创建，`/tmp/...` 与 `/private/tmp/...` 就判不到同一个根。
+        for base in Array(forms) {
+            for alias in lexicalAliasForms(ofPath: base) { add(alias) }
+        }
         return forms
+    }
+
+    /// macOS 上 `/tmp`、`/var`、`/etc`、`/tftpboot` 都是 `/private/…` 的别名，这层关系由系统固定，
+    /// 按字面展开两种形态即可，不需要（也不应该依赖）stat —— 单测里根路径常常并不存在。
+    private static let privateAliasDirectories: Set<String> = ["tmp", "var", "etc", "tftpboot"]
+
+    static func lexicalAliasForms(ofPath path: String) -> [String] {
+        guard path.hasPrefix("/") else { return [path] }
+        if path.hasPrefix("/private/") {
+            let rest = String(path.dropFirst("/private/".count))
+            let head = rest.split(separator: "/", maxSplits: 1).first.map(String.init)
+            if let head, privateAliasDirectories.contains(head) { return [path, "/" + rest] }
+            return [path]
+        }
+        let head = path.dropFirst().split(separator: "/", maxSplits: 1).first.map(String.init)
+        if let head, privateAliasDirectories.contains(head) { return [path, "/private" + path] }
+        return [path]
     }
 
     /// 纯字符串前缀剥离；不成立（含 `..` 逃逸、剥完为空）返回 nil 交给调用方继续判定。
@@ -496,6 +519,88 @@ struct SourceScanResult: Sendable {
     var skippedFileCount: Int = 0
     var scannedFileCount: Int = 0
     var truncatedByMaxFiles: Bool = false
+    /// 「为什么丢了这个文件」的台账；见 `SourceSkipLedger`。
+    var skipLedger: SourceSkipLedger = SourceSkipLedger()
+}
+
+/// 剔除原因。每条都必须对应扫描循环里一个真实判定分支，禁止出现「其他」这类兜底枚举 ——
+/// 否则台账又变回一个解释不了的总数。
+///
+/// 注意 `hiddenEntry` 在审计模式下也**不会**被读内容：隐藏项里常有 `.env`、密钥之类，
+/// 数行数的收益远不值得把它们读进内存，台账只记条数与字节。
+enum SourceSkipReason: String, Sendable, CaseIterable {
+    case symbolicLink                 // 文件/目录软链接：刻意不跟随（不逃逸、不死循环）
+    case hiddenEntry                  // 以 `.` 开头且 includeHidden = false
+    case skippedDirectory             // 命中 skipDirectories 的目录本身（子树随之剔除，是「根因」那一条）
+    case excludedDirectoryNested      // 已剔除目录之下的子目录（根因已记在父目录，避免重复归因）
+    case excludedDirectoryContent     // 已剔除目录之下的文件（仅审计模式才会逐个见到）
+    case notARegularFile              // 设备文件、FIFO 等
+    case missingExtension             // 无后缀：LICENSE、README、Makefile
+    case binaryExtension              // ScanOptions.binaryExtensions
+    case unsupportedExtension         // 语言目录表里没有的后缀（.cmake / .bazel / .txt …）
+    case oversize                     // 超过 ScanOptions.maxFileBytes
+    case unreadable                   // 读不出内容（权限、IO 错误、非目录）
+    case prunedPackageDir             // `.app` / `.dSYM` 等包状目录本身：枚举器交出目录但不再进入其内容
+    case prunedPackageContents        // 包状目录内部的文件（仅审计模式展开归因）
+    case prunedHiddenContents         // 隐藏目录内部的文件（仅审计模式展开；只记条数与字节，绝不读内容）
+    case beyondFileCap                // 达到 maxFiles 之后未处理的部分（数量未知，只标记发生过）
+}
+
+/// 剔除台账：产品要能回答「总数为什么比 `find` 少」，取证要能回答「少掉的那 5 万行去哪了」。
+/// 默认（`auditLineBudget == 0`）只记条数与字节数，字节数来自枚举器已预取的 `fileSizeKey`，
+/// **不额外读文件**，因此对扫描耗时零影响。审计模式下才会读出被剔除文件的真实行数，
+/// 受 `auditLineBudget` 字节预算约束，超预算时 `linesBudgetExhausted` 如实置位。
+struct SourceSkipLedger: Sendable {
+    struct Bucket: Sendable {
+        var files: Int = 0
+        var bytes: Int64 = 0
+        /// 仅审计模式填充；非审计模式恒为 0，UI 不得当成真实行数展示。
+        var lines: Int = 0
+        /// 命中的具体规则项：目录名、后缀、超限阈值等 → 次数。
+        var rules: [String: Int] = [:]
+        var samples: [String] = []
+
+        var byteDescription: String { ByteFormat.string(UInt64(max(0, bytes))) }
+    }
+
+    var buckets: [SourceSkipReason: Bucket] = [:]
+    var linesBudgetExhausted = false
+    var auditedBytes: Int64 = 0
+    /// 达到 maxFiles 后是否确实还有候选文件未处理（与 `truncatedByMaxFiles` 同义，供台账自洽检查）。
+    var cappedRemaining = false
+
+    static let sampleLimit = 5
+    /// 审计模式的默认字节预算：400MB。够把 Homebrew 这类仓库里被剔除的源码全部数一遍行数，
+    /// 又不至于在大仓上把磁盘读满。
+    static let defaultAuditBudget: Int64 = 400 * 1_000 * 1_000
+
+    var skippedFileTotal: Int { buckets.values.map(\.files).reduce(0, +) }
+    var skippedByteTotal: Int64 { buckets.values.map(\.bytes).reduce(0, +) }
+
+    /// 审计模式还剩多少字节预算可用来数行数。
+    func remainingAuditBytes(within budget: Int64) -> Int64 { max(0, budget - auditedBytes) }
+    var skippedLineTotal: Int { buckets.values.map(\.lines).reduce(0, +) }
+
+    mutating func record(_ reason: SourceSkipReason, path: String, bytes: Int64, rule: String?) {
+        var bucket = buckets[reason] ?? Bucket()
+        bucket.files += 1
+        bucket.bytes += max(0, bytes)
+        if let rule { bucket.rules[rule, default: 0] += 1 }
+        if bucket.samples.count < Self.sampleLimit { bucket.samples.append(path) }
+        buckets[reason] = bucket
+    }
+
+    mutating func recordAuditedLines(_ reason: SourceSkipReason, lines: Int, bytes: Int64) {
+        buckets[reason, default: Bucket()].lines += lines
+        auditedBytes += bytes
+    }
+
+    func entries() -> [(reason: SourceSkipReason, bucket: Bucket)] {
+        buckets.sorted { lhs, rhs in
+            if lhs.value.files != rhs.value.files { return lhs.value.files > rhs.value.files }
+            return lhs.key.rawValue < rhs.key.rawValue
+        }.map { ($0.key, $0.value) }
+    }
 }
 
 /// 跳过目录判定 + 已剔除目录的绝对路径集合（符号链接与 skipDirectories 的兜底防线）
@@ -542,13 +647,19 @@ final class SourceTreeScanner {
     private let options: ScanOptions
     // ScanOptions.defaultBinaryExtensions 里有 `dSYM` 这类混合大小写，比较前先统一小写
     private let binaryExtensions: Set<String>
+    /// > 0 时进入「剔除台账审计模式」：会把被剔除文件的真实行数也数出来（要读文件），
+    /// 并在审计模式下对被剔除目录**不掐子树**，以便逐文件归因。产品路径恒为 0。
+    private let auditLineBudget: Int64
     private static let concurrencyLimit = 16
     private static let batchSize = 256
 
-    init(options: ScanOptions) {
+    init(options: ScanOptions, auditLineBudget: Int64 = 0) {
         self.options = options
+        self.auditLineBudget = auditLineBudget
         binaryExtensions = Set(options.binaryExtensions.map { $0.lowercased() })
     }
+
+    private var auditing: Bool { auditLineBudget > 0 }
 
     func scan(root: URL) async -> SourceScanResult {
         var result = SourceScanResult()
@@ -564,8 +675,9 @@ final class SourceTreeScanner {
         // `.isDirectoryKey` 必须在列：URLResourceValues 只回填请求过的键，
         // 漏掉它会让目录判定恒为 nil，skipDirectories / 符号链接兜底全部失效。
         let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey, .fileSizeKey, .isSymbolicLinkKey, .nameKey]
-        var enumerationOptions: FileManager.DirectoryEnumerationOptions = [.skipsPackageDescendants]
-        if options.includeHidden == false { enumerationOptions.insert(.skipsHiddenFiles) }
+        // 隐藏项**不用** `.skipsHiddenFiles`：那样枚举器根本不会交出这些条目，剔除台账就无从统计。
+        // 改为在循环里按 `name` 判定并记账，纳入/排除的结果与原来完全一致。
+        let enumerationOptions: FileManager.DirectoryEnumerationOptions = [.skipsPackageDescendants]
 
         guard let enumerator = FileManager.default.enumerator(
             at: scanRoot,
@@ -583,54 +695,186 @@ final class SourceTreeScanner {
         while let url = enumerator.nextObject() as? URL {
             if Task.isCancelled { break }
             let values = try? url.resourceValues(forKeys: Set(keys))
+            let bytes = Int64(values?.fileSize ?? 0)
+            let entryName = values?.name ?? url.lastPathComponent
+
+            // 隐藏项：includeHidden = false 时目录连带掐掉子树。只进台账，不进 visited/skipped 计数，
+            // 以保持与改用 .skipsHiddenFiles 之前的既有计数完全一致。
+            if options.includeHidden == false, entryName.hasPrefix(".") {
+                if values?.isDirectory == true {
+                    enumerator.skipDescendants()
+                    // 隐藏子树在审计模式下要能报「剪掉了多少文件」，否则台账有洞；
+                    // 但**绝不读内容** —— 隐藏目录里常有 .ssh / .env / 密钥。
+                    auditPrunedSubtree(of: url, into: &result.skipLedger, reason: .prunedHiddenContents,
+                                        readLines: false)
+                }
+                result.skipLedger.record(.hiddenEntry, path: url.path, bytes: values?.isDirectory == true ? 0 : bytes,
+                                         rule: entryName)
+                continue
+            }
 
             // 符号链接：目录链接先掐掉子树再跳过（不跟随 = 不逃逸、不死循环），文件链接直接跳过。
             if values?.isSymbolicLink == true {
                 if values?.isDirectory == true { enumerator.skipDescendants() }
+                result.skipLedger.record(.symbolicLink, path: url.path, bytes: bytes, rule: nil)
                 continue
             }
 
+            if values?.isDirectory == true, isPackageDirectory(entryName) {
+                // `.skipsPackageDescendants` 会让枚举器交出这个目录、但不进入其内容 ——
+                // 不记一笔就是台账解释不掉的黑洞（Homebrew 实测 NewApp.app + 4 个 .dSYM 共 9 个文件）。
+                result.skipLedger.record(.prunedPackageDir, path: url.path, bytes: 0,
+                                         rule: (entryName as NSString).pathExtension.lowercased())
+                auditPrunedSubtree(of: url, into: &result.skipLedger, reason: .prunedPackageContents,
+                                   readLines: true)
+                continue
+            }
             if values?.isDirectory == true {
+                // 先问「是不是已经在被剔除的子树里」，再让 consume 登记：否则 vendor 之下每一层
+                // 目录都会被当成一次独立的 skipDirectories 命中，台账的根因就散了。
+                let nested = plan.isInsideExcluded(url.path)
                 // Darwin Foundation 的枚举器只有 skipDescendants()（skipSubtree 是 corelibs-foundation 独有）
-                if plan.consume(url) { enumerator.skipDescendants() }
+                if plan.consume(url) {
+                    result.skipLedger.record(nested ? .excludedDirectoryNested : .skippedDirectory,
+                                             path: url.path, bytes: 0,
+                                             rule: nested ? nil : entryName)
+                    // 审计模式要逐文件归因子树内容，所以不掐子树；正常扫描必须掐（性能 + 逃逸防线）
+                    if auditing == false { enumerator.skipDescendants() }
+                }
                 continue
             }
 
-            if values?.isRegularFile == false { continue }
-            if plan.isInsideExcluded(url.path) { continue }
+            if values?.isRegularFile == false {
+                result.skipLedger.record(.notARegularFile, path: url.path, bytes: bytes, rule: nil)
+                continue
+            }
+            if plan.isInsideExcluded(url.path) {
+                result.skipLedger.record(.excludedDirectoryContent, path: url.path, bytes: bytes, rule: nil)
+                auditLines(of: url, bytes: bytes, reason: .excludedDirectoryContent, into: &result.skipLedger)
+                continue
+            }
+
+            let rejection = candidateRejection(url, values: values)
 
             // 探测模式：这些文件没有被读、也没有被计入任何计数，只用来判断「还有没有候选文件」。
             // 一发现确实还有未处理的候选文件，就确认「真的截断了」并立即收工。
             if probingForRemainingCandidates {
-                if isCandidate(url, values: values) {
+                if rejection == nil {
                     result.truncatedByMaxFiles = true
+                    result.skipLedger.cappedRemaining = true
                     break
                 }
                 continue
             }
 
             result.visitedFileCount += 1
-            guard isCandidate(url, values: values) else {
-                result.skippedFileCount += 1
+            guard let rejection else {
+                candidateCount += 1
+                batch.append(url)
+                if batch.count >= Self.batchSize {
+                    let urls = batch
+                    batch.removeAll(keepingCapacity: true)
+                    let files = await Self.classifyConcurrently(urls: urls, root: scanRoot, options: options)
+                    merge(files, attempted: urls, into: &result)
+                }
+                // `candidateCount == maxFiles` 本身不代表丢过文件：恰好等于上限的目录一个文件都不该少。
+                // 因此命中上限时先不置位，只继续廉价探测是否有下一个候选文件。
+                if candidateCount >= options.maxFiles { probingForRemainingCandidates = true }
                 continue
             }
 
-            candidateCount += 1
-            batch.append(url)
-            if batch.count >= Self.batchSize {
-                let urls = batch
-                batch.removeAll(keepingCapacity: true)
-                let files = await Self.classifyConcurrently(urls: urls, root: scanRoot, options: options)
-                merge(files, attempted: urls.count, into: &result)
-            }
-            // `candidateCount == maxFiles` 本身不代表丢过文件：恰好等于上限的目录一个文件都不该少。
-            // 因此命中上限时先不置位，只继续廉价探测是否有下一个候选文件。
-            if candidateCount >= options.maxFiles { probingForRemainingCandidates = true }
+            result.skippedFileCount += 1
+            result.skipLedger.record(rejection.reason, path: url.path, bytes: bytes, rule: rejection.rule)
+            auditLines(of: url, bytes: bytes, reason: rejection.reason, into: &result.skipLedger)
         }
 
         let files = await Self.classifyConcurrently(urls: batch, root: scanRoot, options: options)
-        merge(files, attempted: batch.count, into: &result)
+        merge(files, attempted: batch, into: &result)
         return result
+    }
+
+    /// 判定一个文件条目是不是候选；返回 nil 表示候选。同时给出命中的具体规则项，供台账归因。
+    /// 判定顺序与内容必须与 `ScanOptions` 的语义一致：无后缀 → 二进制后缀 → 语言表没有 → 超字节上限。
+    private func candidateRejection(_ url: URL, values: URLResourceValues?)
+        -> (reason: SourceSkipReason, rule: String?)? {
+        let ext = url.pathExtension.lowercased()
+        if ext.isEmpty { return (reason: .missingExtension, rule: nil) }
+        if binaryExtensions.contains(ext) { return (reason: .binaryExtension, rule: ext) }
+        if SourceLanguageCatalog.language(forExtension: ext) == nil {
+            return (reason: .unsupportedExtension, rule: ext)
+        }
+        if let size = values?.fileSize, size > options.maxFileBytes {
+            return (reason: .oversize, rule: ByteFormat.string(UInt64(size)))
+        }
+        return nil
+    }
+
+    /// 包状目录：macOS 的 bundle 后缀。`FileManager` 的 `.skipsPackageDescendants` 按这套规则剪枝，
+    /// 这里必须用同一套名单，否则台账归因和枚举器实际行为不一致。
+    private static let packageExtensions: Set<String> = [
+        "app", "framework", "bundle", "xcodeproj", "xcworkspace", "lproj", "xcassets",
+        "dsym", "playbook", "kext", "component", "plugin", "pkg", "prefpane",
+        "colorpicker", "imgblock", "qd", "rule", "stage", "workflow", "mdimporter",
+        "qlgenerator", "sdef", "spotlightizer", "termext", "webplugin", "internetplug-in",
+    ]
+
+    private func isPackageDirectory(_ name: String) -> Bool {
+        Self.packageExtensions.contains((name as NSString).pathExtension.lowercased())
+    }
+
+    /// 审计模式：展开被枚举器剪掉的子树，把「剪掉了几个文件、多少行」归因清楚。
+    /// `readLines = false` 时只记条数与字节（隐藏子树走这条路，绝不读内容）。
+    private func auditPrunedSubtree(of url: URL, into ledger: inout SourceSkipLedger,
+                                    reason: SourceSkipReason, readLines: Bool) {
+        guard auditing else { return }
+        var fileCount = 0
+        var totalBytes: Int64 = 0
+        var totalLines = 0
+        let walker = FileManager.default.enumerator(
+            at: url, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [], errorHandler: { _, _ in false }
+        )
+        while let item = walker?.nextObject() as? URL {
+            guard (try? item.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]))?
+                .isRegularFile != false else { continue }
+            let values = try? item.resourceValues(forKeys: [.fileSizeKey])
+            let size = Int64(values?.fileSize ?? 0)
+            fileCount += 1
+            totalBytes += max(0, size)
+            if readLines, size > 0, size <= ledger.remainingAuditBytes(within: auditLineBudget),
+               let data = try? Data(contentsOf: item) {
+                var lines = 0
+                for byte in data where byte == 0x0A { lines += 1 }
+                totalLines += lines
+                ledger.auditedBytes += Int64(data.count)
+            } else if readLines, size > 0 {
+                ledger.linesBudgetExhausted = true
+            }
+        }
+        guard fileCount > 0 else { return }
+        var bucket = ledger.buckets[reason] ?? SourceSkipLedger.Bucket()
+        bucket.files += fileCount
+        bucket.bytes += totalBytes
+        bucket.lines += totalLines
+        bucket.rules[(url.lastPathComponent as NSString).pathExtension.lowercased(), default: 0] += 1
+        if bucket.samples.count < SourceSkipLedger.sampleLimit { bucket.samples.append(url.path) }
+        ledger.buckets[reason] = bucket
+    }
+
+    /// 审计模式专用：把被剔除文件的真实行数读出来。非审计模式（预算 0）直接返回，零额外 I/O。
+    private func auditLines(of url: URL, bytes: Int64, reason: SourceSkipReason,
+                            into ledger: inout SourceSkipLedger) {
+        guard auditing else { return }
+        guard bytes > 0 else { return }
+        let remaining = ledger.remainingAuditBytes(within: auditLineBudget)
+        guard bytes <= remaining else {
+            ledger.linesBudgetExhausted = true
+            return
+        }
+        guard let data = try? Data(contentsOf: url) else { return }
+        var lines = 0
+        for byte in data where byte == 0x0A { lines += 1 }
+        ledger.recordAuditedLines(reason, lines: lines, bytes: Int64(data.count))
     }
 
     /// 枚举用的根：把「自身是目录符号链接」的 root 换成解析后的真实目录（见 `scan(root:)` 的说明）。
@@ -644,19 +888,15 @@ final class SourceTreeScanner {
         return resolved
     }
 
-    private func merge(_ files: [ScannedSourceFile], attempted urlCount: Int, into result: inout SourceScanResult) {
+    private func merge(_ files: [ScannedSourceFile], attempted urls: [URL], into result: inout SourceScanResult) {
         result.files.append(contentsOf: files)
         result.scannedFileCount += files.count
-        result.skippedFileCount += urlCount - files.count
-    }
-
-    private func isCandidate(_ url: URL, values: URLResourceValues?) -> Bool {
-        let ext = url.pathExtension.lowercased()
-        guard ext.isEmpty == false else { return false }
-        if binaryExtensions.contains(ext) { return false }
-        if SourceLanguageCatalog.language(forExtension: ext) == nil { return false }
-        if let size = values?.fileSize, size > options.maxFileBytes { return false }
-        return true
+        // 候选名单里但最终没出结果的 = 分类阶段读不出内容（权限 / IO / 非目录），逐条记进台账。
+        let accepted = Set(files.map { $0.url.path })
+        for url in urls where accepted.contains(url.path) == false {
+            result.skippedFileCount += 1
+            result.skipLedger.record(.unreadable, path: url.path, bytes: 0, rule: nil)
+        }
     }
 
     private static func classifyConcurrently(urls: [URL], root: URL, options: ScanOptions) async -> [ScannedSourceFile] {
