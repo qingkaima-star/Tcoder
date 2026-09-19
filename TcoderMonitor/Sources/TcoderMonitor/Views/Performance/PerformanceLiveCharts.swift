@@ -119,7 +119,7 @@ struct PerformanceLiveCharts: View {
                      + (cpuAxis.isZoomed || memoryAxis.isZoomed ? "带下限的轴是**为看清走势而收窄的**，不是 0 起点。" : "两张图均为 0 起点。"))
             let rejected = SystemReadings.rejectedMemoryPoints(points)
             if rejected > 0 {
-                NoteLine("内存曲线已剔除 \(NumberFormat.grouped(rejected)) 个不可信读数（空闲 / 可清除页计数缺失）。",
+                NoteLine("内存曲线已剔除 \(NumberFormat.grouped(rejected)) 个无证据读数（引擎给出压力档 unknown 或字节数为 0）。",
                          role: Theme.Semantic.warning, icon: .riskWarning)
             }
         }

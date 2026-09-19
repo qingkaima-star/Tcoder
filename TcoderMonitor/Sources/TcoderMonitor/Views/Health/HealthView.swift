@@ -100,10 +100,10 @@ struct HealthHero: View {
     var body: some View {
         GlassSection("综合评分", subtitle: subtitle, icon: .health) {
             HStack(alignment: .top, spacing: Theme.Spacing.lg) {
-                HealthScoreRing(score: health.overall,
+                HealthRing(score: health.overall,
                                 grade: health.grade,
                                 trend: health.trendDelta)
-                    .frame(width: HealthScoreRing.canvasWidth, height: HealthScoreRing.canvasHeight)
+                    .frame(width: DashboardLayout.heroRingWidth, height: DashboardLayout.heroRingHeight)
                     .surface(layer: .contentInset, shape: .rounded(Theme.Radius.md))
                 narrativeColumn
             }
@@ -174,8 +174,8 @@ struct HealthNoInputCard: View {
         GlassSection("综合评分", subtitle: "无可用输入", icon: .health) {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 HStack(alignment: .top, spacing: Theme.Spacing.lg) {
-                    HealthScoreRing(score: nil, grade: nil, trend: nil)
-                        .frame(width: HealthScoreRing.canvasWidth, height: HealthScoreRing.canvasHeight)
+                    HealthRing(score: nil, grade: nil, trend: nil)
+                        .frame(width: DashboardLayout.heroRingWidth, height: DashboardLayout.heroRingHeight)
                         .surface(layer: .contentInset, shape: .rounded(Theme.Radius.md))
                     VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                         Text("本次没有任何维度输入，因此不给综合分。")

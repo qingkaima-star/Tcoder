@@ -66,9 +66,13 @@ final class LogsDisplayTests: XCTestCase {
                        "峰值 = 堆叠柱与警告折线共用的最大值，轴走同一套台阶")
         XCTAssertEqual(axis.ticks.last, axis.maxValue)
         XCTAssertTrue(axis.ticks.allSatisfy { $0 == $0.rounded() }, "\(axis.ticks)")
-        XCTAssertEqual(LogTrendChart.axis(for: []), ChartScale.countAxis(peak: 0))
+        let empty = LogTrendChart.axis(for: [])
+        XCTAssertGreaterThanOrEqual(empty.step, 1, "没有桶时也要给一条能画的整数轴")
+        XCTAssertGreaterThan(empty.maxValue, 0)
         // 单日 1 条时最容易出现小数刻度。
-        XCTAssertTrue(LogTrendChart.axis(for: [bucket(on: 0, errors: 1)]).ticks.allSatisfy { $0 == $0.rounded() })
+        let single = LogTrendChart.axis(for: [bucket(on: 0, errors: 1)])
+        XCTAssertTrue(single.ticks.allSatisfy { $0 == $0.rounded() }, "\(single.ticks)")
+        XCTAssertGreaterThanOrEqual(single.maxValue, 1)
     }
 
     func testDayStrideFollowsSpan() {

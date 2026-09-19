@@ -51,13 +51,17 @@ enum SystemReadings {
 
     /// 内存口径与活动监视器一致：`总量 −（空闲 + 推测 + 可清除）`。
     ///
-    /// ⚠️ 这里必须挡住一种假读数：采样引擎读 `vm_statistics64` 失败时返回**全零页计数**，
-    /// 于是「可回收 = 0」→「已用 = 总量」→ 界面会画出一个 100% 占满的红色内存。
-    /// 引擎侧的修法是加成功位（`Services/Performance` 不归本流），视图侧先把它接住：
-    /// 已用 ≥ 总量在真机上不可能长期成立（空闲页为 0 的瞬间也会被压缩），一律按未取到处理。
+    /// 「有没有证据」走 WS-C 在 `8333852` 定下并测过的两个公开信号：读不到页计数时
+    /// 引擎把 `memoryPressure` 落成 `.unknown`、`memoryUsedBytes` 留 0，
+    /// 而 `memoryTotalBytes` 是另一次独立读取、仍带真值。
+    ///
+    /// ⚠️ 本轮改掉一条我自己写过的启发式：原先把「已用 ≥ 总量」当假读数压掉。
+    /// 引擎修好之后，`空闲 + 推测 + 可清除 == 0` 是可以**真实发生**的，
+    /// 那条判据会把最该报警的一帧（内存真用满）也渲染成 `--`——藏警报比报错更糟。
     static func memoryUsedBytes(_ ctx: SampleContext) -> UInt64? {
         guard let snapshot = ctx.snapshot, snapshot.memoryTotalBytes > 0 else { return nil }
-        guard snapshot.memoryUsedBytes < snapshot.memoryTotalBytes else { return nil }
+        guard snapshot.memoryPressure != .unknown else { return nil }
+        guard snapshot.memoryUsedBytes > 0 else { return nil }
         return snapshot.memoryUsedBytes
     }
 
@@ -77,19 +81,19 @@ enum SystemReadings {
         return pressure
     }
 
-    /// 内核内存读数不可信时的说明句——空态必须给原因，不是留白。
+    /// 内存不可用时给具体原因——空态不能只留白，也不能只说「失败」。
     static func memoryGapReason(_ ctx: SampleContext) -> String? {
-        guard let snapshot = ctx.snapshot, snapshot.memoryTotalBytes > 0 else { return nil }
+        guard let snapshot = ctx.snapshot else { return nil }
         guard memoryUsedBytes(ctx) == nil else { return nil }
-        return "本次未取到可信的空闲 / 可清除页计数"
+        if snapshot.memoryTotalBytes == 0 { return "未取到物理内存总量" }
+        if snapshot.memoryPressure == .unknown { return "内核未返回内存页计数（host_statistics64 无可用读数）" }
+        return "已用字节数为 0，等同没有证据"
     }
 
-    /// 曲线只画可信的内存点。一个假 100% 尖峰会把整条曲线压扁，比少画一点更糟；
+    /// 曲线只画有证据的内存点（判据与 tile 完全同一份，避免卡和图各说一套）。
     /// 被剔除的数量必须在卡面上写出来，不能悄悄丢。
     static func trustedMemoryPoints(_ history: [SystemSnapshot]) -> [SystemSnapshot] {
-        history.filter { snapshot in
-            snapshot.memoryTotalBytes > 0 && snapshot.memoryUsedBytes < snapshot.memoryTotalBytes
-        }
+        history.filter { memoryUsedBytes(SampleContext(snapshot: $0, historyCount: 1, isPaused: false)) != nil }
     }
 
     static func rejectedMemoryPoints(_ history: [SystemSnapshot]) -> Int {

@@ -99,6 +99,61 @@ final class PerformanceDesignDebtGuardTests: XCTestCase {
                         + violations.joined(separator: "\n"))
     }
 
+    // MARK: - 元测试：证明这把尺子 itself 量得动东西
+    //
+    // 扫描型棘轮最坏的失效不是报错，而是**正则写坏 / 路径打错 → 永远 0 命中还常绿**。
+    // 所以每条禁用规则都必须能命中一个故意造出来的坏样例，
+    // 并且干净样例不能命中（否则规则过宽，下次会误伤别人）。
+
+    private static let dirtySamples: [(pattern: String, sample: String)] = [
+        ("\\.system\\(size:", #"Text("x").font(.system(size: 9))"#),
+        ("Color\\(red:|Color\\(hex:", "private let tint = Color(red: 0.95, green: 0.45, blue: 0.35)"),
+        ("cornerRadius:", ".background(RoundedRectangle(cornerRadius: 9).fill(color))"),
+        ("strokeBorder", ".overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(color, lineWidth: 1))"),
+        ("\\.opacity\\(0\\.", "Badge().background(role.color.opacity(0.15), in: Capsule())"),
+        ("#available", "if #available(macOS 26.0, *) { glass() }"),
+        ("[Mm]ona", "// 顺手写个品牌词 Mona 试试"),
+        ("design: \\.(rounded|monospaced)", ".font(.system(size: 15, weight: .semibold, design: .rounded))"),
+    ]
+
+    func testEveryBannedPatternActuallyMatchesABadSample() throws {
+        XCTAssertEqual(Self.dirtySamples.count, Self.bannedPatterns.count,
+                       "禁用表加了一条就得配一个坏样例，否则新规则是空转的")
+        for (index, banned) in Self.bannedPatterns.enumerated() {
+            let regex = try NSRegularExpression(pattern: banned.pattern, options: [])
+            let sample = Self.dirtySamples[index].sample
+            let range = NSRange(sample.startIndex..., in: sample)
+            XCTAssertNotNil(regex.firstMatch(in: sample, options: [], range: range),
+                            "规则「\(banned.name)」命中不了坏样例，说明它已经废了：\(banned.pattern)")
+        }
+    }
+
+    func testBannedPatternsDoNotFireOnCleanTokenUsage() throws {
+        let clean = [
+            #".font(Theme.Typo.monoSmall.font)"#,
+            ".foregroundStyle(Theme.Semantic.warning.textColor)",
+            "GlassSection(\"进程占用排行\", icon: .processes) { table }",
+            ".surface(layer: .contentInset, shape: .rounded(Theme.Radius.md))",
+            "LiveNumber(value, tier: Theme.Typo.metricMid)",
+        ]
+        for banned in Self.bannedPatterns {
+            let regex = try NSRegularExpression(pattern: banned.pattern, options: [])
+            for line in clean {
+                let range = NSRange(line.startIndex..., in: line)
+                XCTAssertNil(regex.firstMatch(in: line, options: [], range: range),
+                             "规则「\(banned.name)」误伤了合规写法：\(line)")
+            }
+        }
+    }
+
+    func testLegacyTokenDetectorIsNotBlind() {
+        let dirty = "MetricTile(label: \"CPU\", tint: Theme.caution, systemImage: \"cpu\")"
+        XCTAssertTrue(Self.legacyTokens.contains { dirty.contains($0) },
+                      "旧转发名的检测表要是空的，这条棘轮就只是装饰")
+        let clean = "MetricTile(label: \"CPU\", tint: Theme.Semantic.warning.textColor)"
+        XCTAssertFalse(Self.legacyTokens.contains { clean.contains($0) })
+    }
+
     /// 与本流自己也要过的 800 行闸门同口径（全行数，含注释）。
     func testOwnedFilesStayUnderTheHugeFileBar() throws {
         for directory in Self.ownedDirectories {

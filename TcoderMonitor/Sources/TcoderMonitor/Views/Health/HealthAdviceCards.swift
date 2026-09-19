@@ -107,9 +107,10 @@ struct HealthTrendCard: View {
     private var readoutStrip: some View {
         let scores = points.map { Double($0.score) }
         HStack(spacing: Theme.Spacing.md) {
-            StatLine(label: "最高", value: scores.max().map { String(format: "%.0f", $0) } ?? Live.missing)
-            StatLine(label: "最低", value: scores.min().map { String(format: "%.0f", $0) } ?? Live.missing)
-            StatLine(label: "均值", value: Self.average(scores).map { String(format: "%.1f", $0) } ?? Live.missing)
+            // 一律走 Live.fixed：nil → `--`，不给「无历史」编一个 0 分。
+            StatLine(label: "最高", value: Live.fixed(scores.max(), digits: 0))
+            StatLine(label: "最低", value: Live.fixed(scores.min(), digits: 0))
+            StatLine(label: "均值", value: Live.fixed(Self.average(scores), digits: 1))
             StatLine(label: "跨度", value: "\(NumberFormat.grouped(spanDays)) 天")
             Spacer(minLength: 0)
         }
@@ -139,6 +140,10 @@ struct HealthTrendChart: View {
     let points: [ScoreHistoryPoint]
     let gradeBLine: Double
 
+    /// 历史点直径与 B 级参考线虚线段长，均属图表几何（WS-I §9 例外），随 10pt 轴标签量出来。
+    private static let pointSymbolSize: CGFloat = 32
+    private static let referenceLineDash: [CGFloat] = [4, 3]
+
     var body: some View {
         Chart(points) { point in
             LineMark(x: .value("时间", point.date), y: .value("分数", Double(point.score)))
@@ -148,11 +153,11 @@ struct HealthTrendChart: View {
 
             PointMark(x: .value("时间", point.date), y: .value("分数", Double(point.score)))
                 .foregroundStyle(ChartSeries.color(forScore: point.score))
-                .symbolSize(32)
+                .symbolSize(Self.pointSymbolSize)
 
             RuleMark(y: .value("B 级线", gradeBLine))
                 .foregroundStyle(Theme.Semantic.warning.graphicColor)
-                .lineStyle(StrokeStyle(lineWidth: Theme.Stroke.separator, dash: [4, 3]))
+                .lineStyle(StrokeStyle(lineWidth: Theme.Stroke.separator, dash: Self.referenceLineDash))
                 .annotation(position: .top, alignment: .leading) {
                     Text("B 级线")
                         .font(Theme.Typo.microLabel.font)
