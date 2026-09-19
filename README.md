@@ -6,6 +6,17 @@ Apple Silicon 原生 macOS App（Swift + SwiftUI），对本地开发项目做�
 - 架构：SwiftUI Views → `AppState`（MVVM 根）→ Service Layer → 系统能力
 - 并行开发规约见 [`TcoderMonitor/AGENTS.md`](TcoderMonitor/AGENTS.md)
 
+## 先分清两类内容
+
+| 你是谁 | 该看哪里 |
+|---|---|
+| **想用它监控自己的项目**（不写代码、不编译） | [`docs/使用说明.md`](docs/使用说明.md) —— 怎么装、九个页面各在看什么、每个数字怎么算、什么时候会不准、隐私边界、常见问题 |
+| **要构建 / 改代码 / 出包取证** | 本文件下列各节（以开发与发布向为主）＋ `TcoderMonitor/AGENTS.md` |
+
+本 README 侧重**开发与发布**；唯一两栖的是「数据口径」一节（两边都该读），
+它的**使用者版完整解释**——含界面上原样出现的句子与逐页说明——在
+[`docs/使用说明.md`](docs/使用说明.md) 第 4 节。
+
 ## 功能
 
 | 页面 | 产出 |
@@ -20,7 +31,17 @@ Apple Silicon 原生 macOS App（Swift + SwiftUI），对本地开发项目做�
 | 依赖分析 | `package.json` / `pom.xml` / `build.gradle(.kts)` / `Package.swift` / `requirements.txt` / `pyproject.toml` / `go.mod` / `Cargo.toml` / `Podfile` / `Gemfile`；版本过旧与已知漏洞，可选在线查 OSV.dev 与 npm registry |
 | 健康评分 | 9 维加权评分与优点/问题/建议。**启发式本地计算，未调用任何外部模型**，界面已如实标注 |
 
+> 上表是开发向速览。逐页「给我看什么 / 数字怎么算的 / 什么时候会不准」见
+> [`docs/使用说明.md`](docs/使用说明.md) 第 3 节；页面名称以侧栏为准
+> （`Views/Shell/SectionNav.swift:15-23`）。
+> 另注：「依赖分析」一行只举了常见清单名，代码实际识别 16 个清单文件名
+> （还含 `settings.gradle(.kts)`、`setup.py`、`Pipfile`、`packages.config`，
+> `Services/Dependencies/ManifestParsers.swift:36-53`）。
+
 ## 构建与运行
+
+> 以下是**开发/发布向**。普通使用者不用构建：拿到 `dist/Tcoder Monitor.app` 双击即可，
+> 首次启动、添加项目、重新分析的手动流程见 [`docs/使用说明.md`](docs/使用说明.md) 第 2 节。
 
 ```bash
 cd TcoderMonitor
@@ -35,6 +56,8 @@ open "dist/Tcoder Monitor.app"
 ```
 
 ## 验收脚手架
+
+> 纯开发/发布向，使用者可跳过本节与下一段。
 
 ```bash
 # 端到端：预置一个真实目录让 App 自动扫描，再把落盘的测量结果读回来逐项核对
@@ -63,6 +86,8 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
 
 ## 数据与隐私
 
+> 使用者版（逐条带界面原文与超时/重试的实际数字）见 [`docs/使用说明.md`](docs/使用说明.md) 第 5 节。
+
 - 所有分析**在本机完成**，不上传任何源码内容。
 - 依赖在线查询**默认关闭**，需在「依赖分析」页手动开启。
   单个请求 5 秒硬超时（实测黑洞地址下 OSV=5.006s、npm=5.006s 各自被掐断）；
@@ -70,6 +95,11 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
   超时或失败只降级为内置离线快照，并在页面上写明未核对。
 - 项目列表与报告存在 `~/Library/Application Support/TcoderMonitor/`，删除该目录即清空。
 - 进程监控**只读展示**，不向任何进程发送信号。
+  用到的系统调用仅 `proc_listallpids` / `proc_pidinfo` / `proc_pid_rusage` / `sysctl`
+  （`Sources/TcoderMonitor/Services/Performance/ProcessInspector.swift:54,61,72,206`）。
+- 在线查询只连 npm registry 与 OSV.dev（域名写死 `DependencyNetworkLookup.swift:128-129`）。
+  **注意 OSV 批量接口是 POST**（`OsvClient.swift:129,197`）：语义上只读、请求体只含包名与版本，
+  但不是"只发 GET"，写文档时别这么概括。
 
 ## 数据口径（看到数字前先读这节）
 
@@ -85,7 +115,30 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
   页面底部会列出缺失维度与重归一化明细。
 - 覆盖率只读取仓库已生成的报告，不会代为执行测试；无报告时显示空态而不是 0%。
 
+> 使用者版含界面上**原样出现**的句子与判定字段，见 `docs/使用说明.md` 第 4 节。
+> 两处措辞在此校正（不改上面的结论，只补精确出处）：
+> ① 第三种漏洞状态在界面上写的是「未联网核对，仅内置快照（覆盖 npm / Maven / Python）· 无依赖可核对」
+>   或「已联网核对，但无可比对版本数据的依赖」
+>   （`Sources/TcoderMonitor/Views/Dependencies/DependencyVerdictRows.swift:140-154`），
+>   不是「均无版本数据可比对」这句话；
+> ② 界面判断「历史是否被窗口截断」用的是派生判据 `isWindowTruncated`
+>   （`Sources/TcoderMonitor/Views/CodeGit/GitHistoryScope.swift:65-67`），
+>   **不是**契约字段 `GitInsights.historyTruncated`——后者被合并提交污染，两者不等价
+>   （赋值处 `Services/Git/ShellGitAnalyzer.swift:245-247`）。
+
 ## 已知限制
+
+- **内置示例项目的样例数字在六个页面不带任何「示例」标记**：
+  只有侧栏徽标（`Views/Shell/ProjectSidebar.swift:97-100`）与性能页标签
+  （`Views/Performance/PerformanceView.swift:50`）会说明它是示例，
+  总览 / 代码规模 / 复杂度风险 / Git 洞察 / 贡献者 / 健康评分 六页 `isDemo` 零引用。
+  数值全来自 `Services/Demo/DemoData.swift` 的写死样例。
+- `git log` 撞上 60 秒硬超时（`Services/Git/ShellGitAnalyzer.swift:53`）时本轮 Git 结果整块置空，
+  **上一轮成功的 Git 数据不会被保留**（`App/AppState.swift:148-150` 每次新建报告），
+  页面退回「尚未分析 Git 历史」。
+- 内置离线漏洞规则共 10 条，只覆盖 npm / Maven / Python
+  （`Services/Dependencies/VulnerabilitySource.swift:69-222`）；
+  SwiftPM 与 CocoaPods 连在线核对也不支持（`DependencyNetworkLookup.swift:39`）。
 
 - 无 root 时逐进程指标只覆盖当前用户可见的进程；进程总数走 `sysctl(KERN_PROC_ALL)`，与 `top`/`ps -A` 同源。
 - 内存口径为 `total - (free + speculative + purgeable)`，与活动监视器一致。
