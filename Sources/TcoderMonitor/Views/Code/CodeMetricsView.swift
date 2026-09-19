@@ -241,7 +241,7 @@ struct CodeMetricsView: View {
                 Divider().opacity(0.4)
 
                 HStack(spacing: 16) {
-                    StatLine(label: "扫描耗时", value: durationText(code.durationMs))
+                    StatLine(label: "扫描耗时", value: CodeViewFormat.duration(code.durationMs))
                     StatLine(label: "扫描时间", value: DateFormat.full.string(from: code.scannedAt))
                     StatLine(label: "距今", value: DateFormat.sinceDescription(code.scannedAt))
                 }
@@ -266,13 +266,6 @@ struct CodeMetricsView: View {
         return "FIXME \(NumberFormat.grouped(code.fixmeCount)) 处通常表示已知缺陷，建议优先在对应文件里核对。"
     }
 
-    private func durationText(_ durationMs: Int) -> String {
-        if durationMs >= 1_000 {
-            return String(format: "%.2f 秒", Double(durationMs) / 1_000)
-        }
-        return "\(NumberFormat.grouped(durationMs)) 毫秒"
-    }
-
     // MARK: - Huge files
 
     private func hotspotCard(_ code: CodeMetrics) -> some View {
@@ -293,10 +286,10 @@ struct CodeMetricsView: View {
                     ForEach(Array(code.hugeFiles.prefix(Self.hotspotRowLimit).enumerated()), id: \.element.id) { index, hotspot in
                         CodeMetricsHotspotRow(
                             hotspot: hotspot,
-                            fileName: fileName(hotspot.path),
-                            directory: directoryTail(hotspot.path),
+                            fileName: CodeViewFormat.fileName(hotspot.path),
+                            directory: CodeViewFormat.directoryTail(hotspot.path, root: projectRoot),
                             largestLineCount: largestLineCount(code),
-                            url: resolvedURL(for: hotspot)
+                            url: CodeViewFormat.resolvedURL(hotspot.path, root: projectRoot)
                         )
                         if index < min(Self.hotspotRowLimit, code.hugeFiles.count) - 1 {
                             Divider().opacity(0.35)

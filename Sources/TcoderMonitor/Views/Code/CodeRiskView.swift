@@ -68,7 +68,7 @@ struct CodeRiskView: View {
     private func riskOverviewCard(_ code: CodeMetrics) -> some View {
         SectionCard(
             "风险总览",
-            subtitle: "最近扫描 \(DateFormat.sinceDescription(code.scannedAt)) · 耗时 \(durationText(code.durationMs))",
+            subtitle: "最近扫描 " + DateFormat.sinceDescription(code.scannedAt) + " · 耗时 " + CodeViewFormat.duration(code.durationMs),
             icon: "exclamationmark.triangle",
             trailing: AnyView(RiskBadge(risk: code.overallRisk))
         ) {
@@ -207,7 +207,7 @@ struct CodeRiskView: View {
                 }
                 .buttonStyle(.borderless)
                 .controlSize(.mini)
-                .help("用默认应用打开 \(fileName(first.path))")
+                .help("用默认应用打开 \(CodeViewFormat.fileName(first.path))")
             }
         }
     }
@@ -215,7 +215,7 @@ struct CodeRiskView: View {
     /// 最多列 4 个 occurrence，其余如实汇总为「另有 N 处」。
     private func occurrenceTitles(_ block: DuplicatedBlock) -> String {
         let shown = block.occurrences.prefix(Self.occurrenceLimit)
-            .map { "\(displayPath($0.path)):\(NumberFormat.grouped($0.startLine))" }
+            .map { "\(CodeViewFormat.pathTail($0.path, root: projectRoot)):\(NumberFormat.grouped($0.startLine))" }
         let joined = shown.joined(separator: "   ")
         let rest = block.occurrences.count - shown.count
         return rest > 0 ? "\(joined)   （另有 \(NumberFormat.grouped(rest)) 处）" : joined
@@ -290,7 +290,7 @@ struct CodeRiskView: View {
                             .font(Theme.monoSmall)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                        Text(displayPath(hotspot.filePath))
+                        Text(CodeViewFormat.pathTail(hotspot.filePath, root: projectRoot))
                             .font(.system(size: 9))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
@@ -333,7 +333,7 @@ struct CodeRiskView: View {
             .buttonStyle(.borderless)
             .controlSize(.mini)
             .frame(width: Self.openWidth, alignment: .trailing)
-            .help("用默认应用打开 \(fileName(hotspot.filePath))")
+            .help("用默认应用打开 \(CodeViewFormat.fileName(hotspot.filePath))")
         }
     }
 
@@ -397,7 +397,7 @@ struct CodeRiskView: View {
         // 2) 圈复杂度严重档：CC 数字与函数名逐条点名。
         let critical = code.topComplexFunctions.filter { $0.risk == .critical }
         if !critical.isEmpty {
-            let named = critical.prefix(3).map { "\($0.name)（CC \(NumberFormat.grouped($0.cyclomaticComplexity)) · \(NumberFormat.grouped($0.lineCount)) 行 · \(fileName($0.filePath)):\(NumberFormat.grouped($0.startLine))）" }
+            let named = critical.prefix(3).map { "\($0.name)（CC \(NumberFormat.grouped($0.cyclomaticComplexity)) · \(NumberFormat.grouped($0.lineCount)) 行 · \(CodeViewFormat.fileName($0.filePath)):\(NumberFormat.grouped($0.startLine))）" }
             let highest = critical.map(\.cyclomaticComplexity).max() ?? 0
             let lowestOnBoard = code.topComplexFunctions.map(\.cyclomaticComplexity).min() ?? 0
             items.append(CodeRiskSuggestion(
@@ -423,7 +423,7 @@ struct CodeRiskView: View {
             items.append(CodeRiskSuggestion(
                 icon: "tray.full",
                 tint: Theme.caution,
-                text: "\(NumberFormat.grouped(manyParams.count)) 个上榜函数的参数达到或超过 \(NumberFormat.grouped(Self.manyParameterCount)) 个，最多的是 \(worst.name)（\(NumberFormat.grouped(worst.parameterCount)) 个参数 · \(fileName(worst.filePath)):\(NumberFormat.grouped(worst.startLine))）：把成组参数收进一个配置或值类型，调用点会同步变短。"
+                text: "\(NumberFormat.grouped(manyParams.count)) 个上榜函数的参数达到或超过 \(NumberFormat.grouped(Self.manyParameterCount)) 个，最多的是 \(worst.name)（\(NumberFormat.grouped(worst.parameterCount)) 个参数 · \(CodeViewFormat.fileName(worst.filePath)):\(NumberFormat.grouped(worst.startLine))）：把成组参数收进一个配置或值类型，调用点会同步变短。"
             ))
         }
 
@@ -441,7 +441,7 @@ struct CodeRiskView: View {
             items.append(CodeRiskSuggestion(
                 icon: "doc.on.doc",
                 tint: Theme.color(for: largest.risk),
-                text: "最大文件 \(fileName(largest.path)) 共 \(NumberFormat.grouped(largest.lineCount)) 行（项目行数峰值 \(NumberFormat.grouped(code.largestFileLineCount)) 行）：\(largest.suggestion)"
+                text: "最大文件 \(CodeViewFormat.fileName(largest.path)) 共 \(NumberFormat.grouped(largest.lineCount)) 行（项目行数峰值 \(NumberFormat.grouped(code.largestFileLineCount)) 行）：\(largest.suggestion)"
             ))
         }
 
@@ -472,13 +472,15 @@ struct CodeRiskView: View {
 
     /// 建议文案里点名重复块出现的文件（最多 2 个，剩下的用处数说明）。
     private func occurrenceFileSummary(_ block: DuplicatedBlock) -> String {
-        let names = Array(block.occurrences.prefix(2)).map { "\(fileName($0.path)):\(NumberFormat.grouped($0.startLine))" }
+        let names = Array(block.occurrences.prefix(2)).map { "\(CodeViewFormat.fileName($0.path)):\(NumberFormat.grouped($0.startLine))" }
         let rest = block.occurrences.count - names.count
         let joined = names.joined(separator: "、")
         return rest > 0 ? "\(joined) 等文件" : joined
     }
 
     // MARK: - Formatting & file actions
+
+    private var projectRoot: String { report?.project.path ?? "" }
 
     private func highRiskFunctionCount(_ code: CodeMetrics) -> Int {
         code.topComplexFunctions.filter { $0.risk.rank >= RiskLevel.high.rank }.count
@@ -490,53 +492,14 @@ struct CodeRiskView: View {
         return Theme.healthy
     }
 
-    private func durationText(_ durationMs: Int) -> String {
-        if durationMs >= 1_000 {
-            return String(format: "%.2f 秒", Double(durationMs) / 1_000)
-        }
-        return "\(NumberFormat.grouped(durationMs)) 毫秒"
-    }
-
-    private func fileName(_ path: String) -> String {
-        URL(fileURLWithPath: path).lastPathComponent
-    }
-
-    /// 相对项目根的路径。
-    private func relativePath(_ path: String) -> String {
-        let root = report?.project.path ?? ""
-        if !root.isEmpty, path.hasPrefix(root) {
-            var rest = String(path.dropFirst(root.count))
-            if rest.hasPrefix("/") { rest.removeFirst() }
-            if !rest.isEmpty { return rest }
-        }
-        return path
-    }
-
-    /// 展示用的路径尾部：省略中间目录，最多保留末尾 3 段。
-    private func displayPath(_ path: String) -> String {
-        let parts = relativePath(path).split(separator: "/").map(String.init)
-        guard parts.count > 4 else { return relativePath(path) }
-        return "…/" + parts.suffix(3).joined(separator: "/")
-    }
-
-    private func resolvedURL(_ path: String) -> URL {
-        if path.hasPrefix("/") {
-            return URL(fileURLWithPath: path)
-        }
-        if let base = report?.project.path, !base.isEmpty {
-            return URL(fileURLWithPath: base).appendingPathComponent(path)
-        }
-        return URL(fileURLWithPath: path)
-    }
-
-    /// 在 Finder 中显示该文件。
+    /// 点击行：在 Finder 中显示源文件。
     private func revealInFinder(_ path: String) {
-        NSWorkspace.shared.activateFileViewerSelecting([resolvedURL(path)])
+        NSWorkspace.shared.activateFileViewerSelecting([CodeViewFormat.resolvedURL(path, root: projectRoot)])
     }
 
-    /// 次要动作：用系统默认应用打开文件。
+    /// 次要动作：用系统默认应用打开源文件。
     private func openFile(_ path: String) {
-        NSWorkspace.shared.open(resolvedURL(path))
+        NSWorkspace.shared.open(CodeViewFormat.resolvedURL(path, root: projectRoot))
     }
 }
 

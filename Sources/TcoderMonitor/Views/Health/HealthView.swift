@@ -24,7 +24,8 @@ struct HealthView: View {
     /// 等级 B 的分数线，与 `HealthGrade.init(score:)` 保持一致。
     private static let gradeBLine = 70.0
 
-    static let heuristicClaim = "启发式加权计算，未调用外部模型"
+    private static let heuristicClaim = "启发式加权计算，未调用外部模型"
+
     /// 参与计分的维度数（`defaultWeight == 0` 的维度本来就不计分）。
     private static var scorableDimensionCount: Int {
         HealthDimension.allCases.filter { $0.defaultWeight > 0 }.count
@@ -121,9 +122,10 @@ struct HealthView: View {
                     .foregroundStyle(.tertiary)
 
                 if health.generatedByAI {
-                    // 与本页口径冲突时才出现：不掩盖，也不改口去声称调用过模型。
+                    // 契约里这个标记恒为 false；真出现时如实提示口径冲突，
+                    // 但绝不把本页说成调用过外部模型。
                     BannerRow(
-                        text: "上游把这条评分标记为模型生成，与本页的启发式口径不一致，请重新分析后再看。",
+                        text: "上游把这条评分标记为外部模型产物，与本页口径不一致：Tcoder 只做本机启发式加权计算，不调用外部模型。请重新分析后再看。",
                         style: .warning
                     )
                 }
@@ -293,7 +295,7 @@ struct HealthView: View {
                                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(Theme.color(forScore: component.score))
                                 .frame(minWidth: Self.contributionColumnWidth, alignment: .trailing)
-                                .help("满分可得 \(String(format: "%.1f", component.weight * 100))，这次少了 \(String(format: "%.1f", component.weight * Double(100 - component.score)))")
+                                .help(contributionHelp(component))
 
                             Text(component.detail)
                                 .font(.system(size: 9))
@@ -336,6 +338,13 @@ struct HealthView: View {
             .font(.system(size: 9, weight: .semibold))
             .foregroundStyle(.secondary)
             .frame(width: width, alignment: alignment)
+    }
+
+    /// 贡献格的满分与缺口：满分 = 权重 × 100，缺口就是这一维度把综合分拖下去的量。
+    private func contributionHelp(_ component: ScoreComponent) -> String {
+        let full = component.weight * 100
+        let lost = component.weight * Double(100 - component.score)
+        return "满分可得 \(String(format: "%.1f", full))，这一维度拖了 \(String(format: "%.1f", lost)) 分"
     }
 
     // MARK: 权重口径

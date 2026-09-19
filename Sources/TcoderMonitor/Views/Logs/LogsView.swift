@@ -51,8 +51,8 @@ struct LogsView: View {
             .padding(16)
         }
         .scrollContentBackground(.hidden)
-        .onChange(of: state.logWindowDays) { _, days in
-            rescanForNewWindow(days)
+        .onChange(of: state.logWindowDays) { _, _ in
+            rescanForNewWindow()
         }
     }
 
@@ -164,24 +164,17 @@ struct LogsView: View {
         return "分析于 \(DateFormat.sinceDescription(logs.analyzedAt)) · 时间窗口 \(state.logWindowDays) 天 · 扫描 \(NumberFormat.grouped(logs.totalLinesScanned)) 行"
     }
 
-    /// 直接构造 Binding 写回 `AppState.logWindowDays`，避免为绑定去改 AppState。
-    private var logWindowBinding: Binding<Int> {
-        Binding(
-            get: { state.logWindowDays },
-            set: { days in
-                guard days != state.logWindowDays else { return }
-                state.logWindowDays = days
-                guard let project = state.selectedProject else { return }
-                if project.isDemo {
-                    pendingRescanNote = "示例项目使用内置固定数据，时间窗口不影响结果。"
-                } else if state.isScanning {
-                    pendingRescanNote = "改窗口后需重新分析。"
-                } else {
-                    pendingRescanNote = nil
-                    state.scan(project: project)
-                }
-            }
-        )
+    /// 换窗口后尽量立刻重算；做不到（正在扫描 / 示例项目）时才提示手动重算。
+    private func rescanForNewWindow() {
+        guard let project = state.selectedProject else { return }
+        if project.isDemo {
+            pendingRescanNote = "示例项目使用内置固定数据，时间窗口不影响结果。"
+        } else if state.isScanning {
+            pendingRescanNote = "改窗口后需重新分析。"
+        } else {
+            pendingRescanNote = nil
+            state.scan(project: project)
+        }
     }
 
     private func chooseLogFiles() {
@@ -217,7 +210,9 @@ struct LogsView: View {
         guard let project = state.selectedProject else { return [] }
         var seen = Set<String>()
         var items: [AttachedLogItem] = []
-        for url in state.extraLogURLs[project.id] ?? [] where seen.insert(url.path).inserted {
+        for url in state.extraLogURLs[project.id] ?? [] {
+            guard !seen.contains(url.path) else { continue }
+            seen.insert(url.path)
             items.append(AttachedLogItem(url: url, sizeBytes: Self.fileSize(of: url)))
         }
         return items
@@ -494,7 +489,7 @@ struct LogsView: View {
 
 // MARK: - Page-local pieces
 
-/// 附加文件条目：URL 不是 Identifiable，这里补一个稳定 id（路径 + 序号）。
+/// 附加文件条目：列表条目在附加时已按路径去重，所以用路径当稳定 id。
 private struct AttachedLogItem: Identifiable {
     let url: URL
     let sizeBytes: UInt64?

@@ -247,7 +247,9 @@ enum ComplexityEngine {
         for pattern in profile.patterns {
             guard pattern.needsParen ? line.contains("(") : true else { continue }
             guard let match = pattern.expression.firstMatch(in: line, options: [], range: range) else { continue }
-            let raw = text.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespaces)
+            // 可选捕获组没参与匹配时 range(at:) 返回 {NSNotFound, 0}，直接喂给 substring 会抛
+            // NSInvalidArgumentException（真实崩过），一律走安全取值；没命名就是匿名函数。
+            let raw = trimQuotes(groupText(text, match, 1) ?? "")
             let name: String
             if let prefix = pattern.namePrefix {
                 guard !raw.isEmpty else { continue }
@@ -256,26 +258,43 @@ enum ComplexityEngine {
                 name = raw.isEmpty ? "<anonymous>" : raw
             }
             if isReservedName(name) { continue }
-            if pattern.requiresTypeToken || pattern.requiresModifierWhenNoType {
-                let typeToken = match.numberOfRanges > 2
-                    ? text.substring(with: match.range(at: 2)).trimmingCharacters(in: .whitespaces)
-                    : ""
-                if typeToken.isEmpty {
-                    if pattern.requiresTypeToken { continue }
-                    let head = text.substring(with: NSRange(location: 0, length: match.range(at: 1).location))
-                    if head.rangeOfAny(modifierWords) == nil { continue }
-                }
+            // 名字之前必须真的有什么：注解、修饰符或返回类型。
+            // cStyle 的返回类型组是 (?:…) 非捕获的，拿不到「组 2」，所以这里直接用
+            // 「组 1 之前的前缀」判定：前缀为空说明这是 `foo(bar)` 之类的裸调用行。
+            let headText = (groupText(text, match, 1, prefixOnly: true) ?? "").trimmingCharacters(in: .whitespaces)
+            if pattern.requiresTypeToken {
+                let typeToken = (groupText(text, match, 2) ?? "").trimmingCharacters(in: .whitespaces)
+                if typeToken.isEmpty { continue }
+            } else if pattern.requiresModifierWhenNoType {
+                if headText.isEmpty, name.contains("::") == false { continue }
             }
             return name
         }
         return nil
     }
 
-    private static let modifierWords = [
-        "public", "private", "protected", "internal", "fileprivate", "open", "static", "class",
-        "final", "abstract", "override", "mutating", "nonisolated", "async", "suspend", "inline",
-        "native", "synchronized", "strictfp", "default", "readonly", "virtual", "extern", "fun",
-    ]
+    /// prefixOnly = true 时取「捕获组 1 之前的那段文本」，用于检查行首有没有修饰符。
+    private static func groupText(
+        _ text: NSString, _ match: NSTextCheckingResult, _ index: Int, prefixOnly: Bool = false
+    ) -> String? {
+        guard index < match.numberOfRanges else { return nil }
+        let target = match.range(at: index)
+        guard target.location != NSNotFound else { return nil }
+        if prefixOnly { return text.substring(to: target.location) }
+        guard NSMaxRange(target) <= text.length else { return nil }
+        return text.substring(with: target)
+    }
+
+    /// `'onClick'` / `"onClick"` 这类带引号的对象键，名字里去掉引号。
+    private static func trimQuotes(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard let first = trimmed.first, trimmed.count >= 2 else { return trimmed }
+        if first == "\"" || first == "'" {
+            guard trimmed.hasSuffix(String(first)) else { return trimmed }
+            return String(trimmed.dropFirst().dropLast())
+        }
+        return trimmed
+    }
 
     private static func isReservedName(_ name: String) -> Bool {
         switch name {
@@ -306,6 +325,9 @@ enum ComplexityEngine {
             if cursor > start, !src.balancedBefore[cursor - 1] { return nil }
             if braceLine < 0 {
                 if profile.allowTrailingSemicolonEnd == false, src.cleaned[cursor].contains(";") { return nil }
+                // 向后找 `{` 的窗口里又出现一条新签名，说明本行只是无函数体的声明
+                // （Swift 协议要求、@objc 声明、C 原型），不能把下一个函数的 `{` 当成自己的边界
+                if cursor > start, matchSignature(src.cleaned[cursor], profile) != nil { return nil }
                 if src.opens[cursor] > 0 {
                     braceLine = cursor
                     if src.prefix[cursor + 1] <= base { return (cursor, cursor) }
@@ -334,20 +356,17 @@ enum ComplexityEngine {
         return lastBody == start ? nil : lastBody
     }
 
+    /// Ruby：只有和 `def` 同级（或更靠外）的 `end` 才是函数收尾。
+    /// 更深一层的 `end` 关的是更深的块，与本函数边界无关，不需要计数；
+    /// 同级又开出 def/class/module 说明上一个 end 被漏掉了，直接放弃候选而不是把后面全吞进来。
     private static func rubyEnd(start: Int, _ cleaned: [String]) -> Int? {
         let indent = indentation(of: cleaned[start])
         var cursor = start + 1
-        var nested = 0
         while cursor < cleaned.count, cursor - start <= maxBodyLookahead {
             let line = cleaned[cursor]
-            if line.first != nil {
-                let lineIndent = indentation(of: line)
-                if lineIndent <= indent, line.isRubyBlockCloser {
-                    if nested == 0 { return cursor }
-                    nested -= 1
-                } else if lineIndent > indent, line.isRubyBlockOpener {
-                    nested += 1
-                }
+            if line.first != nil, indentation(of: line) <= indent {
+                if line.isRubyBlockEnd { return cursor }
+                if line.isRubySiblingBlockStart { return nil }
             }
             cursor += 1
         }
@@ -868,12 +887,15 @@ enum ComplexityEngine {
     private static let modifierGroup =
         #"(?:(?:public|private(?:\(\))?|protected|internal|fileprivate|open|static|class|final|"#
         + #"abstract|override|sealed|data|value|inline|noinline|crossinline|tailrec|operator|infix|"#
-        + #"external|constexpr|volatile|register|restrict|synchronized|throws|rethrows|async|await|"#
+        + #"external|constexpr|volatile|register|restrict|synchronized|throws|rethrows|async|await|suspend|"#
         + #"lazy|mutating|nonisolated|isolated|weak|strong|autoclosure|composable|virtual|readonly|"#
         + #"native|strictfp|default)[ \t]+)"#
 
-    /// 「注解 + 修饰符」前缀，可重复零次以上。
-    private static var head: String { #"(?:\#(annotationPrefix)|\#(modifierGroup))*[ \t]*"# }
+    /// 「缩进 + 注解/修饰符（可重复，彼此之间允许空白）」前缀。
+    /// 两处细节都是踩出来的：
+    /// 1) 行首空白必须放在重复组之前，否则 `    suspend fun foo()` 这类带缩进的修饰符签名匹配不上；
+    /// 2) 组内还要留一个 `[ \t]*`，否则 `@MainActor private func` 这种「注解 + 修饰符」会断在空格上。
+    private static var head: String { #"[ \t]*(?:(?:\#(annotationPrefix)|\#(modifierGroup))[ \t]*)*"# }
 
     /// 单层参数列表（不含嵌套花括号，遇分号/换行即止）。
     private static let params = #"\((?:[^;{}\n]*)\)"#
@@ -907,9 +929,12 @@ enum ComplexityEngine {
     }
 
     private static var cStyleFunction: SignaturePattern {
-        let type = #"(?:[A-Za-z_$][\w$]*(?:\.\w+)*(?:<[^<>{}();]*>)?(?:[ \t]*\[[ \t]*\])*[ \t*&]+)+"#
+        let type = #"(?:[A-Za-z_$][\w$]*(?:\.\w+|::\w+)*(?:<[^<>{}();]*>)?(?:[ \t]*\[[ \t]*\])*[ \t*&]+)+"#
+        // 组 1 必须是「函数名」本身；C++ 的 Foo::bar / Foo::~Foo 要整体算名字。
+        // 参数表之后到 `{` 之间允许任意限定串：throws / noexcept / const / override / -> Ret / where…
+        // （只排除分号和换行，所以 `foo(bar);` 这种调用行依然不会被误判成定义。）
         return SignaturePattern(
-            #"^\#(head)(?:\#(type))?([A-Za-z_$][\w$]*)[ \t]*\#(params)(?:[ \t]+throws[ \t]+[\w.,$ \t]+)?[ \t]*(?:\{|$)"#,
+            #"^\#(head)(?:\#(type))?((?:[A-Za-z_$][\w$]*::)*~?[A-Za-z_$][\w$]*)[ \t]*\#(params)[^{;\n]*(?:\{|$)"#,
             requiresModifierWhenNoType: true
         )
     }
@@ -919,8 +944,10 @@ enum ComplexityEngine {
     }
 
     private static var jsFunction: SignaturePattern {
-        SignaturePattern(
-            #"^\#(head)(?:export[ \t]+)?(?:default[ \t]+)?function[ \t]*\*?[ \t]*([A-Za-z_$][\w$]*)?[ \t]*\("#
+        // 允许赋值型函数表达式：`module.exports = function main(cb) {`、`handlers.save = function () {`
+        let target = #"(?:[A-Za-z_$][\w$]*(?:\.?\[[^\]\n]{1,60}\]|\.[A-Za-z_$][\w$]*)*)[ \t]*=[ \t]*"#
+        return SignaturePattern(
+            #"^\#(head)(?:\#(target))?(?:export[ \t]+)?(?:default[ \t]+)?function[ \t]*\*?[ \t]*([A-Za-z_$][\w$]*)?[ \t]*\("#
         )
     }
 
@@ -934,7 +961,8 @@ enum ComplexityEngine {
     }
 
     private static var jsMethod: SignaturePattern {
-        let member = #"(?:[A-Za-z_$][\w$]*|\[[^\]\n]{1,60}\]|"[^"\n]{1,60}"|'[^'\n]{1,60}')"#
+        // 整个成员名必须是捕获组 1：namePrefix "." 与 groupText(_,1) 都靠它（漏掉捕获会当场崩）
+        let member = #"([A-Za-z_$][\w$]*|\[[^\]\n]{1,60}\]|"[^"\n]{1,60}"|'[^'\n]{1,60}')"#
         return SignaturePattern(
             #"^\#(head)(?:get[ \t]+|set[ \t]+)?\#(member)[ \t]*\.?[ \t]*\#(params)"#
                 + #"(?:[ \t]*:[ \t]*[^;{}\n=]+)?[ \t]*\{"#,
@@ -944,7 +972,7 @@ enum ComplexityEngine {
 
     private static var jsObjectMethod: SignaturePattern {
         SignaturePattern(
-            #"^\#(head)(?:"[^"\n]{1,60}"|'[^'\n]{1,60}'|[A-Za-z_$][\w$]*)[ \t]*:[ \t]*(?:async[ \t]+)?"#
+            #"^\#(head)("[^"\n]{1,60}"|'[^'\n]{1,60}'|[A-Za-z_$][\w$]*)[ \t]*:[ \t]*(?:async[ \t]+)?"#
                 + #"(?:function[ \t]*\*?[ \t]*(?:[A-Za-z_$][\w$]*)?[ \t]*)?(?:\#(params)|[A-Za-z_$][\w$]*)"#
                 + #"(?:[ \t]*:[ \t]*[^;{}\n=]+)?[ \t]*(?:=>|\{)"#,
             namePrefix: "."
@@ -983,44 +1011,37 @@ enum ComplexityEngine {
 
     private static var shellNameParen: SignaturePattern {
         SignaturePattern(
-            #"^[ \t]*(?:function[ \t]+|source[ \t]+)([A-Za-z_]\w*)[ \t]*(?:\([^()]*\))?[ \t]*(?:\{|$)"#
+            #"^[ \t]*(?:function[ \t]+|source[ \t]+)([A-Za-z_]\w*)[ \t]*(?:\([^()]*\))?[ \t]*(?:\{|$)"#,
+            needsParen: false
         )
     }
 
     // MARK: Ruby block helpers
 
-    fileprivate static let rubyCloserWords = ["end", "class", "module", "begin", "rescue", "ensure"]
-
-    fileprivate static let rubyOpenerWords = [
-        "def", "class", "module", "do", "begin", "if", "unless", "while", "until", "case",
-    ]
+    /// 与 def 同级出现就意味着上一个块没闭合（rescue/ensure 不在此列，它们属于 def 自己）
+    fileprivate static let rubySiblingBlockWords = ["def", "class", "module", "begin"]
 }
 
 // MARK: - Small text helpers (file private)
 
 private extension String {
 
-    var isRubyBlockCloser: Bool {
-        ComplexityEngine.rubyCloserWords.contains(rubyFirstWord)
+    /// 只有 `end` 能收尾 Ruby 函数；`rescue`/`ensure`/`when` 是同一个块内部的分支。
+    var isRubyBlockEnd: Bool { rubyFirstWord == "end" }
+
+    var isRubySiblingBlockStart: Bool {
+        ComplexityEngine.rubySiblingBlockWords.contains(rubyFirstWord)
     }
 
-    var isRubyBlockOpener: Bool {
-        ComplexityEngine.rubyOpenerWords.contains(rubyFirstWord)
-    }
-
-    private var rubyFirstWord: String {
+    /// 行首第一个标识符。必须先跳过缩进——Ruby 方法全都带缩进，
+    /// 不跳就永远取到空串，`  end` 会被判成「不是闭合」，函数边界一路跑到文件尾。
+    var rubyFirstWord: String {
         var word = ""
         for c in self {
+            if word.isEmpty, c == " " || c == "\t" { continue }
             if c.isLetter || c == "_" { word.append(c) }
             else { break }
         }
         return word
-    }
-
-    func rangeOfAny(_ words: [String]) -> String? {
-        for word in words where contains(word) {
-            return word
-        }
-        return nil
     }
 }

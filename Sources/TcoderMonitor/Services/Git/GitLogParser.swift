@@ -5,7 +5,8 @@ import Foundation
 // OWNER: WS-B subagent 1. 纯函数层：把 `git log --numstat` 的整段 stdout 变成
 // `[ParsedCommit]`，不做任何 IO、不触碰 `@MainActor`，可在 `Task.detached` 里调用。
 // 下游消费方是 `GitAggregation.swift`（子代理2），它只用本文件提供的
-// `ParsedCommit` / `ParsedFileChange` 形状与 4 个静态工具函数。
+// `ParsedCommit` / `ParsedFileChange` 两个形状，以及 `normalizeEmail`、`localHour`、
+// `localWeekdayMondayFirst`、`parseAuthorTimestamp` 这几个静态工具函数。
 //
 // 上游主命令（由 `ShellGitAnalyzer` 侧执行）：
 //     git log --no-merges -n 20000 --date=iso-local \
@@ -33,6 +34,9 @@ import Foundation
 // * 高字节以八进制转义（`\346\272\220`）输出，必须按字节还原成 UTF-8。
 // * 空提交：头行之后直接是空行，没有 numstat 行。
 // * 末尾无换行、提交之间有空行；\x1e 与头在同一物理行的末尾。
+// * git 的 stdout 行尾恒为 LF；但 `%s` 会**原样吐出裸 CR**（实测
+//   `git commit -m "$(printf 'has\rcarriage')"` -> `has^Mcarriage`），所以本实现
+//   只折叠 CRLF，绝不把单独的 CR 当行尾，否则这种提交会被切碎。
 
 // MARK: - 解析结果模型
 
@@ -110,7 +114,7 @@ enum GitLogParser {
                     pending = commit(fromHeaderLine: segment)
                     continue
                 }
-                if segment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
+                if isBlank(segment) { continue }
                 guard pending != nil, let change = numstatLine(segment) else { continue }
                 pending?.changes.append(change)
             }
@@ -150,14 +154,12 @@ enum GitLogParser {
         let parts = text.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
         guard parts.count == 3 else { return nil }
 
-        let added = trimWhitespace(String(parts[0]))
-        let deleted = trimWhitespace(String(parts[1]))
-        let isBinary = (added == "-" || deleted == "-")
+        let isBinary = parts[0] == "-" || parts[1] == "-"
 
         var additions = 0
         var deletions = 0
         if !isBinary {
-            guard let a = Int(added), let d = Int(deleted), a >= 0, d >= 0 else { return nil }
+            guard let a = parseCount(parts[0]), let d = parseCount(parts[1]), a >= 0, d >= 0 else { return nil }
             additions = a
             deletions = d
         }
@@ -468,6 +470,20 @@ enum GitLogParser {
 
     private static func trimWhitespace(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// numstat 的计数列：先按原样解析（git 输出不会有空格），失败再容忍性地去空白。
+    private static func parseCount(_ text: Substring) -> Int? {
+        if let direct = Int(text) { return direct }
+        return Int(text.trimmingCharacters(in: .whitespaces))
+    }
+
+    /// 只看 UTF-8 视图判断是否全是空白/换行，避免每行都走一次 NSString 裁剪。
+    private static func isBlank(_ text: String) -> Bool {
+        for byte in text.utf8 where byte != 0x20 && byte != 0x09 && byte != 0x0A && byte != 0x0D {
+            return false
+        }
+        return true
     }
 
     /// 逐个标量地削掉尾部换行。不能只看 `hasSuffix("\r")`：Swift 里 `"\r\n"` 是一个

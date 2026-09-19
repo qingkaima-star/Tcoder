@@ -138,9 +138,14 @@ enum ManifestParsers {
         for name in dependencyNames {
             let tokens = tokens(of: name)
             guard !tokens.isEmpty else { continue }
+            // 连接形式用于兜住 camelCase 拆出的碎片："MyBatis" -> [my, batis] ~ "mybatis"
+            let joined = tokens.joined()
             var hits: [String] = []
             for rule in markerRules where rule.matches(ecosystem) {
-                guard rule.keys.contains(where: { containsPhrase(tokens, $0) }) else { continue }
+                let isHit = rule.keys.contains { phrase in
+                    containsPhrase(tokens, phrase) || joined == phrase.joined()
+                }
+                guard isHit else { continue }
                 if !hits.contains(rule.marker) { hits.append(rule.marker) }
             }
             for marker in hits { counts[marker, default: 0] += 1 }
@@ -474,6 +479,10 @@ extension ManifestParsers {
         MarkerRule(marker: "Puma", ecosystems: [.ruby, .unknown], keys: [["puma"]]),
         MarkerRule(marker: "Devise", ecosystems: [.ruby, .unknown], keys: [["devise"]]),
         MarkerRule(marker: "Nokogiri", ecosystems: [.ruby, .unknown], keys: [["nokogiri"]]),
+        MarkerRule(marker: "Minitest", ecosystems: [.ruby, .unknown], keys: [["minitest"]]),
+        MarkerRule(marker: "RuboCop", ecosystems: [.ruby, .unknown], keys: [["rubocop"]]),
+        MarkerRule(marker: "SimpleCov", ecosystems: [.ruby, .unknown], keys: [["simplecov"], ["simple", "cov"]]),
+        MarkerRule(marker: "Bundler", ecosystems: [.ruby, .unknown], keys: [["bundler"]]),
         // .NET
         MarkerRule(marker: "ASP.NET Core", ecosystems: [.nuget, .unknown], keys: [["aspnetcore"], ["asp", "net"], ["net", "core"]]),
         MarkerRule(marker: "Entity Framework Core", ecosystems: [.nuget, .unknown], keys: [["entity", "framework"]]),
@@ -532,7 +541,7 @@ extension ManifestParsers {
                 records.append(record(name, version, .npm, section.scope, manifestPath))
             }
         }
-        return records
+        return dedupe(records)
     }
 
     private static func jsonVersionString(_ value: Any?) -> String? {
@@ -551,7 +560,7 @@ extension ManifestParsers {
     /// 代不了就保留原文，完全解不出来版本时填 "未声明"。
     static func pomXMLDependencies(_ text: String, manifestPath: String) -> [DependencyRecord] {
         let model = PomDocumentModel(text: text)
-        return model.dependencyRecords(manifestPath: manifestPath)
+        return dedupe(model.dependencyRecords(manifestPath: manifestPath))
     }
 }
 
@@ -633,7 +642,7 @@ extension ManifestParsers {
             let name = rawID.contains(".") ? rawID : "org.jetbrains.kotlin.\(rawID)"
             records.append(record(name, version, .gradle, .build, manifestPath))
         }
-        return records
+        return dedupe(records)
     }
 
     /// "g:a:v" / "g:a" / "g:a:v@jar" / "g:a:v:classifier" -> (name, version)；不像坐标返回 nil。
@@ -680,7 +689,7 @@ extension ManifestParsers {
                 records.append(record(entry.name, entry.version, .swiftPM, .runtime, manifestPath))
             }
         }
-        return records
+        return dedupe(records)
     }
 
     /// 从 `.package(` 之后扫描配对括号，返回参数文本长度；括号不配对返回 nil。
@@ -709,7 +718,7 @@ extension ManifestParsers {
     static func swiftPackageEntry(_ arguments: String) -> (name: String, version: String)? {
         let url = firstGroup("url\\s*:\\s*(['\"])([^'\"\\n]+)\\1", 2, in: arguments)
         let identifier = firstGroup("\\bid\\s*:\\s*(['\"])([^'\"\\n]+)\\1", 2, in: arguments)
-        let declaredName = firstGroup("(?:[^A-Za-z])name\\s*:\\s*(['\"])([^'\"\\n]+)\\1", 2, in: arguments)
+        let declaredName = firstGroup("(?:^|[^A-Za-z])name\\s*:\\s*(['\"])([^'\"\\n]+)\\1", 2, in: arguments)
         if firstGroup("path\\s*:\\s*(['\"])([^'\"\\n]+)\\1", 2, in: arguments) != nil, url == nil, identifier == nil {
             return nil // 本地路径依赖
         }
@@ -761,7 +770,7 @@ extension ManifestParsers {
                 records.append(item)
             }
         }
-        return records
+        return dedupe(records)
     }
 
     /// pyproject.toml / Pipfile / setup.py -> [DependencyRecord]（尽力而为）。
@@ -819,7 +828,7 @@ extension ManifestParsers {
             let version: String
             if let declared, let extracted = numericVersionPrefix(declared) {
                 version = extracted
-            } else if let declared {
+            } else if let declared, declared != "*" {
                 version = declared
             } else {
                 version = undeclaredVersion
@@ -841,7 +850,7 @@ extension ManifestParsers {
                 appendPython(spec, scope: .dev, manifestPath: manifestPath, to: &records)
             }
         }
-        return records
+        return dedupe(records)
     }
 
     private static func appendPython(_ spec: String, scope: DependencyScope,
@@ -998,7 +1007,7 @@ extension ManifestParsers {
             records.append(record(modulePath, goVersion(rawVersion), .go,
                                   isIndirect ? .unknown : .runtime, manifestPath))
         }
-        return records
+        return dedupe(records)
     }
 
     static func goVersion(_ raw: String) -> String {
@@ -1038,7 +1047,7 @@ extension ManifestParsers {
             records.append(record(name, version.isEmpty || version == "*" ? undeclaredVersion : version,
                                   .cargo, scope, manifestPath))
         }
-        return records
+        return dedupe(records)
     }
 }
 
@@ -1072,7 +1081,7 @@ extension ManifestParsers {
                 scopes.append(blockScope(line) ?? inherited)
             }
         }
-        return records
+        return dedupe(records)
     }
 
     static func blockScope(_ line: String) -> DependencyScope? {
@@ -1138,24 +1147,33 @@ extension ManifestParsers {
                 scopes.append(inherited)
             }
         }
-        return records
+        return dedupe(records)
     }
 
     static func gemGroupScope(_ line: String) -> DependencyScope {
-        let symbols = matches(of: ":([A-Za-z0-9_]+)", in: line).compactMap { $0[safe: 1] }.map { $0.lowercased() }
-        if symbols.contains("test") || symbols.contains("spec") { return .test }
-        if symbols.contains("development") || symbols.contains("dev") { return .dev }
-        if symbols.contains("production") || symbols.contains("prod") { return .runtime }
+        let symbols = matches(of: ":([A-Za-z0-9_]+)", in: line)
+            .compactMap { ManifestParsers.value(at: 1, in: $0) }
+            .map { $0.lowercased() }
+        return rubyScope(forGroups: symbols)
+    }
+
+    /// group 名到 scope 的容错映射（:test/:tests/:spec -> 测试，:dev/:style/:lint/:typecheck/:doc -> 开发）。
+    static func rubyScope(forGroups symbols: [String]) -> DependencyScope {
+        for symbol in symbols {
+            if symbol.contains("test") || symbol.contains("spec") { return .test }
+        }
+        let devHints = ["dev", "lint", "style", "typecheck", "doc", "check", "audit", "quality", "format", "debug", "tool"]
+        for symbol in symbols where devHints.contains(where: { symbol.contains($0) }) { return .dev }
         return .runtime
     }
 
     static func gemInlineScope(_ line: String) -> DependencyScope? {
         guard let body = firstGroup("groups?\\s*:\\s*\\[([^\\]]*)\\]", 1, in: line) else { return nil }
-        let symbols = matches(of: ":([A-Za-z0-9_]+)", in: body).compactMap { $0[safe: 1] }.map { $0.lowercased() }
-        if symbols.contains("test") || symbols.contains("spec") { return .test }
-        if symbols.contains("development") || symbols.contains("dev") { return .dev }
-        if symbols.contains("production") || symbols.contains("prod") { return .runtime }
-        return nil
+        let symbols = matches(of: ":([A-Za-z0-9_]+)", in: body)
+            .compactMap { ManifestParsers.value(at: 1, in: $0) }
+            .map { $0.lowercased() }
+        guard !symbols.isEmpty else { return nil }
+        return rubyScope(forGroups: symbols)
     }
 }
 
@@ -1172,11 +1190,11 @@ extension ManifestParsers {
             let development = (nugetAttribute("developmentDependency", in: attributes) ?? "").lowercased() == "true"
             records.append(record(name, version, .nuget, development ? .dev : .runtime, manifestPath))
         }
-        return records
+        return dedupe(records)
     }
 
     static func nugetAttribute(_ key: String, in attributes: String) -> String? {
-        firstGroup("\(key)\\s*=\\s*(['\"])([^'\"\\n]*)\\1", 2, in: attributes)
+        firstGroup("(?<![A-Za-z0-9_])\(key)\\s*=\\s*(['\"])([^'\"\\n]*)\\1", 2, in: attributes)
     }
 }
 
@@ -1374,6 +1392,6 @@ private final class PomDocumentModel: NSObject, XMLParserDelegate {
             let name = group.isEmpty ? artifact : "\(group):\(artifact)"
             records.append(ManifestParsers.record(name, version, .maven, scope, manifestPath))
         }
-        return records
+        return ManifestParsers.dedupe(records)
     }
 }

@@ -56,9 +56,13 @@ enum HealthCurves {
         let outlierPenalty = maxCC >= 40 ? 10.0 : 0
         let deducted = highRiskPenalty + outlierPenalty
         let score = ScoreCurve.clamped(base - deducted)
-        var detail = "平均圈复杂度 \(decimal(averageCC))，\(whole(highRiskCount)) 个函数 CC≥16，最大 \(maxCC)"
-        if deducted > 0 { detail += "，基准 \(decimal(base)) 分扣 \(decimal(deducted)) 分" }
-        return CurveResult(score: score, detail: bounded(detail), risk: graded(score, 80, 60, 40, 22))
+        let detail = joined([
+            "平均圈复杂度 \(decimal(averageCC))",
+            "\(whole(highRiskCount)) 个函数 CC≥16",
+            "最大 \(maxCC)",
+            deducted > 0 ? "基准 \(decimal(base)) 分扣 \(decimal(deducted)) 分" : ""
+        ])
+        return CurveResult(score: score, detail: detail, risk: graded(score, 80, 60, 40, 22))
     }
 
     // MARK: - 重复度
@@ -73,11 +77,11 @@ enum HealthCurves {
         let lines = Swift.max(0, codeLines)
         let detail: String
         if lines < 200 {
-            detail = "重复率 \(percent(value))，样本过小，按 \(whole(lines)) 行代码估计，置信度低"
+            detail = joined(["重复率 \(percent(value))", "样本过小，按 \(whole(lines)) 行代码估计，置信度低"])
         } else {
-            detail = "重复率 \(percent(value))，按 \(whole(lines)) 行代码统计"
+            detail = joined(["重复率 \(percent(value))", "按 \(whole(lines)) 行代码统计"])
         }
-        return CurveResult(score: score, detail: bounded(detail), risk: graded(score, 90, 70, 45, 15))
+        return CurveResult(score: score, detail: detail, risk: graded(score, 90, 70, 45, 15))
     }
 
     // MARK: - 代码质量
@@ -96,9 +100,13 @@ enum HealthCurves {
         ])
         let longPenalty = Swift.min(20.0, Double(Swift.max(0, longFunctions) / 10) * 2)
         let score = ScoreCurve.clamped((hugeScore + lengthScore) / 2 - longPenalty)
-        var detail = "巨大文件占比 \(percent(hugeFileRatio))，平均函数 \(whole(averageFunctionLength)) 行，共 \(whole(totalFiles)) 个文件"
-        if longPenalty > 0 { detail += "，\(whole(longFunctions)) 个超长函数扣 \(decimal(longPenalty)) 分" }
-        return CurveResult(score: score, detail: bounded(detail), risk: graded(score, 90, 70, 45, 15))
+        let detail = joined([
+            "巨大文件占比 \(percent(hugeFileRatio))",
+            "平均函数 \(whole(averageFunctionLength)) 行",
+            "共 \(whole(totalFiles)) 个文件",
+            longPenalty > 0 ? "\(whole(longFunctions)) 个超长函数扣 \(decimal(longPenalty)) 分" : ""
+        ])
+        return CurveResult(score: score, detail: detail, risk: graded(score, 90, 70, 45, 15))
     }
 
     // MARK: - 注释与可维护性
@@ -122,9 +130,14 @@ enum HealthCurves {
         if ratio < 0.02 { band = "低于 2% 最佳下限" }
         else if ratio > 0.15 { band = "注释过多同样扣分" }
         else { band = "落在 2%~15% 最佳区间" }
-        var detail = "注释占比 \(percent(ratio))（\(band)），TODO \(whole(todoCount)) 个，FIXME \(whole(fixmeCount)) 个，源码 \(whole(totalLines)) 行"
-        if deducted > 0 { detail += "，标记扣 \(decimal(deducted)) 分" }
-        return CurveResult(score: score, detail: bounded(detail), risk: graded(score, 85, 65, 45, 25))
+        let detail = joined([
+            "注释占比 \(percent(ratio))（\(band)）",
+            "TODO \(whole(todoCount)) 个",
+            "FIXME \(whole(fixmeCount)) 个",
+            "源码 \(whole(totalLines)) 行",
+            deducted > 0 ? "标记扣 \(decimal(deducted)) 分" : ""
+        ])
+        return CurveResult(score: score, detail: detail, risk: graded(score, 85, 65, 45, 25))
     }
 
     // MARK: - 提交活跃度
@@ -140,19 +153,23 @@ enum HealthCurves {
             (x: 2, score: 90), (x: 4, score: 95), (x: 8, score: 92), (x: 20, score: 80)
         ])
         var stalePenalty = 0.0
-        var recencyText = "未提供最近提交时间"
+        var recency = ""
         if let days = daysSinceLastCommit, days.isFinite {
-            recencyText = "距今 \(decimal(Swift.max(0, days))) 天无提交"
+            recency = "距今 \(decimal(Swift.max(0, days))) 天无提交"
             if days > 7 {
                 // 7 天起线性扣、60 天封顶 -45。
                 stalePenalty = Swift.min(45.0, Swift.max(0.0, (days - 7) / 53 * 45))
             }
         }
         let score = ScoreCurve.clamped(base - stalePenalty)
-        var detail = "日均 \(decimal(rate)) 次提交，\(recencyText)，累计 \(whole(totalCommits)) 次"
-        if rate >= 8 { detail += "，速率偏高按碎片化折算" }
-        if stalePenalty > 0 { detail += "，陈旧扣 \(decimal(stalePenalty)) 分" }
-        return CurveResult(score: score, detail: bounded(detail), risk: graded(score, 85, 65, 45, 25))
+        let detail = joined([
+            "日均 \(decimal(rate)) 次提交",
+            recency.isEmpty ? "未提供最近提交时间" : recency,
+            "累计 \(whole(totalCommits)) 次",
+            rate >= 8 ? "速率偏高按碎片化折算" : "",
+            stalePenalty > 0 ? "陈旧扣 \(decimal(stalePenalty)) 分" : ""
+        ])
+        return CurveResult(score: score, detail: detail, risk: graded(score, 85, 65, 45, 25))
     }
 
     // MARK: - 协作分布
@@ -174,10 +191,14 @@ enum HealthCurves {
         let singlePoint = activeAuthors == 1 && totalCommits > 50
         if singlePoint { score = Swift.min(score, 8) }
         let shareText = String(format: "%.0f%%", share * 100)
-        var detail = "最高作者占比 \(shareText)，\(whole(activeAuthors)) 位活跃作者，\(whole(totalCommits)) 次提交"
-        if share >= 0.7 { detail += "，单人包揽重扣 22 分" }
-        if singlePoint { detail += "，单点作者封顶 8 分" }
-        return CurveResult(score: score, detail: bounded(detail), risk: risk)
+        let detail = joined([
+            "最高作者占比 \(shareText)",
+            "\(whole(activeAuthors)) 位活跃作者",
+            "\(whole(totalCommits)) 次提交",
+            share >= 0.7 ? "单人包揽重扣 22 分" : "",
+            singlePoint ? "单点作者封顶 8 分" : ""
+        ])
+        return CurveResult(score: score, detail: detail, risk: risk)
     }
 
     // MARK: - 运行稳定性
@@ -196,9 +217,15 @@ enum HealthCurves {
         let exceptionPenalty = Swift.min(15.0, Double(Swift.max(0, exceptionCount) / 5) * 3)
         let deducted = crashPenalty + fatalPenalty + exceptionPenalty
         let score = ScoreCurve.clamped(base - deducted)
-        var detail = "每千行 \(decimal(Swift.max(0, errorsPerKLoc))) 个错误，崩溃 \(whole(crashCount)) 次，致命 \(whole(fatalCount)) 次，异常 \(whole(exceptionCount)) 次，扫描 \(whole(totalLinesScanned)) 行"
-        if deducted > 0 { detail += "，扣 \(decimal(deducted)) 分" }
-        return CurveResult(score: score, detail: bounded(detail), risk: graded(score, 85, 65, 45, 20))
+        let detail = joined([
+            "每千行 \(decimal(Swift.max(0, errorsPerKLoc))) 个错误",
+            "崩溃 \(whole(crashCount)) 次",
+            "致命 \(whole(fatalCount)) 次",
+            "异常 \(whole(exceptionCount)) 次",
+            "扫描 \(whole(totalLinesScanned)) 行",
+            deducted > 0 ? "扣 \(decimal(deducted)) 分" : ""
+        ])
+        return CurveResult(score: score, detail: detail, risk: graded(score, 85, 65, 45, 20))
     }
 
     // MARK: - 依赖健康
@@ -221,9 +248,13 @@ enum HealthCurves {
         else if vulnerable <= 2 { risk = .medium }
         else if vulnerable <= 9 { risk = .high }
         else { risk = .critical }
-        var detail = "依赖 \(whole(totalDependencies)) 个，漏洞 \(whole(vulnerable)) 个，落后 \(whole(outdatedCount)) 个占 \(percent(outdatedRatio))"
-        if deducted > 0 { detail += "，扣 \(decimal(deducted)) 分" }
-        return CurveResult(score: score, detail: bounded(detail), risk: risk)
+        let detail = joined([
+            "依赖 \(whole(totalDependencies)) 个",
+            "漏洞 \(whole(vulnerable)) 个",
+            "落后 \(whole(outdatedCount)) 个占 \(percent(outdatedRatio))",
+            deducted > 0 ? "扣 \(decimal(deducted)) 分" : ""
+        ])
+        return CurveResult(score: score, detail: detail, risk: risk)
     }
 
     // MARK: - 总评
@@ -239,20 +270,20 @@ enum HealthCurves {
         var candidate = "综合 \(score) 分（\(grade) 级）。"
         switch ranked.count {
         case 0:
-            candidate += "当前没有任何维度可供评估，评分依据缺失，建议先完成代码与 Git 分析再看总分。"
+            candidate += "当前没有任何维度可供评估，评分依据缺失，建议先完成代码分析与 Git 采集，再来查看总分。"
         case 1:
             let only = ranked[0]
-            candidate += "目前仅 \(only.name)（\(only.score) 分）这一个维度有可用数据，它同时也是最低项，建议优先\(advice(for: only.name))。"
+            candidate += "目前只有 \(only.name)（\(only.score) 分）这一个维度有可用数据，它同时也是当前最低项，建议优先\(advice(for: only.name))。"
         case 2:
             let low = ranked[0]
             let high = ranked[1]
-            candidate += "主要拖累来自 \(low.name)（\(low.score) 分），\(high.name)（\(high.score) 分）相对较好；建议优先\(advice(for: low.name))。"
+            candidate += "主要拖累来自 \(low.name)（\(low.score) 分），\(high.name)（\(high.score) 分）是目前相对最好的一项；建议优先\(advice(for: low.name))。"
         default:
             let first = ranked[0]
             let second = ranked[1]
             let best = ranked[ranked.count - 1]
             candidate += "主要拖累来自 \(first.name)（\(first.score) 分）与 \(second.name)（\(second.score) 分）；"
-            candidate += "\(best.name)（\(best.score) 分）是当前亮点。建议优先\(advice(for: first.name))。"
+            candidate += "\(best.name)（\(best.score) 分）是当前最稳的一项。建议优先\(advice(for: first.name))。"
         }
         return fittedNarrative(candidate)
     }
@@ -296,7 +327,7 @@ enum HealthCurves {
 
     private static func advice(for dimensionName: String) -> String {
         switch dimensionName {
-        case HealthDimension.complexity.rawValue: return "拆解 CC≥16 的函数"
+        case HealthDimension.complexity.rawValue: return "拆解高复杂度函数"
         case HealthDimension.duplication.rawValue: return "抽取重复代码块"
         case HealthDimension.codeQuality.rawValue: return "拆分超大文件与超长函数"
         case HealthDimension.documentation.rawValue: return "补齐关键注释并清理待办标记"
@@ -319,7 +350,18 @@ enum HealthCurves {
         return .critical
     }
 
-    /// UI 文案预算 60 字：极端输入下宁可截断也不换行，避免撑破行高。
+    /// 文案预算 60 字：核心数字段在前，放不下的段直接舍弃，宁可少说也不截断数字或换行。
+    private static func joined(_ segments: [String]) -> String {
+        var result = ""
+        for segment in segments {
+            if segment.isEmpty { continue }
+            let candidate = result.isEmpty ? segment : result + "，" + segment
+            if candidate.count > 60 { continue }
+            result = candidate
+        }
+        return result.isEmpty ? bounded(segments.first ?? "") : result
+    }
+
     private static func bounded(_ text: String) -> String {
         let characters = Array(text)
         guard characters.count > 60 else { return text }

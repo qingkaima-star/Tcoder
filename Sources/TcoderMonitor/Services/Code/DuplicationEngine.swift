@@ -11,9 +11,9 @@ enum DuplicationEngine {
 
     static let windowSize: Int = 6
 
-    /// 归一化后长度低于此值的行一律丢弃（见 `normalizeBytes` 末尾阈值注释）。
-    /// 取 4 的依据：`normalizeBytes` 输出的是 UTF-8 字节序列，4 字节刚好放过 `x = 1` 这类
-    /// 最短有效语句，而 `}`、`);`、`})` 这些 1~3 字节样板行全部落榜。
+    /// 归一化后长度低于此值（UTF-8 字节，见 `normalizeBytes` 末尾阈值注释）的行一律丢弃。
+    /// 取 4 的依据：标识符已折成 `I`，4 字节刚好放过 `i = N`、`I ( I )` 这类最短有效语句，
+    /// 而 `}`、`);`、`})`、`I I`（`return keep`）这些 1~3 字节样板行全部落榜。
     static let minSignificantRunes: Int = 4
 
     /// 单文件参与滑窗的归一化行数上限：超长文件（生成的/打包的）会吃掉整轮预算，硬截断。
@@ -22,7 +22,8 @@ enum DuplicationEngine {
 
     // MARK: - Normalization
 
-    /// 归一化一行；返回 nil 表示该行丢弃（不进窗口）
+    /// 归一化一行：折叠空白、丢弃注释、数字/字符串/标识符分别换成 `N` / `S` / `I` 占位符。
+    /// 返回 nil 表示该行丢弃（空行、注释行、纯标点、以及撑不起指纹的短样板行）。
     static func normalize(_ text: String, language: String) -> String? {
         guard let bytes = normalizeBytes(text, syntax: buildLineSyntax(language: language)) else { return nil }
         return String(decoding: bytes, as: UTF8.self)
@@ -72,58 +73,64 @@ enum DuplicationEngine {
                 numbers.append(line.number)
             }
 
-            scan.beginFile(numbers: numbers)
             let lineCount = numbers.count
-            guard lineCount >= windowSize else { continue }
+            var hashes = [UInt64]()
+            if lineCount >= windowSize {
+                hashes.reserveCapacity(lineCount - windowSize + 1)
+                var windowStart = 0
+                while windowStart + windowSize <= lineCount {
+                    hashes.append(windowFingerprint(chunks: chunks, starts: starts, lengths: lengths,
+                                                    from: windowStart, size: windowSize))
+                    windowStart += 1
+                }
+            }
+            scan.beginFile(numbers: numbers, hashes: hashes)
 
+            // 只登记「该窗口在跨文件处第一次出现」的指纹：同文件相邻窗口靠 hashes 向前延长，
+            // 不需要为每个窗口都留一条记录，窗口级内存因此与文件数线性而非与拷贝次数相关。
             var windowStart = 0
-            while windowStart + windowSize <= lineCount {
-                let hash = windowFingerprint(chunks: chunks, starts: starts, lengths: lengths,
-                                             from: windowStart, size: windowSize)
-                scan.consume(hash: hash, fileIndex: fileIndex, windowStart: windowStart)
+            while windowStart < hashes.count {
+                scan.register(hash: hashes[windowStart], fileIndex: fileIndex, windowStart: windowStart)
                 windowStart += 1
             }
         }
 
+        // 逐文件顺序扫窗口：碰到一个尚未归入任何克隆、且在别的文件里也出现过的指纹，
+        // 就以它为锚点，挑延长得最长的配对把整段克隆吃掉 —— 相邻/重叠窗口由此合并成一个长块，
+        // 每个克隆只展开一次，整体代价与窗口数线性。
         var blocks: [DuplicatedBlock] = []
         blocks.reserveCapacity(maxBlocks)
 
-        for (hash, extras) in scan.duplicatedRuns {
-            guard let first = scan.firstSeen[hash] else { continue }
-            if first.fileIndex < scan.covered.count {
-                markCoverage(first, flags: &scan.covered[first.fileIndex])
+        for fileIndex in 0..<files.count {
+            let hashes = scan.hashesByFile[fileIndex]
+            var windowStart = 0
+            while windowStart < hashes.count {
+                defer { windowStart += 1 }
+                if scan.isConsumed(fileIndex: fileIndex, windowStart: windowStart) { continue }
+                guard let group = scan.registered[hashes[windowStart]] else { continue }
+
+                var best: Occurrence?
+                var bestExtent = -1
+                for candidate in group where candidate.fileIndex != fileIndex {
+                    let extra = scan.growClone(from: windowStart, in: fileIndex,
+                                               to: candidate.windowStart, in: candidate.fileIndex)
+                    if extra > bestExtent {
+                        bestExtent = extra
+                        best = candidate
+                    }
+                }
+                guard let partner = best, bestExtent >= 0 else { continue }
+
+                let anchor = CloneFragment(fileIndex: fileIndex, windowStart: windowStart)
+                let partnerFragment = CloneFragment(fileIndex: partner.fileIndex, windowStart: partner.windowStart)
+                let members = scan.extraMembers(of: hashes[windowStart], anchor: anchor, extent: bestExtent)
+                if let block = scan.commitClone(anchor: anchor, partner: partnerFragment, members: members,
+                                                extent: bestExtent, files: files) {
+                    blocks.append(block)
+                }
+                // 锚点一侧的整段窗口已被消费，直接跳到克隆之后继续
+                windowStart += bestExtent
             }
-            for run in extras where run.fileIndex < scan.covered.count {
-                markCoverage(run, flags: &scan.covered[run.fileIndex])
-            }
-
-            var runs: [Occurrence] = [first]
-            runs.append(contentsOf: extras)
-            // 块必须跨文件命中（验收口径 + 单测断言）：同文件内部重复只作为额外片段挂在
-            // 已跨文件命中的 hash 上，绝不单独成块。
-            guard Set(runs.map { $0.fileIndex }).count >= 2 else { continue }
-            runs.sort { $0.fileIndex < $1.fileIndex }
-
-            // lineCount 取最长片段；similarity 如实反映「各片段是否等长」——
-            // 归一化后逐行完全一致（同一指纹），所以等长即 1.0，短片段的多余行数不虚报。
-            var longest = 0
-            var shortest = Int.max
-            for run in runs {
-                let count = run.codeLineCount
-                if count > longest { longest = count }
-                if count < shortest { shortest = count }
-            }
-            let lineCount = longest
-            guard lineCount >= windowSize else { continue }
-
-            let occurrences = fragmentsOfRuns(runs, files: files)
-            // 每个 occurrence 至少要落在两个不同文件上，否则不构成跨文件重复。
-            guard occurrences.count >= 2 else { continue }
-            let similarity = shortest >= longest
-                ? 1
-                : min(max(Double(shortest) / Double(longest), 0), 1)
-
-            blocks.append(DuplicatedBlock(occurrences: occurrences, lineCount: lineCount, similarity: similarity))
         }
 
         var duplicatedCodeLines = 0
@@ -157,14 +164,22 @@ enum DuplicationEngine {
 
 // MARK: - Tuning thresholds
 
-/// 归一化行最短长度见 `DuplicationEngine.minSignificantRunes`
+/// 归一化后最短行长见 `DuplicationEngine.minSignificantRunes`
+/// 单词元行（`} catch {` 这类）至少要 8 字节才值得进窗口
 fileprivate let minSignificantBytes = 8
-fileprivate let minTokenCount = 2
+/// 纯标点行（0 词元）必丢；1~2 词元的短行由上面 `minSignificantBytes` 那条规则处理，
+/// 这样 `import Foundation`（`I I`）之类的两词一行不会被整片当成噪声误伤。
+fileprivate let minTokenCount = 1
 /// 单个指纹最多记录多少个片段（跨文件 + 同文件内部重复共用同一预算），超出即丢弃，内存换精度。
 /// 与 `maxFragmentsPerBlock` 取同值：记下的片段都会出现在明细里，榜单与统计不打架。
 fileprivate let maxOccurrencesPerHash = 6
+/// 同一份指纹在单个文件里最多记几个片段（再多就是同一次拷贝的重复展开）
+fileprivate let maxRunsPerFileAndHash = 2
+/// 一个块至少要有一到二成行逐字一致才算「拷贝粘贴」（6 行的最小块 = ≥2 行原文相同）。
+/// 低于此值说明两边只是 token 形状相同，视图上会显示成「相似度 0% 的 35 行重复」这种没意义的答案。
+fileprivate let minCloneSimilarity = 0.2
 fileprivate let maxFragmentsPerBlock = 6
-fileprivate let firstSeenCapacityCap = 300_000
+fileprivate let runsCapacityCap = 300_000
 
 // MARK: - Byte helpers
 
@@ -181,6 +196,9 @@ private let underscoreByte: UInt8 = 0x5F
 private let backslashByte: UInt8 = 0x5C
 private let letterNByte: UInt8 = 0x4E
 private let letterSByte: UInt8 = 0x53
+/// 标识符（变量名 / 函数名 / 类型名）整体折成一个 `I` 占位符，于是 type-2 克隆
+/// （复制后改名的代码）也能命中同一指纹；字面量另有 `N` / `S` 占位。
+private let letterIByte: UInt8 = 0x49
 private let exponentLowerByte: UInt8 = 0x65
 private let exponentUpperByte: UInt8 = 0x45
 private let plusByte: UInt8 = 0x2B
@@ -316,6 +334,8 @@ fileprivate func buildLineSyntax(language: String) -> LineSyntax {
 
 // MARK: - Line normalization
 
+/// 行归一化：折叠空白、丢弃注释、数字/字符串/标识符换成占位符，输出可直接进指纹的字节序列。
+/// 返回 nil 表示这一行不进滑窗（空行、注释行、纯标点、单词元短样板行）。
 fileprivate func normalizeBytes(_ text: String, syntax: LineSyntax) -> [UInt8]? {
     let src = Array(text.utf8)
     let count = src.count
@@ -323,7 +343,6 @@ fileprivate func normalizeBytes(_ text: String, syntax: LineSyntax) -> [UInt8]? 
     out.reserveCapacity(count + 2)
     var pendingSpace = false
     var tokenRuns = 0
-    var significant = 0
     var inIdentRun = false
     var i = 0
 
@@ -332,15 +351,18 @@ fileprivate func normalizeBytes(_ text: String, syntax: LineSyntax) -> [UInt8]? 
 
         if isSpaceByte(b) {
             pendingSpace = !out.isEmpty
+            // 空白同样终结标识符词元：`for row in rows` 是 4 个词元，不是 1 个
+            inIdentRun = false
             i += 1
             continue
         }
 
         let lastByte: UInt8 = out.isEmpty ? spaceByte : out[out.count - 1]
 
-        // 行注释只在行中出现时截断：第 0 列的注释已由分类器标成 comment，
-        // 这里若也截断会误伤 `#include`（C 系前缀就是 `#`）。
-        if i > 0, !isIdentByte(lastByte),
+        // 行注释从它在行内出现的位置起整段截断（含第 0 列，注释行因此归一化为 nil）。
+        // 之所以不用担心 `#include`：C 系语言的行注释前缀是 `//`，目录里没有任何语言把 `#` 之外的
+        // 预处理符号列为前缀；只有 PHP 的 `#[属性]` 会被当注释丢掉，属于已知精度损失。
+        if !isIdentByte(lastByte),
            syntax.lineCommentPrefixes.contains(where: { hasPrefix($0, at: i, in: src) }) {
             break
         }
@@ -368,7 +390,6 @@ fileprivate func normalizeBytes(_ text: String, syntax: LineSyntax) -> [UInt8]? 
             if pendingSpace { out.append(spaceByte) }
             pendingSpace = false
             out.append(letterSByte)
-            significant += 1
             if !inIdentRun { tokenRuns += 1; inIdentRun = true }
             continue
         }
@@ -379,7 +400,6 @@ fileprivate func normalizeBytes(_ text: String, syntax: LineSyntax) -> [UInt8]? 
             if pendingSpace { out.append(spaceByte) }
             pendingSpace = false
             out.append(letterNByte)
-            significant += 1
             if !inIdentRun { tokenRuns += 1; inIdentRun = true }
             i = numberResume(src, from: i)
             continue
@@ -388,20 +408,28 @@ fileprivate func normalizeBytes(_ text: String, syntax: LineSyntax) -> [UInt8]? 
         if pendingSpace { out.append(spaceByte) }
         pendingSpace = false
         if isIdentByte(b) {
-            significant += 1
-            if !inIdentRun { tokenRuns += 1; inIdentRun = true }
+            // 标识符词元只落一个 `I`，后面的字母直接吃掉：`revenueByCategory` -> `I`。
+            // 长度不再随标识符命名波动，改名后的拷贝才能落到同一个指纹上。
+            if !inIdentRun {
+                out.append(letterIByte)
+                tokenRuns += 1
+                inIdentRun = true
+            }
         } else {
+            out.append(b)
             inIdentRun = false
         }
-        out.append(b)
         i += 1
     }
 
-    // 阈值：归一化后长度 < 4、纯标点（0 词元），或「只有 1 个词元且有效字符 < 8」的行一律丢弃。
-    // `}`、`);`、`})`、`else {`、`} catch {` 这类样板行若进窗口，任何两个文件都会撞出海量伪重复。
+    // 阈值（全部只看归一化后的产物，因此与标识符长短无关）：
+    // 1. 长度 < `minSignificantRunes`(4) 的行一律丢弃：`}`、`);`、`})`、`return keep`(`I I`)；
+    // 2. 纯标点（0 词元）丢弃：`}) {`、`];`；
+    // 3. 只有 1 个词元且长度 < `minSignificantBytes`(8) 的行丢弃：`} catch {`、`} else {`、`foo();`。
+    //    这类样板行若进窗口，任何两个文件都会撞出海量伪重复。
     if out.count < DuplicationEngine.minSignificantRunes { return nil }
     if tokenRuns < minTokenCount { return nil }
-    if tokenRuns < 3 && significant < minSignificantBytes { return nil }
+    if tokenRuns < 2 && out.count < minSignificantBytes { return nil }
     return out
 }
 
@@ -424,118 +452,209 @@ private func windowFingerprint(chunks: [UInt8], starts: [Int], lengths: [Int], f
     return hash
 }
 
-// MARK: - Occurrence accumulation
+// MARK: - Clone accumulation
 
 fileprivate struct Occurrence {
     var fileIndex: Int
-    var firstWindowStart: Int
-    var lastWindowStart: Int
-    var startLine: Int
-    var endLine: Int
+    var windowStart: Int
+}
 
-    init(fileIndex: Int, windowStart: Int, startLine: Int, endLine: Int) {
-        self.fileIndex = fileIndex
-        firstWindowStart = windowStart
-        lastWindowStart = windowStart
-        self.startLine = startLine
-        self.endLine = endLine
-    }
-
-    var codeLineCount: Int { lastWindowStart + DuplicationEngine.windowSize - firstWindowStart }
+fileprivate struct CloneFragment {
+    var fileIndex: Int
+    var windowStart: Int
 }
 
 fileprivate struct ScanState {
-    var firstSeen: [UInt64: Occurrence]
-    var duplicatedRuns: [UInt64: [Occurrence]]
+    /// 锚点指纹 → 该 6 行窗口内容在各文件里的出现位置（每指纹预算封顶，内存换精度）。
+    /// 只用于「这个窗口在别的文件也出现过吗」的配对；把相邻窗口合并成长块由
+    /// `growClone` 直接在 `hashesByFile` 上向前延长，不依赖这里的多条记录。
+    var registered: [UInt64: [Occurrence]]
     var numbersByFile: [[Int]]
+    var hashesByFile: [[UInt64]]
     var covered: [[Bool]]
+    var consumed: [[Bool]]
 
     init(fileCount: Int, windowBudget: Int) {
-        firstSeen = [UInt64: Occurrence]()
-        firstSeen.reserveCapacity(min(windowBudget, firstSeenCapacityCap))
-        duplicatedRuns = [UInt64: [Occurrence]]()
+        registered = [UInt64: [Occurrence]]()
+        registered.reserveCapacity(min(windowBudget, runsCapacityCap))
         numbersByFile = [[Int]]()
         numbersByFile.reserveCapacity(fileCount)
+        hashesByFile = [[UInt64]]()
+        hashesByFile.reserveCapacity(fileCount)
         covered = [[Bool]]()
         covered.reserveCapacity(fileCount)
+        consumed = [[Bool]]()
+        consumed.reserveCapacity(fileCount)
     }
 
-    mutating func beginFile(numbers: [Int]) {
+    mutating func beginFile(numbers: [Int], hashes: [UInt64]) {
         numbersByFile.append(numbers)
+        hashesByFile.append(hashes)
         covered.append([Bool](repeating: false, count: numbers.count))
+        consumed.append([Bool](repeating: false, count: hashes.count))
     }
 
-    mutating func consume(hash: UInt64, fileIndex: Int, windowStart: Int) {
-        let size = DuplicationEngine.windowSize
-        let numbers = numbersByFile[fileIndex]
+    mutating func register(hash: UInt64, fileIndex: Int, windowStart: Int) {
+        var group = registered[hash] ?? []
+        var sameFile = 0
+        for item in group where item.fileIndex == fileIndex { sameFile += 1 }
+        // 每个指纹最多留 `maxOccurrencesPerHash` 处、单个文件最多留 `maxRunsPerFileAndHash` 处，
+        // 再多的拷贝仍然会被 ratio 覆盖到（它们与已存锚点同一段克隆），只是不再展开。
+        guard group.count < maxOccurrencesPerHash, sameFile < maxRunsPerFileAndHash else { return }
+        group.append(Occurrence(fileIndex: fileIndex, windowStart: windowStart))
+        registered[hash] = group
+    }
 
-        if var stored = firstSeen[hash] {
-            if stored.fileIndex == fileIndex {
-                // 同文件相邻窗口：链式延长已存位置，不额外占内存。
-                if windowStart == stored.lastWindowStart + 1 {
-                    stored.lastWindowStart = windowStart
-                    stored.endLine = numbers[windowStart + size - 1]
-                    firstSeen[hash] = stored
-                } else if duplicatedRuns[hash] != nil {
-                    // 该指纹已经跨文件命中，同文件的非相邻出现也记成额外片段：
-                    // 文件内部自我重复同样是被覆盖的代码行，只是不单独成块。
-                    appendRun(hash: hash, fileIndex: fileIndex, windowStart: windowStart)
+    func isConsumed(fileIndex: Int, windowStart: Int) -> Bool {
+        guard fileIndex >= 0, fileIndex < consumed.count else { return true }
+        let flags = consumed[fileIndex]
+        guard windowStart >= 0, windowStart < flags.count else { return true }
+        return flags[windowStart]
+    }
+
+    /// 两边窗口指纹连续一致的长度（不含锚点窗口本身），即克隆还能向后延长几个窗口。
+    func growClone(from anchor: Int, in anchorFile: Int, to other: Int, in otherFile: Int) -> Int {
+        guard anchorFile >= 0, anchorFile < hashesByFile.count,
+              otherFile >= 0, otherFile < hashesByFile.count else { return 0 }
+        let left = hashesByFile[anchorFile]
+        let right = hashesByFile[otherFile]
+        var extra = 0
+        while anchor + extra + 1 < left.count, other + extra + 1 < right.count,
+              left[anchor + extra + 1] == right[other + extra + 1] {
+            extra += 1
+        }
+        return extra
+    }
+
+    /// 同一锚点指纹在其它文件里的出现位置，只要整段窗口序列都对得上，就并进同一个块。
+    func extraMembers(of hash: UInt64, anchor: CloneFragment, extent: Int) -> [CloneFragment] {
+        guard let group = registered[hash] else { return [] }
+        guard anchor.fileIndex >= 0, anchor.fileIndex < hashesByFile.count else { return [] }
+        let anchorHashes = hashesByFile[anchor.fileIndex]
+        guard anchor.windowStart >= 0, anchor.windowStart + extent < anchorHashes.count else { return [] }
+        var result: [CloneFragment] = []
+        result.reserveCapacity(maxFragmentsPerBlock)
+        for item in group {
+            guard item.fileIndex != anchor.fileIndex else { continue }
+            guard result.count < maxFragmentsPerBlock else { break }
+            guard item.fileIndex >= 0, item.fileIndex < hashesByFile.count else { continue }
+            let other = hashesByFile[item.fileIndex]
+            guard item.windowStart >= 0, item.windowStart + extent < other.count else { continue }
+            var offset = 0
+            var matches = true
+            while offset <= extent {
+                if other[item.windowStart + offset] != anchorHashes[anchor.windowStart + offset] {
+                    matches = false
+                    break
                 }
-                return
+                offset += 1
             }
-            if duplicatedRuns[hash] == nil { duplicatedRuns[hash] = [] }
-            appendRun(hash: hash, fileIndex: fileIndex, windowStart: windowStart)
-            return
+            if matches { result.append(CloneFragment(fileIndex: item.fileIndex, windowStart: item.windowStart)) }
         }
-
-        firstSeen[hash] = Occurrence(fileIndex: fileIndex,
-                                     windowStart: windowStart,
-                                     startLine: numbers[windowStart],
-                                     endLine: numbers[windowStart + size - 1])
+        return result
     }
 
-    private mutating func appendRun(hash: UInt64, fileIndex: Int, windowStart: Int) {
+    /// 认领整段克隆：算相似度、打窗口消费标记 + 行覆盖，然后产出明细块。
+    mutating func commitClone(anchor: CloneFragment, partner: CloneFragment, members: [CloneFragment],
+                              extent: Int, files: [ScannedSourceFile]) -> DuplicatedBlock? {
+        var picked: [CloneFragment] = [anchor]
+        var seenFiles = [anchor.fileIndex]
+        for candidate in [partner] + members {
+            guard candidate.fileIndex >= 0, candidate.fileIndex < files.count else { continue }
+            guard seenFiles.contains(candidate.fileIndex) == false else { continue }
+            guard candidate.windowStart >= 0,
+                  candidate.windowStart < numbersByFile[candidate.fileIndex].count else { continue }
+            seenFiles.append(candidate.fileIndex)
+            picked.append(candidate)
+        }
+        // 块必须跨文件命中（验收口径 + 冻结单测断言）：只在一个文件里自我重复的片段不成块，
+        // 也不计入 ratio，否则「一个文件抄了自己三遍」会被当成拷贝粘贴上报。
+        guard picked.count >= 2 else { return nil }
+
         let size = DuplicationEngine.windowSize
-        guard var runs = duplicatedRuns[hash] else { return }
-        let numbers = numbersByFile[fileIndex]
-        let endLine = numbers[windowStart + size - 1]
+        let lineCount = extent + size
 
-        for index in runs.indices where runs[index].fileIndex == fileIndex {
-            // 同一文件的窗口只有在与前一片段首尾相接时才延长它；不相接的另起一个片段。
-            guard windowStart == runs[index].lastWindowStart + 1 else { continue }
-            runs[index].lastWindowStart = windowStart
-            runs[index].endLine = endLine
-            duplicatedRuns[hash] = runs
-            return
+        // 相似度门槛：归一化后同指纹但**原始文本一行都不重**的，只是形状巧合（例如两份
+        // 结构相同的 switch 表），不是用户眼里的「拷贝粘贴」，不进榜也不算重复行。
+        var kept: [CloneFragment] = []
+        var occurrences: [DuplicatedFragment] = []
+        var similarity = 1.0
+        for fragment in picked {
+            if fragment.fileIndex == anchor.fileIndex, fragment.windowStart == anchor.windowStart {
+                kept.append(fragment)
+                occurrences.append(fragmentOf(anchor, files: files))
+                continue
+            }
+            let ratio = rawTextMatchRatio(files: files,
+                                          anchor: anchor, anchorNumbers: numbersByFile[anchor.fileIndex],
+                                          other: fragment, otherNumbers: numbersByFile[fragment.fileIndex],
+                                          lineCount: lineCount)
+            guard ratio >= minCloneSimilarity else { continue }
+            similarity = min(similarity, ratio)
+            kept.append(fragment)
+            occurrences.append(fragmentOf(fragment, files: files))
+        }
+        guard kept.count >= 2, occurrences.count >= 2 else {
+            // 整块作废也要把锚点这一侧的窗口吃掉，否则同一个形状会被逐窗口重试一遍（O(N²)）
+            markConsumed(anchor, extent: extent)
+            return nil
         }
 
-        guard runs.count < maxOccurrencesPerHash else { return }
-        runs.append(Occurrence(fileIndex: fileIndex,
-                               windowStart: windowStart,
-                               startLine: numbers[windowStart],
-                               endLine: endLine))
-        duplicatedRuns[hash] = runs
+        for fragment in kept {
+            markConsumed(fragment, extent: extent)
+            markCoverage(fragment, extent: extent)
+        }
+        return DuplicatedBlock(occurrences: occurrences,
+                               lineCount: lineCount,
+                               similarity: min(max(similarity, 0), 1))
+    }
+
+    private func fragmentOf(_ fragment: CloneFragment, files: [ScannedSourceFile]) -> DuplicatedFragment {
+        DuplicatedFragment(path: files[fragment.fileIndex].url.path,
+                           startLine: numbersByFile[fragment.fileIndex][fragment.windowStart])
+    }
+
+    private mutating func markConsumed(_ fragment: CloneFragment, extent: Int) {
+        guard fragment.fileIndex < consumed.count else { return }
+        var index = max(fragment.windowStart, 0)
+        let stop = min(fragment.windowStart + extent + 1, consumed[fragment.fileIndex].count)
+        while index < stop {
+            consumed[fragment.fileIndex][index] = true
+            index += 1
+        }
+    }
+
+    private mutating func markCoverage(_ fragment: CloneFragment, extent: Int) {
+        guard fragment.fileIndex < covered.count else { return }
+        var index = max(fragment.windowStart, 0)
+        let stop = min(fragment.windowStart + extent + DuplicationEngine.windowSize,
+                       covered[fragment.fileIndex].count)
+        while index < stop {
+            covered[fragment.fileIndex][index] = true
+            index += 1
+        }
     }
 }
 
-private func markCoverage(_ run: Occurrence, flags: inout [Bool]) {
-    let size = DuplicationEngine.windowSize
-    var index = run.firstWindowStart
-    let stop = min(run.lastWindowStart + size, flags.count)
-    while index < stop {
-        flags[index] = true
-        index += 1
+/// 相似度口径：归一化后同一指纹的行，其**原始文本**（忽略缩进）有多少是一样的 ——
+/// 逐字拷贝得 1.0，改名拷贝得 0.x，视图上的「相似度」因此不会永远显示 100%。
+private func rawTextMatchRatio(files: [ScannedSourceFile],
+                               anchor: CloneFragment, anchorNumbers: [Int],
+                               other: CloneFragment, otherNumbers: [Int],
+                               lineCount: Int) -> Double {
+    guard lineCount > 0, anchor.fileIndex < files.count, other.fileIndex < files.count else { return 1 }
+    var same = 0
+    for offset in 0..<lineCount {
+        guard let left = rawText(files[anchor.fileIndex], anchorNumbers, anchor.windowStart + offset),
+              let right = rawText(files[other.fileIndex], otherNumbers, other.windowStart + offset) else { continue }
+        if left == right { same += 1 }
     }
+    return Double(same) / Double(lineCount)
 }
 
-private func fragmentsOfRuns(_ runs: [Occurrence], files: [ScannedSourceFile]) -> [DuplicatedFragment] {
-    var fragments: [DuplicatedFragment] = []
-    fragments.reserveCapacity(maxFragmentsPerBlock)
-    for run in runs {
-        guard fragments.count < maxFragmentsPerBlock else { break }
-        guard run.fileIndex >= 0, run.fileIndex < files.count else { continue }
-        let fragment = DuplicatedFragment(path: files[run.fileIndex].url.path, startLine: run.startLine)
-        if !fragments.contains(fragment) { fragments.append(fragment) }
-    }
-    return fragments
+private func rawText(_ file: ScannedSourceFile, _ numbers: [Int], _ keptIndex: Int) -> Substring? {
+    guard keptIndex >= 0, keptIndex < numbers.count else { return nil }
+    let lineNumber = numbers[keptIndex]
+    guard lineNumber >= 1, lineNumber <= file.lines.count else { return nil }
+    return file.lines[lineNumber - 1].text.drop { $0 == " " || $0 == "\t" }
 }
