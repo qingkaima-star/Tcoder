@@ -42,7 +42,7 @@ fi
 if ! git merge-tree --write-tree --name-only main "$BRANCH" >/tmp/merge-tree-out.txt 2>&1; then
   echo "==> ❌ $BRANCH 与 main 有文本冲突，不在 main 上解。"
   grep -aE "^(CONFLICT|Auto-merging)" /tmp/merge-tree-out.txt | head -8
-  echo "    请让负责人在自己树里 `git merge main` 解完再合。"
+  echo "    请让负责人在自己树里先 merge main 解完冲突再合（本脚本不会替你合并）。"
   exit 1
 fi
 
