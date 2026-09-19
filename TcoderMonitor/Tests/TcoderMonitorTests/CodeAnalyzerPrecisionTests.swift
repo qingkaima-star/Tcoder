@@ -340,6 +340,32 @@ extension CodeAnalyzerTests {
         XCTAssertEqual(Set(audited.files.map(\.relativePath)), Set(plain.files.map(\.relativePath)))
     }
 
+    /// 台账必须能按**根因目录**报出行数 —— 用户看到的是「已跳过 vendor/ 352,784 行」，
+    /// 而不是一个光秃秃的总数（Homebrew 实测 vendor 一条就占 excludedDirectoryContent 的 558,732 行）。
+    func testSkipLedgerAttributesLinesToTheRootCauseDirectory() async throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+        _ = try write("let kept = 1\n", to: "Keep.swift", in: root)
+        _ = try write("let a = 1\nlet b = 2\n", to: "vendor/Deep.swift", in: root)
+        _ = try write(String(repeating: "let x = 1\n", count: 7), to: "vendor/nested/More.swift", in: root)
+        let opts = options(skipDirectories: ["vendor"])
+
+        let audited = await SourceTreeScanner(options: opts,
+                                             auditLineBudget: SourceSkipLedger.defaultAuditBudget).scan(root: root)
+        let bucket = try XCTUnwrap(audited.skipLedger.buckets[.excludedDirectoryContent],
+                                   "审计模式必须展开被剔除目录")
+        XCTAssertEqual(bucket.files, 2, "vendor 之下两个文件都要归因")
+        XCTAssertEqual(bucket.lines, 9, "2 + 7 行")
+        XCTAssertEqual(bucket.lineRules["vendor"], 9, "行数是 9 行，且全部归到根因 vendor 而不是 vendor/nested")
+        XCTAssertEqual(bucket.rules["vendor"], 2, "文件数按根因计数")
+        XCTAssertTrue(audited.skipLedger.topLineRules(.excludedDirectoryContent).contains("vendor=9"),
+                      "台账摘要要能直接印出来：\(audited.skipLedger.topLineRules(.excludedDirectoryContent))")
+        XCTAssertEqual(audited.skipLedger.buckets[.excludedDirectoryNested]?.files, 1,
+                       "vendor/nested 记成嵌套目录，行数不重复计")
+        XCTAssertEqual(audited.skipLedger.buckets[.excludedDirectoryNested]?.lineRules.values.reduce(0, +) ?? 0, 0,
+                       "嵌套目录自己不该带行数，否则会与根因重复")
+    }
+
     /// `analyze` 的公开入口也要能单独取台账；不存在的目录必须照旧抛错。
     func testSkipLedgerEntryPointAndMissingRootError() async throws {
         let root = try makeFixtureRoot()
