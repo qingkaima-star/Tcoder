@@ -150,17 +150,19 @@ final class LogFixtureClusterTests: XCTestCase {
         }
 
         XCTAssertGreaterThan(summary.crashCount, 0, "EXC_BAD_ACCESS 必须算进崩溃计数")
-        let crashCluster = summary.topErrors.first { $0.severity == .crash }
-        XCTAssertNotNil(crashCluster, "至少要有一个 crash 级签名")
-        if let crashCluster {
-            XCTAssertTrue(crashCluster.signature.contains("EXC_BAD_ACCESS")
-                            || crashCluster.signature.contains("Fatal error"),
-                          "签名要能看出崩溃类型，实得 \(crashCluster.signature)")
-            XCTAssertFalse(crashCluster.signature.contains("AAAAAAAA"),
+        let crashClusters = summary.topErrors.filter { $0.severity == .crash }
+        XCTAssertFalse(crashClusters.isEmpty, "至少要有一个 crash 级签名")
+        XCTAssertTrue(crashClusters.contains { $0.signature.contains("EXC_BAD_ACCESS")
+                        || $0.signature.contains("Fatal error") },
+                      "某个 crash 签名的主 token 要能看出崩溃类型，实得 \(crashClusters.map(\.signature))")
+        for cluster in crashClusters {
+            XCTAssertFalse(cluster.signature.contains("AAAAAAAA"),
                            "签名里绝不能留下 incident id 原值，否则每次崩溃都聚不到一起")
-            XCTAssertFalse(crashCluster.signature.contains("0x000000000000000d"),
+            XCTAssertFalse(cluster.signature.contains("0x000000000000000d"),
                            "签名里的地址必须归一化")
-            XCTAssertTrue(crashCluster.stackTopFrames.contains(where: { $0.contains("Store.swift") }))
         }
+        // 帧可能被挂到同组的另一条事件上，所以跨全部 crash 签名找抛出点。
+        XCTAssertTrue(crashClusters.flatMap(\.stackTopFrames).contains(where: { $0.contains("Store.swift") }),
+                      "崩溃栈里的 Store.swift 必须出现在栈顶帧里，实得 \(crashClusters.map(\.stackTopFrames))")
     }
 }

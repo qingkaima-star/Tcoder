@@ -264,6 +264,24 @@ enum ComplexityEngine {
     }
 #endif
 
+#if CE_DEBUG
+    static func ceDumpPatterns() {
+        for language in ["Swift", "Java", "Kotlin", "TypeScript", "JavaScript", "Python", "Go", "Rust",
+                         "C", "C++", "Objective-C", "Ruby", "PHP", "Dart", "Gradle", "Shell", "Scala", "Vue"] {
+            let profile = self.profile(for: language)
+            print("\n[\(language)] family=\(profile.family) patterns=\(profile.patterns.count)")
+            for pattern in profile.patterns {
+                let text = pattern.expression.pattern
+                let open = text.filter { $0 == "(" }.count
+                let close = text.filter { $0 == ")" }.count
+                let ob = text.filter { $0 == "[" }.count
+                let cb = text.filter { $0 == "]" }.count
+                print("  groups=\(pattern.expression.numberOfCaptureGroups) parenBal=\(open)-\(close) bracketBal=\(ob)-\(cb) prefix=\(pattern.namePrefix ?? "-") \(text)")
+            }
+        }
+    }
+#endif
+
     // MARK: Signature matching
 
     private static func matchSignature(_ line: String, _ profile: LangProfile) -> String? {
@@ -1023,7 +1041,7 @@ enum ComplexityEngine {
 
     private static var goFunction: SignaturePattern {
         // Go 1.18+ 泛型：`func Map[K comparable, V any](...)` 的类型参数表夹在名字和 `(` 之间
-        SignaturePattern(#"^func[ \t]*(?:\([^()]*\)[ \t]*)?([A-Za-z_]\w*)[ \t]*(?:\[[^\]\n]*\))?[ \t]*\("#)
+        SignaturePattern(#"^func[ \t]*(?:\([^()]*\)[ \t]*)?([A-Za-z_]\w*)[ \t]*(?:\[[^\]\n]*\])?[ \t]*\("#)
     }
 
     private static var rustFunction: SignaturePattern {

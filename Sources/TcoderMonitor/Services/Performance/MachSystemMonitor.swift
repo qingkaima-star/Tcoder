@@ -34,7 +34,7 @@ final class MachSystemMonitor: SystemMonitoringProviding {
 
     // 后台采样闭包里要用，标 nonisolated 免得跨 actor 取值。
     nonisolated private static let historyCapacity = 600
-    nonisolated private static let topProcessLimit = 40
+    nonisolated private static let topProcessLimit = 20
 
     // MARK: Surfaces PerformanceView expects
 
