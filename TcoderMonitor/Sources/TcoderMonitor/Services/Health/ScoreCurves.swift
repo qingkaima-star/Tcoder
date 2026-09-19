@@ -73,6 +73,11 @@ enum HealthCurves {
 
     // MARK: - 复杂度
 
+    /// **调用前置条件：`functionCount > 0`（`HealthCurves` 的锚点契约）。**
+    /// 没有任何函数时这里给的是满分 + 「未发现可计数的函数体」——那是**曲线层的口径**，
+    /// 由 `HealthScoreTests.testComplexityWithoutFunctionsIsPerfectAndExplained` 钉住。
+    /// 评分器不得拿它当「读不懂 = 简单」的证据：`WeightedHealthScorer` 的复杂度分支
+    /// 在均值/分母/热点榜三者都没有证据时让整个维度缺席，而不是调到这里。
     static func complexity(averageCC: Double, highRiskCount: Int, maxCC: Int, functionCount: Int) -> CurveResult {
         if functionCount == 0 {
             return CurveResult(score: 100, detail: "未发现可计数的函数体", risk: .none)
@@ -96,6 +101,10 @@ enum HealthCurves {
 
     // MARK: - 重复度
 
+    /// 曲线自己承认的置信度下限：低于这个代码行数，重复率只能按小样本估计，detail 会标「置信度低」。
+    /// 评分器引用同一个常量来决定「重复代码率低」这句优点能不能写 —— 两处必须同源，防止各写一个数。
+    static let smallSampleCodeLines = 200
+
     static func duplication(ratio: Double, codeLines: Int) -> CurveResult {
         // 2% 以内视作识别噪声（满分平台）；5%→98、12.5%→75、25%→4 是对外标定基准。
         let value = ScoreCurve.clamped(ratio, 0, 1)
@@ -105,7 +114,7 @@ enum HealthCurves {
         ]))
         let lines = Swift.max(0, codeLines)
         let detail: String
-        if lines < 200 {
+        if lines < smallSampleCodeLines {
             detail = joined(["重复率 \(percent(value))", "样本过小，按 \(whole(lines)) 行代码估计，置信度低"])
         } else {
             detail = joined(["重复率 \(percent(value))", "按 \(whole(lines)) 行代码统计"])
@@ -140,6 +149,9 @@ enum HealthCurves {
 
     // MARK: - 注释与可维护性
 
+    /// **调用前置条件：`totalLines > 0`。** 0 行时返回的 50 分是「无源码可评估」的占位口径，
+    /// 不是测量结果；评分器遇到零分母时让整个维度缺席（`.documentation` 分支的 guard），
+    /// 免得一个占位值参与加权、把在场维度的权重摊薄。
     static func documentation(commentRatio: Double, todoCount: Int, fixmeCount: Int, totalLines: Int) -> CurveResult {
         if totalLines == 0 {
             return CurveResult(score: 50, detail: "无源码可评估", risk: graded(50, 85, 65, 45, 25))

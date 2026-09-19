@@ -57,7 +57,11 @@ final class FileLogAnalyzer: LogAnalysisProviding {
         summary.topErrors = aggregate.topErrors
         summary.trend = aggregate.trend
         summary.affectedFiles = aggregate.affectedFiles
-        summary.scannedFiles = readings.map {
+        // 读取失败的文件不进「已扫描文件」：`LogSummary.hasData` 认 scannedFiles 非空，
+        // 让它们混进来等于用一次权限不足换一张 all-clear（审计 P1 #11）。
+        // 读到但内容为空的文件**保留**——那是「已核对零命中」，与「没核对」是两种状态。
+        // 契约缺口：`ScannedLogFile` 没有承载读取失败原因的字段，被剔掉的条数目前无法呈现给 UI。
+        summary.scannedFiles = readings.filter { $0.readFailed == false }.map {
             ScannedLogFile(
                 path: $0.url.path,
                 sizeBytes: $0.sizeBytes,
@@ -69,6 +73,9 @@ final class FileLogAnalyzer: LogAnalysisProviding {
         return summary
     }
 
+    /// 用户显式附加的文件**不参与时间窗口裁剪**（`LogDiscovery.discover` 才裁）：
+    /// 刚点上来的文件因为日期老就被静默丢掉，比窗口口径更让人意外。
+    /// 因此窗口只描述自动发现的范围，UI 若要把这句话写全，需要说明附加文件不受限。
     private func attached(urls: [URL], projectRoot: URL) -> [DiscoveredLog] {
         return urls.compactMap { url in
             guard let values = try? url.resourceValues(
