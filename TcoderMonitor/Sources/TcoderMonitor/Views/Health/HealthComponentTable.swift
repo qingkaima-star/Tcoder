@@ -235,7 +235,11 @@ struct HealthComponentTable: View {
         GlassSection("维度分量",
                      subtitle: "综合分 = Σ(得分 × 归一化权重) · 按拖累程度排序，贡献最低者在前",
                      icon: .health,
-                     trailing: AnyView(Theme.Readout.Field("合计", Live.fixed(sum, digits: 1)))) {
+                     // 卡头 trailing 位只有一行，没有"第二行的值要竖向对齐"这回事，
+                     // 所以标签不占 160pt 列宽 —— 占了就变成「合计 ………… 60.1」
+                     // 中间一段空版心（1240 版框实拍）。
+                     trailing: AnyView(Theme.Readout.Field("合计", Live.fixed(sum, digits: 1),
+                                                           labelWidth: nil))) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 table
                 DataRowSeparator()
