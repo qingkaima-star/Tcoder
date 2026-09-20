@@ -64,7 +64,7 @@ struct LogErrorClusterRow: View {
                     .flexCell()
                     .help(cluster.signature)
                 LiveNumber("\(NumberFormat.grouped(cluster.count)) 次", tier: Theme.Typo.monoBody)
-                    .numberCell(DataColumn.count)
+                    .numberCell(PerfLogWidths.count)
             }
 
             Text(cluster.displayMessage)
@@ -116,7 +116,7 @@ struct LogErrorClusterRow: View {
                         Text("\(index + 1)")
                             .font(Theme.Typo.monoSmall.font)
                             .foregroundStyle(.tertiary)
-                            .numberCell(DataColumn.sampleIndex)
+                            .numberCell(PerfLogWidths.sampleIndex)
                         Text(line)
                             .font(Theme.Typo.monoSmall.font)
                             .foregroundStyle(.secondary)

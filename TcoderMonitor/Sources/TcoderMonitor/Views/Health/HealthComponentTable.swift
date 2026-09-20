@@ -247,18 +247,11 @@ struct HealthComponentTable: View {
         }
     }
 
+    /// 表头与行共用 `DataColumns.healthComponents` 一份列定义（#34）。
+    /// 行间距沿用原 `Grid` 的 `verticalSpacing: .xs`（分量名与详情是两行文本，比另两页松）。
     private var table: some View {
-        Grid(alignment: .trailing, horizontalSpacing: Theme.Spacing.sm, verticalSpacing: Theme.Spacing.xs) {
-            GridRow {
-                TableHeaderCell("维度", width: DataColumn.dimension, trailing: false)
-                    .gridColumnAlignment(.leading)
-                TableHeaderCell("得分", width: DataColumn.score + DataColumn.scoreGauge,
-                                help: "该维度 0~100 分，条形按同一比例")
-                TableHeaderCell("权重", width: DataColumn.weight, help: HealthBreakdown.weightColumnHelp)
-                TableHeaderCell("贡献", width: DataColumn.contribution, help: "得分 × 归一化权重")
-                TableHeaderCell("详情").flexCell().gridColumnAlignment(.leading)
-            }
-            Divider().gridCellColumns(5)
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            DataTableHeader(columns: DataColumns.healthComponents)
             ForEach(rows) { row in
                 rowView(row)
             }
@@ -267,31 +260,32 @@ struct HealthComponentTable: View {
 
     private func rowView(_ row: ScoreRow) -> some View {
         let role = Theme.Semantic.role(forScore: row.score)
-        return GridRow(alignment: .top) {
+        return HStack(alignment: .top, spacing: DataRowMetrics.cellGap) {
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 Text(row.name).font(Theme.Typo.label.font).lineLimit(1)
                 RiskBadge(risk: row.component.risk, showIcon: false)
             }
-            .frame(width: DataColumn.dimension, alignment: .leading)
+            .tableCell(DataColumns.column(DataColumns.healthComponents, 0))
 
             HStack(spacing: Theme.Spacing.xxs) {
                 MiniBarGauge(fraction: Double(row.score) / 100,
                              tint: role.graphicColor,
                              height: BarThickness.component)
-                    .frame(width: DataColumn.scoreGauge)
+                    .frame(width: DataColumns.healthScoreGauge)
                 LiveNumber(String(row.score), tier: Theme.Typo.monoSmall,
                            tint: role.textColor)
-                    .numberCell(DataColumn.score)
+                    .numberCell(DataColumns.healthScoreNumber)
             }
+            .tableCell(DataColumns.column(DataColumns.healthComponents, 1))
 
             LiveNumber(NumberFormat.percent(row.effectiveWeight, precision: 0),
                        tier: Theme.Typo.monoSmall)
-                .numberCell(DataColumn.weight)
+                .tableCell(DataColumns.column(DataColumns.healthComponents, 2))
                 .help(weightHelp(row))
 
             LiveNumber(Live.fixed(row.contribution, digits: 1), tier: Theme.Typo.monoSmall,
                        tint: role.textColor)
-                .numberCell(DataColumn.contribution)
+                .tableCell(DataColumns.column(DataColumns.healthComponents, 3))
                 .help("满分可得 \(Live.fixed(row.fullMarks, digits: 1))，这一维度拖了 \(Live.fixed(row.lostPoints, digits: 1)) 分")
 
             Text(row.component.detail)
@@ -299,7 +293,7 @@ struct HealthComponentTable: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
-                .flexCell()
+                .tableCell(DataColumns.column(DataColumns.healthComponents, 4))
                 .help(row.component.detail)
         }
     }
