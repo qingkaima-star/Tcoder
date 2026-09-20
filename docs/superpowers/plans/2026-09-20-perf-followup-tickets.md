@@ -297,6 +297,11 @@ WS-X3 把这两条守卫的**宿主文件按行数拆成了 extension**——
 所以：
 0. **等 X3/X0 那批先进 main，我再把自己的两包"重新落位"到拆后的布局上**（把 `reslicePattern` 那两条测试
    放进 `+CoarseRatchet.swift`、`knownBaseline` 的改动留在主文件），跑一遍门再合。
+   **落位时必须顺手把 §3.6「收益分级」整段搬进一个新的 `PerfInvalidationRatchetTests+CoarseWeighting.swift`**：
+   加完那段之后主文件已经 **781 行**，离 800 上限只剩 19 行——再写一条测试就会把 main 弄红，
+   而"拆文件"才是修复（改阈值不是，这条已被反复钉过）。现在不搬是因为搬动要把
+   `coarsePattern` / `scanHits` / `codeLines` 从 `private` 放开成 `internal` 才能跨文件共用，
+   而我**不接受复制一份尺子**（两套口径必然漂，#44 就是这个形状）。
    顺序反过来会变成"我先进、他们拆的时候撞我的 hunk"，冲突由不懂这套口径的人解更容易出事。
    **好消息已经核过**：X3 把口径常量（`coarsePattern` / `finePattern` / `coarseCallSiteCeiling` /
    `consumerDirectories` / `knownBaseline`）**留在主文件里没搬**，所以 `trace_report.py migration`
