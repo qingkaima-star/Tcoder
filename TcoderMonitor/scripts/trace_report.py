@@ -217,8 +217,14 @@ def cmd_summary(args):
 
     meta = read_json(os.path.join(d, "meta.json")) or {}
     seconds = args.seconds or meta.get("hitches_seconds") or meta.get("seconds") or 0
+    # 【期间必须出现在表头上】§1 基线是**心跳期**（不去碰它）量的，T1 要的是**交互期**。
+    # 两者同形状、不同含义——不在表头写清楚，过两周就有人会拿心跳期的 HTR 去交交互期的结论。
+    period = str(meta.get("period") or "idle")
+    is_interaction = period == "interaction"
 
     print("== Tcoder 性能读数（对照 spec §1 基线 rev %s，release 口径）==" % BASELINE["rev"])
+    print("   测量期间：%s —— %s" % (period, "有资格答 T1（交互期 hitch = 0）" if is_interaction
+                                else "只答心跳期；**不许**拿去交 T1，要判 T1 用 interact 档重录"))
     print("| %-30s | %-28s | %-34s | %s |" % ("指标", "§1 基线", "本次", "判定"))
     print("|" + "-" * 32 + "|" + "-" * 30 + "|" + "-" * 36 + "|" + "-" * 10 + "|")
 

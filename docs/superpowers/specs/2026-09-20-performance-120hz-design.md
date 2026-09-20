@@ -204,17 +204,19 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 
 ## 4. 尺子（M0 先落，先量后改）
 
-1. `scripts/perf_harness.sh`（新）：五档，全部只读——`idle`（attach 现有实例，录 Animation Hitches +
-   Time Profiler）、`switch`（逐页冷启动）、`report`（重打已有目录）、`probe`（读 `FramePulse` 脉冲）、
+1. `scripts/perf_harness.sh`（新）：六档，全部只读——`idle`（attach 现有实例，录 Animation Hitches +
+   Time Profiler，**期间不碰它**）、`interact`（录法同 idle，唯一区别是**期间人持续滚动**）、
+   `switch`（逐页冷启动）、`report`（重打已有目录）、`probe`（读 `FramePulse` 脉冲）、
    `selfcheck`（拿合成夹具验尺子自己）。解析封装在 `xctrace export --xpath` 逐表导出 +
    `perf_trace_xml.py`（id/ref 解引用）/ `perf_trace_metrics.py`（统计与 §1 基线）/ `trace_report.py`（子命令），
    出一张固定形状的结果表（hitch 数、hitch/s、帧时长分布、app-update 分布、`potential-hangs`、
-   主线程热点 Top20、按线程样本数）。输出目录**必须带短 HEAD 后缀**（`/tmp/tcoder-perf-<rev>/`），
-   否则后一批覆盖前一批。
-   **不设 `scroll` 档**（原计划里有，现撤）：合成滚轮要 `CGEvent.post`，而本机 System Events
+   主线程热点 Top20、按线程样本数）。**表头第一行写「测量期间」**：`idle` 那批明说
+   "只答心跳期，不许拿去交 T1"，`interaction` 那批才标"有资格答 T1"——两批数同形状不同含义，
+   不写进表头就一定会有人混着用（本仓反复踩的"口径不对齐"）。输出目录**必须带短 HEAD 后缀**
+   （`/tmp/tcoder-perf-<rev>/`），否则后一批覆盖前一批。
+   **不设合成输入的 `scroll` 档**（原计划里有，现撤）：合成滚轮要 `CGEvent.post`，而本机 System Events
    权限被拒（§4.1 探测时实测），事件会被静默丢弃——那会造出"交互期 0 hitch"的**假绿**。
-   交互由人真滚，测量由 `probe` 档读 `FramePulse`，并强制 `--interaction` 显式声明；
-   不声明就只给 idle 读数（退出码 2，与 0 达标 / 1 未达标三者可区分）。
+   交互由人真滚，`interact` 档负责把它标成交互期样本。
 2. `FramePulse`（新，`Services/Performance/`）：`CVDisplayLink` 时间戳 + 主线程 runloop 心跳看门狗
    + `os_signpost`，**仅 `TCODER_PERF_PROBE=1` 时启动**（常驻开销不可接受），
    读数落 `$TCODER_PERF_OUT` 或 `/tmp` 文件——**取证 print 必须落文件**，`swift test` 会丢子进程 stdout 后半段。
