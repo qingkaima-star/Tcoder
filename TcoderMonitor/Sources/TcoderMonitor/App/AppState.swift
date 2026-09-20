@@ -37,11 +37,17 @@ final class AppState {
         bootstrapIfNeeded()
     }
 
+    /// 选中项目的**唯一**判定处：落盘选中（仍存在于列表里）> 第一个非示例项目 > 第一个。
+    /// 示例项目的数字是编的，真实项目在场时它不许抢到展示位——今天连着两次把假读数
+    /// 当成实测呈现给用户，用户因此问"为什么有 Java"。
+    nonisolated static func preferredProjectID(in projects: [MonitoredProject], stored: UUID?) -> UUID? {
+        if let stored, projects.contains(where: { $0.id == stored }) { return stored }
+        return (projects.first(where: { $0.isDemo == false }) ?? projects.first)?.id
+    }
+
     var selectedProject: MonitoredProject? {
-        if let id = selectedProjectID, let found = store.projects.first(where: { $0.id == id }) {
-            return found
-        }
-        return store.projects.first
+        guard let id = Self.preferredProjectID(in: store.projects, stored: selectedProjectID) else { return nil }
+        return store.projects.first(where: { $0.id == id })
     }
 
     var selectedReport: ProjectReport? {
@@ -60,7 +66,7 @@ final class AppState {
             return
         }
         guard selectedProjectID == nil else { return }
-        selectedProjectID = store.selectedProjectIDValue() ?? store.projects.first?.id
+        selectedProjectID = Self.preferredProjectID(in: store.projects, stored: store.selectedProjectIDValue())
     }
 
     // MARK: - Project management
