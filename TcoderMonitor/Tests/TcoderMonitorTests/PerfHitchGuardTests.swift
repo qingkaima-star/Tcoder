@@ -128,7 +128,16 @@ final class PerfHitchGuardTests: XCTestCase {
         // ——只靠 print 的"现量"没法被机器读，拧基线的人（包括下一次的我）就拿不到余量。
         let ledger = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("tcoder-perf-renderpath-debt.txt")
-        try? "HEAD=\(Date()) \(debt)\n".write(to: ledger, atomically: true, encoding: .utf8)
+        // 台账里要**点得到名字**：只有 `fullSort 10/10` 这一行的话，还债的人还得自己去
+        // 把守卫的报错触发出来才知道现场在哪。明细顺手带上归属目录，
+        // 免得"这 10 处到底归不归我写"要靠猜。
+        var detail: [String] = ["HEAD=\(Date()) \(debt)"]
+        for rule in Self.knownBaseline.keys.sorted() {
+            let hits = scan.hits[rule, default: []]
+            detail.append("—— \(rule)：\(hits.count) 处")
+            detail.append(contentsOf: hits.sorted().map { "   \($0)" })
+        }
+        try? (detail.joined(separator: "\n") + "\n").write(to: ledger, atomically: true, encoding: .utf8)
         XCTAssertTrue(problems.isEmpty, problems.joined(separator: "\n"))
     }
 

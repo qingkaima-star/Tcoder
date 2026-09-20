@@ -250,6 +250,36 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 让派单的人一眼看见"先做哪 10 处"。分级逻辑已经有了（守卫里的 `classifyCoarseWrites`），
 照它读 `coarsePattern` 的写法再读一遍 `tickBody` 就行——**别手抄第二份名单**，那正是 #44 的形状。
 
+### 第 1.5 步（与第 1 步同批、但收益不同期）：渲染路径剩下的 12 处**全在页面侧**
+
+01:49 用守卫自己的规则复算了全部命中并落进台账明细（`tcoder-perf-renderpath-debt.txt` 现在带
+`文件:行 + 原文`，不再只报一个数）：`fullSort 10` + `syncFileIO 2` **一处都不在 `Services/`、`Design/`、`App/` 里**
+⇒ 性能侧**没有可以自救的份**，这 12 处只能由写页面的人做。清单：
+
+| 处 | 位置 | 被排集合规模 n | 与哪条验收有关 |
+|---|---|---|---|
+| 1 | `Dependencies/DependenciesView.swift:278` `dependencies.sorted { name, version }` | **可到上千**（全仓依赖） | **T1 交互期**（依赖页滚动/切页时重算） |
+| 1 | `Logs/LogsFileTables.swift:104` `scannedFiles.sorted` | **数百～上千**（扫到的日志文件） | **T1 交互期** |
+| 1 | `Logs/LogsFileTables.swift:65` `affectedFiles.sorted` | 数十～数百 | T1，量级次之 |
+| 1 | `Code/CodeMetricsView.swift:56` `languages.sorted` | 个位数～几十 | 清了口径，**别提帧率收益** |
+| 2 | `Git/ContributorRows.swift:11 / :62`、`Git/ContributorsView.swift:22` | 作者数十 | 同上 |
+| 1 | `Health/HealthComponentTable.swift:47` | 组件数固定 | 同上 |
+| 1 | `Logs/LogsMetricGrid.swift:92` `grouped.keys.sorted()` | 几个 key 拼文案 | 同上 |
+| 1 | `Logs/LogsTrendCard.swift:33` `trend.sorted { date }` | 按天分桶，≤90 | 同上（且生产侧本就可以有序） |
+| 2 | `Logs/LogsView.swift:176 / :209` `fileExists` / `attributesOfItem` | **同步 stat()** | **T1**：日志页滚动期做磁盘 I/O |
+
+**为什么这 12 处不牵 T2（心跳 4 ms）**：这五页**一处都不读监控格**——01:50 逐个文件数过
+`grep -c 'monitor\.'`：`DependenciesView`/`LogsView`/`LogsFileTables`/`LogsTrendCard`/
+`LogsMetricGrid`/`CodeMetricsView`/`ContributorRows`/`ContributorsView`/`HealthComponentTable`
+**九个文件全是 0**（粗读点名册里也只有 `DashboardView`/`LiveReadings`/`ProjectSidebar`/`PerformanceView`）。
+所以它们的 body 不随心跳失效，里面的排序/I-O 不会每 tick 跑。⇒ **它们是"切页与滚动期"的成本，归 T1 管，不归 T2 管**。
+派单时别把它们和那 10 处承重粗读点混成一句"清完渲染路径"，两批的验收证据不是同一个窗口。
+
+正解形状与 `cpuRanking` 同一种：**排一次、放进产出，页面读现成的**
+（`PerfLeads.derive` 就是在采集侧一次性排好、页面零排序）。依赖表/日志文件表那两处大集合
+适合挪到分析侧产出有序结果，页面只读——**采集侧改动归我，页面那一行删除归你**。
+要的话我先在服务端把有序版本准备好（不碰 `Views/**`），你那边只剩删调用。
+
 ### 第 2 步：帧率复测（分两小步，因为其中一步需要人手）
 
 ```bash
