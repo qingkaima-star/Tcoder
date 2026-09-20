@@ -51,12 +51,17 @@ BASELINE = {
     "potential_hang_median_ms": 42.6,
     "potential_hang_max_ms": 59.8,
     "potential_hang_total_ms": 573.0,
+    # ⚠ 本节全部数字取自 run1（2026-09-20 15:03，release，rev 465f5a6），
+    #   而 spec §1.3 已判定该样本**测量条件未受控**（当时总工正在并发跑几十个
+    #   `swiftc -typecheck` 抢满 15 核 → app-update 与 hangs 被抬高）。
+    #   它现在只作"同形状对照列"存在，等按 §4.1 协议重测后整块替换；
+    #   在此之前，任何"从 X 降到 Y"的结论都不许引用本块当 X。
     "render_p50_ms": 2.73,
-    "render_p95_ms": 4.05,
-    "render_p99_ms": 4.67,
+    "render_p95_ms": 4.06,     # 原记 4.05：手算漏了 <duration ref> → 见 spec §1.4
+    "render_p99_ms": 4.77,     # 原记 4.67，同上
     "render_max_ms": 25.12,
-    "render_over_budget_frames": 5,
-    "render_over_budget_pct": 0.21,
+    "render_over_budget_frames": 10,   # 原记 5：漏计的 54 行 ref 里正好有 5 帧
+    "render_over_budget_pct": 0.42,    # 原记 0.21
     "main_thread_samples": 684,
     "main_thread_total_samples": 807,
     "main_thread_share_pct": 84.8,
@@ -214,6 +219,44 @@ def dist_line(values):
     return ("n=%d p50=%.2f p95=%.2f p99=%.2f max=%.2f ms"
             % (len(ordered), percentile(ordered, 0.5), percentile(ordered, 0.95),
                percentile(ordered, 0.99), ordered[-1]))
+
+
+def cross_check_durations(xml_path, tool_values):
+    """用一条**独立的、笨到不会错**的逐行正则重解析同一份 XML，与 `Doc` 的结果比对。
+
+    为什么要第二条解析路：`Doc` 的 id/ref 解引用一旦把某行的列错配到别的行，
+    输出的仍然是"行数正确、分位数看着也正常"的表——**它不会自己报错，只会静默给错数**。
+    实测就是这一条救回来的：`hitches-renders` 两把解析都是 n=2394，
+    但判超预算的帧 `Doc` 给 10、逐行重解析给 5，且那 5 个值在 `Doc` 的结果里各出现两次
+    ——即有 5 行的时长被错配到了别的行。不一致时报"未报"，绝不挑一个好看的数用。
+
+    返回 (是否一致, 说明文字)。文件读不到时返回 (False, ...)，让调用方标未覆盖。
+    """
+    try:
+        with open(xml_path, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError as exc:
+        return False, "读不到 %s（%s）" % (os.path.basename(xml_path), exc)
+    first = {}
+    for m in re.finditer(r'<duration id="(\d+)"[^>]*>(\d+)</duration>', text):
+        first.setdefault(m.group(1), m.group(2))
+    per_row = []
+    for row in re.findall(r"<row>(.*?)</row>", text, re.S):
+        m = re.search(r'<duration (?:id="\d+"[^>]*>(\d+)</duration>|ref="(\d+)"/>)', row)
+        if not m:
+            continue
+        raw = m.group(1) or first.get(m.group(2))
+        if raw is not None:
+            per_row.append(int(raw) / 1_000_000.0)
+    a, b = sorted(round(v, 6) for v in per_row), sorted(round(v, 6) for v in tool_values)
+    if len(a) != len(b):
+        return False, "行数不一致：逐行重解析 %d，Doc 解析 %d" % (len(a), len(b))
+    diff = [(i, a[i], b[i]) for i in range(len(a)) if abs(a[i] - b[i]) > 1e-6]
+    if diff:
+        shown = ", ".join("%.3f↔%.3f" % (x[1], x[2]) for x in diff[:6])
+        return False, "%d 处时长不一致：%s%s" % (
+            len(diff), shown, "…" if len(diff) > 6 else "")
+    return True, "两把解析一致（n=%d）" % len(a)
 
 
 def over_budget(values, budget_ms):
@@ -500,14 +543,21 @@ def cmd_summary(args):
         cur = ("p50 %.2f / p95 %.2f / p99 %.2f / max %.2f（n=%d）"
                % (percentile(render, .5), percentile(render, .95), percentile(render, .99),
                   max(render), len(render)))
-        fmt_row("render 相位 (ms)", "p50 2.73 / p95 4.05 / p99 4.67 / max 25.12", cur,
-                "健康" if percentile(render, .95) <= budget else "超")
-        fmt_row("render 超预算帧", "5 帧 (0.21%)", "%d 帧 (%.2f%%)" % (bad, pct),
-                "达标" if pct < 0.1 else "超")
+        # 两条独立解析不一致 ⇒ 这一列不许出数（详见 cross_check_durations 的注释）。
+        doc = (loaded["hitches-renders"] or {}).get("doc")
+        agree, why = (False, "无 XML 可比对")
+        if doc is not None:
+            agree, why = cross_check_durations(doc.path, render)
+        fmt_row("render 相位 (ms)", "p50 2.73 / p95 4.06 / p99 4.77 / max 25.12", cur,
+                ("健康" if percentile(render, .95) <= budget else "超")
+                + ("" if agree else "；解析自检不一致→本行仅参考"))
+        fmt_row("render 超预算帧", "10 帧 (0.42%)",
+                ("%d 帧 (%.2f%%)" % (bad, pct)) if agree else "未报（两把解析不一致）",
+                ("达标" if pct < 0.1 else "超") if agree else why)
     else:
         why = "未覆盖" if not loaded["hitches-renders"]["present"] else "0 帧（未采到）"
-        fmt_row("render 相位 (ms)", "p50 2.73 / p95 4.05 / p99 4.67 / max 25.12", why, "—")
-        fmt_row("render 超预算帧", "5 帧 (0.21%)", why, "—")
+        fmt_row("render 相位 (ms)", "p50 2.73 / p95 4.06 / p99 4.77 / max 25.12", why, "—")
+        fmt_row("render 超预算帧", "10 帧 (0.42%)", why, "—")
 
     # 3) app-update 相位（一次 hitch 通常拆成 Brown+Red 两行，同 duration 走 ref）
     upd = dedupe_pairs(loaded["hitches-updates"])

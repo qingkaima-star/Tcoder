@@ -12,6 +12,7 @@
 // （它数的是源码里的 `.shadow(`、材质、零引用令牌 —— 那些是离散事实，可精确断言）。
 //
 // 用法: swift scripts/pixel_audit.swift <图1.png> [图2.png ...]
+// 输出第二列是前 4 名明度桶，末尾的「地面=…」是占比最高的那一桶（它才是地面）。
 // 退出码恒为 0（报告器不判失败）。
 import AppKit
 
@@ -34,7 +35,17 @@ for path in CommandLine.arguments.dropFirst() {
     }
     let name = (path as NSString).lastPathComponent
 
-    // 版心区域（避开左侧栏与窗口边）；排除彩色像素与纯墨文字，只统计「面」。
+    // 版心区域（避开左侧栏与窗口边）；先只排除彩色像素，统计**全部**明度桶。
+    //
+    // **为什么没有明度窗**：旧版写死 `if l < 120 || l > 252 { continue }`，本意是排除纯墨文字。
+    // 实测它把两个主题的**地面**都排掉了——
+    //   亮主题地面是 `#FFFFFF`（sRGB 亮度 255，被 `> 252` 上限排掉）；
+    //   暗主题地面是 `#1C1C1E`（亮度 ≈ 30，被 `< 120` 下限排掉）。
+    // 于是「大面积明度众数」报的**从来不是地面**，而是把地面扔掉之后剩下的东西，
+    // 且暗主题那批几乎全在窗外、`total` 只剩几百个采样点 —— 读数看着专业，内容是错的。
+    // （这跟《无界 spec》§6.2 记的那两次标定失败是同一类病：判据写死，就只会对某一个主题成立。）
+    // 正确做法：先无窗统计，**占比最高的那个桶就是地面**，再把前几名如实报出来；
+    // 文字像素占比小，进不了前几名，不必为它造一个会误伤地面的窗。
     let stepX = max(1, W / 500), stepY = max(1, H / 500)
     var buckets: [Int: Int] = [:]
     var total = 0
@@ -43,13 +54,16 @@ for path in CommandLine.arguments.dropFirst() {
             guard let p = px(x, y) else { continue }
             if max(p.0, max(p.1, p.2)) - min(p.0, min(p.1, p.2)) > 0.18 { continue }
             let l = Int(srgbLuma(p.0, p.1, p.2) * 255)
-            if l < 120 || l > 252 { continue }
             buckets[l / 3, default: 0] += 1
             total += 1
         }
     }
-    let modes = buckets.sorted { $0.value > $1.value }
-        .prefix(4)
+    let sorted = buckets.sorted { $0.value > $1.value }
+    let groundBucket = sorted.first
+    let groundText = groundBucket.map {
+        String(format: "地面=%d@%.0f%%（RGB 亮度）", $0.key * 3, total == 0 ? 0 : 100 * Double($0.value) / Double(total))
+    } ?? "地面=未统计到"
+    let modes = sorted.prefix(4)
         .map { String(format: "%d@%.0f%%", $0.key * 3, total == 0 ? 0 : 100 * Double($0.value) / Double(total)) }
         .joined(separator: " ")
 
@@ -61,7 +75,7 @@ for path in CommandLine.arguments.dropFirst() {
             if l < minLuma { minLuma = l; minXY = (x, y) }
         }
     }
-    print(String(format: "%-46@ %-30@ y=%.2f 亮度 %.3f  (n=%d)",
+    print(String(format: "%-46@ %@  y=%.2f 最暗亮度 %.3f  (n=%d)  %@",
                  String(name.prefix(44)) as NSString, modes as NSString,
-                 Double(minXY.1) / Double(H), minLuma, total))
+                 Double(minXY.1) / Double(H), minLuma, total, groundText as NSString))
 }
