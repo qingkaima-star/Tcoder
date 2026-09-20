@@ -170,8 +170,9 @@ struct CodeDuplicationSummarySection: View {
                     DataReadout(label: "超长函数", value: NumberFormat.grouped(code.longFunctions),
                                 unit: "个")
                     DataBandSeparator()
-                    DataReadout(label: "平均函数长度", value: "\(NumberFormat.grouped(code.averageFunctionLength)) 行",
-                                caption: "仅统计 ≥2 行的函数")
+                    DataReadout(label: "平均函数长度", value: NumberFormat.grouped(code.averageFunctionLength),
+                                caption: "仅统计 ≥2 行的函数",
+                                unit: "行")
                 }
 
                 MiniBarGauge(fraction: code.duplicationRatio,

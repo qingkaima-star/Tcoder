@@ -178,8 +178,9 @@ struct AddProjectGuideCard: View {
                 .frame(maxWidth: .infinity, minHeight: ShellLayout.guideMinHeight)
             } else {
                 HStack(spacing: Theme.Spacing.xs) {
-                    ThemedIcon(.add, role: .inlineText, label: "添加项目")
-                        .foregroundStyle(iconTint)
+                    // 紧凑态**不再在文字左边再来一枚 ⊕**：行尾本来就有一枚可点的
+                    // 「选择目录」按钮，两枚同义图标把 17 字的提示挤到截断
+                    // （实拍「把项目文件夹拖到这里，或…」）。
                     hint
                     Spacer(minLength: Theme.Spacing.xs)
                     Button(action: onChooseFolder) {
