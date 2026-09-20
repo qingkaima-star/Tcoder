@@ -229,6 +229,33 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 它的价值是**把候选排除了**：持久化不占主线程预算，所以剩下的怀疑对象只有视图图更新，
 也就是第 1 步那 16 处。
 
+## 0.5 交接状态（09-21 00:31）——写给"一个人接两条线"的那位，免考古
+
+**已进 main 的性能侧东西**（`main = f9841ae` 之前的 `3a3381c`）：
+细粒度九格契约 + 交互期引用计数暂停（`Services/Performance/MachSystemMonitor.swift`、`App/AppState.swift`）、
+Design 令牌缓存、尺子五档 + `probe` + `selfcheck`（11 项）、`migration` 命令、
+五维 preflight（含**人手静默**）、四条禁则零余量 `1/1 59/59 10/10 2/2`、
+§5.4 与 **T2 两半归因**（主线程九格写入 0.01 ms / 900 进程派生 9.3 ms 在后台）。
+
+**已提交、只差合的两包**（回执已在 `/tmp`，主树一干净就落）：
+```bash
+ls /tmp/premerge-pass-ws_perf-base-*.ok | tail -2          # 看回执对应的头
+cd TcoderMonitor && ./scripts/merge_stream.sh ws/perf-base "merge ws/perf-base: 台账 + 假迁移守卫"
+```
+内容 = `dynamicNSColor` 拧到 59、两条棘轮各落一份 `$TMPDIR` 台账、
+新守卫 `testPreparedCellsAreNeverReslicedOrResorted`（防"迁了个假的"）。
+
+**下一步只有两条路，都在你手上**：
+1. **§0.4 第 1 步**：16 处粗读点迁完（`python3 scripts/trace_report.py migration` 报 0）
+   → 我再把 `coarseCallSiteCeiling` 拧 0、翻 `consumptionGateOpen`；
+2. **§0.4 第 2 步**：约 5 分钟安静窗口（`idle`×3 不需要人；`interact`×3 需要你持续滚 20 秒）。
+   被挡过两次的真实原因都写在 `measurement-context.txt` 里，脚本会自己拒，不用你判断。
+
+**别做这三件事**（都是这一轮踩过或量过的）：
+不要为了"零动态色"删取色引用（终点不是 0，见规范 T5）；
+不要把任何阈值调松来变绿（`ceiling = 0` 与 ≤800 行那条一样，"改这里的数字不是修复"）；
+不要拿 `probe` 去和改前对照物比（`/tmp/tcoder-before.app` 里没有 `FramePulse`，只能同走 xctrace）。
+
 ## 0. 消费什么（都已进 main，不用等）
 
 
