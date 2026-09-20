@@ -249,6 +249,11 @@ struct ProjectRow: View {
                 HealthDot(score: report?.health?.overall)
                 Text(project.name)
                     .font(Theme.Typo.body.font)
+                    // 侧栏 `List(.sidebar)` 会给行标签套上层级样式，选中行在非活动窗口
+                    // 退成灰底后，标签于是是「secondary 压灰底」—— 深色态实测
+                    // `#7A7A7A` 压 `#464646` ≈ 2.2:1，九张截图里当前项目名全部读不出。
+                    // 名字是这一行的主角，钉绝对纯墨，不随层级连乘。
+                    .foregroundStyle(Theme.Palette.Surface.ink)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     // 单行截断仍然可能存在（名字可以任意长），所以完整名字必须

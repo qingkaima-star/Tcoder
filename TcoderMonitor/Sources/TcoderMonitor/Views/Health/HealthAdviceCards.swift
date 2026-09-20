@@ -179,7 +179,7 @@ struct HealthTrendChart: View {
                     if let number = value.as(Double.self) {
                         Text(NumberFormat.grouped(Int(number)))
                             .font(Theme.Typo.monoSmall.font)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.secondary)
                     }
                 }
             }
@@ -190,7 +190,7 @@ struct HealthTrendChart: View {
                 AxisValueLabel(format: .dateTime.locale(Locale(identifier: "en_US_POSIX")).month(.defaultDigits).day(),
                                centered: false)
                     .font(Theme.Typo.monoSmall.font)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.secondary)
             }
         }
         .accessibilityLabel("评分趋势，\(NumberFormat.grouped(points.count)) 个历史点")

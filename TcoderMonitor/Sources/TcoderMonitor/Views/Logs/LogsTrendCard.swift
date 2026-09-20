@@ -107,7 +107,7 @@ struct LogTrendChart: View {
                     if let number = value.as(Double.self) {
                         Text(NumberFormat.grouped(Int(number)))
                             .font(Theme.Typo.monoSmall.font)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.secondary)
                     }
                 }
             }
@@ -119,7 +119,7 @@ struct LogTrendChart: View {
                 AxisValueLabel(format: .dateTime.locale(Locale(identifier: "en_US_POSIX")).month(.defaultDigits).day(),
                                centered: false)
                     .font(Theme.Typo.monoSmall.font)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.secondary)
             }
         }
         .accessibilityLabel("错误趋势，\(NumberFormat.grouped(buckets.count)) 天")

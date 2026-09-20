@@ -118,4 +118,54 @@ extension BorderlessDetailGuardTests {
         XCTAssertGreaterThanOrEqual(views.count, 30, "Views/ 只扫到 \(views.count) 个文件")
         XCTAssertTrue(views.contains { $0.path.hasSuffix("PerformanceSystemTiles.swift") })
     }
+
+    // MARK: 批次 H10：轴刻度不得用层级样式（会连乘）
+
+    /// `AxisValueLabel` 之后 8 行内出现 `.foregroundStyle(.secondary)` / `.tertiary` 即算违规。
+    /// 层级样式与宿主环境里的层级**连乘**（0.55×0.55≈0.30）：深色态实测性能页五档纵轴
+    /// 刻度只剩 `#464646`（对纯黑约 2.2:1），整条轴读不出，而总览页同类刻度没被连乘 ——
+    /// 同一个 App 里两页的轴一深一浅。绝对色出口是 `View.foregroundStyle(Color.secondary)`。
+    static func hierarchicalAxisLabels(in files: [(path: String, content: String)]) -> [String] {
+        files.flatMap { file -> [String] in
+            let lines = file.content.split(separator: "\n", omittingEmptySubsequences: false)
+                                .map(String.init)
+            var hits: [String] = []
+            for (index, line) in lines.enumerated() {
+                guard SurfaceScanKit.isCode(line), line.contains("AxisValueLabel") else { continue }
+                let window = lines[index..<min(index + 8, lines.count)]
+                if window.contains(where: {
+                    $0.contains(".foregroundStyle(.secondary)") || $0.contains(".foregroundStyle(.tertiary)")
+                }) {
+                    hits.append("\(file.path):\(index + 1)")
+                }
+            }
+            return hits
+        }
+    }
+
+    func test_chartAxisLabelsNeverUseHierarchicalStyle() throws {
+        let offenders = Self.hierarchicalAxisLabels(in: try SurfaceScanKit.sourceFiles(under: "Views"))
+        XCTAssertTrue(offenders.isEmpty,
+                      "轴刻度又用了层级前景色，会跟宿主环境连乘变暗（深色态实测 2.2:1），"
+                          + "请改绝对色 .foregroundStyle(Color.secondary)：\(offenders)")
+    }
+
+    func test_hierarchicalAxisScannerCatchesAndSpares() {
+        let bad = [(path: "Views/FakeChart.swift", content: """
+            AxisValueLabel {
+                Text("50%")
+                    .font(Theme.Typo.monoSmall.font)
+                    .foregroundStyle(.secondary)
+            }
+            """)]
+        XCTAssertEqual(Self.hierarchicalAxisLabels(in: bad), ["Views/FakeChart.swift:1"])
+        let good = [(path: "Views/FakeChart.swift", content: """
+            AxisValueLabel {
+                Text("50%")
+                    .font(Theme.Typo.monoSmall.font)
+                    .foregroundStyle(Color.secondary)
+            }
+            """)]
+        XCTAssertTrue(Self.hierarchicalAxisLabels(in: good).isEmpty, "绝对色的轴刻度被误判")
+    }
 }
