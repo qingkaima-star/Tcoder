@@ -61,6 +61,7 @@ final class BorderlessSurfaceGuardTests: XCTestCase {
                 .enumerated()
                 .filter { _, line in
                     line.contains(".regularMaterial") || line.contains("ultraThinMaterial")
+                        || line.contains(".thinMaterial")
                 }
                 .map { "\(file.path):\($0.offset + 1)" }
         }
@@ -153,6 +154,19 @@ final class BorderlessSurfaceGuardTests: XCTestCase {
                       "表面系统里仍有材质填充（风格契约 1，实测会糊成 1.05:1 的脏灰）：\(hits)")
         XCTAssertTrue(glass.content.contains("case .content:"),
                       "内容层必须仍然存在（页面有 40 处靠它拿掉面板）")
+    }
+
+    /// **守卫补漏（2026-09-20 实拍抓到）**：原来只扫 `Design/`，于是
+    /// `ContributorRows` 在页面里写 `.background(.regularMaterial, …)` 做一个悬停浮层，
+    /// 本守卫**看不见**。材质被禁的理由是"它比页面底暗 1.05:1、糊成脏灰"，
+    /// 这跟它写在哪个目录无关 —— 只扫基座等于漏掉 90% 的落点。
+    /// 现在扫全仓 `Sources/**`。页面要浮层请用 `.surface(layer: .floating, …)`。
+    func test_noMaterialAnywhereInSources() throws {
+        let all = try Self.sourceFiles(under: "")
+        let hits = Self.forbiddenMaterialUses(in: all)
+        XCTAssertTrue(hits.isEmpty,
+                      "全仓仍有材质填充（含页面里散写的）。悬停/浮层请用 "
+                      + "`.surface(layer: .floating, shape: .rounded(Theme.Radius.sm))`。\(hits)")
     }
 
     // MARK: - 契约 6：投影全仓唯一，且只给浮层
