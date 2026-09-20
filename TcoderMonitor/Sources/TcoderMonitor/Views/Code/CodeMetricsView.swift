@@ -108,9 +108,11 @@ struct CodeMetricsSummaryGrid: View {
         }
     }
 
-    /// 分母为 0 时返回占位而不是 `0%`：没有总行数就没有"占比"这个结论。
+    /// 分母为 0 时给「算不出」而不是 `--`，也不是 `0%`：
+    /// 扫描做过、总行数确实是 0，于是「占比」这个比值没有定义。
+    /// 它与「没扫」（`DataAbsence.notAnalysed` → `--`）必须分得开——《42》§14.3 第 1 条。
     static func shareOf(_ lines: Int, _ code: CodeMetrics) -> String {
-        guard code.totalLines > 0 else { return Theme.Placeholder.missingValue }
+        guard code.totalLines > 0 else { return DataAbsence.indeterminate.display }
         return NumberFormat.percent(Double(lines) / Double(code.totalLines), precision: 0)
     }
 }
@@ -191,8 +193,12 @@ struct CodeScaleSection: View {
             + "展示前 \(NumberFormat.grouped(head)) 种"
     }
 
+    /// 平均文件行数 = 总行数 / 文件数。两个分母任期为 0 都是「算不出」，
+    /// 不是「没扫」（`--`）：扫过了，只是这个除法没有定义。
     static func averageFileLines(_ code: CodeMetrics) -> String {
-        guard code.totalLines > 0, code.totalFiles > 0 else { return Theme.Placeholder.missingValue }
+        guard code.totalLines > 0, code.totalFiles > 0 else {
+            return DataAbsence.indeterminate.display
+        }
         return String(format: "%.1f", Double(code.totalLines) / Double(code.totalFiles))
     }
 }

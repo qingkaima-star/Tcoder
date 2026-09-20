@@ -7,15 +7,17 @@ import SwiftUI
 // 变成有类型的常量。双层色（graphic / text）是为同时满足 WS-H §10 的两条验收线，
 // 依据见 `SemanticRole` 注释与笔记 42。
 
-// MARK: - 缺证据占位（三态句式里"没查/失败"那一态的字面）
+// MARK: - 缺证据占位（「没查 / 查不了」那一态的字面）
 
 extension Theme {
-    /// WS-H §7.3 三态：有数据 = 真值（**含真 0**）；查了但空 = `0` + 「未发现」；
-    /// 没查 / 查失败 = 下面这个占位。把第三态写成 0，就是把"没证据"伪装成"结论"。
+    /// 《40 WS-H》§7.3：有数据 = 真值（**含真 0**）；查了但空 = `0` + 「未发现」；
+    /// 没查 / 查失败 = 下面这个占位。把这一态写成 0，就是把"没证据"伪装成"结论"。
     ///
-    /// 注：本轮 #28 删掉了配套的 `Theme.Evidence` 类型（页面零引用），
-    /// 全仓现有 **15 处**手写 `?? Theme.Placeholder.missingValue` 等散布点，
-    /// 已逐处列进《42》末节「占位文本收敛清单」，供 #34 直接当工单。
+    /// 这里只是**字面本体**。要不要用这个字面由 `Design/DataAbsence.swift` 决定：
+    /// 缺数据一共有四态（`value` / `measuredEmpty` / `indeterminate` / `notAnalysed`），
+    /// 只有 `notAnalysed` 用 `--`；「除零算不出」与「查了但是空的」各有自己的字面。
+    /// 页面请取 `DataAbsence.display`，不要再来手写第 N 处 `?? Theme.Placeholder.missingValue`
+    /// （#47 之前全仓有 15 处，逐处清单见《42》§14；现存处数由 `DesignAbsenceStateTests` 钉住）。
     enum Placeholder {
         static let missingValue = "--"
     }

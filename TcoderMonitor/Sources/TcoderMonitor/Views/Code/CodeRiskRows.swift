@@ -38,10 +38,12 @@ enum CodeRiskAnalysis {
         code.topComplexFunctions.filter { $0.risk.rank >= RiskLevel.high.rank }.count
     }
 
-    /// 一个函数都没识别出来时不能显示 0（那是「极简」的意思），要如实显示未知。
+    /// 一个函数都没识别出来时不能显示 0（那是「极简」的意思），也不能显示 `--`
+    /// （那是「没扫」的意思）：扫描做过了、函数集合是空的，这个平均值的分母为 0，
+    /// 属于「算不出」。见 `DataAbsence.indeterminate` 与《42》§14.3 第 1 条。
     static func averageComplexityValue(_ code: CodeMetrics) -> String {
         guard let average = code.averageCyclomaticComplexity else {
-            return Theme.Placeholder.missingValue
+            return DataAbsence.indeterminate.display
         }
         return String(format: "%.2f", average)
     }

@@ -185,8 +185,8 @@ struct DashboardView: View {
                                                                 snapshot?.networkOutBytesPerSecond,
                                                                 rate: ByteFormat.bitRate))
                     StatLine(label: "进程",
-                             value: snapshot.map { NumberFormat.grouped($0.processCount) }
-                                 ?? Theme.Placeholder.missingValue)
+                             value: DataAbsence.optional(
+                                snapshot.map { NumberFormat.grouped($0.processCount) }).display)
                 }
             } else {
                 EmptyStateView(icon: IconName.performance.rawValue,
@@ -265,8 +265,9 @@ struct DashboardView: View {
                 Divider()
                 HStack(spacing: Theme.Spacing.md) {
                     StatLine(label: "生产码行覆盖",
-                             value: coverage.overallLinePercent.map { Self.percentOf100($0, precision: 1) }
-                                 ?? Theme.Placeholder.missingValue)
+                             value: DataAbsence.optional(
+                                coverage.overallLinePercent.map { Self.percentOf100($0, precision: 1) })
+                                .display)
                     StatLine(label: "单元测试",
                              value: coverage.unit.map { Self.percentOf100($0.linePercent) } ?? "无报告")
                     StatLine(label: "集成测试",
@@ -316,12 +317,13 @@ struct DashboardView: View {
         NumberFormat.percent(percent / 100, precision: precision)
     }
 
-    /// 读写两个方向求和。快照缺席时给 `--` ——
+    /// 读写两个方向求和。快照缺席时给 `DataAbsence.notAnalysed` 的字面（`--`）——
     /// 旧写法 `(snapshot?.diskRead ?? 0) + (… ?? 0)` 会把「没采到」报成 `0 B/s`，
     /// 在监控 App 里这是一句假的好消息（WS-I §3.4）。
+    /// 这里**不是** `indeterminate`：差分的分母（时间间隔）没问题，是分子那两帧压根没在场。
     private func snapshotRate(_ read: UInt64?, _ write: UInt64?,
                               rate: (UInt64) -> String) -> String {
-        guard let read, let write else { return Theme.Placeholder.missingValue }
+        guard let read, let write else { return DataAbsence.notAnalysed.display }
         return rate(read + write)
     }
 
