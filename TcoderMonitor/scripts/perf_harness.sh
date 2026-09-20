@@ -61,6 +61,9 @@ SECONDS_TP="${SECONDS_TP:-25}"
 SECONDS_LAUNCH="${SECONDS_LAUNCH:-10}"
 PERF_BIN="${PERF_BIN:-$PWD/dist/Tcoder.app/Contents/MacOS/TcoderMonitor}"
 WINLIST="$PWD/scripts/winlist.swift"
+QUIESCE_SRC="$PWD/scripts/input_quiescence.swift"
+QUIESCE_BIN=""
+QUIESCE_MIN="${QUIESCE_MIN:-5}"
 TRACE_REPORT="$PWD/scripts/trace_report.py"
 PULSE_REPORT="$PWD/scripts/perf_framepulse.py"
 DOMAIN="com.tcoder.monitor"
@@ -139,6 +142,26 @@ note_target_flavor() {  # note_target_flavor <pid>
   echo "    被采二进制=${TARGET_BINARY:-（取不到）} 口径=$TARGET_FLAVOR"
 }
 
+quiescence_probe() {  # → 一行 `… 静默=12.34s`；取不到时打印 静默=-1.00s（调用方按"取不到"处理）
+  if [ -z "$QUIESCE_BIN" ]; then
+    if xcrun swiftc -O -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
+         -target arm64-apple-macos14.0 "$QUIESCE_SRC" -o "/tmp/tcoder-quiesce-$$" 2>/dev/null; then
+      QUIESCE_BIN="/tmp/tcoder-quiesce-$$"
+    else
+      echo "    ⚠ 静默探针编译失败，退回 JIT（慢一点，不影响读数口径）" >&2
+    fi
+  fi
+  if [ -n "$QUIESCE_BIN" ]; then
+    "$QUIESCE_BIN" 2>/dev/null || echo "静默=-1.00s"
+  else
+    xcrun swift "$QUIESCE_SRC" 2>/dev/null || echo "静默=-1.00s"
+  fi
+}
+
+quietest_seconds() {  # 从探针那一行里抠出"静默=Xs"的 X
+  printf '%s' "${1:-}" | sed -n 's/.*静默=\([0-9.-]*\)s.*/\1/p'
+}
+
 preflight_context() {  # preflight_context <outdir> <pid>
   local out="$1" pid="$2" f="" cores load1 front visible others hard=0
   cores=$(sysctl -n hw.ncpu 2>/dev/null || echo 8)
@@ -163,16 +186,21 @@ preflight_context() {  # preflight_context <outdir> <pid>
     visible="无在屏窗口（隐藏/最小化/不在屏）"
   fi
   others=$(pgrep -x swiftc 2>/dev/null | tr '\n' ' ')
+  # 人手静默：整机 load 与并发编译挡得住"机器在忙"，挡不住"有人在点这个窗口"。
+  local qline quiet
+  qline=$(quiescence_probe)
+  quiet=$(quietest_seconds "$qline")
 
   { echo "# 测量上下文（读数只有在这一组条件下才可互比）"
     echo "时间=$(date '+%F %T')  HEAD=$(git rev-parse --short HEAD 2>/dev/null)  工作树改动数=$DIRTY"
     echo "被采pid=$pid  二进制=$TARGET_BINARY  口径=$TARGET_FLAVOR"
     echo "实例数=${COEXIST:-1}  前台App=$front  被测进程visible=$visible"
     echo "load1=$load1  核数=$cores  并发swiftc=${others:-无}"
+    echo "人输入静默=${quiet:-取不到}s  明细=${qline:-（探针没跑起来）}"
     echo "hitches_seconds=$SECONDS_HITCHES  tp_seconds=$SECONDS_TP"
   } > "$f" 2>/dev/null || die "写不出 $f"
 
-  echo "    上下文：前台=$front  visible=$visible  load1=$load1/$cores  并发swiftc=${others:-无}"
+  echo "    上下文：前台=$front  visible=$visible  load1=$load1/$cores  并发swiftc=${others:-无}  静默=${quiet:-取不到}s"
 
   if [ -n "$others" ]; then
     echo "!! 有 swiftc 在跑（$others）——它会抢满全部核，app-update 相位会被显著抬高。等它跑完再来。" >&2
@@ -197,9 +225,50 @@ preflight_context() {  # preflight_context <outdir> <pid>
       echo "   把窗口恢复出来（取消最小化 / 切到该 Space）再测。" >&2
       hard=1 ;;
   esac
+  # 人手静默闸：§1.3 作废的那两批基线，坏因都是"测量期间有人在动"，
+  # 而 load / 并发编译 / 前台这三条整机闸**看不见手**。取不到数只通报、不判败
+  # （一条因为拿不到数据就永远说不合格的闸，等于没有这把尺子——前台那条就栽过这个跟头）。
+  if [ -n "$quiet" ] && [ "$quiet" != "-1.00" ] \
+     && awk -v q="$quiet" -v m="$QUIESCE_MIN" 'BEGIN{exit !(q < m)}' \
+     && [ "${PERIOD:-idle}" != "interaction" ] \
+     && [ "${ALLOW_UNQUIESCENT:-0}" != "1" ]; then
+    echo "!! 人手 ${quiet} 秒前还在动（要求静默 ≥${QUIESCE_MIN}s）。这 20 秒里只要有人点一下、" >&2
+    echo "   滚一下，读数量的就是『那 20 秒里谁干了什么』，不是『这套代码卡不卡』。" >&2
+    echo "   请等人手停下再来；确实要连人一起量（例如就要量交互期）就 $0 interact 那一档。" >&2
+    hard=1
+  fi
   [ "$hard" = "1" ] && [ "${IGNORE_CONTEXT_GATE:-0}" != "1" ] && die "测量上下文不达标（详见 $f）。IGNORE_CONTEXT_GATE=1 可强行跳过，但那批读数必须标注为『条件不合格』。"
   [ "$hard" = "1" ] && echo "    ⚠ IGNORE_CONTEXT_GATE=1：条件不合格，这批读数不得进任何对比表。" >&2
   echo "    上下文已落 $f"
+}
+
+human_input_in_window() {  # human_input_in_window <静默秒> <窗口秒> → 分类，便于拿合成数字验判定
+  awk -v q="$1" -v w="$2" 'BEGIN{ if (q >= w) print "窗口内没人"; else print "窗口内有人" }'
+}
+
+post_window_quiescence() {  # post_window_quiescence <outdir> <窗口秒数>；按 PERIOD 决定"什么样的收尾算合格"
+  # 收尾**再问一次**探针：若"距离上次人手事件"仍短于刚录的窗口，说明窗口里有人动过手。
+  # idle 档要的是"整窗没人动"；interact 档要的正好相反——没人动那批只能退回当 idle 数。
+  local out="$1" window="$2" quiet period="${PERIOD:-idle}" verdict
+  quiet=$(quietest_seconds "$(quiescence_probe)")
+  [ -n "$quiet" ] && [ "$quiet" != "-1.00" ] || { echo "    （收尾静默探针取不到，污染判定不做）"; return 0; }
+  verdict=$(human_input_in_window "$quiet" "$window")
+  meta_write "$out" "quiescence_after_seconds=$quiet" "period=$period" "window_verdict=$verdict"
+  if [ "$period" = "interaction" ]; then
+    if [ "$verdict" = "窗口内没人" ]; then
+      meta_write "$out" "no_human_input_during_window=1"
+      echo "    ⚠ 整个 ${window}s 窗口里**没有一次人手事件**（距上次 ${quiet}s）——" >&2
+      echo "      这批量的是心跳期，不是交互期。要判 T1 必须重跑并真的持续滚动。" >&2
+    else
+      echo "    复核通过：窗口内确有真人输入（距上次 ${quiet}s < ${window}s），可当交互期样本"
+    fi
+  elif [ "$verdict" = "窗口内有人" ]; then
+    meta_write "$out" "contaminated_by_human_input=1"
+    echo "    ⚠ **这批样本被污染**：录制窗口 ${window}s 内人手在 ${quiet} 秒前还在动。" >&2
+    echo "      已写进 meta（contaminated_by_human_input=1），不得进前后对比表。" >&2
+  else
+    echo "    收尾复核：整窗口无人手输入（距上次事件 ${quiet}s ≥ ${window}s）"
+  fi
 }
 
 require_idle_target() {  # 返回全局 PID；!= 1 个实例即拒跑（除非显式 ATTACH_PID=<pid>）
@@ -303,6 +372,7 @@ cmd_idle() {
   # 只认 period=interaction 的样本。写进 meta 是为了让 report 阶段还能看见它——
   # 否则过两天没人记得当时到底碰没碰鼠标，就会拿心跳期的数去交交互期的结论。
   local period="${PERIOD:-idle}"
+  PERIOD="$period"   # 让 preflight / 收尾复核这些被调函数看得见同一档，不靠调用点的隐式作用域
   [ "$period" = "interaction" ] \
     && echo "==> interact 档：**录制期间请持续滚动/拖窗**，停下就不算交互期" \
     || echo "==> idle 档：attach 现有实例录心跳（release 口径；rev=$REV dirty=$DIRTY）"
@@ -325,6 +395,9 @@ cmd_idle() {
   for t in "${HITCH_TABLES[@]}"; do
     [ "$DRY_RUN" = "1" ] || export_table "$out/hitches.trace" "$t" "$out"
   done
+  # 录制窗口一结束就问一次人手探针：这是"这批能不能进对比表"的判据，必须在导表之后、
+  # 在下一个窗口（Time Profiler）开始之前问，否则两个窗口的静默读数会互相顶包。
+  [ "$DRY_RUN" = "1" ] || post_window_quiescence "$out" "$SECONDS_HITCHES"
 
   echo "==> 2/4 录 Time Profiler ${SECONDS_TP}s"
   run rm -rf "$out/time.trace"
@@ -630,6 +703,23 @@ SWIFT
   else
     ok "migration：读不到守卫常量就炸（拒绝退回手抄正则）"
   fi
+
+  # 10) 人手静默探针：闸门新加的那一维必须自己能跑、能解析、判定向两边都咬得住
+  #     （§1.3 两批作废基线的坏因就是"有人在动"，而 load / 编译 / 前台三条闸看不见手）
+  [ -f "$QUIESCE_SRC" ] || fail "缺 scripts/input_quiescence.swift——静默闸是 preflight 的一维，不能删了留着判据"
+  local qline qquiet
+  qline=$(quiescence_probe)
+  qquiet=$(quietest_seconds "$qline")
+  if [ -z "$qquiet" ]; then
+    fail "静默探针输出解析不出数字（拿到「$qline」）——preflight 那一维会永久取不到数，等于没有这把尺子"
+  else
+    ok "人手静默探针可跑可解析：距上次人手事件 ${qquiet}s"
+  fi
+  [ "$(human_input_in_window 2 20)" = "窗口内有人" ] \
+    || fail "判定反了：静默 2s / 窗口 20s 应当是「窗口内有人」（idle 档要据此判污染）"
+  [ "$(human_input_in_window 60 20)" = "窗口内没人" ] \
+    || fail "判定反了：静默 60s / 窗口 20s 应当是「窗口内没人」（interact 档要据此判「没人在滚」）"
+  ok "窗口判定双向都对（idle 防污染 / interact 防空滚 两种失效各管一头）"
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
