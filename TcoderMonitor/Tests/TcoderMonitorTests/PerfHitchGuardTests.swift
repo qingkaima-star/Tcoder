@@ -63,7 +63,7 @@ final class PerfHitchGuardTests: XCTestCase {
     ///   → 归 **M1 / WS-W**（spec §5 点名"LogsView.attachedItems 的 body 内 stat() 移出"），终点 0。
     static let knownBaseline: [String: Int] = [
         "directFormatters": 1,
-        "dynamicNSColor": 107,
+        "dynamicNSColor": 86,   // 2026-09-20 由 107 拧到实测 86，见下方 ownerNotes
         "fullSort": 10,
         "syncFileIO": 2,
     ]
@@ -74,7 +74,9 @@ final class PerfHitchGuardTests: XCTestCase {
         "dynamicNSColor": "语义已变（C 包落地后）：令牌由「每次访问现造」改成缓存之后，本条量的不再是分配次数，"
             + "而是**渲染路径里引用令牌成员的次数**——它仍是重算面的代理指标（引用越多＝每 tick 求值越密），"
             + "但不再等于「每 tick new 多少个 NSColor」。落地前 88（只认 .textColor），"
-            + "放宽到四成员后实测 107（+19 处 .graphicColor，全在图表 Mark/循环里）。终点仍由 M1 各流按页面收敛。",
+            + "放宽到四成员后实测 107（+19 处 .graphicColor，全在图表 Mark/循环里）。终点仍由 M1 各流按页面收敛。"
+            + "**2026-09-20 拧到 86**：`165faa7`（M1-集成，图表取色上提进 Design/）还掉了 21 处 Views 侧引用，"
+            + "而这条棘轮当时不报现量、没人看得见那 21 处余量——现在它每次跑都打「现量/上限」。",
         "fullSort": "M1 WS-P/WS-W：body 内派生集合缓存或移到 publish 里算（终点 0）",
         "syncFileIO": "M1 WS-W：渲染路径的文件尺寸/存在性检查移到扫描期（终点 0）",
     ]
@@ -109,6 +111,16 @@ final class PerfHitchGuardTests: XCTestCase {
         }
         // 防"假零"的第二道：基线本身不许被偷偷清零。
         XCTAssertTrue(Self.knownBaseline.values.reduce(0, +) > 0, "基线全 0 等于没有守卫")
+        // 【每次跑都报现量】"只减不增"有两个方向的失效：涨上去必须红（上面管），
+        // 而**降下来却没人拧基线**同样坏——余量 60 处的闸门等于没有闸门，
+        // 新债可以悄悄长回来还不红。这里不判红（清零是合法终态），
+        // 但把"现量/上限"打进输出，让余量在日志里透明。
+        let debt = Self.knownBaseline.keys.sorted().map { rule -> String in
+            let baseline = Self.knownBaseline[rule] ?? 0
+            let now = counts[rule] ?? -1
+            return now < baseline ? "\(rule) \(now)/\(baseline)（可拧到 \(now)）" : "\(rule) \(now)/\(baseline)"
+        }.joined(separator: "  ")
+        print("【渲染路径禁则】现量/上限 —— \(debt)")
         XCTAssertTrue(problems.isEmpty, problems.joined(separator: "\n"))
     }
 

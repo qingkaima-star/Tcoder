@@ -4,11 +4,85 @@
 - 收件：第三轮「简约无界」UI 总工 —— 由你排进对应流的**追加**批次
 - 依据裁定：用户 2026-09-20 16:57（`AGENTS.md`「双总工协作裁定」）——页面树归 UI 总工派发与收回，
   性能侧只出工单、**不另起会话写 `Views/**`**。本文件就是那份工单，性能轮不动手写这些文件。
-- 度量口径：本文件所有数字都是在 **`main = 96761b7`** 上用宽松口径实扫得到的
-  （`git grep -h -E <模式> refs/heads/main -- 'TcoderMonitor/Sources/TcoderMonitor/Views'`）。
-  严谨口径以守卫自己的计数为准（`PerfHitchGuardTests` / `PerfInvalidationRatchetTests`）。
+- 度量口径：本文件的**调用点计数一律以守卫自己的正则为准**
+  （`PerfHitchGuardTests` / `PerfInvalidationRatchetTests`）。
+  头一版写在 `main = 96761b7` 上、用顺手 `git grep | wc -l` 量的数已作废——**行数不是调用点**
+  （同一次误判让我差点把绿的 main 报成红的，见 spec §1.4 之后的那段更正）。
+
+## 0.0 先说一件拦路的事：main 那条红是我欠的，已经修好了
+
+`165faa7` 的提交说明点名：main 上唯一那条红是性能轮随 `d5bb239` 带进来的
+`scripts/trace_report.py` 涨到 **810 行**，撞本仓 ≤800 行棘轮（`SelfScanDogfoodTests`，
+ceiling=0，扫描分母含 `.py/.sh/.md`）。你**没有改阈值**，只把它交回给我——处理如下（`f84a8f4`）：
+
+- 按层拆成 `perf_trace_xml.py` / `perf_trace_metrics.py` / `trace_report.py`，**入口形状一字未动**，
+  `perf_harness.sh` 零改动；拆前拆后对同一批真 trace 跑 6 种子命令，stdout 逐字相同、JSON 逐字节相同。
+- 顺带兜出一个真缺陷：`cmd_switches` 引用不存在的 `cur` ⇒ **switch 档只要有真数据就崩**
+  （空目录时提前返回，所以一直没暴露）。
+- 新增 `scripts/perf_harness.sh selfcheck`（六项、合成夹具、零采样）。
+
+**对三家的影响**：这条红卡的是**所有人的 `premerge_check`**（你们树上那 810 行是同一个文件）。
+我这包一合，main 回全绿，你们的回执才谈得上重跑；我合入会让 main 前进一笔，
+**请在合入之后再 merge main 并重取回执**。我这边只有这一包要落，之后到 M2 前不再动 main。
+
+**测帧率的规矩（M1 交回时请照这个来，不照做的话数字我不收）**：
+
+1. 测量前先 `scripts/perf_harness.sh selfcheck`，六项全绿才算"这把尺子可用"；它红了所有读数作废。
+2. 交互期那一档（T1）**不做合成滚动输入**：本机 System Events 权限被拒，`CGEvent` 会被静默丢弃，
+   只会量产"交互期 0 hitch"的假绿。改成**真人滚 10 秒 + `TCODER_PERF_PROBE=1` + `probe --interaction`**：
+
+   ```bash
+   TCODER_PERF_PROBE=1 dist/Tcoder.app/Contents/MacOS/TcoderMonitor &   # 唯一实例、前台、无并发编译
+   # ……用鼠标在页面上真实滚动 10 秒……
+   ./scripts/perf_harness.sh probe            # 退出码 0 达标 / 1 未达标 / 2 没确认交互（只算 idle）
+   ```
+
+   不带 `--interaction` 只会被判成 idle 读数——**别拿它当 T1 达标**。
+3. 禁则棘轮现在每次跑都打「现量/上限」。我把 `dynamicNSColor` 从 107 拧到 **86**
+   （你们 `165faa7` 已经还掉 21 处，而那 21 处当时藏在余量里没人看见）。
+   四条现在**零余量**：`1/1 86/86 10/10 2/2`——再新增一处当场红。
+
+## 0.1 【最高优先】细粒度契约目前消费数为 **0**
+
+按守卫自己的正则复算 `main = a99f38b` 的 `Views/**` + `App/**`：
+
+- **粗粒度读点 16 处 = 棘轮上限 16（零余量，再加第 17 处即判红）**
+- **细粒度读点（`monitor.<格>.value`）0 处**
+
+含义说白：**M0 服务侧把一次 tick 的写入面收窄了，但页面一格都没接**，
+所以 1.5 秒一次的整棵重算**依旧在发生**，用户端目前**不会感到任何帧率改善**。
+T1/T2 在这 16 处迁完之前不可能达标——**这不是"优化项"，是其余性能工单的前置**。
+
+16 处逐条（迁完后由总工把上限往下拧，最终 0）：
+
+| 文件 | 行 | 现在这么读 | 该换成 |
+|---|---|---|---|
+| `Views/DashboardView.swift` | 332 | `state.monitor.latestSnapshot` | `monitor.pulse.value`（+ 需要的格单独读） |
+|  | 443 | `state.monitor.history.count > 2` | `monitor.pulse.value.historyCount` |
+|  | 444 | `Array(state.monitor.history.suffix(90))` | **`monitor.curve.value`**（已切好窗口，别再 `suffix`） |
+| `Views/PerfLogs/LiveReadings.swift` | 25–26 | `monitor.latestSnapshot` / `monitor.history.count` | 入参改成 `PerfPulse`，或读 `pulse.value` / `curve.value` |
+| `Views/Performance/PerformanceView.swift` | 45 | `monitor.trackedGroups` | `monitor.groupRanking.value` |
+|  | 47 / 55 | `monitor.processMetricsTruncated` ×2 | `monitor.ledger.value.metricsTruncated` |
+|  | 53 | `monitor.measuredProcessCount` | `monitor.ledger.value.measuredCount` |
+|  | 54 | `monitor.latestSnapshot?.processCount` | `monitor.ledger.value`（系统/被测计数） |
+|  | 63 | `Array(monitor.history.suffix(chartPointLimit))` | `monitor.curve.value` |
+|  | 68 | `monitor.topProcesses` | `monitor.cpuRanking.value` |
+|  | 69 | `monitor.processesByMemory` | `monitor.memoryRanking.value` |
+|  | 104 | `monitor.lastSampleAt` | `monitor.pulse.value.sampleAt` |
+|  | 105 | `monitor.history.count` | `monitor.pulse.value.historyCount` |
+| `Views/Shell/ProjectSidebar.swift` | 411 | `state.monitor.latestSnapshot`（喂 `LiveCPUBadge`） | `monitor.cpu.value`（badge 只需 CPU） |
+
+> 顺带：`isCollectingForDisplay` 也是 **0 读取**（见 W-6）。
+> 这两个 0 是同一件事的两面——**新契约没接，旧入口没撤**。
+
+**「完成」现在有机器定义了**：`PerfInvalidationRatchetTests.consumptionGateOpen`（当前 `false`）。
+闸门是四态判定，除「粗读点 0 / 上限 0 / 细读点 > 0」这一种之外，没有任何状态能静默绿：
+债还在 → 每次跑测试都打印「这轮的收益还没在页面上落地」；债清完却没人翻闸门 → 判红（防长期挂着）；
+**提前翻闸门 → 判红**。所以「16 处迁完 + 上限拧成 0」是这套工单里唯一一条**能改变 T1/T2 可否判定**的项。
+16 处迁完后请回报，由我把上限拧成 0 并翻闸门，然后才做帧率复测。
 
 ## 0. 消费什么（都已进 main，不用等）
+
 
 `state.monitor` 上的 9 个独立观察格与派生入口，签名与语义见
 `docs/superpowers/specs/2026-09-20-performance-120hz-design.md` §5.3。要点：

@@ -72,18 +72,30 @@
 下表（run1）是**单一采样、条件未受控**。同一份 release 二进制（`465f5a6`）后来又采了两次，
 三者互相矛盾，而代码一行没变：
 
-| 样本 | 时刻/时长 | hitch | app-update 相位 | 交互延迟 | 当时的机器条件 |
+| 样本 | 时刻/时长 | hitch 次数 | **Hitch Time Ratio**（Apple 主指标） | 帧时长分布 | 当时的机器条件 |
 |---|---|---|---|---|---|
-| run1 | 15:03 / 20s | 7 次 = 0.35/s | **10.8 ~ 24.8 ms** | 13 次，中位 42.6ms | **我正在并发跑几十个 `swiftc -typecheck` 探针**（抢满 15 核）→ 抬高 |
-| run2 | 16:03 / 25s | 2 次 = 0.08/s | — | 1 次 3243.8 ms | 刚 SIGTERM 掉 6 个残留实例；那个 3243ms 像被挂起 |
-| run2b | 16:12 / 20s | 2 次 = 0.10/s | **1.9 ~ 3.0 ms** | **0 次** | `vm.loadavg = {82.38 …}`、**前台是别的 App** → 后台窗口被节流，假性地好看 |
+| run1 | 15:03 / 20s | 7 = 0.35/s | **11.67 ms/s → 危急(>10)** | 33.3 / 41.7 / 50.0 / 58.3 ms（每次晚 **4~7 帧**） | **我正在并发跑几十个 `swiftc -typecheck` 探针**（抢满 15 核）→ 抬高 |
+| run2 | 16:03 / 25s | — | **无效** | — | 该次 `hitches` 表 export 失败（`Document Missing Template Error`，后台任务被中途杀）⇒ **空文件**。先前记的"2 次"来自同一份坏解析，**作废** |
+| run2b | 16:12 / 20s | 9 = 0.45/s | **0.83 ms/s → 无感(<5)** | 8.3×7 / 16.7×2 ms（每次只晚 **1~2 帧**） | `vm.loadavg={82.38 …}`、**前台是别的 App** → 后台窗口被节流，假性地好看 |
 
-**所以**：既不能说"改动前 7 hitch / 24.8ms"，也不能说"其实只要 1.9ms 早就达标了"。
-两把读数都没被条件约束住。**处置**：`perf_harness.sh` 已加 `preflight_context()`
+**这张表最重要的一条不是"降了多少"，而是「次数根本不是判别量」**：
+run1 与 run2b 的 hitch **次数几乎相同（7 vs 9）**，严重度却差 **14 倍**（11.67 vs 0.83 ms/s），
+因为前者每次晚 4~7 帧、后者每次只晚 1~2 帧。**这正是 Apple 把指标定义成时间占比而非次数的理由**，
+也说明我最初拿"7 次 / 连丢 7 帧"当卖点是**选错了量纲**（方向没错，口径错了）。
+
+**所以**：既不能说"改动前 11.67 ms/s 就是基线"（run1 条件被污染），
+也不能拿 run2b 的 0.83 说"已达标"（后台态、条件不合格）。**处置**：`perf_harness.sh` 已加 `preflight_context()`
 （并发编译器 / `load1 ≤ 核数×1.5` / 被测窗口必须前台 / 非 hidden，全部连同读数落
 `measurement-context.txt`），按该协议**连测 ≥3 次且取值一致**的那一组，才是本规范"改动前基线"一栏该填的数。
 在此之前，§3 的 T1/T2 目标值仍按 Apple 口径推导（120Hz ⇒ 8.33ms/帧），**不依赖**这张表；
-但 §6 验收里"7 → 0"这一项在基线重定之前**不得申报达成**。
+但 §6 验收里"HTR 降到 <5、目标 0"这一项在基线重定之前**不得申报达成**。
+
+
+`app-update` 那一行也按同一方式复核过：`hitches-updates` 表 n=14、
+去重后仍是 **10.8 / 11.1 / 13.2 / 15.0 / 16.0 / 18.6 / 24.8 ms**（每个值在 Brown+Red 两行各出现一次，
+工具侧早有 `dedupe_pairs` 处理），**§1 的该行无需更正**——
+记下这条是为了免得后来人以为同一个 ref bug 也污染了它。
+（run2b 同法复核：1.9~3.0 ms、超预算 0 个。）
 
 ### 1.4 一次"两把尺子对不上"的结案：错的是我，不是工具
 
@@ -148,8 +160,28 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 
 ## 3. 目标（T1~T9，全部可机器断言）
 
-- **T1 交互期不掉帧**：切页 / 滚动 / 悬停 / 拖窗 / resize 期间 p95 帧间隔 ≤ **8.4 ms**、p99 ≤ 16.7 ms；
-  **hitch 帧 = 0**；硬上限 <1/s 且 hitch ratio <0.1%。
+### 3.0 口径出处（Apple 原文，不是我自己推的）
+
+来源：Apple Developer Tech Talk **《Explore UI animation hitches and the render loop》**
+（`developer.apple.com/videos/play/tech-talks/10855/`），以及其推荐的配套会话
+《Eliminate animation hitches with XCTest》（WWDC20 `wwdc2020/10077`）、
+《Find and fix hitches in the commit phase》《Demystify and eliminate hitches in the render phase》。
+
+| Apple 原文口径 | 本规范怎么用 |
+|---|---|
+| hitch =「**any time a frame appears on screen later than expected**」 | 判据定义，不自造 |
+| 帧预算：60 Hz 每 **16.67 ms** 出一帧；ProMotion 120 Hz 每 **8.33 ms** 一帧 | T1/T2 的预算值来源（本机 `device-display-info` 实测 120Hz ⇒ 8.33ms） |
+| 正式指标是 **Hitch Time Ratio**（一段时间内 hitch 总时长 ÷ 该段时间，单位 **hitch-ms/秒**） | **主指标改用它**；我原先写的"hitch ratio < 0.1%"是自造口径，**撤销** |
+| 档位：**<5 无感**；**5–10 用户可察觉、需排查**；**>10 严重影响体验、需立刻处理**；**理想 = 0** | T1 验收线 = **<5，目标 0**；run1 实测 **11.67 ms/s** 属"危急"档 |
+| hitch 分 **commit hitch**（本进程错过 VSYNC：布局/绘制/事件处理慢）与 **render hitch**（render server 侧） | 归因分层：本轮打的全是 commit 侧（`_updateViewGraph`），render 侧实测健康 |
+
+**本仓库的算法**：`HTR = Σ max(0, 帧时长 − 预算) / 录制秒数`，数据源是
+`Animation Hitches` 模板的 `hitches` 表（帧时长）。这是 Apple 定义的**保守上界**
+（它按"晚了多少"算，我们按整帧时长减预算算，不会低估）。已实现进 `trace_report.py`。
+
+- **T1 交互期不掉帧**：切页 / 滚动 / 悬停 / 拖窗 / resize 期间 **Hitch Time Ratio < 5 ms/s，目标 0**；
+  p95 帧间隔 ≤ **8.4 ms**、p99 ≤ 16.7 ms。改动前基线（未受控，见 §1.3）**= 11.67 ms/s（`perf_harness.sh report` 实算，非口算）= Apple 的"危急"档**。
+
 - **T2 心跳不越一帧**：1.5 s 一次 publish 引起的 **app-update 相位 ≤ 8.33 ms**（冲刺目标 4.0 ms）。
   起点 10.8~24.8 ms ⇒ 需要 **2~6 倍**收窄，只靠"少画几个点"不可能达到，必须收失效面。
 - **T3 交互优先**：滚动 / 拖窗期间冻结实时写入，交互停止 150 ms 后恢复（用户已批准）。
@@ -172,18 +204,27 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 
 ## 4. 尺子（M0 先落，先量后改）
 
-1. `scripts/perf_harness.sh`（新）：`before|after` 两个子命令，封装 attach 录制 Animation Hitches +
-   Time Profiler → `xctrace export --xpath` 逐表导出 → 内嵌 `trace_report.py` 出一张固定形状的结果表
-   （hitch 数、hitch/s、帧时长分布、app-update 分布、`potential-hangs`、主线程热点 Top20、
-   按线程样本数）。输出目录**必须带短 HEAD 后缀**（`/tmp/tcoder-perf-<rev>/`），否则后一批覆盖前一批。
-   采样路径分三档：`idle`（不碰它，量心跳）、`switch`（`-selectedDetailSection <页>` 逐页重启，
-   量切页与冷构建）、`scroll`（若驱动得起；起不动就如实写"未覆盖"，不许拿 idle 的数冒充交互数）。
+1. `scripts/perf_harness.sh`（新）：五档，全部只读——`idle`（attach 现有实例，录 Animation Hitches +
+   Time Profiler）、`switch`（逐页冷启动）、`report`（重打已有目录）、`probe`（读 `FramePulse` 脉冲）、
+   `selfcheck`（拿合成夹具验尺子自己）。解析封装在 `xctrace export --xpath` 逐表导出 +
+   `perf_trace_xml.py`（id/ref 解引用）/ `perf_trace_metrics.py`（统计与 §1 基线）/ `trace_report.py`（子命令），
+   出一张固定形状的结果表（hitch 数、hitch/s、帧时长分布、app-update 分布、`potential-hangs`、
+   主线程热点 Top20、按线程样本数）。输出目录**必须带短 HEAD 后缀**（`/tmp/tcoder-perf-<rev>/`），
+   否则后一批覆盖前一批。
+   **不设 `scroll` 档**（原计划里有，现撤）：合成滚轮要 `CGEvent.post`，而本机 System Events
+   权限被拒（§4.1 探测时实测），事件会被静默丢弃——那会造出"交互期 0 hitch"的**假绿**。
+   交互由人真滚，测量由 `probe` 档读 `FramePulse`，并强制 `--interaction` 显式声明；
+   不声明就只给 idle 读数（退出码 2，与 0 达标 / 1 未达标三者可区分）。
 2. `FramePulse`（新，`Services/Performance/`）：`CVDisplayLink` 时间戳 + 主线程 runloop 心跳看门狗
    + `os_signpost`，**仅 `TCODER_PERF_PROBE=1` 时启动**（常驻开销不可接受），
    读数落 `$TCODER_PERF_OUT` 或 `/tmp` 文件——**取证 print 必须落文件**，`swift test` 会丢子进程 stdout 后半段。
    它是常驻门禁的尺子，与 xctrace 这把外部尺子**互相校验**（两把尺子不得共享同一盲区）。
+   2026-09-20 补：这把尺子原先**只产数不读数**（没人解析那个文件），已补
+   `perf_framepulse.py` + `probe` 档，并由 `PerfFramePulseRulerTests` 拿**产品真实产出的摘要行**
+   跨语言对账格式（Swift 侧改字段名 → 那条立刻红，而不是静默把"没数"读成"0 hitch"）。
 3. T5 三条静态禁则守卫 + **每条配元测试**（故意造违规样本确认它会红）。理由见记忆
    「扫描型测试要配元测试」：本仓上一轮的病因正是"令牌定义了但零引用"，旧守卫查不出来。
+   同一道理现在也覆盖尺子自己：`selfcheck` 六项里每项都配了反例（把已修的缺陷放回去，它必须红）。
 
 ## 4.1 T3「交互期暂停」的实现位置（由探针决定，不由偏好决定）
 
@@ -198,8 +239,10 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 1. **暂停不许丢数据**：跳过的帧仍要进环形缓冲，恢复时一次性补齐；**严禁把暂停期画成 0 或空白**
    （那等于制造假读数，违反 T8 与 `PerformanceMemoryHonestyTests` 的精神）。
 2. **暂停不许变成"永远暂停"**：监视器必须成对释放；单次连续暂停实测 **>500ms 即本条判失败并回退**。
-   实测方式：`perf_harness.sh` 的 `scroll` 档（驱动得起就用它），驱动不起来就交 `FramePulse` 内建读数，
-   两者都拿不到就**明写"未覆盖"**，不许拿 idle 档的数冒充。
+   实测方式：人在装了 `TCODER_PERF_PROBE=1` 的实例上滚 / 拖窗若干秒，
+   再 `perf_harness.sh probe <脉冲文件> --interaction` 读帧间隔分布。
+   **不做合成输入**（本机 System Events 权限被拒，`CGEvent.post` 会被静默丢弃，
+   那只会造出"交互期 0 hitch"的假绿），拿不到脉冲文件就**明写"未覆盖"**，不许拿 idle 档的数冒充。
 
 ## 5. 分工（零文件重叠，按"谁消费谁负责"）
 
@@ -212,7 +255,7 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 
 | 包 | 内容 | 路径 | 归属 |
 |---|---|---|---|
-| R 尺子 | `perf_harness.sh`、`trace_report.py`、`FramePulse`、T5 守卫 + 元测试 | `scripts/**`、`Services/Performance/FramePulse.swift`、`Tests/TcoderMonitorTests/Perf*Tests.swift` | 总工独占（新建文件，零重叠） |
+| R 尺子 | `perf_harness.sh`、`trace_report.py` + `perf_trace_xml.py` + `perf_trace_metrics.py` + `perf_framepulse.py`、`FramePulse`、T5 守卫 + 元测试 | `scripts/**`、`Services/Performance/FramePulse.swift`、`Tests/TcoderMonitorTests/Perf*Tests.swift` | 总工独占（新建文件，零重叠） |
 | P 心跳链路 | `publish` 拆细粒度读模型、派生榜单（`processesByMemory`、`history.suffix(90)`）在 publish 里算一次并缓存、`sampleNow` 移出主线程、T3 交互期暂停 | `Services/Performance/**`(除 FramePulse)、`App/AppState.swift`（本轮解冻，`SystemSnapshot` 契约不动） | **无界三家按 spec 不得碰 `Services/**`，此包总工独占** |
 | C 令牌缓存 | `ColorToken.swift` 每次访问 new `NSColor(name:nil){}` → 缓存；`ThemeTokens` 的 `var font: Font {` 计算属性 → `static let`；`ChartTokens.areaGradient` 每调用现造 `LinearGradient` → 按 (index,intensity) 缓存 | `Design/**` | **与无界轮 `Design/**` 归属冲突，待用户裁定后才能动**（见 §7.7） |
 
@@ -343,16 +386,21 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 
 ## 6. 验收判据（改完必须交这些）
 
-1. `perf_harness.sh after` 与**§1.3 重定后的受控基线**逐列同形状对齐（**不是** run1 那张未受控的表）：
+1. `perf_harness.sh idle` + `report` 的改后读数，与**§1.3 重定后的受控基线**逐列同形状对齐（**不是** run1 那张未受控的表）：
    hitch 数 → **0**、单次 app-update → **≤8.33 ms**、`potential-hangs` → **0**、
-   主线程热点第一名不再是 `_updateViewGraph`。两次读数必须来自**同一测量协议**
+   主线程热点第一名不再是 `_updateViewGraph`；交互期那一条另交
+   `perf_harness.sh probe <脉冲文件> --interaction`（T1：hitch=0 且 p95 ≤ 实测期望间隔×1.01）。
+   两次读数必须来自**同一测量协议**
    （`measurement-context.txt` 两栏并列贴出：前台 App、`load1`、并发编译器、实例数），
    上下文不一致的对比等于没对比。
 2. T5 三条守卫 + 元测试全绿，且元测试能证明守卫抓得住坏样例。
 3. `locked_build.sh test` 全绿（当前 645 例基线，只许增不许减）。
 4. 九页×深浅截图 + 《预期视觉变化清单》（无界化 spec §6.3）。
 5. 每家 Obsidian 笔记：真实命令输出数字、契约缺口、已知问题。
-6. **未覆盖项必须明写"未覆盖"**（例如 `scroll` 档若驱动不起来），不许拿相邻档的数冒充。
+6. **未覆盖项必须明写"未覆盖"**（例如交互期那一档：没有真人滚动就没有 `--interaction`，
+   此时只交 idle 读数并标注，不许拿相邻档的数冒充）。
+   **尺子自己也要交证据**：`perf_harness.sh selfcheck` 六项全绿才算"读数可信"，
+   它坏了的时候所有测量数字一律作废（2026-09-20 就靠它兜出过 `cmd_switches` 的 `NameError`）。
 
 ## 7. 风险与备案
 
