@@ -44,11 +44,33 @@
    不得再宣称它是性能主因。** 谁在报告里写"去材质所以不卡了"就是错证据。
 2. 头号工是 **收窄一次 publish 引起的视图图更新面**（§3 T2/T5）。
 
+### 1.2 勘查数字勘误（总工独立计数复核，15:37）
+
+三名勘查子代理的结论方向正确，但**四个数字是错的**，其中一个会造出假零守卫。
+以本表为准（计数命令附后，口径 = `grep -rhoE <正则> <目录> --include='*.swift' | wc -l`，在 `m0-borderless-base` 之后的 `ws/perf-base` 上跑）：
+
+| 项 | 勘查报的 | **实测** | 影响 |
+|---|---|---|---|
+| Views 内动态色成员（`.textColor/.graphicColor/.badgeFill/.onFillColor`） | 115 | **116** | 差 1，无实质影响 |
+| `id: \.offset` / `id: \.self` | 8 / 7 | **4 / 8**（另有 `\.element` 6、`\.key` 1、`\.raw` 1） | **两个数写反了**，工单 P-5 按实测派 |
+| "全仓 0 个 Lazy" | 0 个 LazyVStack | `LazyVStack` 确实 **0**，但 **`LazyVGrid` 已有 11 处**（总览/健康/代码/依赖/日志/性能/Git/贡献者的 tile 网格） | 工单 P-2 必须收窄成**只改长列表**，误改已是 Lazy 的网格属于白烧 |
+| "`LogsView.attachedItems` 在 body 里做 `stat()`，每次 body 3~4 轮 syscall" | 3~4 轮 | **body 路径上只有 1 处**：`LogsView.attachedItems` → `fileSize(of:)` → `FileManager.attributesOfItem`（每附加文件一次）；另一处 `FileManager.fileExists` 在 `chooseLogFiles()` **按钮动作里，不在渲染路径** | ① 工单 W-1 降级为"1 处"；② **T5-③ 守卫若只正则匹配 `stat(` 会永远得 0 = 假零守卫** |
+| Views 内 `.font(` | 183（含 Design） | **Views 内 148**，Views+Design 合计 183 | 口径分两个数写，别当同一个 |
+| 全仓 `#available` | 4 处全在 `Design/Glass.swift` | 9 处，分布在 `Design/Glass.swift` + `Design/GlassComponents.swift` | 两份都在 `Design/**`，**"页面不散写"红线未被违反**，不改工单 |
+| `Sources/**` 实现文件数 / 超 800 行文件数 | 110 / — | **110 / 0** | 与 `SourceFileReachabilityTests.censusBaseline = 110` 一致；M0 每加一个新文件该基线 +1，**只由总工改** |
+
+> **给 R 的硬要求（写在这里防止守卫长成假零）**：T5-③「渲染路径同步 I/O」的正则**必须至少覆盖**
+> `fileExists`、`attributesOfItem`、`contentsOfDirectory`、`Data(contentsOf:`、`String(contentsOf:`、
+> `stat(`、`lstat(`、`FileManager`；且元测试要用 **`attributesOfItem`** 这种真实形状造坏样例，
+> 而不是用最显眼的 `stat(`——否则扫描器只会抓一种写法却对外宣称抓全部。
+
+
+
 ## 2. 能力边界（编译探针实测，`xcrun swiftc -typecheck -target arm64-apple-macos14.0`）
 
 | 能力 | macOS 14 下限 | 结论 |
 |---|---|---|
-| `CVDisplayLinkCreateWithActiveCGDisplays` | 可用 | 帧节拍内建探针用它 |
+| `CVDisplayLinkCreateWithActiveCGDisplays` | 可用 | 帧节拍内建探针的**兜底**时间源（主时间源见 §2.1） |
 | `CGDisplayCopyDisplayMode(...).refreshRate`、`CGDisplayCopyAllDisplayModes` | 可用 | 运行时取真实 Hz，**不硬编码 120** |
 | `os_signpost`（`OSSignpostID` 老式 API） | 可用 | 打点；`OSSignposter` 新式 API 的 `emit`/`signpost` 成员在本 SDK **签名不同，用前先探针** |
 | `TimelineView(.animation(minimumInterval:paused:))`、`Canvas` | 可用 | 重画曲线/矩阵的原语 |
@@ -157,16 +179,16 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 | 工 | 改动前实测病因 | 交回判据 |
 |---|---|---|
 | P-1 密集矩阵降本 | `ContributorHourRow.bar(for:)`：30 行 × 24 柱 = **720 个 `RoundedRectangle` + 720 个 `.help(String(format:))`**，且 `peak` 每柱重算；`GitActivityHeatmap.body` 非懒 **168 格 + 168 tooltip**，`intensity` 内两次 `.max()` | 改 `Canvas` 或懒加载；交回给出**视图实例数改前/改后**（同一计数口径：`grep -c` 的调用点数 + 渲染期实例数算法要写清） |
-| P-2 表格懒加载 | 全仓 **0 个 `LazyVStack`、0 个 `Table`**；`DependenciesView.body` 用 `ScrollView{VStack}` 一次实例化 N 生态 × 40 行 | 名下五页长列表改 lazy；列头仍只能用 `Design/DataTable.swift`（红线 1，只许调用不许改） |
+| P-2 长列表懒加载 | **`LazyVStack` 实测仍为 0、`Table(` 为 0**（但 tile 网格已有 **11 处 `LazyVGrid`，那些别动**）；`DependenciesView.body` 用 `ScrollView{VStack}` 一次实例化 N 生态 × 40 行 | 名下五页**长列表**改 lazy；列头仍只能用 `Design/DataTable.swift`（红线 1，只许调用不许改） |
 | P-3 body 内派生集合缓存 | `DependencySafetyVerdict` 在 body 里被构 4 次（每次 `flatMap`+`filter` 全量依赖）；`CodeRiskAnalysis.suggestions` ≈10 次 filter/map/max/reduce；`CodeDuplicationBlockRow.hint` 对**全部** occurrence 做 `pathTail`；`HealthView.historyPoints` 每 body 重排 | 命中数进 R 的 T5 棘轮基线并**只减不增**；名下页目标 0 |
 | P-4 扫描离开主线程 | 实测扫描耗时 **Git 11.4s / 8.0s、代码 1830ms**；5 分析器 `async let` 并发 + 16 路 `classifyConcurrently`，扫描期 CPU 抢占为"高" | 扫描运行中点击响应 ≤ 100ms（T7），并给出 `perf_harness.sh` 扫描期读数；**扫描结果数值必须逐位不变**（不许为提速改口径） |
-| P-5 稳定 identity | `id: \.offset` **8 处**、`id: \.self`（String/Int 数组）**7 处** | 名下页归零，行模型上 `Identifiable` |
+| P-5 稳定 identity | 实测 `id: \.self` **8 处**、`id: \.offset` **4 处**（勘查曾把两个数写反，见 §1.2；另有 `\.element` 6、`\.key` 1、`\.raw` 1 属可接受形状） | 名下页 `\.offset` 归零、`\.self` 只允许留在真正不可变且唯一的字符串键上，逐条给理由 |
 
 ### WS-W 性能·日志·评分 —— 性能包
 
 | 工 | 改动前实测病因 | 交回判据 |
 |---|---|---|
-| W-1 `body` 内文件 I/O 归零 | `LogsView.attachedItems` 在 body 里做 `stat()`（`fileSize(of:)`，每次 body 3~4 个调用点） | 挪进 `@State` + `.task`；R 的 T5-③ 守卫名下页命中 **0** |
+| W-1 `body` 内文件 I/O 归零 | **实测 1 处**（勘查曾报 3~4 轮，见 §1.2）：`LogsView.attachedItems` → `fileSize(of:)` → `FileManager.attributesOfItem`，每附加文件一次同步 stat；另一处 `fileExists` 在 `chooseLogFiles()` 按钮动作里，**不属渲染路径、不用改** | 挪进 `@State` + `.task`；R 的 T5-③ 守卫名下页命中 **0** |
 | W-2 图表降本 | `LiveSeriesChart.body` 每点 AreaMark+LineMark，**每 mark 现场构造 `LinearGradient` + 动态 `NSColor`**（C 包已把构造变成缓存，但重算面还在）；`trustedMemoryPoints` 每 tick 被跑 **3 遍**（270 个 `SampleContext`） | 停在该页跑 `idle`，app-update ≤ 8.33ms；`trustedMemoryPoints` 每 tick **1 遍** |
 | W-3 轴标签 formatter | `LiveSeriesChart.xLabel(for:)` 每个刻度现造 `DateFormatter()`（~5 标签 ×2 图 ×每 tick） | 提 `static let`；R 的 T5-① 守卫该文件命中 0 |
 | W-4 进程榜 | `PerformanceProcessTable.row`：20 行 × 6 个 `LiveNumber` 格式化 + 每行 2 处 `.help` 拼串；`PerformanceView.rankedProcesses` → `MachSystemMonitor.processesByMemory` 每次访问全量 `sorted`（本机 `ps ax` = 920） | 排序消费 P 缓存的榜单（**不再自算**）；榜长与内容逐位不变 |
