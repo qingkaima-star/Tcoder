@@ -203,67 +203,80 @@ internal struct SourceLineWalker {
 
         let count = chars.count
         var index = 0
-        while index < count {
-            if isWhitespace(chars[index]) == false { break }
-            index += 1
-        }
+        while index < count, isWhitespace(chars[index]) { index += 1 }
         if index == count { return .blank }
 
         var sawCode = false
         while index < count {
-            switch mode {
-            case .plain:
-                let character = chars[index]
-                // docstring 定界符必须先于普通字符串判定，否则 Python 的 `"""` 会被拆成三个空串
-                if let doc = matched(profile.docDelimiters, at: index, in: chars) {
-                    mode = .docString(doc)
-                    index += doc.count
-                } else if character == "\"" || character == "'" {
-                    mode = .stringLiteral(character)
-                    sawCode = true
-                    index += 1
-                } else if let token = matched(profile.linePrefixes, at: index, in: chars) {
-                    mode = .lineComment
-                    index += token.count
-                } else if let start = profile.blockStart, matches(start, at: index, in: chars) {
-                    mode = .block
-                    index += start.count
-                } else {
-                    sawCode = true
-                    index += 1
-                }
-
-            case .block:
-                if let end = profile.blockEnd, matches(end, at: index, in: chars) {
-                    mode = .plain
-                    index += end.count
-                } else {
-                    index += 1
-                }
-
-            case .docString(let delimiter):
-                if matches(delimiter, at: index, in: chars) {
-                    mode = .plain
-                    index += delimiter.count
-                } else {
-                    index += 1
-                }
-
-            case .lineComment:
-                index = count
-
-            case .stringLiteral(let quote):
-                if chars[index] == "\\", index + 1 < count {
-                    index += 2
-                } else if chars[index] == quote {
-                    mode = .plain
-                    index += 1
-                } else {
-                    index += 1
-                }
-            }
+            index = advance(chars: chars, from: index, count: count, sawCode: &sawCode)
         }
         return sawCode ? .code : .comment
+    }
+
+    /// 按当前词法模式前进一段，返回新的列位置。
+    ///
+    /// 原先这是 `kind(for:)` 里的一个 71 行大 switch（自扫报告点名 CC=23）；现在每个模式
+    /// 各自成一个 `advance*` 小函数，**判定顺序、推进步长、`sawCode` 置位点全部一字未改**，
+    /// 变的只是「分支从 23 降到 7」。
+    private mutating func advance(chars: [Character], from index: Int, count: Int,
+                                  sawCode: inout Bool) -> Int {
+        switch mode {
+        case .plain:
+            return advancePlain(chars, from: index, count: count, sawCode: &sawCode)
+        case .block:
+            return advanceBlock(chars, from: index)
+        case .docString(let delimiter):
+            return advanceDocString(delimiter, chars, from: index)
+        case .lineComment:
+            return count
+        case .stringLiteral(let quote):
+            return advanceStringLiteral(quote, chars, from: index, count: count)
+        }
+    }
+
+    /// 行首：docstring 定界符必须先于普通字符串判定，否则 Python 的 `"""` 会被拆成三个空串。
+    private mutating func advancePlain(_ chars: [Character], from index: Int, count: Int,
+                                       sawCode: inout Bool) -> Int {
+        let character = chars[index]
+        if let doc = matched(profile.docDelimiters, at: index, in: chars) {
+            mode = .docString(doc)
+            return index + doc.count
+        } else if character == "\"" || character == "'" {
+            mode = .stringLiteral(character)
+            sawCode = true
+            return index + 1
+        } else if let token = matched(profile.linePrefixes, at: index, in: chars) {
+            mode = .lineComment
+            return index + token.count
+        } else if let start = profile.blockStart, matches(start, at: index, in: chars) {
+            mode = .block
+            return index + start.count
+        }
+        sawCode = true
+        return index + 1
+    }
+
+    private mutating func advanceBlock(_ chars: [Character], from index: Int) -> Int {
+        guard let end = profile.blockEnd, matches(end, at: index, in: chars) else { return index + 1 }
+        mode = .plain
+        return index + end.count
+    }
+
+    private mutating func advanceDocString(_ delimiter: [Character], _ chars: [Character],
+                                           from index: Int) -> Int {
+        guard matches(delimiter, at: index, in: chars) else { return index + 1 }
+        mode = .plain
+        return index + delimiter.count
+    }
+
+    private mutating func advanceStringLiteral(_ quote: Character, _ chars: [Character],
+                                               from index: Int, count: Int) -> Int {
+        if chars[index] == "\\", index + 1 < count { return index + 2 }
+        if chars[index] == quote {
+            mode = .plain
+            return index + 1
+        }
+        return index + 1
     }
 
     private func matched(_ tokens: [[Character]], at index: Int, in chars: [Character]) -> [Character]? {

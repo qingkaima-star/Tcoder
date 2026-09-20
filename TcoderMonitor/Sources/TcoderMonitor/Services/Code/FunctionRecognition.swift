@@ -15,37 +15,63 @@ extension ComplexityEngine {
         let text = line as NSString
         let range = NSRange(location: 0, length: text.length)
         for pattern in profile.patterns {
-            guard pattern.needsParen ? line.contains("(") : true else { continue }
+            guard patternApplies(pattern, to: line) else { continue }
             guard let match = pattern.expression.firstMatch(in: line, options: [], range: range) else { continue }
-            // 可选捕获组没参与匹配时 range(at:) 返回 {NSNotFound, 0}，直接喂给 substring 会抛
-            // NSInvalidArgumentException（真实崩过），一律走安全取值；没命名就是匿名函数。
-            let raw = trimQuotes(groupText(text, match, 1) ?? "")
-            let name: String
-            if let prefix = pattern.namePrefix {
-                guard !raw.isEmpty else { continue }
-                name = prefix + raw
-            } else {
-                name = raw.isEmpty ? "<anonymous>" : raw
-            }
-            if isReservedName(name) { continue }
-            // 名字之前必须真的有什么：注解、修饰符或返回类型。
-            // cStyle 的返回类型组是 (?:…) 非捕获的，拿不到「组 2」，所以这里直接用
-            // 「组 1 之前的前缀」判定：前缀为空说明这是 `foo(bar)` 之类的裸调用行。
-            let headText = (groupText(text, match, 1, prefixOnly: true) ?? "").trimmingCharacters(in: .whitespaces)
-            // 类型声明不是函数。C++ 的 `class PROTOBUF_EXPORT PROTOBUF_ALIGNAS(8)`、Kotlin 的
-            // `data class Foo(val x: Int)`、Java 的 `public class Foo(int x)` 都长得像
-            // 「返回类型 + 名字 + 括号」，一旦被吃下来，边界会一路走到类体的 `}` ——
-            // protobuf 真实语料里实测到一个类声明被记成 626 行 / CC=43 的「超高复杂度函数」。
-            if isTypeDeclaration(headText) { continue }
-            if pattern.requiresTypeToken {
-                let typeToken = (groupText(text, match, 2) ?? "").trimmingCharacters(in: .whitespaces)
-                if typeToken.isEmpty { continue }
-            } else if pattern.requiresModifierWhenNoType {
-                if headText.isEmpty, name.contains("::") == false { continue }
-            }
-            return name
+            if let name = signatureName(from: match, text: text, pattern: pattern) { return name }
         }
         return nil
+    }
+
+    /// 廉价预筛：只有声明了 `needsParen` 的 pattern 才要求行里有左括号（Ruby / shell 的签名可以不带）。
+    static func patternApplies(_ pattern: SignaturePattern, to line: String) -> Bool {
+        guard pattern.needsParen else { return true }
+        return line.contains("(")
+    }
+
+    /// 正则命中之后能不能真的收下这个名字。原先落在各判定上的 `continue`
+    /// 一律变成返回 nil —— 调用方拿到 nil 就是「换下一条 pattern 再试」，语义相同。
+    static func signatureName(from match: NSTextCheckingResult, text: NSString,
+                              pattern: SignaturePattern) -> String? {
+        let name = functionName(from: match, text: text, pattern: pattern)
+        // 原实现在这里 `continue`：带 namePrefix 的 pattern 捕获组为空就不是命中
+        if name.isEmpty { return nil }
+        if isReservedName(name) { return nil }
+        // 名字之前必须真的有什么：注解、修饰符或返回类型。
+        // cStyle 的返回类型组是 (?:…) 非捕获的，拿不到「组 2」，所以这里直接用
+        // 「组 1 之前的前缀」判定：前缀为空说明这是 `foo(bar)` 之类的裸调用行。
+        let headText = (groupText(text, match, 1, prefixOnly: true) ?? "").trimmingCharacters(in: .whitespaces)
+        // 类型声明不是函数。C++ 的 `class PROTOBUF_EXPORT PROTOBUF_ALIGNAS(8)`、Kotlin 的
+        // `data class Foo(val x: Int)`、Java 的 `public class Foo(int x)` 都长得像
+        // 「返回类型 + 名字 + 括号」，一旦被吃下来，边界会一路走到类体的 `}` ——
+        // protobuf 真实语料里实测到一个类声明被记成 626 行 / CC=43 的「超高复杂度函数」。
+        if isTypeDeclaration(headText) { return nil }
+        guard hasRequiredHead(match, text: text, pattern: pattern, headText: headText, name: name) else { return nil }
+        return name
+    }
+
+    /// C 系 / Kotlin 那几条 pattern 额外要求「名字之前有类型」或「有修饰符」，缺了就不是定义。
+    static func hasRequiredHead(_ match: NSTextCheckingResult, text: NSString,
+                                pattern: SignaturePattern, headText: String, name: String) -> Bool {
+        if pattern.requiresTypeToken {
+            let typeToken = (groupText(text, match, 2) ?? "").trimmingCharacters(in: .whitespaces)
+            return typeToken.isEmpty == false
+        } else if pattern.requiresModifierWhenNoType {
+            return headText.isEmpty == false || name.contains("::")
+        }
+        return true
+    }
+
+    /// 捕获组 1 折成函数名。
+    /// 可选捕获组没参与匹配时 range(at:) 返回 {NSNotFound, 0}，直接喂给 substring 会抛
+    /// NSInvalidArgumentException（真实崩过），一律走安全取值；没命名就是匿名函数。
+    static func functionName(from match: NSTextCheckingResult, text: NSString,
+                             pattern: SignaturePattern) -> String {
+        let raw = trimQuotes(groupText(text, match, 1) ?? "")
+        if let prefix = pattern.namePrefix {
+            // 带 namePrefix 的 pattern（ObjC 方法、JS 成员）名字为空就不是命中，交给调用方 continue
+            return raw.isEmpty ? "" : prefix + raw
+        }
+        return raw.isEmpty ? "<anonymous>" : raw
     }
 
     /// prefixOnly = true 时取「捕获组 1 之前的那段文本」，用于检查行首有没有修饰符。

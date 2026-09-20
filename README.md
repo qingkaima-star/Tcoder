@@ -32,7 +32,7 @@ Apple Silicon 原生 macOS App（Swift + SwiftUI），对本地开发项目做�
 | 依赖分析 | `package.json` / `pom.xml` / `build.gradle(.kts)` / `settings.gradle(.kts)` / `Package.swift` / `requirements.txt`（含 `requirements-*.txt`、`dev-requirements.txt` 派生名）/ `pyproject.toml` / `setup.py` / `Pipfile` / `go.mod` / `Cargo.toml` / `Podfile` / `Gemfile` / `packages.config` —— 共 16 个精确文件名外加派生规则，以 `ManifestParsers.swift` 的
 `ManifestFileName.table`（清单名 → 生态）与 `ManifestFileName.ecosystem(for:)`（派生名判定）为准；
 版本过旧与已知漏洞，可选在线查 OSV.dev 与 npm registry |
-| 健康评分 | 9 维加权评分与优点/问题/建议。**启发式本地计算，未调用任何外部模型**，界面已如实标注 |
+| 健康评分 | 9 维加权评分与优点/问题/建议，另并列**工程质量（代码口径）**副读数。**启发式本地计算，未调用任何外部模型**，界面已如实标注 |
 
 > 上表是开发向速览。逐页「给我看什么 / 数字怎么算的 / 什么时候会不准」见
 > [`docs/使用说明.md`](docs/使用说明.md) 第 3 节；页面名称以侧栏为准
@@ -153,6 +153,11 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
 - **健康评分是启发式本地计算，未调用任何外部模型**，界面已如实标注。
   缺少证据的维度**不参与计分也不得分**，其权重按比例摊到场维度，
   页面底部会列出缺失维度与重归一化明细。
+- **本仓库自己被自己扫的读数是公开的**：`./scripts/self_score.sh` 出综合分与
+  「工程质量（代码口径）」两个数，逐维依据见 `docs/口径与已知限制.md` §4.4.2。
+  两个数必须一起读：代码口径只统计"靠改代码抬得起来"的维度，
+  综合分里那 21% 权重（提交活跃度 + 协作分布）量的是 Git 历史的既成事实，
+  新仓库与署名口径都会压低它，与代码好坏无关。
 - 覆盖率只读取仓库已生成的报告，不会代为执行测试；**没有报告时整块不画**（连分隔线都不出现），
   既不是空态卡也不是 0%——实现是 `DashboardView.coverageStrip` 外面那层 `coverage.hasData` 判断，
   与 `docs/使用说明.md` 第 4.6 节同一条口径。

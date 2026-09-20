@@ -255,4 +255,5 @@ final class PerfMainThreadBudgetTests: XCTestCase {
         XCTAssertEqual(encodeOnly.count, 15)
         XCTAssertEqual(bootLoads.count, 7)
     }
+
 }

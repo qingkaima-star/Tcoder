@@ -10,36 +10,15 @@ final class FileLogAnalyzer: LogAnalysisProviding {
     private static let topErrorLimit = 20
 
     func analyze(projectRoot: URL, extraLogURLs: [URL], withinDays: Int) async throws -> LogSummary {
-        let projectName = projectRoot.lastPathComponent
         let windowDays = max(1, withinDays)
-
-        var discovered = LogDiscovery.discover(
-            projectRoot: projectRoot,
-            projectName: projectName,
-            withinDays: windowDays,
-            maxFiles: Self.maxDiscoveredFiles
-        )
-        discovered.append(contentsOf: attached(urls: extraLogURLs, projectRoot: projectRoot))
-
-        // De-duplicate by absolute path: a user-attached file often also lives
-        // inside the project's own Logs/ directory.
-        var seen = Set<String>()
-        let targets = discovered.filter { seen.insert($0.url.path).inserted }
-
-        var readings: [LogFileReading] = []
-        var crashEvents: [LogEvent] = []
-        for log in targets {
-            let reading = LogReader.read(log, maxBytes: Self.maxBytesPerFile,
-                                         maxLines: Self.maxLinesPerFile)
-            readings.append(reading)
-            if CrashReportParser.isCrashReport(log.url, role: log.role) {
-                crashEvents.append(contentsOf: CrashReportParser.events(for: reading))
-            }
-        }
+        let targets = dedupedTargets(projectRoot: projectRoot, windowDays: windowDays,
+                                     extraLogURLs: extraLogURLs)
+        let batch = readAll(targets)
+        let readings = batch.readings
 
         let aggregate = LogAggregator.aggregate(
             readings: readings,
-            extraEvents: crashEvents,
+            extraEvents: batch.crashEvents,
             topLimit: Self.topErrorLimit
         )
 
@@ -60,30 +39,58 @@ final class FileLogAnalyzer: LogAnalysisProviding {
         // 读取失败的文件不进「已扫描文件」：`LogSummary.hasData` 认 scannedFiles 非空，
         // 让它们混进来等于用一次权限不足换一张 all-clear（审计 P1 #11）。
         // 读到但内容为空的文件**保留**——那是「已核对零命中」，与「没核对」是两种状态。
-        summary.scannedFiles = readings.filter { $0.readFailed == false }.map {
-            ScannedLogFile(
-                path: $0.url.path,
-                sizeBytes: $0.sizeBytes,
-                lineCount: $0.totalLines,
-                modifiedAt: $0.modifiedAt,
-                role: $0.role
-            )
-        }
+        summary.scannedFiles = Self.scannableReadings(readings)
         // 被剔掉的那些不能就此消失：单独一本账带着各自的原因，UI 才说得出
         // 「已跳过 N 份读取失败（权限不足 ×2、文件已不存在 ×1）」。
         // 只在非空时赋值——没有失败就没有这个 key，旧报告的形状也不变。
-        let failed = readings.filter { $0.readFailed }.map {
-            ScannedLogFile(
-                path: $0.url.path,
-                sizeBytes: $0.sizeBytes,
-                lineCount: $0.totalLines,
-                modifiedAt: $0.modifiedAt,
-                role: $0.role,
-                readFailure: $0.readFailure ?? "读取失败（原因未记录）"
-            )
-        }
+        let failed = Self.readFailures(readings)
         if !failed.isEmpty { summary.readFailedFiles = failed }
         return summary
+    }
+
+    /// 发现 + 附加 + 按绝对路径去重（用户手工附加的文件常常就在项目自己的 Logs/ 里）。
+    private func dedupedTargets(projectRoot: URL, windowDays: Int,
+                                extraLogURLs: [URL]) -> [DiscoveredLog] {
+        var discovered = LogDiscovery.discover(
+            projectRoot: projectRoot,
+            projectName: projectRoot.lastPathComponent,
+            withinDays: windowDays,
+            maxFiles: Self.maxDiscoveredFiles
+        )
+        discovered.append(contentsOf: attached(urls: extraLogURLs, projectRoot: projectRoot))
+        var seen = Set<String>()
+        return discovered.filter { seen.insert($0.url.path).inserted }
+    }
+
+    /// 逐份读取；崩溃报告额外解析成事件。两者一起返回，顺序即 targets 的顺序。
+    private func readAll(_ targets: [DiscoveredLog]) -> (readings: [LogFileReading], crashEvents: [LogEvent]) {
+        var readings: [LogFileReading] = []
+        var crashEvents: [LogEvent] = []
+        for log in targets {
+            let reading = LogReader.read(log, maxBytes: Self.maxBytesPerFile,
+                                         maxLines: Self.maxLinesPerFile)
+            readings.append(reading)
+            if CrashReportParser.isCrashReport(log.url, role: log.role) {
+                crashEvents.append(contentsOf: CrashReportParser.events(for: reading))
+            }
+        }
+        return (readings, crashEvents)
+    }
+
+    /// 「已扫描」= 读成功的（含读到但内容为空的），失败的那些走 `readFailures` 单独一本账。
+    static func scannableReadings(_ readings: [LogFileReading]) -> [ScannedLogFile] {
+        readings.filter { $0.readFailed == false }.map {
+            ScannedLogFile(path: $0.url.path, sizeBytes: $0.sizeBytes, lineCount: $0.totalLines,
+                           modifiedAt: $0.modifiedAt, role: $0.role)
+        }
+    }
+
+    static func readFailures(_ readings: [LogFileReading]) -> [ScannedLogFile] {
+        readings.filter { $0.readFailed }.map {
+            ScannedLogFile(path: $0.url.path, sizeBytes: $0.sizeBytes, lineCount: $0.totalLines,
+                           modifiedAt: $0.modifiedAt, role: $0.role,
+                           readFailure: $0.readFailure ?? "读取失败（原因未记录）")
+        }
     }
 
     /// 用户显式附加的文件**不参与时间窗口裁剪**（`LogDiscovery.discover` 才裁）：

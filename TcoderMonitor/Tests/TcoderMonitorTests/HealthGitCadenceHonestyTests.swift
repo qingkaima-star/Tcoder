@@ -294,22 +294,36 @@ final class HealthGitCadenceHonestyTests: HealthScoreTestCase {
                         "同一行前半段是真读取时仍须抓到")
 
         let real = try scorerSource()
-        let goodBranch = try XCTUnwrap(branch(of: "activity", in: real),
-                                      "活跃度分支的写法变了，抽取器对不上号了，请同步")
-        XCTAssertFalse(goodBranch.contains("case .busFactor"), "抽取必须停在下一个同级 case 之前")
-        XCTAssertTrue(goodBranch.contains("case .sufficient"), "嵌套三态 switch 必须整段被抽到")
-        XCTAssertNil(detectDegenerateCadenceUse(in: goodBranch), "现状必须是干净的")
-        XCTAssertTrue(goodBranch.contains("GitCadenceEvidence"), "活跃度分支必须真的用上了派生判断")
+        // 拆分沿革（收官轮 WS-X0）：`evaluate` 只做分派，活跃度的曲线选择与文案搬到了
+        // `HealthTeamDimensions.activityOutcome`。判据面改成**按函数名切**：
+        // 从 `func activityOutcome(` 起、到 `func busFactorOutcome(` 止，
+        // 少一个字都不算（切不出来说明名字变了，判据当场红，不会静默看空气）。
+        let start = try XCTUnwrap(real.range(of: "func activityOutcome("),
+                                  "活跃度维度的实现名字变了，抽取器对不上号了，请同步这条判据")
+        let end = try XCTUnwrap(real.range(of: "func busFactorOutcome(", range: start.lowerBound..<real.endIndex),
+                                "协作分布的切点找不到，判据面会无限扩")
+        let activityScope = String(real[start.lowerBound..<end.lowerBound])
+        XCTAssertFalse(activityScope.contains("case .busFactor"), "判据面必须停在协作分布之前")
+        XCTAssertTrue(activityScope.contains("case .sufficient"), "嵌套三态 switch 必须整段被抽到")
+        XCTAssertNil(detectDegenerateCadenceUse(in: activityScope), "现状必须是干净的")
+        XCTAssertTrue(activityScope.contains("GitCadenceEvidence"), "活跃度分支必须真的用上了派生判断")
     }
 
+    /// 活跃度维度现在住在两份文件里：分派在 `WeightedHealthScorer.swift`、实现在
+    /// `HealthTeamDimensions.swift`。两份拼起来喂判据——少一份就等于让守卫看半截逻辑。
     private func scorerSource() throws -> String {
-        let url = URL(fileURLWithPath: #filePath)
+        let dir = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // TcoderMonitorTests
             .deletingLastPathComponent()   // Tests
             .deletingLastPathComponent()   // TcoderMonitor
-            .appendingPathComponent("Sources/TcoderMonitor/Services/Health/WeightedHealthScorer.swift")
-        guard let text = try? String(contentsOf: url, encoding: .utf8), !text.isEmpty else {
-            throw AnalysisError.empty("读不到评分器源码：\(url.path)")
+            .appendingPathComponent("Sources/TcoderMonitor/Services/Health/")
+        var text = ""
+        for name in ["WeightedHealthScorer.swift", "HealthTeamDimensions.swift"] {
+            let url = dir.appendingPathComponent(name)
+            guard let piece = try? String(contentsOf: url, encoding: .utf8), piece.isEmpty == false else {
+                throw AnalysisError.empty("读不到评分器源码：\(url.path)")
+            }
+            text += piece + "\n"
         }
         return text
     }

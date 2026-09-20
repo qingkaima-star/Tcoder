@@ -181,20 +181,11 @@ private final class PomDocumentModel: NSObject, XMLParserDelegate {
         characters = ""
     }
 
+    /// 叶子值按「父元素是谁」分派。三个分支的判定表达式逐字照抄拆分前的 `route`，
+    /// 只是各自搬进了一个方法；调用顺序、`stack` 的读法、落空时的行为都没有变。
     private func route(name: String, parent: String, value: String) {
         if parent == "dependency" {
-            let inManagement = stack.contains("dependencyManagement")
-            var list = inManagement ? managedEntries : entries
-            guard !list.isEmpty, var entry = list.popLast() else { return }
-            switch name {
-            case "groupId": entry.group = value
-            case "artifactId": entry.artifact = value
-            case "version": entry.version = value
-            case "scope": entry.scope = value
-            default: return
-            }
-            list.append(entry)
-            if inManagement { managedEntries = list } else { entries = list }
+            routeDependency(name: name, value: value)
             return
         }
         if parent == "properties" {
@@ -207,12 +198,34 @@ private final class PomDocumentModel: NSObject, XMLParserDelegate {
             return
         }
         if stack.count == 2 {
-            switch name {
-            case "groupId": rootGroup = value
-            case "artifactId": rootArtifact = value
-            case "version": rootVersion = value
-            default: break
-            }
+            routeRootLevel(name: name, value: value)
+        }
+    }
+
+    /// `<dependency>` 里的字段。`dependencyManagement` 内外是两个列表，
+    /// 「列表为空就整条丢弃」这条 guard 与原实现一致（含 `popLast` 后再 `append` 回去的顺序）。
+    private func routeDependency(name: String, value: String) {
+        let inManagement = stack.contains("dependencyManagement")
+        var list = inManagement ? managedEntries : entries
+        guard !list.isEmpty, var entry = list.popLast() else { return }
+        switch name {
+        case "groupId": entry.group = value
+        case "artifactId": entry.artifact = value
+        case "version": entry.version = value
+        case "scope": entry.scope = value
+        default: return
+        }
+        list.append(entry)
+        if inManagement { managedEntries = list } else { entries = list }
+    }
+
+    /// 根元素上直接挂的 `<groupId>` / `<artifactId>` / `<version>`（父 pom 自己的坐标）。
+    private func routeRootLevel(name: String, value: String) {
+        switch name {
+        case "groupId": rootGroup = value
+        case "artifactId": rootArtifact = value
+        case "version": rootVersion = value
+        default: break
         }
     }
 

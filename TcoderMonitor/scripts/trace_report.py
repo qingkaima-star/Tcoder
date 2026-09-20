@@ -5,7 +5,14 @@
 解析层（id/ref 解引用）在 `perf_trace_xml.py`，统计层与 §1 基线常量在
 `perf_trace_metrics.py`——三件事原本挤在一个 819 行的文件里，撞了本仓 ≤800 行棘轮
 （`SelfScanDogfoodTests`，分母含 `.py`，ceiling=0）。**拆开是修复，拧阈值不是。**
-两个模块与本文件同级目录，Python 会自动把脚本所在目录放进 `sys.path`，
+
+第二轮（WS-X6 规模债，2026-09-21）：≤800 是棘轮，本 App 自扫还有一条「巨大文件 >400 行」，
+本文件当时 644 行被点名。于是 CLI 编排层里最大的两块又各自成章——
+`threads` 家族在 `perf_trace_threads.py`、`summary` 家族（spec §1 对照表）在
+`perf_trace_summary.py`。**判据、格式串、正则、七节顺序逐字未动**，本文件只剩
+`durations` / `displays` / `fps` / `lifecycle` / `switches` / `migration` 六个子命令与 CLI。
+
+各模块与本文件同级目录，Python 会自动把脚本所在目录放进 `sys.path`，
 所以入口仍是 `python3 scripts/trace_report.py <子命令>`，`perf_harness.sh` 一个字节都不用改。
 
 ## 子命令（`perf_harness.sh` 按这些形状调用，改形状要同步改它）
@@ -30,99 +37,11 @@ import re
 import statistics
 import sys
 
-from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, dedupe_pairs, disp_values,
-                                dist_line, fmt_row, fps_counts, load_measure, over_budget,
-                                percentile, read_json, write_json)
-from perf_trace_xml import (Doc, PLUMBING_SHARE_PCT, build_stack_index, cross_check_durations,
-                            find_tag, is_runloop_plumbing)
-
-
-# ----------------------------------------------------------------------------
-# threads：Time Profiler 的按线程样本数与热点栈
-# ----------------------------------------------------------------------------
-
-def cmd_threads(args):
-    with open(args.xml, "r", encoding="utf-8", errors="replace") as fh:
-        text = fh.read()
-    _, _, tbs, threads = build_stack_index(text)
-    per = collections.Counter()
-    leaf = collections.Counter()
-    anyf = collections.Counter()
-    pairs = collections.Counter()
-    for row in re.findall(r"<row>(.*?)</row>", text, re.S):
-        tm = re.search(r'<thread (?:id="(\d+)"[^>]*|ref="(\d+)")', row)
-        if not tm:
-            continue
-        tname = threads.get(tm.group(1) or tm.group(2), "?")
-        per[tname] += 1
-        bm = re.search(r'<tagged-backtrace (?:id="(\d+)"|ref="(\d+)")', row)
-        if not bm:
-            continue
-        stack = tbs.get(bm.group(1) or bm.group(2), [])
-        if not stack:
-            continue
-        leaf[(tname, stack[0])] += 1
-        for f in dict.fromkeys(stack):
-            anyf[(tname, f)] += 1
-        if len(stack) > 1:
-            pairs[(tname, stack[0], stack[1])] += 1
-
-    if not per:
-        print("!! 一个样本都没解出来：确认导出的是 time-profile 表（而不是空的 time-profile）")
-        return 1
-
-    print("== 线程样本数 ==")
-    for tname, cnt in per.most_common(8):
-        print("  %6d  %s" % (cnt, tname[:70]))
-
-    cand = [t for t in per if t.startswith(args.thread)]
-    target = max(cand, key=lambda t: per[t]) if cand else max(per, key=lambda t: per[t])
-    total_all = sum(per.values())
-    total = per[target]
-    print("\n== %s  %d 样本（占全进程 %.1f%%）==" % (target[:60], total, 100.0 * total / max(1, total_all)))
-    print("栈中出现频率前 %d（已剥掉事件循环本体帧）：" % args.top)
-    shown = 0
-    for (tname, f), cnt in anyf.most_common(4000):
-        if tname == target and not is_runloop_plumbing(f) and shown < args.top:
-            print("  %6d (%5.1f%%)  %s" % (cnt, 100.0 * cnt / total, f[:86]))
-            shown += 1
-    loop = max(((cnt, f) for (tname, f), cnt in anyf.most_common(4000)
-                if tname == target and is_runloop_plumbing(f)), default=None)
-    if loop:
-        print("  （事件循环本体占 %.1f%%：%s —— 说明主线程绝大部分样本是在**等事件**，不是算不动）"
-              % (100.0 * loop[0] / total, loop[1][:48]))
-    print("\n叶子帧（自身耗时）前 %d：" % args.leaf)
-    shown = 0
-    for (tname, f), cnt in leaf.most_common(4000):
-        if tname == target and cnt >= 2 and shown < args.leaf:
-            print("  %6d  %s" % (cnt, f[:86]))
-            shown += 1
-    print("\n调用对（leaf <- 上一帧）前 %d：" % args.pairs)
-    shown = 0
-    for (tname, a, b), cnt in pairs.most_common(4000):
-        if tname == target and cnt >= 3 and shown < args.pairs:
-            print("  %6d  %s <- %s" % (cnt, a[:44], b[:44]))
-            shown += 1
-
-    if args.json:
-        ranked = [(f, cnt) for (tname, f), cnt in anyf.most_common(4000) if tname == target]
-        # 热点第一名要**剥掉事件循环本体**：RunCurrentEventLoopInMode 这类帧在几乎每个
-        # 主线程样本里都有（本机实测 93.3%），拿它当"热点"既没有信息量，
-        # 又会把 spec §1 里那个 64.3% _updateViewGraph 挤掉，前后两批就不可比了。
-        ranked = [(f, round(100.0 * cnt / max(1, total), 2)) for f, cnt in ranked]
-        hotspot = [(f, pct) for f, pct in ranked
-                   if not is_runloop_plumbing(f) and pct < PLUMBING_SHARE_PCT]
-        write_json(args.json, {
-            "thread": target,
-            "samples": total,
-            "process_samples": total_all,
-            "share_pct": round(100.0 * total / max(1, total_all), 2),
-            "hotspot_top1": hotspot[0][0] if hotspot else "",
-            "hotspot_top1_pct": hotspot[0][1] if hotspot else 0.0,
-            "runloop_top1": ranked[0][0] if ranked else "",
-            "runloop_top1_pct": ranked[0][1] if ranked else 0.0,
-        })
-    return 0
+from perf_trace_metrics import (FRAME_BUDGET_MS_DEFAULT, dist_line, over_budget, percentile,
+                                read_json, write_json)
+from perf_trace_summary import cmd_summary
+from perf_trace_threads import cmd_threads
+from perf_trace_xml import Doc, find_tag
 
 
 # ----------------------------------------------------------------------------
@@ -165,11 +84,7 @@ def cmd_displays(args):
         name = find_tag(row, "metal-object-label") or find_tag(row, "display-name")
         res = find_tag(row, "size-in-pixels")
         builtin = find_tag(row, "boolean")
-        rate = None
-        uints = [c for c in row if c.tag == "uint32"]
-        for c in uints:
-            if c.fmt and c.fmt.isdigit() and 10 <= int(c.fmt) <= 1000:
-                rate = int(c.fmt)
+        rate = display_row_rate(row)
         if name is None:
             continue
         print("  %-18s %-12s built-in=%-3s 最大刷新率=%s Hz"
@@ -180,6 +95,16 @@ def cmd_displays(args):
     if args.json:
         write_json(args.json, {"displays": hz, "max_hz": max(hz.values()) if hz else 0})
     return 0
+
+
+def display_row_rate(row):
+    """一行里落在 10~1000 的那个 uint32 就是刷新率；**取最后一个**（照拆分前的覆盖式赋值）。"""
+    rate = None
+    uints = [c for c in row if c.tag == "uint32"]
+    for c in uints:
+        if c.fmt and c.fmt.isdigit() and 10 <= int(c.fmt) <= 1000:
+            rate = int(c.fmt)
+    return rate
 
 
 def cmd_fps(args):
@@ -201,143 +126,6 @@ def cmd_fps(args):
     if args.json:
         write_json(args.json, {"fps_p50": percentile(counts, 0.5), "fps_p95": percentile(counts, 0.95),
                                "fps_min": min(counts), "fps_max": max(counts), "seconds": len(counts)})
-    return 0
-
-
-# ----------------------------------------------------------------------------
-# 汇总表：与 spec §1 逐列同形状
-# ----------------------------------------------------------------------------
-
-def cmd_summary(args):
-    d = args.directory
-    loaded = {}
-    for key in ("hitches", "hitches-updates", "hitches-renders", "potential-hangs",
-                "device-display-info", "displayed-surfaces-per-second", "time-profile"):
-        loaded[key] = load_measure(d, key)
-
-    meta = read_json(os.path.join(d, "meta.json")) or {}
-    seconds = args.seconds or meta.get("hitches_seconds") or meta.get("seconds") or 0
-    # 【期间必须出现在表头上】§1 基线是**心跳期**（不去碰它）量的，T1 要的是**交互期**。
-    # 两者同形状、不同含义——不在表头写清楚，过两周就有人会拿心跳期的 HTR 去交交互期的结论。
-    period = str(meta.get("period") or "idle")
-    is_interaction = period == "interaction"
-
-    print("== Tcoder 性能读数（对照 spec §1 基线 rev %s，release 口径）==" % BASELINE["rev"])
-    print("   测量期间：%s —— %s" % (period, "有资格答 T1（交互期 hitch = 0）" if is_interaction
-                                else "只答心跳期；**不许**拿去交 T1，要判 T1 用 interact 档重录"))
-    print("| %-30s | %-28s | %-34s | %s |" % ("指标", "§1 基线", "本次", "判定"))
-    print("|" + "-" * 32 + "|" + "-" * 30 + "|" + "-" * 36 + "|" + "-" * 10 + "|")
-
-    # 1) 刷新率：预算的分母，必须实测而不是假定 120
-    disp = loaded["device-display-info"]
-    rates = {}
-    if disp["doc"] is not None:
-        for row in disp["doc"].rows():
-            name = find_tag(row, "metal-object-label") or find_tag(row, "display-name")
-            for c in [c for c in row if c.tag == "uint32"]:
-                if c.fmt and c.fmt.isdigit() and 10 <= int(c.fmt) <= 1000 and name is not None:
-                    rates[name.fmt] = int(c.fmt)
-    max_hz = max(rates.values()) if rates else (disp["json"] or {}).get("max_hz", 0)
-    shown = " / ".join("%s=%dHz" % (k, v) for k, v in list(rates.items())[:2]) if rates else (
-        "未覆盖" if not disp["present"] else "表里没读到屏幕")
-    budget = args.budget_ms or (1000.0 / max_hz if max_hz else FRAME_BUDGET_MS_DEFAULT)
-    fmt_row("内建/外接最大刷新率", "120 / 120 Hz", shown or "未覆盖",
-            ("预算 %.3f ms" % budget) if max_hz else "未采")
-
-    # 2) render 相位
-    render = disp_values(loaded["hitches-renders"])
-    if render:
-        bad, pct = over_budget(render, budget)
-        cur = ("p50 %.2f / p95 %.2f / p99 %.2f / max %.2f（n=%d）"
-               % (percentile(render, .5), percentile(render, .95), percentile(render, .99),
-                  max(render), len(render)))
-        # 两条独立解析不一致 ⇒ 这一列不许出数（详见 cross_check_durations 的注释）。
-        doc = (loaded["hitches-renders"] or {}).get("doc")
-        agree, why = (False, "无 XML 可比对")
-        if doc is not None:
-            agree, why = cross_check_durations(doc.path, render)
-        fmt_row("render 相位 (ms)", "p50 2.73 / p95 4.06 / p99 4.77 / max 25.12", cur,
-                ("健康" if percentile(render, .95) <= budget else "超")
-                + ("" if agree else "；解析自检不一致→本行仅参考"))
-        fmt_row("render 超预算帧", "10 帧 (0.42%)",
-                ("%d 帧 (%.2f%%)" % (bad, pct)) if agree else "未报（两把解析不一致）",
-                ("达标" if pct < 0.1 else "超") if agree else why)
-    else:
-        why = "未覆盖" if not loaded["hitches-renders"]["present"] else "0 帧（未采到）"
-        fmt_row("render 相位 (ms)", "p50 2.73 / p95 4.06 / p99 4.77 / max 25.12", why, "—")
-        fmt_row("render 超预算帧", "10 帧 (0.42%)", why, "—")
-
-    # 3) app-update 相位（一次 hitch 通常拆成 Brown+Red 两行，同 duration 走 ref）
-    upd = dedupe_pairs(loaded["hitches-updates"])
-    if upd:
-        cur = " ".join("%.1f" % v for v in sorted(upd))
-        fmt_row("app-update 单次耗时(ms)", "10.8~24.8（7 次）",
-                (cur[:31] + "…") if len(cur) > 32 else cur,
-                "达标" if max(upd) <= budget else "超 %.1f 倍" % (max(upd) / budget))
-    else:
-        fmt_row("app-update 单次耗时(ms)", "10.8~24.8（7 次）",
-                "无 app-update = 无 hitch" if loaded["hitches-updates"]["present"] else "未覆盖", "—")
-
-    # 4) hitch 次数 / 速率
-    hitch = disp_values(loaded["hitches"])
-    if loaded["hitches"]["present"]:
-        rate = (len(hitch) / seconds) if seconds else 0.0
-        fmt_row("hitch 次数 / 速率", "7 次 / 0.35 每秒",
-                "%d 次 / %ds = %.2f /s" % (len(hitch), seconds, rate),
-                "达标(0 次)" if not hitch else ("超(预算 0)" if rate < 1.0 else "严重超(>=1/s)"))
-        fmt_row("hitch 帧时长", "33.33~58.33 ms (4~7 帧)",
-                ("%.2f~%.2f ms" % (min(hitch), max(hitch))) if hitch else "无 hitch",
-                "超" if hitch and max(hitch) > budget else "达标")
-        # Hitch Time Ratio：Apple 的正式指标（tech-talk 10855）——
-        # 本实现取 Σ max(0, 帧时长 − 预算) / 秒数，是"晚了多少"的保守上界。
-        # 档位（Apple 原文）：<5 无感 / 5~10 可察觉需排查 / >10 危急需立刻处理 / 理想 0。
-        htr = (sum(max(0.0, d - budget) for d in hitch) / seconds) if seconds else 0.0
-        band = "理想(0)" if not hitch else ("无感" if htr < 5 else ("可察觉·需排查" if htr <= 10 else "危急·立刻处理"))
-        fmt_row("Hitch Time Ratio (ms/s)", "%.2f（危急档）" % BASELINE.get("hitch_time_ratio_ms_per_s", 12.9),
-                "%.2f（%d 帧迟到，预算 %.3f ms）" % (htr, len(hitch), budget), band)
-    else:
-        fmt_row("hitch 次数 / 速率", "7 次 / 0.35 每秒", "未覆盖", "—")
-        fmt_row("hitch 帧时长", "33.33~58.33 ms (4~7 帧)", "未覆盖", "—")
-        fmt_row("Hitch Time Ratio (ms/s)", "%.2f（危急档）" % BASELINE.get("hitch_time_ratio_ms_per_s", 12.9),
-                "未覆盖", "—")
-
-    # 5) potential-hangs（主线程被占住多久）
-    hangs = disp_values(loaded["potential-hangs"])
-    if hangs:
-        cur = "%d 次 中位 %.1f / 最大 %.1f / 累计 %.0f ms" % (
-            len(hangs), statistics.median(hangs), max(hangs), sum(hangs))
-        fmt_row("potential-hangs", "13 次 中位 42.6 / 累计 573 ms", cur,
-                "严重超" if max(hangs) > budget else "达标")
-    else:
-        fmt_row("potential-hangs", "13 次 中位 42.6 / 累计 573 ms",
-                "0 次" if loaded["potential-hangs"]["present"] else "未覆盖", "—")
-
-    # 6) 主线程样本占比 + 热点第一名（这两列只能来自 time-profile）
-    tp = (loaded["time-profile"]["json"] or {})
-    if tp:
-        fmt_row("主线程 CPU 样本占比", "684/807 = 84.8%",
-                "%d / %d (%.1f%%)" % (tp.get("samples", 0), tp.get("process_samples", 0),
-                                       tp.get("share_pct", 0.0)),
-                "改善" if tp.get("share_pct", 0) < BASELINE["main_thread_share_pct"] else "回退")
-        hot = str(tp.get("hotspot_top1", ""))
-        # §1 那 64.3% 写的是 "_updateViewGraph / AG::Graph::UpdateStack::update()" 两个符号，
-        # 它们是同一条视图图更新链；判定必须都认，否则换个入口符号就误报"已换位"。
-        still = any(tok in hot for tok in ("updateViewGraph", "UpdateStack::update"))
-        fmt_row("主线程热点第一名", "64.3% _updateViewGraph / UpdateStack::update",
-                "%.1f%% %s" % (tp.get("hotspot_top1_pct", 0.0), hot[:26]),
-                "仍是它" if still else "已换位")
-    else:
-        fmt_row("主线程 CPU 样本占比", "684/807 = 84.8%", "未覆盖（缺 time-profile.json）", "—")
-        fmt_row("主线程热点第一名", "64.3% _updateViewGraph", "未覆盖（缺 time-profile.json）", "—")
-
-    # 7) 出帧（spec §7.6：静止界面无所谓帧率，这一列只当"东西确实在动"的证据）
-    fps = loaded["displayed-surfaces-per-second"]["json"] or fps_counts(loaded["displayed-surfaces-per-second"])
-    if fps:
-        fmt_row("实测出帧/s", "参考项", "p50 %s / p95 %s / 共 %s 秒"
-                % (fps.get("fps_p50"), fps.get("fps_p95"), fps.get("seconds")), "参考")
-    else:
-        fmt_row("实测出帧/s", "参考项", "未覆盖", "参考")
-    print("\n（未覆盖 = 该表没导出或导出为空，按 spec §6.6 明写，不许拿相邻档的数冒充。）")
     return 0
 
 
@@ -495,7 +283,14 @@ def cmd_migration(args):
 def build_parser():
     p = argparse.ArgumentParser(description="xctrace XML → 性能读数（含 id/ref 解引用）")
     sub = p.add_subparsers(dest="cmd", required=True)
+    # 两个小节按"吃 XML 文件"与"吃输出目录"分，注册顺序一字未动——
+    # argparse 的 --help 子命令列表就是按注册顺序出的，重排等于改读数。
+    add_xml_subcommands(sub)
+    add_directory_subcommands(sub)
+    return p
 
+
+def add_xml_subcommands(sub):
     d = sub.add_parser("durations", help="时长分布：hitches / hitches-updates / potential-hangs / renders")
     d.add_argument("xml")
     d.add_argument("--label", default="")
@@ -524,6 +319,8 @@ def build_parser():
     f.add_argument("--json", default=None)
     f.set_defaults(func=cmd_fps)
 
+
+def add_directory_subcommands(sub):
     m = sub.add_parser("summary", help="读一个输出目录，打印与 spec §1 同形状的对照表")
     m.add_argument("directory")
     m.add_argument("--seconds", type=int, default=0)
@@ -543,7 +340,6 @@ def build_parser():
     g.add_argument("--module-root", default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     g.add_argument("--strict", action="store_true", help="还有粗粒度读点就非零退出（给 CI/门禁用）")
     g.set_defaults(func=cmd_migration)
-    return p
 
 
 def main(argv=None):

@@ -184,3 +184,184 @@ struct CPUHistoryChart: View {
         .accessibilityLabel("CPU 占用历史曲线")
     }
 }
+
+// MARK: - 实时读数区（隔离出 DashboardView 的心跳失效域）
+
+/// 总览页的实时部分：**独立成 struct**，整体从 `DashboardView.body` 的失效域里挪出。
+///
+/// 它读 `state.monitor.latestSnapshot` 与 `state.monitor.history`（每 1.5s 变一次）。
+/// 旧写法这些读发生在 `DashboardView.body` 求值过程中，于是一次心跳就把整页
+/// （四枚 tile + 三张静态卡 + 90 点×2 mark）全量重算，主线程热点第一名是
+/// `_updateViewGraph`（性能规格 §1 实测 64.3%）。隔离后，心跳只让本 body 失效，
+/// 静态分组（代码规模 / 文件构成 / 覆盖率 / 最近提交 / 高频错误）原地不动（O-2）。
+///
+/// 当前仍订阅整份 `latestSnapshot` / `history`，未用 M0 的细粒度读模型
+///（M0 尚未进 main，且 `Services/**` 不在本流可写范围）；隔离已使失效域退出静态区，
+/// M0 落地后可进一步只订阅所需字段。
+struct DashboardLiveReadout: View {
+    @Environment(AppState.self) private var state
+
+    private var report: ProjectReport? { state.selectedReport }
+    private var snapshot: SystemSnapshot? { state.monitor.latestSnapshot }
+
+    /// 顺序是**实时性能在前、读数带在后**（设计复核第 2 条的结构解）。
+    ///
+    /// 原来的顺序是「读数带 → 实时性能 → 代码规模」：曲线自带一段坐标轴留白，
+    /// 于是「读数带→实时性能」这一处 32pt 看起来明显大于「实时性能→代码规模」那处 32pt。
+    /// **不改间距数值**去迁就观感（那是"为了好看改令牌"，三家会改得不一致），
+    /// 改的是**谁挨着谁**：把带留白的曲线块挪到 hero 之后（hero 本身就 airy，两段呼吸同性质），
+    /// 让两个紧凑块（读数带 / 代码规模）相邻，视觉不等就没了。
+    /// 另一半理由是阅读优先级：这一组全是「本机此刻」的实时数据，比仓库静态的代码规模更该先看。
+    ///
+    /// ⚠️ 曾考虑的另一种解法——把「实时性能」与「代码规模」配成同列宽双栏——**被棘轮拦下**：
+    /// 那要把本视图拆成两个叶子（曲线一个、读数带一个），每个都得自己读一次
+    /// `state.monitor.latestSnapshot`，粗粒度读点就从 16 涨到 17，而
+    /// `PerfInvalidationRatchetTests.coarseCallSiteCeiling` 当前正好是 16（顶格）。
+    /// 双栏要等性能轮把这两处迁到细粒度读模型（`monitor.cpu.value` / `.curve.value`，
+    /// 现量 0 处）之后才做得起。
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.group) {
+            livePerformanceGroup
+            readoutStrip
+        }
+    }
+
+    // MARK: 读数带（旧「四枚 tile」）
+
+    /// 四枚 tile 的三态口径：
+    /// 「没有测到」一律传 `value: nil`，由 `MetricTile` 渲染成 `--` + 中性色；
+    /// 真 0 是结论，照实传 `"0"`。原来 CPU 缺值传 `"--"` 而今日错误缺值传 `0`，
+    /// 同一块屏上两种自相矛盾的说法并存（WS-I §3.4）。
+    ///
+    /// 排法换成 `ReadoutStrip` + 列间发丝线：tile 已经不是一块面了，
+    /// 四块无边框文字并排会糊成一整段，发丝线替掉原来的盒体边界。
+    private var readoutStrip: some View {
+        ReadoutStrip {
+            cpuTile
+            DataBandSeparator()
+            memoryTile
+            DataBandSeparator()
+            errorTile
+            DataBandSeparator()
+            commitTile
+        }
+    }
+
+    private var cpuTile: some View {
+        MetricTile(
+            label: "CPU",
+            value: snapshot.map { String(Int(($0.cpuUsage * 100).rounded())) },
+            unit: "%",
+            caption: snapshot.map {
+                "\(NumberFormat.grouped($0.cpuCoreCount)) 核 · 负载 \(String(format: "%.2f", $0.loadAverage1))"
+            },
+            systemImage: IconName.cpu.rawValue
+        )
+    }
+
+    private var memoryTile: some View {
+        MetricTile(
+            // 「Memory」→「内存」：WS-H §7.1 点名的必修项
+            label: "内存",
+            value: snapshot.map { ByteFormat.string($0.memoryUsedBytes, precision: 1) },
+            caption: snapshot.map {
+                "共 \(ByteFormat.string($0.memoryTotalBytes, precision: 0)) · "
+                    + NumberFormat.percent($0.memoryFraction, precision: 0)
+            },
+            systemImage: IconName.memory.rawValue
+        )
+    }
+
+    private var errorTile: some View {
+        let logs = report?.logs
+        let caption: String?
+        if logs?.hasData == true {
+            caption = "崩溃 \(NumberFormat.grouped(logs?.crashCount ?? 0)) · "
+                + "异常 \(NumberFormat.grouped(logs?.exceptionCount ?? 0))"
+        } else {
+            caption = logs == nil ? ShellCopy.notAnalyzed("错误日志")
+                : ShellCopy.cannotAnalyze("未接入任何日志文件")
+        }
+        let count = logs?.hasData == true ? logs?.todayErrorCount : nil
+        return MetricTile(
+            label: "今日错误",
+            value: count.map { NumberFormat.grouped($0) },
+            caption: caption,
+            tint: DashboardView.hasTodayErrors(count) ? Theme.Semantic.danger.textColor
+                                                      : Theme.Palette.Surface.ink,
+            systemImage: IconName.riskWarning.rawValue
+        )
+    }
+
+    private var commitTile: some View {
+        MetricTile(
+            label: "最近提交",
+            value: report?.git.map {
+                DateFormat.sinceDescription($0.lastCommitAt).replacingOccurrences(of: " 前", with: "")
+            },
+            caption: report?.git.map {
+                "\(NumberFormat.grouped($0.totalCommits)) 次提交 · "
+                    + "\(NumberFormat.grouped($0.activeAuthorCount)) 位贡献者"
+            } ?? ShellCopy.notAnalyzed("Git 历史"),
+            systemImage: IconName.git.rawValue
+        )
+    }
+
+    // MARK: 实时性能分组
+
+    /// 节奏文案。**页面不再自己写死间隔数字**——节拍唯一真值是
+    /// `MachSystemMonitor.defaultSampleIntervalMilliseconds`，展示串走
+    /// `sampleIntervalText`（性能 spec §5.1，`PerfCadenceSingleSourceTests` 钉着）。
+    /// 另一半是诚实性：交互暂停期间屏幕上的数不再按那个节奏更新，继续宣称固定节奏
+    /// 就是说谎（读数仍是真的，说谎的是「节奏」这两个字），所以暂停时改口。
+    /// 与 WS-W 的 `PerformanceView.cadenceText` 同一条口径。
+    /// （注：这段说明原先写过带秒数的字面量 —— 那条守卫**不剥注释**，
+    /// 说明文字会被当成真命中计数，实测把 5 的基线白占了一格。）
+    private var cadenceSubtitle: String {
+        state.monitor.isInteractionPaused
+            ? "本机 · 采样已暂停"
+            : "本机 · 每 \(state.monitor.sampleIntervalText)采样"
+    }
+
+    private var livePerformanceGroup: some View {
+        GlassSection("实时性能",
+                     subtitle: cadenceSubtitle,
+                     icon: .performance) {
+            if state.monitor.history.count > 2 {
+                CPUHistoryChart(snapshots: Array(state.monitor.history.suffix(90)))
+                    .frame(minHeight: Theme.Layout.chartMinHeight)
+                HStack(spacing: Theme.Spacing.md) {
+                    StatLine(label: "磁盘", value: snapshotRate(snapshot?.diskReadBytesPerSecond,
+                                                                snapshot?.diskWriteBytesPerSecond,
+                                                                rate: ByteFormat.rate))
+                    StatLine(label: "网络", value: snapshotRate(snapshot?.networkInBytesPerSecond,
+                                                                snapshot?.networkOutBytesPerSecond,
+                                                                rate: ByteFormat.bitRate))
+                    StatLine(label: "进程",
+                             value: DataAbsence.optional(
+                                snapshot.map { NumberFormat.grouped($0.processCount) }).display)
+                    // 「立即采样」原挂在 `GlassSection.trailing`（需 `AnyView`，O-3 清零），
+                    // 移回内容区时**并进这一行**：单独占一行会成一个游离控件，
+                    // 眼睛读它是「曲线的一部分」还是「读数的一部分」都说不清。
+                    Spacer(minLength: Theme.Spacing.sm)
+                    GlassButton("立即采样", icon: .refresh, style: .bordered) {
+                        state.monitor.sampleNow()
+                    }
+                }
+            } else {
+                EmptyStateView(icon: IconName.performance.rawValue,
+                               title: "正在采集…",
+                               message: "首个采样点到达后显示曲线。")
+            }
+        }
+    }
+
+    /// 读写两个方向求和。快照缺席时给 `DataAbsence.notAnalysed` 的字面（`--`）——
+    /// 旧写法 `(snapshot?.diskRead ?? 0) + (… ?? 0)` 会把「没采到」报成 `0 B/s`，
+    /// 在监控 App 里这是一句假的好消息（WS-I §3.4）。
+    private func snapshotRate(_ read: UInt64?, _ write: UInt64?,
+                              rate: (UInt64) -> String) -> String {
+        guard let read, let write else { return DataAbsence.notAnalysed.display }
+        return rate(read + write)
+    }
+}

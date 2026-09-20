@@ -194,29 +194,75 @@ enum MissingDimensionReason {
     ]
 
     /// 未评分**不参与也不得按 0 显示**，所以这里给的是原因，不是一个分数（验收点 6）。
+    ///
+    /// 拆成三段不是为了凑复杂度数（本 App 自扫点名本函数 CC 21）：
+    /// 「扫描失败」「还没扫」「扫了但这一维没产出」本来就是三类原因，
+    /// 混在一个函数里读，谁也看不出界面为什么是这句话。
     static func text(for dimension: HealthDimension, report: ProjectReport?) -> String {
-        guard let analyzer = analyzerLabel[dimension] else { return "该维度不在内置口径里，本次未参与计分。" }
+        guard let analyzer = analyzerLabel[dimension] else {
+            return "该维度不在内置口径里，本次未参与计分。"
+        }
+        if let absent = scanAbsenceReason(analyzer: analyzer, report: report) { return absent }
+        return dimensionAbsenceReason(dimension, analyzer: analyzer, report: report)
+            ?? "「\(analyzer)」完成但该分量未产出。"
+    }
+
+    /// 整体缺席：整次扫描没跑、或这一维所属的分析器报过失败。
+    private static func scanAbsenceReason(analyzer: String, report: ProjectReport?) -> String? {
         if let report, report.failedSections.contains(analyzer) {
             return "上次扫描「\(analyzer)」失败，本维度没有输入。"
         }
-        if report == nil {
-            return "还没有扫描结果，「\(analyzer)」未运行。"
-        }
+        if report == nil { return "还没有扫描结果，「\(analyzer)」未运行。" }
+        return nil
+    }
+
+    /// 逐维判据：扫过了，但这一维缺哪样输入。返回 nil = 输入齐了却没算出分量（走兜底句）。
+    /// 逐维判据：扫过了，但这一维缺哪样输入。返回 nil = 输入齐了却没算出分量（走兜底句）。
+    ///
+    /// 拆的理由是机械的：原来一个 switch 里塞五段三元加一个 guard，被本 App 自扫点名 CC 16
+    /// ——它自己正是「缺证据不给分」那条判据的守门人，本身不该是热点。
+    /// 每维的措辞搬进各自的小函数，**文案与判据一字未动**。
+    private static func dimensionAbsenceReason(_ dimension: HealthDimension, analyzer: String,
+                                               report: ProjectReport?) -> String? {
         switch dimension {
         case .codeQuality, .complexity, .duplication, .documentation:
-            return report?.code == nil ? "「\(analyzer)」没有产出代码指标。" : "「\(analyzer)」完成但该分量未产出。"
+            return codeAbsence(analyzer: analyzer, code: report?.code)
         case .activity, .busFactor:
-            return report?.git == nil ? "该目录不是 Git 仓库，或未取到提交历史。" : "「\(analyzer)」完成但该分量未产出。"
+            return gitAbsence(git: report?.git)
         case .stability:
-            guard let logs = report?.logs else { return "尚未分析日志。" }
-            return logs.hasData ? "「\(analyzer)」完成但该分量未产出。" : "未发现可读的日志文件。"
+            return stabilityAbsence(logs: report?.logs)
         case .dependencies:
-            return report?.dependencies == nil ? "未识别到依赖清单。" : "「\(analyzer)」完成但该分量未产出。"
+            return dependencyAbsence(dependencies: report?.dependencies)
         case .testing:
-            return report?.coverage?.hasData == true
-                ? "「\(analyzer)」完成但该分量未产出。"
-                : "该项目没有产出覆盖率报告，不参与计分。"
+            return testingAbsence(coverage: report?.coverage)
         }
+    }
+
+    private static func codeAbsence(analyzer: String, code: CodeMetrics?) -> String? {
+        code == nil ? "「\(analyzer)」没有产出代码指标。" : nil
+    }
+
+    private static func gitAbsence(git: GitInsights?) -> String? {
+        git == nil ? "该目录不是 Git 仓库，或未取到提交历史。" : nil
+    }
+
+    /// 唯一要分两档的一维：`logs == nil`（没分析过）与「分析了但一行没读到」是两件事，
+    /// 合成一句就把输入状态弄丢了。
+    private static func stabilityAbsence(logs: LogSummary?) -> String? {
+        guard let logs else { return "尚未分析日志。" }
+        return logs.hasData ? nil : "未发现可读的日志文件。"
+    }
+
+    private static func dependencyAbsence(dependencies: DependencyReport?) -> String? {
+        dependencies == nil ? "未识别到依赖清单。" : nil
+    }
+
+    private static func testingAbsence(coverage: CoverageMetrics?) -> String? {
+        coverage?.hasData == true ? nil : "该项目没有产出覆盖率报告，不参与计分。"
+    }
+
+    private static func coverageHasData(_ report: ProjectReport?) -> Bool {
+        report?.coverage?.hasData == true
     }
 }
 

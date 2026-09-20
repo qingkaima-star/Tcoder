@@ -216,111 +216,172 @@ enum DupLex {
     /// 返回 nil 表示这一行不进滑窗（空行、注释行、纯标点、单词元短样板行、正文型语言里的散文行）。
     /// 这里是**指纹通道**的判据；对外的 `normalize(_:language:)` 在此之上还更严一档，见该方法注释。
     static func normalizeBytes(_ text: String, syntax: LineSyntax) -> [UInt8]? {
-    let src = Array(text.utf8)
-    let count = src.count
-    var out = [UInt8]()
-    out.reserveCapacity(count + 2)
-    var pendingSpace = false
-    var tokenRuns = 0
-    var inIdentRun = false
-    var i = 0
+        var scanner = ByteLineScanner(src: Array(text.utf8), syntax: syntax)
+        return scanner.run()
+    }
 
-    while i < count {
-        let b = src[i]
+    /// 一行字节的归一化扫描。原先这是 `normalizeBytes` 里 108 行 / CC 27 的一整段，
+    /// 现在按**原来的判定顺序**切成一格一小段：
+    /// 空白 → 行注释 → 块注释 → 字符串 → 数字 → 标识符 / 符号 → 收尾阈值。
+    ///
+    /// 三条最容易被「顺手重写」改坏的语义刻意留住了：
+    /// 1. 「是不是又一个词元的开头」只看**源码里的前一个字节**（`previousByte`），不看折叠后的输出：
+    ///    归一化输出会折叠空白，于是 `x = 1 // note` 里 `//` 的前一个**输出**字节是 `N`（标识符字符），
+    ///    按输出口径判定就会漏掉行内注释、把注释文字折成 `// I` 留在指纹里（两份逐字相同的代码只要
+    ///    注释不同就撞不上，是 type-1 漏报）。第 0 列视作空白，因此整行注释照样归一化为 nil。
+    /// 2. 字符串 / 块注释 / 数字命中后是 `i = resume`（一次跳过整段），普通分支才是 `i += 1`；
+    /// 3. `tokenRuns` 与 `inIdentRun` 的「同一段标识符只记一次词元」推进节奏完全照原样。
+    struct ByteLineScanner {
+        let src: [UInt8]
+        let syntax: LineSyntax
+        var out: [UInt8] = []
+        var pendingSpace = false
+        var tokenRuns = 0
+        var inIdentRun = false
+        var i = 0
 
-        if isSpaceByte(b) {
-            pendingSpace = !out.isEmpty
-            // 空白同样终结标识符词元：`for row in rows` 是 4 个词元，不是 1 个
-            inIdentRun = false
-            i += 1
-            continue
+        init(src: [UInt8], syntax: LineSyntax) {
+            self.src = src
+            self.syntax = syntax
+            out.reserveCapacity(src.count + 2)
         }
 
-        // 「是不是又一个词元的开头」只能看**源码里的前一个字节**：归一化输出会折叠空白，
-        // 于是 `x = 1 // note` 里 `//` 的前一个输出字节是 `N`（标识符字符），按输出口径判定
-        // 就会漏掉行内注释、把注释文字折成 `// I` 留在指纹里（两份逐字相同的代码只要注释
-        // 不同就撞不上，是 type-1 漏报）。第 0 列视作空白，因此整行注释照样归 nil。
-        let prevByte: UInt8 = i == 0 ? spaceByte : src[i - 1]
+        var count: Int { src.count }
 
-        // 行注释从它在行内出现的位置起整段截断（含第 0 列，注释行因此归一化为 nil）。
-        // 之所以不用担心 `#include`：C 系语言的行注释前缀是 `//`，目录里没有任何语言把 `#` 之外的
-        // 预处理符号列为前缀。已知精度损失：PHP 的 `#[属性]` 会被当注释丢掉 —— 而且它在更上游的
-        // `SourceFileClassifier` 里就已经判成注释行（既不进分母、也进不到这里），要修得动语言目录表。
-        if !isIdentByte(prevByte),
-           syntax.lineCommentPrefixes.contains(where: { hasPrefix($0, at: i, in: src) }) {
-            break
+        /// 第 0 列视作空白。
+        var previousByte: UInt8 { i == 0 ? DupLex.spaceByte : src[i - 1] }
+
+        /// 主循环：走完一行后交给 `survivingBytes` 判阈值。
+        mutating func run() -> [UInt8]? {
+            while i < count {
+                if DupLex.isSpaceByte(src[i]) {
+                    pendingSpace = !out.isEmpty
+                    // 空白同样终结标识符词元：`for row in rows` 是 4 个词元，不是 1 个
+                    inIdentRun = false
+                    i += 1
+                    continue
+                }
+                if tokenStep() == false { break }
+            }
+            return survivingBytes()
         }
 
-        if let blockStart = syntax.blockStart, let blockEnd = syntax.blockEnd,
-           hasPrefix(blockStart, at: i, in: src) {
-            if let resume = closingSequenceResume(blockEnd, in: src, from: i + blockStart.count) {
+        /// 一个非空白位置上的判定。返回 false 等价于原实现的 `break`（从这里到行尾整段丢掉）。
+        mutating func tokenStep() -> Bool {
+            let prevByte = previousByte
+            // 行注释从它在行内出现的位置起整段截断（含第 0 列，注释行因此归一化为 nil）。
+            // 之所以不用担心 `#include`：C 系语言的行注释前缀是 `//`，目录里没有任何语言把 `#` 之外的
+            // 预处理符号列为行注释前缀。已知精度损失：PHP 的 `#[属性]` 会被当注释丢掉 —— 而且它在更上游的
+            // `SourceFileClassifier` 里就已经判成注释行（既不进分母、也进不到这里），要修得动语言目录表。
+            if hitsLineComment(after: prevByte) { return false }
+            switch blockCommentStep() {
+            case .notACommentStart:
+                break
+            case .unterminated:
+                return false
+            case let .skippedTo(resume):
                 pendingSpace = !out.isEmpty
                 i = resume
-                continue
+                return true
             }
-            break
+            if consumeStringLiteral() { return true }
+            if consumeNumberLiteral(after: prevByte) { return true }
+            consumeIdentifierOrSymbol()
+            return true
         }
 
-        if let slot = syntax.stringDelimiters.firstIndex(where: { hasPrefix($0, at: i, in: src) }) {
+        func hitsLineComment(after prevByte: UInt8) -> Bool {
+            guard DupLex.isIdentByte(prevByte) == false else { return false }
+            return syntax.lineCommentPrefixes.contains(where: { DupLex.hasPrefix($0, at: i, in: src) })
+        }
+
+        /// 块注释的三种结局：不是块注释开头 / 本行内没闭合（原 `break`）/ 吃掉这一段从 resume 继续。
+        enum BlockCommentStep {
+            case notACommentStart
+            case unterminated
+            case skippedTo(resume: Int)
+        }
+
+        func blockCommentStep() -> BlockCommentStep {
+            guard let blockStart = syntax.blockStart, let blockEnd = syntax.blockEnd,
+                  DupLex.hasPrefix(blockStart, at: i, in: src) else { return .notACommentStart }
+            guard let resume = DupLex.closingSequenceResume(blockEnd, in: src, from: i + blockStart.count)
+            else { return .unterminated }
+            return .skippedTo(resume: resume)
+        }
+
+        /// 字符串字面量整段折成一个 `S` 占位符。
+        mutating func consumeStringLiteral() -> Bool {
+            guard let slot = syntax.stringDelimiters.firstIndex(where: { DupLex.hasPrefix($0, at: i, in: src) })
+            else { return false }
             let delimiter = syntax.stringDelimiters[slot]
             // 单字符引号要跳过 `\` 转义；多行串定界符按整段定界符配对（未闭合则吃到行尾）。
             let resume: Int?
             if delimiter.count == 1 {
-                resume = closingQuoteResume(delimiter[0], in: src, from: i + 1)
+                resume = DupLex.closingQuoteResume(delimiter[0], in: src, from: i + 1)
             } else {
-                resume = closingSequenceResume(delimiter, in: src, from: i + delimiter.count)
+                resume = DupLex.closingSequenceResume(delimiter, in: src, from: i + delimiter.count)
             }
             i = resume ?? count
-            if pendingSpace { out.append(spaceByte) }
+            if pendingSpace { out.append(DupLex.spaceByte) }
             pendingSpace = false
-            out.append(letterSByte)
+            out.append(DupLex.letterSByte)
             if !inIdentRun { tokenRuns += 1; inIdentRun = true }
-            continue
+            return true
         }
 
-        // 数字的开头同样按源码上下文判定：`foo bar 123` 里的 `123` 前一个是空白，
-        // 就该折成 `N` 而不是被当成标识符续字符折成 `I`（否则「数字」与「标识符」在指纹里
-        // 撞成同一个词元，会造出「形状恰好相同」的伪克隆）。
-        let startsNumber = !isIdentByte(prevByte)
-            && (isDigitByte(b) || (b == dotByte && i + 1 < count && isDigitByte(src[i + 1])))
-        if startsNumber {
-            if pendingSpace { out.append(spaceByte) }
+        /// 数字的开头同样按源码上下文判定：`foo bar 123` 里的 `123` 前一个是空白，
+        /// 就该折成 `N` 而不是被当成标识符续字符折成 `I`（否则「数字」与「标识符」在指纹里
+        /// 撞成同一个词元，会造出「形状恰好相同」的伪克隆）。
+        mutating func consumeNumberLiteral(after prevByte: UInt8) -> Bool {
+            guard startsNumber(after: prevByte) else { return false }
+            if pendingSpace { out.append(DupLex.spaceByte) }
             pendingSpace = false
-            out.append(letterNByte)
+            out.append(DupLex.letterNByte)
             if !inIdentRun { tokenRuns += 1; inIdentRun = true }
-            i = numberResume(src, from: i)
-            continue
+            i = DupLex.numberResume(src, from: i)
+            return true
         }
 
-        if pendingSpace { out.append(spaceByte) }
-        pendingSpace = false
-        if isIdentByte(b) {
-            // 标识符词元只落一个 `I`，后面的字母直接吃掉：`revenueByCategory` -> `I`。
-            // 长度不再随标识符命名波动，改名后的拷贝才能落到同一个指纹上。
-            if !inIdentRun {
-                out.append(letterIByte)
-                tokenRuns += 1
-                inIdentRun = true
+        func startsNumber(after prevByte: UInt8) -> Bool {
+            guard DupLex.isIdentByte(prevByte) == false else { return false }
+            if DupLex.isDigitByte(src[i]) { return true }
+            return src[i] == DupLex.dotByte && i + 1 < count && DupLex.isDigitByte(src[i + 1])
+        }
+
+        /// 标识符折成一个 `I`，其余字符原样落进指纹。
+        mutating func consumeIdentifierOrSymbol() {
+            if pendingSpace { out.append(DupLex.spaceByte) }
+            pendingSpace = false
+            if DupLex.isIdentByte(src[i]) {
+                // 标识符词元只落一个 `I`，后面的字母直接吃掉：`revenueByCategory` -> `I`。
+                // 长度不再随标识符命名波动，改名后的拷贝才能落到同一个指纹上。
+                if !inIdentRun {
+                    out.append(DupLex.letterIByte)
+                    tokenRuns += 1
+                    inIdentRun = true
+                }
+            } else {
+                out.append(src[i])
+                inIdentRun = false
             }
-        } else {
-            out.append(b)
-            inIdentRun = false
+            i += 1
         }
-        i += 1
-    }
 
-    // 阈值（全部只看归一化后的产物，因此与标识符长短无关）：
-    // 1. 长度 < `minNormalizedBytes`(4) 的行一律丢弃：`}`、`);`、`})`、`return keep`(`I I`)；
-    // 2. 纯标点（0 词元）丢弃：`}) {`、`];`；
-    // 3. 只有 1 个词元且长度 < `minBytesForSingleTokenLine`(8) 的行丢弃：`} catch {`、`} else {`、`foo();`。
-    // 4. 正文型语言（没有行注释前缀：Markdown / HTML / XML / Vue / CSS / JSON）里，一行必须
-    //    带个代码结构符才算数，否则 README 里抄来的一段散文会被当成「重复代码」上报
-    //    （实测：两份 README 共用一段正文，改前 ratio 81.8%、9 行「重复块」；改后 0%）。
-    // 对外的 `normalize` 在此之上还叠一条「≥3 个含字母数字的词元」，两档差别的说明见那里。
-    if out.count < DuplicationEngine.minNormalizedBytes { return nil }
-    if tokenRuns < minTokenCount { return nil }
-    if tokenRuns < 2 && out.count < minBytesForSingleTokenLine { return nil }
-    if syntax.needsStructureByte, !out.contains(where: { structureBytes.contains($0) }) { return nil }
-    return out
+        // 阈值（全部只看归一化后的产物，因此与标识符长短无关）：
+        // 1. 长度 < `minNormalizedBytes`(4) 的行一律丢弃：`}`、`);`、`})`、`return keep`(`I I`)；
+        // 2. 纯标点（0 词元）丢弃：`}) {`、`];`；
+        // 3. 只有 1 个词元且长度 < `minBytesForSingleTokenLine`(8) 的行丢弃：`} catch {`、`} else {`、`foo();`。
+        // 4. 正文型语言（没有行注释前缀：Markdown / HTML / XML / Vue / CSS / JSON）里，一行必须
+        //    带个代码结构符才算数，否则 README 里抄来的一段散文会被当成「重复代码」上报
+        //    （实测：两份 README 共用一段正文，改前 ratio 81.8%、9 行「重复块」；改后 0%）。
+        // 对外的 `normalize` 在此之上还叠一条「≥3 个含字母数字的词元」，两档差别的说明见那里。
+        func survivingBytes() -> [UInt8]? {
+            if out.count < DuplicationEngine.minNormalizedBytes { return nil }
+            if tokenRuns < DupLex.minTokenCount { return nil }
+            if tokenRuns < 2 && out.count < DupLex.minBytesForSingleTokenLine { return nil }
+            if syntax.needsStructureByte, !out.contains(where: { DupLex.structureBytes.contains($0) }) { return nil }
+            return out
+        }
     }
 }

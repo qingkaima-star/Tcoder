@@ -45,11 +45,33 @@ extension DependencyNetworkLookup {
         return "OSV 详情：" + parts.joined(separator: "；")
     }
 
+    /// 一次 OSV 在线查询的账本：条目累加结果 + 失败计数 + 自述说明。
+    struct OsvSeed: Sendable {
+        var entries: [String: OsvEntry]
+        var failed: Int
+        var note: String?
+    }
+
     static func performOsvLookup(_ queries: [OsvPackageQuery], deadline: Date) async -> OsvPayload {
+        let seed = await osvSeedEntries(queries, deadline: deadline)
+        guard !seed.entries.isEmpty else {
+            return OsvPayload(advisories: [], failedRequests: seed.failed, note: seed.note)
+        }
+        var entries = seed.entries
+        var note = seed.note
+        await expandOsvDetails(&entries, deadline: deadline, note: &note)
+        let advisories = osvAdvisories(from: entries, queries: queries)
+        if seed.failed > 0 { appendNote(&note, "本次 \(seed.failed) 个 OSV 请求失败") }
+        return OsvPayload(advisories: VulnerabilitySource.sortedAdvisories(advisories),
+                          failedRequests: seed.failed, note: note)
+    }
+
+    /// 第一步：批量端点拿 id，拿不到就整批退回逐包查询。
+    /// 「批量失败算 1 次 + 逐包逐次算」这个计数口径，以及那句中文，与拆分前逐字相同。
+    static func osvSeedEntries(_ queries: [OsvPackageQuery], deadline: Date) async -> OsvSeed {
         var failed = 0
         var note: String?
         var entries = [String: OsvEntry]()
-
         if let idsByQuery = await osvQueryBatch(queries, deadline: deadline) {
             for (index, ids) in idsByQuery.enumerated() where index < queries.count {
                 for id in ids { merge(&entries, id: id, queryIndex: index, vuln: nil) }
@@ -61,12 +83,14 @@ extension DependencyNetworkLookup {
             failed += fallback.failedRequests
             for row in fallback.rows { merge(&entries, id: row.id, queryIndex: row.queryIndex, vuln: row.vuln) }
         }
+        return OsvSeed(entries: entries, failed: failed, note: note)
+    }
 
-        guard !entries.isEmpty else {
-            return OsvPayload(advisories: [], failedRequests: failed, note: note)
-        }
-
-        // 补齐详情：批量接口只回 id，需要再按 id 拉完整记录。
+    /// 第二步：批量接口只回 id，需要再按 id 拉完整记录。
+    /// 展开不全时的三态账本与那句披露说明原样搬过来，没有改判定顺序。
+    static func expandOsvDetails(_ entries: inout [String: OsvEntry],
+                                 deadline: Date,
+                                 note: inout String?) async {
         let missing = entries.compactMap { $0.value.vuln == nil ? $0.key : nil }.sorted()
         let toFetch = Array(missing.prefix(maxOsvDetailRequests))
         let detailRows: [(id: String, outcome: OsvDetailOutcome, vuln: OsvVuln?)] =
@@ -84,7 +108,13 @@ extension DependencyNetworkLookup {
                                          cap: maxOsvDetailRequests) {
             appendNote(&note, truncation)
         }
+    }
 
+    /// 第三步：条目 -> SecurityAdvisory。
+    /// 「内置快照已命中同一 CVE / 规则的包跳过，避免与离线结果重复计入」这条覆盖口径
+    /// 逐字未改，`ecosystem` 取第一条可归因的查询、`packages` 去重后升序也一样。
+    static func osvAdvisories(from entries: [String: OsvEntry],
+                              queries: [OsvPackageQuery]) -> [SecurityAdvisory] {
         var advisories: [SecurityAdvisory] = []
         advisories.reserveCapacity(entries.count)
         for (id, entry) in entries {
@@ -106,9 +136,7 @@ extension DependencyNetworkLookup {
             advisories.append(makeAdvisory(id: id, vuln: vuln, ecosystem: ecosystem,
                                            affectedPackages: Array(Set(packages)).sorted()))
         }
-        if failed > 0 { appendNote(&note, "本次 \(failed) 个 OSV 请求失败") }
-        return OsvPayload(advisories: VulnerabilitySource.sortedAdvisories(advisories),
-                          failedRequests: failed, note: note)
+        return advisories
     }
 
     static func merge(_ entries: inout [String: OsvEntry], id: String,
@@ -362,94 +390,5 @@ extension DependencyNetworkLookup {
         dayOnly.timeZone = TimeZone(identifier: "UTC")
         dayOnly.dateFormat = "yyyy-MM-dd"
         return dayOnly.date(from: raw)
-    }
-
-    // MARK: - JSON shapes（字段路径与 api.osv.dev / registry.npmjs.org 实测响应对齐）
-    struct OsvEcosystemPackage: Codable {
-        let name: String
-        let ecosystem: String
-    }
-
-    struct OsvQueryPayload: Encodable {
-        let package: OsvEcosystemPackage
-        let version: String
-    }
-
-    struct OsvBatchPayload: Encodable {
-        let queries: [OsvQueryPayload]
-    }
-
-    struct OsvBatchResponse: Decodable {
-        let results: [OsvBatchResult]?
-    }
-
-    struct OsvBatchResult: Decodable {
-        let vulns: [OsvBriefVuln]?
-    }
-
-    struct OsvBriefVuln: Decodable {
-        let id: String
-        let aliases: [String]?
-        let modified: String?
-    }
-
-    struct OsvQueryResponse: Decodable {
-        let vulns: [OsvVuln]?
-    }
-
-    struct OsvVuln: Decodable {
-        let id: String
-        let aliases: [String]?
-        let summary: String?
-        let details: String?
-        let published: String?
-        let modified: String?
-        let severity: [OsvSeverityEntry]?
-        let databaseSpecific: OsvDatabaseSpecific?
-        let affected: [OsvAffected]?
-
-        enum CodingKeys: String, CodingKey {
-            case id, aliases, summary, details, published, modified, severity, affected
-            case databaseSpecific = "database_specific"
-        }
-    }
-
-    /// 实测：`severity: [{"type":"CVSS_V3","score":"CVSS:3.1/AV:N/…"}]`，score 多为向量串而非数字。
-    struct OsvSeverityEntry: Decodable {
-        let type: String?
-        let score: String?
-    }
-
-    /// 实测：`database_specific.severity` 为 "CRITICAL" / "HIGH" / "MODERATE" / "LOW"。
-    struct OsvDatabaseSpecific: Decodable {
-        let severity: String?
-    }
-
-    struct OsvAffected: Decodable {
-        let package: OsvAffectedPackage?
-        let ranges: [OsvRange]?
-        let versions: [String]?
-    }
-
-    /// 解码时全部字段可选，避免个别记录字段缺失导致整条 OSV 记录解析失败。
-    struct OsvAffectedPackage: Decodable {
-        let name: String?
-        let ecosystem: String?
-    }
-
-    struct OsvRange: Decodable {
-        let type: String?
-        let events: [OsvEvent]?
-    }
-
-    struct OsvEvent: Decodable {
-        let introduced: String?
-        let fixed: String?
-        let lastAffected: String?
-
-        enum CodingKeys: String, CodingKey {
-            case introduced, fixed
-            case lastAffected = "last_affected"
-        }
     }
 }

@@ -1,0 +1,167 @@
+import XCTest
+@testable import TcoderMonitor
+
+/// OWNER: WS-X5（接手 WS-X2 RuntimeServices）。
+///
+/// **性能两把尺子自己的**热点棘轮：`scripts/perf_harness.sh`、`scripts/perf_selfcheck.sh`、
+/// `scripts/perf_preflight.sh`、`scripts/trace_report.py` 与它的五个 python 兄弟
+/// （解析层两件、`perf_trace_threads.py`、`perf_trace_summary.py`、`perf_framepulse.py`）
+/// ——函数圈复杂度 / 函数行数 / 文件行数只减不增。
+///
+/// 为什么要有这一条：这两把尺子的输出是**别人的验收依据**（AGENTS.md 第四轮红线 1
+/// 「帧率结论只认 perf_harness.sh 的读数」），而它们恰好是全仓 CC 最高的一批函数所在处
+/// （`cmd_summary` CC 63、`cmd_selfcheck` CC 44）。尺子烂在没人复核的那一天的话，
+/// 之后所有"从 X 降到 Y"的结论都无据可查。
+///
+/// 尺子不是我自己写的：直接调产品侧的 `SourceTreeScanner` + `ComplexityEngine`，
+/// 与 `LogHotspotRatchetTests`（同一下属包的姊妹门）、自扫报告同一个函数、同一把尺子。
+///
+/// 阈值写死为字面量，口径来源与 `LogHotspotRatchetTests` 一字一样：
+/// - 16 = `SelfScanHarnessCase.complexFunctionBar`；
+/// - 50 = 本轮收口判据「函数 ≤ 50 行」；
+/// - 800 = `SelfScanHarnessCase.toolHighFileLines`（分母含 `.sh`/`.py`，`ceiling = 0`）。
+/// **要放宽必须先向总工说明理由。**
+final class PerfRulerHotspotRatchetTests: XCTestCase {
+
+    static let complexityBar = 16
+    static let functionLineBar = 50
+    static let fileLineBar = 800
+
+    /// 九把尺子文件（`scripts/` 下）。`perf_framepulse.py` 与两个解析层模块一起纳入，
+    /// 是因为 `cmd_selfcheck` 第 1 项要求"三层文件齐全"——它们同生共死。
+    ///
+    /// 后三名（WS-X6 规模债切片，2026-09-21）不是新写的尺子，是**从前三把里搬出来的**：
+    /// `perf_trace_threads.py` / `perf_trace_summary.py` 自 `trace_report.py` 搬出，
+    /// `perf_preflight.sh` 自 `perf_harness.sh` 搬出。不点名它们，本门的分母会从 101 个函数
+    /// 静默掉到 67 个——尺子照样"绿"，只是不再量那 34 个函数。
+    /// **搬出去的文件必须继续被量着**，否则"按职责拆文件"就等价于"拆到守卫看不见的地方"。
+    static let rulerScripts: Set<String> = [
+        "perf_harness.sh", "perf_selfcheck.sh", "perf_preflight.sh", "trace_report.py",
+        "perf_trace_xml.py", "perf_trace_metrics.py", "perf_trace_threads.py",
+        "perf_trace_summary.py", "perf_framepulse.py",
+    ]
+
+    /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。
+    static var packageRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    }
+    static var scriptsRoot: URL { packageRoot.appendingPathComponent("scripts") }
+
+    /// 与 `SelfScanHarnessCase.wcStyleLineCount` / `LogHotspotRatchetTests` 同一把尺子。
+    static func wcStyleLineCount(_ text: String) -> Int {
+        let newlines = text.reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
+        return text.hasSuffix("\n") ? newlines : newlines + 1
+    }
+
+    struct Scanned {
+        var file: String
+        var candidate: FunctionCandidate
+        var key: String { "\(file).\(candidate.name)" }
+        var complexity: Int { candidate.complexity }
+    }
+
+    /// 用工具自己的引擎把六把尺子里每个函数过一遍。
+    func rulerFunctions() async throws -> [Scanned] {
+        let result = await SourceTreeScanner(options: .default).scan(root: Self.scriptsRoot)
+        XCTAssertFalse(result.files.isEmpty,
+                       "扫 scripts/ 一个文件都没有 = 路径解析静默失效，这条门会永真绿")
+        var all: [Scanned] = []
+        for file in result.files {
+            let base = file.url.deletingPathExtension().lastPathComponent
+            guard Self.rulerScripts.contains(file.url.lastPathComponent) else { continue }
+            all += ComplexityEngine.functions(in: file).map { Scanned(file: base, candidate: $0) }
+        }
+        // 分母门：每个尺子文件都必须真的被认出函数，认不出就是引擎对这些扩展名失效了。
+        for name in Self.rulerScripts {
+            let base = (name as NSString).deletingPathExtension
+            let hit = all.contains { $0.file == base }
+            XCTAssertTrue(hit, "\(name) 一个函数都没数到：尺子文件名变了还是引擎认出函数了？")
+        }
+        return all
+    }
+
+    func testRulerFunctionsStayBelowTheComplexityBar() async throws {
+        let functions = try await rulerFunctions()
+        XCTAssertGreaterThan(functions.count, 60,
+                             "六把尺子只认出 \(functions.count) 个函数，分母异常，热点榜数不到东西不能算通过")
+        let ranked = functions.sorted {
+            if $0.complexity != $1.complexity { return $0.complexity > $1.complexity }
+            return $0.key < $1.key
+        }
+        let roster = ranked.map { "  \($0.key) CC\($0.complexity) \($0.candidate.lineCount)行" }
+        print("【WS-X5 尺子热点】分母 \(functions.count) 个函数，CC 最高的若干个：\n"
+            + roster.prefix(15).joined(separator: "\n"))
+        let strays = functions.filter { $0.complexity >= Self.complexityBar }
+            .map { "\($0.key) CC\($0.complexity)" }
+        XCTAssertTrue(strays.isEmpty,
+                      "尺子里出现名单口径的高复杂度函数（≥\(Self.complexityBar)）：\(strays.sorted().joined(separator: ", "))")
+        let long = functions.filter { $0.candidate.lineCount > Self.functionLineBar }
+            .map { "\($0.key) \($0.candidate.lineCount)行" }
+        XCTAssertTrue(long.isEmpty, "尺子函数超过 \(Self.functionLineBar) 行：\(long.sorted().joined(separator: ", "))")
+    }
+
+    func testRulerFilesStayAtOrBelowEightHundredLines() throws {
+        let fm = FileManager.default
+        var over: [String] = []
+        var counted = 0
+        for name in Self.rulerScripts.sorted() {
+            let url = Self.scriptsRoot.appendingPathComponent(name)
+            guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+                XCTFail("读不到尺子文件 \(name)：它被改名或删除了")
+                continue
+            }
+            counted += 1
+            let lines = Self.wcStyleLineCount(text)
+            print("  \(name) \(lines) 行")
+            if lines > Self.fileLineBar { over.append("\(name) \(lines) 行") }
+        }
+        XCTAssertEqual(counted, Self.rulerScripts.count, "六把尺子必须都在，少一把这条门就是空的")
+        XCTAssertTrue(over.isEmpty, "撞 ≤\(Self.fileLineBar) 行棘轮的尺子：\(over.sorted().joined(separator: ", "))——拆开它，别拧阈值")
+    }
+
+    /// **元测试**：上面那条 CC 门必须抓得住坏例。往 /tmp 造一个已知高 CC 的 python 夹具，
+    /// 引擎数不出 ≥16 的话，主门就是永真绿（AGENTS.md 第四轮红线 6：守卫要配元测试）。
+    func testComplexityBarCatchesASyntheticHotRulerFunction() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("tcoder-x5-ruler-probe",
+                                                                                isDirectory: true)
+        try? FileManager.default.removeItem(at: dir)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fixture = """
+        def x5_probe_hot(a, b):
+            if a and b:
+                return 1
+            for i in a:
+                if i or b:
+                    continue
+            while b:
+                if a:
+                    break
+            if a and b or a:
+                return 2
+            for i in b:
+                for j in i:
+                    if a or b:
+                        return 3
+            if a:
+                return 4
+            elif b:
+                return 5
+            while a and b:
+                return 6
+            return 0
+        """
+        let url = dir.appendingPathComponent("x5_probe.py")
+        try fixture.write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let files = await SourceTreeScanner(options: .default).scan(root: dir).files
+        XCTAssertEqual(files.count, 1, "夹具没被扫到（分母 0），下面那句断言就没意义")
+        let measured = ComplexityEngine.functions(in: files.first!)
+        XCTAssertEqual(measured.map(\.name), ["x5_probe_hot"], "函数名没认出来，CC 榜也数不到东西")
+        XCTAssertGreaterThanOrEqual(measured[0].complexity, Self.complexityBar,
+                                    "18 处判定的合成夹具都过不了 \(Self.complexityBar) 这条线，"
+                                    + "说明本门的 CC 判定空转（实得 \(measured[0].complexity)）")
+        print("【WS-X5 元测试】合成坏例 x5_probe_hot CC=\(measured[0].complexity) ≥ \(Self.complexityBar) —— 门抓得住坏例")
+    }
+}

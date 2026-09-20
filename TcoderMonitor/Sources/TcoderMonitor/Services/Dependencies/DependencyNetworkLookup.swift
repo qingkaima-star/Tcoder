@@ -178,32 +178,26 @@ enum DependencyNetworkLookup {
         }
         guard !supported.isEmpty else {
             return OsvLookupResult(advisories: [], packagesChecked: 0, failedRequests: 0,
-                                   note: notes.joined(separator: "；"))
+                                   note: notes.joined(separator: noteSeparator))
         }
         let batch = Array(supported.prefix(maxOsvBatchPackages))
-        if supported.count > batch.count {
-            notes.append("超出单次上限，仅查询前 \(maxOsvBatchPackages) 个包（其余 \(supported.count - batch.count) 个未查）")
-        }
+        notes.append(contentsOf: capNote(cap: maxOsvBatchPackages, attempted: supported.count, accepted: batch.count))
 
-        let deadline = Date().addingTimeInterval(requestTimeout)
-        // 比内层预算多 1 秒：正常情况下内层会带着「已取回的部分」在 5 秒线自行返回，
-        // 外层只在真挂死时兜底。否则内层攒到的公告会被整个丢弃（缺陷 D2 的另一半）。
-        let outcome = await Self.withHardDeadline(requestTimeout + 1) {
-            await Self.performOsvLookup(batch, deadline: deadline)
-        }
-        switch outcome {
-        case .value(let payload):
-            if let extra = payload.note, !extra.isEmpty { notes.append(extra) }
-            return OsvLookupResult(advisories: payload.advisories,
-                                   packagesChecked: batch.count,
-                                   failedRequests: payload.failedRequests,
-                                   note: notes.joined(separator: "；"))
-        case .timedOut:
-            notes.append("OSV 查询超过 \(Int(requestTimeout)) 秒硬超时，本次在线漏洞结果整体放弃"
-                + "（含已取回但未来得及返回的公告）")
-            return OsvLookupResult(advisories: [], packagesChecked: batch.count,
-                                   failedRequests: batch.count, note: notes.joined(separator: "；"))
-        }
+        return await registryLookup(
+            notes: notes,
+            batchCount: batch.count,
+            timeoutNote: "OSV 查询超过 \(Int(requestTimeout)) 秒硬超时，本次在线漏洞结果整体放弃（含已取回但未来得及返回的公告）",
+            run: { deadline in await Self.performOsvLookup(batch, deadline: deadline) },
+            payloadNote: { $0.note },
+            success: { payload, checked, note in
+                OsvLookupResult(advisories: payload.advisories, packagesChecked: checked,
+                                failedRequests: payload.failedRequests, note: note)
+            },
+            failure: { checked, note in
+                OsvLookupResult(advisories: [], packagesChecked: checked,
+                                failedRequests: checked, note: note)
+            }
+        )
     }
 
     /// 便捷入口：直接对一批依赖记录查 OSV（自动过滤不支持的生态）。
@@ -226,25 +220,66 @@ enum DependencyNetworkLookup {
             return RegistryLookupResult(latestVersions: [:], packagesChecked: 0, failedRequests: 0, note: "")
         }
         let batch = Array(names.prefix(maxNpmPackages))
-        if names.count > batch.count {
-            notes.append("超出单次上限，仅查询前 \(maxNpmPackages) 个包（其余 \(names.count - batch.count) 个未查）")
-        }
+        notes.append(contentsOf: capNote(cap: maxNpmPackages, attempted: names.count, accepted: batch.count))
 
+        return await registryLookup(
+            notes: notes,
+            batchCount: batch.count,
+            timeoutNote: "npm registry 查询超过 \(Int(requestTimeout)) 秒硬超时，已放弃在线版本结果",
+            run: { deadline in await Self.performNpmLookup(batch, deadline: deadline) },
+            payloadNote: { $0.note },
+            success: { payload, checked, note in
+                RegistryLookupResult(latestVersions: payload.versions, packagesChecked: checked,
+                                     failedRequests: payload.failedRequests, note: note)
+            },
+            failure: { checked, note in
+                RegistryLookupResult(latestVersions: [:], packagesChecked: checked,
+                                     failedRequests: checked, note: note)
+            }
+        )
+    }
+
+    // MARK: - 两条在线路径共用的收口
+
+    /// 多条说明并成一句中文时的分隔符。原先四处各自写字面量「；」，值完全相同，
+    /// 收成一份以免将来有人只改一处。
+    static let noteSeparator = "；"
+
+    /// 超出单次上限时的说明；**没超出就返回空数组**（与原两处 `if count > batch.count`
+    /// 只在超限时才 append 的行为一致）。文案与插值顺序逐字照抄。
+    static func capNote(cap: Int, attempted: Int, accepted: Int) -> [String] {
+        guard attempted > accepted else { return [] }
+        return ["超出单次上限，仅查询前 \(cap) 个包（其余 \(attempted - accepted) 个未查）"]
+    }
+
+    /// 「两级超时保护 + 把 payload 自述的说明并进 notes + 结局分派」——OSV 与 npm
+    /// 两条路径原本各写一遍这 14 行（工具点名的重复块），现在共用一份。
+    ///
+    /// 三个必须逐字保住的口径**全部留在调用方**，本函数不引入任何新数值：
+    /// 超时那句中文文案、成功/失败各自怎么装配结果、以及批量数。
+    /// 只有两处时间口径搬了进来，且与搬出前两处写的完全一致：
+    /// 内层 `deadline = now + requestTimeout`，外层硬线 `requestTimeout + 1`
+    /// （比内层多 1 秒：正常情况下内层会带着「已取回的部分」在 5 秒线自行返回，
+    /// 外层只在真挂死时兜底，否则内层攒到的公告会被整个丢弃 —— 缺陷 D2 的另一半）。
+    static func registryLookup<Payload: Sendable, Outcome: Sendable>(
+        notes: [String],
+        batchCount: Int,
+        timeoutNote: String,
+        run: @escaping @Sendable (Date) async -> Payload,
+        payloadNote: @Sendable (Payload) -> String?,
+        success: @Sendable (Payload, Int, String) -> Outcome,
+        failure: @Sendable (Int, String) -> Outcome
+    ) async -> Outcome {
+        var merged = notes
         let deadline = Date().addingTimeInterval(requestTimeout)
-        let outcome = await Self.withHardDeadline(requestTimeout + 1) {
-            await Self.performNpmLookup(batch, deadline: deadline)
-        }
+        let outcome = await Self.withHardDeadline(requestTimeout + 1) { await run(deadline) }
         switch outcome {
         case .value(let payload):
-            if let extra = payload.note, !extra.isEmpty { notes.append(extra) }
-            return RegistryLookupResult(latestVersions: payload.versions,
-                                        packagesChecked: batch.count,
-                                        failedRequests: payload.failedRequests,
-                                        note: notes.joined(separator: "；"))
+            if let extra = payloadNote(payload), !extra.isEmpty { merged.append(extra) }
+            return success(payload, batchCount, merged.joined(separator: noteSeparator))
         case .timedOut:
-            notes.append("npm registry 查询超过 \(Int(requestTimeout)) 秒硬超时，已放弃在线版本结果")
-            return RegistryLookupResult(latestVersions: [:], packagesChecked: batch.count,
-                                        failedRequests: batch.count, note: notes.joined(separator: "；"))
+            merged.append(timeoutNote)
+            return failure(batchCount, merged.joined(separator: noteSeparator))
         }
     }
 

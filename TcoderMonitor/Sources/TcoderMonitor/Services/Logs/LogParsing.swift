@@ -102,65 +102,94 @@ enum LogReader {
         }
         defer { try? handle.close() }
 
-        var size = log.sizeBytes
-        if size <= 0, let attrs = try? FileManager.default.attributesOfItem(atPath: log.url.path),
-           let number = attrs[.size] as? NSNumber {
-            size = number.int64Value
-        }
+        let size = resolvedByteSize(of: log)
         reading.sizeBytes = size
-
-        // 只读尾段：大文件整读进内存会直接把 App 压挂
-        var startOffset: UInt64 = 0
-        if size > Int64(maxBytes) {
-            startOffset = UInt64(size - Int64(maxBytes))
-            reading.truncated = true
-        }
+        let startOffset = tailStartOffset(size: size, maxBytes: maxBytes)
         if startOffset > 0 {
             handle.seek(toFileOffset: startOffset)
         }
-
-        // 时间戳缺年份时以文件修改时间为基准而不是「现在」，否则老日志会被推到未来
-        var builder = LogEventBuilder(sourcePath: log.url.path, referenceDate: log.modifiedAt, role: log.role)
-        var buffer = Data()
-        var droppingLeadingPartialLine = startOffset > 0
-        var bytesFromDisk = startOffset
+        var stream = LogStream(reading: reading, maxBytes: maxBytes, maxLines: maxLines,
+                               size: size, startOffset: startOffset)
         let chunkLength = max(4_096, min(262_144, maxBytes))
-        let newline = UInt8(0x0A)
-        let carriageReturn = UInt8(0x0D)
 
-        func decode(_ data: Data) -> String {
-            if data.isEmpty { return "" }
-            if let text = String(data: data, encoding: .utf8) { return text }
-            reading.parseErrors += 1
-            return String(decoding: data, as: UTF8.self)
+        while !stream.stoppedByLineCap {
+            guard let chunk = stream.nextChunk(from: handle, length: chunkLength) else { break }
+            stream.ingest(chunk)
+            if stream.exceededTailBudget() { break }
         }
 
-        func consume(_ data: Data) {
-            var lineData = data
-            if lineData.last == carriageReturn { lineData.removeLast() }
-            builder.append(decode(lineData))
-        }
+        stream.flushTrailingBuffer()
+        stream.finishEmptyFileDisclosure()
+        return stream.reading
+    }
 
+    /// `log.sizeBytes` 声明为 0 时向文件系统再问一次。
+    /// 这条回退是原 `read` 里的一段，判定（`size <= 0` 且拿得到 `.size`）逐字未改。
+    static func resolvedByteSize(of log: DiscoveredLog) -> Int64 {
+        guard log.sizeBytes <= 0 else { return log.sizeBytes }
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: log.url.path),
+              let number = attrs[.size] as? NSNumber else { return log.sizeBytes }
+        return number.int64Value
+    }
+
+    /// 只读尾段：大文件整读进内存会直接把 App 压挂。返回尾段的起始偏移。
+    /// 「`size > maxBytes` 就截尾并置 truncated」这条判定与拆分前一致。
+    static func tailStartOffset(size: Int64, maxBytes: Int) -> UInt64 {
+        guard size > Int64(maxBytes) else { return 0 }
+        return UInt64(size - Int64(maxBytes))
+    }
+
+    /// 逐块读取到行末的全部可变状态。原先这些是 `read` 里的局部变量与四个嵌套闭包，
+    /// 收进结构体只是为了让每个判定各自成一个短函数，**初值、置位时机、读取顺序一字未改**。
+    fileprivate struct LogStream {
+        var reading: LogFileReading
+        let maxBytes: Int
+        let maxLines: Int
+        let size: Int64
+        var builder: LogEventBuilder
+        var buffer = Data()
+        var droppingLeadingPartialLine: Bool
+        var bytesFromDisk: UInt64
+        var stoppedByLineCap = false
         /// 读取中途的错误。打开成功但读不出内容时，原因和「文件本来就是空的」必须分开——
         /// 前者是没核对，后者才是核对过零命中。
         var readError: Error?
 
-        func readChunk() -> Data? {
+        static let newline = UInt8(0x0A)
+        static let carriageReturn = UInt8(0x0D)
+
+        init(reading: LogFileReading, maxBytes: Int, maxLines: Int, size: Int64, startOffset: UInt64) {
+            self.reading = reading
+            self.maxBytes = maxBytes
+            self.maxLines = maxLines
+            self.size = size
+            self.builder = LogEventBuilder(sourcePath: reading.url.path,
+                                           referenceDate: reading.modifiedAt,
+                                           role: reading.role)
+            self.droppingLeadingPartialLine = startOffset > 0
+            self.bytesFromDisk = startOffset
+            // 时间戳缺年份时以文件修改时间为基准而不是「现在」，否则老日志会被推到未来
+            if startOffset > 0 { self.reading.truncated = true }
+        }
+
+        /// 读一块；读到空（文件到底）与读失败都返回 nil，但**只有读失败才记 readError**。
+        mutating func nextChunk(from handle: FileHandle, length: Int) -> Data? {
+            let chunk: Data?
             do {
-                return try handle.read(upToCount: chunkLength)
+                chunk = try handle.read(upToCount: length)
             } catch {
                 if readError == nil { readError = error }
                 return nil
             }
+            guard let chunk, !chunk.isEmpty else { return nil }
+            return chunk
         }
 
-        var stoppedByLineCap = false
-        while !stoppedByLineCap {
-            guard let chunk = readChunk(), !chunk.isEmpty else { break }
+        /// 把一块字节按换行切成行喂给 builder，并处理「截断处的第一个半行」与行数上限。
+        mutating func ingest(_ chunk: Data) {
             buffer.append(chunk)
             bytesFromDisk += UInt64(chunk.count)
-
-            while let index = buffer.firstIndex(of: newline) {
+            while let index = buffer.firstIndex(of: Self.newline) {
                 let lineData = buffer.subdata(in: buffer.startIndex..<index)
                 buffer.removeSubrange(buffer.startIndex...index)
                 if droppingLeadingPartialLine {
@@ -175,31 +204,49 @@ enum LogReader {
                     break
                 }
             }
-
-            if stoppedByLineCap { break }
-            if size <= 0, bytesFromDisk >= UInt64(maxBytes) {
-                reading.truncated = true
-                break
-            }
         }
 
-        if !stoppedByLineCap, buffer.isEmpty == false, droppingLeadingPartialLine == false {
+        /// `size <= 0` 时（拿不到声明大小）只能用已读字节数当硬闸。
+        mutating func exceededTailBudget() -> Bool {
+            guard size <= 0, bytesFromDisk >= UInt64(maxBytes) else { return false }
+            reading.truncated = true
+            return true
+        }
+
+        /// 读到尽头剩下的最后一段：仍在「准备丢半行」的状态就不收尾，与拆分前一致。
+        mutating func flushTrailingBuffer() {
+            guard !stoppedByLineCap, !buffer.isEmpty, !droppingLeadingPartialLine else { return }
             consume(buffer)
         }
 
-        reading.totalLines = builder.lineCount
-        reading.linesRead = builder.lineCount
-        reading.events = builder.events
-        // 文件声明有内容、却一行都没读出来：这不是「空的」，这是没读进来。
-        // 不标成读取失败，就会被当成「核对过、零命中」参与后续结论。
-        if let readError {
-            reading.readFailed = true
-            reading.readFailure = readFailureReason(for: readError)
-        } else if reading.totalLines == 0 && reading.sizeBytes > 0 {
-            reading.readFailed = true
-            reading.readFailure = "文件有 \(reading.sizeBytes) 字节，却一行都没有读到"
+        mutating func consume(_ data: Data) {
+            var lineData = data
+            if lineData.last == Self.carriageReturn { lineData.removeLast() }
+            builder.append(decode(lineData))
         }
-        return reading
+
+        mutating func decode(_ data: Data) -> String {
+            if data.isEmpty { return "" }
+            if let text = String(data: data, encoding: .utf8) { return text }
+            reading.parseErrors += 1
+            return String(decoding: data, as: UTF8.self)
+        }
+
+        /// 收尾：行计数、事件、以及「声明有内容却一行都没读出来」这条诚实性披露。
+        mutating func finishEmptyFileDisclosure() {
+            reading.totalLines = builder.lineCount
+            reading.linesRead = builder.lineCount
+            reading.events = builder.events
+            // 文件声明有内容、却一行都没读出来：这不是「空的」，这是没读进来。
+            // 不标成读取失败，就会被当成「核对过、零命中」参与后续结论。
+            if let readError {
+                reading.readFailed = true
+                reading.readFailure = LogReader.readFailureReason(for: readError)
+            } else if reading.totalLines == 0 && reading.sizeBytes > 0 {
+                reading.readFailed = true
+                reading.readFailure = "文件有 \(reading.sizeBytes) 字节，却一行都没有读到"
+            }
+        }
     }
 
     /// 把「打不开 / 读不动」的错误翻成给用户看的一句话。
