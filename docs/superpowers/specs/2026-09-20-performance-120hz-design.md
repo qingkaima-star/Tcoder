@@ -53,11 +53,36 @@
 | `os_signpost`（`OSSignpostID` 老式 API） | 可用 | 打点；`OSSignposter` 新式 API 的 `emit`/`signpost` 成员在本 SDK **签名不同，用前先探针** |
 | `TimelineView(.animation(minimumInterval:paused:))`、`Canvas` | 可用 | 重画曲线/矩阵的原语 |
 | `EquatableView(content:)`、`View.drawingGroup(opaque:colorMode:)` | 可用 | 手工短路重算 |
-| `CADisplayLink` | **不可用**（"unavailable in macOS"） | 照抄 iOS 帧率方案这条路是死的 |
-| `MetricKit` 的 `MXAnimationDiagnostic` / `MXMemoryDiagnostic` / `MXCPUDiagnostic` | **macOS 上不存在**（只有 `MXMetricManager`、`MXAppLaunchMetric`） | 线上帧率回传方案不成立 |
+| `CADisplayLink` | **可用——但只能经 `NSView.displayLink(target:selector:)` 拿到**（见 §2.1） | 直接构造子 `CADisplayLink(target:selector:)` 在 macOS **不可用**；成员 `preferredFramesPerSecond` / `frameInterval` / `preferredFrameDuration` 也不可用 |
+| MetricKit 的 `MXAnimationDiagnostic` / `MXMemoryDiagnostic` / `MXCPUDiagnostic` | **macOS 上不存在**（只有 `MXMetricManager`、`MXAppLaunchMetric`） | 线上帧率回传方案不成立 |
 | `GlassEffectContainer` / `.glassEffect` | 仅 macOS 26 | 闸门仍只准集中在 `Design/Glass.swift` |
 | `.containerBackground(_, for: .window)` | 仅 macOS 15+ | 需 `#available` 兜底，同样只准集中在 Design 层 |
+| `onScrollPhaseChange` / `onScrollGeometryChange(for:of:action:)` | **仅 macOS 15+**（14 下限报 "only available in macOS 15.0 or newer"） | T3 不能用它们（页面禁散写 `#available`） |
+| `NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .leftMouseDragged, .rightMouseDragged])`、`NSScrollView.didLiveScrollNotification` | **macOS 14 可用** | **T3 交互期暂停就走这条**（见 §4.1） |
 | 本机运行系统 | **macOS 26.5.2** | 真玻璃路径在本机生效，测出来的数就是 26 路径的数 |
+
+### 2.1 纠正一处我自己写错的结论（15:33 复核，编译探针）
+
+本文件初稿在 §2 写过「`CADisplayLink` 不可用 → 照抄 iOS 帧率方案这条路是死的」。**那是错的**，
+错因就是我刚在别处提醒过别人的那个坑：**半截探针会得出反向结论**。我探的是
+`CADisplayLink(target:selector:)` 直接构造子（确实 "unavailable in macOS"），
+但**没有探 `NSView.displayLink(target:selector:)`** —— 它返回的正是 `CADisplayLink`，
+且整套在 macOS 14 下限可用：
+
+```swift
+let dl = someView.displayLink(target: handler, selector: #selector(H.tick(_:)))  // -> CADisplayLink
+dl.add(to: RunLoop.main, forMode: .common)     // 注意：add(_:) 单参版不存在，必须 to:forMode:
+dl.isPaused = true                             // 不是 .paused
+dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
+// 回调参数可用成员：timestamp / duration / targetTimestamp
+// 不可用成员：preferredFrameDuration / preferredFramesPerSecond / frameInterval
+```
+
+**结论改动**：`FramePulse` 的主时间源从 `CVDisplayLink` 升级为 **`NSView.displayLink` 拿到的
+`CADisplayLink`**（它是"这个视图所在显示器真正呈现的节拍"，比 `CVDisplayLink` 的"显示器名义节拍"
+更贴近用户看到的卡顿）；`CVDisplayLink` 与 `CGDisplayMode.refreshRate` 降为**无窗口时的兜底与名义 Hz 来源**。
+两把尺子仍然互相校验，但**不得共享同一盲区**：`displayLink` 挂在具体 `NSView` 上，
+测不到"窗口不可见时"的行为，这部分留给 xctrace 外部尺子。
 
 ## 3. 目标（T1~T9，全部可机器断言）
 
@@ -97,6 +122,59 @@
    它是常驻门禁的尺子，与 xctrace 这把外部尺子**互相校验**（两把尺子不得共享同一盲区）。
 3. T5 三条静态禁则守卫 + **每条配元测试**（故意造违规样本确认它会红）。理由见记忆
    「扫描型测试要配元测试」：本仓上一轮的病因正是"令牌定义了但零引用"，旧守卫查不出来。
+
+## 4.1 T3「交互期暂停」的实现位置（由探针决定，不由偏好决定）
+
+候选 API 探测结果：`onScrollPhaseChange` / `onScrollGeometryChange` 是 **macOS 15+**，
+而红线禁止页面散写 `#available`（AGENTS.md §3 横切约束 1、无界红线 7）→ **不能用**。
+可用的是 **macOS 14 就有**的 `NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel,
+.leftMouseDragged, .rightMouseDragged])` 与 `NSScrollView.didLiveScrollNotification`。
+
+因此机制定死为：**`AppState` 装一个本地事件监视器记 `lastInteractionAt`**，心跳 tick 到来时
+若 `now - lastInteractionAt < 150ms` 就**跳过发布**；页面**零改动**、Design 层零 `#available`。
+两条硬要求：
+1. **暂停不许丢数据**：跳过的帧仍要进环形缓冲，恢复时一次性补齐；**严禁把暂停期画成 0 或空白**
+   （那等于制造假读数，违反 T8 与 `PerformanceMemoryHonestyTests` 的精神）。
+2. **暂停不许变成"永远暂停"**：监视器必须成对释放；单次连续暂停实测 **>500ms 即本条判失败并回退**。
+   实测方式：`perf_harness.sh` 的 `scroll` 档（驱动得起就用它），驱动不起来就交 `FramePulse` 内建读数，
+   两者都拿不到就**明写"未覆盖"**，不许拿 idle 档的数冒充。
+
+## 5.1 M1 性能工单（与无界工单**同一次交付**，两家合并执行）
+
+每条都带"改动前实测"与"交回时要拿出的数"。**没有数的报告按未完成处理。**
+
+### WS-O 外壳与总览 —— 性能包
+
+| 工 | 改动前实测病因 | 交回判据 |
+|---|---|---|
+| O-1 侧栏脱离心跳失效面 | `ProjectSidebar.sidebarFooter` 读 `monitor.latestSnapshot`，其失效域含整个 `List` 内容闭包 → **每 1.5s 重建全部项目行**（`ProjectSidebar.projectsSection`、`ProjectRow.body`） | 停在总览页跑 `perf_harness.sh idle`，`potential-hangs` 从 **13 次/25s → 0**；`ProjectRow` 路径上不再出现每秒级重建 |
+| O-2 总览脱离整页重算 | `DashboardView.snapshot` + `livePerformanceCard` + `CPUHistoryChart.body`：一次 publish 让 4 枚 tile + 3 张静态卡 + 90 点×2 mark 全量重算；主线程 **64.3%** 样本在 `AG::Graph::UpdateStack::update()` | 主线程热点第一名**不再是** `_updateViewGraph`；总览页 app-update 相位 ≤ 8.33ms |
+| O-3 `AnyView` 归零 | `GlassSection.trailing: AnyView?` 声明 1 处，Views 内 `AnyView` 13 处 | 全仓 `AnyView` 计数 **0**，且写进守卫（元测试自证抓得住坏样例） |
+| O-4 切页首帧 | 无实测（待 `switch` 档基线） | 交 `switch` 档改前/改后同形状读数；**测不到就明写"未覆盖"** |
+
+### WS-P 代码与 Git 五页 —— 性能包
+
+| 工 | 改动前实测病因 | 交回判据 |
+|---|---|---|
+| P-1 密集矩阵降本 | `ContributorHourRow.bar(for:)`：30 行 × 24 柱 = **720 个 `RoundedRectangle` + 720 个 `.help(String(format:))`**，且 `peak` 每柱重算；`GitActivityHeatmap.body` 非懒 **168 格 + 168 tooltip**，`intensity` 内两次 `.max()` | 改 `Canvas` 或懒加载；交回给出**视图实例数改前/改后**（同一计数口径：`grep -c` 的调用点数 + 渲染期实例数算法要写清） |
+| P-2 表格懒加载 | 全仓 **0 个 `LazyVStack`、0 个 `Table`**；`DependenciesView.body` 用 `ScrollView{VStack}` 一次实例化 N 生态 × 40 行 | 名下五页长列表改 lazy；列头仍只能用 `Design/DataTable.swift`（红线 1，只许调用不许改） |
+| P-3 body 内派生集合缓存 | `DependencySafetyVerdict` 在 body 里被构 4 次（每次 `flatMap`+`filter` 全量依赖）；`CodeRiskAnalysis.suggestions` ≈10 次 filter/map/max/reduce；`CodeDuplicationBlockRow.hint` 对**全部** occurrence 做 `pathTail`；`HealthView.historyPoints` 每 body 重排 | 命中数进 R 的 T5 棘轮基线并**只减不增**；名下页目标 0 |
+| P-4 扫描离开主线程 | 实测扫描耗时 **Git 11.4s / 8.0s、代码 1830ms**；5 分析器 `async let` 并发 + 16 路 `classifyConcurrently`，扫描期 CPU 抢占为"高" | 扫描运行中点击响应 ≤ 100ms（T7），并给出 `perf_harness.sh` 扫描期读数；**扫描结果数值必须逐位不变**（不许为提速改口径） |
+| P-5 稳定 identity | `id: \.offset` **8 处**、`id: \.self`（String/Int 数组）**7 处** | 名下页归零，行模型上 `Identifiable` |
+
+### WS-W 性能·日志·评分 —— 性能包
+
+| 工 | 改动前实测病因 | 交回判据 |
+|---|---|---|
+| W-1 `body` 内文件 I/O 归零 | `LogsView.attachedItems` 在 body 里做 `stat()`（`fileSize(of:)`，每次 body 3~4 个调用点） | 挪进 `@State` + `.task`；R 的 T5-③ 守卫名下页命中 **0** |
+| W-2 图表降本 | `LiveSeriesChart.body` 每点 AreaMark+LineMark，**每 mark 现场构造 `LinearGradient` + 动态 `NSColor`**（C 包已把构造变成缓存，但重算面还在）；`trustedMemoryPoints` 每 tick 被跑 **3 遍**（270 个 `SampleContext`） | 停在该页跑 `idle`，app-update ≤ 8.33ms；`trustedMemoryPoints` 每 tick **1 遍** |
+| W-3 轴标签 formatter | `LiveSeriesChart.xLabel(for:)` 每个刻度现造 `DateFormatter()`（~5 标签 ×2 图 ×每 tick） | 提 `static let`；R 的 T5-① 守卫该文件命中 0 |
+| W-4 进程榜 | `PerformanceProcessTable.row`：20 行 × 6 个 `LiveNumber` 格式化 + 每行 2 处 `.help` 拼串；`PerformanceView.rankedProcesses` → `MachSystemMonitor.processesByMemory` 每次访问全量 `sorted`（本机 `ps ax` = 920） | 排序消费 P 缓存的榜单（**不再自算**）；榜长与内容逐位不变 |
+| W-5 消费 P 的细粒度契约 | 现状：性能页整页 body 读每秒变化的值 | 改读 P 在 M0 交付的细粒度入口 + P 的《必须迁移清单》，粗 API 棘轮该流命中数 → 0 |
+
+**三家共同**：`AnyView` 归零（各自名下）、T5 三条守卫全绿且元测试自证、
+`git merge main` 后 `build --build-tests` + `test` 双绿 + `premerge_check.sh` 回执、
+**每组先过门再 commit**（子代理有 150 轮上限）、Obsidian 名下笔记贴真实输出。
 
 ## 5. 分工（零文件重叠，按"谁消费谁负责"）
 
