@@ -79,16 +79,29 @@ sections() {
 
 instance_pids() { pgrep -x TcoderMonitor 2>/dev/null || true; }
 
+# 取某 pid 的可执行文件绝对路径。**为什么不用 `ps -o args=`**：本机 `ps` 被系统拒绝
+# （`/bin/ps: Operation not permitted`，实测在非沙箱下同样如此），于是原来那行永远取空，
+# 而 `TARGET_FLAVOR` 会**默认成 release** —— 等于给一份可能来自 debug 的读数贴上 release 标签，
+# 正好违反 spec §7.3「两档绝对值不可混比」。`lsof -p` 在本机可用，`txt` 行就是可执行文件。
+pid_binary() {  # pid_binary <pid>
+  lsof -p "$1" 2>/dev/null | awk '$4 == "txt" { print $NF; exit }'
+}
+
 TARGET_BINARY=""   # 由 require_idle_target 填：实际被采的那个二进制的绝对路径
 TARGET_FLAVOR=""   # release / debug —— spec §7.3 要求两档的绝对值永不混比
 
 note_target_flavor() {  # note_target_flavor <pid>
-  TARGET_BINARY=$(ps -o args= -p "$1" 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | cut -d' ' -f1)
+  TARGET_BINARY=$(pid_binary "$1")
+  # **认不出就说认不出**：原来 `*) release` 是个兜底，配上取不到路径的 `ps`，
+  # 会稳定地把「不知道」说成 release。release 与 debug 的绝对值差着一个量级，
+  # 这种默认值是把读数卖给第一个来查的人。
   case "$TARGET_BINARY" in
-    *debug*) TARGET_FLAVOR="debug" ;;
-    *) TARGET_FLAVOR="release" ;;
+    "") TARGET_FLAVOR="未知（取不到被采二进制 → release/debug 不可判定，本批读数不得与任何基线比）" ;;
+    *".build/debug"*) TARGET_FLAVOR="debug" ;;
+    *"/dist/Tcoder.app/"*) TARGET_FLAVOR="release" ;;
+    *) TARGET_FLAVOR="未知（路径既非 .build/debug 也非 dist/Tcoder.app：$TARGET_BINARY）" ;;
   esac
-  echo "    被采二进制=$TARGET_BINARY 口径=$TARGET_FLAVOR"
+  echo "    被采二进制=${TARGET_BINARY:-（取不到）} 口径=$TARGET_FLAVOR"
 }
 
 preflight_context() {  # preflight_context <outdir> <pid>
@@ -98,10 +111,22 @@ preflight_context() {  # preflight_context <outdir> <pid>
   [ -n "$load1" ] || load1=0
   f="$out/measurement-context.txt"
 
-  front=$(osascript -e 'tell application "System Events" to name of first application process whose frontmost is true' 2>/dev/null | tr -d '\n')
+  # 前台 App：**先走 `lsappinfo`（零权限）**。原来只用 `osascript` + System Events，
+  # 而本机那条路被权限拒（实测 `-10004 发生权限违例`），于是永远得到「未知」、
+  # 闸门永远拒跑——一条因为取不到数就永远说"不合格"的闸门，等于没有这把尺子。
+  local asn win
+  asn=$(lsappinfo front 2>/dev/null || true)
+  front=""
+  [ -n "$asn" ] && front=$(lsappinfo info -only name "$asn" 2>/dev/null | sed -n 's/^"LSDisplayName"="\(.*\)"$/\1/p')
+  [ -n "$front" ] || front=$(osascript -e 'tell application "System Events" to name of first application process whose frontmost is true' 2>/dev/null | tr -d '\n')
   [ -n "$front" ] || front="未知"
-  visible=$(osascript -e "tell application \"System Events\" to get visible of process \"TcoderMonitor\"" 2>/dev/null | tr -d '\n')
-  [ -n "$visible" ] || visible="未知"
+  # 窗口在不在屏：走 `winlist.swift`（CGWindowList，**零权限**），与其它三个取证脚本同一把尺子。
+  win=$(xcrun swift "$WINLIST" "$pid" 2>/dev/null | head -1)
+  if [ -n "$win" ]; then
+    visible="有在屏窗口（$(printf '%s' "$win" | cut -d'|' -f2)）"
+  else
+    visible="无在屏窗口（隐藏/最小化/不在屏）"
+  fi
   others=$(pgrep -x swiftc 2>/dev/null | tr '\n' ' ')
 
   { echo "# 测量上下文（读数只有在这一组条件下才可互比）"
@@ -131,10 +156,12 @@ preflight_context() {  # preflight_context <outdir> <pid>
     echo "   确实要量后台态就 ALLOW_UNFRONTMOST=1（那批只能标成『后台态』，不得当交互基线）。" >&2
     hard=1
   fi
-  if [ "$visible" = "false" ]; then
-    echo "!! 被测进程处于 hidden 状态，窗口根本没在画。取消隐藏再测。" >&2
-    hard=1
-  fi
+  case "$visible" in
+    无在屏窗口*)
+      echo "!! 被测进程没有在屏窗口（$visible）——窗口根本没在画，量不到有意义的心跳期帧。" >&2
+      echo "   把窗口恢复出来（取消最小化 / 切到该 Space）再测。" >&2
+      hard=1 ;;
+  esac
   [ "$hard" = "1" ] && [ "${IGNORE_CONTEXT_GATE:-0}" != "1" ] && die "测量上下文不达标（详见 $f）。IGNORE_CONTEXT_GATE=1 可强行跳过，但那批读数必须标注为『条件不合格』。"
   [ "$hard" = "1" ] && echo "    ⚠ IGNORE_CONTEXT_GATE=1：条件不合格，这批读数不得进任何对比表。" >&2
   echo "    上下文已落 $f"
@@ -156,7 +183,7 @@ require_idle_target() {  # 返回全局 PID；!= 1 个实例即拒跑（除非�
     echo "      spec §7.5 的「采样期间独占实例」前提**不成立**，这批读数的绝对值只能与同样"
     echo "      多实例条件下取的另一批比，不能直接和 §1 的独占基线比。meta.json 里已记 coexist=$n。"
     COEXIST="$n"
-    echo "    目标实例 pid=$PID，来源：$(ps -o args= -p "$PID" | cut -c1-100)"
+    echo "    目标实例 pid=$PID，来源：$(pid_binary "$PID" | cut -c1-100)"
     note_target_flavor "$PID"
     return 0
   fi
@@ -178,8 +205,8 @@ require_idle_target() {  # 返回全局 PID；!= 1 个实例即拒跑（除非�
   PID="$pids"
   COEXIST=1
   local exe
-  exe=$(ps -o comm= -p "$PID" | sed 's/.*\///')
-  echo "    目标实例 pid=$PID（$exe），来源：$(ps -o args= -p "$PID" | cut -c1-100)"
+  exe=$(basename "$(pid_binary "$PID")")
+  echo "    目标实例 pid=$PID（${exe:-未知}），来源：$(pid_binary "$PID" | cut -c1-100)"
   note_target_flavor "$PID"
 }
 
