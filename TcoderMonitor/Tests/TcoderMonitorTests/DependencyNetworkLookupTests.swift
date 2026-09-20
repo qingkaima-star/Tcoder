@@ -20,12 +20,13 @@ import XCTest
 // 本文件不修改、也不放宽任何被测超时值。
 //
 // 夹具全在 `NSTemporaryDirectory()` 下即建即删；不读本机任何已有仓库。
+// 2026-09-20 WS-X3：本文件 701 行超口径，四个类已各成文件；本文件只留夹具与 1) 离线守卫组。
 // 在线实测对网络抖动敏感（同一请求观测到 0.9s 与 3.5s 两种结果），需要真实数据的用例最多重试 2 次，
 // 每次耗时都会记进附件 —— 重试是给抖动留余地，不是放宽预算。
 
 // MARK: - 探针与工具
 
-private enum NetProbe {
+enum NetProbe {
     /// RFC 5737 TEST-NET-1：公网不可路由。curl 实测 `https://192.0.2.10/v1/querybatch`
     /// 在 TLS 层挂 81.8 秒才报错（另一文档段 198.51.100.7 挂 83.9 秒）—— 天然的「永不应答」。
     static let blackHoleHost = "192.0.2.10"
@@ -86,7 +87,7 @@ private enum NetProbe {
 
 /// 在 body 执行期间把 OSV / npm 的主机名整体换成 `host`，结束后恢复原值。
 /// SwiftPM 的 XCTest runner 默认串行执行用例，故不额外加锁。
-private func withHostOverride<T>(_ host: String, _ body: () async throws -> T) async rethrows -> T {
+func withHostOverride<T>(_ host: String, _ body: () async throws -> T) async rethrows -> T {
     let key = DependencyNetworkLookup.hostOverrideEnvironmentKey
     let previous = ProcessInfo.processInfo.environment[key]
     host.withCString { _ = setenv(key, $0, 1) }
@@ -96,9 +97,9 @@ private func withHostOverride<T>(_ host: String, _ body: () async throws -> T) a
     return try await body()
 }
 
-private func uptimeNow() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
+func uptimeNow() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
 
-private func secondsText(_ value: TimeInterval) -> String { String(format: "%.3fs", value) }
+func secondsText(_ value: TimeInterval) -> String { String(format: "%.3fs", value) }
 
 // MARK: - 夹具
 
@@ -106,7 +107,7 @@ private func secondsText(_ value: TimeInterval) -> String { String(format: "%.3f
 ///
 /// `snapshotBlind`（moment / semver / jquery / react 内置快照都没收录）是用来证明
 /// 「拿到的版本确实来自 registry.npmjs.org，而不是内置字典」的抓手。
-private enum DepFixture {
+enum DepFixture {
     /// 只放 2 个 OSV 命中少（3 条公告）的包：详情二次拉取能稳稳落在 5 秒预算内。
     static let advisoryPackageJSON = """
     {
@@ -183,7 +184,7 @@ private enum DepFixture {
     }
 }
 
-private extension XCTestCase {
+extension XCTestCase {
     func makeDependencyProject(_ tag: String, files: [String: String]) throws -> URL {
         let base = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("tcoder-depnet-\(tag)-\(UUID().uuidString)", isDirectory: true)
@@ -374,328 +375,9 @@ final class DependencyNetworkOfflineGuardTests: XCTestCase {
 
 }
 
-// MARK: - 2) 硬超时实测（黑洞地址；本机环境不「挂住」就整组跳过）
-
-
-final class DependencyNetworkTimeoutTests: XCTestCase {
-
-    override func setUp() async throws {
-        let stalls = await NetProbe.doesBlackHoleStall()
-        try XCTSkipUnless(stalls,
-                          "本机到 \(NetProbe.blackHoleHost) 的裸请求会立刻报错而不是挂住，"
-                          + "这种环境下量出的「5 秒」证明不了预算生效，整组跳过")
-    }
-
-    /// 主张②：请求不能在预算内完成时，必须停在预算附近被放弃，而不是挂到裸请求的 81.8 秒。
-    func testHardTimeoutAbortsAtBudgetInsteadOfHanging() async throws {
-        let timeout = DependencyNetworkLookup.requestTimeout
-        XCTAssertEqual(timeout, 5, "被测预算是 5 秒；本测试不改动它")
-        let queries = [
-            OsvPackageQuery(ecosystem: "npm", package: "jquery", version: "3.4.1"),
-            OsvPackageQuery(ecosystem: "Maven", package: "com.alibaba:fastjson", version: "1.2.68"),
-        ]
-
-        let osvStarted = uptimeNow()
-        let osv = await withHostOverride(NetProbe.blackHoleHost) {
-            await DependencyNetworkLookup.osvBatch(queries)
-        }
-        let osvSeconds = uptimeNow() - osvStarted
-
-        let npmStarted = uptimeNow()
-        let registry = await withHostOverride(NetProbe.blackHoleHost) {
-            await DependencyNetworkLookup.npmLatestVersions(["jquery", "moment", "semver", "react"])
-        }
-        let npmSeconds = uptimeNow() - npmStarted
-
-        let root = try makeDependencyProject("timeout", files: DepFixture.full)
-        let (report, analyzeSeconds) = try await withHostOverride(NetProbe.blackHoleHost) {
-            try await analyzeOnline(root)
-        }
-
-        logMeasurement("主张②对照基线",
-                       "同地址无保护裸请求 ≥20s 未结束（curl 实测 81.8s 才失败）；"
-                       + "OSV=\(secondsText(osvSeconds)) npm=\(secondsText(npmSeconds)) "
-                       + "整链路=\(secondsText(analyzeSeconds))")
-        logMeasurement("超时 note", "OSV[\(osv.note)] npm[\(registry.note)] 报告[\(report.networkLookupNote)]")
-
-        // 单点：OSV 预算 5s、npm 预算 5(+1)s，各留 2 秒调度余量；关键是停在个位数秒。
-        XCTAssertLessThanOrEqual(osvSeconds, timeout + 2, "OSV 必须停在预算附近，实测 \(osvSeconds)s")
-        XCTAssertGreaterThanOrEqual(osvSeconds, 0.2, "这么快返回说明根本没发请求，测量无效")
-        XCTAssertLessThanOrEqual(npmSeconds, timeout + 3, "npm 必须停在预算附近，实测 \(npmSeconds)s")
-        XCTAssertGreaterThanOrEqual(npmSeconds, 0.2, "这么快返回说明根本没发请求，测量无效")
-
-        XCTAssertTrue(osv.advisories.isEmpty)
-        XCTAssertFalse(osv.note.isEmpty, "超时/失败必须写进 note")
-        XCTAssertGreaterThanOrEqual(osv.failedRequests, queries.count)
-        XCTAssertTrue(registry.latestVersions.isEmpty)
-        XCTAssertFalse(registry.note.isEmpty)
-        XCTAssertEqual(registry.failedRequests, 4)
-
-        // 整条链路是 npm -> OSV 串行，最坏 ≈ 5+6 秒，而不是裸请求的 81.8 秒。
-        XCTAssertLessThanOrEqual(analyzeSeconds, 2 * timeout + 4,
-                                "整链路实测 \(analyzeSeconds)s，超出两个查询预算之和")
-        // 主张③同时成立：超时后仍然返回结果，并明确标注未完成。
-        XCTAssertFalse(report.ecosystems.isEmpty, "超时后仍然返回完整清单")
-        XCTAssertGreaterThanOrEqual(report.totalDependencies, 11)
-        XCTAssertFalse(report.offlineVulnerabilities.isEmpty, "内置结论仍然给出")
-        XCTAssertTrue(report.networkLookupPerformed)
-        XCTAssertFalse(report.networkLookupNote.isEmpty)
-        XCTAssertTrue(report.advisories.isEmpty)
-        XCTAssertTrue(report.networkLookupNote.contains("超时") || report.networkLookupNote.contains("失败"),
-                      "报告必须点名在线没查成")
-    }
-}
-
-// MARK: - 3) 真实在线查询（需公网；不可达整组跳过）
-
-final class DependencyNetworkLiveTests: XCTestCase {
-
-    override func setUp() async throws {
-        let seconds = await NetProbe.osvReachable()
-        try XCTSkipIf(seconds == nil, "api.osv.dev 在 4 秒内握不上手：跳过在线实测（本机无网络或被拦截）")
-        if let seconds { logMeasurement("预检 api.osv.dev 往返", secondsText(seconds)) }
-    }
-
-    /// 主张①（registry）：内置快照**没收录**的包能拿到真实最新版本，就证明数据来自 registry。
-    ///
-    /// 最多 3 次尝试，且**必须三个盲区包全部**拿到在线源归因才停：5 个包共用一个并发窗口和
-    /// 同一条 5 秒总预算（`performNpmLookup` + `makeRequest`），冷启动 TLS 握手会让其中
-    /// **个别**包先被掐掉（实测首个请求 5.006s 被预算吃掉、热了之后同一条只要 0.23s）。
-    /// 所以「有一个包拿到了」并不等于「网络给力」，早停条件写成「全都拿到」。
-    ///
-    /// 收尾把两种结局分开，二者绝不混为一谈：
-    ///   · registry 自己都没答上（`npmShortfallDisclosed`）→ XCTSkip，并留下实测数字；
-    ///   · registry 自述答上了、记录里却没有在线源归因 → 归因链路断了，必须失败。
-    /// 不放宽任何断言，也不放宽超时预算。
-    func testOnlineRegistryLookupReturnsRealLatestVersionsForPackagesMissingFromSnapshot() async throws {
-        let root = try makeDependencyProject("live-registry",
-                                             files: ["package.json": DepFixture.registryPackageJSON])
-        let blind = ["moment", "semver", "jquery"]
-        for name in blind {
-            XCTAssertNil(DependencySnapshot.latestKnownVersion(ecosystem: .npm, name: name),
-                         "前置条件：\(name) 不该在内置快照里，否则这条证明不成立")
-        }
-
-        var report = DependencyReport()
-        var seconds: TimeInterval = 0
-        var attempts = 0
-        while attempts < 3 {
-            attempts += 1
-            let attempt = try await analyzeOnline(root)
-            (report, seconds) = attempt
-            let attributed = blind.filter { name in
-                record(report, named: name)?.versionCheckSource == .onlineRegistry
-            }.count
-            if attributed == blind.count { break }
-        }
-
-        let online = records(of: report).filter { $0.versionCheckSource == .onlineRegistry }
-        let detail = online.map { "\($0.name)->\($0.latestKnownVersion ?? "nil")" }.sorted()
-        logMeasurement("主张①registry（尝试\(attempts)次）",
-                       "\(secondsText(seconds)) 在线版本 \(detail.joined(separator: " "))")
-
-        var starved: [String] = []
-        for name in blind {
-            guard let found = record(report, named: name) else {
-                XCTFail("\(name) 应出现在依赖清单里"); continue
-            }
-            if found.versionCheckSource == .onlineRegistry {
-                let latest = try XCTUnwrap(found.latestKnownVersion,
-                                           "\(name) 已归因成在线源，就必须带在线最新版本")
-                XCTAssertFalse(latest.isEmpty)
-                XCTAssertTrue(latest.split(separator: ".").first?.allSatisfy { $0.isNumber } ?? false,
-                              "\(name) 的在线最新版本要像版本号，实测 \(latest)")
-                XCTAssertTrue(found.isProbablyOutdated,
-                              "\(name) 声明 \(found.version) 应被在线最新版 \(latest) 判为过旧")
-                continue
-            }
-            // 以下两条是「归因是否丢」的判据，与网络状况无关，一条都不许让步。
-            if let latest = found.latestKnownVersion {
-                XCTFail("\(name) 有最新版本 \(latest) 却被报成 \(found.versionCheckSource.rawValue)："
-                    + "数据取回来了却没写来源，属归因缺陷，不是网络抖动")
-                continue
-            }
-            guard DependencyNetworkLookup.npmShortfallDisclosed(in: report.networkLookupNote) else {
-                XCTFail("\(name) 既无版本又无在线源归因，而 registry 自述没有任何包查询失败："
-                    + "说明结果被取回却没写回记录 —— 归因链路断了。最后一次 note=\(report.networkLookupNote)")
-                continue
-            }
-            starved.append(name)
-        }
-        XCTAssertTrue(report.networkLookupPerformed)
-
-        // 预检可达 ≠ 现场每次都在预算内：被 registry 自述为「有包没答上」的那些，
-        // 是网络状况而非产品缺陷 —— 跳过并留下实测痕迹，而不是留成一条会自行翻红的断言。
-        if !starved.isEmpty {
-            throw XCTSkip("预检可达，但 \(starved.joined(separator: "、")) 在 \(attempts) 次尝试里都没从 registry "
-                + "取回版本（registry 自述有包未答上）：\(report.networkLookupNote)")
-        }
-        if report.networkLookupNote.contains("超时") {
-            throw XCTSkip("预检可达但现场有请求超出 \(Int(DependencyNetworkLookup.requestTimeout)) 秒预算："
-                + "\(report.networkLookupNote)")
-        }
-    }
-
-    /// 主张①（CVE）：真打 OSV 要回真实公告编号（GHSA / CVE 别名）。
-    ///
-    /// 与 registry 那条同款的处理：两次尝试都没拿到公告时，先看 OSV 自己有没有把缺口讲出来 ——
-    /// 讲了就是网络状况（跳过并留数），没讲就是"自称查成功却一条都没给"（必须失败）。
-    /// 公告一旦拿到，下面每条实质断言原样保留，不做任何放宽。
-    func testOnlineVulnerabilityLookupReturnsRealAdvisoryIdsAndCVEAliases() async throws {
-        let root = try makeDependencyProject("live-advisory",
-                                             files: ["package.json": DepFixture.advisoryPackageJSON])
-        var report = DependencyReport()
-        var seconds: TimeInterval = 0
-        var attempts = 0
-        while attempts < 2 {
-            attempts += 1
-            let attempt = try await analyzeOnline(root)
-            (report, seconds) = attempt
-            if !report.advisories.isEmpty { break }
-        }
-
-        let osv = report.advisories.filter { $0.source.localizedCaseInsensitiveContains("OSV") }
-        let listing = osv.map { advisory in
-            advisory.id + "(aliases=" + advisory.aliases.joined(separator: ",")
-                + ",sev=" + advisory.severity.rawValue + ",pkgs=" + advisory.affectedPackages.joined(separator: "|") + ")"
-        }
-        logMeasurement("主张①OSV（尝试\(attempts)次）",
-                       "\(secondsText(seconds)) 在线公告 \(osv.count) 条：\(listing.joined(separator: " "))")
-
-        if osv.isEmpty {
-            // 空公告 + OSV 自述没查成 = 网络状况；空公告 + OSV 自述查成功了 = 结果被丢，是缺陷。
-            XCTAssertTrue(DependencyNetworkLookup.osvShortfallDisclosed(in: report.networkLookupNote),
-                          "OSV 自述在线查询已完成，却一条公告都没给出（\(attempts) 次尝试）："
-                          + "结果被取回却没落进报告，属归因/聚合缺陷。note=\(report.networkLookupNote)")
-            throw XCTSkip("预检可达，但 OSV 在 \(attempts) 次尝试里都有请求没答上："
-                + "\(report.networkLookupNote)")
-        }
-        for advisory in osv {
-            XCTAssertTrue(["GHSA-", "PYSEC-", "CVE-", "RSEC-", "GO-", "META-"].contains { advisory.id.hasPrefix($0) },
-                          "公告编号要像真实 OSV id：\(advisory.id)")
-            XCTAssertFalse(advisory.affectedPackages.isEmpty, "\(advisory.id) 必须点名受影响坐标")
-            XCTAssertFalse(advisory.summary.isEmpty, "\(advisory.id) 摘要不得为空")
-            XCTAssertTrue(advisory.affectedPackages.allSatisfy { $0.contains("@") },
-                          "受影响坐标要带版本：\(advisory.affectedPackages)")
-        }
-        XCTAssertTrue(osv.contains { $0.aliases.contains { $0.hasPrefix("CVE-") } },
-                      "至少一条在线公告要带真实 CVE 编号")
-        XCTAssertTrue(osv.contains { $0.severity > RiskLevel.none }, "至少一条要有严重度")
-        XCTAssertEqual(report.networkLookupPerformed, true)
-    }
-
-    /// 真实规模档案：12 条依赖在 OSV 一次回 104 条公告 id（curl 实测），
-    /// 而单次只拉 40 条详情、整体预算 5 秒。这里只要求「有界 + 诚实 + 不杜撰」，
-    /// 不要求在线公告非空 —— 结果是否被预算整体放弃，正是这条测试要记录下来的事实。
-    func testRealSizedProjectOnlineProfileStaysBoundedAndHonest() async throws {
-        let root = try makeDependencyProject("live-profile", files: DepFixture.full)
-        let (report, seconds) = try await analyzeOnline(root)
-
-        let covered = Set(["CVE-2021-23337", "CVE-2021-44228", "CVE-2022-25845", "CVE-2020-28168",
-                           "CVE-2015-6420", "CVE-2018-1000531", "CVE-2022-42003"])
-        let duplicated = report.advisories.filter { advisory in advisory.aliases.contains { covered.contains($0) } }
-        logMeasurement("真实规模在线档案",
-                       "\(secondsText(seconds)) 依赖 \(report.totalDependencies) 条 / 在线公告 "
-                       + "\(report.advisories.count) 条 / 内置 \(report.offlineVulnerabilities.count) 条 "
-                       + "/ vulnerableCount=\(report.vulnerableCount) 风险=\(report.riskLevel.rawValue) "
-                       + "note=\(report.networkLookupNote)")
-
-        XCTAssertGreaterThanOrEqual(report.totalDependencies, 11)
-        // 预算：npm(≤6) + OSV(≤5) 串行，再加清单扫描，必须停在个位数~十位数秒。
-        XCTAssertLessThanOrEqual(seconds, 2 * DependencyNetworkLookup.requestTimeout + 6,
-                                 "真实规模在线阶段实测 \(seconds)s，已失去「硬超时」意义")
-        XCTAssertTrue(report.networkLookupPerformed)
-        XCTAssertFalse(report.offlineVulnerabilities.isEmpty, "内置结论永远在场")
-        // 去重：在线公告不得重复计入内置规则已覆盖的同一 CVE。
-        XCTAssertTrue(duplicated.isEmpty, "在线结果与内置规则重复：\(duplicated.map(\.id))")
-        // note 与 advisories 必须自洽：一条在线公告都没拿到时，必须注明原因。
-        if report.advisories.isEmpty {
-            XCTAssertFalse(report.networkLookupNote.isEmpty, "空在线结果必须注明原因：\(report.networkLookupNote)")
-        }
-    }
-}
-
-// MARK: - 4) 版本来源归因（不打公网）
-
-/// 钉住「版本来源归因」本身，一条公网请求都不发。
-///
-/// 为什么要单独有这一组：在线实测那条只能证明「这一次网络给力时归因是对的」，
-/// registry 一抖它就跳，守不住归因链路。这两条把快照侧与在线侧的**成对写回**钉死 ——
-/// 谁给的数据就归因给谁；registry 没答的包不许被顺手改成在线源，
-/// 答了的包也不许只留版本不改来源（那正是"其实没查到"被读成"查到并确认最新"的方向）。
-final class DependencyNetworkAttributionTests: XCTestCase {
-
-    private func offlineReport(_ tag: String, files: [String: String]) async throws -> DependencyReport {
-        let root = try makeDependencyProject(tag, files: files)
-        // allowNetwork=false：这条路径保证一个请求都不发（已由主张④钉住），结果只可能来自内置快照。
-        return try await ManifestDependencyAnalyzer().analyze(projectRoot: root, allowNetwork: false)
-    }
-
-    /// 快照未收录、但在线能返结果的依赖 -> 来源必须是 `.onlineRegistry` 且版本非空。
-    func testRegistryAnswerForSnapshotBlindPackageIsAttributedToOnlineSource() async throws {
-        let report = try await offlineReport("attribution-blind",
-                                            files: ["package.json": DepFixture.registryPackageJSON])
-        let before = try XCTUnwrap(record(report, named: "moment"), "moment 应出现在依赖清单里")
-        XCTAssertEqual(before.versionCheckSource, VersionCheckSource.none,
-                       "前置条件：内置快照没收录 moment，离线阶段它不能带任何来源")
-        XCTAssertNil(before.latestKnownVersion, "前置条件：离线阶段 moment 不能有版本")
-
-        var patched = report
-        ManifestDependencyAnalyzer.applyRegistryVersions(
-            RegistryLookupResult(latestVersions: ["moment": "2.31.0"],
-                                 packagesChecked: 1, failedRequests: 0, note: ""),
-            to: &patched.ecosystems)
-
-        let after = try XCTUnwrap(record(patched, named: "moment"))
-        XCTAssertEqual(after.versionCheckSource, .onlineRegistry,
-                       "registry 已经给出 moment 的版本，来源却还是 \(after.versionCheckSource.rawValue)："
-                       + "在线结果被丢了，用户会把「没核对」读成「已核对」")
-        XCTAssertEqual(after.latestKnownVersion, "2.31.0", "在线版本必须原样落到记录里")
-        XCTAssertFalse(after.latestKnownVersion?.isEmpty ?? true)
-        XCTAssertTrue(after.isProbablyOutdated, "声明 \(after.version) 对在线最新 \(after.latestKnownVersion ?? "") 应判为过旧")
-
-        // 在线用例的跳过闸门只能用得准：成功说明不能被当成「有包没答上」。
-        XCTAssertFalse(DependencyNetworkLookup.npmShortfallDisclosed(in: "在线查询已完成（OSV + npm registry）"),
-                       "全量成功的说明被误判成有缺口，会把真缺陷跳过去")
-        XCTAssertTrue(DependencyNetworkLookup.npmShortfallDisclosed(in: "npm registry：5 个包中 1 个查询失败"))
-        XCTAssertTrue(DependencyNetworkLookup.npmShortfallDisclosed(in: "OSV 批量接口不可用，已改用逐包查询"
-            + "；达到时间预算，剩余 1 个包未查询"))
-        XCTAssertFalse(DependencyNetworkLookup.osvShortfallDisclosed(in: "在线查询已完成（OSV + npm registry）"),
-                       "OSV 的全量成功说明同样不能被误判成缺口")
-        XCTAssertTrue(DependencyNetworkLookup.osvShortfallDisclosed(in: "OSV：12 个包中 13 个查询失败"))
-    }
-
-    /// 内置快照命中的依赖 -> 来源必须是快照，不能是"在线"。
-    func testSnapshotCoveredPackageIsAttributedToBundledSnapshotNotOnline() async throws {
-        let report = try await offlineReport("attribution-snapshot",
-                                            files: ["package.json": DepFixture.registryPackageJSON])
-        let snapshotName = "lodash"
-        let snapshotVersion = try XCTUnwrap(DependencySnapshot.latestKnownVersion(ecosystem: .npm, name: snapshotName),
-                                            "前置条件：\(snapshotName) 必须在内置快照里")
-        let lodash = try XCTUnwrap(record(report, named: snapshotName))
-        XCTAssertEqual(lodash.versionCheckSource, .bundledSnapshot)
-        XCTAssertNotEqual(lodash.versionCheckSource, .onlineRegistry,
-                          "没联网却把来源报成在线源，等于凭空声称在线核对过")
-        XCTAssertEqual(lodash.latestKnownVersion, snapshotVersion)
-
-        // registry 这次只答了 moment：lodash 的结论必须原地不动，既不升级成在线源、也不被抹掉。
-        var patched = report
-        ManifestDependencyAnalyzer.applyRegistryVersions(
-            RegistryLookupResult(latestVersions: ["moment": "2.31.0"],
-                                 packagesChecked: 2, failedRequests: 1, note: "npm registry：2 个包中 1 个查询失败"),
-            to: &patched.ecosystems)
-        let after = try XCTUnwrap(record(patched, named: snapshotName))
-        XCTAssertEqual(after.versionCheckSource, .bundledSnapshot,
-                       "registry 没答 \(snapshotName)，就不能把它顺手改称在线源；实得 \(after.versionCheckSource.rawValue)")
-        XCTAssertEqual(after.latestKnownVersion, snapshotVersion, "未答的包已有结论不许被清空")
-
-        // 反向上限：registry 真答了 lodash 时，来源必须随之升级（否则归因写死了快照）。
-        ManifestDependencyAnalyzer.applyRegistryVersions(
-            RegistryLookupResult(latestVersions: [snapshotName: "9.9.9"],
-                                 packagesChecked: 1, failedRequests: 0, note: ""),
-            to: &patched.ecosystems)
-        let promoted = try XCTUnwrap(record(patched, named: snapshotName))
-        XCTAssertEqual(promoted.versionCheckSource, .onlineRegistry)
-        XCTAssertEqual(promoted.latestKnownVersion, "9.9.9")
-    }
-}
+// MARK: - 2) 硬超时实测 / 3) 真实在线查询 / 4) 版本来源归因
+//
+// 这三组已按类各拆一个文件（WS-X3 TestSplit，用例本体一字未改）：
+// `DependencyNetworkTimeoutTests.swift`、`DependencyNetworkLiveTests.swift`、
+// `DependencyNetworkAttributionTests.swift`。夹具（NetProbe / DepFixture / XCTestCase 扩展）
+// 仍留在本文件，同模块 internal 可见。
