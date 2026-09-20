@@ -106,6 +106,10 @@ extension CodeRiskAnalysis {
     }
 
     static func scaleAdvice(_ code: CodeMetrics) -> [Item] {
+        markerAdvice(code) + proseAdvice(code)
+    }
+
+    private static func markerAdvice(_ code: CodeMetrics) -> [Item] {
         var items: [Item] = []
         // 5) 函数整体长度。
         if code.longFunctions > 0 {
@@ -125,6 +129,11 @@ extension CodeRiskAnalysis {
                               role: Theme.Semantic.neutral, text: divergence))
         }
 
+        return items
+    }
+
+    private static func proseAdvice(_ code: CodeMetrics) -> [Item] {
+        var items: [Item] = []
         // 7) 巨大文件：给出真实行数与扫描器自己的建议原文。
         if let largest = code.hugeFiles.max(by: { $0.lineCount < $1.lineCount }) {
             items.append(Item(
@@ -159,6 +168,7 @@ extension CodeRiskAnalysis {
             ))
         }
 
+        return items
         return items
     }
 }
