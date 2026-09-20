@@ -171,6 +171,39 @@ Tests/TcoderMonitorTests/Health*Tests.swift
 | WS-I 设计债审计 | 硬编码值/魔法数/不统一写法清单 | **仅** Obsidian `45 WS-I 设计债清单.md`；不写码、**不启动 App** |
 | WS-J 自食其果 | 用 Tcoder 扫 Tcoder，按自报结论修真问题 | 报告点名的 `Services/**`；**碰别人目录先停下报总工**；不得改 `Models/**`、`Package.swift`、阈值定义 |
 
+
+### 第三轮（2026-09-20 07:08）：全站 UI「简约无界」重构
+
+设计规格 `docs/superpowers/specs/2026-09-20-borderless-minimal-ui-redesign-design.md`，
+实施计划 `docs/superpowers/plans/2026-09-20-borderless-minimal-ui-redesign.md`。
+基座（M0）已由总工落在 `04453f6` 并打 tag **`m0-borderless-base`**，三家从该 tag 切树。
+
+| 流 | 负责 | 可写路径 | Obsidian |
+|---|---|---|---|
+| WS-O 外壳与总览 | 侧栏 source list / 删 chip 条 / 总览重排 | `Views/RootView.swift`、`Views/ProjectDetailView.swift`、`Views/DashboardView.swift`、`Views/Shell/**`、新建 `Tests/TcoderMonitorTests/ShellBorderlessTests.swift` | 新建 `80 WS-O 外壳与总览无界化.md` |
+| WS-P 代码与 Git 五页 | 代码规模/复杂度/Git/贡献者/依赖 | `Views/Code/**`、`Views/Git/**`、`Views/Dependencies/**`、`Views/CodeGit/**`、新建 `Tests/TcoderMonitorTests/CodeGitBorderlessTests.swift` | 新建 `82 WS-P 代码与Git五页无界化.md` |
+| WS-W 性能·日志·评分 | 杀手功能三页 | `Views/Performance/**`、`Views/Logs/**`、`Views/Health/**`、`Views/PerfLogs/**`、新建 `Tests/TcoderMonitorTests/PerfLogsBorderlessTests.swift` | 新建 `84 WS-W 性能日志评分无界化.md` |
+
+**M0 之后新增的红线（覆盖 §3 旧表的相关条目）**：
+
+1. **`Design/DataTable.swift` 由总工拥有**（自 `Views/CodeGit/CodeGitTable.swift` 上提，
+   它被 6 个目录 10 个文件共用）。三家只许**调用**，不得改；要加列能力报契约缺口。
+2. **`Design/**` 与 `App/Theme.swift` 仍归总工**（M0 起）。三家不得改。
+3. **`View.typed(_:)` 是排版令牌唯一消费入口**（`Design/SharedComponents.swift`）。
+   `Font` 没有任何字距 API，所以 `.font(Theme.Typo.groupLabel.font)` 会**静默丢掉字距**，
+   `BorderlessSurfaceGuardTests` 钉着这条。分区标题一律写 `.typed(Theme.Typo.groupLabel)`。
+4. **`GlassSection` 不再画面板**（`.content` 层现在返回 `self`），`padding` 默认值已是 **0**。
+   页面要"嵌进去"的观感只能靠 `.contentInset`（实心井，限表格/日志/代码块）。
+5. **主读数一律 `Theme.Palette.Surface.ink`**，`.primary` 不够黑（`labelColor` 只有 85% 黑）。
+   数据色禁止用 `info`/`accent`；颜色只承载语义（健康分档/风险/日志等级/增删）。
+6. **投影不得新增**。全仓 `.shadow(` 只允许 1 处且在 `.floating` 分支内，
+   `BorderlessSurfaceGuardTests.test_shadowIsExactlyOneOccurrenceAndSitsInFloating` 会拦。
+7. **页面不得散写 `#available` / `glassEffect`**（沿用 §3 横切约束 1）。
+8. `BorderlessSurfaceGuardTests` 里 `m2WiringComplete = false` 是**总工的闸门**，
+   三家不得自行翻成 true；M2 由总工在接线完成后撤除。
+9. **并行拍图必须 `SWITCH_MODE=argv` + 各自 `CAPTURE_SANDBOX` + 各自输出目录**。
+   `single` 模式会 `defaults write com.tcoder.monitor`，那是全机共享域，三家会互相改页。
+
 ### 三条横切约束（设计与 dogfooding 流尤其注意）
 
 1. **部署下限 macOS 14 不变**。Liquid Glass API 是 macOS 26 才有的，
