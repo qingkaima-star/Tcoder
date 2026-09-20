@@ -151,6 +151,9 @@ python3 scripts/trace_report.py migration --strict   # 挂进自家收尾检查�
 三条红线（都会被当场拦，别试）：
 1. **不要新增第 17 处**——棘轮零余量（`1/1 59/59 10/10 2/2`），多一处立即红；
 2. **不要用 `AnyView` / `id: \.offset` 绕失效面**——那只是把重建换个名字，守卫与本工单都不认；
+   （新加一条同族守卫 `testPreparedCellsAreNeverReslicedOrResorted`：**读到细格之后又再切一次窗口、
+   再排一次榜单**也算假迁移——编译通过、画面也对，收益却留在原地，粗 API 棘轮抓不到它，
+   所以基线从写作起就是 **0**，元测试双向验过）；
 3. **不要对 `curve.value` 再 `suffix`、对 `cpuRanking.value` 再 `sorted`**——排序与切窗已在采集侧做一次。
 
 ### 交回标准（我不接受口头完成）

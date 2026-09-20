@@ -45,6 +45,11 @@ final class PerfInvalidationRatchetTests: XCTestCase {
     /// 新细粒度入口（P 包给三家的契约）。这里只用来证明"合规写法不会误伤"。
     static let finePattern = #"monitor\s*\.\s*(cpu|memory|rates|ledger|pulse|cpuRanking|memoryRanking|groupRanking|curve|isCollectingForDisplay)\s*\.\s*value\b"#
 
+    /// **迁移期的专属失效**：采集侧已经把窗口切好、把榜单排好，页面拿到之后**又再切一次 / 再排一次**。
+    /// 这种写法编译通过、画面也对，收益却原地消失（每 tick 仍然在 body 里做 O(n log n)），
+    /// 而且不会被粗 API 棘轮抓到——因为它读的就是细格。所以单独一条，**基线 0，一处都不许有**。
+    static let reslicePattern = #"\.(curve|cpuRanking|memoryRanking|groupRanking)\s*\.\s*value\s*\.\s*(sorted|suffix|prefix|dropFirst|dropLast|reversed|filter|shuffled)\b"#
+
     /// 回归守卫：采集侧不许再把这些退回去。
     /// 1) `processesByMemory` 不许再是计算属性（每次访问全量排序）；
     /// 2) `allProcesses` 必须留在观察图外；
@@ -278,6 +283,49 @@ final class PerfInvalidationRatchetTests: XCTestCase {
                                             ceiling: item.ceiling, gateOpen: item.open)
             XCTAssertEqual(got, item.expect, "状态机认错了：\(item.name)")
         }
+    }
+
+    // MARK: - 3.5 迁移期专属失效：切好的窗又切一次、排好的榜又排一次
+
+    /// 这条**不报现量也不会有余量问题**，因为基线从一开始就是 0：
+    /// 今天还没有人迁，所以命中数必然是 0；等迁移开始后它才是防止"迁了个假迁移"的闸。
+    func testPreparedCellsAreNeverReslicedOrResorted() throws {
+        let docs = try scannedConsumerDocs()
+        XCTAssertGreaterThanOrEqual(docs.count, Self.minimumConsumerFiles,
+                                    "只扫到 \(docs.count) 个文件，路径口径坏了——下面那条 0 命中就是永真绿")
+        let hits = try Self.scanHits(pattern: Self.reslicePattern, in: docs)
+        XCTAssertTrue(hits.isEmpty, """
+        页面把采集侧**已经算好**的结果又切了一遍/又排了一遍：
+        \(hits.joined(separator: "\n"))
+        `curve.value` 已经是切好窗口的 90 点、`cpuRanking/memoryRanking` 已经是排好序的榜单
+        （都在后台各算一次）。再 `suffix`/`sorted` 一次，等于把收益留在原地还多拷一份数组——
+        粗 API 棘轮抓不到这种写法（它读的是细格），所以由这条管。
+        """)
+    }
+
+    /// 元测试（双向）：坏样例必须三种形状都被抓到，合规写法一条都不许被误伤。
+    /// 没这一条，"0 命中"到底是"没人这么写"还是"正则坏了"就分不出来——本仓的老坑。
+    func testResliceScannerCatchesBadAndSparesGood() throws {
+        let bad: [(String, String)] = [
+            ("已切窗的曲线又 suffix", "PerformanceLiveCharts(points: Array(monitor.curve.value.suffix(30)))"),
+            ("已排序的榜单又 sorted", "ForEach(monitor.cpuRanking.value.sorted { $0.cpuUsage > $1.cpuUsage })"),
+            ("内存榜倒序现算", "let rows = monitor.memoryRanking.value.reversed()"),
+        ]
+        for (name, sample) in bad {
+            let hits = try Self.scanHits(pattern: Self.reslicePattern,
+                                        in: [Self.syntheticDoc("合成夹具", sample)])
+            XCTAssertFalse(hits.isEmpty, "规则抓不住「\(name)」，它就是条废守卫：\(sample)")
+        }
+        let good = """
+        PerformanceLiveCharts(points: monitor.curve.value, context: context)
+        if monitor.curve.value.isEmpty { EmptyState() }
+        Text("采样点 \\(monitor.pulse.value.historyCount)")
+        ProcessRow(process: monitor.memoryRanking.value.first)
+        // 注释里写 monitor.curve.value.suffix(90) 不算调用点
+        """
+        let spared = try Self.scanHits(pattern: Self.reslicePattern,
+                                       in: [Self.syntheticDoc("合规夹具", good)])
+        XCTAssertTrue(spared.isEmpty, "合规写法被误伤，逼人家写绕路代码：\n\(spared.joined(separator: "\n"))")
     }
 
     // MARK: - 4. 采集侧不许退回旧形状
