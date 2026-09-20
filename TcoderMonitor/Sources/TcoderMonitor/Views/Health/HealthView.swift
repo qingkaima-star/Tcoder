@@ -30,15 +30,19 @@ struct HealthView: View {
         }
     }
 
+    /// 页内小标题（页头归 WS-O：项目名 / 路径 / 分析时间在 `ProjectDetailView`）。
+    /// 图标灰阶；本页的口径声明常驻在 `HeuristicClaimLine`（分数旁边），不重复写在这里。
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
             ThemedIcon(.health, role: .navigation)
-                .foregroundStyle(Theme.Semantic.accent.textColor)
-            Text("健康评分").font(Theme.Typo.pageTitle.font)
+                .foregroundStyle(.secondary)
+            Text("健康评分")
+                .typed(Theme.Typo.pageTitle)
             if report?.project.isDemo == true {
+                // 「示例」是**状态**而不是数据（全页唯一一处 `info`，语义留色侧）。
                 SemanticBadge("示例", role: Theme.Semantic.info)
             }
-            Spacer(minLength: Theme.Spacing.sm)
+            Spacer(minLength: Theme.Spacing.md)
             ScanControls()
         }
     }
@@ -88,6 +92,12 @@ struct ScanControls: View {
 
 // MARK: - Hero：分数环 + 结论
 
+/// Hero：分数环 + 结论。
+///
+/// **环上不再套井**：旧写法给 `HealthRing` 加了一层 `.contentInset` 实心灰盒 ——
+/// 契约 3 里井只给表格 / 日志列表 / 代码块，一个环不是井；而它套在唯一的地面色上，
+/// 就是「整个界面黑黢黢很脏」在这一页的具体落点。拿掉之后 56pt 的分数直接坐在
+/// `ground` 上，全页最暗的墨与最重的字号第一次对上位置（风格契约 4）。
 struct HealthHero: View {
     let health: HealthScore
 
@@ -98,7 +108,6 @@ struct HealthHero: View {
                                 grade: health.grade,
                                 trend: health.trendDelta)
                     .frame(width: DashboardLayout.heroRingWidth, height: DashboardLayout.heroRingHeight)
-                    .surface(layer: .contentInset, shape: .rounded(Theme.Radius.md))
                 narrativeColumn
             }
             if health.generatedByAI {
@@ -109,17 +118,25 @@ struct HealthHero: View {
         }
     }
 
+    /// 小标题只留**环里没有的那一件**信息。
+    ///
+    /// 旧文案是「综合分 82 /100 · 等级 B · 6/9 个维度参与计分」，而它下面 8pt 就是
+    /// 56pt 的 `82`、环心里还写着 `/100` 和 `B` —— 同一张卡里一个数念三遍，
+    /// 这就是「不规整拥挤」在文字侧的定义。分数、/100、等级三件由环承担（字号与
+    /// 位置都在交代它们最重要），这里只交代参与计分的维度数。信息总量一项未减。
     private var subtitle: String {
         let scorable = HealthDimension.allCases.filter { $0.defaultWeight > 0 }.count
-        return "综合分 \(health.overall) /100 · 等级 \(health.grade.rawValue) · \(health.components.count)/\(scorable) 个维度参与计分"
+        return "\(health.components.count)/\(scorable) 个维度参与计分"
     }
 
     private var narrativeColumn: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             if health.narrative.isEmpty {
+                // 一句结论缺位的说明，不是元数据：`.tertiary` 会让它像被灰掉的占位符，
+                // 而它恰恰是「这次没有文字结论」这个事实本身。
                 Text("本次评分没有附带文字结论。")
                     .font(Theme.Typo.narrative.font)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .lineSpacing(Theme.Typo.narrative.lineSpacing)
             } else {
                 Text(health.narrative)
@@ -131,8 +148,14 @@ struct HealthHero: View {
 
             HeuristicClaimLine()
 
-            Theme.Readout.Bar {
-                Theme.Readout.Field("本次", String(health.overall))
+            // 两件事的调整：
+            //   ① 不再用 `Theme.Readout.Bar` —— 它内部自带 `.contentInset`，给一行键值
+            //      读数画了一口非表格的井（`Design/**` 归总工，改不动，已报契约缺口）；
+            //      `Readout.Field` 自己什么都不画，直接排。
+            //   ② 「本次 X」删掉，因为 56pt 的环心里就是同一个 X（连同 /100 与等级），
+            //      同一张卡里第三个副本只会挤掉版面的呼吸。「上次」与「计算于」环里没有，
+            //      一律保留。
+            VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 Theme.Readout.Field("上次", health.previousOverall.map(String.init) ?? "无记录")
                 Theme.Readout.Field("计算于", DateFormat.sinceDescription(health.computedAt))
             }
@@ -169,7 +192,6 @@ struct HealthNoInputCard: View {
                 HStack(alignment: .top, spacing: Theme.Spacing.lg) {
                     HealthRing(score: nil, grade: nil, trend: nil)
                         .frame(width: DashboardLayout.heroRingWidth, height: DashboardLayout.heroRingHeight)
-                        .surface(layer: .contentInset, shape: .rounded(Theme.Radius.md))
                     VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                         Text("本次没有任何维度输入，因此不给综合分。")
                             .font(Theme.Typo.body.font)
