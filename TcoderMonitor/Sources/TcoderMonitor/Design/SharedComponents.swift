@@ -109,7 +109,7 @@ struct MetricTile: View {
                         // 图标不再吃倾向色：标签是结构，结构一律灰阶（风格契约 5）。
                         .foregroundStyle(Color.secondary)
                 }
-                Text(label)
+                Text(localizedCopy(label))
                     .typed(Theme.Typo.groupLabel)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -120,7 +120,7 @@ struct MetricTile: View {
                     .foregroundStyle(Self.tint(value: value, fallback: tint))
                     .contentTransition(.numericText())
                 if let unit {
-                    Text(unit)
+                    Text(localizedCopy(unit))
                         .font(Theme.Typo.label.font)
                         .foregroundStyle(.secondary)
                 }
@@ -136,7 +136,7 @@ struct MetricTile: View {
                              height: Theme.Layout.gaugeInline)
             }
             if let caption {
-                Text(caption)
+                Text(localizedCopy(caption))
                     .font(Theme.Typo.label.font)
                     // 原来是 `.tertiary`：测得值不得用 tertiary。全仓 42 处 `.tertiary`
                     // 里落在数字上的那些，是「没有主次」在文字侧的另一半成因。
@@ -298,7 +298,7 @@ struct SectionEmptyNote: View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
             ThemedIcon(icon, role: .badge)
                 .foregroundStyle(.tertiary)
-            Text(text)
+            Text(localizedCopy(text))
                 .font(Theme.Typo.label.font)
                 // `.secondary` 而不是 `.tertiary`：这是一句要读的说明，
                 // 实拍里 tertiary 的 11pt 灰字几乎读不出（清单 3.11 的伴生问题）。
@@ -322,10 +322,10 @@ struct EmptyStateView: View {
             Image(systemName: icon)
                 .themeIcon(.cardHeader)
                 .foregroundStyle(.tertiary)
-            Text(title)
+            Text(localizedCopy(title))
                 .font(Theme.Typo.cardTitle.font)
                 .foregroundStyle(.secondary)
-            Text(message)
+            Text(localizedCopy(message))
                 .font(Theme.Typo.label.font)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.leading)

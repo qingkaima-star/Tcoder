@@ -97,12 +97,12 @@ struct GlassSection<Content: View>: View {
                         ThemedIcon(icon, role: .cardHeader)
                             .foregroundStyle(Color.secondary)
                     }
-                    Text(title)
+                    Text(localizedCopy(title))
                         .typed(Theme.Typo.groupLabel)
                         .foregroundStyle(.secondary)
                 }
                 if let subtitle {
-                    Text(subtitle)
+                    Text(localizedCopy(subtitle))
                         .font(Theme.Typo.label.font)
                         .foregroundStyle(.secondary)
                         .lineSpacing(Theme.Typo.label.lineSpacing)
@@ -165,7 +165,7 @@ struct GlassButton: View {
         Button(action: action) {
             HStack(spacing: Theme.Spacing.xxs) {
                 if let icon { ThemedIcon(icon, role: .inlineText) }
-                Text(title).font(Theme.Typo.body.font)
+                Text(localizedCopy(title)).font(Theme.Typo.body.font)
             }
             .frame(minHeight: Theme.Layout.minHitTarget)
         }
@@ -206,7 +206,7 @@ struct SemanticBadge: View {
         HStack(spacing: Theme.Spacing.xxs) {
             // 双通道：图标承载语义，颜色只做加强，色觉障碍与灰度下仍然可读
             if let icon { ThemedIcon(icon, role: .badge) }
-            Text(text)
+            Text(localizedCopy(text))
                 .font(Theme.Typo.microLabel.font)
                 .foregroundStyle(role.textColor)
         }

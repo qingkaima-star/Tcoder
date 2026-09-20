@@ -199,7 +199,7 @@ struct DataTableHeader: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             HStack(spacing: DataRowMetrics.cellGap) {
                 ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
-                    Text(column.title)
+                    Text(localizedCopy(column.title))
                         .font(CodeGitType.prose(Theme.Typo.microLabel))
                         .foregroundStyle(.secondary)
                         .tableCell(DataColumns.column(columns, index))

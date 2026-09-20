@@ -32,7 +32,7 @@ struct DataFieldRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: DataRowMetrics.cellGap) {
-            Text(label)
+            Text(localizedCopy(label))
                 .font(CodeGitType.prose(Theme.Typo.label))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -49,7 +49,7 @@ struct DataFieldRow: View {
 
     @ViewBuilder
     private var valueText: some View {
-        let base = Text(value).monospacedDigit().foregroundStyle(valueColor ?? Color.primary)
+        let base = Text(localizedCopy(value)).monospacedDigit().foregroundStyle(valueColor ?? Color.primary)
         switch style {
         case .number:
             base.font(CodeGitType.metric)
@@ -99,26 +99,26 @@ struct DataReadout: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-            Text(label)
+            Text(localizedCopy(label))
                 .font(CodeGitType.readoutLabel)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .monospacedDigit()
             HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
-                Text(value)
+                Text(localizedCopy(value))
                     .font(CodeGitType.metric)
                     .foregroundStyle(role?.textColor ?? Color.primary)
                     .lineLimit(1)
                     .monospacedDigit()
                 if let unit {
-                    Text(unit)
+                    Text(localizedCopy(unit))
                         .font(CodeGitType.prose(Theme.Typo.microLabel))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
             }
             if let caption {
-                Text(caption)
+                Text(localizedCopy(caption))
                     .font(CodeGitType.prose(Theme.Typo.microLabel))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
@@ -155,7 +155,7 @@ struct DataShareBarRow: View {
                                height: DataColumns.legendSwatchSide)
                         .accessibilityHidden(true)
                 }
-                Text(label)
+                Text(localizedCopy(label))
                     .font(CodeGitType.prose(Theme.Typo.label))
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -240,7 +240,7 @@ struct DataNotice: View {
                 }
             }
             .foregroundStyle(role.textColor)
-            Text(text)
+            Text(localizedCopy(text))
                 .font(CodeGitType.prose(Theme.Typo.narrative))
                 .lineSpacing(Theme.Typo.narrative.lineSpacing)
                 .foregroundStyle(.primary)

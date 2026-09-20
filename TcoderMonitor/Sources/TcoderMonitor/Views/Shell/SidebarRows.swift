@@ -54,7 +54,7 @@ struct AnalysisSectionRow: View {
             // 变体表意：选中态换 fill 符号（WS-H §6.1 规则 3）。图标一律灰阶，
             // 蓝只留给交互（风格契约 5）。
             ThemedIcon(section.iconName, role: .badge, selected: isSelected)
-            Text(section.title)
+            Text(localizedCopy(section.title))
                 .font(Theme.Typo.body.font)
                 .lineLimit(1)
             Spacer(minLength: Theme.Spacing.xxs)

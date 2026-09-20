@@ -63,7 +63,7 @@ extension Theme {
                 // 同一个毛病 H3 已经在 `DataFieldRow` 上治过一遍，而这是它的第二份实现。
                 // 两份壳可以并存（字档不同），**列宽只能有一个来源**，所以走同一个令牌。
                 HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
-                    Text(label)
+                    Text(localizedCopy(label))
                         .font(Theme.Typo.label.font)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -88,14 +88,14 @@ extension Theme {
             private func groupFor(_ style: Style) -> some View {
                 switch style {
                 case .number:
-                    Text(value).font(Self.numberFont)
+                    Text(localizedCopy(value)).font(Self.numberFont)
                 case .identifier:
-                    Text(value).font(Theme.Typo.monoLabel.font)
+                    Text(localizedCopy(value)).font(Theme.Typo.monoLabel.font)
                 case .path:
-                    Text(value).font(Theme.Typo.monoSmall.font)
+                    Text(localizedCopy(value)).font(Theme.Typo.monoSmall.font)
                         .truncationMode(.middle)   // 长路径要保住尾部目录名
                 case .text:
-                    Text(value).font(Theme.Typo.body.font)
+                    Text(localizedCopy(value)).font(Theme.Typo.body.font)
                 }
             }
 
@@ -166,7 +166,7 @@ extension Theme {
                             .frame(width: Theme.Layout.legendSwatchSide,
                                    height: Theme.Layout.legendSwatchSide)
                     }
-                    Text(label)
+                    Text(localizedCopy(label))
                         .font(Theme.Typo.label.font)
                         .lineLimit(1)
                         // 名称列定宽是**特性**（所有条从同一 x 起画，才能横向比长短），
@@ -266,7 +266,7 @@ extension Theme {
                         actions
                     }
                     if let subtitle {
-                        Text(subtitle)
+                        Text(localizedCopy(subtitle))
                             .typed(Theme.Typo.label)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -301,6 +301,31 @@ extension Theme {
             }
         }
     }
+}
+
+// MARK: - 文案查表出口（双语方案 §5 P3）
+
+/// **组件渲染点**的查表出口。
+///
+/// 为什么必须有这一层：`Text(变量)` 天生不查表（双语方案 §7.1）。目录里翻了、
+/// 机制也通了，界面一个字都不动 —— 这是双语最容易的空转。2026-09-21 用
+/// `-AppleLanguages "(en)"` 实跑证实了这一点：页头「Health Score」和分组标题
+/// 「Projects / Analysis」出英文，而侧栏九条页名仍是中文，因为
+/// `SidebarRows` 走的是 `Text(section.title)`。
+///
+/// 组件入参**继续收 `String`**（调用点不 churn，三元表达式与枚举 rawValue 都塞得进来），
+/// 只在真正上屏这一行查表。键 = 简体中文原文，所以查不到就原样显示中文 ——
+/// 缺一条译文的表现是"退回正确的中文"，不是漏出机器键。
+///
+/// 为什么走 `Bundle.main`：语言资源不能进 `Package.swift` 的 `resources:`
+/// （那只会产出 `TcoderMonitor_TcoderMonitor.bundle`，而 `Text` 查的是 `Bundle.main`），
+/// 实际由 `scripts/build_app.sh` 拷进 `Contents/Resources`，一个 `.lproj` 都没拷到就拒绝出包。
+///
+/// 为什么**不**用 `String(format:)`：裸 `%` 会被静默吃掉（实测「95% 的提交…」→「95 的提交…」，
+/// 双语方案 §9）。这里是纯查表，`%` 只是普通字符，与今天 `Text("95% …")` 的行为一致。
+/// 带实参的文案要翻时另开显式映射（`var uiLabel`），不要往这里塞占位符。
+func localizedCopy(_ text: String) -> String {
+    NSLocalizedString(text, bundle: .main, comment: "")
 }
 
 extension View {
