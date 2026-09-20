@@ -24,9 +24,12 @@ struct PerformanceView: View {
     private var context: SampleContext { SampleContext.from(monitor) }
 
     var body: some View {
-        // 页面骨架（左右 16 / 顶 24 / 卡间 16 / 超宽屏限宽居中）来自基座，不再各页手搓
-        Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthDense) {
-            header
+        // 版框：组间 32 / 页边距 24 / 顶部段落 40（风格契约 8），三页共用一份。
+        BorderlessPage(maxWidth: Theme.Layout.maxWidthDense) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                header
+                sampleStats
+            }
             statusBanners
             PerformanceSystemTiles(context: context)
             PerformanceLiveCharts(points: chartWindow,
@@ -62,31 +65,25 @@ struct PerformanceView: View {
     // MARK: - 工具条
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
-                ThemedIcon(.performance, role: .navigation)
-                    .foregroundStyle(Theme.Semantic.accent.textColor)
-                Text("性能监控").font(Theme.Typo.pageTitle.font)
-                if report?.project.isDemo == true {
-                    SemanticBadge("示例", role: Theme.Semantic.info)
-                }
-                Spacer(minLength: Theme.Spacing.sm)
-                sampleStats
-                controls
-            }
-            Text("系统级实时读数只观测不干预。数值随采样刷新，取不到的一律显示 --，不会补成 0。")
-                .font(Theme.Typo.label.font)
-                .foregroundStyle(.secondary)
-        }
+        BorderlessPageHeader(icon: .performance,
+                             title: "性能监控",
+                             isDemo: report?.project.isDemo == true,
+                             note: "系统级实时读数只观测不干预。数值随采样刷新，"
+                                 + "取不到的一律显示 --，不会补成 0。",
+                             actions: { controls })
     }
 
-    /// 三页共用的「标签 + 数字」读数一律走基座 `Theme.Readout`，
-    /// 不再引 WS-K 冻结文件里的 `StatLine`（WS-I §3.5 点名的归属错位）。
+    /// 采样元信息：这一屏数据有多新。它不是读数，所以留在页头下方一行、
+    /// 11pt 次要墨，**不与页名抢水平线**（原来三枚 `Readout.Field` 与页名同排，
+    /// 是「不规整拥挤」的直接来源）。三态与口径文案一字未改。
     private var sampleStats: some View {
-        HStack(spacing: Theme.Spacing.md) {
-            Theme.Readout.Field("上次采样", DateFormat.sinceDescription(monitor.lastSampleAt))
-            Theme.Readout.Field("采样点", NumberFormat.grouped(monitor.history.count))
-            Theme.Readout.Field("间隔", Self.sampleIntervalText)
+        HStack(spacing: Theme.Spacing.xs) {
+            Text("上次采样 \(DateFormat.sinceDescription(monitor.lastSampleAt))"
+                 + " · 采样点 \(NumberFormat.grouped(monitor.history.count))"
+                 + " · 间隔 \(Self.sampleIntervalText)")
+                .typed(Theme.Typo.label)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
         }
     }
 

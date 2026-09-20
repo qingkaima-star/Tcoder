@@ -21,7 +21,10 @@ struct PerformanceLiveCharts: View {
                                title: "正在采集首个样本",
                                message: "至少 3 个点之后才有曲线可画。这里不预先给出估算形状。")
             } else {
-                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                // 两张图是两个同级并列的叙事单元 → 组间 `group`(32)。
+                // 原来它们与脚注都挤在 `md`(16) 上，跟图例与图之间同一个数，
+                // 眼睛分不出「一张图结束了」。
+                VStack(alignment: .leading, spacing: Theme.Spacing.group) {
                     cpuBlock
                     memoryBlock
                     axisNotes

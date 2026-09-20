@@ -67,9 +67,10 @@ struct PerformanceProcessTableCard: View {
 
     /// 表头与行都从 `DataColumns.processes` 取布局（#34 收敛前这里是 `Grid` +
     /// 逐格手写的 `TableHeaderCell`，列宽与对齐各写一遍）。
-    /// 行间距沿用原 `Grid` 的 `verticalSpacing: .xxs`，密度一字未改。
+    /// 行距走风格契约 8 的「列表行 8」档（原 `xxs`4 是无井时代为了压住四块灰盒的高度，
+    /// 面拿掉后 4pt 会把相邻两行的数字读成同一行）。
     private var table: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             DataTableHeader(columns: DataColumns.processes)
             ForEach(shown) { process in
                 row(process)

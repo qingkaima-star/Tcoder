@@ -18,9 +18,6 @@ struct PerformanceProcessGroupsCard: View {
     let isTruncated: Bool
     let onRemove: (UUID) -> Void
 
-    private static let columns = [GridItem(.adaptive(minimum: Theme.Layout.twoColumnMinWidth),
-                                           spacing: Theme.Spacing.sm)]
-
     var body: some View {
         GlassSection("进程分组",
                      subtitle: "按匹配模式在全系统进程里查找，与所选项目无关",
@@ -30,15 +27,29 @@ struct PerformanceProcessGroupsCard: View {
                                title: "还没有分组规则",
                                message: "在下方「匹配模式」里添加分组，例如 java、nginx、mysqld 这类通用进程名。")
             } else {
-                LazyVGrid(columns: Self.columns, spacing: Theme.Spacing.sm) {
-                    ForEach(groups) { item in
-                        PerformanceGroupCard(group: item,
-                                             context: context,
-                                             isTruncated: isTruncated,
-                                             onRemove: { onRemove(item.id) })
-                    }
-                }
+                groupList
                 NoteLine(coverageFootnote)
+            }
+        }
+    }
+
+    /// 分组之间用 `Spacing.group`(32) + 一条发丝线分开。
+    ///
+    /// 旧写法是 `LazyVGrid(adaptive 420)` 里摆若干块带井的卡，边界由灰盒自己交代；
+    /// 井拿掉之后如果没有那道组间距，相邻两张卡的文字会读成同一段（「不规整拥挤」的
+    /// 另一半成因就是**去掉面却不补间距**）。这里不改单列/双列的取舍来省这点钱：
+    /// 一张分组卡有 4 格数据 + 一行匹配模式，双列并排时列宽不足会把「N/M 个进程取到」
+    /// 截成两行，所以收成单列。
+    private var groupList: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.group) {
+            ForEach(Array(groups.enumerated()), id: \.element.id) { index, item in
+                if index > 0 {
+                    Divider()
+                }
+                PerformanceGroupCard(group: item,
+                                     context: context,
+                                     isTruncated: isTruncated,
+                                     onRemove: { onRemove(item.id) })
             }
         }
     }
@@ -59,8 +70,8 @@ struct PerformanceGroupCard: View {
     let isTruncated: Bool
     let onRemove: () -> Void
 
-    private static let cellColumns = [GridItem(.flexible(), spacing: Theme.Spacing.sm),
-                                      GridItem(.flexible(), spacing: Theme.Spacing.sm)]
+    private static let cellColumns = [GridItem(.flexible(), spacing: Theme.Spacing.md),
+                                      GridItem(.flexible(), spacing: Theme.Spacing.md)]
 
     private var pattern: String { group.group.matchPattern }
     private var coreCount: Int { max(1, context.snapshot?.cpuCoreCount ?? 1) }
@@ -76,9 +87,10 @@ struct PerformanceGroupCard: View {
                 .truncationMode(.middle)
             content
         }
-        .padding(Theme.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .surface(layer: .contentInset, shape: .rounded(Theme.Radius.md))
+        // **不再画井**：旧写法是卡一口 `.contentInset` + 里面四个格子各一口井 = 井里套井，
+        // 那是「界面发脏」的成因。契约 3 里井只给表格 / 日志列表 / 代码块，
+        // 一张分组汇总卡不是井。组界交给页头的 `groupLabel` + `Spacing.group` 留白 + 一条分隔线。
     }
 
     /// 零命中的卡整体弱化：标题降级为次要墨色，不铺任何指标数字。
@@ -167,7 +179,7 @@ struct PerformanceGroupCard: View {
     private var content: some View {
         switch state {
         case .matched:
-            LazyVGrid(columns: Self.cellColumns, spacing: Theme.Spacing.sm) {
+            LazyVGrid(columns: Self.cellColumns, spacing: Theme.Spacing.md) {
                 cpuCell
                 memoryCell
                 threadsCell
@@ -192,11 +204,14 @@ struct PerformanceGroupCard: View {
                 .fixedSize(horizontal: false, vertical: true)
             Divider()
             HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+                // 「下一步」是引导文字而不是链接：蓝在这套体系里只代表交互 / 选中
+                // （风格契约 5），给它涂 accent 等于把交互语义稀释掉。
+                // 双通道靠 `disclose` 箭头符号 + 文字本身，不靠颜色。
                 ThemedIcon(.disclose, role: .badge)
-                    .foregroundStyle(Theme.Semantic.accent.textColor)
+                    .foregroundStyle(.secondary)
                 Text(copy.nextStep)
                     .font(Theme.Typo.label.font)
-                    .foregroundStyle(Theme.Semantic.accent.textColor)
+                    .foregroundStyle(.secondary)
                     .lineSpacing(Theme.Typo.label.lineSpacing)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
@@ -214,7 +229,9 @@ struct PerformanceGroupCard: View {
             value: Live.cores(cores),
             caption: cores.map { "占全机 \(Live.percent($0 / Double(coreCount), precision: 0))" }
                 ?? "差分帧未到，不给百分比",
-            tint: LoadLevel.role(for: cores.map { $0 / Double(coreCount) }).textColor
+            tint: LoadLevel.role(for: cores.map { $0 / Double(coreCount) }).textColor,
+            // 一组里唯一的重音：吃几个核。其余三格留在 13pt。
+            tier: Theme.Typo.metricMid
         )
     }
 
@@ -223,7 +240,7 @@ struct PerformanceGroupCard: View {
             label: "内存合计",
             value: Live.bytes(group.totalMemoryBytes),
             caption: ProcessMetric.peakMemory(of: group).map { "单进程峰值 \(Live.bytes($0))" } ?? "无成员进程",
-            tint: Theme.Semantic.neutral.textColor
+            tint: Theme.Palette.Surface.ink
         )
     }
 
@@ -233,7 +250,7 @@ struct PerformanceGroupCard: View {
             value: Live.grouped(ProcessMetric.groupThreads(of: group)),
             caption: coverageCaption(ProcessMetric.threadsCovered(in: group),
                                      meaningEmpty: "全部成员进程的 task_info 都没返回线程数"),
-            tint: Theme.Semantic.neutral.textColor
+            tint: .primary
         )
     }
 
@@ -245,7 +262,7 @@ struct PerformanceGroupCard: View {
                                      meaningEmpty: isTruncated
                                         ? "本轮取句柄的时间预算已用完，一个都没读到"
                                         : "全部成员进程的句柄数都未取到"),
-            tint: Theme.Semantic.neutral.textColor
+            tint: .primary
         )
     }
 
@@ -257,27 +274,33 @@ struct PerformanceGroupCard: View {
     }
 }
 
-/// 组内一格指标：18pt 等宽中数字 + 一行口径说明。
+/// 组内一格指标：micro-label 标签 + 数字 + 一行口径说明。**不画面**。
+///
+/// 旧实现每格套一口 `.contentInset` 井，而卡本身又是一口井 —— 井里套井就是
+/// 「整个界面黑黢黢很脏」在进程分组上的具体形态。
+///
+/// 数字默认 13pt（`monoBody`）；一组里**只有 CPU 那一格**抬到 `metricMid`(22)，
+/// 因为用户在这张卡上要扫的就是「这一组现在吃几个核」。四格平铺 22pt 会变成
+/// 「四枚 22 争位」，而本页的主角已经是顶部 34pt 读数带，不该在每个分组里再造主角。
 private struct GroupMetricCell: View {
     let label: String
     let value: String
     let caption: String
     let tint: Color
+    var tier: Theme.TypeToken = Theme.Typo.monoBody
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             Text(label)
-                .font(Theme.Typo.microLabel.font)
+                .typed(Theme.Typo.groupLabel)
                 .foregroundStyle(.secondary)
-            LiveNumber(value, tier: Theme.Typo.metricMid, tint: tint)
+            LiveNumber(value, tier: tier, tint: tint)
             Text(caption)
-                .font(Theme.Typo.label.font)
-                .foregroundStyle(.tertiary)
+                .typed(Theme.Typo.label)
+                .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(Theme.Spacing.xs)
-        .surface(layer: .contentInset, shape: .rounded(Theme.Radius.sm))
     }
 }
