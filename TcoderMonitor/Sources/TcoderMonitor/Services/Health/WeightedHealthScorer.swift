@@ -166,10 +166,13 @@ final class WeightedHealthScorer: HealthScoringProviding {
 
         case .busFactor:
             guard let git = inputs.git, let top = git.topAuthor, git.totalCommits > 0 else { return nil }
-            let share = Double(top.commits) / Double(git.totalCommits)
+            // 分母必须是作者表的总体（非合并），见 `GitInsights.authorBasisCommits`。
+            // 用 totalCommits（含合并）会把 91% 的集中度算成 51%（缺陷 #44）。
+            let basis = max(git.authorBasisCommits, 1)
+            let share = Double(top.commits) / Double(basis)
             let curve = HealthCurves.busFactor(risk: git.busFactorRisk, topAuthorShare: share,
                                                activeAuthors: git.activeAuthorCount,
-                                               totalCommits: git.totalCommits)
+                                               commitBasis: basis)
             if git.activeAuthorCount >= 4 && share < 0.45 {
                 strengths.append("贡献分布合理（\(git.activeAuthorCount) 人，头号作者占 \(NumberFormat.percent(share, precision: 0))）")
             }
@@ -180,6 +183,13 @@ final class WeightedHealthScorer: HealthScoringProviding {
 
         case .stability:
             guard let logs = inputs.logs else { return nil }
+            // 一行日志都没扫到＝这个维度**没有证据**。以前它按默认值 85 分计入，
+            // 而 85 × 权重 0.178 是全表最高的一项贡献（15.1 分），等于用"没查"换分（缺陷 #46）。
+            // 现在与依赖健康、测试覆盖同一处理：缺席、不参与归一化，并把原因写进建议里。
+            if logs.totalLinesScanned == 0 {
+                recommendations.append("没有可扫描的日志，运行稳定性不参与本次评分；放入 Logs/error.log 或在依赖页附加日志文件后，这个维度才会出现。")
+                return nil
+            }
             // 密度需要代码规模做分母；没有 code 时退化成「按绝对值当每千行计」，
             // 宁可偏严也不把证据缺失算成满分（availableDimensions 承诺了这个维度在场）。
             let lines = inputs.code?.codeLines ?? 0
@@ -191,10 +201,8 @@ final class WeightedHealthScorer: HealthScoringProviding {
             // 一行日志都没扫到时不得写「近期无崩溃」——那是把「没看到」说成「没有」。
             // 曲线那边已经如实标了「未扫描到运行日志，本维度按默认值计」，
             // 优点卡必须跟它一个口径，否则同一份报告自己打自己脸。
-            if logs.totalLinesScanned > 0, logs.crashCount == 0, perKloc < 0.5 {
+            if logs.crashCount == 0, perKloc < 0.5 {
                 strengths.append("已扫描 \(NumberFormat.grouped(logs.totalLinesScanned)) 行日志，未见崩溃")
-            } else if logs.totalLinesScanned == 0 {
-                recommendations.append("当前没有可扫描的日志，运行稳定性按默认值计；放入 Logs/error.log 或附加日志文件后才有结论。")
             }
             if let worst = logs.topErrors.first, worst.count >= 10 {
                 issues.append("\(worst.displayMessage) 出现 \(worst.count) 次（最近 \(worst.lastSeenDescription)）")
