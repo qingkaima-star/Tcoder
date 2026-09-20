@@ -178,6 +178,58 @@ python3 scripts/trace_report.py migration --strict   # 挂进自家收尾检查�
 - 滚动与拖窗引起的实时暂停**已由 `AppState` 统一接管**，页面只在"切页动画"这类自己知道的时机
   用 `beginInteractionPause(.pageTransition)` / `endInteractionPause(.pageTransition)`，**不要接第二条**。
 
+## 0.3 重派前请先各建一棵新树——三家的工作树与分支已随 M2 清掉了
+
+2026-09-20 22:24 实查：`git worktree list` 只剩主树、`ws/chief`、`ws/perf-base` 与 WorkBuddy 的树，
+`git branch --list 'ws/*borderless*'` **一条不剩**，`git stash list` 为空。
+也就是说 §0.2 那 16 处目前**既没有工作树也没有分支**可以承接——重派必须先建树：
+
+```bash
+cd /Users/one/Documents/Tcoder
+git worktree add .worktrees/o-perf-migration -b ws/o-perf-migration main
+cd .worktrees/o-perf-migration/TcoderMonitor
+./scripts/locked_build.sh build && ./scripts/locked_build.sh test   # 本机第一道：双绿
+```
+
+改完之后按既有两道门走（**不要直接合 main**）：
+
+```bash
+git add <你改过的文件> && git commit -m "WS-O(§0.2): 4 处粗读点上收细粒度格"
+./scripts/premerge_check.sh ws/o-perf-migration      # 回执按头 SHA 命名
+cd /Users/one/Documents/Tcoder && git worktree remove .worktrees/<树名>   # 由总工或自己清，别留
+```
+
+三条现场约束（都是今天真咬过的）：
+- **锁按树独立**：`locked_build.sh` 的锁在各树自己的 `.build/agents.lock`，
+  所以"一家只跑一个编译"是**约定**不是机制——请自觉，别和别的流同时抢 CPU（读数会被污染）。
+- **不要动 `Design/**` 与 `App/Theme.swift` 的取值**（归 UI 总工），这单只改读法；
+- **不要为了少改而新增第 17 处粗读**：棘轮零余量（`1/1 86/86 10/10 2/2` 与粗读 `16/16`），加一处当场红。
+
+### 为什么这 16 处现在更是唯一有收益的路
+
+同一轮把 §5.4 那两笔欠账也量掉了（`PerfMainThreadBudgetTests`，夹具是取证沙箱里的**真报告** 42,663 字节）：
+
+- 一次 `upsertReport`（encode + 写报告 + 写注册表，全在主线程）**中位 0.5 ms**、p95 1.0 ms；
+- 启动同步解码 4 份真报告 **中位 1.3 ms**（占 T4 冷启动预算 0.13%）。
+
+⇒ **持久化不占主线程预算**，两笔都结案为"不动"。
+于是 §1 那 10.8~24.8 ms 的 app-update 只剩一个怀疑对象：**视图图更新**，
+也就是你们这边那 16 处粗读点。这条读数不出自推测，出自把候选逐个排除。
+
+### M2 终测要预约窗口（先到先得，别同时上）
+
+```bash
+pgrep -x TcoderMonitor | wc -l        # 必须是 1（被采的那一个）
+lsappinfo info -only name $(lsappinfo front)   # 前台必须是 Tcoder
+pgrep -f 'swift-frontend|swift-build' | wc -l  # 必须是 0
+ls -d /tmp/tcoder-capture.lock 2>/dev/null     # 取证锁必须空闲
+```
+
+四条都满足才跑 `./scripts/perf_harness.sh idle <目录>`（或 `interact`，需要真人持续滚动）。
+不满足时脚本自己的 `preflight_context` 会**直接拒跑**并写明缺哪一条——那不是脚本坏，
+是它在拦第三次"未受控基线"（spec §1.3 已经作废过两批这样的数）。
+一次完整前后对比约 **5 分钟**（`idle`×3 + `interact`×3，各含导出与解析）。
+
 ## 1. WS-W（性能·日志·健康三页）—— 已随 `96761b7` 交回，**现在就能排**
 
 | # | 工 | main 上实测现状 | 交回时要拿出的东西 |
