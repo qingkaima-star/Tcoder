@@ -4,9 +4,43 @@
 - 收件：第三轮「简约无界」UI 总工 —— 由你排进对应流的**追加**批次
 - 依据裁定：用户 2026-09-20 16:57（`AGENTS.md`「双总工协作裁定」）——页面树归 UI 总工派发与收回，
   性能侧只出工单、**不另起会话写 `Views/**`**。本文件就是那份工单，性能轮不动手写这些文件。
-- 度量口径：本文件所有数字都是在 **`main = 96761b7`** 上用宽松口径实扫得到的
-  （`git grep -h -E <模式> refs/heads/main -- 'TcoderMonitor/Sources/TcoderMonitor/Views'`）。
-  严谨口径以守卫自己的计数为准（`PerfHitchGuardTests` / `PerfInvalidationRatchetTests`）。
+- 度量口径：本文件的**调用点计数一律以守卫自己的正则为准**
+  （`PerfHitchGuardTests` / `PerfInvalidationRatchetTests`）。
+  头一版写在 `main = 96761b7` 上、用顺手 `git grep | wc -l` 量的数已作废——**行数不是调用点**
+  （同一次误判让我差点把绿的 main 报成红的，见 spec §1.4 之后的那段更正）。
+
+## 0.0 先说一件拦路的事：main 那条红是我欠的，已经修好了
+
+`165faa7` 的提交说明点名：main 上唯一那条红是性能轮随 `d5bb239` 带进来的
+`scripts/trace_report.py` 涨到 **810 行**，撞本仓 ≤800 行棘轮（`SelfScanDogfoodTests`，
+ceiling=0，扫描分母含 `.py/.sh/.md`）。你**没有改阈值**，只把它交回给我——处理如下（`f84a8f4`）：
+
+- 按层拆成 `perf_trace_xml.py` / `perf_trace_metrics.py` / `trace_report.py`，**入口形状一字未动**，
+  `perf_harness.sh` 零改动；拆前拆后对同一批真 trace 跑 6 种子命令，stdout 逐字相同、JSON 逐字节相同。
+- 顺带兜出一个真缺陷：`cmd_switches` 引用不存在的 `cur` ⇒ **switch 档只要有真数据就崩**
+  （空目录时提前返回，所以一直没暴露）。
+- 新增 `scripts/perf_harness.sh selfcheck`（六项、合成夹具、零采样）。
+
+**对三家的影响**：这条红卡的是**所有人的 `premerge_check`**（你们树上那 810 行是同一个文件）。
+我这包一合，main 回全绿，你们的回执才谈得上重跑；我合入会让 main 前进一笔，
+**请在合入之后再 merge main 并重取回执**。我这边只有这一包要落，之后到 M2 前不再动 main。
+
+**测帧率的规矩（M1 交回时请照这个来，不照做的话数字我不收）**：
+
+1. 测量前先 `scripts/perf_harness.sh selfcheck`，六项全绿才算"这把尺子可用"；它红了所有读数作废。
+2. 交互期那一档（T1）**不做合成滚动输入**：本机 System Events 权限被拒，`CGEvent` 会被静默丢弃，
+   只会量产"交互期 0 hitch"的假绿。改成**真人滚 10 秒 + `TCODER_PERF_PROBE=1` + `probe --interaction`**：
+
+   ```bash
+   TCODER_PERF_PROBE=1 dist/Tcoder.app/Contents/MacOS/TcoderMonitor &   # 唯一实例、前台、无并发编译
+   # ……用鼠标在页面上真实滚动 10 秒……
+   ./scripts/perf_harness.sh probe            # 退出码 0 达标 / 1 未达标 / 2 没确认交互（只算 idle）
+   ```
+
+   不带 `--interaction` 只会被判成 idle 读数——**别拿它当 T1 达标**。
+3. 禁则棘轮现在每次跑都打「现量/上限」。我把 `dynamicNSColor` 从 107 拧到 **86**
+   （你们 `165faa7` 已经还掉 21 处，而那 21 处当时藏在余量里没人看见）。
+   四条现在**零余量**：`1/1 86/86 10/10 2/2`——再新增一处当场红。
 
 ## 0.1 【最高优先】细粒度契约目前消费数为 **0**
 
