@@ -220,8 +220,23 @@ struct ContributorHourRow: View {
     /// 标签列宽：两个汉字 + 余量。
     private static let labelWidth: CGFloat = Theme.Layout.minHitTarget + Theme.Spacing.xxs
     private static let bars = 24
+    /// 浮层**预留**出来的那一截高度。浮层必须落在自己预留的布局空间里，
+    /// 不能用 `offset` 推到宿主外面 —— 原来 `offset(y: height + 2)` 把它推到
+    /// 下一条贡献者的行上（本条带只有 20pt 高，浮层约 22pt），等于用浮层盖内容。
+    private static let tooltipReserve: CGFloat = 20
+    /// 浮层宽度的保守上界（用于贴右边界时往回夹，避免溢出列宽）。
+    private static let tooltipMaxWidth: CGFloat = 150
 
     @State private var hoveredHour: Int? = nil
+    @State private var hoverX: CGFloat = 0
+
+    /// 柱宽与命中宽**必须是同一个公式**。原来 Canvas 里扣了柱间 gap、
+    /// `onContinuousHover` 里没扣，24 根柱累计偏移到 23 号柱约 44pt ≈ 两格，
+    /// 鼠标停在 21:00 上浮层却写 23:00 —— 读数指错小时，这是正确性缺陷不是观感。
+    private static func cellWidth(_ width: CGFloat) -> CGFloat {
+        let gap = Theme.Stroke.emphasis
+        return max(1, (width - gap * CGFloat(bars - 1)) / CGFloat(bars))
+    }
 
     var body: some View {
         HStack(spacing: Theme.Spacing.xs) {
@@ -231,9 +246,9 @@ struct ContributorHourRow: View {
                 .frame(width: Self.labelWidth, alignment: .leading)
             GeometryReader { geo in
                 let width = geo.size.width
+                let cellW = Self.cellWidth(width)
+                let gap = Theme.Stroke.emphasis
                 Canvas { ctx, size in
-                    let gap = Theme.Stroke.emphasis
-                    let cellW = max(1, (size.width - gap * CGFloat(Self.bars - 1)) / CGFloat(Self.bars))
                     for hour in 0..<Self.bars {
                         let value = hour < counts.count ? counts[hour] : 0
                         let ratio = Double(value) / Double(peak)
@@ -248,13 +263,13 @@ struct ContributorHourRow: View {
                         ctx.fill(Path(roundedRect: rect, cornerRadius: 0), with: .color(color))
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: Self.height, alignment: .top)
                 .onContinuousHover { phase in
                     switch phase {
                     case .active(let point):
-                        let cellW = width / CGFloat(Self.bars)
-                        let idx = Int((point.x / cellW).rounded(.down))
+                        let idx = Int((point.x / (cellW + gap)).rounded(.down))
                         hoveredHour = (0..<Self.bars).contains(idx) ? idx : nil
+                        hoverX = point.x
                     case .ended:
                         hoveredHour = nil
                     }
@@ -269,13 +284,17 @@ struct ContributorHourRow: View {
                             // 请回内容层（无内容可折射时退化成平涂半透明灰，比页面底暗 6~13 阶），
                             // 而 `cornerRadius: 4` 是令牌里没有的裸魔法数。投影与底一律由基座给。
                             .surface(layer: .floating, shape: .rounded(Theme.Radius.sm))
-                            .offset(y: Self.height + 2)
+                            .fixedSize()
+                            // 纵向落在**预留带**里（条带下方 tooltipReserve），横向跟着鼠标所在柱，
+                            // 并在贴右边界时往回夹，不越出这一列。
+                            .offset(x: min(hoverX, max(0, width - Self.tooltipMaxWidth)),
+                                    y: Self.height + Theme.Spacing.xxs)
                     }
                 }
             }
-            .frame(height: Self.height)
+            .frame(height: Self.height + Self.tooltipReserve)
         }
-        .frame(height: Self.height)
+        .frame(height: Self.height + Self.tooltipReserve)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("各小时提交分布，峰值 \(peak) 次")
         .help(hoverHelp)

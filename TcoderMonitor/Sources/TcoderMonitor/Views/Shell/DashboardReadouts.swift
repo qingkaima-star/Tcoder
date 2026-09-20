@@ -33,11 +33,16 @@ struct StatLine: View {
             Text(label)
                 .font(Theme.Typo.label.font)
                 .foregroundStyle(.tertiary)
+                .lineLimit(1)
             Text(value)
                 // 数字一律等宽：这是 WS-I §4 那条「全仓 monospacedDigit 命中 = 0」的根修法，
                 // 一处改、56 个调用点全站生效。
+                // `lineLimit(1)` 同理由：这一格在实时读数旁边，值一旦折成两行，
+                // 整行高度被撑开、把下面的脚注往下顶（`1.2 GB/s` 进位时真实发生过）。
                 .font(Theme.Typo.label.font.weight(.semibold).monospacedDigit())
                 .foregroundStyle(.primary)
+                .lineLimit(1)
+                .layoutPriority(1)   // 挤不下的时候宁可截标签，也不能截测得值
         }
     }
 }
@@ -84,20 +89,32 @@ struct BannerRow: View {
             Spacer(minLength: Theme.Spacing.xs)
         }
         .padding(Theme.Spacing.sm)
-        .bannerTintedSurface(style.role)
+        .bannerRuleSurface(style.role)
         .accessibilityElement(children: .combine)
     }
 }
 
 extension View {
-    /// 淡色提示底：语义**图形**色 × 统一一档透明度铺在 `Radius.md` 圆角矩形上，不叠描边。
+    /// 提示条的表面画法：**左侧一道语义色竖标，不铺色底**。
     ///
-    /// 内容层的分层靠材质 + 间距，不靠 1px 描边（WS-H §3.3），所以原来那圈
-    /// `strokeBorder(color.opacity(0.3))` 去掉了。抽出来是为了让 `BannerRow` 与
-    /// 总览的「可行动失败详情卡」共用同一份配方，而不是把同一段样式抄两遍。
-    func bannerTintedSurface(_ role: Theme.SemanticRole) -> some View {
-        background(role.graphicColor.opacity(Theme.Palette.Opacity.badgeFill),
-                   in: RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+    /// 原来这里是 `role.graphicColor.opacity(0.15)` 铺满整条 `Radius.md` 圆角矩形。
+    /// 在纯白地面上，一块 1900×40pt 的淡色面是**全页最大的色块**，比它要强调的
+    /// 主读数还显眼（用户实拍：Git 页蓝横幅、贡献者页粉横幅、错误日志页米黄横幅、
+    /// 依赖页蓝横幅 —— 四页四块，颜色各不相同）。参考图里没有任何整幅色块，
+    /// 语义只出现在小面积标记上。
+    /// 竖标把彩色面积从约 76000pt² 压到约 80pt²（**降 99.9%**），语义色一个没丢：
+    /// 色相仍然说"这是警告 / 提示 / 错误"，位置仍然把它钉在正文左边。
+    ///
+    /// 抽成一处是为了让 `BannerRow` 与 `DataNotice` 共用同一份配方 ——
+    /// 它们本来就是同一个东西的两份实现（#34 之后仍未合并，是"同一件事两种画法"的活样本）。
+    func bannerRuleSurface(_ role: Theme.SemanticRole) -> some View {
+        overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: Theme.Stroke.emphasis / 2, style: .continuous)
+                .fill(role.graphicColor)
+                .frame(width: Theme.Stroke.emphasis)
+                .padding(.vertical, Theme.Spacing.xs)
+                .accessibilityHidden(true)
+        }
     }
 }
 
@@ -130,6 +147,11 @@ struct CPUHistoryChart: View {
             .lineStyle(StrokeStyle(lineWidth: Theme.Stroke.chartLine))
         }
         .chartYScale(domain: 0...100)
+        // 这一张的轴没收窄（0...100 定值），加裁剪是**把规则钉死**而不是修当下的 bug：
+        // `AreaMark` 一旦配收窄轴就会把填充画到绘图区外（见 ChartChrome 里那条注释），
+        // 谁以后把这里改成自适应轴，不需要重新发现一遍这个坑。守卫：
+        // `BorderlessSurfaceGuardTests.test_areaChartsClipTheirPlotArea`。
+        .chartPlotStyle { $0.clipped() }
         .chartYAxis {
             AxisMarks(values: [0, 50, 100]) { _ in
                 AxisGridLine().foregroundStyle(Theme.Palette.Surface.separator)

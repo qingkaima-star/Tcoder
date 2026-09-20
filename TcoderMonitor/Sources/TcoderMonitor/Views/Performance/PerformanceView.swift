@@ -84,7 +84,7 @@ struct PerformanceView: View {
                 if report?.project.isDemo == true {
                     // 「示例」是**状态**而不是数据：全页唯一一处 `info`，
                     // 标的是「这一屏数字是内置假数据」，属语义留色那一侧。
-                    SemanticBadge("示例", role: Theme.Semantic.info)
+                    DemoBadge()
                 }
                 Spacer(minLength: Theme.Spacing.md)
                 controls

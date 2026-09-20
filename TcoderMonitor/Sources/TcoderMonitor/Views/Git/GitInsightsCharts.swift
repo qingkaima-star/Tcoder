@@ -100,7 +100,14 @@ struct GitActivityHeatmap: View {
     @State private var hovered: (weekday: Int, hour: Int)? = nil
 
     private static var gridHeight: CGFloat { Self.rowLabelWidth * 7 + Self.cellGap * 6 }
-    private static var totalHeight: CGFloat { 2 + Self.gridHeight + 14 }
+    /// 底部两带：14 给小时刻度字，`tooltipReserve` 给悬停浮层。
+    /// 浮层**必须落在预留带里**：原来它钉在整个矩阵的 `topLeading`，
+    /// 于是悬停周日那一行时，浮层画在左上角、把周一 00:00 / 01:00 两个格子盖住 ——
+    /// 浮层遮住正是要看的数据，等于用一个提示制造另一个盲区。
+    private static var totalHeight: CGFloat { 2 + Self.gridHeight + 14 + Self.tooltipReserve }
+    private static let tooltipReserve: CGFloat = 22
+    /// 浮层宽度的保守上界，用于贴右边界时往回夹。
+    private static let tooltipMaxWidth: CGFloat = 176
 
     var body: some View {
         GeometryReader { geo in
@@ -167,6 +174,12 @@ struct GitActivityHeatmap: View {
                         .padding(Theme.Spacing.xxs)
                         // 同 ContributorHourRow：悬停浮层属 `.floating`，不散写材质与圆角数字。
                         .surface(layer: .floating, shape: .rounded(Theme.Radius.sm))
+                        .fixedSize()
+                        // 横向跟着被悬停的那一列，纵向固定在矩阵下方的预留带里：
+                        // 既不盖格子，也不越出这一帧去盖下一个区块。
+                        .offset(x: min(labelW + CGFloat(cell.hour) * (cellW + gap),
+                                       max(0, size.width - Self.tooltipMaxWidth)),
+                                y: topPad + Self.gridHeight + 14)
                 }
             }
         }

@@ -160,6 +160,10 @@ struct AnalysisSectionRow: View {
     var isEnabled: Bool
     var action: () -> Void
 
+    /// 窗口活动状态。项目行走的是系统原生高亮（失焦自动退灰），导航行是手绘底色，
+    /// 不跟着退就会出现「同一个侧栏，两种选中状态色」。
+    @Environment(\.controlActiveState) private var activeState
+
     var body: some View {
         label
             .buttonStyle(.plain)
@@ -195,13 +199,24 @@ struct AnalysisSectionRow: View {
         .frame(maxWidth: .infinity, minHeight: ShellLayout.rowMinHeight, alignment: .leading)
         .background {
             if isSelected {
-                // 实心强调色胶囊，与上面项目行的**原生**选中态同一种画法。
-                // 原来这里是 15% 淡洗，于是同一个侧栏里并存两种选中态（项目行实心、
-                // 视图行淡洗），实拍图上一眼能看出"不规整"。
-                Capsule().fill(Theme.Semantic.accent.graphicColor)
+                // 与上面项目行的**原生**选中态同一种画法：圆角矩形 + 实心强调色 + 反色文字。
+                // 这里原来是一枚满宽 `Capsule`，而原生那款是带内缩的圆角行 ——
+                // 同一个侧栏里上下两段两种形状（满宽胶囊 vs 内缩圆角），
+                // 用户实拍里一眼能看出「不规整」。
+                // 窗口失焦时原生那款会退成灰，这里跟着退，否则又变成两种状态色。
+                RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous)
+                    .fill(selectionFill)
+                    .padding(.horizontal, Theme.Spacing.xxs)
             }
         }
-        .contentShape(Capsule())
+        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous))
+    }
+
+    /// 选中底色的唯一来源：活动窗口用强调色，非活动退成中性灰（与系统原生高亮同步）。
+    private var selectionFill: Color {
+        activeState == .inactive
+            ? Color(nsColor: .quaternaryLabelColor)
+            : Theme.Semantic.accent.graphicColor
     }
 }
 
@@ -295,28 +310,39 @@ struct ProjectRow: View {
     var project: MonitoredProject
     var report: ProjectReport?
 
+    /// 名字与读数的**左边缘对齐量**：色点直径 + 行内间距。
+    private static let metaIndent: CGFloat =
+        ShellLayout.statusDotDiameter + Theme.Spacing.xs
+
     var body: some View {
-        HStack(spacing: Theme.Spacing.xs) {
-            HealthDot(score: report?.health?.overall)
-            Text(project.name)
-                .font(Theme.Typo.body.font)
-                .lineLimit(1)
-                // 单行截断是刻意的（名字给右侧两格读数让位），所以完整名字必须
-                // 悬停可得 —— 否则「看得见一半」比「看不见」更难查。
-                .help(project.name)
-            if project.isDemo {
-                // 原来这里是一套就地自造的淡色胶囊（8pt + 0.15 底），
-                // 与 PerformanceView 的 PerfTag 逐行重复（WS-I §3.1）→ 改用基座件。
-                SemanticBadge("示例", role: Theme.Semantic.accent)
+        // 两行制：名字独占一行，测得读数落在第二行。
+        // 原来名字与两格定宽读数抢同一行，`Spacer` 把名字压成「Tcoder…」「Tc…」——
+        // 用户九张实拍里每一张都有被截的项目名，而侧栏宽度明明放得下整行读数。
+        // 第二行不参与竞争，于是名字拿回整行宽度，读数也不再互相推。
+        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+            HStack(spacing: Theme.Spacing.xs) {
+                HealthDot(score: report?.health?.overall)
+                Text(project.name)
+                    .font(Theme.Typo.body.font)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    // 单行截断仍然可能存在（名字可以任意长），所以完整名字必须
+                    // 悬停可得 —— 否则「看得见一半」比「看不见」更难查。
+                    .help(project.name)
+                if project.isDemo {
+                    // 原来这里是一套就地自造的淡色胶囊（8pt + 0.15 底），
+                    // 与 PerformanceView 的 PerfTag 逐行重复（WS-I §3.1）→ 改用基座件。
+                    DemoBadge()
+                }
             }
-            Spacer(minLength: Theme.Spacing.xxs)
             metaLine
+                .padding(.leading, Self.metaIndent)
         }
         .padding(.horizontal, ShellLayout.rowPadding)
         .frame(maxWidth: .infinity, minHeight: ShellLayout.rowMinHeight, alignment: .leading)
     }
 
-    /// 右侧读数行。三态在这儿的落法：没有代码报告 = 写「尚未分析」而不是 `--`，
+    /// 第二行读数。三态在这儿的落法：没有代码报告 = 写「尚未分析」而不是 `--`，
     /// 因为这一格就是「还没有结论」，摆两个短横线会被读成一个测得值。
     ///
     /// 每个读数占一个**右对齐定宽格**：`.monospacedDigit()` 只保证单个数字等宽，
@@ -328,7 +354,8 @@ struct ProjectRow: View {
                            width: ShellLayout.lineCountColumnWidth)
             } else {
                 Text(ShellCopy.notAnalyzed("代码规模"))
-                    .font(Theme.Typo.label.font)
+                    .font(Theme.Typo.microLabel.font)
+                    .lineLimit(1)
             }
             if let score = report?.health?.overall {
                 metricCell("健康 \(score)", width: ShellLayout.healthColumnWidth)

@@ -270,6 +270,12 @@ struct ProgressOverlay: View {
             Text("\(projectName) · \(phase.label)")
                 .font(Theme.Typo.label.font)
                 .foregroundStyle(.secondary)
+                // 它挂在顶栏里，而项目名是用户自选目录名（可以 40 个字符）。
+                // 不限宽就会把整条工具栏撑开、把右侧按钮推出窗口。
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 260, alignment: .leading)
+                .help("\(projectName) · \(phase.label)")
         }
         .padding(.horizontal, Theme.Spacing.sm)
         .padding(.vertical, Theme.Spacing.xs)
