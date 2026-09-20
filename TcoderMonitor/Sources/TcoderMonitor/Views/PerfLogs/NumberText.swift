@@ -30,7 +30,10 @@ import SwiftUI
 /// **新表格的列宽不许加到这里**，请去 `DataColumns` 声明一份 `[DataGridColumn]`。
 enum PerfLogWidths {
     /// 错误聚类列表 · 出现次数。
-    static let count: CGFloat = 56
+    /// 「N 次」列。56 装得下 4 位（`1,234 次` ≈ 52pt），装不下 5 位：
+    /// 一个 panic 循环刷出 `12,345 次` 约 70pt，13pt 等宽 + `lineLimit(1)` 会截成
+    /// `12,34…` —— 错误签名计数恰好是最不该被截的数字。量到 72。
+    static let count: CGFloat = 72
     /// 错误聚类列表 · 样本序号（个位数，只用来把样本对齐）。
     static let sampleIndex: CGFloat = 22
     /// 进程页排序分段控件。取值 = 两个选项里较长那条「按 CPU 核当量」的实测宽度。

@@ -207,6 +207,13 @@ struct LiveSeriesChart<Point: Identifiable>: View {
                 .lineStyle(StrokeStyle(lineWidth: Theme.Stroke.emphasis))
         }
         .chartYScale(domain: axis.minValue...axis.maxValue)
+        // **绘图区必须裁剪**。这条不是装饰，是"图会盖住别的区块"的止血点：
+        // 纵轴被 `adaptivePercentAxis` 收窄成 75...100 之后，落在下限以下的真实读数
+        // （CPU 掉到 20%、内存那一帧 `used > total` 给到 >100%）仍会按数据坐标换算，
+        // `AreaMark` 的填充于是画到绘图区**外面**，一路糊住下面的轴脚注与下一个分组。
+        // 用户 23:05 那句「太乱了」的实证就是这一片灰（像素从 y≈500pt 一直渐变到 y≈780pt）。
+        // 只裁绘制、**不夹数据**：轴外的那些点仍然真实存在，脚注与 `rejected` 计数照旧说话。
+        .chartPlotStyle { $0.clipped() }
         .chartYAxis {
             AxisMarks(position: .leading, values: axis.ticks) { value in
                 AxisGridLine().foregroundStyle(Theme.Palette.Surface.separator)
@@ -278,10 +285,20 @@ struct SeriesLegend: View {
     var value: String
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
-            Text(name)
-                .font(Theme.Typo.label.font)
-                .foregroundStyle(.secondary)
+        // 两行制：第一行「名称 …… 读数」，第二行整行给口径。
+        // 原来三段挤一行、中间靠 `Spacer` 撑开，于是 1900pt 宽的画布上名称与读数之间
+        // 出现约 1200pt 的空档（用户说的「拉到两端、中间没有可对齐的列」），
+        // 而最先被吃掉的一定是口径那一段 —— 截完之后恰好把用户要核对的「已用 X GB」截掉。
+        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
+                Text(name)
+                    .font(Theme.Typo.label.font)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: Theme.Spacing.xs)
+                // 读数用墨色：小字号彩字在浅底上过不了 4.5:1，而且颜色在这里不表意。
+                LiveNumber(value, tier: Theme.Typo.monoBody)
+            }
             if let basis {
                 // 口径里带的是测得值（已用字节 / 总量），不得用 `.tertiary`。
                 Text(basis)
@@ -290,9 +307,6 @@ struct SeriesLegend: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-            Spacer(minLength: Theme.Spacing.xs)
-            // 读数用墨色：小字号彩字在浅底上过不了 4.5:1，而且颜色在这里不表意。
-            LiveNumber(value, tier: Theme.Typo.monoBody)
         }
     }
 }

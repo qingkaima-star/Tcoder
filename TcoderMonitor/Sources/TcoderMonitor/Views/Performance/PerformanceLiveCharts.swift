@@ -118,7 +118,11 @@ struct PerformanceLiveCharts: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             NoteLine("横轴：\(usesRelativeAxis ? "距今秒数（窗口不足 \(Int(ChartScale.relativeAxisLimitSeconds)) 秒，时钟读数没有区分度）" : "每 \(ChartScale.secondsStride(windowSeconds: actualSpanSeconds)) 秒一格")。"
                      + "纵轴：CPU \(cpuAxis.domainText)%、内存 \(memoryAxis.domainText)%。"
-                     + (cpuAxis.isZoomed || memoryAxis.isZoomed ? "带下限的轴是**为看清走势而收窄的**，不是 0 起点。" : "两张图均为 0 起点。"))
+                     // 这一句不能用 markdown 星号做强调：`NoteLine` 走 `Text(String)`
+                     // 逐字初始化、不解析 markdown，星号会原样上屏（实测屏幕上出现过 `**`）。
+                     + (cpuAxis.isZoomed || memoryAxis.isZoomed
+                        ? "带下限的轴是为看清走势而收窄的，不是 0 起点。"
+                        : "两张图均为 0 起点。"))
             let rejected = SystemReadings.rejectedMemoryPoints(points)
             if rejected > 0 {
                 NoteLine("内存曲线已剔除 \(NumberFormat.grouped(rejected)) 个无证据读数（引擎给出压力档 unknown 或字节数为 0）。",

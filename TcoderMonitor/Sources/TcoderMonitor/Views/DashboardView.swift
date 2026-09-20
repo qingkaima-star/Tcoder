@@ -308,7 +308,7 @@ struct DashboardView: View {
             }
         }
         .padding(Theme.Spacing.sm)
-        .bannerTintedSurface(Theme.Semantic.warning)
+        .bannerRuleSurface(Theme.Semantic.warning)
     }
 }
 
@@ -545,9 +545,12 @@ private struct ErrorClusterRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: Theme.Spacing.xs)
-            Text("\(cluster.count) 次")
-                .font(Theme.Typo.metricMid.font)
+            Text("\(NumberFormat.grouped(cluster.count)) 次")
+                // 千分位与等宽：日志页同一事实写成 `NumberFormat.grouped(...)`，
+                // 这里原来直接插 `cluster.count` → 同屏一个 12,345 一个 12345。
+                .font(Theme.Typo.metricMid.font.monospacedDigit())
                 .foregroundStyle(Theme.Semantic.danger.textColor)
+                .lineLimit(1)
         }
     }
 }

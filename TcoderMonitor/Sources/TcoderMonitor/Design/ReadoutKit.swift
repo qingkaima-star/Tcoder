@@ -142,12 +142,21 @@ extension Theme {
                 self.gaugeHeight = gaugeHeight
             }
 
-            /// 按稳定键取色（语言名、作者名、生态名）——同一键跨启动永远同色。
+            /// 结构占比（语言名、作者名、生态名、文件名）——**一律纯墨、不染色点**。
+            ///
+            /// 原来这里按 key 稳定取 `Theme.Chart` 序列色，于是总览页那条
+            /// 「Swift 89%」成了一根 1300pt 长的**高饱和蓝条**，是全页最大的一块颜色，
+            /// 压过了它上方的主读数；代码规模页一个小区块里同时出现绿/棕/琥珀/红/蓝五色。
+            /// 关键点是：**每一行的名字就写在条的左边**，颜色在这里不携带任何信息，
+            /// 纯粹是装饰性用色 —— 风格契约 5「结构去色、语义留色」要删的就是这种。
+            /// 全部转墨之后，最长的那根条自然成为视觉重点，而那正是它该说的话。
+            /// 需要颜色表意的地方（风险 / 健康档 / 增删）由调用方显式传 `color:`。
             init(label: String, detail: String? = nil, fraction: Double,
                  percentText: String, countText: String? = nil) {
                 self.init(label: label, detail: detail, fraction: fraction,
                           percentText: percentText, countText: countText,
-                          color: Theme.Chart.color(forLabel: label))
+                          color: Theme.Palette.Surface.ink,
+                          showSwatch: false)
             }
 
             var body: some View {
@@ -161,6 +170,11 @@ extension Theme {
                     Text(label)
                         .font(Theme.Typo.label.font)
                         .lineLimit(1)
+                        // 名称列定宽是**特性**（所有条从同一 x 起画，才能横向比长短），
+                        // 但文件名这类尾部带扩展名的串按尾截会把 `.swift` 整段吃掉
+                        // （错误日志页「受影响源文件」实测只剩 `PerfInvalid…`）。
+                        // 中间截断保住头与尾，列宽与对齐都不动。
+                        .truncationMode(.middle)
                         .frame(width: Theme.Layout.shareLabelWidth, alignment: .leading)
                     if let detail {
                         Text(detail)
@@ -170,12 +184,14 @@ extension Theme {
                     }
                     MiniBarGauge(fraction: fraction, tint: color, height: gaugeHeight)
                     Text(percentText)
-                        .font(Theme.Typo.microLabel.font)
+                        // 占比与次数是**测得值**：不等宽的话每 1.5 秒刷新一次就左右抖一次
+                        // （`microLabel` 的 `monospacedDigits` 是 false，这里必须显式要）。
+                        .font(Theme.Typo.microLabel.font.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .frame(width: Theme.Layout.sharePercentWidth, alignment: .trailing)
                     if let countText {
                         Text(countText)
-                            .font(Theme.Typo.microLabel.font)
+                            .font(Theme.Typo.microLabel.font.monospacedDigit())
                             .foregroundStyle(.tertiary)
                             .frame(width: Theme.Layout.shareCountWidth, alignment: .trailing)
                     }
