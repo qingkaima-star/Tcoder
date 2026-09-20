@@ -87,6 +87,29 @@ pid_binary() {  # pid_binary <pid>
   lsof -p "$1" 2>/dev/null | awk '$4 == "txt" { print $NF; exit }'
 }
 
+WINLIST_BIN=""
+
+# 窗口存在性探测。**为什么先编译一次**：`xcrun swift winlist.swift` 是 JIT，实测每次 0.3 s；
+# 原来 `switch` 档把它放在"首帧轮询"里（最多 60 次），既慢又把探测开销混进了计时。
+# 编译成二进制后稳态实测 39~45 ms，且首次 ~508 ms 的 dyld 冷启动由下面这次预热挡在计时窗外。
+winlist_probe() {  # winlist_probe <pid> → 有在屏窗口时打印 `窗口号|标题|宽`，否则空
+  local pid="$1"
+  if [ -z "$WINLIST_BIN" ]; then
+    if xcrun swiftc -O -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
+         -target arm64-apple-macos14.0 "$WINLIST" -o "/tmp/tcoder-winlist-$$" 2>/dev/null; then
+      WINLIST_BIN="/tmp/tcoder-winlist-$$"
+      "$WINLIST_BIN" "$pid" >/dev/null 2>&1 || true
+    else
+      echo "    ⚠ winlist 编译失败 → 退回 JIT（单次 ~300 ms，只影响存在性探测，不影响时长口径）" >&2
+    fi
+  fi
+  if [ -n "$WINLIST_BIN" ]; then
+    "$WINLIST_BIN" "$pid" 2>/dev/null | head -1
+  else
+    xcrun swift "$WINLIST" "$pid" 2>/dev/null | head -1
+  fi
+}
+
 TARGET_BINARY=""   # 由 require_idle_target 填：实际被采的那个二进制的绝对路径
 TARGET_FLAVOR=""   # release / debug —— spec §7.3 要求两档的绝对值永不混比
 
@@ -121,7 +144,7 @@ preflight_context() {  # preflight_context <outdir> <pid>
   [ -n "$front" ] || front=$(osascript -e 'tell application "System Events" to name of first application process whose frontmost is true' 2>/dev/null | tr -d '\n')
   [ -n "$front" ] || front="未知"
   # 窗口在不在屏：走 `winlist.swift`（CGWindowList，**零权限**），与其它三个取证脚本同一把尺子。
-  win=$(xcrun swift "$WINLIST" "$pid" 2>/dev/null | head -1)
+  win=$(winlist_probe "$pid")
   if [ -n "$win" ]; then
     visible="有在屏窗口（$(printf '%s' "$win" | cut -d'|' -f2)）"
   else
@@ -358,26 +381,28 @@ cmd_switch() {
       --launch -- "$PERF_BIN" -ApplePersistenceIgnoreState YES -selectedDetailSection "$page" \
       --time-limit "${SECONDS_LAUNCH}s" --output "$dir/launch.trace" --no-prompt --quiet
     t1=$(python3 -c 'import time;print(time.time())')
-    # 首帧：xctrace 是父进程，被采 pid 只能从"最新起的那个实例"里认（只读 pgrep -n）。
-    local pid first="" waited=0
+    # 首帧**不能**用墙钟轮询量。原实现的顺序是：t0 → `xctrace record --launch
+    # --time-limit 10s`（阻塞满 10 s）→ 才去轮询窗口出现 → `first = now - t0`，
+    # 于是 `first_frame_ms` 恒 ≥ 录制时长，量到的是"录制跑了多久"，不是首帧。
+    # 时长一律从 trace 的 life-cycle-period 派生；探测只回答"窗口到底出现过没有"。
+    local pid window_seen="未探测到实例"
     pid=$(pgrep -n -x TcoderMonitor 2>/dev/null || true)
-    if [ -n "$pid" ]; then
-      while [ "$waited" -lt 60 ]; do
-        if [ -n "$(xcrun swift "$WINLIST" "$pid" 2>/dev/null | head -1)" ]; then
-          first=$(python3 -c "import time;print('%.0f' % ((time.time()-$t0)*1000))")
-          break
-        fi
-        sleep 0.2; waited=$((waited + 1))
-      done
-    fi
+    [ -n "$pid" ] && { [ -n "$(winlist_probe "$pid")" ] && window_seen="有在屏窗口" || window_seen="无在屏窗口"; }
     export_table "$dir/launch.trace" "life-cycle-period" "$dir"
     export_table "$dir/launch.trace" "hitches" "$dir"
     xcrun xctrace export --input "$dir/launch.trace" --toc --output "$dir/toc.xml" >/dev/null 2>&1
-    meta_write "$dir" "page=$page" "pid=$pid" "first_frame_ms=${first:-未观测到}" \
-      "record_wall_s=$(python3 -c "print('%.1f' % ($t1-$t0))")"
-    echo "    首帧(带采样器，窗口出现口径)=${first:-未观测到} ms；细表见 $dir/life-cycle-period.xml"
-    [ -n "$first" ] && python3 "$TRACE_REPORT" lifecycle "$dir/life-cycle-period.xml" \
+    python3 "$TRACE_REPORT" lifecycle "$dir/life-cycle-period.xml" \
       --json "$dir/life-cycle-period.json" 2>/dev/null | sed 's/^/    /'
+    local launch_total="未观测到"
+    if [ -s "$dir/life-cycle-period.json" ]; then
+      launch_total=$(python3 -c "import json;print(json.load(open('$dir/life-cycle-period.json')).get('total_ms','未观测到'))" 2>/dev/null \
+                     || echo "未观测到")
+    fi
+    meta_write "$dir" "page=$page" "pid=$pid" \
+      "first_frame_ms=${launch_total}" "first_frame_source=life-cycle-period(trace 派生，非墙钟)" \
+      "window_seen=$window_seen" \
+      "record_wall_s=$(python3 -c "print('%.1f' % ($t1-$t0))")"
+    echo "    启动到就绪(trace)=${launch_total} ms；$window_seen；细表见 $dir/life-cycle-period.xml"
     # 收尾：绝不用 `tell application id "<bundle id>" to quit` —— 它按 bundle id **全机生效**，
     # 会把用户自己开着的实例一起退掉（实测踩过：留下 7 个残留，且随时可能误伤）。
     # 默认只报告该退哪个 pid，由人 Cmd+Q；确实要自动收，必须显式授权 SWITCH_TERM=1，
