@@ -7,6 +7,20 @@ import Foundation
 /// 的 9 个维度全部调用这里的曲线（`e676fad` 起），`HealthScoreTests` A~G 是它的回归契约。
 /// 锚点表是产品规约点名要的那份（重复度 12.5%→75、注释 2%~15% 最佳、一人包揽 70%+ 重扣、
 /// narrative 40~80 字）。改锚点等于改对外承诺，必须连测试一起改。
+///
+/// ## 本文件的分片（收官轮 WS-X6，2026-09-21）
+///
+/// 本文件曾被自己的 App 扫成「巨大文件」（>400 行）。修法是**按维度族把 `HealthCurves` 的
+/// 函数切到同目录两个分片文件**，用 `extension HealthCurves` 拼回同一个类型：
+/// - `ScoreCurvesCode.swift` —— 复杂度 / 重复度 / 代码质量 / 注释与可维护性
+/// - `ScoreCurvesTeamRuntime.swift` —— 提交活跃度 / 协作分布 / 运行稳定性 / 依赖健康
+///
+/// **锚点数字、detail 文案、`VulnerabilityEvidence` 判据、`smallSampleCodeLines` 一个字符都没改**，
+/// 搬的只是「哪个函数住在哪个文件」。留在这里的是：证据三态判定、插值原语、标定常量、
+/// 总评 narrative、以及所有分片共用的格式化与分档工具。
+/// 下面那六个工具原先是 `private`：`private` 只到文件作用域，跨文件的同类型扩展看不见它们，
+/// 而把 `joined` / `decimal` 抄第二份正是本仓记过无数次的死法（两份口径并存时错的那套常在喂数据）。
+/// 所以它们放成了 internal —— **不要改回 private，那会让两个分片文件编不过。**
 
 /// 漏洞核对的证据状态。依赖健康这一维最容易虚报：
 /// 「没查过漏洞库」和「查了、确实零命中」在数据上长得一样（都是 0 个漏洞），
@@ -71,238 +85,12 @@ enum ScoreCurve {
 
 enum HealthCurves {
 
-    // MARK: - 复杂度
-
-    /// **调用前置条件：`functionCount > 0`（`HealthCurves` 的锚点契约）。**
-    /// 没有任何函数时这里给的是满分 + 「未发现可计数的函数体」——那是**曲线层的口径**，
-    /// 由 `HealthScoreTests.testComplexityWithoutFunctionsIsPerfectAndExplained` 钉住。
-    /// 评分器不得拿它当「读不懂 = 简单」的证据：`WeightedHealthScorer` 的复杂度分支
-    /// 在均值/分母/热点榜三者都没有证据时让整个维度缺席，而不是调到这里。
-    static func complexity(averageCC: Double, highRiskCount: Int, maxCC: Int, functionCount: Int) -> CurveResult {
-        if functionCount == 0 {
-            return CurveResult(score: 100, detail: "未发现可计数的函数体", risk: .none)
-        }
-        let base = ScoreCurve.piecewise(averageCC, through: [
-            (x: 1, score: 100), (x: 3, score: 92), (x: 5, score: 80), (x: 8, score: 60),
-            (x: 12, score: 38), (x: 16, score: 22), (x: 25, score: 6), (x: 40, score: 0)
-        ])
-        let highRiskPenalty = Swift.min(30.0, Double(Swift.max(0, highRiskCount)) * 3)
-        let outlierPenalty = maxCC >= 40 ? 10.0 : 0
-        let deducted = highRiskPenalty + outlierPenalty
-        let score = ScoreCurve.clamped(base - deducted)
-        let detail = joined([
-            "平均圈复杂度 \(decimal(averageCC))",
-            "\(whole(highRiskCount)) 个函数 CC≥16",
-            "最大 \(maxCC)",
-            deducted > 0 ? "基准 \(decimal(base)) 分扣 \(decimal(deducted)) 分" : ""
-        ])
-        return CurveResult(score: score, detail: detail, risk: graded(score, 80, 60, 40, 22))
-    }
-
-    // MARK: - 重复度
+    // MARK: - 标定常量（曲线共用，锚点之外唯一住在这里的数）
 
     /// 曲线自己承认的置信度下限：低于这个代码行数，重复率只能按小样本估计，detail 会标「置信度低」。
     /// 评分器引用同一个常量来决定「重复代码率低」这句优点能不能写 —— 两处必须同源，防止各写一个数。
+    /// 消费方 `HealthCurves.duplication` 现在住在 `ScoreCurvesCode.swift`（分片只搬函数体，数没动）。
     static let smallSampleCodeLines = 200
-
-    static func duplication(ratio: Double, codeLines: Int) -> CurveResult {
-        // 2% 以内视作识别噪声（满分平台）；5%→98、12.5%→75、25%→4 是对外标定基准。
-        let value = ScoreCurve.clamped(ratio, 0, 1)
-        let score = ScoreCurve.clamped(ScoreCurve.piecewise(value, through: [
-            (x: 0, score: 100), (x: 0.02, score: 100), (x: 0.05, score: 98), (x: 0.08, score: 88),
-            (x: 0.125, score: 75), (x: 0.18, score: 45), (x: 0.25, score: 4), (x: 0.35, score: 0)
-        ]))
-        let lines = Swift.max(0, codeLines)
-        let detail: String
-        if lines < smallSampleCodeLines {
-            detail = joined(["重复率 \(percent(value))", "样本过小，按 \(whole(lines)) 行代码估计，置信度低"])
-        } else {
-            detail = joined(["重复率 \(percent(value))", "按 \(whole(lines)) 行代码统计"])
-        }
-        return CurveResult(score: score, detail: detail, risk: graded(score, 90, 70, 45, 15))
-    }
-
-    // MARK: - 代码质量
-
-    static func codeQuality(hugeFileRatio: Double, averageFunctionLength: Int, longFunctions: Int, totalFiles: Int) -> CurveResult {
-        if totalFiles == 0 {
-            return CurveResult(score: 100, detail: "未发现可评估的源码文件", risk: .none)
-        }
-        let hugeScore = ScoreCurve.piecewise(ScoreCurve.clamped(hugeFileRatio, 0, 1), through: [
-            (x: 0, score: 100), (x: 0.02, score: 92), (x: 0.05, score: 78),
-            (x: 0.10, score: 58), (x: 0.20, score: 28), (x: 0.35, score: 5)
-        ])
-        let lengthScore = ScoreCurve.piecewise(Double(Swift.max(0, averageFunctionLength)), through: [
-            (x: 10, score: 100), (x: 20, score: 92), (x: 35, score: 78),
-            (x: 55, score: 55), (x: 90, score: 25), (x: 150, score: 2)
-        ])
-        let longPenalty = Swift.min(20.0, Double(Swift.max(0, longFunctions) / 10) * 2)
-        let score = ScoreCurve.clamped((hugeScore + lengthScore) / 2 - longPenalty)
-        let detail = joined([
-            "巨大文件占比 \(percent(hugeFileRatio))",
-            "平均函数 \(whole(averageFunctionLength)) 行",
-            "共 \(whole(totalFiles)) 个文件",
-            longPenalty > 0 ? "\(whole(longFunctions)) 个超长函数扣 \(decimal(longPenalty)) 分" : ""
-        ])
-        return CurveResult(score: score, detail: detail, risk: graded(score, 90, 70, 45, 15))
-    }
-
-    // MARK: - 注释与可维护性
-
-    /// **调用前置条件：`totalLines > 0`。** 0 行时返回的 50 分是「无源码可评估」的占位口径，
-    /// 不是测量结果；评分器遇到零分母时让整个维度缺席（`.documentation` 分支的 guard），
-    /// 免得一个占位值参与加权、把在场维度的权重摊薄。
-    static func documentation(commentRatio: Double, todoCount: Int, fixmeCount: Int, totalLines: Int) -> CurveResult {
-        if totalLines == 0 {
-            return CurveResult(score: 50, detail: "无源码可评估", risk: graded(50, 85, 65, 45, 25))
-        }
-        // 峰值在 5%，2%~15% 为最佳带；两端都掉分——注释过多同样是维护成本，50% 只给 20 分。
-        let ratio = ScoreCurve.clamped(commentRatio, 0, 1)
-        let base = ScoreCurve.piecewise(ratio, through: [
-            (x: 0, score: 35), (x: 0.005, score: 55), (x: 0.02, score: 92), (x: 0.05, score: 100),
-            (x: 0.10, score: 98), (x: 0.15, score: 86), (x: 0.22, score: 62), (x: 0.35, score: 35),
-            (x: 0.50, score: 20)
-        ])
-        let todoPenalty = Swift.min(8.0, Double(Swift.max(0, todoCount) / 20) * 1)
-        let fixmePenalty = Swift.min(12.0, Double(Swift.max(0, fixmeCount) / 5) * 2)
-        let deducted = todoPenalty + fixmePenalty
-        let score = ScoreCurve.clamped(base - deducted)
-        let band: String
-        if ratio < 0.02 { band = "低于 2% 最佳下限" }
-        else if ratio > 0.15 { band = "注释过多同样扣分" }
-        else { band = "落在 2%~15% 最佳区间" }
-        let detail = joined([
-            "注释占比 \(percent(ratio))（\(band)）",
-            "TODO \(whole(todoCount)) 个",
-            "FIXME \(whole(fixmeCount)) 个",
-            "源码 \(whole(totalLines)) 行",
-            deducted > 0 ? "标记扣 \(decimal(deducted)) 分" : ""
-        ])
-        return CurveResult(score: score, detail: detail, risk: graded(score, 85, 65, 45, 25))
-    }
-
-    // MARK: - 提交活跃度
-
-    static func activity(commitsPerDay: Double, daysSinceLastCommit: Double?, totalCommits: Int) -> CurveResult {
-        if totalCommits == 0 {
-            return CurveResult(score: 15, detail: "无提交记录", risk: graded(15, 85, 65, 45, 25))
-        }
-        // 速率超过 4 次/天后掉头：高频小提交是碎片化，不该比稳定节奏拿更高分。
-        let rate = Swift.max(0.0, commitsPerDay)
-        let base = ScoreCurve.piecewise(rate, through: [
-            (x: 0, score: 18), (x: 0.2, score: 45), (x: 0.5, score: 65), (x: 1, score: 80),
-            (x: 2, score: 90), (x: 4, score: 95), (x: 8, score: 92), (x: 20, score: 80)
-        ])
-        var stalePenalty = 0.0
-        var recency = ""
-        if let days = daysSinceLastCommit, days.isFinite {
-            recency = "距今 \(decimal(Swift.max(0, days))) 天无提交"
-            if days > 7 {
-                // 7 天起线性扣、60 天封顶 -45。
-                stalePenalty = Swift.min(45.0, Swift.max(0.0, (days - 7) / 53 * 45))
-            }
-        }
-        let score = ScoreCurve.clamped(base - stalePenalty)
-        let detail = joined([
-            "日均 \(decimal(rate)) 次提交",
-            recency.isEmpty ? "未提供最近提交时间" : recency,
-            "累计 \(whole(totalCommits)) 次",
-            rate >= 8 ? "速率偏高按碎片化折算" : "",
-            stalePenalty > 0 ? "陈旧扣 \(decimal(stalePenalty)) 分" : ""
-        ])
-        return CurveResult(score: score, detail: detail, risk: graded(score, 85, 65, 45, 25))
-    }
-
-    // MARK: - 协作分布
-
-    /// `commitBasis` 是**作者统计的总体**（非合并提交数），不是 `totalCommits`（含合并）。
-    /// 分子 `topAuthorShare` 来自作者表，分母若换成含合并的总数就是两个总体相除（缺陷 #44）。
-    static func busFactor(risk: RiskLevel, topAuthorShare: Double, activeAuthors: Int, commitBasis: Int) -> CurveResult {
-        if commitBasis == 0 {
-            return CurveResult(score: 70, detail: "提交记录过少，暂不评估协作分布", risk: .none)
-        }
-        let base = ScoreCurve.piecewise(Double(risk.rank), through: [
-            (x: 0, score: 100), (x: 1, score: 88), (x: 2, score: 62), (x: 3, score: 28), (x: 4, score: 10)
-        ])
-        let share = ScoreCurve.clamped(topAuthorShare, 0, 1)
-        let adjustment: Double
-        if share <= 0.35 { adjustment = 6 }
-        else if share < 0.5 { adjustment = 2 }
-        else if share < 0.7 { adjustment = -6 }
-        else { adjustment = -22 }
-        var score = ScoreCurve.clamped(base + adjustment)
-        let singlePoint = activeAuthors == 1 && commitBasis > 50
-        if singlePoint { score = Swift.min(score, 8) }
-        let shareText = String(format: "%.0f%%", share * 100)
-        let detail = joined([
-            "最高作者占比 \(shareText)",
-            "\(whole(activeAuthors)) 位活跃作者",
-            "\(whole(commitBasis)) 次非合并提交",
-            share >= 0.7 ? "单人包揽重扣 22 分" : "",
-            singlePoint ? "单点作者封顶 8 分" : ""
-        ])
-        return CurveResult(score: score, detail: detail, risk: risk)
-    }
-
-    // MARK: - 运行稳定性
-
-    static func stability(errorsPerKLoc: Double, crashCount: Int, fatalCount: Int, exceptionCount: Int, totalLinesScanned: Int) -> CurveResult {
-        if totalLinesScanned == 0 {
-            // 没扫到日志就不假装满分：给偏高的默认分，并在文案里标明是默认值。
-            return CurveResult(score: 85, detail: "未扫描到运行日志，本维度按默认值计", risk: .low)
-        }
-        let base = ScoreCurve.piecewise(Swift.max(0, errorsPerKLoc), through: [
-            (x: 0, score: 100), (x: 0.5, score: 92), (x: 1.5, score: 78), (x: 3, score: 58),
-            (x: 6, score: 32), (x: 12, score: 12), (x: 25, score: 0)
-        ])
-        let crashPenalty = Swift.min(48.0, Double(Swift.max(0, crashCount)) * 12)
-        let fatalPenalty = Swift.min(24.0, Double(Swift.max(0, fatalCount)) * 8)
-        let exceptionPenalty = Swift.min(15.0, Double(Swift.max(0, exceptionCount) / 5) * 3)
-        let deducted = crashPenalty + fatalPenalty + exceptionPenalty
-        let score = ScoreCurve.clamped(base - deducted)
-        let detail = joined([
-            "每千行 \(decimal(Swift.max(0, errorsPerKLoc))) 个错误",
-            "崩溃 \(whole(crashCount)) 次",
-            "致命 \(whole(fatalCount)) 次",
-            "异常 \(whole(exceptionCount)) 次",
-            "扫描 \(whole(totalLinesScanned)) 行",
-            deducted > 0 ? "扣 \(decimal(deducted)) 分" : ""
-        ])
-        return CurveResult(score: score, detail: detail, risk: graded(score, 85, 65, 45, 20))
-    }
-
-    // MARK: - 依赖健康
-
-    /// 依赖健康曲线。**只在 `VulnerabilityEvidence == .verified` 时调用**：
-    /// 未核对/核对未完成时由评分器让整个维度缺席，而不是在这里给个打折的分数——
-    /// 「零漏洞」既可能是查过之后干净，也可能压根没查，曲线分不出这两种。
-    static func dependencyHealth(vulnerableCount: Int, outdatedCount: Int,
-                                 totalDependencies: Int) -> CurveResult {
-        if totalDependencies == 0 {
-            return CurveResult(score: 100, detail: "未发现依赖清单", risk: .none)
-        }
-        let vulnerable = Swift.max(0, vulnerableCount)
-        let vulnerablePenalty = Swift.min(70.0, Double(vulnerable) * 14)
-        let outdatedRatio = ScoreCurve.clamped(Double(Swift.max(0, outdatedCount)) / Double(Swift.max(1, totalDependencies)), 0, 1)
-        // 这里 piecewise 标定的是「扣分幅度」而非分数本身，基准恒为 100。
-        let outdatedPenalty = ScoreCurve.piecewise(outdatedRatio, through: [
-            (x: 0, score: 0), (x: 0.1, score: 6), (x: 0.25, score: 18), (x: 0.5, score: 32), (x: 0.8, score: 45)
-        ])
-        let deducted = vulnerablePenalty + outdatedPenalty
-        let score = ScoreCurve.clamped(100 - deducted)
-        let risk: RiskLevel
-        if vulnerable == 0 { risk = outdatedRatio > 0.25 ? .low : .none }
-        else if vulnerable <= 2 { risk = .medium }
-        else if vulnerable <= 9 { risk = .high }
-        else { risk = .critical }
-        let detail = joined([
-            "依赖 \(whole(totalDependencies)) 个",
-            vulnerable > 0 ? "漏洞 \(whole(vulnerable)) 个" : "漏洞核对零命中",
-            "落后 \(whole(outdatedCount)) 个占 \(percent(outdatedRatio))",
-            deducted > 0 ? "扣 \(decimal(deducted)) 分" : "",
-        ])
-        return CurveResult(score: score, detail: detail, risk: risk)
-    }
 
     // MARK: - 总评
 
@@ -387,9 +175,9 @@ enum HealthCurves {
         }
     }
 
-    // MARK: - 内部工具
+    // MARK: - 内部工具（分片共用：见文件头「不要改回 private」）
 
-    private static func graded(_ score: Double, _ noneAt: Double, _ lowAt: Double, _ mediumAt: Double, _ highAt: Double) -> RiskLevel {
+    static func graded(_ score: Double, _ noneAt: Double, _ lowAt: Double, _ mediumAt: Double, _ highAt: Double) -> RiskLevel {
         if score >= noneAt { return .none }
         if score >= lowAt { return .low }
         if score >= mediumAt { return .medium }
@@ -398,7 +186,7 @@ enum HealthCurves {
     }
 
     /// 文案预算 60 字：核心数字段在前，放不下的段直接舍弃，宁可少说也不截断数字或换行。
-    private static func joined(_ segments: [String]) -> String {
+    static func joined(_ segments: [String]) -> String {
         var result = ""
         for segment in segments {
             if segment.isEmpty { continue }
@@ -416,7 +204,7 @@ enum HealthCurves {
     }
 
     /// 手写定点格式化，不走 Locale，保证任何系统语言下 detail 里的数字都一致。
-    private static func decimal(_ value: Double, _ digits: Int = 1) -> String {
+    static func decimal(_ value: Double, _ digits: Int = 1) -> String {
         guard value.isFinite else { return "0" }
         let fractionDigits = Swift.max(0, Swift.min(4, digits))
         let boundedValue = Swift.max(-9_999_999_999.0, Swift.min(9_999_999_999.0, value))
@@ -436,11 +224,11 @@ enum HealthCurves {
         return (negative && text != "0") ? "-" + text : text
     }
 
-    private static func percent(_ ratio: Double, _ digits: Int = 1) -> String {
+    static func percent(_ ratio: Double, _ digits: Int = 1) -> String {
         decimal(Swift.max(0, ratio) * 100, digits) + "%"
     }
 
-    private static func whole(_ value: Int) -> String {
+    static func whole(_ value: Int) -> String {
         String(Swift.max(0, value))
     }
 }
