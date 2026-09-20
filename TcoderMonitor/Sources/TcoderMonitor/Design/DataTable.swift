@@ -416,18 +416,6 @@ enum DataGaugeHeight {
     static let metric: CGFloat = 6
 }
 
-// MARK: 行底色
-
-/// 行级淡底色：比徽标底再弱一档，避免整屏表格被高饱和色块盖住。
-/// 数值来自 `Opacity.badgeFill` 的一半，不是新造的魔法数。
-enum CodeGitRowTint {
-    static let alpha = Theme.Palette.Opacity.badgeFill / 2
-
-    static func fill(_ role: Theme.SemanticRole) -> Color {
-        role.graphicColor.opacity(alpha)
-    }
-}
-
 // MARK: 提示条
 
 /// 页面内的口径/告警提示条。取代冻结在 `DashboardView` 里的 `BannerRow`
