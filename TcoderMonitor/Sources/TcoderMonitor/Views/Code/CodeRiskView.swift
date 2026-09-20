@@ -61,7 +61,7 @@ struct CodeRiskOverviewSection: View {
                 DataCaption(text: "口径：\(NumberFormat.grouped(code.totalFiles)) 个文件 · "
                             + "\(NumberFormat.grouped(code.codeLines)) 行有效代码 · 主语言 \(code.primaryLanguage)")
 
-                DataReadoutBand {
+                ReadoutStrip {
                     DataReadout(label: "最大文件",
                                 value: "\(NumberFormat.grouped(code.largestFileLineCount)) 行",
                                 caption: "单文件行数峰值")
@@ -183,7 +183,7 @@ struct CodeComplexitySection: View {
                 )
             } else {
                 VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                    DataReadoutBand {
+                    ReadoutStrip {
                         DataReadout(label: "高/严重复杂度",
                                     value: NumberFormat.grouped(CodeRiskAnalysis.highRiskFunctionCount(code)),
                                     caption: "个函数",

@@ -150,7 +150,7 @@ struct DependencyOverviewSection: View {
             trailing: AnyView(SafetyVerdictBadge(verdict: verdict))
         ) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                DataReadoutBand {
+                ReadoutStrip {
                     DataReadout(label: "生态", value: NumberFormat.grouped(deps.ecosystems.count),
                                 caption: "个清单来源")
                     DataBandSeparator()

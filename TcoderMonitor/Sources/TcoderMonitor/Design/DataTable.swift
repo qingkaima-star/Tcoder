@@ -317,21 +317,9 @@ struct DataReadout: View {
     }
 }
 
-/// 读数条容器：内嵌面，与外层内容卡形成同心圆角（外 16 / 内 10）。
-struct DataReadoutBar<Content: View>: View {
-    var spacing: CGFloat = Theme.Spacing.lg
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        HStack(alignment: .top, spacing: spacing) {
-            content
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, Theme.Spacing.md)
-        .padding(.vertical, Theme.Spacing.sm)
-        .surface(layer: .contentInset, shape: .rounded(Theme.Radius.md))
-    }
-}
+// `DataReadoutBar` 已删（零调用）。它给一行聚合数字画了一口井，而契约 3 只许
+// 表格/日志/代码块进井 —— 三页重样时把它们逐个"出井"之后，这个壳就再没人用了。
+// 留着的风险不是占地方，是下一个人在新表上把它请回来，井又铺回内容层。
 
 // MARK: 占比条
 
