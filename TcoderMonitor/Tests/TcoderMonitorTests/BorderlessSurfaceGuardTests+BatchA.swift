@@ -129,6 +129,119 @@ extension BorderlessSurfaceGuardTests {
         XCTAssertTrue(Self.pageHeaderDeclarations(in: commented).isEmpty, "注释被误判成声明")
     }
 
+    // MARK: 批次 G：不许再有"盒式选择器"
+
+    /// `.pickerStyle(.segmented)` 的命中位置。系统分段控件给选中项画一枚**灰底胶囊**，
+    /// 那是地面改白之后仅剩的"灰底选中"语言，且与侧栏实心绿选中态、与参考图的
+    /// `Week / Month / Quarter / Year` 文字档位都对不齐。全站统一走 `TextSegmentedPicker`。
+    static func boxedSegmentedPickers(in files: [(path: String, content: String)]) -> [String] {
+        files.flatMap { file in
+            file.content.split(separator: "\n", omittingEmptySubsequences: false)
+                .enumerated()
+                .compactMap { index, raw in
+                    guard isCode(raw), raw.contains(".pickerStyle(.segmented)") else { return nil }
+                    return "\(file.path):\(index + 1)"
+                }
+        }
+    }
+
+    func test_noBoxedSegmentedPickersRemain() throws {
+        let offenders = Self.boxedSegmentedPickers(in: try Self.sourceFiles(under: "Views"))
+        XCTAssertTrue(offenders.isEmpty,
+                      "又出现盒式分段选择器（灰底选中），改走 TextSegmentedPicker：\(offenders)")
+    }
+
+    func test_boxedPickerScannerDetectsInjectedUse() {
+        let dirty = [(path: "Views/Fake.swift",
+                      content: "  Picker(\"x\", selection: $s) {}\n    .pickerStyle(.segmented)\n")]
+        XCTAssertEqual(Self.boxedSegmentedPickers(in: dirty).count, 1, "盒式选择器坏样例没抓到")
+        let clean = [(path: "Views/Fake.swift",
+                      content: "// 原来写 .pickerStyle(.segmented)，已换掉\n")]
+        XCTAssertTrue(Self.boxedSegmentedPickers(in: clean).isEmpty, "注释里的写法被误判")
+    }
+
+    // MARK: 批次 H：分隔线只许两种画法
+
+    /// `Divider()` 的命中位置。竖线归 `DataBandSeparator`、横线归 `DataRowSeparator`，
+    /// `Divider()` 只许留在**系统菜单**里（菜单分隔线由 AppKit 画，不是内容层规则）。
+    static func strayDividers(in files: [(path: String, content: String)],
+                              allowed: Set<String>) -> [String] {
+        files.flatMap { file in
+            guard !allowed.contains(file.path) else { return [String]() }
+            return file.content.split(separator: "\n", omittingEmptySubsequences: false)
+                .enumerated()
+                .compactMap { index, raw in
+                    guard isCode(raw), raw.contains("Divider()") else { return nil }
+                    return "\(file.path):\(index + 1)"
+                }
+        }
+    }
+
+    /// 允许 `Divider()` 的文件 + 理由。**没有理由的条目不许加进来。**
+    private static let dividerAllowlist: Set<String> = [
+        "Views/Shell/ProjectSidebar.swift",   // 右键菜单里的分组线，由 AppKit 绘制
+    ]
+
+    func test_dividerIsConfinedToSystemMenus() throws {
+        let offenders = Self.strayDividers(in: try Self.sourceFiles(under: "Views"),
+                                           allowed: Self.dividerAllowlist)
+        XCTAssertTrue(offenders.isEmpty,
+                      "内容层又出现第三种分隔线画法，竖线用 DataBandSeparator、横线用 DataRowSeparator：\(offenders)")
+    }
+
+    func test_strayDividerScannerDetectsInjectedUse() {
+        let dirty = [(path: "Views/Fake.swift", content: "  VStack { Divider() }\n")]
+        XCTAssertEqual(Self.strayDividers(in: dirty, allowed: []).count, 1, "坏样例没抓到")
+        let allowed = [(path: "Shell/Menu.swift", content: "  Divider()\n")]
+        XCTAssertTrue(Self.strayDividers(in: allowed, allowed: ["Shell/Menu.swift"]).isEmpty,
+                      "白名单没生效")
+        let commented = [(path: "Views/Fake.swift", content: "// 原来这里写 Divider()\n")]
+        XCTAssertTrue(Self.strayDividers(in: commented, allowed: []).isEmpty, "注释被误判")
+    }
+
+    // MARK: 批次 H：量词不许被当成口径
+
+    /// `caption: "个"` 这类**纯量词**写法。量词属于数字（走 `unit:`，同行小一档），
+    /// 口径属于这一格在量什么（走 `caption`，落下一行）。混用的后果是同一屏
+    /// 出现两种单位尺度：代码规模页「110k 行」同行、依赖页「4 项」换行。
+    static func pureUnitCaptions(in files: [(path: String, content: String)]) -> [String] {
+        let units: Set<Character> = ["个", "项", "行", "次", "天", "条", "台", "组"]
+        return files.flatMap { file in
+            file.content.split(separator: "\n", omittingEmptySubsequences: false)
+                .enumerated()
+                .compactMap { index, raw in
+                    let line = String(raw)
+                    guard isCode(line), let start = line.range(of: "caption: \"") else { return nil }
+                    let rest = line[start.upperBound...]
+                    guard let end = rest.firstIndex(of: "\"") else { return nil }
+                    let text = rest[..<end]
+                    guard text.count >= 1, text.count <= 2,
+                          let first = text.first, units.contains(first) else { return nil }
+                    return "\(file.path):\(index + 1) caption: \"\(text)\""
+                }
+        }
+    }
+
+    func test_pureUnitsGoToUnitNotCaption() throws {
+        let offenders = Self.pureUnitCaptions(in: try Self.sourceFiles(under: "Views"))
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些格把量词写成了口径（应改用 unit:）：\(offenders)")
+    }
+
+    func test_pureUnitScannerDetectsInjectedUse() {
+        // 用 `##"…"##` raw string 写样例：内容以引号结尾，单 `#` 的定界符会被
+        // 结尾那个 `"` 吃掉（上一版就是这么炸的：unterminated string literal）。
+        let dirty = [(path: "Views/Fake.swift",
+                      content: ##"  DataReadout(label: "x", value: "4", caption: "项")"## + "\n")]
+        XCTAssertEqual(Self.pureUnitCaptions(in: dirty).count, 1, "纯量词 caption 没抓到")
+        let fine = [(path: "Views/Fake.swift",
+                     content: ##"  DataReadout(label: "x", value: "4", caption: "单文件行数峰值", unit: "行")"##
+                         + "\n"
+                         + ##"  DataReadout(label: "y", value: "1", caption: "注释率 12%")"## + "\n")]
+        XCTAssertTrue(Self.pureUnitCaptions(in: fine).isEmpty,
+                      "真口径串被误判成量词（长度/首字判据太松）")
+    }
+
     /// 反向自证：`sourceFiles` 真读到了文件。否则上面所有「扫不到就算通过」的断言
     /// 会集体假绿 —— 这是扫描型守卫最经典的死法。
     func test_sourceScannerActuallyFindsFiles() throws {

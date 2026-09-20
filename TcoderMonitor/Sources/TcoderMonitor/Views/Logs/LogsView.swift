@@ -68,15 +68,16 @@ struct LogsView: View {
             Text("时间窗口")
                 .typed(Theme.Typo.label)
                 .foregroundStyle(.secondary)
-            Picker("时间窗口", selection: window) {
-                ForEach(Self.windowChoices, id: \.self) { day in
-                    Text("最近 \(day) 天").tag(day)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .help("切换后自动重新分析（示例项目与扫描进行中除外）")
+            // 一排纯文字选档，替掉 `.pickerStyle(.segmented)`：后者给选中项画一枚
+            // **灰底胶囊**，那是白底改造之后全站仅剩的一处"灰底选中"，与侧栏的
+            // 实心绿选中态、与参考图的 `Week / Month / Quarter / Year` 都对不齐；
+            // 而且 `.fixedSize()` 明确拒绝压缩，窄窗口下这一行会横向溢出页边距（清单 2.12）。
+            TextSegmentedPicker(options: Self.windowChoices,
+                                label: { "最近 \($0) 天" },
+                                selection: window.wrappedValue,
+                                onSelect: { window.wrappedValue = $0 })
+                .accessibilityLabel("时间窗口")
+                .help("切换后自动重新分析（示例项目与扫描进行中除外）")
             controls
         }
     }

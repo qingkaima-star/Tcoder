@@ -34,11 +34,11 @@ struct PerformanceSystemTiles: View {
         GlassSection("系统资源", subtitle: sectionSubtitle, icon: .cpu) {
             ReadoutStrip {
                 cpuTile
-                Divider()
+                DataBandSeparator()
                 memoryTile
-                Divider()
+                DataBandSeparator()
                 diskTile
-                Divider()
+                DataBandSeparator()
                 networkTile
             }
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
@@ -162,11 +162,12 @@ struct PerformanceSystemTiles: View {
     private var statusStrip: some View {
         HStack(spacing: Theme.Spacing.xs) {
             ThemedIcon(.temperature, role: .badge).foregroundStyle(.secondary)
-            Text("机身 \(context.snapshot?.thermalState.rawValue ?? Live.missing)")
-            Text("·").foregroundStyle(.tertiary)
-            Text("已运行 \(Self.uptimeText(context.snapshot?.uptimeSeconds))")
-            Text("·").foregroundStyle(.tertiary)
-            Text("全系统 \(Live.grouped(context.snapshot?.processCount)) 个进程")
+            // **一个** Text，而不是"五段 + 两个间隔点"抢一行：
+            // 后者在窄窗口下按弹性比例压缩每段，`·` 会单独留在行尾（清单 2.14）。
+            // 同页 `sampleStats` 本来就是拼成单串的写法 —— 两种写法并存就是"不规整"本身。
+            Text("机身 \(context.snapshot?.thermalState.rawValue ?? Live.missing)"
+                 + " · 已运行 \(Self.uptimeText(context.snapshot?.uptimeSeconds))"
+                 + " · 全系统 \(Live.grouped(context.snapshot?.processCount)) 个进程")
             Spacer(minLength: 0)
         }
         .font(Theme.Typo.label.font)
