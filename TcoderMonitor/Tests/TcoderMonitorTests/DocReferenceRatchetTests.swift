@@ -40,9 +40,15 @@ final class DocReferenceRatchetTests: XCTestCase {
         .deletingLastPathComponent()
         .deletingLastPathComponent()
 
-    /// 2026-09-20 在 main `713f121` 上实测：四份文档共 92 条 `File.swift:NN` 形状的行号引用。
-    /// 这个数是**基线**，不是"合法额度"——它只许往下调。
-    private static let fileLineReferenceCeiling = 92
+    /// 2026-09-20 在 main `ab34cad` 上实测：四份文档里**带行号**的引用只剩 1 条
+    /// （WS-Z / WS-Z2 把存量逐条换成了符号锚点，文件名提及另有 92 条，那是正常写作）。
+    /// 这是**基线**不是"合法额度"——只许往下调；真降到 0 时把这里改成 0 并删掉
+    /// 剩下那条历史引述。
+    ///
+    /// 第一版这里误用了 `fileCount`（所有反引号里的文件名），结果我自己写一句
+    /// `verify_provenance.sh` 就把它顶到 93 而判红——那会把人训练成"改文档要绕着守卫走"。
+    /// 现在只数**带行号**的那一类，正是 #48 要防的东西。
+    private static let fileLineReferenceCeiling = 1
 
     private static let docs: [String] = ["README.md", "docs/使用说明.md",
                                        "docs/口径与已知限制.md", "docs/九页实拍读数.md"]
@@ -195,6 +201,7 @@ final class DocReferenceRatchetTests: XCTestCase {
         var unreadable: [String] = []
         var symbolCount = 0
         var fileCount = 0
+        var fileWithLineCount = 0
         var exampleCount = 0
         var excludedExtensions = Set<String>()
         var symbolFileScopedLive = 0
@@ -230,8 +237,12 @@ final class DocReferenceRatchetTests: XCTestCase {
                             scan.symbolPlainLive += 1
                         }
                     }
-                case .file:
+                case .file(_, let line):
                     scan.fileCount += 1
+                    // #48 真正要盯的是**带行号**的那一类：`foo.swift` 这种纯文件名提及
+                    // 是正常写作（`build_app.sh`、`Info.plist`…），拿它当债务计数会
+                    // 惩罚普通改文档——第一版就误伤过一次（写 `verify_provenance.sh` 就 +1）。
+                    if line != nil { scan.fileWithLineCount += 1 }
                 }
                 if let reason = resolution.reason { scan.dead[token] = reason }
             }
@@ -271,14 +282,14 @@ final class DocReferenceRatchetTests: XCTestCase {
         // 做成启发式——那种误报会把人训练成"红了就忽略"，不值。
         // 所以这里改用**只减不增棘轮**：行号引用条数只许往下走，
         // 让 §4.6"只写符号不写行号"这条规约变成机器守得住的事。
-        XCTAssertLessThanOrEqual(scan.fileCount, Self.fileLineReferenceCeiling,
-                                 "行号引用从 \(Self.fileLineReferenceCeiling) 涨到 \(scan.fileCount) 条："
+        XCTAssertLessThanOrEqual(scan.fileWithLineCount, Self.fileLineReferenceCeiling,
+                                 "带行号的引用从 \(Self.fileLineReferenceCeiling) 涨到 \(scan.fileWithLineCount) 条："
                                + "新增一律写成 `文件名` 的 `类型.成员`，不要写行号。"
                                + "确实清掉了若干条，就把基线改成新的实测值（只许往下调）。")
 
         print("【#29 分母】在锚引用 \(scan.symbolCount + scan.fileCount) 条"
             + "（符号 \(scan.symbolCount)：按文件名作用域判活 \(scan.symbolFileScopedLive)"
-            + " / 纯符号判活 \(scan.symbolPlainLive)）、文件行号 \(scan.fileCount) 条；"
+            + " / 纯符号判活 \(scan.symbolPlainLive)）、文件名提及 \(scan.fileCount) 条（其中带行号 \(scan.fileWithLineCount) 条）；"
             + "示例清单名排除 \(scan.exampleCount) 条；文档读到 \(scan.docsRead)/\(Self.docs.count) 份，skip 0；"
             + "豁免掉的文件名首段 \(scan.droppedSegments.count) 个："
             + "\(scan.droppedSegments.sorted().joined(separator: ", "))")
