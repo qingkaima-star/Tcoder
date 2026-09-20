@@ -44,10 +44,23 @@ extension Theme {
             // 上定义好了却**全仓零引用** —— 所以《BorderlessSurfaceGuardTests》现在既查
             // 「画了不该画的」也查「定义了没人用的」，只查前者会原样复发。
 
-            /// 唯一页面底色（风格契约 1）。参考图两处取样对比 1.00:1 = 全页只有一个面。
-            static let ground = DualColor(lightHex: 0xF1F1F3, darkHex: 0x1C1C1E).color
+            /// 唯一页面底色（风格契约 1）。
+            ///
+            /// **2026-09-20 夜二次修订：浅色从 `#F1F1F3` 改成纯白，深色从 `#1C1C1E` 改成纯黑。**
+            /// 上一版照参考图取了"桌面灰"，但漏了参考图的另一半：它是**纯白面板压在灰桌上**
+            /// 的两级结构（同一张图实测桌面 `#EFEFF2`、卡内 `#F5F5F5`），而我这一轮把内容层的
+            /// 面全去掉了，于是灰桌成了唯一底色。实拍读数：81.3% 像素落在 235–249 这一条灰带里，
+            /// 纯白只占 5.1% —— 用户判词「不要用灰色底，显脏」在像素上就是这个分布。
+            ///
+            /// 还有一条更硬的理由：`DesignAppearance.referenceSurface` 一直是
+            /// `#FFFFFF / #1E1E1E`（编译产物实测），也就是**全部 3:1 图形色断言本来就按白底算**。
+            /// 地面定成 `#F1F1F3` 等于让真实像素比断言低 12%（`#2CA94C` 断言 3.05、真实 2.70），
+            /// 守卫绿着、屏幕不达标。地面回白之后，断言与像素第一次是同一把尺子。
+            static let ground = DualColor(lightHex: 0xFFFFFF, darkHex: 0x000000).color
             /// 井：内容层唯一允许的实心底（风格契约 3），只给表格 / 日志列表 / 代码块。
-            static let well = DualColor(lightHex: 0xEAEAEC, darkHex: 0x2A2A2C).color
+            /// 浅色从 `#EAEAEC` 提到 `#F5F5F7`：地面已经变白，井只要"比白暗一档"就够，
+            /// 再深就成了上一版那种"灰块压灰底"的脏源。
+            static let well = DualColor(lightHex: 0xF5F5F7, darkHex: 0x1C1C1E).color
             /// 控件层在 macOS ≤ 15 的实心兜底（26 上由系统玻璃接管）。
             static let control = DualColor(lightHex: 0xFFFFFF, darkHex: 0x2D2D2F).color
             /// 主读数纯墨（风格契约 4）。34pt 及以上的数字必须用它。
@@ -57,6 +70,15 @@ extension Theme {
             /// `#2F2F2F` 的来源，而它落在**小号正文**上；参考图最暗像素 `#000000`
             /// 落在**最大的数字**上。「没有主次」在像素层面的定义就是这个错位。
             static let ink = DualColor(lightHex: 0x0A0A0A, darkHex: 0xF2F2F5).color
+            /// 主行动填充（参考图右上角那颗黑色 "Share" 胶囊）。
+            ///
+            /// 为什么主按钮是墨而不是强调色：参考图把**最高对比**给了唯一的主动作
+            /// （`#0A0A0A` 底 + 白字，实测 19.8:1），把**彩色**留给"选中/增量"这类状态。
+            /// 我们原来反过来——主按钮吃强调色玻璃，于是每个区域都在喊。
+            /// 深浅两版各自翻转到极端：浅底黑胶囊白字、深底白胶囊黑字，都是 19.8:1。
+            static let inkFill = DualColor(lightHex: 0x0A0A0A, darkHex: 0xF2F2F5).color
+            /// 压在 `inkFill` 上的前景，必须与它反向。
+            static let onInkFill = DualColor(lightHex: 0xFFFFFF, darkHex: 0x0A0A0A).color
         }
 
         /// 透明度只留三档，收编现仓散落的 0.04/0.08/0.12/0.14/0.15/0.25。
@@ -101,9 +123,6 @@ extension Theme {
         /// 必须是双层：`critical` 的浅底填充是深红（配白才够 6.5:1），
         /// 而它的深底填充是浅鲑红（配墨才够 6.7:1）——单值必然有一侧不达标。
         let onFill: DualColor
-        /// 系统动态色优先的角色（如 accent 跟随用户强调色）在这里放 `Color`；
-        /// 为 nil 表示该角色的 graphic 是数值令牌、可参与对比度断言。
-        let systemGraphic: Color?
         /// badge 底色两档预计算（`Opacity.badgeFill` 铺在对应外观的图形色上）。
         ///
         /// 存在理由与 `DualColor.color` 同源：`badgeFill(in:)` 是徽标/提示条每行都要
@@ -120,18 +139,6 @@ extension Theme {
             self.text = DualColor(lightHex: textLight, darkHex: textDark)
             self.graphic = DualColor(lightHex: graphicLight, darkHex: graphicDark)
             self.onFill = onFill
-            self.systemGraphic = nil
-            self.badgeFillLight = Self.makeBadgeFill(of: self.graphic.light)
-            self.badgeFillDark = Self.makeBadgeFill(of: self.graphic.dark)
-        }
-
-        /// 跟随系统色的角色（accent）。无法用数值断言，报告里单列。
-        init(systemNamed name: String, system: Color, textLight: UInt32, textDark: UInt32) {
-            self.name = name
-            self.text = DualColor(lightHex: textLight, darkHex: textDark)
-            self.graphic = DualColor(lightHex: 0x0A82FF, darkHex: 0x0A84FF)
-            self.onFill = DualColor(lightHex: 0x111111, darkHex: 0x111111)
-            self.systemGraphic = system
             self.badgeFillLight = Self.makeBadgeFill(of: self.graphic.light)
             self.badgeFillDark = Self.makeBadgeFill(of: self.graphic.dark)
         }
@@ -143,7 +150,7 @@ extension Theme {
         }
 
         var textColor: Color { text.color }
-        var graphicColor: Color { systemGraphic ?? graphic.color }
+        var graphicColor: Color { graphic.color }
         /// 跟随外观切换的前景墨色。
         var onFillColor: Color { onFill.color }
 
@@ -178,9 +185,32 @@ extension Theme {
     }
 
     enum Semantic {
+        /// 强调色。**从这一版起钉死为绿色，不再跟随用户系统强调色**。
+        ///
+        /// 为什么不再跟随系统：用户给的锚点图用亮绿做唯一强调色，而系统强调色在本机是蓝——
+        /// 于是"选中态"这一类最重要的反馈跟着每个人的系统设置漂，参考图里那套
+        /// "结构去色、语义留色、强调只有一种" 就永远对不齐。钉死的代价是失去系统联动，
+        /// 换来的是像素可反查、断言可计算（这条角色从此进 `measurable`，与其余六个同线）。
+        ///
+        /// 三档各自的存在理由（数值 = 对 `ground` 与对白色前景双向实测）：
+        /// - `graphic` 浅 `#15803D`：对白底 5.02:1，白字压上去 5.02:1。**同时**过
+        ///   非文本 3:1 与文本 4.5:1 两条线，所以它既能画进度条也能当选中胶囊底。
+        ///   深 `#15803D`：对纯黑 4.19:1、白字压上去 5.02:1。**两版取同一个值**是算出来的——
+        ///   深底想更亮一档（如 `#0E8A45`）时，白字于其上只剩 4.43:1，反而跌破 4.5 线。
+        /// - `text` 浅 `#0D7130`：对白底 6.11:1，**压在自己 15% badge 底上 4.98:1**。
+        ///   原来取 `#0E7A32`（对白底 5.46:1，看着更宽裕），但 badge 底是"同色 15% 铺白底"，
+        ///   合成后亮度掉到 0.806，文字对比被压成 **4.45:1** —— 差 0.05 就是不过线，
+        ///   而这条线是 `testSemanticTextClearsWCAG_AA_OnBadgeFill` 实测出来的，不是估的。
+        ///   深 `#59E08A`：对纯黑 12.45:1。
+        /// - `onFill` 一律白：`graphic` 做填充时前景取白，两版都 ≥4.5。
+        ///
+        /// 与 `success` 的关系是**刻意同族不同档**：`success` 管数据（健康/涨），
+        /// `accent` 管交互（选中/焦点/主行动旁的状态）。参考图本来就让绿色同时承担
+        /// "品牌"与"正向"两义，两者在屏幕上从不相邻（一个在导航、一个在数据位）。
         static let accent = SemanticRole(
-            systemNamed: "accent", system: Color.accentColor,
-            textLight: 0x1D4ED8, textDark: 0x8AB4F8)
+            name: "accent", textLight: 0x0D7130, textDark: 0x59E08A,
+            graphicLight: 0x15803D, graphicDark: 0x15803D,
+            onFill: DualColor(lightHex: 0xFFFFFF, darkHex: 0xFFFFFF))
 
         static let success = SemanticRole(
             name: "success", textLight: 0x157A32, textDark: 0x5BE28A,
@@ -192,8 +222,8 @@ extension Theme {
             graphicLight: 0x2AA694, graphicDark: 0x4ED8C0)
 
         static let warning = SemanticRole(
-            name: "warning", textLight: 0x8A5000, textDark: 0xFFD60A,
-            graphicLight: 0xD18208, graphicDark: 0xFFD60A)
+            name: "warning", textLight: 0x8A5000, textDark: 0xFF9F0A,
+            graphicLight: 0xD18208, graphicDark: 0xFF9F0A)
 
         static let danger = SemanticRole(
             name: "danger", textLight: 0xC2251C, textDark: 0xFF6B63,
@@ -214,11 +244,14 @@ extension Theme {
             name: "neutral", textLight: 0x5F5F64, textDark: 0xA9A9AE,
             graphicLight: 0x8E8E93, graphicDark: 0x98989D)
 
-        /// 参与对比度断言的角色（accent 的 graphic 随系统强调色，数值不可断言，单列）。
+        /// 参与对比度断言的角色。**从 accent 钉死之日起，八个角色全进这条线**——
+        /// 以前 accent 因为跟随系统强调色而"数值不可断言"，只能单列；现在它是钉死的
+        /// 绿色，没有理由豁免。谁再把某个角色改回系统动态色，就必须同时把它从这里摘出去，
+        /// 那等于承认"这个数我不负责"，`DesignTokenTests` 的注册表断言会拦住这种操作。
         static let measurable: [SemanticRole] =
-            [success, healthy, warning, danger, critical, info, neutral]
+            [accent, success, healthy, warning, danger, critical, info, neutral]
 
-        static let all: [SemanticRole] = [accent] + measurable
+        static let all: [SemanticRole] = measurable
 
         /// 风险等级 → 角色。沿用旧映射（WS-H §5.3 判定该映射合理），换成双层色。
         static func role(for risk: RiskLevel) -> SemanticRole {

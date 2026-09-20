@@ -51,8 +51,8 @@ final class DesignTokenTests: XCTestCase {
         }
     }
 
-    func testAccentTextTierClearsWCAG_AA_EvenThoughItsGraphicFollowsSystem() {
-        // accent 的图形色随用户强调色（无法数值断言），但文字层是钉死的。
+    func testAccentTextTierClearsWCAG_AA() {
+        // accent 已钉死为绿色（不再随用户系统强调色），文字层与其余七个角色同线。
         for appearance in appearances {
             let ratio = Theme.Semantic.accent.contrastTextOnSurface(in: appearance)
             XCTAssertGreaterThanOrEqual(
@@ -211,15 +211,30 @@ final class DesignTokenTests: XCTestCase {
         XCTAssertEqual(Theme.Semantic.role(for: .debug).name, "neutral")
     }
 
-    /// 注册表完整性：新增角色必须同时进 `all`、名字唯一；`measurable` 只允许少一个
-    /// accent（它随用户系统强调色，数值不可断言）。防止有人加了角色却忘了补对比度断言。
+    /// 注册表完整性：新增角色必须同时进 `all`、名字唯一；并且**八个角色全部进对比度断言**。
+    ///
+    /// 2026-09-20 夜：accent 从"跟随系统强调色、数值不可断言"改成钉死的绿色，
+    /// 于是它不再享有豁免。这条断言从"只允许少 accent 一项"收紧成"一个都不能少"——
+    /// 谁再把某个角色接回系统动态色，就会在这里被迫写一句"这个数我不负责"。
     func testSemanticRegistryIsCompleteAndUniquelyNamed() {
         let all = Theme.Semantic.all
         XCTAssertEqual(Set(all.map(\.name)).count, all.count, "语义角色有重名")
-        XCTAssertEqual(Theme.Semantic.measurable.count + 1, all.count,
-                       "all 与 measurable 之间只应差 accent 一项，多出来的角色必须补对比度断言")
-        XCTAssertEqual(all.filter { $0.systemGraphic != nil }.count, 1,
-                       "只能有一个角色走系统动态色")
+        XCTAssertEqual(Theme.Semantic.measurable.count, all.count,
+                       "有角色没进对比度断言；只有'数值不可断言的系统动态色'才允许缺席，而本仓现在没有这种角色")
+    }
+
+    /// 强调色钉死的两条硬判据：选中胶囊要同时撑住"画在白底上"和"白字压在上面"。
+    /// 这不是审美——浅一档的 `#0E8A45` 白字于其上只有 4.43:1，会跌破 AA 文本线。
+    func testAccentGraphicClearsBothGraphicAndOnFillLines() {
+        let accent = Theme.Semantic.accent
+        for appearance in appearances {
+            XCTAssertGreaterThanOrEqual(
+                accent.contrastGraphicOnSurface(in: appearance), graphicLine,
+                "accent/\(appearance == .light ? "浅色" : "深色") 图形色低于非文本 \(graphicLine):1")
+            XCTAssertGreaterThanOrEqual(
+                accent.contrastOnOwnFill(in: appearance), textLine,
+                "accent/\(appearance == .light ? "浅色" : "深色") 的白字压在选中胶囊上低于 \(textLine):1")
+        }
     }
 
     // MARK: - H. 图表色板：全 App 唯一一套

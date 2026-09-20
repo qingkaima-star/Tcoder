@@ -70,8 +70,14 @@ struct HealthRing: View {
         VStack(spacing: Theme.Spacing.xs) {
             Text(Self.scoreText(for: score))
                 .font(Theme.Typo.heroMetric.font)
+                // 56pt 的数字**一律纯墨**，健康语义交给外面那圈环（`role.graphicColor`）。
+                // 原来这里涂 `role.textColor`，于是深色模式下一个 61 分的中档分数会以整块
+                // 色板里最响的那颗黄（旧 `#FFD60A`，相对亮度 0.694，比 danger 的 0.258
+                // 亮 2.7 倍）占住页面最大的面积 —— 参考图最响的墨永远给最大的数，
+                // 彩色只出现在小面积的状态标记上。「没有主次」在首屏就是这一行。
+                // 未评分那一支仍走 neutral：空读数不该和真实读数一样响。
                 .foregroundStyle(score == nil ? Theme.Semantic.neutral.textColor
-                                              : role.textColor)
+                                              : Theme.Palette.Surface.ink)
             subline(role: role)
         }
     }

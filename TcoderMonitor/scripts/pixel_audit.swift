@@ -21,7 +21,8 @@ func srgbLuma(_ r: Double, _ g: Double, _ b: Double) -> Double {
     return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
 }
 
-print(String(format: "%-46@ %-30@ %@", "截图", "大面积明度众数(面积占比)", "最暗像素落点"))
+print(String(format: "%-46@ %-30@ %@  %@",
+             "截图", "大面积明度众数(面积占比)", "最暗像素落点", "灰阶分带 白/灰带235-249/暗灰带215-234"))
 for path in CommandLine.arguments.dropFirst() {
     guard let img = NSImage(contentsOfFile: path), let tiff = img.tiffRepresentation,
           let rep = NSBitmapImageRep(data: tiff) else {
@@ -49,15 +50,28 @@ for path in CommandLine.arguments.dropFirst() {
     let stepX = max(1, W / 500), stepY = max(1, H / 500)
     var buckets: [Int: Int] = [:]
     var total = 0
+    // 灰阶分带：**这是"显脏"唯一可证伪的读数**。
+    // 用户判词「不要用灰色底，显脏」如果只能靠眼睛，下一轮一定再犯——所以这里把
+    // "白" 与 "灰" 拆成三个带计数：纯白（三通道都 ≥250）、灰带（235–249，旧地面
+    // `#F1F1F3` 正落在这里）、暗灰带（215–234，旧井 `#EAEAEC` 落在这里）。
+    // 参考图实测是「白面板 + 灰桌」两级，上一版把内容层的面全去掉后只剩灰带一级：
+    // 实拍灰带 81.3% / 纯白 5.1%。地面回白之后这两个数应当反过来。
+    var pureWhite = 0, grayBand = 0, darkGrayBand = 0
     for y in stride(from: Int(Double(H) * 0.16), to: Int(Double(H) * 0.96), by: stepY) {
         for x in stride(from: Int(Double(W) * 0.26), to: W - 2, by: stepX) {
             guard let p = px(x, y) else { continue }
             if max(p.0, max(p.1, p.2)) - min(p.0, min(p.1, p.2)) > 0.18 { continue }
+            let mn = Int(min(p.0, min(p.1, p.2)) * 255)
+            if mn >= 250 { pureWhite += 1 }
+            else if mn >= 235 { grayBand += 1 }
+            else if mn >= 215 { darkGrayBand += 1 }
             let l = Int(srgbLuma(p.0, p.1, p.2) * 255)
             buckets[l / 3, default: 0] += 1
             total += 1
         }
     }
+    let pct: (Int) -> String = { total == 0 ? "—" : String(format: "%.1f%%", 100 * Double($0) / Double(total)) }
+    let bands = "白\(pct(pureWhite))/灰带\(pct(grayBand))/暗灰带\(pct(darkGrayBand))"
     let sorted = buckets.sorted { $0.value > $1.value }
     let groundBucket = sorted.first
     let groundText = groundBucket.map {
@@ -75,7 +89,7 @@ for path in CommandLine.arguments.dropFirst() {
             if l < minLuma { minLuma = l; minXY = (x, y) }
         }
     }
-    print(String(format: "%-46@ %@  y=%.2f 最暗亮度 %.3f  (n=%d)  %@",
+    print(String(format: "%-46@ %@  y=%.2f 最暗亮度 %.3f  (n=%d)  %@  %@",
                  String(name.prefix(44)) as NSString, modes as NSString,
-                 Double(minXY.1) / Double(H), minLuma, total, groundText as NSString))
+                 Double(minXY.1) / Double(H), minLuma, total, bands as NSString, groundText as NSString))
 }

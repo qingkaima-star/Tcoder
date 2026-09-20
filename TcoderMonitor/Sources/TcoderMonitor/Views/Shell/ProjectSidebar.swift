@@ -37,6 +37,9 @@ struct ProjectSidebar: View {
             guideSection
         }
         .listStyle(.sidebar)
+        // 选中胶囊染色。不写这一行时它跟的是**用户系统强调色**（本机是蓝），
+        // 于是"最重要的反馈"跟着每个人的系统设置漂，与钉死的绿色强调对不齐。
+        .tint(Theme.Semantic.accent.graphicColor)
         .safeAreaInset(edge: .bottom) {
             sidebarFooter
         }
@@ -186,14 +189,16 @@ struct AnalysisSectionRow: View {
                 .lineLimit(1)
             Spacer(minLength: Theme.Spacing.xxs)
         }
-        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+        .foregroundStyle(isSelected ? Theme.Semantic.accent.onFillColor : Color.secondary)
         .padding(.horizontal, ShellLayout.rowPadding)
         .padding(.vertical, Theme.Spacing.xxs)
         .frame(maxWidth: .infinity, minHeight: ShellLayout.rowMinHeight, alignment: .leading)
         .background {
             if isSelected {
-                Capsule().fill(Theme.Semantic.accent.graphicColor
-                                   .opacity(Theme.Palette.Opacity.badgeFill))
+                // 实心强调色胶囊，与上面项目行的**原生**选中态同一种画法。
+                // 原来这里是 15% 淡洗，于是同一个侧栏里并存两种选中态（项目行实心、
+                // 视图行淡洗），实拍图上一眼能看出"不规整"。
+                Capsule().fill(Theme.Semantic.accent.graphicColor)
             }
         }
         .contentShape(Capsule())

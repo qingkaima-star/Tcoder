@@ -151,21 +151,23 @@ extension View {
     // 玻璃按钮样式必须挂在 `Button` 站点上才生效（挂在 label 上会被系统忽略），
     // 所以这里提供 View 修饰器而不是 ButtonStyle 选择器，让 `#available` 仍只落在本文件。
 
-    /// 给 `Button` 挂玻璃样式。真玻璃走系统的 `.glass` / `.glassProminent`。
+    /// 给 `Button` 挂样式。
+    ///
+    /// **主行动不再走 `.glassProminent`**：参考图把最高对比给了唯一的主动作（黑色胶囊 +
+    /// 白字，实测 19.8:1），把彩色留给"选中/增量"这类状态；而系统 prominent 玻璃是
+    /// 拿强调色当底，一个区域里出现两个按钮时它们一样响 —— 用户判词「没有主次」
+    /// 在控件层的落点就是这个。三套系统同一画法，内容观感一致性顺带保住。
     @ViewBuilder
     func glassButtonStyle(_ kind: GlassButtonKind) -> some View {
-        if #available(macOS 26.0, *) {
-            switch kind {
-            case .prominent: self.buttonStyle(.glassProminent)
-            case .bordered: self.buttonStyle(.glass)
-            case .plain: self.buttonStyle(.plain)
-            }
-        } else {
-            switch kind {
-            case .prominent: self.buttonStyle(FallbackProminentButtonStyle())
-            case .bordered: self.buttonStyle(FallbackBorderedButtonStyle())
-            case .plain: self.buttonStyle(PlainButtonStyle())
-            }
+        switch kind {
+        case .prominent:
+            self.buttonStyle(InkCapsuleButtonStyle())
+        case .bordered:
+            if #available(macOS 26.0, *) { self.buttonStyle(.glass) }
+            else { self.buttonStyle(FallbackBorderedButtonStyle()) }
+        case .plain:
+            if #available(macOS 26.0, *) { self.buttonStyle(.plain) }
+            else { self.buttonStyle(PlainButtonStyle()) }
         }
     }
 }
@@ -195,17 +197,16 @@ enum GlassButtonKind: Hashable {
     case plain
 }
 
-/// 兜底分支的主行动按钮：着色填充 + 由 `onFill` 择优出来的前景。
-/// 前景色不是审美选择，是实测结果——蓝色填充上放白字只有 3.1:1，放近黑墨是 6.0:1。
-struct FallbackProminentButtonStyle: ButtonStyle {
+/// 主行动按钮：墨填充 + 反向前景的胶囊。前景不是审美选择而是实测结果——
+/// 浅底 `#0A0A0A` 上放白字 19.8:1，深底 `#F2F2F5` 上放近黑墨 19.8:1，两版同分。
+/// 旧的"强调色玻璃主按钮"之所以被换掉，是因为它和选中态、和另一个按钮同响。
+struct InkCapsuleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .padding(.horizontal, Theme.Spacing.sm)
+            .padding(.horizontal, Theme.Spacing.md)
             .padding(.vertical, Theme.Spacing.xs)
-            .background(
-                Theme.Semantic.accent.graphicColor,
-                in: RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
-            .foregroundStyle(Theme.Semantic.accent.onFillColor)
+            .background(Theme.Palette.Surface.inkFill, in: Capsule())
+            .foregroundStyle(Theme.Palette.Surface.onInkFill)
             .opacity(configuration.isPressed ? 0.78 : 1)
     }
 }

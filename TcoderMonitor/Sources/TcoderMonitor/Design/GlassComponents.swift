@@ -136,7 +136,8 @@ struct GlassToolbar<Content: View>: View {
     }
 }
 
-/// 主行动 / 次级 / 文字按钮。`prominent` 在 macOS 26 上直接吃系统的 `.glassProminent`。
+/// 主行动 / 次级 / 文字按钮。`prominent` 三套系统同一画法：墨填充胶囊 + 反向前景
+/// （见 `Glass.swift` 的 `InkCapsuleButtonStyle`），不再吃系统的 `.glassProminent`。
 struct GlassButton: View {
     typealias Style = GlassButtonKind
 
