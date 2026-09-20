@@ -204,6 +204,45 @@ Tests/TcoderMonitorTests/Health*Tests.swift
 9. **并行拍图必须 `SWITCH_MODE=argv` + 各自 `CAPTURE_SANDBOX` + 各自输出目录**。
    `single` 模式会 `defaults write com.tcoder.monitor`，那是全机共享域，三家会互相改页。
 
+### 第四轮（2026-09-20 15:40）：性能轮 120Hz —— 唯一总工裁定与新增红线
+
+性能规格 `docs/superpowers/specs/2026-09-20-performance-120hz-design.md`（含**改动前实测基线**）。
+
+**裁定（用户 15:2x）**：第三轮的三棵页面树 `o-borderless` / `p-borderless` / `w-borderless`
+**由本会话（性能轮总工）派发**；并行会话**不得再动 `Views/**`、`Design/**`、本文件**。
+本轮把"无界化重排"与"性能包"**合并成同一次交付**，不分两轮付两遍钱。
+
+**M0 剩余三包归属（全在 `ws/perf-base` 一棵树，总工串行 merge）**：
+
+| 包 | 路径 | 内容 |
+|---|---|---|
+| R 尺子 | `scripts/perf_harness.sh`、`scripts/trace_report.py`、`Sources/TcoderMonitor/Services/Performance/FramePulse.swift`、`Tests/TcoderMonitorTests/Perf*Tests.swift` | xctrace 封装 + App 内帧探针 + T5 三条主线程禁则守卫（每条配元测试） |
+| P 心跳链路 | `Services/Performance/**`（除 `FramePulse.swift`）、`App/AppState.swift`（**本轮解冻，仅限这两处**；`SystemSnapshot` 契约不动） | 一次 publish 的失效面收窄、派生榜单缓存、`sampleNow` 离开主线程、T3 交互期暂停 |
+| C 令牌缓存 | `Design/**`（`ColorToken`/`ThemeTokens`/`ChartTokens`） | 把"每次访问现造 `NSColor`/`Font`/`LinearGradient`"改成缓存，**公开 API 名字与调用形状一字不动** |
+
+**本轮新增红线（覆盖第三轮相关条目）**：
+
+1. **帧率结论只认 `perf_harness.sh` 的读数**。报告里没有与基线**逐列同形状**的数字，按未完成处理。
+2. **口径必须标出来**：`release` 还是 `debug`（绝对值不可混比，火焰图归因用 debug、交付数用 release）、
+   `idle` / `switch` / `scroll` 哪一档。**测不到就明写"未覆盖"**，不许拿相邻档冒充。
+3. **`render` 相位实测健康（p95 4.05ms）**，所以"去材质/去投影"**不得再被当作性能主因**申报；
+   它的收益记在观感账上。头号靶子是 `AG::Graph::UpdateStack::update()`（主线程 64.3% 样本）。
+4. **交互期暂停只在 `AppState` 实现**（`NSEvent` 本地监视器，macOS 14 可用）。
+   页面**零改动**、`Design/**` **零新增 `#available`**——`onScrollPhaseChange` 是 macOS 15+，禁止使用。
+   暂停期跳过的帧仍要进环形缓冲，**严禁把暂停期画成 0 或空白**。
+5. **诚实性语义与阈值一律不许为了帧率改**：两帧才出速率、缺数据 `--`、轴台阶 ∈{1,2,2.5,5}×10ⁿ
+   且只抬不降 ≤2 倍、不可信点剔除并计数、`historyCapacity`、pressure 70/85、`.unknown` 只能由
+   `available:false` 产出。**谁为了让守卫绿而放宽阈值，等于把工具废掉。**
+6. **T5 三条主线程禁则的守卫一律写成"只减不增棘轮 + 元测试 + 分母 > 0"**。
+   特别是渲染路径 I/O 那条：正则必须覆盖 `fileExists`/`attributesOfItem`/`contentsOfDirectory`/
+   `Data(contentsOf:`/`String(contentsOf:`/`stat(`/`lstat(`/`FileManager`，
+   元测试要用 **`attributesOfItem`** 这种仓库里真实存在的形状造坏样例——只匹配 `stat(` 会得到永真绿守卫。
+7. **`SourceFileReachabilityTests.censusBaseline`（现 110）与本文件的新章节，只由总工改**；
+   每加一个 `Sources/**` 文件必须在该常量注释里写清"谁加的、凭什么被引用"。
+   注意该守卫**剥注释与字符串**、且**只认 `Sources/**` 里的调用点**——单测引用不算证据。
+8. `FramePulse` 必须接线进产品代码后才允许合入（零调用的实现文件会被第 7 条拦下），
+   且**默认关闭**：只有 `TCODER_PERF_PROBE=1` 时才允许创建 `displayLink`，关闭时开销必须为零。
+
 ### 三条横切约束（设计与 dogfooding 流尤其注意）
 
 1. **部署下限 macOS 14 不变**。Liquid Glass API 是 macOS 26 才有的，
