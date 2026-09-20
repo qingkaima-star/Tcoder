@@ -268,19 +268,19 @@ final class HealthScoreCurvesTests: HealthScoreTestCase {
     }
 
     func testBusFactorPunishesConcentratedAuthorship() {
-        let concentrated = HealthCurves.busFactor(risk: .high, topAuthorShare: 0.75, activeAuthors: 4, totalCommits: 900)
-        let shared = HealthCurves.busFactor(risk: .low, topAuthorShare: 0.3, activeAuthors: 4, totalCommits: 900)
+        let concentrated = HealthCurves.busFactor(risk: .high, topAuthorShare: 0.75, activeAuthors: 4, commitBasis: 900)
+        let shared = HealthCurves.busFactor(risk: .low, topAuthorShare: 0.3, activeAuthors: 4, commitBasis: 900)
         XCTAssertGreaterThanOrEqual(
             shared.score - concentrated.score,
             30,
             "75% 单人占比 + 高风险必须比 30% 占比 + 低风险至少低 30 分"
         )
 
-        let solo = HealthCurves.busFactor(risk: .critical, topAuthorShare: 1.0, activeAuthors: 1, totalCommits: 500)
+        let solo = HealthCurves.busFactor(risk: .critical, topAuthorShare: 1.0, activeAuthors: 1, commitBasis: 500)
         XCTAssertLessThanOrEqual(solo.score, 15, "单人维护 500 次提交必须极低分")
         XCTAssertTrue(solo.risk == .high || solo.risk == .critical, "单人维护必须是高/严重风险")
 
-        let moderate = HealthCurves.busFactor(risk: .medium, topAuthorShare: 0.55, activeAuthors: 3, totalCommits: 240)
+        let moderate = HealthCurves.busFactor(risk: .medium, topAuthorShare: 0.55, activeAuthors: 3, commitBasis: 240)
         XCTAssertGreaterThan(moderate.score, solo.score, "三人分担必须优于单人")
         XCTAssertLessThan(moderate.score, shared.score, "55% 占比必须优于 30% 占比")
 
@@ -288,7 +288,7 @@ final class HealthScoreCurvesTests: HealthScoreTestCase {
         assertCurveIsValid(shared, context: "busFactor shared")
         assertCurveIsValid(moderate, context: "busFactor moderate")
         assertCurveIsValid(
-            HealthCurves.busFactor(risk: .none, topAuthorShare: 0, activeAuthors: 0, totalCommits: 0),
+            HealthCurves.busFactor(risk: .none, topAuthorShare: 0, activeAuthors: 0, commitBasis: 0),
             context: "busFactor 无提交"
         )
     }
@@ -389,7 +389,7 @@ final class HealthScoreCurvesTests: HealthScoreTestCase {
             results.append(HealthCurves.activity(commitsPerDay: commitsPerDay, daysSinceLastCommit: 4, totalCommits: 600))
         }
         for share in [0.0, 0.35, 0.65, 1.0] {
-            results.append(HealthCurves.busFactor(risk: .medium, topAuthorShare: share, activeAuthors: 5, totalCommits: 700))
+            results.append(HealthCurves.busFactor(risk: .medium, topAuthorShare: share, activeAuthors: 5, commitBasis: 700))
         }
         for errorsPerKLoc in [0.0, 2.0, 18.0] {
             results.append(HealthCurves.stability(errorsPerKLoc: errorsPerKLoc, crashCount: 1, fatalCount: 0, exceptionCount: 4, totalLinesScanned: 40_000))
