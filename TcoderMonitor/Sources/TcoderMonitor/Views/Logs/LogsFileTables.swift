@@ -81,17 +81,8 @@ struct LogsScannedFilesCard: View {
             GlassSection("已扫描文件",
                          subtitle: "共 \(NumberFormat.grouped(files.count)) 个 · 按大小降序",
                          icon: .processes) {
-                Grid(alignment: .trailing, horizontalSpacing: Theme.Spacing.sm,
-                     verticalSpacing: Theme.Spacing.xxs) {
-                    GridRow {
-                        TableHeaderCell("类型", width: DataColumn.fileRole, trailing: false)
-                            .gridColumnAlignment(.leading)
-                        TableHeaderCell("文件").flexCell().gridColumnAlignment(.leading)
-                        TableHeaderCell("大小", width: DataColumn.fileSize, help: "文件字节数（1024 进制）")
-                        TableHeaderCell("行数", width: DataColumn.fileLines)
-                        TableHeaderCell("修改", width: DataColumn.fileDate)
-                    }
-                    Divider().gridCellColumns(5)
+                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                    DataTableHeader(columns: DataColumns.scannedLogFiles)
                     ForEach(shown) { file in
                         row(file)
                     }
@@ -111,27 +102,28 @@ struct LogsScannedFilesCard: View {
         }
     }
 
+    /// 表头与行共用 `DataColumns.scannedLogFiles` 一份列定义（#34）。
     private func row(_ file: ScannedLogFile) -> some View {
         let role = LogRoleStyle.role(for: file.role)
-        return GridRow {
+        return HStack(spacing: DataRowMetrics.cellGap) {
             HStack(spacing: Theme.Spacing.xxs) {
                 ThemedIcon(.emptyTray, role: .badge).foregroundStyle(role.textColor)
                 Text(file.role.rawValue)
             }
-            .frame(width: DataColumn.fileRole, alignment: .leading)
+            .tableCell(DataColumns.column(DataColumns.scannedLogFiles, 0))
             Text(file.path)
                 .font(Theme.Typo.monoSmall.font)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .flexCell()
+                .tableCell(DataColumns.column(DataColumns.scannedLogFiles, 1))
                 .help(file.path)
             LiveNumber(Self.sizeText(file.sizeBytes), tier: Theme.Typo.monoSmall)
-                .numberCell(DataColumn.fileSize)
+                .tableCell(DataColumns.column(DataColumns.scannedLogFiles, 2))
             LiveNumber(NumberFormat.grouped(file.lineCount), tier: Theme.Typo.monoSmall)
-                .numberCell(DataColumn.fileLines)
+                .tableCell(DataColumns.column(DataColumns.scannedLogFiles, 3))
             LiveNumber(DateFormat.sinceDescription(file.modifiedAt), tier: Theme.Typo.monoSmall)
-                .numberCell(DataColumn.fileDate)
+                .tableCell(DataColumns.column(DataColumns.scannedLogFiles, 4))
         }
     }
 
