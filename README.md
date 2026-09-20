@@ -10,12 +10,13 @@ Apple Silicon 原生 macOS App（Swift + SwiftUI），对本地开发项目做�
 
 | 你是谁 | 该看哪里 |
 |---|---|
-| **想用它监控自己的项目**（不写代码、不编译） | [`docs/使用说明.md`](docs/使用说明.md) —— 怎么装、九个页面各在看什么、每个数字怎么算、什么时候会不准、隐私边界、常见问题 |
+| **想用它监控自己的项目**（不写代码、不编译） | [`docs/使用说明.md`](docs/使用说明.md) —— 怎么装、九个页面各在看什么；
+  口径、隐私、常见问题在它的续篇 [`docs/口径与已知限制.md`](docs/口径与已知限制.md)（小节编号连续，"第 4.x 节"照旧指得准） |
 | **要构建 / 改代码 / 出包取证** | 本文件下列各节（以开发与发布向为主）＋ `TcoderMonitor/AGENTS.md` |
 
 本 README 侧重**开发与发布**；唯一两栖的是「数据口径」一节（两边都该读），
 它的**使用者版完整解释**——含界面上原样出现的句子与逐页说明——在
-[`docs/使用说明.md`](docs/使用说明.md) 第 4 节。
+[`docs/口径与已知限制.md`](docs/口径与已知限制.md) 第 4 节。
 
 ## 功能
 
@@ -28,16 +29,16 @@ Apple Silicon 原生 macOS App（Swift + SwiftUI），对本地开发项目做�
 | 贡献者 | 提交/增删/占比排行、每人活跃时段、Bus Factor 风险 |
 | 性能监控 | 本机 CPU/内存/磁盘/网络实时曲线 + 进程占用排行 + **进程分组**（按匹配模式汇总某服务的 CPU/RAM/Threads/Open Files；旧称「工程进程组」，卡标题已随《40 WS-H》§1.3 收口） |
 | 错误日志 | 解析 `Logs/error.log`、`crash.log`、macOS `.ips`；今日错误/崩溃/异常/警告、高频错误聚类（次数、首次、最近；旧称 Top Errors） |
-| 依赖分析 | `package.json` / `pom.xml` / `build.gradle(.kts)` / `settings.gradle(.kts)` / `Package.swift` / `requirements.txt`（含 `requirements-*.txt`、`dev-requirements.txt` 派生名）/ `pyproject.toml` / `setup.py` / `Pipfile` / `go.mod` / `Cargo.toml` / `Podfile` / `Gemfile` / `packages.config` —— 共 16 个精确文件名外加派生规则，以 `ManifestFileName.table` 与 `ecosystem(for:)` 的派生名规则为准（`Sources/TcoderMonitor/Services/Dependencies/ManifestParsers.swift:34-62`，
-其中 `enum ManifestFileName` 在 `:34`、`table` 在 `:36-53`、派生判定在 `ecosystem(for:)` `:55-62`）；版本过旧与已知漏洞，可选在线查 OSV.dev 与 npm registry |
+| 依赖分析 | `package.json` / `pom.xml` / `build.gradle(.kts)` / `settings.gradle(.kts)` / `Package.swift` / `requirements.txt`（含 `requirements-*.txt`、`dev-requirements.txt` 派生名）/ `pyproject.toml` / `setup.py` / `Pipfile` / `go.mod` / `Cargo.toml` / `Podfile` / `Gemfile` / `packages.config` —— 共 16 个精确文件名外加派生规则，以 `ManifestParsers.swift` 的
+`ManifestFileName.table`（清单名 → 生态）与 `ManifestFileName.ecosystem(for:)`（派生名判定）为准；
+版本过旧与已知漏洞，可选在线查 OSV.dev 与 npm registry |
 | 健康评分 | 9 维加权评分与优点/问题/建议。**启发式本地计算，未调用任何外部模型**，界面已如实标注 |
 
 > 上表是开发向速览。逐页「给我看什么 / 数字怎么算的 / 什么时候会不准」见
 > [`docs/使用说明.md`](docs/使用说明.md) 第 3 节；页面名称以侧栏为准
 > （`SectionNav.DetailSection`）。
 > 另注：「依赖分析」一行只举了常见清单名，代码实际识别 16 个清单文件名
-> （还含 `settings.gradle(.kts)`、`setup.py`、`Pipfile`、`packages.config`，
-> `Services/Dependencies/ManifestParsers.swift:36-53`）。
+> （还含 `settings.gradle(.kts)`、`setup.py`、`Pipfile`、`packages.config`，见 `ManifestFileName.table`）。
 
 ## 构建与运行
 
@@ -92,7 +93,7 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
 
 ## 数据与隐私
 
-> 使用者版（逐条带界面原文与超时/重试的实际数字）见 [`docs/使用说明.md`](docs/使用说明.md) 第 5 节。
+> 使用者版（逐条带界面原文与超时/重试的实际数字）见 [`docs/口径与已知限制.md`](docs/口径与已知限制.md) 第 5 节。
 
 - 所有分析**在本机完成**，不上传任何源码内容。
 - 依赖在线查询**默认关闭**，需在「依赖分析」页手动开启。
@@ -100,11 +101,16 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
   但 npm 与 OSV 是**串行**发起的，所以整个在线阶段实测约 10 秒，不是 5 秒。
   超时或失败只降级为内置离线快照，并在页面上写明未核对。
 - 项目列表与报告存在 `~/Library/Application Support/TcoderMonitor/`，删除该目录即清空。
-- 进程监控**只读展示**，不向任何进程发送信号。
-  用到的系统调用仅 `proc_listallpids` / `proc_pidinfo` / `proc_pid_rusage` / `sysctl`
-  （`Sources/TcoderMonitor/Services/Performance/ProcessInspector.swift:54,61,72,206`）。
-- 在线查询只连 npm registry 与 OSV.dev（域名写死 `DependencyNetworkLookup.swift:128-129`）。
-  **注意 OSV 批量接口是 POST**（`OsvClient.swift:129,197`）：语义上只读、请求体只含包名与版本，
+- 进程监控**只读展示**，不向任何进程发送信号。`ProcessInspector.swift` 用到的查询接口
+  **共五类**（不是早先写的四类）：`sysctl(KERN_PROC_ALL)` 数进程总数（`ProcessInspector.processCount`）、
+  `proc_listallpids`（`ProcessInspector.listAllPids` / `visibleProcessCount`）、
+  `proc_pidinfo` 的三种 flavor `PROC_PIDTBSDINFO` / `PROC_PIDTASKINFO` / `PROC_PIDLISTFDS`
+  （`bsdInfo` / `taskInfo` / `openFileCount`）、**`proc_pidpath`**（`executablePath`，早先这行漏了它）、
+  `proc_pid_rusage`（`rusageInfo` 经 `callRusage`）。全是取值用的，没有任何写操作。
+- 在线查询只连 npm registry 与 OSV.dev，两个域名写死在 `DependencyNetworkLookup.osvHost` 与
+  `DependencyNetworkLookup.npmRegistryHost`。
+  **注意 OSV 批量接口是 POST**（`OsvClient.swift` 的 `DependencyNetworkLookup.osvQueryBatch`，
+  逐包回退 `osvQuerySingle` 同样是 POST）：语义上只读、请求体只含包名与版本，
   但不是"只发 GET"，写文档时别这么概括。
 
 ## 数据口径（看到数字前先读这节）
@@ -114,12 +120,15 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
   Cargo、NuGet、SwiftPM…）在未联网时是**未判定**，不是"安全"。
 - **提交总数与作者榜求和可能不相等**：作者与代码行统计一贯采用 `--no-merges` 口径，
   而提交总数含合并提交，差值即 merge 数。页面会分别标注。
-- **大仓库的历史是按窗口分析的**：超过上限时 `historyTruncated` 为真，
-  页面标"近 N 次提交窗口内"，此时作者数、增删行都是窗口内结果而非全量。
+- **大仓库的历史是按窗口分析的**：**非合并提交**打满 20,000 条窗口上限时界面才标"近 N 次提交窗口内"，
+  判据是派生属性 `GitHistoryScope.isWindowTruncated`（**不是**契约字段 `GitInsights.historyTruncated`，
+  理由见本节脚注②与 `docs/使用说明.md` 第 4.3 节），此时作者数、增删行都是窗口内结果而非全量。
 - **健康评分是启发式本地计算，未调用任何外部模型**，界面已如实标注。
   缺少证据的维度**不参与计分也不得分**，其权重按比例摊到场维度，
   页面底部会列出缺失维度与重归一化明细。
-- 覆盖率只读取仓库已生成的报告，不会代为执行测试；无报告时显示空态而不是 0%。
+- 覆盖率只读取仓库已生成的报告，不会代为执行测试；**没有报告时整块不画**（连分隔线都不出现），
+  既不是空态卡也不是 0%——实现是 `DashboardView.coverageStrip` 外面那层 `coverage.hasData` 判断，
+  与 `docs/使用说明.md` 第 4.6 节同一条口径。
 
 > 使用者版含界面上**原样出现**的句子与判定字段，见 `docs/使用说明.md` 第 4 节。
 > 两处措辞在此校正（不改上面的结论，只补精确出处）：
@@ -128,9 +137,11 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
 >   （`DependencyVerdictRows.DependencySafetyVerdict.summaryCaption`），
 >   不是「均无版本数据可比对」这句话；
 > ② 界面判断「历史是否被窗口截断」用的是派生判据 `isWindowTruncated`
->   （`GitHistoryScope.isWindowTruncated`），
->   **不是**契约字段 `GitInsights.historyTruncated`——后者被合并提交污染，两者不等价
->   （赋值处 `Services/Git/ShellGitAnalyzer.swift:245-247`）。
+>   （`GitHistoryScope.isWindowTruncated`，判据是非合并窗口是否打满），
+>   **不是**契约字段 `GitInsights.historyTruncated`——后者在 `ShellGitAnalyzer.makeInsights` 里按
+>   `commitsAnalyzed < totalCommits` 赋值，仓库只要有一个合并提交它就为真：本仓 2026-09-20 实测
+>   `git rev-list --count HEAD` = 291（含 127 次合并、非合并 164），距 20,000 的窗口上限差两个数量级，
+>   该字段依然是真。所以描述界面行为时按 `isWindowTruncated` 写，别按字段名写。
 
 ## 已知限制
 
@@ -139,12 +150,15 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
   错误日志 `LogsView.header`、健康评分 `HealthView.header`；
   **总览 / 代码规模 / 复杂度风险 / Git 洞察 / 贡献者 / 依赖分析** 六页 `isDemo` 零引用。
   数值全来自 `Services/Demo/DemoData.swift` 的写死样例。
-- `git log` 撞上 60 秒硬超时（`Services/Git/ShellGitAnalyzer.swift:53`）时本轮 Git 结果整块置空，
-  **上一轮成功的 Git 数据不会被保留**（`App/AppState.swift:148-150` 每次新建报告），
+- `git log` 撞上 60 秒硬超时（`ShellGitAnalyzer.swift` 的 `ShellGitAnalyzer.init` 参数 `logTimeout`
+  默认值）时本轮 Git 结果整块置空，
+  **上一轮成功的 Git 数据不会被保留**（`AppState.scan` 每次新建报告），
   页面退回「尚未分析 Git 历史」。
 - 内置离线漏洞规则共 10 条，只覆盖 npm / Maven / Python
-  （`Services/Dependencies/VulnerabilitySource.swift:69-222`）；
-  SwiftPM 与 CocoaPods 连在线核对也不支持（`DependencyNetworkLookup.swift:39`）。
+  （`VulnerabilitySource.swift` 的 `VulnerabilitySource.bundled`，逐条编号看每条的
+  `KnownVulnerability.cveIdentifiers`）；
+  SwiftPM 与 CocoaPods 连在线核对也不支持
+  （`DependencyNetworkLookup.swift` 的 `OsvPackageQuery.osvEcosystem` 对它们返回 nil）。
 - 无 root 时逐进程指标只覆盖当前用户可见的进程；进程总数走 `sysctl(KERN_PROC_ALL)`，与 `top`/`ps -A` 同源。
 - 内存口径为 `total - (free + speculative + purgeable)`，与活动监视器一致。
 - 首次扫描 `~/Documents`、`~/Desktop` 下的目录时 macOS 可能弹一次文件访问授权。
@@ -156,7 +170,15 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
 
 - **代码规模**：常见做法是拿 `cloc` 当基准，但**本机没有 `cloc`**（`tokei`、`scc` 同样未安装），
   所以这里改用一套与分析器零共享代码的独立口径核对：`git ls-files` 排除 `vendor/` 后 `wc -l`。
-  主导语言逐位吻合——Homebrew 非 vendor 的 `.rb` 为 **1756 文件 / 239,668 行**。
+  主导语言在测量当天逐位吻合，对上的读数是 **1756 文件 / 239,668 行**（2026-09-19 实测）。
+  **`/opt/homebrew` 是活的第三方仓库，这两个数不是恒定量**：2026-09-20 同口径复测已漂到
+  **1757 文件 / 240,128 行**（当时其 HEAD 为 `72ba737379`）。复现命令（全部只读）：
+  ```bash
+  git -C /opt/homebrew ls-files '*.rb' | grep -v vendor | wc -l
+  git -C /opt/homebrew ls-files -z '*.rb' | grep -zv vendor \
+      | (cd /opt/homebrew && xargs -0 wc -l) | tail -1
+  ```
+  所以本条只能读作「当日实测 X，隔天会漂」；要复核的是**命令与口径**，不是那两个数本身。
   文件总数上的差值来自分析器**比窄后缀白名单更包含**（`.rake`、`.gemspec`、`.podspec`
   以及 `Gemfile`、`bin/brew` 这类无后缀可执行脚本），不是漏算或多算。
 - **Git 指标**：提交总数与 `git rev-list --count HEAD` 逐位一致；增删行数与同窗口
