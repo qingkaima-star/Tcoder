@@ -235,7 +235,7 @@ struct HealthComponentTable: View {
                      subtitle: "综合分 = Σ(得分 × 归一化权重) · 按拖累程度排序，贡献最低者在前",
                      icon: .health,
                      trailing: AnyView(Theme.Readout.Field("合计", Live.fixed(sum, digits: 1)))) {
-            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 table
                 Divider()
                 missingBlock
@@ -328,7 +328,7 @@ struct HealthComponentTable: View {
                 }
                 Text(HealthBreakdown.normalizationSummary(rows: rows, missingCount: missing.count))
                     .font(Theme.Typo.microLabel.font)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

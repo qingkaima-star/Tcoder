@@ -5,15 +5,15 @@ import Charts
 
 /// 三张结论卡。列表为空是「查了但没命中」（②），不是「没查」（③）——
 /// 能走到这一步说明分量已经算出来了，所以句式统一写成「未识别到」。
+///
+/// 三张卡从 `LazyVGrid(adaptive 320)` 收成**单列 + `Spacing.group`(32)**：
+/// `GlassSection` 自基座起不再画面板，三列长短不一的文字并排 12pt 会互相吃进对方的
+/// 行距里 ——「不规整拥挤」在去面之后只能靠间距解决，不能靠把盒子加回来解决。
 struct HealthAdviceGrid: View {
     let health: HealthScore
 
-    /// 三张结论卡并排所需的最小列宽（比指标 tile 宽，因为卡里是长句）。
-    private static let cardMinWidth: CGFloat = 320
-    private static let columns = [GridItem(.adaptive(minimum: cardMinWidth), spacing: Theme.Spacing.sm)]
-
     var body: some View {
-        LazyVGrid(columns: Self.columns, spacing: Theme.Spacing.sm) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.group) {
             AdviceCard(title: "优点",
                        items: health.strengths,
                        role: Theme.Semantic.success,
@@ -47,9 +47,10 @@ struct AdviceCard: View {
     var body: some View {
         GlassSection(title, subtitle: subtitle, icon: icon) {
             if items.isEmpty {
+                // 「已完成计算，未识别到突出项」是 ② 那一态的**结论**，不是被灰掉的占位符。
                 Text(emptyNote)
                     .font(Theme.Typo.narrative.font)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, Theme.Spacing.xs)
             } else {
@@ -57,9 +58,12 @@ struct AdviceCard: View {
                     ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
                             ThemedIcon(icon, role: .badge).foregroundStyle(role.textColor)
+                            // 句子本身回到墨色：一条 12pt 的红字长句既难读，又把「颜色」
+                            // 这个唯一还能表达语义的通道花在**整段正文**上。
+                            // 语义由左边的图标（色 + 形双通道）与这张卡的 `groupLabel` 标题承担。
                             Text(item)
                                 .font(Theme.Typo.narrative.font)
-                                .foregroundStyle(role.textColor)
+                                .foregroundStyle(.primary)
                                 .lineSpacing(Theme.Typo.narrative.lineSpacing)
                                 .lineLimit(3)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -106,8 +110,11 @@ struct HealthTrendCard: View {
     @ViewBuilder
     private var readoutStrip: some View {
         let scores = points.map { Double($0.score) }
-        // 读数条走基座 Readout：内嵌面 + 同心圆角（外 16 / 内 10），不再引 WS-K 的 StatLine
-        Theme.Readout.Bar {
+        // 四件统计量一件不少。**不再用 `Theme.Readout.Bar`**：它内部画一口
+        // `.contentInset` 实心井，而契约 3 里井只给表格 / 日志列表 / 代码块，
+        // 一行键值读数不是井（`Readout.Bar` 本体在 `Design/` 里，归总工，已报契约缺口）。
+        // `Readout.Field` 什么都不画，直接排就是无界版读数条。
+        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             Theme.Readout.Field("最高", Live.fixed(scores.max(), digits: 0))
             Theme.Readout.Field("最低", Live.fixed(scores.min(), digits: 0))
             Theme.Readout.Field("均值", Live.fixed(Self.average(scores), digits: 1))
