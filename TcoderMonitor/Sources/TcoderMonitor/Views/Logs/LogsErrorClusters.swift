@@ -158,6 +158,8 @@ struct LogErrorClusterRow: View {
     }
 
     private func detailTitle(_ text: String) -> some View {
-        Text(text).font(Theme.Typo.microLabel.font).foregroundStyle(.tertiary)
+        // 同 3.9：组内小标题一律 `groupLabel`。原来这档是 `microLabel` + `.tertiary`，
+        // 10pt 中灰压在一堆 10pt 元数据里，读不出"这是一个小标题"。
+        Text(text).typed(Theme.Typo.groupLabel).foregroundStyle(.secondary)
     }
 }

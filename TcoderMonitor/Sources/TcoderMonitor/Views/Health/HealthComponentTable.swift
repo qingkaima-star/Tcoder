@@ -313,7 +313,12 @@ struct HealthComponentTable: View {
         } else {
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 Text("缺失维度 \(NumberFormat.grouped(missing.count)) 项")
-                    .font(Theme.Typo.cardTitle.font)
+                    // 组内小标题全站一档：`groupLabel`（10pt medium + 0.6 字距）。
+                    // 这里原来是 `cardTitle`(13 semibold)，与它上面那行节标题只差一档字重，
+                    // 而日志页同一角色又用 `microLabel + .tertiary` —— 三种画法（清单 3.9）。
+                    // 必须走 `.typed`：`Font` 没有字距 API，直接 `.font(...)` 会静默丢字距。
+                    .typed(Theme.Typo.groupLabel)
+                    .foregroundStyle(.secondary)
                 ForEach(missing, id: \.rawValue) { dimension in
                     HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
                         ThemedIcon(.unverified, role: .badge)

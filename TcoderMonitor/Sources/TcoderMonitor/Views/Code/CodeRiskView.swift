@@ -63,18 +63,18 @@ struct CodeRiskOverviewSection: View {
 
                 ReadoutStrip {
                     DataReadout(label: "最大文件",
-                                value: "\(NumberFormat.grouped(code.largestFileLineCount)) 行",
-                                caption: "单文件行数峰值")
+                                value: NumberFormat.grouped(code.largestFileLineCount),
+                                caption: "单文件行数峰值", unit: "行")
                     DataBandSeparator()
                     DataReadout(label: "超长函数", value: NumberFormat.grouped(code.longFunctions),
-                                caption: "个")
+                                unit: "个")
                     DataBandSeparator()
                     DataReadout(label: "平均函数长度",
                                 value: "\(NumberFormat.grouped(code.averageFunctionLength)) 行",
                                 caption: "仅 ≥2 行的函数")
                     DataBandSeparator()
                     DataReadout(label: "巨大文件", value: NumberFormat.grouped(code.hugeFiles.count),
-                                caption: "个")
+                                unit: "个")
                 }
             }
         }
@@ -186,7 +186,7 @@ struct CodeComplexitySection: View {
                     ReadoutStrip {
                         DataReadout(label: "高/严重复杂度",
                                     value: NumberFormat.grouped(CodeRiskAnalysis.highRiskFunctionCount(code)),
-                                    caption: "个函数",
+                                    unit: "个",
                                     role: CodeRiskAnalysis.highRiskFunctionCount(code) > 0
                                         ? Theme.Semantic.danger : Theme.Semantic.neutral)
                         DataBandSeparator()
@@ -198,11 +198,11 @@ struct CodeComplexitySection: View {
                         DataBandSeparator()
                         DataReadout(label: "复杂度上榜",
                                     value: NumberFormat.grouped(code.topComplexFunctions.count),
-                                    caption: "个函数")
+                                    unit: "个")
                         DataBandSeparator()
                         DataReadout(label: "重复块",
                                     value: NumberFormat.grouped(code.duplicatedBlocks.count),
-                                    caption: "个",
+                                    unit: "个",
                                     role: Theme.Semantic.role(for: code.overallRisk))
                     }
 

@@ -292,6 +292,12 @@ struct DataReadout: View {
     let label: String
     let value: String
     var caption: String?
+    /// **纯量词**（个 / 项 / 行 / 次 / 天）走这里，与数字同一行、小一档；
+    /// 解释性口径才走 `caption` 落下一行。原来两者混用：依赖页上排把"项"丢到下一行，
+    /// 而代码规模页的「110k 行」把"行"贴在数字右侧 —— 同一屏两种单位尺度（清单 3.12）。
+    /// 声明顺序在 `role` 之前：Swift 的成员化初始化器要求实参按声明顺序传，
+    /// 排在后面会让"带 role 的那几格"必须把 unit 写到最后，读起来别扭。
+    var unit: String?
     var role: Theme.SemanticRole?
 
     var body: some View {
@@ -301,11 +307,19 @@ struct DataReadout: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .monospacedDigit()
-            Text(value)
-                .font(CodeGitType.metric)
-                .foregroundStyle(role?.textColor ?? Color.primary)
-                .lineLimit(1)
-                .monospacedDigit()
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+                Text(value)
+                    .font(CodeGitType.metric)
+                    .foregroundStyle(role?.textColor ?? Color.primary)
+                    .lineLimit(1)
+                    .monospacedDigit()
+                if let unit {
+                    Text(unit)
+                        .font(CodeGitType.prose(Theme.Typo.microLabel))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
             if let caption {
                 Text(caption)
                     .font(CodeGitType.prose(Theme.Typo.microLabel))

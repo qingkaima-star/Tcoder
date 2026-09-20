@@ -575,6 +575,49 @@ final class BorderlessSurfaceGuardTests: XCTestCase {
         XCTAssertTrue(Self.strayDividers(in: commented, allowed: []).isEmpty, "注释被误判")
     }
 
+    // MARK: 批次 H：量词不许被当成口径
+
+    /// `caption: "个"` 这类**纯量词**写法。量词属于数字（走 `unit:`，同行小一档），
+    /// 口径属于这一格在量什么（走 `caption`，落下一行）。混用的后果是同一屏
+    /// 出现两种单位尺度：代码规模页「110k 行」同行、依赖页「4 项」换行。
+    static func pureUnitCaptions(in files: [(path: String, content: String)]) -> [String] {
+        let units: Set<Character> = ["个", "项", "行", "次", "天", "条", "台", "组"]
+        return files.flatMap { file in
+            file.content.split(separator: "\n", omittingEmptySubsequences: false)
+                .enumerated()
+                .compactMap { index, raw in
+                    let line = String(raw)
+                    guard isCode(line), let start = line.range(of: "caption: \"") else { return nil }
+                    let rest = line[start.upperBound...]
+                    guard let end = rest.firstIndex(of: "\"") else { return nil }
+                    let text = rest[..<end]
+                    guard text.count >= 1, text.count <= 2,
+                          let first = text.first, units.contains(first) else { return nil }
+                    return "\(file.path):\(index + 1) caption: \"\(text)\""
+                }
+        }
+    }
+
+    func test_pureUnitsGoToUnitNotCaption() throws {
+        let offenders = Self.pureUnitCaptions(in: try Self.sourceFiles(under: "Views"))
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些格把量词写成了口径（应改用 unit:）：\(offenders)")
+    }
+
+    func test_pureUnitScannerDetectsInjectedUse() {
+        // 用 `##"…"##` raw string 写样例：内容以引号结尾，单 `#` 的定界符会被
+        // 结尾那个 `"` 吃掉（上一版就是这么炸的：unterminated string literal）。
+        let dirty = [(path: "Views/Fake.swift",
+                      content: ##"  DataReadout(label: "x", value: "4", caption: "项")"## + "\n")]
+        XCTAssertEqual(Self.pureUnitCaptions(in: dirty).count, 1, "纯量词 caption 没抓到")
+        let fine = [(path: "Views/Fake.swift",
+                     content: ##"  DataReadout(label: "x", value: "4", caption: "单文件行数峰值", unit: "行")"##
+                         + "\n"
+                         + ##"  DataReadout(label: "y", value: "1", caption: "注释率 12%")"## + "\n")]
+        XCTAssertTrue(Self.pureUnitCaptions(in: fine).isEmpty,
+                      "真口径串被误判成量词（长度/首字判据太松）")
+    }
+
     /// 反向自证：`sourceFiles` 真读到了文件。否则上面所有「扫不到就算通过」的断言
     /// 会集体假绿 —— 这是扫描型守卫最经典的死法。
     func test_sourceScannerActuallyFindsFiles() throws {

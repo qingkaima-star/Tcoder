@@ -407,10 +407,10 @@ struct CodeDuplicationSummarySection: View {
                                 role: Theme.Semantic.role(for: code.overallRisk))
                     DataBandSeparator()
                     DataReadout(label: "重复块", value: NumberFormat.grouped(code.duplicatedBlocks.count),
-                                caption: "个")
+                                unit: "个")
                     DataBandSeparator()
                     DataReadout(label: "超长函数", value: NumberFormat.grouped(code.longFunctions),
-                                caption: "个")
+                                unit: "个")
                     DataBandSeparator()
                     DataReadout(label: "平均函数长度", value: "\(NumberFormat.grouped(code.averageFunctionLength)) 行",
                                 caption: "仅统计 ≥2 行的函数")

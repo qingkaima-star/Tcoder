@@ -265,14 +265,14 @@ struct GitRepositoryInfoSection: View {
 
                 ReadoutStrip {
                     DataReadout(label: "触达文件", value: NumberFormat.grouped(git.filesTouched),
-                                caption: "个")
+                                unit: "个")
                     DataBandSeparator()
                     // 新增/删除保留语义色：增=绿、删=红 是契约 5 明确留色的那一类。
                     DataReadout(label: "新增", value: NumberFormat.signed(git.totalAdditions),
-                                caption: "行", role: Theme.Semantic.success)
+                                unit: "行", role: Theme.Semantic.success)
                     DataBandSeparator()
                     DataReadout(label: "删除", value: NumberFormat.signed(-git.totalDeletions),
-                                caption: "行", role: Theme.Semantic.danger)
+                                unit: "行", role: Theme.Semantic.danger)
                     DataBandSeparator()
                     DataReadout(label: "首次提交", value: Self.firstCommitCaption(git),
                                 caption: Self.scopeCaption(git))
