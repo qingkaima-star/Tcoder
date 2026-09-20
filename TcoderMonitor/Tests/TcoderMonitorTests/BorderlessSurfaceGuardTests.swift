@@ -27,7 +27,11 @@ final class BorderlessSurfaceGuardTests: XCTestCase {
     /// 在 M0 就硬断言，会逼出「为了过门随手涂一个 background」的假接线；
     /// 而把测试整个删掉等 M2 再写，就会忘掉（上一轮的 `Spacing.section` 就是这么烂掉的）。
     /// `XCTSkipIf` 取的是中间那条路：**测试在场、当前不拦路、且在输出里显式报 skipped**。
-    private static let m2WiringComplete = false
+    /// **已于 M2 翻成 `true`**（三家合完后由总工执行，实施计划 Task 10）。
+    /// 翻 true 的依据不是"感觉接完了"，是下面两条硬断言当时真的跑起来了：
+    /// `Surface.ground` 被 `ProjectDetailView` 引用（WS-O 接线）、
+    /// `Spacing.group/section/pageMargin` 被 `Views/**` 引用（三家各自引用）。
+    private static let m2WiringComplete = true
 
     // MARK: - 扫描器（纯函数，供合成输入元测试）
 
