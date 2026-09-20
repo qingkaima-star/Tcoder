@@ -400,6 +400,95 @@ def cmd_switches(args):
 
 
 # ----------------------------------------------------------------------------
+# migration：把工单 §0.1 那张表变成一条能反复跑的命令
+# ----------------------------------------------------------------------------
+
+# 命中符号 → 该换成什么。只是提示，判据不住这里（见下面的口径来源）。
+MIGRATION_HINTS = {
+    "latestSnapshot": "monitor.pulse.value（或按需读单个格）",
+    "history": "monitor.curve.value（窗口已切好，别再 suffix）",
+    "topProcesses": "monitor.cpuRanking.value",
+    "processesByMemory": "monitor.memoryRanking.value",
+    "trackedGroups": "monitor.groupRanking.value",
+    "measuredProcessCount": "monitor.ledger.value.measuredCount",
+    "processMetricsTruncated": "monitor.ledger.value.metricsTruncated",
+    "lastSampleAt": "monitor.pulse.value.sampleAt",
+    "allProcesses": "视图零读点：改读 ranking 格",
+}
+
+# 【口径只有一个来源】这两条正则与上限**不住在 Python 里**：
+# 它们由 `PerfInvalidationRatchetTests` 拥有，这里去把那三行常量读回来。
+# 复制一份的正则迟早会与闸门分叉——分叉之后"命令说迁完了、守卫说没迁完"，
+# 或者更糟：命令按老规则报 0、守卫按新规则也报 0，谁都不红。
+RATCHET_SOURCE = "Tests/TcoderMonitorTests/PerfInvalidationRatchetTests.swift"
+
+
+def read_guard_ruler(module_root):
+    """从守卫源码里取 coarse/fine 正则 + 上限 + 消费方目录。取不到就抛，绝不返回空口径。"""
+    path = os.path.join(module_root, RATCHET_SOURCE)
+    with open(path, "r", encoding="utf-8") as fh:
+        src = fh.read()
+    got = re.search(r'static let coarsePattern = #"([^"]*)"#', src)
+    fine = re.search(r'static let finePattern = #"([^"]*)"#', src)
+    ceiling = re.search(r'static let coarseCallSiteCeiling = (\d+)', src)
+    dirs = re.search(r'consumerDirectories = \[(.*?)\]', src, re.S)
+    missing = [n for n, v in (("coarsePattern", got), ("finePattern", fine),
+                              ("coarseCallSiteCeiling", ceiling), ("consumerDirectories", dirs))
+               if v is None]
+    if missing:
+        raise RuntimeError("读不到守卫里的 %s——它被改名或删掉了，本命令的口径就没有单一来源，"
+                           "宁可报错也不许退回手抄正则（那会变成第二把尺子）：%s"
+                           % (", ".join(missing), path))
+    names = re.findall(r'"([^"]+)"', dirs.group(1))
+    return got.group(1), fine.group(1), int(ceiling.group(1)), names
+
+
+def swift_source_files(module_root, relative_dirs):
+    for rel in relative_dirs:
+        base = os.path.join(module_root, rel)
+        for root, _dirs, files in os.walk(base):
+            for name in sorted(files):
+                if name.endswith(".swift"):
+                    yield os.path.join(root, name)
+
+
+def cmd_migration(args):
+    root = args.module_root
+    try:
+        coarse, fine, ceiling, dirs = read_guard_ruler(root)
+    except (OSError, RuntimeError) as exc:
+        print("!! %s" % exc, file=sys.stderr)
+        return 2
+    coarse_re, fine_re = re.compile(coarse), re.compile(fine)
+    hits, fine_count, scanned = [], 0, 0
+    for path in swift_source_files(root, dirs):
+        scanned += 1
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            for number, line in enumerate(fh.read().split("\n"), 1):
+                if line.strip().startswith("//"):      # 与守卫同一条豁免：整行注释不算调用点
+                    continue
+                for m in coarse_re.finditer(line):
+                    hits.append((os.path.relpath(path, root), number, m.group(1),
+                                 MIGRATION_HINTS.get(m.group(1), "读对应的细粒度格")))
+                fine_count += len(fine_re.findall(line))
+    print("== 细粒度契约迁移进度（口径直接取自 %s）==" % RATCHET_SOURCE)
+    print("   扫描 %d 个文件（%s），粗粒度读点 %d 处 / 登记上限 %d 处 / 目标 0，细粒度读点 %d 处"
+          % (scanned, " + ".join(dirs), len(hits), ceiling, fine_count))
+    if hits:
+        print("   剩哪几处（符号是稳定的，行号只是当下位置）：")
+        for rel, number, symbol, hint in hits:
+            print("     %-46s %-22s → %s" % ("%s:%d" % (rel, number), "monitor." + symbol, hint))
+        print("   按文件汇总：%s" % ", ".join("%s×%d" % (k, v) for k, v in
+              sorted(collections.Counter(h[0] for h in hits).items())))
+    else:
+        print("   粗粒度读点已清零——请总工把上限拧成 0 并翻 `consumptionGateOpen`。")
+    if args.strict and len(hits) > 0:
+        print("!! --strict：还剩 %d 处未迁" % len(hits), file=sys.stderr)
+        return 1
+    return 0
+
+
+# ----------------------------------------------------------------------------
 # CLI
 # ----------------------------------------------------------------------------
 
@@ -449,6 +538,11 @@ def build_parser():
     w = sub.add_parser("switches", help="switch 档逐页汇总")
     w.add_argument("directory")
     w.set_defaults(func=cmd_switches)
+
+    g = sub.add_parser("migration", help="细粒度契约迁移进度（正则与上限直接取自守卫源码，不复制口径）")
+    g.add_argument("--module-root", default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    g.add_argument("--strict", action="store_true", help="还有粗粒度读点就非零退出（给 CI/门禁用）")
+    g.set_defaults(func=cmd_migration)
     return p
 
 

@@ -73,7 +73,23 @@ ceiling=0，扫描分母含 `.py/.sh/.md`）。你**没有改阈值**，只把�
 所以 1.5 秒一次的整棵重算**依旧在发生**，用户端目前**不会感到任何帧率改善**。
 T1/T2 在这 16 处迁完之前不可能达标——**这不是"优化项"，是其余性能工单的前置**。
 
-16 处逐条（迁完后由总工把上限往下拧，最终 0）：
+16 处逐条（迁完后由总工把上限往下拧，最终 0）。
+**下面这张表是快照，行号会漂**——反复核对请用命令，它的正则与上限**直接从守卫源码里读**，
+不存在第二套口径：
+
+```bash
+python3 scripts/trace_report.py migration              # 剩哪几处 + 该换成哪个格 + 按文件汇总
+python3 scripts/trace_report.py migration --strict     # 还有剩余就非零退出（可挂自家门禁）
+python3 scripts/trace_report.py migration --module-root ../<你的树>/TcoderMonitor
+```
+
+按文件汇总（2026-09-20 20:56 实测，`main = ee3dbdd`）——**归属照第三轮的页面分工**：
+
+| 谁 | 文件 | 剩几处 |
+|---|---|---|
+| WS-O | `Views/DashboardView.swift` ×3、`Views/Shell/ProjectSidebar.swift` ×1 | **4** |
+| WS-W | `Views/Performance/PerformanceView.swift` ×10、`Views/PerfLogs/LiveReadings.swift` ×2 | **12** |
+| WS-P | 代码/Git/依赖三组页 | **0**（本项无工，其余 W/P/O 工单照旧） |
 
 | 文件 | 行 | 现在这么读 | 该换成 |
 |---|---|---|---|
