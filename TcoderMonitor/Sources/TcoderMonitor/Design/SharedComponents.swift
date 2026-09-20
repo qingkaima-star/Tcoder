@@ -235,6 +235,33 @@ struct MiniBarGauge: View {
 }
 
 /// 空态。数据缺失时必须走这里，而不是显示 0 假装是真实结果。
+/// **节级**空态：一行说明，不占版面。
+///
+/// 与 `EmptyStateView`（**页级**空态：图标 + 标题 + 解释 + 140pt 留白）的分工是刻意的：
+/// 错误日志页实拍里，"没有可读的日志文件"这件事被说了四遍 —— 顶部横幅一遍、
+/// 「错误概览」副标题一遍、「错误趋势」整块空态一遍、「高频错误」整块空态又一遍，
+/// 每遍都带一枚大图标和 140pt 留白，于是页面看起来是坏的。
+/// 页级空态负责"这一屏为什么没有内容 + 下一步做什么"，说一次；
+/// 节级空态只负责"这一节因此画不出什么"，一行、`secondary`、不铺留白。
+struct SectionEmptyNote: View {
+    var text: String
+    var icon: IconName = .info
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+            ThemedIcon(icon, role: .badge)
+                .foregroundStyle(.tertiary)
+            Text(text)
+                .font(Theme.Typo.label.font)
+                // `.secondary` 而不是 `.tertiary`：这是一句要读的说明，
+                // 实拍里 tertiary 的 11pt 灰字几乎读不出（清单 3.11 的伴生问题）。
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
 struct EmptyStateView: View {
     var icon: String = "tray"
     var title: String

@@ -19,13 +19,11 @@ struct LogsTrendCard: View {
                     NoteLine(footnote(buckets))
                 }
             } else if logs == nil {
-                EmptyStateView(icon: IconName.chartLine.rawValue,
-                               title: "尚未分析",
-                               message: "点「重新分析」后，这里按天展示错误、异常与崩溃的分布。")
+                SectionEmptyNote(text: "尚未分析，点「重新分析」后这里按天展示错误、异常与崩溃的分布。",
+                                 icon: .chartLine)
             } else {
-                EmptyStateView(icon: IconName.chartLine.rawValue,
-                               title: "暂无趋势数据",
-                               message: "日志行里没有可解析的时间戳时无法按天分桶，这里不画空柱。")
+                SectionEmptyNote(text: "暂无趋势数据：日志行里没有可解析的时间戳时无法按天分桶，这里不画空柱。",
+                                 icon: .chartLine)
             }
         }
     }
