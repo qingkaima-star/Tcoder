@@ -331,10 +331,25 @@ struct DashboardLiveReadout: View {
     private var report: ProjectReport? { state.selectedReport }
     private var snapshot: SystemSnapshot? { state.monitor.latestSnapshot }
 
+    /// 顺序是**实时性能在前、读数带在后**（设计复核第 2 条的结构解）。
+    ///
+    /// 原来的顺序是「读数带 → 实时性能 → 代码规模」：曲线自带一段坐标轴留白，
+    /// 于是「读数带→实时性能」这一处 32pt 看起来明显大于「实时性能→代码规模」那处 32pt。
+    /// **不改间距数值**去迁就观感（那是"为了好看改令牌"，三家会改得不一致），
+    /// 改的是**谁挨着谁**：把带留白的曲线块挪到 hero 之后（hero 本身就 airy，两段呼吸同性质），
+    /// 让两个紧凑块（读数带 / 代码规模）相邻，视觉不等就没了。
+    /// 另一半理由是阅读优先级：这一组全是「本机此刻」的实时数据，比仓库静态的代码规模更该先看。
+    ///
+    /// ⚠️ 曾考虑的另一种解法——把「实时性能」与「代码规模」配成同列宽双栏——**被棘轮拦下**：
+    /// 那要把本视图拆成两个叶子（曲线一个、读数带一个），每个都得自己读一次
+    /// `state.monitor.latestSnapshot`，粗粒度读点就从 16 涨到 17，而
+    /// `PerfInvalidationRatchetTests.coarseCallSiteCeiling` 当前正好是 16（顶格）。
+    /// 双栏要等性能轮把这两处迁到细粒度读模型（`monitor.cpu.value` / `.curve.value`，
+    /// 现量 0 处）之后才做得起。
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.group) {
-            readoutStrip
             livePerformanceGroup
+            readoutStrip
         }
     }
 
