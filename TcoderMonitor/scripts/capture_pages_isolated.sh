@@ -18,7 +18,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
-APP_DIR="$PWD/dist/Tcoder Monitor.app"
+APP_DIR="$PWD/dist/Tcoder.app"
 BIN="$APP_DIR/Contents/MacOS/TcoderMonitor"
 WINLIST="$PWD/scripts/winlist.swift"
 OUT="${1:-/tmp/tcoder-pages-isolated}"

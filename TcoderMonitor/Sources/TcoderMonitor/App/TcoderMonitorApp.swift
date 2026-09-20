@@ -5,7 +5,7 @@ struct TcoderMonitorApp: App {
     @State private var state = AppState()
 
     var body: some Scene {
-        WindowGroup("Tcoder 项目监控") {
+        WindowGroup("Tcoder") {
             RootView()
                 .environment(state)
                 .frame(minWidth: 1080, minHeight: 680)

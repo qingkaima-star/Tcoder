@@ -1,4 +1,4 @@
-# Tcoder 项目监控
+# Tcoder
 
 Apple Silicon 原生 macOS App（Swift + SwiftUI），对本地开发项目做一站式工程指标监控。
 
@@ -42,7 +42,7 @@ Apple Silicon 原生 macOS App（Swift + SwiftUI），对本地开发项目做�
 
 ## 构建与运行
 
-> 以下是**开发/发布向**。普通使用者不用构建：拿到 `dist/Tcoder Monitor.app` 双击即可，
+> 以下是**开发/发布向**。普通使用者不用构建：拿到 `dist/Tcoder.app` 双击即可，
 > 首次启动、添加项目、重新分析的手动流程见 [`docs/使用说明.md`](docs/使用说明.md) 第 2 节。
 
 ```bash
@@ -54,7 +54,7 @@ cd TcoderMonitor
 
 # 产出可双击的 .app 到 dist/
 ./scripts/build_app.sh release
-open "dist/Tcoder Monitor.app"
+open "dist/Tcoder.app"
 ```
 
 ## 验收脚手架

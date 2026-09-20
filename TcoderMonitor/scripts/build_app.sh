@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 
 CONFIG="${1:-release}"
 APP_NAME="TcoderMonitor"
-BUNDLE_NAME="Tcoder Monitor.app"
+BUNDLE_NAME="Tcoder.app"
 OUT_DIR="dist"
 BIN_DIR=".build/arm64-apple-macosx/${CONFIG}"
 APP_DIR="${OUT_DIR}/${BUNDLE_NAME}"

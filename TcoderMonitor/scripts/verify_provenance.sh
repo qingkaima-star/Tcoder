@@ -9,7 +9,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
 MANIFEST="dist/RELEASE_MANIFEST.env"
-APP_DIR="dist/Tcoder Monitor.app"
+APP_DIR="dist/Tcoder.app"
 BIN="${APP_DIR}/Contents/MacOS/TcoderMonitor"
 
 if [ ! -f "$MANIFEST" ] || [ ! -f "$BIN" ]; then
@@ -17,9 +17,9 @@ if [ ! -f "$MANIFEST" ] || [ ! -f "$BIN" ]; then
   exit 1
 fi
 
-# 不用 eval 解析：值里带空格（"dist/Tcoder Monitor.app"），
-# 一旦去掉引号再 eval 就会词分割成 `Monitor.app: command not found`。
-# WS-E 已经踩过并修过同一个坑，这里只按需要的键逐条取值。
+# 不用 eval 解析清单：值曾经带空格（旧包名 "Tcoder Monitor.app"），去掉引号再 eval 会
+# 词分割成 `Monitor.app: command not found`。包名现在没空格了，但 eval 仍是注入面，
+# 规则留着：只按需要的键逐条取值。
 mf_get() {
   grep -E "^TCODER_$1=" "$MANIFEST" | head -1 | sed -E 's/^[^=]+=//; s/^"//; s/"$//'
 }

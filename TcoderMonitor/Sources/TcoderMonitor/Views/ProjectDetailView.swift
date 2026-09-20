@@ -70,7 +70,7 @@ struct ProjectDetailView: View {
                     }
                 }
             } else {
-                Text("Tcoder 项目监控").font(Theme.Typo.pageTitle.font)
+                Text("Tcoder").font(Theme.Typo.pageTitle.font)
             }
 
             Spacer(minLength: Theme.Spacing.md)

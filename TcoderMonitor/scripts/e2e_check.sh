@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 FX="${1:-/tmp/tcoder-fixture}"
 SUPPORT="$HOME/Library/Application Support/TcoderMonitor"
 UUID="11111111-2222-3333-4444-555555555555"
-APP="dist/Tcoder Monitor.app"
+APP="dist/Tcoder.app"
 # 窗口列举器随仓库走，不放 /tmp：重启即失效会让取证静默退化成"无窗口"
 WINLIST="$PWD/scripts/winlist.swift"
 

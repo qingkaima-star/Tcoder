@@ -4,7 +4,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-APP="dist/Tcoder Monitor.app"
+APP="dist/Tcoder.app"
 # 窗口列举器随仓库走，不放 /tmp：重启即失效会让取证静默退化成"无窗口"
 WINLIST="$PWD/scripts/winlist.swift"
 OUT="${1:-/tmp/tcoder-pages}"
@@ -56,7 +56,7 @@ for name in "${SECTIONS[@]}"; do
   defaults write com.tcoder.monitor ApplePersistenceIgnoreState -bool YES
   open "$APP"
   sleep 7
-  PID=$(pgrep -f "dist/Tcoder Monitor.app/Contents/MacOS/TcoderMonitor" | head -1 || true)
+  PID=$(pgrep -f "dist/Tcoder.app/Contents/MacOS/TcoderMonitor" | head -1 || true)
   if [ -z "$PID" ]; then echo "  $name -> !! 未找到本次 dist 实例（有无响应退出的调试实例残留？）"; continue; fi
   WIN=$(xcrun swift "$WINLIST" "$PID" 2>/dev/null | head -1 | cut -d'|' -f1)
   # 分隔符必须是 `|`：winlist.swift 打印的是 `窗口号|标题|宽度`，
