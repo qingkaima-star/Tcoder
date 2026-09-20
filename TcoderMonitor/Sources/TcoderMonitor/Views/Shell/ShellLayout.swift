@@ -7,10 +7,11 @@ import SwiftUI
 // 页面里不再出现裸数字（WS-I §2.6 的工单口径：列宽/尺寸改命名常量表，参照 `DepColumns`）。
 
 enum ShellLayout {
-    /// 侧栏三档宽度。min 取 220 是为了「复杂度风险」这类四字标题 + 健康点 + 行数副标题
-    /// 在一行内不折行；max 收到 340 防止拉宽侧栏后把 1080 起窗的内容区挤到不可用。
-    static let sidebarMinWidth: CGFloat = 220
-    static let sidebarIdealWidth: CGFloat = 260
+    /// 侧栏三档宽度。220 → 240：项目行从「48pt 两行卡」收成「30pt 单行」之后，
+    /// 项目名与右侧两格定宽读数（`37k 行` / `健康 61`）挤在同一行，220 下名字被截成
+    /// `Tcoder…`（17:17 实拍实测）。max 收到 340 防止拉宽侧栏把 1080 起窗的内容区挤到不可用。
+    static let sidebarMinWidth: CGFloat = 240
+    static let sidebarIdealWidth: CGFloat = 272
     static let sidebarMaxWidth: CGFloat = 340
 
     /// 健康评分环的描边宽度。环是「一个数字 + 一圈进度」，描边必须粗到能从 40pt 数字
@@ -23,15 +24,24 @@ enum ShellLayout {
 
     /// 实时读数里数字列的定宽。等宽数字仍要定宽，是因为 `ByteFormat` 的
     /// 「1.5 GB / 128 MB」位数不同，不锁宽会把整条侧栏底栏推着走。
-    static let liveReadoutColumnWidth: CGFloat = 40
+    ///
+    /// 40 → 56：18:00 实拍实测 `30.6 GB` 在 40pt 里**折成两行**（`30.6` / `GB`），
+    /// 底栏被撑歪 —— 而全仓没有一条断言量过这一格（`ShellDesignTests` 只量项目行那两格）。
+    /// 「定宽格」不量就等于没钉。下限由
+    /// `ShellBorderlessTests.test_sidebarLiveReadoutColumnFitsTheWorstCase` 钉住。
+    static let liveReadoutColumnWidth: CGFloat = 56
 
-    // MARK: 侧栏行卡片
+    // MARK: 侧栏行
 
-    /// 行卡最小高度。两行文字（13 semibold + 11 读数）加上下内边距的自然结果，
-    /// 也顺着 macOS 26 列表「行高与内边距更大」的方向（WS-H §2.2）。
-    static let rowMinHeight: CGFloat = 48
-    /// 行卡内边距。行间沟槽由 `List` 自己给，这里只算卡内的。
-    static let rowPadding: CGFloat = Theme.Spacing.sm
+    /// 侧栏行高。48 → 30（风格契约 7）。
+    ///
+    /// 旧值 48 是**行卡**的高度：两行文字 + 上下内边距 + 一块 `.contentInset` 材质。
+    /// 现在行卡没了，选中态交回 `.listStyle(.sidebar)` 原生绘制，行就是一行文字 ——
+    /// 还留 48pt 等于在原生列表里手工撑出第二套行距，两侧一起用力必然显挤。
+    /// 30 是「11pt 读数 + 上下各 8pt 命中余量」的自然结果，也仍在可点下限之上。
+    static let rowMinHeight: CGFloat = 30
+    /// 行内左右内边距。系统 sidebar 行本身已有缩进，这里只补图标与文字的呼吸。
+    static let rowPadding: CGFloat = Theme.Spacing.xs
 
     /// 两个读数各占一个**右对齐定宽格**。
     ///

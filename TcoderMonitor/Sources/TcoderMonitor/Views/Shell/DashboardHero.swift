@@ -101,21 +101,25 @@ struct HealthRing: View {
     }
 }
 
-/// Hero 卡：左环右结论。属**内容层**，所以吃标准材质而不是玻璃（[HIG-M]）。
+/// Hero 区：左环右结论。
+///
+/// **它不再是一块卡**（风格契约 1/2）：外面那层 `GlassCard` 撤了。基座把 `.content`
+/// 改成什么都不画之后，那张卡只剩下 24pt 内边距还在把内容往中间挤，
+/// 而版框已经由页面的 `Spacing.pageMargin` 负责 —— 留着它等于凭空多一层缩进。
+/// 分组线交给上面的 `groupLabel` 小标题与留白。
 struct HealthHeroCard: View {
     var health: HealthScore?
 
     var body: some View {
-        GlassCard(spacing: nil) {
-            HStack(alignment: .top, spacing: DashboardLayout.heroGap) {
-                HealthRing(score: health?.overall,
-                           grade: health?.grade,
-                           trend: health?.trendDelta)
-                    .frame(width: DashboardLayout.heroRingWidth,
-                           height: DashboardLayout.heroRingHeight)
-                narrative
-            }
+        HStack(alignment: .top, spacing: DashboardLayout.heroGap) {
+            HealthRing(score: health?.overall,
+                       grade: health?.grade,
+                       trend: health?.trendDelta)
+                .frame(width: DashboardLayout.heroRingWidth,
+                       height: DashboardLayout.heroRingHeight)
+            narrative
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -123,7 +127,7 @@ struct HealthHeroCard: View {
         if let health {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 Text("工程健康评分")
-                    .font(Theme.Typo.label.font)
+                    .typed(Theme.Typo.groupLabel)
                     .foregroundStyle(.secondary)
                 findings(health)
                 if !health.narrative.isEmpty {

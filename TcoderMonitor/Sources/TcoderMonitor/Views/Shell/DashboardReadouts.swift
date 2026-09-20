@@ -8,12 +8,13 @@ import SwiftUI
 /// 基座 `Theme.Share.Row` 用 `Theme.Layout.shareLabelWidth` / `sharePercentWidth` /
 /// `gaugeInline` 自己管，页面再留一份就是第二套真相。
 enum DashboardLayout {
-    /// hero 区评分环的原始尺寸。页面把它放进 `GlassCard` 里再自适应拉宽。
+    /// hero 区评分环的原始尺寸。页面把它放进自适应行里再拉宽。
     /// `HealthView`（WS-M）也在用这一对，改动要同步那页。
     static let heroRingWidth: CGFloat = 170
     static let heroRingHeight: CGFloat = 150
-    /// hero 右侧结论区与环之间的间隙。
-    static let heroGap: CGFloat = Theme.Spacing.sm
+    /// hero 右侧结论区与环之间的间隙。`sm`(12) → `lg`(20)：卡面撤掉之后，
+    /// 环与文字之间没有边界替它们分家了，间隙就是唯一的组内分隔（风格契约 8）。
+    static let heroGap: CGFloat = Theme.Spacing.lg
 }
 
 // MARK: - 统计读数行

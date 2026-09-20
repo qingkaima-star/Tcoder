@@ -1,30 +1,39 @@
 import AppKit
 import SwiftUI
 
-// MARK: - 窗口侧栏（项目列表）
+// MARK: - 窗口侧栏（项目列表 + 九页导航）
 //
 // 从 `RootView.swift` 整体迁出，让 RootView 只留导航骨架。侧栏本身属控件层，
 // macOS 26 上系统已给 `List(.sidebar)` 挂了玻璃材质，所以不再自造窗口背景
 // （[LG]「减少控件里的自定义背景、让系统决定」）。
 //
-// 第二轮按总工目视结论改的三件事：
-//   1. 只有一个项目时整块侧栏是空的 → 行卡化把视觉重量压回去，并在列表尾常驻一张
-//      「添加 / 拖入」引导卡占住剩余空间，且**拖放是真能用的**（不是画个虚线框骗人）；
-//   2. 扫描中「20k 行 健康 61」左右抖 → 两个读数改成右对齐定宽格，理由见 `ShellLayout`；
-//   3. 选中行与顶部导航条用同一条规则（未选中=内容层材质、选中=升到控件层吃玻璃），
-//      侧栏、导航条、顶栏于是是同一套材质语言。
+// **本轮（WS-O / M1）改成原生 source list**（spec §3，风格契约 7）：
+//   · 两个分组 —— `Section("项目")` + `Section("分析视图")`（9 行）。
+//     原来九页挤在页头下面一条横滚 chip 条里，吃掉 44pt 纵向空间，还和侧栏选中行、
+//     顶栏按钮各用一套材质语言；页名是这九页的主导航，它该住在侧栏。
+//   · 项目行不再是一块 48pt 材质胶囊（自带一份投影）。行高收到 30pt，
+//     选中态整个交回 `.listStyle(.sidebar)` 原生绘制 —— **零胶囊、零投影、零描边**。
+//   · 视图行用手动选中态：`List(selection:)` 只能有一根绑定，而「哪个项目」与
+//     「哪一页」是**两个选择轴**，硬塞进一根绑定会让点页面把项目选没。
+//
+// 保留的真功能：拖放添加项目（`dropDestination`，落点校验只收目录）、上下文菜单、
+// 引导卡常驻、底栏「添加项目」+ 本机实时读数。
+// `@AppStorage("selectedDetailSection")` 的键名与取值一律不动 ——
+// 九页取证脚本靠 `-selectedDetailSection <中文页名>` 传页。
 
 struct ProjectSidebar: View {
     @Environment(AppState.self) private var state
     @Binding var selection: UUID?
     @State private var showImporter = false
     @State private var isDropTargeted = false
+    @AppStorage("selectedDetailSection") private var sectionRaw: String = DetailSection.overview.rawValue
 
     var body: some View {
         List(selection: $selection) {
             if !state.store.projects.isEmpty {
                 projectsSection
             }
+            analysisSection
             guideSection
         }
         .listStyle(.sidebar)
@@ -54,20 +63,38 @@ struct ProjectSidebar: View {
     /// 拆成独立计算属性是必需的：整段内联在一个 `List { }` 里会让类型检查
     /// 在 20 秒内算不出来（实测报 "unable to type-check this expression"）。
     private var projectsSection: some View {
-        Section("项目列表") {
+        Section("项目") {
             ForEach(state.store.projects) { project in
                 projectRow(project)
             }
         }
     }
 
-    private var guideSection: some View {
-        Group {
-            if state.store.projects.isEmpty {
-                Section("开始使用") { guideCard(mode: .firstRun) }
-            } else {
-                Section { guideCard(mode: .compact) } header: { EmptyView() }
+    /// 九页导航。可达性沿用 `DetailSection.isReachable(reportAvailable:)`：
+    /// 没有报告时把需要报告的页禁掉，而不是让用户点进一张空卡。
+    private var analysisSection: some View {
+        Section("分析视图") {
+            ForEach(DetailSection.allCases) { section in
+                AnalysisSectionRow(
+                    section: section,
+                    isSelected: section.rawValue == sectionRaw,
+                    isEnabled: section.isReachable(reportAvailable: state.selectedReport != nil)
+                        // 当前页永远保持可用态：把「正在看的一页」画成禁用灰，
+                        // 读屏会念出「已禁用」而屏幕上它明明是选中的。
+                        || section.rawValue == sectionRaw
+                ) {
+                    sectionRaw = section.rawValue
+                }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var guideSection: some View {
+        if state.store.projects.isEmpty {
+            Section("开始使用") { guideCard(mode: .firstRun) }
+        } else {
+            Section { guideCard(mode: .compact) } header: { EmptyView() }
         }
     }
 
@@ -83,12 +110,8 @@ struct ProjectSidebar: View {
     }
 
     private func projectRow(_ project: MonitoredProject) -> some View {
-        ProjectRow(project: project,
-                   report: state.store.report(for: project),
-                   isSelected: project.id == selection)
+        ProjectRow(project: project, report: state.store.report(for: project))
             .tag(project.id)
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
             .contextMenu { rowContextMenu(project) }
     }
 
@@ -107,17 +130,73 @@ struct ProjectSidebar: View {
         return true
     }
 
+    /// 侧栏底栏。**独立成 struct**（`SidebarLiveFooter`）：
+    /// 它读 `state.monitor.latestSnapshot`，而 `ProjectSidebar.body` 已不再读 `monitor`
+    /// 任何属性 —— 否则每 1.5s 一次心跳会把整个 `List`（含全部 `ProjectRow`）
+    /// 一起失效重建（O-1，性能规格 §5.2）。独立成视图后，`latestSnapshot` 的失效域
+    /// 只落在这一个 body 上，侧栏项目行不再随心跳重建。
     @ViewBuilder
     private var sidebarFooter: some View {
-        HStack(spacing: Theme.Spacing.xs) {
-            GlassButton("添加项目", icon: .add, style: .bordered) {
-                showImporter = true
-            }
-            Spacer(minLength: Theme.Spacing.xs)
-            LiveCPUBadge(snapshot: state.monitor.latestSnapshot)
+        SidebarLiveFooter(showImporter: $showImporter)
+    }
+}
+
+// MARK: - 视图行（九页导航的一行）
+
+/// 侧栏里的一页。
+///
+/// 为什么是手动选中态而不是 `List(selection:)`：项目与页面是**两根选择轴**，
+/// 一根绑定塞不下两个语义（选中页面会把当前项目选没）。代价是系统不替我画高亮，
+/// 所以这里自己画一枚 accent 淡底 —— 但只有**实心淡底**这一件事，
+/// 无描边、无投影（风格契约 6：全仓唯一一处投影在 `.floating`）。
+struct AnalysisSectionRow: View {
+    var section: DetailSection
+    var isSelected: Bool
+    /// false = 这一页要先扫一次才有数据。禁用而不是藏起来，
+    /// 藏起来用户会以为这个功能不存在。
+    var isEnabled: Bool
+    var action: () -> Void
+
+    var body: some View {
+        label
+            .buttonStyle(.plain)
+            .disabled(!isEnabled)
+            .help(isEnabled ? section.title : ShellCopy.notAnalyzed("该项目"))
+    }
+
+    /// 选中态必须能被读屏说出来。视觉上它是一枚淡底行，
+    /// VoiceOver 拿不到这个差别；`.buttonStyle(.plain)` 又不自带选中语义。
+    @ViewBuilder
+    private var label: some View {
+        let button = Button(action: action) { rowContent }
+        if isSelected {
+            button.accessibilityAddTraits(.isSelected)
+        } else {
+            button
         }
-        .padding(.horizontal, Theme.Spacing.sm)
-        .padding(.vertical, Theme.Spacing.xs)
+    }
+
+    private var rowContent: some View {
+        HStack(spacing: Theme.Spacing.xs) {
+            // 变体表意：选中态换 fill 符号（WS-H §6.1 规则 3）。图标一律灰阶，
+            // 蓝只留给交互（风格契约 5）。
+            ThemedIcon(section.iconName, role: .badge, selected: isSelected)
+            Text(section.title)
+                .font(Theme.Typo.body.font)
+                .lineLimit(1)
+            Spacer(minLength: Theme.Spacing.xxs)
+        }
+        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+        .padding(.horizontal, ShellLayout.rowPadding)
+        .padding(.vertical, Theme.Spacing.xxs)
+        .frame(maxWidth: .infinity, minHeight: ShellLayout.rowMinHeight, alignment: .leading)
+        .background {
+            if isSelected {
+                Capsule().fill(Theme.Semantic.accent.graphicColor
+                                   .opacity(Theme.Palette.Opacity.badgeFill))
+            }
+        }
+        .contentShape(Capsule())
     }
 }
 
@@ -203,39 +282,37 @@ struct AddProjectGuideCard: View {
 
 // MARK: - 项目行
 
+/// 一行 = 一个项目。**它不再是一块卡**（风格契约 7）：
+/// 无 `.surface()`、无 48pt 胶囊、无描边、无投影。
+/// 选中态连文字色一起交给系统 —— 侧栏高亮是 `.listStyle(.sidebar)` 的本行，
+/// 页面在这里自己涂一层淡底就是第二套选中语言（原来正是这套，和导航条、顶栏各说各话）。
 struct ProjectRow: View {
     var project: MonitoredProject
     var report: ProjectReport?
-    var isSelected: Bool
 
     var body: some View {
-        HStack(spacing: Theme.Spacing.sm) {
+        HStack(spacing: Theme.Spacing.xs) {
             HealthDot(score: report?.health?.overall)
-            VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                HStack(spacing: Theme.Spacing.xxs) {
-                    Text(project.name)
-                        .font(Theme.Typo.cardTitle.font)
-                        .lineLimit(1)
-                    if project.isDemo {
-                        // 原来这里是一套就地自造的淡色胶囊（8pt + 0.15 底），
-                        // 与 PerformanceView 的 PerfTag 逐行重复（WS-I §3.1）→ 改用基座件。
-                        SemanticBadge("示例", role: Theme.Semantic.accent)
-                    }
-                }
-                metaLine
+            Text(project.name)
+                .font(Theme.Typo.body.font)
+                .lineLimit(1)
+                // 单行截断是刻意的（名字给右侧两格读数让位），所以完整名字必须
+                // 悬停可得 —— 否则「看得见一半」比「看不见」更难查。
+                .help(project.name)
+            if project.isDemo {
+                // 原来这里是一套就地自造的淡色胶囊（8pt + 0.15 底），
+                // 与 PerformanceView 的 PerfTag 逐行重复（WS-I §3.1）→ 改用基座件。
+                SemanticBadge("示例", role: Theme.Semantic.accent)
             }
-            Spacer()
+            Spacer(minLength: Theme.Spacing.xxs)
+            metaLine
         }
         .padding(.horizontal, ShellLayout.rowPadding)
-        .padding(.vertical, Theme.Spacing.xs)
         .frame(maxWidth: .infinity, minHeight: ShellLayout.rowMinHeight, alignment: .leading)
-        // 与顶部导航条同一条规则：未选中是内容层的一块内嵌材质，选中才升到控件层。
-        .surface(layer: isSelected ? .chrome : .contentInset,
-                 shape: .rounded(Theme.Radius.md))
     }
 
-    /// 副标题行。三态在这儿的落法：没有代码报告 = 写「尚未分析」而不是 `--`，
-    /// 因为这一整行就是「还没有结论」，摆两个短横线会被读成一个测得值。
+    /// 右侧读数行。三态在这儿的落法：没有代码报告 = 写「尚未分析」而不是 `--`，
+    /// 因为这一格就是「还没有结论」，摆两个短横线会被读成一个测得值。
     ///
     /// 每个读数占一个**右对齐定宽格**：`.monospacedDigit()` 只保证单个数字等宽，
     /// 挡不住 `compact` 结果本身跨位数变宽（`9k`→`182k`）把邻居推走。
@@ -252,7 +329,9 @@ struct ProjectRow: View {
                 metricCell("健康 \(score)", width: ShellLayout.healthColumnWidth)
             }
         }
-        .foregroundStyle(.tertiary)
+        // 原来是 `.tertiary`：这一格里是**测得值**（行数、健康分），
+        // 测得值不得用 tertiary（风格契约 4）。
+        .foregroundStyle(.secondary)
     }
 
     private func metricCell(_ text: String, width: CGFloat) -> some View {
@@ -299,6 +378,43 @@ struct HealthDot: View {
 }
 
 // MARK: - 实时读数（侧栏底栏）
+
+/// 侧栏底栏的实时读数（本机 CPU / 已用内存）。
+///
+/// **必须独立成 struct**：它读 `state.monitor.latestSnapshot`，而 `ProjectSidebar`
+/// 的 `body` 不再读 `monitor` 任何属性。SwiftUI 的 `@Observable` 失效域按「正在求值
+/// 的 view body」划分 —— 如果这里写成 `ProjectSidebar` 的计算属性，读 `latestSnapshot`
+/// 会发生在 `ProjectSidebar.body` 的求值过程中，于是每次心跳（每 1.5s）都让整个
+/// `List`（含全部 `ProjectRow`）整段失效、整段重建（潜在交互卡顿的根因之一，性能规格 §5.2 O-1）。
+/// 独立成视图后，失效域只落在本 body，侧栏项目行不再随心跳重建。
+///
+/// 注：当前仍订阅整份 `latestSnapshot`，未用 M0 的细粒度读模型（M0 尚未进 main 且
+/// `Services/**` 不在本流可写范围）。隔离已使失效域退出 `List`；M0 落地后可进一步改成
+/// 只订阅 `cpuUsage` / `memoryUsedBytes` 单字段，但本修复不依赖它。
+struct SidebarLiveFooter: View {
+    @Environment(AppState.self) private var state
+    @Binding var showImporter: Bool
+
+    /// 两行式底栏。**不是一行**：18:29 实拍实测，「按钮 + CPU 定宽格 + 内存定宽格」
+    /// 挤在同一行时总宽超出侧栏可用宽，`.frame(width:)` 在过约束的 `HStack` 里会被压缩，
+    /// 于是 `36.9 GB` 在格子里折成三行（`36.` / `9` / `GB`），把底栏撑歪。
+    /// 定宽格本身够宽（见 `ShellBorderlessTests.test_sidebarLiveReadoutColumnFitsTheWorstCase`），
+    /// 不够的是**同一行的预算** —— 所以把读数单独成行，并另加一条同行预算断言。
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+            HStack(spacing: Theme.Spacing.xs) {
+                GlassButton("添加项目", icon: .add, style: .bordered) {
+                    showImporter = true
+                }
+                Spacer(minLength: Theme.Spacing.xs)
+            }
+            LiveCPUBadge(snapshot: state.monitor.latestSnapshot)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .padding(.horizontal, Theme.Spacing.sm)
+        .padding(.vertical, Theme.Spacing.xs)
+    }
+}
 
 struct LiveCPUBadge: View {
     var snapshot: SystemSnapshot?
