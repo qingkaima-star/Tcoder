@@ -1,0 +1,44 @@
+/*
+  Tcoder — English catalog
+
+  键 = 简体中文原文（权威文本），值 = 人工写的英文译文。
+  这么做的唯一理由：**缺一条译文时界面退回显示正确的中文，而不是漏出一个机器键。**
+
+  术语表见 docs/中英双语方案.md §3，同一个概念全仓只允许一个译法。
+  新增/修改键必须同步那张表；守卫 LocalizationGuardTests 会拦
+  "值等于键（没翻）"、"键在代码里已经不存在（译文烂尾）"、
+  以及"代码里出现没登记的中文界面串"（棘轮，只许减不许增）。
+*/
+
+/* ===== 外壳与导航 ===== */
+"项目" = "Projects";
+"分析视图" = "Analysis";
+"添加项目" = "Add Project";
+"把项目文件夹拖到这里，或选择本地目录" = "Drop a project folder here, or choose a local directory";
+"选择目录…" = "Choose Directory…";
+"加载示例项目" = "Load Sample Project";
+"尚未分析" = "Not analysed yet";
+"示例" = "Sample";
+"重新分析" = "Re-analyse";
+"重新采样" = "Re-sample";
+"暂停" = "Pause";
+"已暂停" = "Paused";
+"重试" = "Retry";
+
+/* ===== 九页页名（Theme.Page.Header）===== */
+"总览" = "Overview";
+"代码规模" = "Code Size";
+"复杂度风险" = "Complexity & Risk";
+"Git 洞察" = "Git Insights";
+"贡献者" = "Contributors";
+"性能监控" = "Performance";
+"错误日志分析" = "Error Logs";
+"依赖分析" = "Dependencies";
+"健康评分" = "Health Score";
+
+/* ===== 单位与量词（stringsdict 负责复数，这里只收不需要数的）===== */
+"行" = "lines";
+"次" = "commits";
+"人" = "people";
+"天" = "days";
+"个" = "items";

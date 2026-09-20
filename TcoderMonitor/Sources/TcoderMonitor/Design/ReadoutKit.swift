@@ -240,7 +240,11 @@ extension Theme {
                             ThemedIcon(titleIcon, role: .navigation)
                                 .foregroundStyle(.secondary)
                         }
-                        Text(title).typed(Theme.Typo.pageTitle)
+                        // **必须是 `LocalizedStringKey`**：`title` 是 `String`，
+                        // `Text(String)` 走的是 verbatim 初始化、**不查本地化表**，
+                        // 于是目录里登记了英文也永远显示中文。这是双语最容易踩的空转：
+                        // 机制接好了、表也翻了，界面上一个字都没变。
+                        Text(LocalizedStringKey(title)).typed(Theme.Typo.pageTitle)
                         if showsDemoBadge { DemoBadge() }
                         Spacer(minLength: Theme.Spacing.md)
                         actions

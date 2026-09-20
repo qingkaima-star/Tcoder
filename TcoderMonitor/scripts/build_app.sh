@@ -27,6 +27,24 @@ cp Resources/Info.plist "${APP_DIR}/Contents/Info.plist"
 printf 'APPL????' > "${APP_DIR}/Contents/PkgInfo"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "${APP_DIR}/Contents/Resources/"
 
+# 语言资源必须进**主 bundle**，不是 SwiftPM 的 .bundle：
+# `Text("中文")` / `String(localized:)` 查的是 `Bundle.main`，而 `Bundle.main` 对
+# .app 来说就是 Contents/Resources。所以本地化文件放在 Resources/*.lproj/ 下，
+# 在这里手工拷进去 —— 走 `Package.swift` 的 `resources:` 只会产出一个
+# `TcoderMonitor_TcoderMonitor.bundle`，SwiftUI 的自动查表**不会**看它。
+lproj_count=0
+for dir in Resources/*.lproj; do
+  [ -d "${dir}" ] || continue
+  cp -R "${dir}" "${APP_DIR}/Contents/Resources/"
+  lproj_count=$((lproj_count + 1))
+done
+if [ "${lproj_count}" -eq 0 ]; then
+  echo "!! Resources/ 下一个 .lproj 都没有 —— 打出来的包不会说第二种语言。"
+  echo "   宁可不打包，也别交付一个「看起来支持英文、其实整段不查表」的包。"
+  exit 1
+fi
+echo "==> localisations: ${lproj_count} 个 .lproj 已进 Contents/Resources"
+
 # Stamp provenance into Info.plist before signing, so a delivered bundle can be
 # mechanically tied to the exact revision it was built from (release evidence).
 PLIST="${APP_DIR}/Contents/Info.plist"
