@@ -90,10 +90,10 @@ extension PerfLogsBorderlessTests {
                    "同一 struct 内两枚环没数出来 → 「一页两枚主角」判据失效")
 
         // 页头扫描器：本流真养过的那份形状必须被抓到，而普通视图不得误伤。
-        XCTAssertEqual(Self.pageHeaderDeclarations(in: [(path: "Views/PerfLogs/Fake.swift", content:
+        XCTAssertEqual(Self.pageHeaderTypeDeclarations(in: [(path: "Views/PerfLogs/Fake.swift", content:
             "struct PerfLogsPageHeader<Actions: View>: View {")]).count, 1,
                        "页头声明扫描器失灵 → 页面目录里的第二套页头会漏")
-        XCTAssertTrue(Self.pageHeaderDeclarations(in: [(path: "Views/PerfLogs/Fake.swift", content: """
+        XCTAssertTrue(Self.pageHeaderTypeDeclarations(in: [(path: "Views/PerfLogs/Fake.swift", content: """
             struct LiveNumber: View {
             struct NoteLine: View {
             """)]).isEmpty, "普通视图被误判成页头 → 三家会被逼着把组件改名绕守卫")

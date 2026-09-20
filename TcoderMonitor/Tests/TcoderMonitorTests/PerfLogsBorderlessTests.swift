@@ -164,7 +164,11 @@ final class PerfLogsBorderlessTests: XCTestCase {
     /// 页面目录里自己养的**页头类型**声明。
     /// 「页头」（项目名 / 路径 / 分析时间 / 右侧控件）全仓只许一套画法，
     /// 归 `Views/ProjectDetailView.swift` 与 `Views/Shell/**`（WS-O 名下）。
-    static func pageHeaderDeclarations(in files: [(path: String, content: String)]) -> [String] {
+    /// 本流判据：数**页头类型声明**（`struct …PageHeader…: View`，即"有没有养出第二套页头"）。
+    /// 原名 `pageHeaderDeclarations` 与 `BorderlessSurfaceGuardTests` 那份同名但不同物
+    /// （那份数 `Theme.Page.Header(` 的调用点，管"九页各一处 H1"）。2026-09-21 收官集成时改名消歧，
+    /// 判据本体一字未动 —— 两把不同的尺子共用一个名字，早晚有人在错的那把上读到"通过"。
+    static func pageHeaderTypeDeclarations(in files: [(path: String, content: String)]) -> [String] {
         hits(in: files, where: { line in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             return trimmed.hasPrefix("struct ") && trimmed.contains(": View")

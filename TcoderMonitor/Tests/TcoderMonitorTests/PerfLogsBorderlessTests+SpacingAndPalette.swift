@@ -38,15 +38,22 @@ extension PerfLogsBorderlessTests {
         // 本流域曾养过一份 `PerfLogsPageHeader`（三页共用），已按总工裁定删除：
         // 页面目录里再出现任何 `struct …PageHeader…: View` 就是第二套页头。
         let files = try ownedFiles()
-        let headers = Self.pageHeaderDeclarations(in: files)
+        let headers = Self.pageHeaderTypeDeclarations(in: files)
         XCTAssertTrue(headers.isEmpty,
                       "页面目录里养着第二套页头（归 WS-O）：\(headers)")
-        // 反向：三页各自写**页内小标题**（页名 + 本页口径），不依赖任何共用页头件。
+        // 反向：三页各自**声明**自己的页级 H1（标题串与口径句仍在本页文件里），
+        // 但画法收进基座 `Theme.Page.Header` —— 九页一致由
+        // `BorderlessSurfaceGuardTests.test_everyPageDeclaresExactlyOnePageHeader` 守。
+        // 原来这条查的是 `Text("页名")` 字面量，等于强制每页手抄一份标题行；
+        // 那正是"三页三份、六页没有"的成因，所以换成"本页必须声明 Header，
+        // 且页名串仍在本页"—— 抽走或改名照样红，但不再逼人手抄版式。
         for (page, title) in [("PerformanceView", "性能监控"),
                               ("LogsView", "错误日志分析"),
                               ("HealthView", "健康评分")] {
             let file = try XCTUnwrap(files.first { $0.path.hasSuffix("\(page).swift") })
-            XCTAssertTrue(file.content.contains("Text(\"\(title)\")"),
+            XCTAssertTrue(file.content.contains("Theme.Page.Header("),
+                          "\(page) 不再声明页级 H1 → 标题层又退回各页自画或干脆没有")
+            XCTAssertTrue(file.content.contains("\"\(title)\""),
                           "\(page) 的页名不在本页里 → 页内小标题被抽走或改名了")
         }
     }
