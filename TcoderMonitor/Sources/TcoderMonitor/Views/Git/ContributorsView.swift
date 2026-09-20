@@ -19,10 +19,14 @@ struct ContributorsView: View {
                     }
                 } else {
                     let authors = ContributorAnalysis.sorted(git.authors)
-                    ContributorBusFactorSection(git: git)
-                    ContributorsMetricGrid(git: git, authors: authors)
-                    ContributorRankingSection(git: git, authors: authors)
-                    ContributorConcentrationSection(git: git, authors: authors)
+                    GroupStack {
+                        ContributorBusFactorSection(git: git)
+                        ContributorsMetricGrid(git: git, authors: authors)
+                    }
+                    GroupStack {
+                        ContributorRankingSection(git: git, authors: authors)
+                        ContributorConcentrationSection(git: git, authors: authors)
+                    }
                 }
             } else {
                 EmptyStateView(
@@ -91,50 +95,59 @@ struct ContributorBusFactorSection: View {
 
 // MARK: - 指标条
 
+/// 主角 = **头部作者占比**（纯数字百分比），其余三条走无面读数带。
+///
+/// 旧形态：`LazyVGrid` 四枚 tile，各涂 accent / role色 / neutral / success。
+/// 契约 5 之后只剩一种颜色留在这儿：Bus Factor 的**状态**。而那个状态本来就由
+/// `ContributorBusFactorSection` 的 `DataNotice` 用「色 + 文字 + 图标」三通道说清楚了，
+/// 不需要再用 tile 数字的颜色复述一遍 —— 所以四枚 tile 的 tint 全部删掉，
+/// 「头部作者占比」升为主角并回到纯墨。
+///
+/// **占比的分母口径必须跟着主角**：`topShare` 除的是非合并窗口，不是提交真值，
+/// 那句 `authorTileCaption` 一个字都不能少，否则 42% 会被读成「42% 的全部历史」。
 struct ContributorsMetricGrid: View {
     let git: GitInsights
     let authors: [AuthorStats]
 
-    private static let columns = [GridItem(.adaptive(minimum: Theme.Layout.tileMinWidth),
-                                           spacing: Theme.Spacing.gutter)]
-
     var body: some View {
         let scope = git.commitScope
-        LazyVGrid(columns: Self.columns, spacing: Theme.Spacing.gutter) {
-            MetricTile(
-                label: "贡献者",
-                value: NumberFormat.grouped(authors.count),
-                icon: .people,
-                unit: "人",
-                caption: scope.authorTileCaption(authorCount: git.activeAuthorCount),
-                tint: Theme.Semantic.accent.textColor
-            )
-            MetricTile(
-                label: "头部作者占比",
-                value: Self.topShare(git).map { NumberFormat.percent($0, precision: 0) },
-                icon: .topContributor,
-                caption: git.topAuthor.map {
-                    "\(ContributorAnalysis.displayName($0)) · \(NumberFormat.grouped($0.commits)) 次"
-                } ?? "无作者数据",
-                tint: Theme.Semantic.role(for: ContributorAnalysis.busFactorRisk(git)).textColor
-            )
-            MetricTile(
-                label: "累计变更",
-                value: scope.authorBasis > 0
-                    ? NumberFormat.compact(git.totalAdditions + git.totalDeletions) : nil,
-                unit: "行",
-                caption: "\(NumberFormat.signed(git.totalAdditions)) / "
-                    + "\(NumberFormat.signed(-git.totalDeletions)) · 按非合并提交统计",
-                tint: Theme.Semantic.neutral.textColor
-            )
-            MetricTile(
-                label: "近 30 天活跃",
-                value: NumberFormat.grouped(ContributorAnalysis.recentlyActive(authors).count),
-                symbol: CodeGitSymbol.recency,
-                unit: "人",
-                caption: Self.recentlyActiveCaption(authors),
-                tint: Theme.Semantic.success.textColor
-            )
+        GlassSection("贡献集中度读数", subtitle: scope.headline, icon: .people) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                DataHeroReadout(value: Self.topShare(git).map { NumberFormat.percent($0, precision: 0) }
+                                    ?? DataAbsence.notAnalysed.display,
+                                unit: nil,
+                                note: (git.topAuthor.map {
+                                    "\(ContributorAnalysis.displayName($0)) 一人完成 · "
+                                        + "\(NumberFormat.grouped($0.commits)) 次"
+                                } ?? "无作者数据") + "（\(scope.authorBasis > 0 ? "分母 = \(NumberFormat.grouped(scope.authorBasis)) 次非合并提交" : DataAbsence.indeterminate.textDisplay)）")
+
+                ReadoutStrip {
+                    MetricTile(
+                        label: "贡献者",
+                        value: NumberFormat.grouped(authors.count),
+                        icon: .people,
+                        unit: "人",
+                        caption: scope.authorTileCaption(authorCount: git.activeAuthorCount)
+                    )
+                    DataBandSeparator()
+                    MetricTile(
+                        label: "累计变更",
+                        value: scope.authorBasis > 0
+                            ? NumberFormat.compact(git.totalAdditions + git.totalDeletions) : nil,
+                        unit: "行",
+                        caption: "\(NumberFormat.signed(git.totalAdditions)) / "
+                            + "\(NumberFormat.signed(-git.totalDeletions)) · 按非合并提交统计"
+                    )
+                    DataBandSeparator()
+                    MetricTile(
+                        label: "近 30 天活跃",
+                        value: NumberFormat.grouped(ContributorAnalysis.recentlyActive(authors).count),
+                        symbol: CodeGitSymbol.recency,
+                        unit: "人",
+                        caption: Self.recentlyActiveCaption(authors)
+                    )
+                }
+            }
         }
     }
 
@@ -159,31 +172,53 @@ struct ContributorRankingSection: View {
     let git: GitInsights
     let authors: [AuthorStats]
 
-    static let displayLimit = 30
+    /// 30 行排行一次摊开是「不规整拥挤」最典型的一处。收成 8 行 + 展开，
+    /// 未展示的人数必须继续写在屏幕上。
+    static let displayLimit = 8
+
+    @State private var expanded = false
 
     var body: some View {
-        let shown = Array(authors.prefix(Self.displayLimit))
+        let shown = visibleRows
         GlassSection(
             "贡献者排行",
             subtitle: "按提交数降序 · 展示 \(NumberFormat.grouped(shown.count)) / "
                 + "\(NumberFormat.grouped(authors.count)) 人 · \(git.commitScope.headline)",
             icon: .people
         ) {
-            VStack(spacing: DataRowMetrics.rowGap) {
-                ForEach(Array(shown.enumerated()), id: \.element.id) { index, author in
-                    ContributorRow(author: author, rank: index + 1, git: git)
-                    if index < shown.count - 1 {
-                        DataRowSeparator()
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                DataTableWell {
+                    ForEach(Array(shown.enumerated()), id: \.element.id) { index, author in
+                        ContributorRow(author: author, rank: index + 1, git: git)
+                        if index < shown.count - 1 {
+                            DataRowSeparator()
+                        }
                     }
                 }
                 if authors.count > Self.displayLimit {
-                    Text("另有 \(NumberFormat.grouped(authors.count - Self.displayLimit)) 位贡献者未展示")
-                        .monospacedDigit()
-                        .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity, alignment: .center)
+                    DataDisclosureButton(expanded: expanded,
+                                         hiddenCount: authors.count - Self.displayLimit,
+                                         noun: "位贡献者") {
+                        expanded.toggle()
+                    }
                 }
+                DataFootnote(text: Self.truncationNote(authors: authors, shown: shown.count))
             }
         }
+    }
+
+    private var visibleRows: [AuthorStats] {
+        expanded ? authors : Array(authors.prefix(Self.displayLimit))
+    }
+
+    /// 副标题里的「展示 N / M」已经说了数量，这里补的是**折叠这件事本身**，
+    /// 展开之后必须翻成「已全部展示」，不能留一句过期的「另有 N 位」。
+    static func truncationNote(authors: [AuthorStats], shown: Int) -> String {
+        let total = authors.count
+        guard total > shown else {
+            return "共 \(NumberFormat.grouped(total)) 位贡献者，已全部展示。"
+        }
+        return "另有 \(NumberFormat.grouped(total - shown)) 位贡献者未展示。"
     }
 }
 
@@ -205,7 +240,7 @@ struct ContributorConcentrationSection: View {
                 + scope.windowSuffix,
             icon: .chartLine
         ) {
-            VStack(spacing: DataRowMetrics.rowGap) {
+            DataTableWell {
                 DataTableHeader(columns: DataColumns.shareBar)
                 DataShareBarRow(
                     label: "前 3 名合计",
@@ -213,6 +248,8 @@ struct ContributorConcentrationSection: View {
                     fraction: Double(topCommits) / Double(base),
                     tint: Theme.Chart.color(at: CodeGitCategoryColor.aggregateIndex)
                 )
+                // 每位作者一个稳定分类色：这是「需要区分类别」的那一半，
+                // 与「给数字涂蓝」不同 —— 颜色在这里替读者把同一作者的条与点连起来。
                 ForEach(top) { author in
                     DataShareBarRow(
                         label: ContributorAnalysis.displayName(author),

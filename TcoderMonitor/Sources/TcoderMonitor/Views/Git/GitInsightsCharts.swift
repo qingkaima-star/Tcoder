@@ -115,7 +115,7 @@ struct GitActivityHeatmap: View {
                 ForEach(0..<24, id: \.self) { hour in
                     Text([0, 6, 12, 18].contains(hour) ? "\(hour)" : "")
                         .font(CodeGitType.number(Theme.Typo.microLabel))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -152,9 +152,12 @@ struct GitCommitRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: DataRowMetrics.cellGap) {
+            // SHA 是一行**标识符文本**，不是按钮：它没有动作、不导航，`.textSelection`
+            // 只是让人能复制。以前给它涂 accent 蓝，于是表里每一行都像可点，
+            // 而真正可点的行（巨大文件榜）反而没有蓝。标识符一律等宽 + `.secondary`。
             Text(String(commit.sha.prefix(7)))
                 .font(CodeGitType.path)
-                .foregroundStyle(Theme.Semantic.accent.textColor)
+                .foregroundStyle(.secondary)
                 .tableCell(DataColumns.column(columns, 0))
                 .textSelection(.enabled)
 
@@ -166,7 +169,7 @@ struct GitCommitRow: View {
                     + "\(LogRecency.describe(commit.date)) · "
                     + "\(DateFormat.full.string(from: commit.date))")
                     .monospacedDigit()
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -219,7 +222,7 @@ struct GitNestedCandidateRow: View {
                     }
                     Text(candidate.path)
                         .font(CodeGitType.path)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .textSelection(.enabled)
@@ -242,7 +245,7 @@ struct GitNestedCandidateRow: View {
 
             Text(candidate.lastCommitAt.map { LogRecency.describe($0) } ?? "无提交")
                 .monospacedDigit()
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
                 .tableCell(DataColumns.column(columns, 3))
         }
         .dataTableRow()

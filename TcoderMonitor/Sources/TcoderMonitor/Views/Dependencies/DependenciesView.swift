@@ -17,11 +17,13 @@ struct DependenciesView: View {
 
     var body: some View {
         DataPageScaffold {
-            NetworkOptionsCard(
-                allowNetwork: Bindable(state).allowNetworkLookups,
-                canRescan: state.selectedProject != nil && !state.isScanning,
-                rescan: { state.scanSelected() }
-            )
+            GroupStack {
+                NetworkOptionsCard(
+                    allowNetwork: Bindable(state).allowNetworkLookups,
+                    canRescan: state.selectedProject != nil && !state.isScanning,
+                    rescan: { state.scanSelected() }
+                )
+            }
             if let deps = report?.dependencies {
                 if deps.ecosystems.isEmpty {
                     EmptyStateView(
@@ -31,8 +33,10 @@ struct DependenciesView: View {
                             + "如果依赖声明在自定义脚本里，这一页为空是真实结果。"
                     )
                 } else {
-                    DependencySummaryGrid(deps: deps)
-                    DependencyOverviewSection(deps: deps)
+                    GroupStack {
+                        DependencyOverviewSection(deps: deps)
+                        DependencySummaryGrid(deps: deps)
+                    }
                     ForEach(deps.ecosystems) { eco in
                         DependencyEcosystemSection(
                             eco: eco,
@@ -40,7 +44,9 @@ struct DependenciesView: View {
                             toggle: { toggle(eco.id) }
                         )
                     }
-                    DependencyAdvisoriesSection(deps: deps)
+                    GroupStack {
+                        DependencyAdvisoriesSection(deps: deps)
+                    }
                 }
             } else {
                 EmptyStateView(
@@ -64,48 +70,56 @@ struct DependenciesView: View {
 
 // MARK: - 指标条
 
+/// 主角 = **依赖总数**，其余三条走无面读数带。
+///
+/// 为什么主角不是「漏洞数」：离线未核对时 `vulnerableCount` 恒为 0，而 56pt 的一个 0
+/// 会被读成「安全」—— 那正是本页最不该出现的误读（`emptyCaption` 那句
+/// 「0 条命中只是没有查，不是没有病」就是为了堵它）。把重音给**不含歧义的测得总量**，
+/// 漏洞数留在带里、由 `verdict.role` 说话，`mayClaimSafe` 为假时它旁边就是「未核对」。
+///
+/// 旧形态是 4 块各涂 accent / neutral / warning|success / verdict色 的灰盒：
+/// 前两个是给数据上色（契约 5 禁止），后两个是状态（保留，改走 `role:`）。
+/// 「依赖总数」那句不含传递依赖的口径说明**跟着升到主角的 note 槽**，一个字没丢。
 struct DependencySummaryGrid: View {
     let deps: DependencyReport
 
-    private static let columns = [GridItem(.adaptive(minimum: Theme.Layout.tileMinWidth),
-                                           spacing: Theme.Spacing.gutter)]
-
     var body: some View {
         let verdict = DependencySafetyVerdict(deps)
-        LazyVGrid(columns: Self.columns, spacing: Theme.Spacing.gutter) {
-            MetricTile(
-                label: "依赖总数",
-                value: NumberFormat.grouped(deps.totalDependencies),
-                icon: .package,
-                unit: "项",
-                caption: "清单直接声明，不含锁文件解析出的传递依赖 · "
-                    + "\(NumberFormat.grouped(deps.ecosystems.count)) 个生态",
-                tint: Theme.Semantic.accent.textColor
-            )
-            MetricTile(
-                label: "运行时 / 开发",
-                value: "\(NumberFormat.grouped(deps.productionCount)) / \(NumberFormat.grouped(deps.devCount))",
-                caption: "开发依赖不随产物发布",
-                tint: Theme.Semantic.neutral.textColor
-            )
-            MetricTile(
-                label: "版本过旧",
-                value: deps.outdatedCount > 0 || deps.totalDependencies > 0
-                    ? NumberFormat.grouped(deps.outdatedCount) : nil,
-                symbol: CodeGitSymbol.outdated,
-                unit: "项",
-                caption: Self.outdatedCaption(deps),
-                tint: deps.outdatedCount > 0
-                    ? Theme.Semantic.warning.textColor : Theme.Semantic.success.textColor
-            )
-            MetricTile(
-                label: "漏洞数",
-                value: NumberFormat.grouped(deps.vulnerableCount),
-                icon: .vulnerable,
-                unit: "条",
-                caption: verdict.summaryCaption,
-                tint: verdict.role.textColor
-            )
+        GlassSection("依赖规模", subtitle: "清单直接声明数 · 不含锁文件里的传递依赖", icon: .package) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                DataHeroReadout(value: NumberFormat.grouped(deps.totalDependencies),
+                                unit: "项",
+                                note: "\(NumberFormat.grouped(deps.ecosystems.count)) 个生态的清单直接声明，"
+                                    + "不含锁文件解析出的传递依赖")
+
+                ReadoutStrip {
+                    MetricTile(
+                        label: "运行时 / 开发",
+                        value: "\(NumberFormat.grouped(deps.productionCount)) / \(NumberFormat.grouped(deps.devCount))",
+                        caption: "开发依赖不随产物发布"
+                    )
+                    DataBandSeparator()
+                    MetricTile(
+                        label: "版本过旧",
+                        value: deps.outdatedCount > 0 || deps.totalDependencies > 0
+                            ? NumberFormat.grouped(deps.outdatedCount) : nil,
+                        role: deps.outdatedCount > 0
+                            ? Theme.Semantic.warning : Theme.Semantic.success,
+                        symbol: CodeGitSymbol.outdated,
+                        unit: "项",
+                        caption: Self.outdatedCaption(deps)
+                    )
+                    DataBandSeparator()
+                    MetricTile(
+                        label: "漏洞数",
+                        value: NumberFormat.grouped(deps.vulnerableCount),
+                        role: verdict.role,
+                        icon: .vulnerable,
+                        unit: "条",
+                        caption: verdict.summaryCaption
+                    )
+                }
+            }
         }
     }
 
@@ -134,15 +148,18 @@ struct DependencyOverviewSection: View {
             icon: .clean,
             trailing: AnyView(SafetyVerdictBadge(verdict: verdict))
         ) {
-            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                DataReadoutBar {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                DataReadoutBand {
                     DataReadout(label: "生态", value: NumberFormat.grouped(deps.ecosystems.count),
                                 caption: "个清单来源")
+                    DataBandSeparator()
                     DataReadout(label: "依赖", value: NumberFormat.grouped(deps.totalDependencies),
                                 caption: "项直接声明")
+                    DataBandSeparator()
                     DataReadout(label: "过旧", value: NumberFormat.grouped(deps.outdatedCount),
                                 caption: "项",
                                 role: deps.outdatedCount > 0 ? Theme.Semantic.warning : nil)
+                    DataBandSeparator()
                     DataReadout(label: "漏洞", value: NumberFormat.grouped(deps.vulnerableCount),
                                 caption: verdict.mayClaimSafe ? "条已核对" : "条（未核对）",
                                 role: verdict.role)
@@ -186,7 +203,7 @@ struct DependencyEcosystemSection: View {
     let isExpanded: Bool
     let toggle: () -> Void
 
-    static let rowLimit = 40
+    static let rowLimit = 12
 
     var body: some View {
         GlassSection(
@@ -235,11 +252,9 @@ struct DependencyTable: View {
         let visible = isExpanded ? sorted : Array(sorted.prefix(DependencyEcosystemSection.rowLimit))
 
         if sorted.isEmpty {
-            Text("该清单没有解析出可枚举的依赖项。")
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
+            DataCaption(text: "该清单没有解析出可枚举的依赖项。")
         } else {
-            VStack(spacing: DataRowMetrics.rowGap) {
+            DataTableWell {
                 DataTableHeader(columns: DataColumns.dependencies)
                 ForEach(visible) { record in
                     DependencyRow(record: record)
@@ -249,10 +264,12 @@ struct DependencyTable: View {
                 }
             }
             if sorted.count > DependencyEcosystemSection.rowLimit {
+                // 展开/收起是**控件**，所以 accent 在它身上合法（契约 5 的交互语义）。
                 GlassButton(isExpanded ? "收起"
                             : "展开其余 \(NumberFormat.grouped(sorted.count - DependencyEcosystemSection.rowLimit)) 项",
                             style: .bordered, action: toggle)
             }
+            DataFootnote(text: Self.countNote(total: sorted.count, shown: visible.count))
         }
     }
 
@@ -261,6 +278,15 @@ struct DependencyTable: View {
             if $0.name != $1.name { return $0.name < $1.name }
             return $0.version < $1.version
         }
+    }
+
+    /// 折叠必须被计数交代：只显示 12 行而不说「共 N 项」，用户会把 12 当成全部。
+    static func countNote(total: Int, shown: Int) -> String {
+        guard total > shown else {
+            return "共 \(NumberFormat.grouped(total)) 项，已全部展示。"
+        }
+        return "当前展示 \(NumberFormat.grouped(shown)) / \(NumberFormat.grouped(total)) 项 · "
+            + "按名称排序。"
     }
 }
 

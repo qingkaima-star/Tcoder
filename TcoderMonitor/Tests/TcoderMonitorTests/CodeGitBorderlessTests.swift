@@ -155,7 +155,8 @@ final class CodeGitBorderlessTests: XCTestCase {
                 if text.contains("struct "), let name = declaredStructName(in: text) {
                     current = name
                 }
-                if text.contains("Theme.Semantic.accent"), !isInteractive(current) {
+                if text.contains("Theme.Semantic.accent"), !isInteractive(current),
+                    !isBadgeRoleArgument(text) {
                     found.append("\(file.path):\(offset + 1): 在 \(current) 里用了 accent（\(text.prefix(52))）")
                 }
             }
@@ -171,6 +172,14 @@ final class CodeGitBorderlessTests: XCTestCase {
 
     static func isInteractive(_ structName: String) -> Bool {
         structName.hasSuffix("Button") || structName.hasSuffix("Action")
+    }
+
+    /// 徽标是「色 + 文字 + 图标」三通道的**状态**载体，`role:` 传 accent 表达的是
+    /// 「选中 / 当前对象」（契约 5 明确保留的那侧），与给数字涂蓝不是一回事。
+    /// 所以只放行这一个形状：同一行若改成 `.foregroundStyle(Theme.Semantic.accent…)`
+    /// 仍然算违规 —— 放宽的是「徽标 role 形参」，不是「这行允许出现蓝」。
+    static func isBadgeRoleArgument(_ line: String) -> Bool {
+        line.contains("SemanticBadge(") && line.contains("role: Theme.Semantic.accent")
     }
 
     /// 井的用法只许在基座里（`DataTableWell` 是 `.contentInset` 在本流唯一合法出口）。
@@ -490,6 +499,18 @@ final class CodeGitBorderlessTests: XCTestCase {
                        "块名解析失灵，上面两条 accent 判据会一起失真")
         XCTAssertTrue(Self.isInteractive("CodeOpenFileButton"))
         XCTAssertFalse(Self.isInteractive("GitCommitRow"))
+
+        // ⑤b 徽标 role: accent 是「选中态」，放行的是这个形状，不是整行
+        let badgeRow = "struct GitNestedCandidateRow: View {\n"
+            + "    SemanticBadge(\"当前分析对象\", role: Theme.Semantic.accent, icon: .info)\n}"
+        XCTAssertTrue(Self.accentOutsideInteractiveViews(in: [("Git/A.swift", badgeRow)]).isEmpty,
+                      "徽标的 role: accent 被判违规 —— 它标的是选中态，属契约 5 保留侧")
+        let textRow = "struct GitNestedCandidateRow: View {\n"
+            + "    Text(x).foregroundStyle(Theme.Semantic.accent.textColor)\n}"
+        XCTAssertEqual(Self.accentOutsideInteractiveViews(in: [("Git/A.swift", textRow)]).count, 1,
+                      "同一非交互视图里的文本涂蓝没抓到 —— 说明放行做宽了，整行都放过了")
+        XCTAssertFalse(Self.isBadgeRoleArgument("Text(x).role(Theme.Semantic.accent)"),
+                       "没有 SemanticBadge 也算徽标，会放过任意一行")
 
         // ⑥ 面
         XCTAssertEqual(Self.wellsOutsideKit(in: [("Git/A.swift",

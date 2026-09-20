@@ -51,14 +51,10 @@ enum ContributorAnalysis {
         return .low
     }
 
-    /// 榜首之外不额外给" crown "，排名数字已经承载了顺序信息；这里只负责取前三的色阶语义。
-    static func rankRole(_ rank: Int) -> Theme.SemanticRole {
-        switch rank {
-        case 1: return Theme.Semantic.accent
-        case 2...3: return Theme.Semantic.healthy
-        default: return Theme.Semantic.neutral
-        }
-    }
+    /// 排名不再按名次发色。旧写法是榜首 accent 蓝、2~3 名 teal、其余 neutral ——
+    /// 那正是本轮根因 ④「蓝色同时是数据色和交互色」在贡献者页的形态：名次这个**顺序信息**
+    /// 已经由数字本身与排序表达了，再涂一层蓝只是让 1 号看起来像可点元素。
+    /// 现在一律纯墨（`rank` 是本页这一列的重音），颜色留给真正的语义（Bus Factor 结论、增删）。
 
     /// 目录热点：字典无序，按次数降序、目录名升序取前 3。
     static func topDirectories(_ author: AuthorStats, limit: Int = 3) -> [(String, Int)] {
@@ -101,14 +97,14 @@ struct ContributorRow: View {
                     HStack(spacing: Theme.Spacing.xs) {
                         Text("#\(NumberFormat.grouped(rank))")
                             .font(CodeGitType.number(Theme.Typo.microLabel))
-                            .foregroundStyle(ContributorAnalysis.rankRole(rank).textColor)
+                            .foregroundStyle(Theme.Palette.Surface.ink)
                         Text(ContributorAnalysis.displayName(author))
                             .font(CodeGitType.prose(Theme.Typo.body).weight(.semibold))
                             .lineLimit(1)
                     }
                     Text(ContributorAnalysis.email(author))
                         .font(CodeGitType.path)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     ContributorDirectoryChips(author: author)
@@ -124,7 +120,7 @@ struct ContributorRow: View {
                             + "触达 \(NumberFormat.grouped(author.filesTouched)) 个文件")
                     Text(author.lastActiveDescription)
                         .monospacedDigit()
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -189,7 +185,7 @@ struct ContributorDirectoryChips: View {
         if directories.isEmpty {
             Text("未记录目录")
                 .monospacedDigit()
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
         } else {
             HStack(spacing: Theme.Spacing.xs) {
                 ForEach(Array(directories.enumerated()), id: \.offset) { _, entry in
@@ -224,7 +220,7 @@ struct ContributorHourRow: View {
         HStack(spacing: Theme.Spacing.xs) {
             Text("时段")
                 .monospacedDigit()
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
                 .frame(width: Self.labelWidth, alignment: .leading)
             HStack(alignment: .bottom, spacing: Theme.Stroke.emphasis) {
                 ForEach(0..<24, id: \.self) { hour in

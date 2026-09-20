@@ -1,11 +1,18 @@
 import SwiftUI
 import Charts
 
-/// OWNER: WS-L —— Git 洞察页。
+/// OWNER: WS-L / WS-P —— Git 洞察页。
 ///
-/// 2026-09-19 重样（WS-L）：版面、字号、图标、卡片全部改走 `Design/` 令牌与
-/// `Views/CodeGit/` 数据表基座；并修掉一条诚实性缺陷——页头「总提交数」是含合并的仓库真值，
-/// 下面作者表求和是不含合并的窗口值，两者从来不同却从没解释过（见 `GitHistoryScope`）。
+/// 2026-09-20 无界化（WS-P，本轮）。这一页是五页里最挤的：8 个顶层分区平铺、
+/// 5 枚各自一色的 tile、2 层灰盒、12 处 `.tertiary`。改动：
+/// - **主角 = 总提交数**（纯数字 56pt 纯墨），它的 `note` 槽就是那句 merge 口径
+///   `scope.totalTileCaption`。**口径句子一字未改，只是从 tile 的说明位升到了主角旁边**
+///   ——「共 62 次提交」与「作者统计基于 48 次非合并提交」必须在同一屏上并排，
+///   用户才不需要自己去对账（这是 WS-L 背的那条功能性诚实修正，不是装饰）。
+/// - 5 枚 tile → 一条 `ReadoutStrip`（列间 `DataBandSeparator`），**全部显式 `tint:` 删除**，
+///   回到纯墨。它们的 `caption`（含 `authorBasisCaption` 的四种口径分支）全部原文保留。
+/// - 8 个分区收成 3 个段落（段落 40 / 分组 32 / 组内 16）。
+/// - 所有 `DataReadoutBar` 出井、所有表格进井、`.tertiary` 归零。
 ///
 /// 数据只来自 `report?.git`；「没分析过」和「分析过但没有提交」是两种空态，都不渲染成 0。
 struct GitInsightsView: View {
@@ -14,14 +21,20 @@ struct GitInsightsView: View {
     var body: some View {
         DataPageScaffold {
             if let git = report?.git {
-                GitRepositorySourceSection(git: git, selectedPath: report?.project.path ?? "")
-                GitCommitScopeSection(git: git)
-                GitInsightsMetricGrid(git: git)
-                GitCommitTrendSection(git: git)
-                GitActivitySection(git: git)
-                GitRepositoryInfoSection(git: git)
-                GitNestedCandidatesSection(git: git)
-                GitRecentCommitsSection(git: git)
+                GroupStack {
+                    GitRepositorySourceSection(git: git, selectedPath: report?.project.path ?? "")
+                    GitCommitScopeSection(git: git)
+                    GitInsightsMetricGrid(git: git)
+                }
+                GroupStack {
+                    GitCommitTrendSection(git: git)
+                    GitActivitySection(git: git)
+                }
+                GroupStack {
+                    GitRepositoryInfoSection(git: git)
+                    GitNestedCandidatesSection(git: git)
+                    GitRecentCommitsSection(git: git)
+                }
             } else {
                 GitInsightsEmptyState.missingAnalysis
             }
@@ -31,61 +44,61 @@ struct GitInsightsView: View {
 
 // MARK: - 指标条
 
-/// 四枚指标 tile。列数交给自适应断点（WS-H §3.2）：写死 4 列在窄窗口里会把数字挤成两行。
+/// 主角读数 + 四条辅助读数。**无面**：旧形态是 `LazyVGrid` 里五块 `.contentInset`
+/// 灰盒，每块自带一份投影，且五枚各涂一色（accent / healthy / neutral / success / warning），
+/// 于是「提交数」和「活跃作者」看起来像两个不同性质的结论 —— 它们都只是测得值。
+///
+/// 列数交给 `ReadoutStrip` 的横向排布；窄窗口下 tile 会各自换行而不是挤成两行数字。
 struct GitInsightsMetricGrid: View {
     let git: GitInsights
 
-    private static let columns = [GridItem(.adaptive(minimum: Theme.Layout.tileMinWidth),
-                                           spacing: Theme.Spacing.gutter)]
-
     var body: some View {
         let scope = git.commitScope
-        LazyVGrid(columns: Self.columns, spacing: Theme.Spacing.gutter) {
-            MetricTile(
-                label: "总提交数",
-                value: NumberFormat.grouped(git.totalCommits),
-                icon: .git,
-                unit: "次",
-                caption: scope.totalTileCaption,
-                tint: Theme.Semantic.accent.textColor
-            )
-            MetricTile(
-                label: "作者统计基准",
-                value: scope.nonMergeCommitsAnalysed > 0
-                    ? NumberFormat.grouped(scope.authorBasis)
-                    : nil,
-                symbol: CodeGitSymbol.marker,
-                unit: "次",
-                caption: Self.authorBasisCaption(scope),
-                tint: Theme.Semantic.healthy.textColor
-            )
-            MetricTile(
-                label: scope.isWindowTruncated ? "窗口跨度" : "项目年龄",
-                value: git.projectAgeDays > 0 ? NumberFormat.grouped(git.projectAgeDays) : nil,
-                symbol: CodeGitSymbol.calendar,
-                unit: "天",
-                caption: Self.ageCaption(git, scope: scope),
-                tint: Theme.Semantic.neutral.textColor
-            )
-            MetricTile(
-                label: "最近修改",
-                value: git.lastCommitAt.map { LogRecency.describe($0) },
-                symbol: CodeGitSymbol.recency,
-                caption: Self.latestCommitCaption(git),
-                tint: Theme.Semantic.success.textColor
-            )
-            MetricTile(
-                label: scope.isWindowTruncated ? "窗口内作者" : "活跃作者",
-                value: NumberFormat.grouped(git.activeAuthorCount),
-                icon: .people,
-                unit: "人",
-                caption: scope.authorTileCaption(authorCount: git.activeAuthorCount),
-                tint: Theme.Semantic.warning.textColor
-            )
+        GlassSection("提交规模", subtitle: "以下均为测得值，口径见上方口径条", icon: .git) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                DataHeroReadout(value: NumberFormat.grouped(git.totalCommits),
+                                unit: "次",
+                                note: scope.totalTileCaption)
+
+                ReadoutStrip {
+                    MetricTile(
+                        label: "作者统计基准",
+                        value: scope.nonMergeCommitsAnalysed > 0
+                            ? NumberFormat.grouped(scope.authorBasis)
+                            : nil,
+                        symbol: CodeGitSymbol.marker,
+                        unit: "次",
+                        caption: Self.authorBasisCaption(scope)
+                    )
+                    DataBandSeparator()
+                    MetricTile(
+                        label: scope.isWindowTruncated ? "窗口跨度" : "项目年龄",
+                        value: git.projectAgeDays > 0 ? NumberFormat.grouped(git.projectAgeDays) : nil,
+                        symbol: CodeGitSymbol.calendar,
+                        unit: "天",
+                        caption: Self.ageCaption(git, scope: scope)
+                    )
+                    DataBandSeparator()
+                    MetricTile(
+                        label: "最近修改",
+                        value: git.lastCommitAt.map { LogRecency.describe($0) },
+                        symbol: CodeGitSymbol.recency,
+                        caption: Self.latestCommitCaption(git)
+                    )
+                    DataBandSeparator()
+                    MetricTile(
+                        label: scope.isWindowTruncated ? "窗口内作者" : "活跃作者",
+                        value: NumberFormat.grouped(git.activeAuthorCount),
+                        icon: .people,
+                        unit: "人",
+                        caption: scope.authorTileCaption(authorCount: git.activeAuthorCount)
+                    )
+                }
+            }
         }
     }
 
-    /// 第二个 tile 专门承载「48」这个数字：它必须和第一个 tile 的「62」并排出现，
+    /// 第二个 tile 专门承载「48」这个数字：它必须和主角的「62」并排出现，
     /// 用户才能自己在屏幕上把账对上，而不是去翻下面的作者表求和。
     static func authorBasisCaption(_ scope: GitHistoryScope) -> String {
         switch scope.basis {
