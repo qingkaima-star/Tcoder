@@ -8,7 +8,9 @@ struct LogsErrorClustersCard: View {
     var body: some View {
         GlassSection("高频错误", subtitle: subtitle, icon: .logs) {
             if let clusters, !clusters.isEmpty {
-                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                // 每条签名是「签名 + 原文 + 时间 + 可展开」的多行块，
+                // 块与块之间必须是组间档（16），不能再和块内部的 4pt 挤在同一个数上。
+                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                     ForEach(Array(clusters.enumerated()), id: \.element.id) { index, cluster in
                         LogErrorClusterRow(cluster: cluster)
                         if index < clusters.count - 1 { Divider() }
@@ -56,9 +58,11 @@ struct LogErrorClusterRow: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
                 SeverityBadge(severity: cluster.severity)
+                // 签名是这一行的主角：原来靠 accent 蓝把自己拎出来，而蓝在这套体系里
+                // 只代表交互 / 选中。改走 11pt 等档（`monoLabel`，专为代码标识符设的档），
+                // **层级靠字号与等宽字族分，不靠色相分**。
                 Text(cluster.signature)
-                    .font(Theme.Typo.monoSmall.font)
-                    .foregroundStyle(Theme.Semantic.accent.textColor)
+                    .font(Theme.Typo.monoLabel.font)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .flexCell()
@@ -130,7 +134,7 @@ struct LogErrorClusterRow: View {
                 detailTitle("堆栈顶帧")
                 ForEach(Array(cluster.stackTopFrames.prefix(6).enumerated()), id: \.offset) { _, frame in
                     HStack(alignment: .top, spacing: Theme.Spacing.xxs) {
-                        ThemedIcon(.disclose, role: .badge).foregroundStyle(Theme.Semantic.accent.textColor)
+                        ThemedIcon(.disclose, role: .badge).foregroundStyle(.secondary)
                         Text(frame)
                             .font(Theme.Typo.monoSmall.font)
                             .foregroundStyle(.secondary)

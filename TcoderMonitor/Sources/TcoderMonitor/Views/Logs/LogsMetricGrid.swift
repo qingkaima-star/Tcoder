@@ -34,28 +34,37 @@ enum LogReading {
     }
 }
 
+/// 错误概览：一行四枚 34pt 纯墨读数（今日错误 / 异常 / 崩溃 / 警告）+ 归一口径脚注。
+///
+/// **本页的主角**（风格契约 4）。四格横向排成 `ReadoutStrip`、列间发丝线，
+/// 替掉原来 `LazyVGrid(adaptive 220)` 的四块灰盒 + 四份投影。
+///
+/// 四格一律纯墨，**不再按危险/严重涂色**。理由不是审美：旧写法把 `role: .danger`
+/// 写死在调用点上，**零错误的项目那格照样是红的** —— 一个永远不关灯的颜色
+/// 不携带任何信息，只会把整页读成一片报警（与 `PerformanceProcessTableCard.cpuTint`
+/// 的注释同源：「给每个正常进程挂上颜色会把整张表读成一片警告」）。
+/// 这一页的**判断**由 `trailing` 那枚 `RiskBadge(overallRisk)` 承担，
+/// 它是色 + 文字 + 图标三通道；等级本身在高频错误行的 `SeverityBadge` 与
+/// 趋势图的堆叠色上，那些地方颜色**随数据变**，才是语义。
 struct LogsMetricGrid: View {
     let logs: LogSummary?
     let code: CodeMetrics?
 
-    private static let columns = [GridItem(.adaptive(minimum: Theme.Layout.tileMinWidth),
-                                           spacing: Theme.Spacing.sm)]
-
     var body: some View {
         GlassSection("错误概览", subtitle: subtitle, icon: .riskSevere, trailing: riskBadge) {
-            LazyVGrid(columns: Self.columns, spacing: Theme.Spacing.sm) {
+            ReadoutStrip {
                 tile("今日错误", count: LogReading.count(logs) { $0.todayErrorCount },
-                     caption: todayCaption,
-                     role: Theme.Semantic.danger, icon: .riskWarning)
+                     caption: todayCaption, icon: .riskWarning)
+                Divider()
                 tile("异常", count: LogReading.count(logs) { $0.exceptionCount },
-                     caption: LogReading.caption(logs) { _ in "窗口内累计" },
-                     role: Theme.Semantic.danger, icon: .riskSevere)
+                     caption: LogReading.caption(logs) { _ in "窗口内累计" }, icon: .riskSevere)
+                Divider()
                 tile("崩溃", count: LogReading.count(logs) { $0.crashCount },
                      caption: LogReading.caption(logs) { "其中 FATAL \(NumberFormat.grouped($0.fatalCount)) 条" },
-                     role: Theme.Semantic.critical, icon: .crash)
+                     icon: .crash)
+                Divider()
                 tile("警告", count: LogReading.count(logs) { $0.warningCount },
-                     caption: warningCaption,
-                     role: Theme.Semantic.warning, icon: .info)
+                     caption: warningCaption, icon: .info)
             }
             if let perKilo = LogReading.perKiloCode(logs, code: code) {
                 NoteLine("今日错误按代码规模归一为每千行 \(Live.fixed(perKilo, digits: 2)) 次；"
@@ -89,12 +98,12 @@ struct LogsMetricGrid: View {
         return AnyView(RiskBadge(risk: logs.overallRisk))
     }
 
+    /// `tint` 不传 = `MetricTile` 的默认值 `Surface.ink`（纯墨）。
     private func tile(_ label: String, count: Int?, caption: String,
-                      role: Theme.SemanticRole, icon: IconName) -> some View {
+                      icon: IconName) -> some View {
         MetricTile(label: label,
                    value: count == nil ? nil : NumberFormat.grouped(count ?? 0),
                    caption: caption,
-                   tint: role.textColor,
                    systemImage: icon.rawValue)
     }
 

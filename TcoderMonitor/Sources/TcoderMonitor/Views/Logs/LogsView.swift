@@ -33,54 +33,63 @@ struct LogsView: View {
         .onChange(of: state.logWindowDays) { _, _ in rescanForNewWindow() }
     }
 
-    // MARK: - 页头与工具条（控件层：本页唯一一处真玻璃落点）
+    // MARK: - 页内小标题与工具条（页头归 WS-O；控件层是本页唯一一处真玻璃落点）
 
     private func header(window: Binding<Int>) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+        // 原来整块 header 挂着 `.padding(md)` + `.surface(layer: .content)` ——
+        // 内容层现在什么都不画，那是一次空操作，而它为已经不存在的盒子留了 16pt 内边距，
+        // 把标题与正文之间的组间距吃掉了一截。一并去掉。
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
                 ThemedIcon(.logs, role: .navigation)
-                    .foregroundStyle(Theme.Semantic.accent.textColor)
-                Text("错误日志分析").font(Theme.Typo.pageTitle.font)
+                    .foregroundStyle(.secondary)
+                Text("错误日志分析")
+                    .typed(Theme.Typo.pageTitle)
                 if report?.project.isDemo == true {
+                    // 「示例」是**状态**而不是数据（全页唯一一处 `info`，语义留色侧）。
                     SemanticBadge("示例", role: Theme.Semantic.info)
                 }
-                Spacer(minLength: Theme.Spacing.sm)
-                if state.isScanning {
-                    HStack(spacing: Theme.Spacing.xxs) {
-                        ProgressView().controlSize(.small)
-                        Text(state.phase.label)
-                            .font(Theme.Typo.label.font)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                controls
+                Spacer(minLength: Theme.Spacing.md)
+                actions(window: window)
             }
-
-            Text(subtitle).font(Theme.Typo.label.font).foregroundStyle(.secondary)
-
-            HStack(spacing: Theme.Spacing.sm) {
-                Text("时间窗口").font(Theme.Typo.label.font).foregroundStyle(.secondary)
-                Picker("时间窗口", selection: window) {
-                    ForEach(Self.windowChoices, id: \.self) { day in
-                        Text("最近 \(day) 天").tag(day)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-                .help("切换后自动重新分析（示例项目与扫描进行中除外）")
-                if let note = pendingRescanNote {
-                    NoteLine(note, role: Theme.Semantic.warning, icon: .riskWarning)
-                }
-                Spacer(minLength: 0)
+            Text(subtitle)
+                .typed(Theme.Typo.label)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let note = pendingRescanNote {
+                NoteLine(note, role: Theme.Semantic.warning, icon: .riskWarning)
             }
-
-            if !attachedItems.isEmpty { attachedFilesRow }
+            if !attachedItems.isEmpty { attachedFilesLine }
         }
-        .padding(Theme.Spacing.md)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .surface(layer: .content, shape: .rounded(Theme.Radius.card))
+    }
+
+    /// 时间窗口与三个动作都属**控件**，走 `.chrome` 层（`GlassToolbar` 自己就是控件层）。
+    /// 扫描进度是状态，不是控件，所以它在工具条旁边而不里面。
+    private func actions(window: Binding<Int>) -> some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            if state.isScanning {
+                HStack(spacing: Theme.Spacing.xxs) {
+                    ProgressView().controlSize(.small)
+                    Text(state.phase.label)
+                        .font(Theme.Typo.label.font)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Text("时间窗口")
+                .typed(Theme.Typo.label)
+                .foregroundStyle(.secondary)
+            Picker("时间窗口", selection: window) {
+                ForEach(Self.windowChoices, id: \.self) { day in
+                    Text("最近 \(day) 天").tag(day)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .help("切换后自动重新分析（示例项目与扫描进行中除外）")
+            controls
+        }
     }
 
     private var controls: some View {
@@ -124,15 +133,30 @@ struct LogsView: View {
 
     // MARK: - 附加文件
 
-    private var attachedFilesRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: Theme.Spacing.xs) {
-                Text("已附加 \(NumberFormat.grouped(attachedItems.count)) 个文件")
-                    .font(Theme.Typo.microLabel.font)
-                    .foregroundStyle(.tertiary)
-                ForEach(attachedItems) { item in
-                    AttachedLogFileChip(item: item)
+    /// 已附加的日志文件。
+    ///
+    /// 原来每条是一个 `.contentInset` 胶囊，横向排在一根滚动条里 —— 井只许给
+    /// 表格 / 日志列表 / 代码块（风格契约 3），一枚展示用的文件名不是井，
+    /// 而这排灰盒正是「界面发脏」的一分子。改成「计数小标题 + 逐行文件名（带体积）」，
+    /// `.help` 里的完整路径与体积一个字都没少；文件名抬到 11pt 等宽，
+    /// 因为它现在是这一行唯一的主角，不再靠灰底把自己从地面上拎出来。
+    private var attachedFilesLine: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+            Text("已附加 \(NumberFormat.grouped(attachedItems.count)) 个文件")
+                .typed(Theme.Typo.groupLabel)
+                .foregroundStyle(.secondary)
+            ForEach(attachedItems) { item in
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
+                    Text(item.url.lastPathComponent)
+                        .font(Theme.Typo.monoLabel.font)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text(item.sizeBytes.map { Live.bytes($0) } ?? Live.missing)
+                        .typed(Theme.Typo.microLabel)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
                 }
+                .help(item.url.path)
             }
         }
     }
@@ -199,32 +223,12 @@ struct LogsView: View {
 }
 
 /// 附加文件条目：列表在附加时已按路径去重，所以用路径当稳定 id。
+///
+/// 它原来还配一个 `.contentInset` 胶囊视图 `AttachedLogFileChip`，本轮随井一起退场
+/// （见 `attachedFilesLine` 的说明）；这层数据本身仍在用，不能删。
 struct AttachedLogItem: Identifiable {
     let url: URL
     let sizeBytes: UInt64?
 
     var id: String { url.path }
-}
-
-/// 附加文件胶囊。尺寸与材质走内容层，不再生造 `background + strokeBorder`。
-struct AttachedLogFileChip: View {
-    let item: AttachedLogItem
-
-    var body: some View {
-        HStack(spacing: Theme.Spacing.xxs) {
-            ThemedIcon(.attach, role: .badge).foregroundStyle(Theme.Semantic.accent.textColor)
-            Text(item.url.lastPathComponent)
-                .font(Theme.Typo.monoSmall.font)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Text(item.sizeBytes.map { Live.bytes($0) } ?? Live.missing)
-                .font(Theme.Typo.microLabel.font)
-                .foregroundStyle(.tertiary)
-        }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, Theme.Spacing.chip)
-        .padding(.vertical, Theme.Spacing.xxs)
-        .surface(layer: .contentInset, shape: .capsule)
-        .help(item.url.path)
-    }
 }

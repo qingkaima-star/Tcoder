@@ -15,26 +15,37 @@ struct PerformanceView: View {
 
     @State private var sortKey: ProcessSortKey = .cpuCores
 
-    /// 曲线滚动窗口点数。`MachSystemMonitor` 按 1500 毫秒采样 → 90 点 ≈ 135 秒。
+    /// 曲线滚动窗口点数。**只给点数**——节拍与窗口秒数都由 `MachSystemMonitor`
+    /// 那份唯一真值派生（性能 spec §5.1：页面里再写一个 `1.5` 就是第二个真值来源，
+    /// 节拍一改，界面必然说谎）。90 点 × 1.5 秒 ≈ 135 秒。
     private static let chartPointLimit = 90
-    private static let sampleIntervalText = "1.5 秒"
-    private static var windowSeconds: TimeInterval { Double(chartPointLimit) * 1.5 }
 
     private var monitor: MachSystemMonitor { state.monitor }
     private var context: SampleContext { SampleContext.from(monitor) }
 
+    /// 节奏文案。**暂停时不许继续宣称"每 X 秒"**——那时屏幕上的数不再按那个节奏更新。
+    /// 读数本身仍是真的（末值有效），说谎的是"节奏"这两个字（性能 spec §5.1 第 4 条）。
+    private var cadenceText: String {
+        context.isPaused ? "采样已暂停" : "每 \(monitor.sampleIntervalText)"
+    }
+
     var body: some View {
-        // 页面骨架（左右 16 / 顶 24 / 卡间 16 / 超宽屏限宽居中）来自基座，不再各页手搓
+        // 版框走基座那一份页骨架（组间 32 / 页边距 24 / 顶部段落 40，全仓只许一份）。
         Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthDense) {
-            header
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                header
+                sampleStats
+            }
             statusBanners
             PerformanceSystemTiles(context: context)
             PerformanceLiveCharts(points: chartWindow,
                                   context: context,
-                                  windowSeconds: Self.windowSeconds)
+                                  windowSeconds: monitor.windowSeconds(pointCount: Self.chartPointLimit),
+                                  cadenceText: cadenceText)
             PerformanceProcessGroupsCard(groups: monitor.trackedGroups,
                                          context: context,
                                          isTruncated: monitor.processMetricsTruncated,
+                                         intervalText: monitor.sampleIntervalText,
                                          onRemove: { monitor.removeGroup(id: $0) })
             PerformanceProcessTableCard(rows: rankedProcesses,
                                         context: context,
@@ -59,34 +70,43 @@ struct PerformanceView: View {
         }
     }
 
-    // MARK: - 工具条
+    // MARK: - 页内小标题（页头归 WS-O：项目名 / 路径 / 分析时间在 `ProjectDetailView`）
 
+    /// 只标「这一页是什么 + 这一页的口径」，控件由本页自己摆。
+    /// 图标一律灰阶（结构去色，风格契约 5），口径句固定第二行 11pt `.secondary`。
     private var header: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
                 ThemedIcon(.performance, role: .navigation)
-                    .foregroundStyle(Theme.Semantic.accent.textColor)
-                Text("性能监控").font(Theme.Typo.pageTitle.font)
+                    .foregroundStyle(.secondary)
+                Text("性能监控")
+                    .typed(Theme.Typo.pageTitle)
                 if report?.project.isDemo == true {
+                    // 「示例」是**状态**而不是数据：全页唯一一处 `info`，
+                    // 标的是「这一屏数字是内置假数据」，属语义留色那一侧。
                     SemanticBadge("示例", role: Theme.Semantic.info)
                 }
-                Spacer(minLength: Theme.Spacing.sm)
-                sampleStats
+                Spacer(minLength: Theme.Spacing.md)
                 controls
             }
             Text("系统级实时读数只观测不干预。数值随采样刷新，取不到的一律显示 --，不会补成 0。")
-                .font(Theme.Typo.label.font)
+                .typed(Theme.Typo.label)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    /// 三页共用的「标签 + 数字」读数一律走基座 `Theme.Readout`，
-    /// 不再引 WS-K 冻结文件里的 `StatLine`（WS-I §3.5 点名的归属错位）。
+    /// 采样元信息：这一屏数据有多新。它不是读数，所以留在标题下方一行、
+    /// 11pt 次要墨，**不与页名抢水平线**（原来三枚 `Readout.Field` 与页名同排，
+    /// 是「不规整拥挤」的直接来源）。三态与口径文案一字未改。
     private var sampleStats: some View {
-        HStack(spacing: Theme.Spacing.md) {
-            Theme.Readout.Field("上次采样", DateFormat.sinceDescription(monitor.lastSampleAt))
-            Theme.Readout.Field("采样点", NumberFormat.grouped(monitor.history.count))
-            Theme.Readout.Field("间隔", Self.sampleIntervalText)
+        HStack(spacing: Theme.Spacing.xs) {
+            Text("上次采样 \(DateFormat.sinceDescription(monitor.lastSampleAt))"
+                 + " · 采样点 \(NumberFormat.grouped(monitor.history.count))"
+                 + " · 间隔 \(monitor.sampleIntervalText)")
+                .typed(Theme.Typo.label)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
         }
     }
 

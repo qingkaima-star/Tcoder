@@ -1,13 +1,27 @@
 import SwiftUI
 
-// MARK: - 实时数字与单元格观感（性能 / 日志 / 健康三页共用）
+// MARK: - 三页共用的「数字观感」（性能 / 日志 / 健康）
 //
 // 活动监视器的专业感来自两件极小的事：**列宽定死** 与 **数字等宽**。
 // 这两件事一旦各页自己写就会漂（WS-I §4 实测全仓 `.monospacedDigit()` 命中 0），
 // 所以数字取色、单元格对齐、占位符着色全部收在这一个文件里。
 //
+// 本文件**只放数字与单元格的观感**。它曾先后寄居过两份"看着像共用件、其实越界"的东西，
+// 都已删除，写在这里免得有人再放回来：
+//   1. `BorderlessPage`（自造页骨架）—— 总工 `48443d9` 把基座 `Theme.Page.Scaffold`
+//      换成 `pageMargin/group/section` 三档，并钉了「全仓只许一份页骨架」
+//      （`pageScaffoldDeclarations` 按 `Scaffold` / `BorderlessPage` 字样识别）。
+//      三页现全部走 `Theme.Page.Scaffold`。**再想加骨架：名字带这两个词就会被拦。**
+//   2. `PerfLogsPageHeader`（三页共用的页头）—— 「页头」这件事全仓只许一套画法，
+//      归 `Views/ProjectDetailView.swift` 与 `Views/Shell/**`（WS-O 名下）。
+//      页面目录里养一份页头 = 两套页头并存，正是用户说的「东一个系一个」。
+//      三页现在各自写**页内小标题**（页名 + 本页口径一句 + 本页控件），
+//      不碰项目名 / 路径 / 分析时间。需要基座提供通用页头件请报契约缺口给总工，
+//      由他加进 `Design/`，**不要在页面目录里养**。
+//
 // #34 起，**列头与列宽不再归本文件管**：全仓唯一一套列系统在
-// `Views/CodeGit/CodeGitTable.swift`（`DataGridColumn` / `DataTableHeader` / `.tableCell`），
+// `Design/DataTable.swift`（`DataColumn` / `DataTableHeader` / `.tableCell`，
+// 自 `Views/CodeGit/CodeGitTable.swift` 上提），
 // 原先这里的 `TableHeaderCell` 与那 14 个 `DataColumn` 列宽常量已随收敛删除。
 // 下面剩下的三个宽度都不是列：两个是「错误聚类」列表的行内列（那张列表没有列头），
 // 一个是排序控件。
@@ -23,14 +37,16 @@ enum PerfLogWidths {
     static let sortPicker: CGFloat = 208
 }
 
-/// 量表厚度。《40 WS-H》§9 只给两档：分量表 4、tile 内 5–6，
-/// 页面不再各写一个 height 魔法数（占位空行也用同一档，保证等高）。
-enum BarThickness {
-    static let tile: CGFloat = 5
-    static let component: CGFloat = 4
-}
+// 量表厚度不再在本文件造档：`BarThickness`（tile 5 / component 4）已收口到
+// `Theme.Layout.gaugeInline`(5) / `gaugeMetric`(6)。分量表原来那个 4pt 在基座里没有对应档，
+// 差 1pt 换掉一份私有刻度是划算的 —— 「令牌定义了却没人用」正是本轮的病因。
 
 /// 会实时变化的数字。等宽 + 右对齐 + 定宽三件事一起做，缺证据时强制中性色。
+///
+/// 默认前景是**纯墨 `Surface.ink`** 而不是 `.primary`：`labelColor` 只有 85% 黑，
+/// 铺在 `ground` 上合成出来约 `#262626`，而参考图最暗像素落在最大的数字上（`#000000`）。
+/// 「最重的墨给最重要的数」在这个组件上的落地就是：凡是要人盯着读的那个跳动的数，
+/// 一律墨色；`.primary` 退回给 13pt 以下正文。
 struct LiveNumber: View {
     var text: String
     var tier: Theme.TypeToken
@@ -39,7 +55,7 @@ struct LiveNumber: View {
 
     init(_ text: String,
          tier: Theme.TypeToken = Theme.Typo.metricMid,
-         tint: Color = .primary,
+         tint: Color = Theme.Palette.Surface.ink,
          width: CGFloat? = nil) {
         self.text = text
         self.tier = tier
@@ -99,3 +115,4 @@ extension View {
         frame(maxWidth: .infinity, alignment: .leading)
     }
 }
+

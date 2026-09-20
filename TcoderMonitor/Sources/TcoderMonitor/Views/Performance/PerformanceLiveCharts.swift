@@ -10,6 +10,9 @@ struct PerformanceLiveCharts: View {
     let points: [SystemSnapshot]
     let context: SampleContext
     let windowSeconds: TimeInterval
+    /// 节奏文案，由页面从 `MachSystemMonitor` 的唯一真值派生（暂停时显示"采样已暂停"，
+    /// 而不是继续宣称一个固定节奏）。页面里不许再写第二个节拍字面量（性能 spec §5.1）。
+    let cadenceText: String
 
     /// 两个点连出来是一条直线，看起来像「趋势」，其实是采样未到；三个点起才画。
     private static let minPointsToPlot = 3
@@ -21,7 +24,10 @@ struct PerformanceLiveCharts: View {
                                title: "正在采集首个样本",
                                message: "至少 3 个点之后才有曲线可画。这里不预先给出估算形状。")
             } else {
-                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                // 两张图是两个同级并列的叙事单元 → 组间 `group`(32)。
+                // 原来它们与脚注都挤在 `md`(16) 上，跟图例与图之间同一个数，
+                // 眼睛分不出「一张图结束了」。
+                VStack(alignment: .leading, spacing: Theme.Spacing.group) {
                     cpuBlock
                     memoryBlock
                     axisNotes
@@ -31,7 +37,7 @@ struct PerformanceLiveCharts: View {
     }
 
     private var subtitle: String {
-        "最近 \(NumberFormat.grouped(points.count)) 点 · 每 1.5 秒 · 窗口约 \(Int(windowSeconds)) 秒"
+        "最近 \(NumberFormat.grouped(points.count)) 点 · \(cadenceText) · 窗口约 \(Int(windowSeconds)) 秒"
     }
 
     private var trustedMemory: [SystemSnapshot] { SystemReadings.trustedMemoryPoints(points) }
@@ -65,14 +71,12 @@ struct PerformanceLiveCharts: View {
         let axis = cpuAxis
         return VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             SeriesLegend(name: "CPU 占用率",
-                         series: ChartSeries.cpu,
                          basis: Self.cpuBasis(context: context),
                          value: Live.percent(SystemReadings.cpuFraction(context), precision: 0))
             LiveSeriesChart(points: points,
                             xOf: \.timestamp,
                             yOf: { $0.cpuUsage * ChartScale.percentMax },
                             valueName: "占用率",
-                            series: ChartSeries.cpu,
                             axis: axis,
                             timeAxis: timeAxis,
                             summary: cpuSummary(axis),
@@ -87,7 +91,6 @@ struct PerformanceLiveCharts: View {
         let trusted = trustedMemory
         return VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             SeriesLegend(name: "内存在用率",
-                         series: ChartSeries.memory,
                          basis: Self.memoryBasis(context: context),
                          value: Live.percent(SystemReadings.memoryFraction(context), precision: 0))
             if trusted.count >= Self.minPointsToPlot {
@@ -95,7 +98,6 @@ struct PerformanceLiveCharts: View {
                                 xOf: \.timestamp,
                                 yOf: { $0.memoryFraction * ChartScale.percentMax },
                                 valueName: "在用率",
-                                series: ChartSeries.memory,
                                 axis: axis,
                                 timeAxis: timeAxis,
                                 summary: memorySummary(trusted.count, axis),

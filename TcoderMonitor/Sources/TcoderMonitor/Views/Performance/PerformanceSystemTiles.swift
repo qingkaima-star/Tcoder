@@ -18,21 +18,27 @@ enum LoadLevel {
     }
 }
 
-/// 系统资源区：CPU / 内存 / 磁盘 / 网络四枚 tile + 内存口径声明 + 机器状态条。
+/// 系统资源区：CPU / 内存 / 磁盘 / 网络**一行四枚纯墨读数** + 内存口径声明 + 机器状态条。
+///
+/// **这一行就是本页的主角**（风格契约 4「最重的墨给最大的数」）。原来它们是
+/// `LazyVGrid(adaptive 220)` 里四块 `.contentInset` 灰盒，每块自带一份投影 ——
+/// 基座把面与投影摘掉之后，剩下的问题只有「四个 34pt 谁先被读到」，
+/// 答案是**都不该抢**：横向读数带 + 列间发丝线就是活动监视器底栏的排法，
+/// 它们是一个整体，而不是四张彼此争位的卡。
 ///
 /// 速率类指标没有可信分母，因此只留等高占位而不画进度条——画一条假的满格线比不画更误导。
 struct PerformanceSystemTiles: View {
     let context: SampleContext
 
-    private static let columns = [GridItem(.adaptive(minimum: Theme.Layout.tileMinWidth),
-                                           spacing: Theme.Spacing.sm)]
-
     var body: some View {
         GlassSection("系统资源", subtitle: sectionSubtitle, icon: .cpu) {
-            LazyVGrid(columns: Self.columns, spacing: Theme.Spacing.sm) {
+            ReadoutStrip {
                 cpuTile
+                Divider()
                 memoryTile
+                Divider()
                 diskTile
+                Divider()
                 networkTile
             }
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
@@ -101,11 +107,9 @@ struct PerformanceSystemTiles: View {
                 caption: total == nil
                     ? "首个差分帧到达前不给速率"
                     : "读 \(Live.rate(SystemReadings.diskReadBytesPerSecond(context))) / 写 \(Live.rate(SystemReadings.diskWriteBytesPerSecond(context)))",
-                tint: ChartSeries.color(ChartSeries.disk),
                 systemImage: IconName.disk.rawValue
             ),
-            fraction: nil,
-            graphic: ChartSeries.color(ChartSeries.disk)
+            fraction: nil
         )
     }
 
@@ -118,23 +122,25 @@ struct PerformanceSystemTiles: View {
                 caption: total == nil
                     ? "首个差分帧到达前不给速率"
                     : "↓ \(Live.bitRate(SystemReadings.networkInBytesPerSecond(context))) / ↑ \(Live.bitRate(SystemReadings.networkOutBytesPerSecond(context)))",
-                tint: ChartSeries.color(ChartSeries.network),
                 systemImage: IconName.network.rawValue
             ),
-            fraction: nil,
-            graphic: ChartSeries.color(ChartSeries.network)
+            fraction: nil
         )
     }
 
     /// tile 下面挂一条量表；无数据时保留等高占位，不让整块高度跳动。
+    ///
+    /// `graphic` 只收**语义**图形色（`LoadLevel.role.graphicColor`）。吞吐类指标没有
+    /// 可信分母、也没有好坏分档，所以既不给它画量表、也不给它涂分类色 ——
+    /// 旧写法把磁盘涂紫、网络涂青，是无端让眼睛读出「这两件事性质不同」。
     @ViewBuilder
-    private func gauged(_ tile: MetricTile, fraction: Double?, graphic: Color) -> some View {
+    private func gauged(_ tile: MetricTile, fraction: Double?, graphic: Color? = nil) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             tile
-            if let fraction {
-                MiniBarGauge(fraction: fraction, tint: graphic, height: BarThickness.tile)
+            if let fraction, let graphic {
+                MiniBarGauge(fraction: fraction, tint: graphic, height: Theme.Layout.gaugeInline)
             } else {
-                Color.clear.frame(height: BarThickness.tile)
+                Color.clear.frame(height: Theme.Layout.gaugeInline)
             }
         }
     }
