@@ -130,6 +130,19 @@ extension View {
 struct CPUHistoryChart: View {
     var snapshots: [SystemSnapshot]
 
+    /// 时间轴刻度格式。**窗口不足 10 分钟时必须降到秒**：
+    /// 实拍总览页出现 `03:57` 与 `03:57` 并排 —— 三个自动刻度落进同一分钟，
+    /// 轴看起来像坏了，而它其实什么都没说错，只是分辨率不够。
+    static func axisTimeFormat(span: TimeInterval) -> Date.FormatStyle {
+        span < 600 ? .dateTime.hour().minute().second() : .dateTime.hour().minute()
+    }
+
+    private var windowSpan: TimeInterval {
+        guard let first = snapshots.first?.timestamp, let last = snapshots.last?.timestamp
+        else { return 0 }
+        return max(0, last.timeIntervalSince(first))
+    }
+
     var body: some View {
         Chart(snapshots) { snapshot in
             AreaMark(
@@ -160,7 +173,7 @@ struct CPUHistoryChart: View {
         }
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 3)) { _ in
-                AxisValueLabel(format: .dateTime.hour().minute(), centered: false)
+                AxisValueLabel(format: Self.axisTimeFormat(span: windowSpan), centered: false)
                     .font(Theme.Typo.microLabel.font.monospacedDigit())
             }
         }

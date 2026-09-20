@@ -106,6 +106,20 @@ extension ShellBorderlessTests {
                        "页面自己挑版框宽度 = 又想单开一档，九页边距会再次分叉")
     }
 
+    /// 总览 CPU 曲线的时间轴：短窗口必须降到秒级。
+    /// 实拍上出现过 `03:57` 与 `03:57` 并排 —— 三个自动刻度落进同一分钟，
+    /// 轴看起来像坏了，其实只是分辨率不够；而小时级窗口里再印秒就是噪声。
+    func test_cpuChartAxisDropsToSecondsForShortWindows() {
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        let later = base.addingTimeInterval(30)
+        XCTAssertNotEqual(base.formatted(CPUHistoryChart.axisTimeFormat(span: 45)),
+                          later.formatted(CPUHistoryChart.axisTimeFormat(span: 45)),
+                          "45 秒的窗口里两个刻度印成了同一个数")
+        XCTAssertEqual(base.formatted(CPUHistoryChart.axisTimeFormat(span: 3 * 3600)),
+                       later.formatted(CPUHistoryChart.axisTimeFormat(span: 3 * 3600)),
+                       "小时级窗口不该把秒印出来")
+    }
+
     func test_scaffoldScannerCatchesSyntheticDuplication() {
         let handRolled = [(path: "Views/FakeView.swift", content: """
         struct FakeView: View {

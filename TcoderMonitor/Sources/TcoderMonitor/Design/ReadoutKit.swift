@@ -19,15 +19,20 @@ import SwiftUI
 // MARK: 键值读数
 
 extension Theme {
-    /// 一行「标签 + 数字」读数。数字一律等宽右对齐，缺证据自动中性。
+    /// 一行「标签 + 值」读数。**标签占定宽、值紧跟左对齐**（与 `DataFieldRow` 同一份列宽），
+    /// 一屏多行时值们竖向成列才可比。缺证据的值由调用方给 `DataAbsence` 字面。
     enum Readout {
-        /// 键值行：标签在左、值在右（表格里的路径/SHA/权重也用它）。
+        /// 键值行：标签列 + 值列。
         struct Field: View {
             var label: String
             var value: String
             var style: Style
             var role: Theme.SemanticRole?
             var help: String?
+            /// 标签列宽。`nil` = 不占列、标签与值贴着排 —— 只给**卡头 trailing 位**这种
+            /// "本身就一行、没有第二行可对齐"的场合；两行以上的键值区必须给列宽，
+            /// 否则值与值对不上，就又退回 `label + Spacer + 值` 那个老形状。
+            var labelWidth: CGFloat?
 
             enum Style {
                 /// 等宽数字档（表格里读值）
@@ -41,24 +46,35 @@ extension Theme {
             }
 
             init(_ label: String, _ value: String, style: Style = .number,
-                 role: Theme.SemanticRole? = nil, help: String? = nil) {
+                 role: Theme.SemanticRole? = nil, help: String? = nil,
+                 labelWidth: CGFloat? = Theme.Layout.fieldLabelWidth) {
                 self.label = label
                 self.value = value
                 self.style = style
                 self.role = role
                 self.help = help
+                self.labelWidth = labelWidth
             }
 
             var body: some View {
+                // **与 `DataFieldRow` 同一套两列几何**（标签定宽、值紧跟左对齐）。
+                // 这里原来是 `label + Spacer + 值`：版框从 1040 收到 1240 之后，
+                // 「上次 …………… 无记录」被拉到相距约 1500px，中间什么都没有 ——
+                // 同一个毛病 H3 已经在 `DataFieldRow` 上治过一遍，而这是它的第二份实现。
+                // 两份壳可以并存（字档不同），**列宽只能有一个来源**，所以走同一个令牌。
                 HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
                     Text(label)
                         .font(Theme.Typo.label.font)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                    Spacer(minLength: Theme.Spacing.xs)
+                        // `width: nil` 时 `frame(width:)` 就是"用固宽"，
+                        // 所以定宽列与贴着排两种形态共用同一行代码。
+                        .frame(width: labelWidth, alignment: .leading)
                     valueText
                         .themeHelp(help)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(minHeight: Theme.Layout.rowHeightCompact)
             }
 
