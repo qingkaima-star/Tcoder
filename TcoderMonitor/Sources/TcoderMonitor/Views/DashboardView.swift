@@ -2,10 +2,20 @@ import SwiftUI
 
 /// 总览首屏。
 ///
-/// 本轮把每一块「平涂卡 + 1px 描边」换成基座的内容层（标准材质 + `Radius.card` 16
-/// + 20pt 内边距，靠间距与材质分层、不再描边），并把所有「没数据」的地方从 0 / 红色
-/// 改成 `--` + 中性 + 明说原因的三态句式（WS-H §7.3）。
-/// 外壳件（评分环、占比条、读数行、横幅）在 `Views/Shell/**`。
+/// **本轮（WS-O / M1）按 spec §4.1 重排**，针对的是量出来的三条病灶：
+///   · 「hero 卡 + 4 tile + 4 卡」全部同一表面重量 → `codeScaleCard` 里的 `182,430`
+///     原本涂 `info` 蓝（`0x0A5BCC`，墨/底对比 10.7:1），而参考图最暗像素 `#000000`
+///     落在**最大的数字**上。现在主读数一律 `Surface.ink`，蓝不再当数据色用（风格契约 4/5）。
+///   · 「没有主次」在文字侧的另一半是四块灰盒 tile → 收成一条 `ReadoutStrip`
+///     （列间发丝线），一次去掉 4 个面 + 4 份投影。
+///   · 组间与组内是同一个数（`md`16 / `gutter`12）→ 组间 `Spacing.group`(32)、
+///     段落间 `Spacing.section`(40)、页边距 `Spacing.pageMargin`(24)。
+///   · 「代码规模」一张卡塞了 大数 + 5 条占比 + 3 个 StatLine + 覆盖率 4 行说明 → 拆成
+///     代码规模 / 文件构成 / 测试覆盖率 三组，覆盖率口径说明降到 10pt 脚注。
+///
+/// **诚实性内容一个字都没删**（#37 / #38）：口径说明、「含测试代码 X%（不用于评分）」、
+/// 报告生成时间 `generationSummaryText`、三态句式、缺数据不显示成 0 —— 全部原样在场，
+/// 只降排版层级。
 struct DashboardView: View {
     @Environment(AppState.self) private var state
 
@@ -14,51 +24,71 @@ struct DashboardView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 HealthHeroCard(health: report?.health)
-                metricGrid
-                LazyVGrid(columns: cardColumns, alignment: .leading,
-                          spacing: Theme.Spacing.gutter) {
-                    codeScaleCard
-                    livePerformanceCard
-                    recentCommitsCard
-                    topErrorsCard
-                }
+                scaleSegment
+                livePerformanceGroup
+                listSegment
                 if let error = state.lastError {
                     failureCard(error)
                 }
             }
-            .padding(.horizontal, Theme.Spacing.md)
-            .padding(.top, Theme.Spacing.xl)
-            .padding(.bottom, Theme.Spacing.xl)
+            .padding(.horizontal, Theme.Spacing.pageMargin)
+            .padding(.top, Theme.Spacing.section)
+            .padding(.bottom, Theme.Spacing.section)
             .frame(maxWidth: Theme.Layout.maxWidthOverview)
             .frame(maxWidth: .infinity)
         }
         .scrollContentBackground(.hidden)
     }
 
+    /// 本机读数 + 代码规模这一段。组内用 `group`(32)，段与段之间用 `section`(40)。
+    private var scaleSegment: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.group) {
+            readoutStrip
+            codeScaleGroup
+            LazyVGrid(columns: pairColumns, alignment: .leading,
+                      spacing: Theme.Spacing.group) {
+                fileCompositionGroup
+                coverageStrip
+            }
+        }
+    }
+
+    /// 底部两块清单（最近提交 / 高频错误）。窄窗口自动折成单列。
+    private var listSegment: some View {
+        LazyVGrid(columns: pairColumns, alignment: .leading,
+                  spacing: Theme.Spacing.group) {
+            recentCommitsGroup
+            topErrorsCard
+        }
+    }
+
     /// 栅格列宽全部走基座锚点，不再写死「一行四列」：窗口收窄时自动折行（WS-H §3.2）。
-    private var tileColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: Theme.Layout.tileMinWidth),
-                  spacing: Theme.Spacing.gutter)]
-    }
-
-    private var cardColumns: [GridItem] {
+    /// 列间距从 `gutter`(12) 抬到 `pageMargin`(24)：无界面里两列之间没有盒体边界，
+    /// 12pt 会被读成「两列挤成一坨」。
+    private var pairColumns: [GridItem] {
         [GridItem(.adaptive(minimum: Theme.Layout.twoColumnMinWidth),
-                  spacing: Theme.Spacing.gutter)]
+                  spacing: Theme.Spacing.pageMargin)]
     }
 
-    // MARK: 指标 tile
+    // MARK: 读数带（旧「四枚 tile」）
 
     /// 四枚 tile 的三态口径：
     /// 「没有测到」一律传 `value: nil`，由 `MetricTile` 渲染成 `--` + 中性色；
     /// 真 0 是结论，照实传 `"0"`。原来 CPU 缺值传 `"--"` 而今日错误缺值传 `0`，
     /// 同一块屏上两种自相矛盾的说法并存（WS-I §3.4）。
-    private var metricGrid: some View {
-        LazyVGrid(columns: tileColumns, spacing: Theme.Spacing.gutter) {
+    ///
+    /// 排法换成 `ReadoutStrip` + 列间发丝线：tile 已经不是一块面了，
+    /// 四块无边框文字并排会糊成一整段，发丝线替掉原来的盒体边界。
+    private var readoutStrip: some View {
+        ReadoutStrip {
             cpuTile
+            Divider()
             memoryTile
+            Divider()
             errorTile
+            Divider()
             commitTile
         }
     }
@@ -71,7 +101,6 @@ struct DashboardView: View {
             caption: snapshot.map {
                 "\(NumberFormat.grouped($0.cpuCoreCount)) 核 · 负载 \(String(format: "%.2f", $0.loadAverage1))"
             },
-            tint: Theme.Semantic.info.textColor,
             systemImage: IconName.cpu.rawValue
         )
     }
@@ -85,7 +114,6 @@ struct DashboardView: View {
                 "共 \(ByteFormat.string($0.memoryTotalBytes, precision: 0)) · "
                     + NumberFormat.percent($0.memoryFraction, precision: 0)
             },
-            tint: Theme.Semantic.info.textColor,
             systemImage: IconName.memory.rawValue
         )
     }
@@ -100,14 +128,22 @@ struct DashboardView: View {
             caption = logs == nil ? ShellCopy.notAnalyzed("错误日志")
                 : ShellCopy.cannotAnalyze("未接入任何日志文件")
         }
+        let count = logs?.hasData == true ? logs?.todayErrorCount : nil
         return MetricTile(
             label: "今日错误",
-            value: logs?.hasData == true ? NumberFormat.grouped(logs?.todayErrorCount ?? 0) : nil,
+            value: count.map { NumberFormat.grouped($0) },
             caption: caption,
-            tint: Theme.Semantic.danger.textColor,
+            tint: Self.hasTodayErrors(count) ? Theme.Semantic.danger.textColor
+                                             : Theme.Palette.Surface.ink,
             systemImage: IconName.riskWarning.rawValue
         )
     }
+
+    /// 「这一格里真有危险吗」。红只留给 `>0`：`0` 是「查过、没有」这一结论，
+    /// 把 0 涂成红等于对着一句定心丸拉警报。缺证据那一态由 `MetricTile` 自己
+    /// 强制回 neutral（`forcesNeutralTint(for:)`），这里不重复那件事。
+    /// 做成谓词而不是返回 `Color`，是为了可测 —— 动态色两次取值不相等。
+    static func hasTodayErrors(_ count: Int?) -> Bool { (count ?? 0) > 0 }
 
     private var commitTile: some View {
         MetricTile(
@@ -119,43 +155,45 @@ struct DashboardView: View {
                 "\(NumberFormat.grouped($0.totalCommits)) 次提交 · "
                     + "\(NumberFormat.grouped($0.activeAuthorCount)) 位贡献者"
             } ?? ShellCopy.notAnalyzed("Git 历史"),
-            tint: Theme.Semantic.info.textColor,
             systemImage: IconName.git.rawValue
         )
     }
 
-    // MARK: 内容卡
+    // MARK: 分组（旧「内容卡」）
 
-    private var codeScaleCard: some View {
+    /// 代码规模：只留**一个**主角（纯墨大数）+ 语言占比。
+    ///
+    /// 原来这张卡里还塞着文件构成与覆盖率四行说明 —— 一张卡五种信息，
+    /// 结果什么都不是重点（spec §4.1）。现在拆成 `codeScaleGroup` /
+    /// `fileCompositionGroup` / `coverageStrip` 三组。
+    private var codeScaleGroup: some View {
         GlassSection("代码规模",
                      subtitle: report?.code.map { "最近扫描 \(DateFormat.sinceDescription($0.scannedAt))" },
                      icon: .code) {
             if let code = report?.code {
-                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.group) {
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
                         Text(NumberFormat.grouped(code.codeLines))
                             .font(Theme.Typo.metricNumber.font)
-                            .foregroundStyle(Theme.Semantic.info.textColor)
+                            // 原来这里和 tile 一样涂 `info` 蓝。蓝同时是链接与选中色，
+                            // 一色两义（spec §0 根因 ④）；主读数一律纯墨。
+                            .foregroundStyle(Theme.Palette.Surface.ink)
                         Text("有效代码行")
                             .font(Theme.Typo.label.font)
                             .foregroundStyle(.secondary)
                     }
-                    ForEach(code.languages.prefix(5)) { share in
-                        // 占比条统一走基座件：全仓原本有三套（我的 LanguageBar、
-                        // WS-L 的 DataShareBarRow、基座的 Theme.Share.Row），
-                        // 基座那套正是为取代前两套而建却零引用。取色也必须走基座的
-                        // 稳定键入口，页面不再自带一份哈希。
-                        Theme.Share.Row(
-                            label: share.language,
-                            fraction: share.share,
-                            percentText: NumberFormat.percent(share.share, precision: 0))
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        ForEach(code.languages.prefix(5)) { share in
+                            // 占比条统一走基座件：全仓原本有三套（我的 LanguageBar、
+                            // WS-L 的 DataShareBarRow、基座的 Theme.Share.Row），
+                            // 基座那套正是为取代前两套而建却零引用。取色也必须走基座的
+                            // 稳定键入口，页面不再自带一份哈希。
+                            Theme.Share.Row(
+                                label: share.language,
+                                fraction: share.share,
+                                percentText: NumberFormat.percent(share.share, precision: 0))
+                        }
                     }
-                    HStack(spacing: Theme.Spacing.md) {
-                        StatLine(label: "文件", value: NumberFormat.grouped(code.totalFiles))
-                        StatLine(label: "注释行", value: NumberFormat.grouped(code.commentLines))
-                        StatLine(label: "空行", value: NumberFormat.grouped(code.blankLines))
-                    }
-                    coverageStrip
                 }
             } else {
                 EmptyStateView(icon: IconName.code.rawValue,
@@ -165,7 +203,24 @@ struct DashboardView: View {
         }
     }
 
-    private var livePerformanceCard: some View {
+    /// 文件构成：从「代码规模」那张卡里分出来的第二组。
+    private var fileCompositionGroup: some View {
+        GlassSection("文件构成") {
+            if let code = report?.code {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    StatLine(label: "文件", value: NumberFormat.grouped(code.totalFiles))
+                    StatLine(label: "注释行", value: NumberFormat.grouped(code.commentLines))
+                    StatLine(label: "空行", value: NumberFormat.grouped(code.blankLines))
+                }
+            } else {
+                Text(ShellCopy.notAnalyzed("代码规模"))
+                    .font(Theme.Typo.label.font)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var livePerformanceGroup: some View {
         GlassSection("实时性能",
                      subtitle: "本机 · 每 1.5 秒采样",
                      icon: .performance,
@@ -196,7 +251,7 @@ struct DashboardView: View {
         }
     }
 
-    private var recentCommitsCard: some View {
+    private var recentCommitsGroup: some View {
         GlassSection("最近提交", subtitle: branchSubtitle, icon: .git) {
             if let git = report?.git, !git.recentCommits.isEmpty {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
@@ -218,6 +273,8 @@ struct DashboardView: View {
         }
     }
 
+    /// 名字冻结：`docs/口径与已知限制.md` 用 `DashboardView.topErrorsCard` 定位「高频错误」这一组的口径，
+    /// `DocReferenceRatchetTests` 钉这个锚点。**它已经不是一张卡**（无面、无描边），只是名字留着。
     private var topErrorsCard: some View {
         GlassSection("高频错误",
                      subtitle: report?.logs.map {
@@ -258,12 +315,15 @@ struct DashboardView: View {
     /// 「报告里所有文件」的加权值，而测试代码几乎必然被自己的测试覆盖到——
     /// 本机实测它占分母 43.83%、自身 86.38%，于是只加测试就能把这个数字养大。
     /// 全口径仍然展示，但明确标注「不用于评分」，只展示高的那一个是不诚实的。
+    ///
+    /// 本轮把它从「代码规模」那张卡里独立成一组，四行说明降到 10pt 脚注档 ——
+    /// **字一个没删**，只是不再和读数抢注意力。
     @ViewBuilder
     private var coverageStrip: some View {
         if let coverage = report?.coverage, coverage.hasData {
-            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                Divider()
-                HStack(spacing: Theme.Spacing.md) {
+            GlassSection("测试覆盖率", trailing: AnyView(RiskBadge(risk: coverage.riskLevel,
+                                                                  showIcon: false))) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     StatLine(label: "生产码行覆盖",
                              value: DataAbsence.optional(
                                 coverage.overallLinePercent.map { Self.percentOf100($0, precision: 1) })
@@ -272,25 +332,27 @@ struct DashboardView: View {
                              value: coverage.unit.map { Self.percentOf100($0.linePercent) } ?? "无报告")
                     StatLine(label: "集成测试",
                              value: coverage.integration.map { Self.percentOf100($0.linePercent) } ?? "无报告")
-                    Spacer(minLength: Theme.Spacing.xs)
-                    RiskBadge(risk: coverage.riskLevel, showIcon: false)
                 }
-                Text(coverageCaliberLine(coverage))
-                    .font(Theme.Typo.microLabel.font.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-                // #38：这些读数是把几份本地报告合起来算的，而报告本身是 .gitignore 挡着的
-                // 本地产物——不写「哪天生成的」，一份几天前的 lcov 就能长期冒充新鲜数据进健康分。
-                // 多份报告按最旧那份说（见 `CoverageMetrics.generationSummaryText`）。
-                if let generation = coverage.generationSummaryText {
-                    Text(generation)
+                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                    Text(coverageCaliberLine(coverage))
                         .font(Theme.Typo.microLabel.font.monospacedDigit())
-                        .foregroundStyle(.tertiary)
-                }
-                if let branch = coverage.overallBranchPercent {
-                    Text("分支覆盖 \(Self.percentOf100(branch, precision: 1)) · 来源 "
-                         + coverage.reports.map { $0.toolName }.joined(separator: " / "))
-                        .font(Theme.Typo.microLabel.font.monospacedDigit())
-                        .foregroundStyle(.tertiary)
+                        // 原来是 `.tertiary`：这一行里是**测得值**（含测试代码占比、差值），
+                        // 测得值不得用 tertiary。降到 10pt 已经足够安静了。
+                        .foregroundStyle(.secondary)
+                    // #38：这些读数是把几份本地报告合起来算的，而报告本身是 .gitignore 挡着的
+                    // 本地产物——不写「哪天生成的」，一份几天前的 lcov 就能长期冒充新鲜数据进健康分。
+                    // 多份报告按最旧那份说（见 `CoverageMetrics.generationSummaryText`）。
+                    if let generation = coverage.generationSummaryText {
+                        Text(generation)
+                            .font(Theme.Typo.microLabel.font.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    if let branch = coverage.overallBranchPercent {
+                        Text("分支覆盖 \(Self.percentOf100(branch, precision: 1)) · 来源 "
+                             + coverage.reports.map { $0.toolName }.joined(separator: " / "))
+                            .font(Theme.Typo.microLabel.font.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -368,7 +430,9 @@ private struct CommitRow: View {
         HStack(alignment: .top, spacing: Theme.Spacing.xs) {
             Text(String(commit.sha.prefix(7)))
                 .font(Theme.Typo.monoSmall.font)
-                .foregroundStyle(Theme.Semantic.info.textColor)
+                // 原来涂 `info` 蓝。SHA 是**数据**不是状态，蓝要留给交互（风格契约 5）；
+                // spec §0 根因 ④ 点名的 36 处里就有它。
+                .foregroundStyle(.primary)
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 Text(commit.subject)
                     .font(Theme.Typo.narrative.font)
