@@ -32,14 +32,32 @@ final class LogHotspotRatchetTests: XCTestCase {
 
     /// 真机自扫 2026-09-20 21:01 报给本包的热点，键 = `文件名.函数名`，值 = 报告当时读数。
     /// 报告读数只用于失败信息里说明「这是原来那笔债」，不参与判定。
+    ///
+    /// `parseAuthorTimestamp` 的键写的是 `GitTimestampParsing` 而不是报告里的
+    /// `GitLogParser`：本轮为把该函数 CC 27 降下来，把它连同时间戳段整体搬到了
+    /// GitTimestampParsing.swift（仍是 `GitLogParser` 的成员，函数名一字未改）。
+    /// 这条门按「文件名.函数名」点名，搬家必须显式改键——**改的是文件归属，
+    /// 不是判定阈值**，函数还在榜上、上限仍是 16 与 50。
     static let hotspots: [String: (reportedCC: Int, reportedLines: Int)] = [
         "CrashReportParser.parseDiagnosticReport": (43, 116),
-        "GitLogParser.parseAuthorTimestamp": (27, 78),
+        "GitTimestampParsing.parseAuthorTimestamp": (27, 78),
         "CrashTextParsing.parseTextSegment": (26, 107),
         "ManifestParsersPython.pyprojectDependencies": (26, 78),
         "LogParsing.read": (25, 113),
         "ManifestParsersNative.goModDependencies": (25, 38),
         "OsvClient.performOsvLookup": (21, 65),
+    ]
+
+    /// 报告点名之外、本包同一把尺子数出来的其余高复杂度函数，本轮一并清零。
+    /// 留这张表是为了让「清零」这件事可核对：名单里任意一个回潮都会撞上面试。
+    static let extraHotspotsCleared: Set<String> = [
+        "CrashIpsValueReading.flattenASI", "CrashIpsValueReading.ipsFrame",
+        "CrashIpsValueReading.stringOrJoined", "GitLogParser.unquotePath",
+        "LogClustering.aggregate", "LogClustering.cluster",
+        "LogDiscovery.projectLogCandidates", "ManifestDependencyAnalyzer.discoverManifests",
+        "ManifestParsers.parse", "ManifestParsers.tokens",
+        "ManifestParsersApple.podfileDependencies", "ManifestParsersJava.route",
+        "ManifestParsersScripting.gemfileDependencies",
     ]
 
     /// 本包三个目录（相对 `Sources/TcoderMonitor/`）。
@@ -138,6 +156,17 @@ final class LogHotspotRatchetTests: XCTestCase {
             }
         }
         print("【WS-X2 热点前后】\n" + lines.joined(separator: "\n"))
+        // 报告点名之外的 13 个：逐个报当前读数，让「本包 CC≥16 已清零」这句话可核对。
+        // 反逃跑设计不在这里，在下面那条 strays 面试——它数的是**全量函数**，
+        // 改名或搬文件都躲不过，只要还在本包且仍 ≥16 就当场判红。
+        var extras: [String] = []
+        for key in Self.extraHotspotsCleared.sorted() {
+            let base = key.split(separator: ".").last.map(String.init) ?? key
+            let found = functions.filter { $0.candidate.name == base }
+            let worst = found.map(\.complexity).max()
+            extras.append("  \(key) → \(worst.map { "现 CC \($0)" } ?? "本包已无数同名函数")")
+        }
+        print("【WS-X2 加练热点现状】\n" + extras.joined(separator: "\n"))
 
         // 兜底：整个包里任何函数都不许新长出 ≥16 的圈复杂度。
         let strays = functions.filter { $0.complexity >= Self.complexityBar }

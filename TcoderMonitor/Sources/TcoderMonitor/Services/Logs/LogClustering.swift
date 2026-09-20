@@ -181,18 +181,7 @@ enum LogAggregator {
         events = deduplicated(events)
         result.events = events
 
-        for event in events where event.isContinuation == false {
-            switch event.severity {
-            case .error: result.errorCount += 1
-            case .exception: result.exceptionCount += 1
-            case .warning: result.warningCount += 1
-            case .fatal: result.fatalCount += 1
-            case .info: result.infoLineCount += 1
-            case .trace, .debug: break
-            case .crash: break
-            }
-            if event.severity == .crash || event.isCrash { result.crashCount += 1 }
-        }
+        countEventSeverities(events, into: &result)
 
         let dated = events.compactMap { $0.date }
         result.windowStart = dated.min()
@@ -205,47 +194,84 @@ enum LogAggregator {
         return result
     }
 
-    static func cluster(events: [LogEvent], limit: Int) -> [ErrorCluster] {
-        guard limit > 0 else { return [] }
-        // 只保留带签名的非 continuation 事件（调用方也可能直接扔全量事件过来）
+    /// 级别计数。`switch` 的八个分支与那句「`severity == .crash` **或** `isCrash` 都算一次崩溃」
+    /// 逐字照抄拆分前，包括 `.trace / .debug / .crash` 三个只 break 不计数分支。
+    static func countEventSeverities(_ events: [LogEvent], into result: inout LogAggregate) {
+        for event in events where event.isContinuation == false {
+            switch event.severity {
+            case .error: result.errorCount += 1
+            case .exception: result.exceptionCount += 1
+            case .warning: result.warningCount += 1
+            case .fatal: result.fatalCount += 1
+            case .info: result.infoLineCount += 1
+            case .trace, .debug: break
+            case .crash: break
+            }
+            if event.severity == .crash || event.isCrash { result.crashCount += 1 }
+        }
+    }
+
+    /// cluster 的排序判据（全序，输出因此确定）。
+    static func clusterOrder(_ lhs: ErrorCluster, _ rhs: ErrorCluster) -> Bool {
+        if lhs.count != rhs.count { return lhs.count > rhs.count }
+        let left = lhs.lastSeen ?? Date.distantPast
+        let right = rhs.lastSeen ?? Date.distantPast
+        if left != right { return left > right }
+        return lhs.signature < rhs.signature
+    }
+
+    /// 只保留带签名的非 continuation 事件（调用方也可能直接扔全量事件过来）。
+    static func keyedSignatureEvents(_ events: [LogEvent]) -> [(signature: String, event: LogEvent)] {
         var keyed: [(signature: String, event: LogEvent)] = []
         for event in events where event.isContinuation == false {
             guard let sig = signature(for: event) else { continue }
             keyed.append((sig, event))
         }
-        guard keyed.isEmpty == false else { return [] }
+        return keyed
+    }
 
-        // 先按 (signature, path, lineNumber) 做一次全序，组内「第一条事件」的选取才与字典遍历顺序无关
-        keyed.sort { lhs, rhs in
-            if lhs.signature != rhs.signature { return lhs.signature < rhs.signature }
-            if lhs.event.sourceLogPath != rhs.event.sourceLogPath {
-                return lhs.event.sourceLogPath < rhs.event.sourceLogPath
-            }
-            return lhs.event.lineNumber < rhs.event.lineNumber
+    /// 先按 (signature, path, lineNumber) 做一次全序，组内「第一条事件」的选取才与字典遍历顺序无关
+    static func keyedEventOrder(_ lhs: (signature: String, event: LogEvent),
+                                _ rhs: (signature: String, event: LogEvent)) -> Bool {
+        if lhs.signature != rhs.signature { return lhs.signature < rhs.signature }
+        if lhs.event.sourceLogPath != rhs.event.sourceLogPath {
+            return lhs.event.sourceLogPath < rhs.event.sourceLogPath
         }
+        return lhs.event.lineNumber < rhs.event.lineNumber
+    }
 
+    /// 按签名分组，`keys` 记录首次出现顺序（输出稳定靠的就是这一条）。
+    static func groupKeyedEvents(_ keyed: [(signature: String, event: LogEvent)])
+        -> (keys: [String], groups: [String: [LogEvent]]) {
         var keys: [String] = []
         var groups: [String: [LogEvent]] = [:]
         for pair in keyed {
             if groups[pair.signature] == nil { keys.append(pair.signature) }
             groups[pair.signature, default: []].append(pair.event)
         }
+        return (keys, groups)
+    }
 
+    /// 组 -> cluster，`makeCluster` 判定为 nil 的组整组丢掉（与拆分前一致）。
+    static func buildClusters(keys: [String], groups: [String: [LogEvent]]) -> [ErrorCluster] {
         var clusters: [ErrorCluster] = []
         for key in keys {
             guard let group = groups[key], let item = makeCluster(signature: key, events: group) else { continue }
             clusters.append(item)
         }
-
-        // count 降序 -> lastSeen 新到旧 -> signature 升序，构成全序，输出因此确定
         return clusters
-            .sorted { lhs, rhs in
-                if lhs.count != rhs.count { return lhs.count > rhs.count }
-                let left = lhs.lastSeen ?? Date.distantPast
-                let right = rhs.lastSeen ?? Date.distantPast
-                if left != right { return left > right }
-                return lhs.signature < rhs.signature
-            }
+    }
+
+    static func cluster(events: [LogEvent], limit: Int) -> [ErrorCluster] {
+        guard limit > 0 else { return [] }
+        let keyed = keyedSignatureEvents(events)
+        guard keyed.isEmpty == false else { return [] }
+        let sorted = keyed.sorted(by: keyedEventOrder)
+        let grouped = groupKeyedEvents(sorted)
+        // count 降序 -> lastSeen 新到旧 -> signature 升序，构成全序，输出因此确定；
+        // 最后按 limit 截断（截断这一步与拆分前同样是「先全序再 prefix」）。
+        return buildClusters(keys: grouped.keys, groups: grouped.groups)
+            .sorted(by: clusterOrder)
             .prefix(limit)
             .map { $0 }
     }

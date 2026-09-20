@@ -114,33 +114,43 @@ extension CrashReportParser {
     }
 
     /// codes 可能是字符串、数字数组，也可能是小字典。
+    /// 四种形状各判一次，数组与字典的展开分别抽在下面两个函数里，判定链顺序未动。
     static func stringOrJoined(_ value: Any?) -> String? {
         if let text = value as? String { return text.isEmpty ? nil : text }
         if let number = value as? NSNumber { return number.stringValue }
-        if let list = value as? [Any] {
-            let parts = list.compactMap { element -> String? in
-                if let text = element as? String { return text.isEmpty ? nil : text }
-                if let number = element as? NSNumber { return number.stringValue }
-                if let nested = element as? [Any] {
-                    let flat = nested.compactMap { string($0) }
-                    return flat.isEmpty ? nil : flat.joined(separator: ", ")
-                }
-                if let table = element as? [String: Any] { return stringOrJoined(table) }
-                return nil
-            }
-            return parts.isEmpty ? nil : parts.joined(separator: ", ")
-        }
-        if let table = value as? [String: Any] {
-            let parts = table.keys.sorted().prefix(8).compactMap { key -> String? in
-                guard let value = stringOrJoined(table[key]), !value.isEmpty else { return nil }
-                return "\(key)=\(value)"
-            }
-            return parts.isEmpty ? nil : Array(parts).joined(separator: ", ")
-        }
+        if let list = value as? [Any] { return joinedOsvList(list) }
+        if let table = value as? [String: Any] { return joinedOsvTable(table) }
         return nil
     }
 
+    /// 数组元素：字符串 / 数字 / 再嵌一层数组 / 字典，四种写法之外的元素一律丢掉。
+    static func stringOrJoinedElement(_ element: Any) -> String? {
+        if let text = element as? String { return text.isEmpty ? nil : text }
+        if let number = element as? NSNumber { return number.stringValue }
+        if let nested = element as? [Any] {
+            let flat = nested.compactMap { string($0) }
+            return flat.isEmpty ? nil : flat.joined(separator: ", ")
+        }
+        if let table = element as? [String: Any] { return stringOrJoined(table) }
+        return nil
+    }
+
+    static func joinedOsvList(_ list: [Any]) -> String? {
+        let parts = list.compactMap { stringOrJoinedElement($0) }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
+
+    /// 字典：键升序、最多取 8 个，拼成 `key=value`。取前 8 与排序这两条都未改。
+    static func joinedOsvTable(_ table: [String: Any]) -> String? {
+        let parts = table.keys.sorted().prefix(8).compactMap { key -> String? in
+            guard let value = stringOrJoined(table[key]), !value.isEmpty else { return nil }
+            return "\(key)=\(value)"
+        }
+        return parts.isEmpty ? nil : Array(parts).joined(separator: ", ")
+    }
+
     /// `asi` 的每个 section 形如 `[[key, [values]], …]`，平摊成 `key = v1, v2`。
+    /// 「先 Backtrace / Diagnose，其余键升序」这个顺序，以及最多 6 条的上限，逐字未动。
     static func flattenASI(_ asi: [String: Any]?) -> [String] {
         guard let asi, !asi.isEmpty else { return [] }
         let preferred = ["Backtrace", "Diagnose"]
@@ -150,21 +160,34 @@ extension CrashReportParser {
             guard let entries = array(asi[section]) else { continue }
             for entry in entries {
                 if result.count >= 6 { break }
-                if let pair = array(entry), let key = string(pair.first), pair.count >= 2 {
-                    let values = array(pair[1])?.compactMap { string($0) } ?? []
-                    let joined = values.isEmpty ? (stringOrJoined(pair[1]) ?? "") : values.joined(separator: ", ")
-                    guard !joined.isEmpty else { continue }
-                    result.append(normalize("\(key) = \(joined)"))
-                } else if let table = dictionary(entry) {
-                    for key in table.keys.sorted() {
-                        guard result.count < 6, let value = stringOrJoined(table[key]), !value.isEmpty else { continue }
-                        result.append(normalize("\(key) = \(value)"))
-                    }
-                }
+                appendASIEntry(entry, to: &result)
             }
             if result.count >= 6 { break }
         }
         return Array(result.prefix(6))
+    }
+
+    /// 一条 asi 条目：`[key, values]` 数组形状或 `{key: value}` 字典形状，两者互斥。
+    static func appendASIEntry(_ entry: Any, to result: inout [String]) {
+        if let pair = array(entry), let key = string(pair.first), pair.count >= 2 {
+            appendASIPair(key: key, raw: pair[1], to: &result)
+        } else if let table = dictionary(entry) {
+            appendASITable(table, to: &result)
+        }
+    }
+
+    static func appendASIPair(key: String, raw: Any, to result: inout [String]) {
+        let values = array(raw)?.compactMap { string($0) } ?? []
+        let joined = values.isEmpty ? (stringOrJoined(raw) ?? "") : values.joined(separator: ", ")
+        guard !joined.isEmpty else { return }
+        result.append(normalize("\(key) = \(joined)"))
+    }
+
+    static func appendASITable(_ table: [String: Any], to result: inout [String]) {
+        for key in table.keys.sorted() {
+            guard result.count < 6, let value = stringOrJoined(table[key]), !value.isEmpty else { continue }
+            result.append(normalize("\(key) = \(value)"))
+        }
     }
 
     /// usedImages 顺序表：frame 只带 imageIndex 时用它补镜像名。
@@ -178,43 +201,77 @@ extension CrashReportParser {
     }
 
     /// 一帧 .ips frame -> `symbol (File.swift:123)`；无 symbol 时 `frame <idx> in <imageName>`。
+    /// 取字段与拼文案分成两步（`ipsFrameParts` + 两个拼装函数），
+    /// 每个键的候选顺序、裁剪长度（160 / 300）、以及「全空则返回 nil」都逐字未改。
     static func ipsFrame(_ raw: Any?, index: Int, imageNames: [String]) -> (frame: String, file: String?)? {
         if let text = string(raw) {
             let plain = clip(trimmed(text), 300)
             return plain.isEmpty ? nil : (plain, nil)
         }
         guard let frame = dictionary(raw) else { return nil }
-        let symbol = firstNonEmpty([string(frame["symbol"]), string(frame["symbolLocation"])])
+        let parts = ipsFrameParts(frame, index: index, imageNames: imageNames)
+        let built = clip(trimmed(parts.text), 300)
+        guard !built.isEmpty else { return nil }
+        return (built, parts.fileName)
+    }
+
+    struct IPSFrameParts {
+        var text: String
+        var fileName: String?
+    }
+
+    /// 一帧的机器字段。`?? ` 的候选次序（symbol→symbolLocation、file→filePath、
+    /// imageIndex→image_index、image_offset→imageOffset）与拆分前完全一样。
+    static func ipsFrameParts(_ frame: [String: Any],
+                              index: Int,
+                              imageNames: [String]) -> IPSFrameParts {
         let source = dictionary(frame["sourceLineInfo"])
         let filePath = firstNonEmpty([string(source?["file"]), string(source?["filePath"])])
-        let lineNumber = int(source?["line"]) ?? int(source?["lineNumber"])
         let imageIndex = int(frame["imageIndex"]) ?? int(frame["image_index"])
         let imageName = firstNonEmpty([
             string(frame["binary_name"]),
             string(frame["imageName"]),
-            imageIndex.flatMap { position in position >= 0 && position < imageNames.count ? imageNames[position] : nil },
+            ipsImageName(at: imageIndex, imageNames: imageNames),
         ])
-        let offset = int(frame["image_offset"]) ?? int(frame["imageOffset"])
-
         let file = filePath.map { trimmed(($0 as NSString).lastPathComponent) }
         let fileName = (file?.isEmpty == false) ? file : nil
 
-        var text: String
-        if let symbol {
-            text = clip(symbol, 160)
-            if let fileName {
-                text += lineNumber.map { " (\(fileName):\($0))" } ?? " (\(fileName))"
-            } else if let imageName {
-                text += " in \(imageName)"
-            }
-        } else {
-            text = "frame \(index)"
-            if let imageName { text += " in \(imageName)" }
-            if let offset { text += " + 0x" + String(max(0, offset), radix: 16) }
+        if let symbol = firstNonEmpty([string(frame["symbol"]), string(frame["symbolLocation"])]) {
+            return IPSFrameParts(
+                text: ipsSymbolFrameText(symbol: symbol, fileName: fileName,
+                                         lineNumber: int(source?["line"]) ?? int(source?["lineNumber"]),
+                                         imageName: imageName),
+                fileName: fileName)
         }
-        let built = clip(trimmed(text), 300)
-        guard !built.isEmpty else { return nil }
-        return (built, fileName)
+        return IPSFrameParts(
+            text: ipsIndexedFrameText(index: index, imageName: imageName,
+                                      offset: int(frame["image_offset"]) ?? int(frame["imageOffset"])),
+            fileName: fileName)
+    }
+
+    static func ipsImageName(at position: Int?, imageNames: [String]) -> String? {
+        guard let position, position >= 0, position < imageNames.count else { return nil }
+        return imageNames[position]
+    }
+
+    /// 有符号名的那一支：先裁 160，再按「有文件名带行号 / 只带文件名 / 退回镜像名」拼装。
+    static func ipsSymbolFrameText(symbol: String, fileName: String?,
+                                   lineNumber: Int?, imageName: String?) -> String {
+        var text = clip(symbol, 160)
+        if let fileName {
+            text += lineNumber.map { " (\(fileName):\($0))" } ?? " (\(fileName))"
+        } else if let imageName {
+            text += " in \(imageName)"
+        }
+        return text
+    }
+
+    /// 没有符号名的那一支：`frame <idx>`，可选 ` in <镜像>` 与 ` + 0x<偏移>`（偏移负数夹到 0）。
+    static func ipsIndexedFrameText(index: Int, imageName: String?, offset: Int?) -> String {
+        var text = "frame \(index)"
+        if let imageName { text += " in \(imageName)" }
+        if let offset { text += " + 0x" + String(max(0, offset), radix: 16) }
+        return text
     }
 
     /// date 优先 body 的 timestamp，回落到 header 的 timestamp/reporting_time，再回落 modifiedAt。
