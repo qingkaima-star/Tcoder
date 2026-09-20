@@ -43,13 +43,10 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 普查基线：`Sources/TcoderMonitor/**` 的文件数。钉住它是为了堵死
     /// 「目录解析失效 → 分母掉到个位数 → 零死文件通过」这条永真绿路径。
     ///
-    /// 108 → 109（WS-T #43）：新增 `Services/Health/GitCadenceEvidence.swift`。
-    /// 它**不是**孤儿文件——生产调用点在 `WeightedHealthScorer.swift` 的 `.activity` 分支
-    /// （`let cadence = GitCadenceEvidence.assess(git)`），本守卫的"未用清单"也没有点名它，
-    /// 红的原因只有分母不等。这正是这条棘轮想要的摩擦：加文件必须有人看一眼它凭什么被引用。
-    /// 109 → 110（WS-Y #47）：新增 `Design/DataAbsence.swift`（四态单点）。
-    /// 它被 13 处页面调用点引用（`Views/Shell/DashboardHero.swift`、`Views/Code/CodeMetricsView.swift` 等），
-    /// 本守卫的"未用清单"没有点名它，红的只是分母。
+    /// 108 → 109（WS-T #43 新增 Services/Health/GitCadenceEvidence.swift，
+    /// 调用点 WeightedHealthScorer 的 .activity 分支）。棘轮的摩擦是有意的：
+    /// 加文件必须有人先确认它凭什么被引用。
+    /// 109 → 110（WS-Y #47 新增 Design/DataAbsence.swift，13 处页面调用点，未用清单未点名它）。
     private static let censusBaseline = 110
 
     private static let prunedDirectories: Set<String> = [".git", ".build", ".swiftpm", ".worktrees",
