@@ -25,7 +25,8 @@ final class SelfScanDogfoodTests: SelfScanHarnessCase {
     func testEveryFileOverHighLineBarIsReportedByTheToolItself() async throws {
         let metrics = try await selfScan().code
         let reported = hugeFilePaths(in: metrics)
-        let over = try independentSwiftLineCounts().filter { $0.lines > Self.toolHighFileLines }
+        // #49：必须与工具同一总体（含 `.md`），否则文档一长就变成"凭空造"。
+        let over = try independentSourceLineCounts().filter { $0.lines > Self.toolHighFileLines }
 
         // 方向一（漏报）：我独立数出的超限文件，工具一个都不许漏。
         let missed = over.filter { !reported.contains($0.path) }.map { "\($0.path)(\($0.lines) 行)" }
@@ -66,8 +67,22 @@ final class SelfScanDogfoodTests: SelfScanHarnessCase {
     /// "工具到底能不能数出超限文件"改由 `SelfScanHugeFileMechanismTests` 用合成夹具
     /// 双向证明（超线的必须被看见、未超线的不得被误报）——上一版守卫把靶子立在
     /// "仓库恰好欠着债"上，债还上了它就假，那是找错对象。
+    /// #49 元测试：尺子的归属必须**由目录决定**，不是由我手抄的清单决定。
+    /// 双向：目录认的扩展名（含 `.md`）必须被收；目录不认的（`.txt`、无扩展名）必须被排除。
+    func testIndependentRulerUsesTheSamePopulationAsTheTool() {
+        XCTAssertTrue(Self.isToolScannedExtension("swift"))
+        XCTAssertTrue(Self.isToolScannedExtension("md"),
+                      "文档也要数：漏了 .md 就是本次回归的根因")
+        XCTAssertTrue(Self.isToolScannedExtension("markdown"))
+        XCTAssertFalse(Self.isToolScannedExtension("txt"), "目录不收的不得混进分母")
+        XCTAssertFalse(Self.isToolScannedExtension(""), "无扩展名文件不是源码")
+        // 反向对照：若有人把尺子退回"只数 .swift"，这条就会红。
+        let nonSwift = ["md", "markdown", "sh", "py", "rb"].filter(Self.isToolScannedExtension)
+        XCTAssertGreaterThan(nonSwift.count, 1, "尺子退化成 swift-only 了")
+    }
+
     func testRepositoryDoesNotGrowMoreHugeFiles() async throws {
-        let over = try independentSwiftLineCounts()
+        let over = try independentSourceLineCounts()
             .filter { $0.lines > Self.toolHighFileLines }
             .sorted { $0.lines > $1.lines }
         let ceiling = 0

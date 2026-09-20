@@ -97,10 +97,56 @@ class SelfScanHarnessCase: XCTestCase {
     ///
     /// 手写递归而不是 `enumerator(at:)`：`FileManager.DirectoryEnumerator` 没有
     /// `skipSubtree`，而剪枝必须发生在下潜之前，否则会把 `.build` 整个走一遍。
+    /// `wc -l` 口径：数换行符，末尾不成行的一段算一行。
+    /// 三个来源（`wc`、分析器的 `lines.count`、这里的独立复检）必须共用这一把尺子，
+    /// 所以它只允许有一份——内联副本会在下一次改动里悄悄分叉。
+    static func wcStyleLineCount(_ text: String) -> Int {
+        let newlines = text.reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
+        return text.hasSuffix("\n") ? newlines : newlines + 1
+    }
+
     func independentSwiftLineCounts() throws -> [GroundTruthFile] {
         var result: [GroundTruthFile] = []
         try collectSwiftFiles(in: Self.repoRoot, into: &result)
         return result
+    }
+
+    /// #49：工具的"巨大文件榜"按 `SourceLanguageCatalog` 的扩展名表收文件（含 `.md`），
+    /// 而上面那把尺子只数 `.swift`。两把尺子量的不是同一个总体，于是
+    /// 任何一份超过 800 行的文档都会让"独立复检数不到"判红——今天就是
+    /// `docs/使用说明.md` 涨到 819 行时现形的。
+    /// 这条按**目录本身**判定归属，绝不另抄一份扩展名清单（一抄就会再次漂移）。
+    static func isToolScannedExtension(_ ext: String) -> Bool {
+        SourceLanguageCatalog.language(forExtension: ext) != nil
+    }
+
+    /// 与分析器同一总体的独立复检：凡是被 `SourceLanguageCatalog` 认作源码的扩展名都数。
+    func independentSourceLineCounts() throws -> [GroundTruthFile] {
+        var result: [GroundTruthFile] = []
+        try collectSourceFiles(in: Self.repoRoot, into: &result)
+        return result
+    }
+
+    private func collectSourceFiles(in directory: URL, into result: inout [GroundTruthFile]) throws {
+        let fm = FileManager.default
+        let children = try fm.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: []
+        )
+        for url in children.sorted(by: { $0.path < $1.path }) {
+            let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
+            if values.isDirectory == true {
+                guard !Self.skipDirectoryNames.contains(url.lastPathComponent) else { continue }
+                try collectSourceFiles(in: url, into: &result)
+                continue
+            }
+            guard values.isRegularFile == true,
+                  Self.isToolScannedExtension(url.pathExtension.lowercased()) else { continue }
+            guard let data = fm.contents(atPath: url.path),
+                  let text = String(data: data, encoding: .utf8) else { continue }
+            result.append(GroundTruthFile(path: url.path, lines: Self.wcStyleLineCount(text)))
+        }
     }
 
     func collectSwiftFiles(in directory: URL, into result: inout [GroundTruthFile]) throws {
@@ -124,9 +170,7 @@ class SelfScanHarnessCase: XCTestCase {
             // 这样三个来源（wc、分析器的 lines.count、这里）能对上同一个数。
             // 早先用 components(separatedBy:"\n").count 会整体 +1，
             // 因为结尾换行会多出一个空段——差 1 行看起来就像两边在量不同的文件。
-            let newlines = text.reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
-            let lines = text.hasSuffix("\n") ? newlines : newlines + 1
-            result.append(GroundTruthFile(path: url.path, lines: lines))
+            result.append(GroundTruthFile(path: url.path, lines: Self.wcStyleLineCount(text)))
         }
     }
 
