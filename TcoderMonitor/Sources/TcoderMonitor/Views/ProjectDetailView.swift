@@ -55,7 +55,10 @@ struct ProjectDetailView: View {
                     HStack(spacing: Theme.Spacing.xs) {
                         Text(project.path)
                             .font(Theme.Typo.label.font.monospacedDigit())
-                            .foregroundStyle(.tertiary)
+                            // 红线允许路径/时间戳用 `.tertiary`，但 17:25 深色实拍实测：
+                            // 11pt 元数据在 `#1C1C1E` 上几乎读不出。基座自己也已经把
+                            // `MetricTile` 的 caption 从 tertiary 升到 secondary，这里跟同一档。
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .help(project.path)
@@ -65,7 +68,7 @@ struct ProjectDetailView: View {
                                 .foregroundStyle(.tertiary)
                             Text("分析于 \(DateFormat.sinceDescription(scanned))")
                                 .font(Theme.Typo.label.font.monospacedDigit())
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }

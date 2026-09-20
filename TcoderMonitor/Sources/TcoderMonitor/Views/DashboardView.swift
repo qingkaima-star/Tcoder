@@ -438,10 +438,9 @@ struct DashboardLiveReadout: View {
                     StatLine(label: "进程",
                              value: DataAbsence.optional(
                                 snapshot.map { NumberFormat.grouped($0.processCount) }).display)
-                }
-                // 「立即采样」原挂在 `GlassSection.trailing`（需 `AnyView`，O-3 清零），
-                // 现移入内容区，避免为按钮在页面里引入 `AnyView`。
-                HStack(spacing: Theme.Spacing.sm) {
+                    // 「立即采样」原挂在 `GlassSection.trailing`（需 `AnyView`，O-3 清零），
+                    // 移回内容区时**并进这一行**：单独占一行会成一个游离控件，
+                    // 眼睛读它是「曲线的一部分」还是「读数的一部分」都说不清。
                     Spacer(minLength: Theme.Spacing.sm)
                     GlassButton("立即采样", icon: .refresh, style: .bordered) {
                         state.monitor.sampleNow()
@@ -483,7 +482,7 @@ private struct CommitRow: View {
                     .lineLimit(1)
                 Text("\(commit.author) · \(DateFormat.sinceDescription(commit.date))")
                     .font(Theme.Typo.microLabel.font.monospacedDigit())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
             Spacer(minLength: Theme.Spacing.xs)
             VStack(alignment: .trailing, spacing: Theme.Spacing.xxs) {
@@ -514,7 +513,7 @@ private struct ErrorClusterRow: View {
                     .lineLimit(1)
                 Text("首次 \(cluster.firstSeenDescription) · 最近 \(cluster.lastSeenDescription)")
                     .font(Theme.Typo.microLabel.font)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
             Spacer(minLength: Theme.Spacing.xs)
             Text("\(cluster.count) 次")
