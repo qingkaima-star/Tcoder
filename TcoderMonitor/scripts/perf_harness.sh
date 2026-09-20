@@ -249,6 +249,9 @@ export_table() {  # export_table <trace> <schema> <outdir>
 
 meta_write() {  # meta_write <outdir> <键=值...>
   local out="$1"; shift
+  # 目录由本函数自己保证存在：cmd_switch 的 mkdir 在 per-page 循环里，
+  # DRY_RUN 下整段被跳过，于是第一次 meta_write 会写进不存在的目录（实测 traceback）。
+  mkdir -p "$out" 2>/dev/null || { echo "    ⚠ meta_write 建不了 $out，本条 meta 丢失" >&2; return 0; }
   python3 - "$out/meta.json" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REV" "$DIRTY" "$@" <<'PY'
 import json, os, sys
 path, ts, rev, dirty = sys.argv[1:5]
