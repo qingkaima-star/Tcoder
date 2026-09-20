@@ -339,6 +339,16 @@ final class GitTimeSemanticsTests: XCTestCase {
                        "git 非合并计数必须等于分析器解析条数（同一批提交）")
         print("【真实仓库分桶】作者偏移 \(offset) 共 \(truth.count) 天："
             + truth.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))
+
+        // 同一个真实仓库顺带把 #43 的效果打出来：冻结字段给什么、派生判断给什么、评分给几分。
+        let cadence = GitCadenceEvidence.assess(git)
+        let health = WeightedHealthScorer().score(HealthInputs(git: git))
+        let activity = health.components.first { $0.name == HealthDimension.activity.rawValue }
+        print("【真实仓库节奏】冻结日均 \(String(format: "%.1f", git.commitsPerDay))"
+            + "（= 提交总数 \(git.totalCommits)？）vs 派生日均 \(String(format: "%.1f", cadence.ratePerDay))"
+            + " 状态=\(cadence.status.rawValue) 跨度=\(String(format: "%.2f", cadence.spanDays)) 天"
+            + " 活跃度分量=\(activity.map { "\($0.score) 分/\($0.risk.rawValue)" } ?? "缺席")"
+            + " 说了节奏稳定=\(health.strengths.contains { $0.contains("提交节奏稳定") })")
     }
 
     // MARK: - 独立取数（自己起 git 进程，不复用 WS-J 的取证管道）
