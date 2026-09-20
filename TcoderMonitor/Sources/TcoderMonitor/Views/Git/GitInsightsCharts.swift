@@ -3,9 +3,14 @@ import Charts
 
 // MARK: - Git 洞察页的图表与表格行（WS-L）
 //
-// 图表是这页唯一允许"比文字更抢眼"的东西，所以线宽、面积渐变、坐标轴字号全部取自令牌：
-// 曲线 1.5pt（`Stroke.chartLine`）、面积 0.30 → 0.02（`Opacity.gradientTop/gradientFloor`）、
+// 图表是这页唯一允许"比文字更抢眼"的东西，所以线宽、取色、坐标轴字号全部取自令牌：
 // 轴标签 10pt（`Typo.microLabel`，全仓文字下限）。
+//
+// **取色一律走 `ChartSeries`**（本轮集成修正）：这页的趋势柱与 24×7 矩阵都是
+// **单序列**，所以颜色只有一个 —— 主线纯墨，空格子走分隔色。以前它们各自取
+// `Theme.Chart` 的 0 号位并自养两个 alpha 端点，于是同一段历史在总览上是蓝的、
+// 在这页也是蓝的、在性能页是黑的：三家各一套约定。多类别（语言占比、作者占比条）
+// 才用 `CodeGitCategoryColor` 的稳定索引色，那一档没动。
 
 func gitBucketLabel(_ granularity: BucketGranularity) -> String {
     switch granularity {
@@ -31,7 +36,11 @@ struct GitCommitTrendChart: View {
                 x: .value("时间", bucket.date, unit: calendarUnit),
                 y: .value("提交", bucket.commits)
             )
-            .foregroundStyle(Theme.Chart.color(at: CodeGitCategoryColor.aggregateIndex))
+            // 单序列图：一张图只有一批柱子，"按号位取色"要解决的问题（分辨哪条是哪条）
+            // 在这里不存在。旧写法取 `Theme.Chart` 的 0 号位，于是同一段历史在总览上是
+            // 蓝的、在这页也是蓝的、在性能页是黑的 —— 三套约定并存。收进 `ChartSeries`
+            // 的唯一规则：单序列 = 纯墨（`Design/ChartTokens.swift` 上提后全仓同此）。
+            .foregroundStyle(ChartSeries.lineColor)
             .cornerRadius(Self.barCorner)
         }
         .chartXAxis {
@@ -82,9 +91,6 @@ struct GitActivityHeatmap: View {
     let weekdayCounts: [Int]
 
     private static let weekdayNames = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-    /// 空格子与最忙格子的不透明度，两端都取自透明度刻度，不再是 0.08/0.85 这种杂值。
-    private static let idleAlpha = Theme.Palette.Opacity.badgeFill / 2
-    private static let peakAlpha = Theme.Palette.Opacity.gradientBottom
     /// 星期标签列宽：容纳「周三」两个汉字 + 一字母余量。
     private static let rowLabelWidth = Theme.Spacing.xl
     /// 矩阵格子的间隙属图表几何，不是榜单行节奏——所以它不走 `DataRowMetrics`，
@@ -118,8 +124,17 @@ struct GitActivityHeatmap: View {
                         let strength = intensity(hour: h, weekday: w)
                         let x = labelW + CGFloat(h) * (cellW + gap)
                         let rect = CGRect(x: x, y: y, width: cellW, height: cellH)
-                        let color = Theme.Chart.color(at: CodeGitCategoryColor.aggregateIndex)
-                            .opacity(Self.idleAlpha + (Self.peakAlpha - Self.idleAlpha) * strength)
+                        // 强度已经是 0~1 的归一比，直接当不透明度用：
+                        // 空格子 = 分隔色（与 `ContributorHourRow` 的零柱同一约定），
+                        // 有值的格子 = 主线纯墨按强度加浓。
+                        // 旧写法在这里自养 `idleAlpha = badgeFill/2` 与
+                        // `peakAlpha = Opacity.gradientBottom` 两个端点常量，而
+                        // `gradientBottom` 的令牌含义是「面积渐变的收尾值」——
+                        // 借一个语义属于别处的令牌当热力峰值，就是本轮要收掉的第三套
+                        // 图表取色约定。现在端点不再需要常量：0 与 1 由强度本身给出。
+                        let color = strength > 0
+                            ? ChartSeries.lineColor.opacity(strength)
+                            : Theme.Palette.Surface.separator
                         ctx.fill(Path(roundedRect: rect, cornerRadius: 2), with: .color(color))
                     }
                 }

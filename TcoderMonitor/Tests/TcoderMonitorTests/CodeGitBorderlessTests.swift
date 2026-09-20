@@ -265,6 +265,15 @@ final class CodeGitBorderlessTests: XCTestCase {
         hits(in: files, containing: "cornerRadius: ")
     }
 
+    /// 色板 0 号位是**合计行 / 主序列**专用（`CodeGitRestyleTests
+    /// .testMemberColorsNeverCollideWithTheAggregateBlue` 已钉过成员不得取 0）。
+    /// 本轮集成修正又暴露它的反面：单序列图表（趋势柱、24×7 矩阵）也去取 0 号位，
+    /// 于是同一段历史在总览是蓝的、在性能页是黑的 —— 三套图表取色约定并存。
+    /// 单序列一律 `ChartSeries.lineColor`，所以全流只许在**合计行**出现一次 0 号位。
+    static func aggregateIndexUses(in files: [(path: String, content: String)]) -> [String] {
+        hits(in: files, containing: "Theme.Chart.color(at: CodeGitCategoryColor.aggregateIndex)")
+    }
+
     // MARK: - 真源码定位
 
     private static let packageRoot: URL = {
@@ -459,6 +468,16 @@ final class CodeGitBorderlessTests: XCTestCase {
                       "读数条仍走 DataReadoutBar（它给数字画了一层井）。改 DataReadoutBand：\(hits)")
     }
 
+    /// 色板 0 号位只许出现在**合计行**：实测本流应为 1 处（贡献者集中度表的"前 3 名合计"）。
+    /// 本轮集成修正前这里是 3 处 —— 多出的是趋势柱与 24×7 矩阵把 0 号位当"单序列色"用了，
+    /// 那正是"同一段历史在总览是蓝的、在性能页是黑的"的第三种约定。
+    func test_aggregatePaletteIndexIsReservedForTotalRows() throws {
+        let hits = Self.aggregateIndexUses(in: try Self.pageSourceFiles())
+        XCTAssertLessThanOrEqual(hits.count, 1,
+                                 "色板 0 号位是合计行专用，实测 \(hits.count) 处：\(hits)。"
+                                     + "单序列图表请改用 ChartSeries.lineColor。")
+    }
+
     /// 我引进的原语必须真有人用，否则本守卫的若干「零命中即通过」会变成空跑。
     func test_newPrimitivesAreActuallyWired() throws {
         let pages = try Self.pageSourceFiles(dirs: Self.pageDirs)
@@ -627,6 +646,13 @@ final class CodeGitBorderlessTests: XCTestCase {
                       "进了井的表被判违规")
         XCTAssertEqual(Self.readoutBarsUsed(in: [("Code/A.swift", "DataReadoutBar { }")]).count, 1,
                       "读数条画井没抓到")
+        // 色板 0 号位：单序列图占位必须抓到，成员索引色不得误判
+        XCTAssertEqual(Self.aggregateIndexUses(in: [("Git/A.swift",
+            "BarMark(x: v).foregroundStyle(Theme.Chart.color(at: CodeGitCategoryColor.aggregateIndex))")]).count,
+                       1, "单序列图占 0 号位没抓到 —— 这条守卫就是空的")
+        XCTAssertTrue(Self.aggregateIndexUses(in: [("Git/A.swift",
+            "DataShareBarRow(label: \"合计\", tint: Theme.Chart.color(at: other))")]).isEmpty,
+                      "其他索引色被误判成合计行专用位")
 
         // ⑦ 材质与裸圆角
         XCTAssertEqual(Self.materialUses(in: [("Git/A.swift",
