@@ -1,27 +1,44 @@
 import SwiftUI
 
-/// OWNER: WS-L —— 「代码规模」页。
+/// OWNER: WS-L / WS-P —— 「代码规模」页。
 ///
-/// 2026-09-19 重样（WS-L）：卡片改走 `GlassSection`（内容层标准材质、圆角 16、内边距 20、
-/// 不再叠 1px 描边），键值行与读数条改走 `Views/CodeGit` 基座，语言占比行不再用冻结的
-/// `LanguageBar`（裸 RGB + 每进程随机 `hashValue` 取色）。数字一律等宽。
+/// 2026-09-20 无界化（WS-P，本轮）：
+/// - **一个主角**：56pt 的总行数，从 `accent` 蓝改回纯墨 `Surface.ink`。
+///   （旧页同屏还有一枚 34pt 重复率当第二主角，现降到 22pt 读数带。）
+/// - **面全部去掉**，只留井：三处 `DataReadoutBar`（它给聚合数字画了一层井）改
+///   `DataReadoutBand`；语言榜与巨大文件榜改嵌 `DataTableWell`。井是内容层唯一
+///   允许的底（风格契约 3），只给有行列结构的东西。
+/// - **颜色只承载语义**（契约 5）：四枚 tile 的 `tint: accent/success/warning/neutral`
+///   全部删掉 —— 那是给数据上色，不是状态。不变式行「空行+注释+代码=总计」同理，
+///   它是结构，改灰阶。真正该留色的两处留着：不变式不成立的 `DataNotice(.warning)`、
+///   风险量表 `MiniBarGauge`。
+/// - **节奏**：页边距 24 / 段落 40 / 分组 32 / 组内 16。此前五页这三档全部零引用，
+///   组间(16)与组内(12)几乎同数，这就是「拥挤」的机械成因。
+/// - **信息一条没减**：`CodeDataGate` 三态、`mergedNote` 合并口径、`markerNote`
+///   「扫过、没找到」的措辞、巨大文件阈值说明全部原文保留，只降排版层级。
 ///
 /// 唯一数据来源是 `report?.code`；三态判定收在 `CodeDataGate`，绝不把「未扫描」渲染成 0。
 struct CodeMetricsView: View {
     var report: ProjectReport?
 
-    /// 语言占比至少展示前 8 项，其余如实合并为「其他」；巨大文件最多渲染 20 行。
+    /// 语言占比至少展示前 8 项，其余如实合并为「其他」；巨大文件折叠态 8 行，
+    /// 展开后不再截断（`hotspotRowLimit` 从 20 收到 8 是为了组内不堆叠，
+    /// 「另有 N 个未展示」那句必须跟着一起在场，否则截断就成了静默丢数据）。
     static let languageHeadCount = 8
-    static let hotspotRowLimit = 20
+    static let hotspotRowLimit = 8
 
     var body: some View {
-        DataPageScaffold {
+        Theme.Page.Scaffold {
             if let code = CodeDataGate.metrics(of: report?.code) {
-                CodeMetricsSummaryGrid(code: code)
-                CodeScaleSection(code: code, root: projectRoot)
-                CodeMarkersSection(code: code)
-                CodeHotspotSection(code: code, root: projectRoot)
-                CodeDuplicationSummarySection(code: code)
+                GroupStack {
+                    CodeScaleSection(code: code, root: projectRoot)
+                    CodeMetricsSummaryGrid(code: code)
+                }
+                GroupStack {
+                    CodeMarkersSection(code: code)
+                    CodeHotspotSection(code: code, root: projectRoot)
+                    CodeDuplicationSummarySection(code: code)
+                }
             } else if let copy = CodeDataGate.emptyCopy(for: report?.code,
                                                        page: "语言占比与重复、复杂度概览") {
                 EmptyStateView(icon: copy.icon, title: copy.title, message: copy.message)
@@ -65,46 +82,46 @@ struct CodeMetricsView: View {
 
 // MARK: - 指标条
 
+/// 总量构成四读数。**无面**，横向一条读数带，列间竖发丝线。
+/// 旧形态是 `LazyVGrid` 里四块 `.contentInset` 灰盒，各带一份投影。
 struct CodeMetricsSummaryGrid: View {
     let code: CodeMetrics
 
-    private static let columns = [GridItem(.adaptive(minimum: Theme.Layout.tileMinWidth),
-                                           spacing: Theme.Spacing.gutter)]
-
     var body: some View {
-        LazyVGrid(columns: Self.columns, spacing: Theme.Spacing.gutter) {
-            MetricTile(
-                label: "代码文件",
-                value: NumberFormat.grouped(code.totalFiles),
-                unit: "个",
-                caption: "主语言 \(code.primaryLanguage) · 扫描于 "
-                    + DateFormat.sinceDescription(code.scannedAt),
-                tint: Theme.Semantic.accent.textColor
-            )
-            MetricTile(
-                label: "代码行数",
-                value: NumberFormat.grouped(code.codeLines),
-                unit: "行",
-                caption: "总行数 \(NumberFormat.grouped(code.totalLines)) · 代码占 "
-                    + Self.shareOf(code.codeLines, code),
-                tint: Theme.Semantic.success.textColor
-            )
-            MetricTile(
-                label: "注释行数",
-                value: NumberFormat.grouped(code.commentLines),
-                unit: "行",
-                caption: "注释率 " + NumberFormat.percent(code.commentRatio)
-                    + "（分母为总行数 \(NumberFormat.grouped(code.totalLines)) 行）",
-                tint: Theme.Semantic.warning.textColor
-            )
-            MetricTile(
-                label: "空行数",
-                value: NumberFormat.grouped(code.blankLines),
-                unit: "行",
-                caption: "空行占 " + Self.shareOf(code.blankLines, code)
-                    + " · 与注释、代码共同构成总行数",
-                tint: Theme.Semantic.neutral.textColor
-            )
+        GlassSection("总量构成", subtitle: "代码 / 注释 / 空行共同构成总行数", icon: .code) {
+            ReadoutStrip {
+                MetricTile(
+                    label: "代码文件",
+                    value: NumberFormat.grouped(code.totalFiles),
+                    unit: "个",
+                    caption: "主语言 \(code.primaryLanguage) · 扫描于 "
+                        + DateFormat.sinceDescription(code.scannedAt)
+                )
+                DataBandSeparator()
+                MetricTile(
+                    label: "代码行数",
+                    value: NumberFormat.grouped(code.codeLines),
+                    unit: "行",
+                    caption: "总行数 \(NumberFormat.grouped(code.totalLines)) · 代码占 "
+                        + Self.shareOf(code.codeLines, code)
+                )
+                DataBandSeparator()
+                MetricTile(
+                    label: "注释行数",
+                    value: NumberFormat.grouped(code.commentLines),
+                    unit: "行",
+                    caption: "注释率 " + NumberFormat.percent(code.commentRatio)
+                        + "（分母为总行数 \(NumberFormat.grouped(code.totalLines)) 行）"
+                )
+                DataBandSeparator()
+                MetricTile(
+                    label: "空行数",
+                    value: NumberFormat.grouped(code.blankLines),
+                    unit: "行",
+                    caption: "空行占 " + Self.shareOf(code.blankLines, code)
+                        + " · 与注释、代码共同构成总行数"
+                )
+            }
         }
     }
 
@@ -124,37 +141,23 @@ struct CodeScaleSection: View {
     let root: String
 
     var body: some View {
-        GlassSection(
-            "总行数与语言构成",
-            subtitle: Self.subtitle(code),
-            icon: .code
-        ) {
-            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
-                    Text(NumberFormat.grouped(code.totalLines))
-                        .font(Theme.Typo.heroMetric.font)
-                        .foregroundStyle(Theme.Semantic.accent.textColor)
-                    Text("总行数（= 空行 + 注释 + 代码）")
-                        .font(CodeGitType.prose(Theme.Typo.label))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: Theme.Spacing.xs)
+        GroupStack {
+            GlassSection(
+                "代码规模",
+                subtitle: "主语言 \(code.primaryLanguage) · 共 "
+                    + "\(NumberFormat.grouped(code.totalFiles)) 个文件",
+                icon: .code
+            ) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                    DataHeroReadout(value: NumberFormat.grouped(code.totalLines),
+                                    unit: "行",
+                                    note: "总行数（= 空行 + 注释 + 代码）")
+                    CodeInvariantRow(code: code)
                 }
+            }
 
-                CodeInvariantRow(code: code)
-
-                DataRowSeparator()
-
+            GlassSection("语言构成", subtitle: Self.subtitle(code), icon: .chartLine) {
                 languageBlock
-
-                DataReadoutBar {
-                    DataReadout(label: "主要语言", value: code.primaryLanguage,
-                                caption: "按有效代码行")
-                    DataReadout(label: "平均文件行数", value: Self.averageFileLines(code),
-                                caption: "总行数 ÷ 文件数")
-                    DataReadout(label: "最大文件", value: "\(NumberFormat.grouped(code.largestFileLineCount)) 行",
-                                caption: "单文件行数峰值")
-                }
-                .padding(.top, Theme.Spacing.xxs)
             }
         }
     }
@@ -170,17 +173,14 @@ struct CodeScaleSection: View {
                     + "但没有任何语言的有效代码行占比大于 0。"
             )
         } else {
-            VStack(spacing: DataRowMetrics.rowGap) {
+            DataTableWell {
                 DataTableHeader(columns: DataColumns.shareBar)
                 ForEach(rows) { share in
                     CodeLanguageShareRow(share: share, onOpenHint: CodeLanguageShareRow.hint(share))
                 }
             }
             if let note = CodeMetricsView.mergedNote(code, head: CodeMetricsView.languageHeadCount) {
-                Text(note)
-                    .monospacedDigit()
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
+                DataFootnote(text: note)
             }
         }
     }
@@ -204,6 +204,10 @@ struct CodeScaleSection: View {
 }
 
 /// 空行 + 注释 + 代码 = 总行数 的不变式核对；对不上时如实说明差值，不静默吞掉。
+///
+/// 这一行**不再四色**：以前空行 neutral / 注释 warning / 代码 success / 总计 accent，
+/// 把「结构等式」读成了四个状态结论。契约 5 是结构去色 —— 等式靠 `+` `=` 与
+/// 基线对齐说话，颜色在这里不携带任何信息。
 struct CodeInvariantRow: View {
     let code: CodeMetrics
 
@@ -212,13 +216,13 @@ struct CodeInvariantRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             HStack(spacing: Theme.Spacing.xs) {
-                term("空行", code.blankLines, Theme.Semantic.neutral)
+                term("空行", code.blankLines)
                 sign("+")
-                term("注释", code.commentLines, Theme.Semantic.warning)
+                term("注释", code.commentLines)
                 sign("+")
-                term("代码", code.codeLines, Theme.Semantic.success)
+                term("代码", code.codeLines)
                 sign("=")
-                term("总计", code.totalLines, Theme.Semantic.accent)
+                term("总计", code.totalLines)
                 Spacer(minLength: 0)
             }
             if sum != code.totalLines {
@@ -233,18 +237,18 @@ struct CodeInvariantRow: View {
     private func sign(_ text: String) -> some View {
         Text(text)
             .font(CodeGitType.number(Theme.Typo.label))
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.secondary)
             .accessibilityHidden(true)
     }
 
-    private func term(_ label: String, _ value: Int, _ role: Theme.SemanticRole) -> some View {
+    private func term(_ label: String, _ value: Int) -> some View {
         HStack(spacing: Theme.Spacing.xxs) {
             Text(label)
-                .monospacedDigit()
+                .font(CodeGitType.prose(Theme.Typo.label))
                 .foregroundStyle(.secondary)
             Text(NumberFormat.grouped(value))
                 .font(CodeGitType.metric)
-                .foregroundStyle(role.textColor)
+                .foregroundStyle(Theme.Palette.Surface.ink)
         }
     }
 }
@@ -260,22 +264,23 @@ struct CodeMarkersSection: View {
             subtitle: "源码里留下的待办标记，只代表历史备注，不代表当前缺陷",
             icon: .info
         ) {
-            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                DataReadoutBar {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                DataReadoutBand {
                     DataReadout(label: "TODO", value: NumberFormat.grouped(code.todoCount),
                                 caption: "处")
+                    DataBandSeparator()
                     DataReadout(label: "FIXME", value: NumberFormat.grouped(code.fixmeCount),
                                 caption: "处",
                                 role: code.fixmeCount > 0 ? Theme.Semantic.warning : nil)
+                    DataBandSeparator()
                     DataReadout(label: "标记合计",
                                 value: NumberFormat.grouped(code.todoCount + code.fixmeCount),
                                 caption: "处")
+                    DataBandSeparator()
                     DataReadout(label: "每千行标记",
                                 value: String(format: "%.2f", Self.markerDensityPerKilo(code)),
                                 caption: "条 / 千行有效代码")
                 }
-
-                DataRowSeparator()
 
                 VStack(spacing: DataRowMetrics.rowGap) {
                     DataFieldRow(label: "扫描耗时", value: CodeViewFormat.duration(code.durationMs),
@@ -288,11 +293,7 @@ struct CodeMarkersSection: View {
                                  style: .number)
                 }
 
-                Text(Self.markerNote(code))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .lineSpacing(Theme.Typo.narrative.lineSpacing)
-                    .fixedSize(horizontal: false, vertical: true)
+                DataCaption(text: Self.markerNote(code))
             }
         }
     }
@@ -319,6 +320,8 @@ struct CodeHotspotSection: View {
     let root: String
     var rowLimit: Int = CodeMetricsView.hotspotRowLimit
 
+    @State private var expanded = false
+
     var body: some View {
         GlassSection(
             "巨大文件（按行数降序）",
@@ -333,9 +336,9 @@ struct CodeHotspotSection: View {
                         + "未超过阈值。这是测得的结果，不是没扫。"
                 )
             } else {
-                VStack(spacing: DataRowMetrics.rowGap) {
+                let rows = visibleRows
+                DataTableWell {
                     DataTableHeader(columns: DataColumns.hugeFiles)
-                    let rows = Array(code.hugeFiles.prefix(rowLimit))
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, hotspot in
                         CodeHotspotRow(hotspot: hotspot, root: root,
                                        largestLineCount: Self.largestLineCount(code))
@@ -343,15 +346,31 @@ struct CodeHotspotSection: View {
                             DataRowSeparator()
                         }
                     }
-                    if code.hugeFiles.count > rows.count {
-                        Text("另有 \(NumberFormat.grouped(code.hugeFiles.count - rows.count)) 个未展示")
-                            .monospacedDigit()
-                            .monospacedDigit()
-                            .foregroundStyle(.tertiary)
+                }
+                if code.hugeFiles.count > rowLimit {
+                    DataDisclosureButton(expanded: expanded,
+                                        hiddenCount: code.hugeFiles.count - rowLimit,
+                                        noun: "个未展示") {
+                        expanded.toggle()
                     }
                 }
+                DataFootnote(text: Self.truncationNote(code, shown: rows.count))
             }
         }
+    }
+
+    private var visibleRows: [FileHotspot] {
+        expanded ? code.hugeFiles : Array(code.hugeFiles.prefix(rowLimit))
+    }
+
+    /// 折叠状态必须自己交代，不然「8 行」会被读成「一共只有 8 个」。
+    static func truncationNote(_ code: CodeMetrics, shown: Int) -> String {
+        let total = code.hugeFiles.count
+        guard total > shown else {
+            return "共 \(NumberFormat.grouped(total)) 个，已全部展示。"
+        }
+        return "另有 \(NumberFormat.grouped(total - shown)) 个未展示 · 当前列出 "
+            + "\(NumberFormat.grouped(shown)) / \(NumberFormat.grouped(total)) 个。"
     }
 
     static func largestLineCount(_ code: CodeMetrics) -> Int {
@@ -367,6 +386,8 @@ struct CodeHotspotSection: View {
 
 // MARK: - 重复与复杂度概览（明细在「复杂度风险」页）
 
+/// 概览段。**这一页已有 56pt 主角，所以重复率从 34pt 降到 22pt 读数带**
+/// ——「两个 28pt 以上数字争位」就是旧页「没有主次」的定量形态。
 struct CodeDuplicationSummarySection: View {
     let code: CodeMetrics
 
@@ -377,32 +398,28 @@ struct CodeDuplicationSummarySection: View {
             icon: .complexity,
             trailing: AnyView(RiskBadge(risk: code.overallRisk))
         ) {
-            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
-                    Text(NumberFormat.percent(code.duplicationRatio, precision: 1))
-                        .font(Theme.Typo.metricNumber.font)
-                        .foregroundStyle(Theme.Semantic.role(for: code.overallRisk).textColor)
-                    Text("代码行落在重复块内")
-                        .font(CodeGitType.prose(Theme.Typo.label))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: Theme.Spacing.xs)
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                DataReadoutBand {
+                    DataReadout(label: "重复代码率",
+                                value: NumberFormat.percent(code.duplicationRatio, precision: 1),
+                                caption: "的代码行落在重复块内",
+                                role: Theme.Semantic.role(for: code.overallRisk))
+                    DataBandSeparator()
+                    DataReadout(label: "重复块", value: NumberFormat.grouped(code.duplicatedBlocks.count),
+                                caption: "个")
+                    DataBandSeparator()
+                    DataReadout(label: "超长函数", value: NumberFormat.grouped(code.longFunctions),
+                                caption: "个")
+                    DataBandSeparator()
+                    DataReadout(label: "平均函数长度", value: "\(NumberFormat.grouped(code.averageFunctionLength)) 行",
+                                caption: "仅统计 ≥2 行的函数")
                 }
 
                 MiniBarGauge(fraction: code.duplicationRatio,
                              tint: Theme.Semantic.role(for: code.overallRisk).graphicColor,
                              height: DataGaugeHeight.metric)
-
-                DataReadoutBar {
-                    DataReadout(label: "重复块", value: NumberFormat.grouped(code.duplicatedBlocks.count),
-                                caption: "个")
-                    DataReadout(label: "超长函数", value: NumberFormat.grouped(code.longFunctions),
-                                caption: "个")
-                    DataReadout(label: "平均函数长度", value: "\(NumberFormat.grouped(code.averageFunctionLength)) 行",
-                                caption: "仅统计 ≥2 行的函数")
-                    DataReadout(label: "复杂度上榜", value: NumberFormat.grouped(code.topComplexFunctions.count),
-                                caption: "个函数")
-                }
-                .padding(.top, Theme.Spacing.xxs)
+                DataFootnote(text: "重复块 \(NumberFormat.grouped(code.duplicatedBlocks.count)) 个 · "
+                             + "复杂度上榜 \(NumberFormat.grouped(code.topComplexFunctions.count)) 个函数")
             }
         }
     }

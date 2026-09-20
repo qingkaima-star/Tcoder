@@ -36,6 +36,10 @@ enum GitInsightsEmptyState {
 
 /// 「分析的是哪个仓、怎么找到的」必须一眼可见：只要定位结果偏离了用户所选目录，
 /// 就用提示条说清楚，绝不静默地拿另一个仓库的数字冒充。
+///
+/// 本轮去掉了它外面那层 `GlassCard`（一块带描边的灰盒）。它承载的是**事实**而不是
+/// 一个可点对象，所以层级反而要往上走：改成与其他分区同形的 `GlassSection`。
+/// 偏离时的 `DataNotice` 原样保留 —— 那是状态告警，不是装饰。
 struct GitRepositorySourceSection: View {
     let git: GitInsights
     let selectedPath: String
@@ -48,25 +52,13 @@ struct GitRepositorySourceSection: View {
                            ? Theme.Semantic.warning : Theme.Semantic.info,
                        icon: .riskWarning, iconLabel: "仓库定位偏离")
         } else {
-            GlassCard(radius: Theme.Radius.md, padding: Theme.Spacing.md,
-                      spacing: Theme.Spacing.xxs) {
-                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
-                    ThemedIcon(.git, role: .badge)
-                        .foregroundStyle(Theme.Semantic.accent.textColor)
-                    Text(root.isEmpty ? "来源未记录（旧数据，重新分析后可见）" : root)
-                        .font(CodeGitType.path)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-                    Spacer(minLength: Theme.Spacing.xs)
-                    Text(Self.discoveryCaption(git))
-                        .monospacedDigit()
-                        .foregroundStyle(.tertiary)
+            GlassSection("仓库来源", subtitle: Self.discoveryCaption(git), icon: .git) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    DataFieldRow(label: "路径",
+                                 value: root.isEmpty ? "来源未记录（旧数据，重新分析后可见）" : root,
+                                 style: .path)
+                    DataFootnote(text: Self.discoveryDetail(git))
                 }
-                Text(Self.discoveryDetail(git))
-                    .monospacedDigit()
-                    .foregroundStyle(.tertiary)
             }
         }
     }
@@ -154,20 +146,26 @@ struct GitCommitTrendSection: View {
 
 /// 趋势图上方的读数条（WS-H §2.3 对标 Instruments 的统计读数行）。
 /// 只报数，不下结论：均值与峰值都是同一批桶的派生值。
+///
+/// 本轮两件事：`DataReadoutBar` 给四个数字画了一层井（井按契约 3 只许给表格/日志/
+/// 代码块），换成无面读数带；四个 `role` 全删 —— 峰值/均值/最冷清/桶数都是**测得值**，
+/// 旧代码把它们涂成 accent / healthy / neutral / info 四色，等于用颜色假装它们是四种结论。
 struct GitTrendReadoutBar: View {
     let buckets: [CommitBucket]
 
     var body: some View {
-        DataReadoutBar {
+        DataReadoutBand {
             DataReadout(label: "峰值桶", value: NumberFormat.grouped(summary.peak),
-                        caption: summary.unitLabel, role: Theme.Semantic.accent)
+                        caption: summary.unitLabel)
+            DataBandSeparator()
             DataReadout(label: "桶均值", value: String(format: "%.1f", summary.average),
-                        caption: summary.unitLabel, role: Theme.Semantic.healthy)
+                        caption: summary.unitLabel)
+            DataBandSeparator()
             DataReadout(label: "最冷清桶", value: NumberFormat.grouped(summary.lowest),
-                        caption: "\(NumberFormat.grouped(summary.emptyBuckets)) 个空桶",
-                        role: Theme.Semantic.neutral)
+                        caption: "\(NumberFormat.grouped(summary.emptyBuckets)) 个空桶")
+            DataBandSeparator()
             DataReadout(label: "桶数", value: NumberFormat.grouped(summary.count),
-                        caption: summary.spanCaption, role: Theme.Semantic.info)
+                        caption: summary.spanCaption)
         }
     }
 
@@ -228,10 +226,12 @@ struct GitActivitySection: View {
                     message: "提交记录里没有可解析的时间戳，因此无法给出任何时段结论。"
                 )
             } else {
-                GitActivityHeatmap(hourCounts: git.activityByHour, weekdayCounts: git.activityByWeekday)
-                Text(Self.busiestCaption(git))
-                    .monospacedDigit()
-                    .foregroundStyle(.tertiary)
+                // 24×7 矩阵是「有行列结构、需要横向对齐扫读」的内容，属于契约 3 里
+                // 允许进井的那一类。
+                DataTableWell {
+                    GitActivityHeatmap(hourCounts: git.activityByHour, weekdayCounts: git.activityByWeekday)
+                }
+                DataFootnote(text: Self.busiestCaption(git))
             }
         }
     }
@@ -250,27 +250,33 @@ struct GitRepositoryInfoSection: View {
 
     var body: some View {
         GlassSection("仓库信息", subtitle: "分析于 \(LogRecency.describe(git.analyzedAt))", icon: .git) {
-            VStack(spacing: DataRowMetrics.rowGap) {
-                DataFieldRow(label: "当前分支", value: git.branch.isEmpty ? "未记录" : git.branch,
-                             style: .text, valueColor: Theme.Semantic.accent.textColor)
-                DataRowSeparator()
-                DataFieldRow(label: "HEAD", value: git.headSHA.isEmpty ? "未记录" : git.headSHA,
-                             style: .path)
-                DataRowSeparator()
-                DataFieldRow(label: "远端", value: git.remoteURL.isEmpty ? "未配置" : git.remoteURL,
-                             style: .path)
-                DataRowSeparator()
-                DataReadoutBar {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                VStack(spacing: DataRowMetrics.rowGap) {
+                    // 分支名不再涂蓝：它是一段文本，不是一个可点对象。
+                    DataFieldRow(label: "当前分支", value: git.branch.isEmpty ? "未记录" : git.branch,
+                                 style: .text)
+                    DataRowSeparator()
+                    DataFieldRow(label: "HEAD", value: git.headSHA.isEmpty ? "未记录" : git.headSHA,
+                                 style: .path)
+                    DataRowSeparator()
+                    DataFieldRow(label: "远端", value: git.remoteURL.isEmpty ? "未配置" : git.remoteURL,
+                                 style: .path)
+                }
+
+                DataReadoutBand {
                     DataReadout(label: "触达文件", value: NumberFormat.grouped(git.filesTouched),
                                 caption: "个")
+                    DataBandSeparator()
+                    // 新增/删除保留语义色：增=绿、删=红 是契约 5 明确留色的那一类。
                     DataReadout(label: "新增", value: NumberFormat.signed(git.totalAdditions),
                                 caption: "行", role: Theme.Semantic.success)
+                    DataBandSeparator()
                     DataReadout(label: "删除", value: NumberFormat.signed(-git.totalDeletions),
                                 caption: "行", role: Theme.Semantic.danger)
+                    DataBandSeparator()
                     DataReadout(label: "首次提交", value: Self.firstCommitCaption(git),
                                 caption: Self.scopeCaption(git))
                 }
-                .padding(.top, Theme.Spacing.xxs)
             }
         }
     }
@@ -315,7 +321,7 @@ struct GitNestedCandidatesSection: View {
                 subtitle: "当前只分析了提交数最多的那一个；要单独分析其中某个，直接把它添加为项目",
                 icon: .package
             ) {
-                VStack(spacing: DataRowMetrics.rowGap) {
+                DataTableWell {
                     DataTableHeader(columns: Self.columns)
                     ForEach(git.nestedCandidates) { candidate in
                         GitNestedCandidateRow(candidate: candidate,
@@ -333,14 +339,20 @@ struct GitNestedCandidatesSection: View {
 struct GitRecentCommitsSection: View {
     let git: GitInsights
 
-    static let displayLimit = 20
+    /// 折叠态一行一提交，20 行会把这一组撑成一堵墙（自查清单第 4 条：一组 > 6 行
+    /// 同类条目就拆或收进可展开区）。收成 8 行 + 展开，**「显示 N / M 条」那句
+    /// 副标题跟着实际展示数走**，展开之后必须改成「已全部展示」，不能停在 8 上骗人。
+    static let displayLimit = 8
+
+    @State private var expanded = false
 
     var body: some View {
+        let rows = visibleRows
         GlassSection(
             "最近提交",
             subtitle: git.recentCommits.isEmpty
                 ? "无提交记录"
-                : "显示 \(NumberFormat.grouped(min(Self.displayLimit, git.recentCommits.count))) / "
+                : "显示 \(NumberFormat.grouped(rows.count)) / "
                     + "\(NumberFormat.grouped(git.recentCommits.count)) 条",
             icon: .processes
         ) {
@@ -354,17 +366,29 @@ struct GitRecentCommitsSection: View {
                     )
                 }
             } else {
-                VStack(spacing: DataRowMetrics.rowGap) {
-                    DataTableHeader(columns: DataColumns.recentCommits)
-                    let rows = Array(git.recentCommits.prefix(Self.displayLimit))
-                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, commit in
-                        GitCommitRow(commit: commit)
-                        if index < rows.count - 1 {
-                            DataRowSeparator()
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    DataTableWell {
+                        DataTableHeader(columns: DataColumns.recentCommits)
+                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, commit in
+                            GitCommitRow(commit: commit)
+                            if index < rows.count - 1 {
+                                DataRowSeparator()
+                            }
+                        }
+                    }
+                    if git.recentCommits.count > Self.displayLimit {
+                        DataDisclosureButton(expanded: expanded,
+                                             hiddenCount: git.recentCommits.count - Self.displayLimit,
+                                             noun: "条提交") {
+                            expanded.toggle()
                         }
                     }
                 }
             }
         }
+    }
+
+    private var visibleRows: [CommitRecord] {
+        expanded ? git.recentCommits : Array(git.recentCommits.prefix(Self.displayLimit))
     }
 }

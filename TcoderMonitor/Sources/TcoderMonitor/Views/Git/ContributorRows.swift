@@ -51,14 +51,10 @@ enum ContributorAnalysis {
         return .low
     }
 
-    /// 榜首之外不额外给" crown "，排名数字已经承载了顺序信息；这里只负责取前三的色阶语义。
-    static func rankRole(_ rank: Int) -> Theme.SemanticRole {
-        switch rank {
-        case 1: return Theme.Semantic.accent
-        case 2...3: return Theme.Semantic.healthy
-        default: return Theme.Semantic.neutral
-        }
-    }
+    /// 排名不再按名次发色。旧写法是榜首 accent 蓝、2~3 名 teal、其余 neutral ——
+    /// 那正是本轮根因 ④「蓝色同时是数据色和交互色」在贡献者页的形态：名次这个**顺序信息**
+    /// 已经由数字本身与排序表达了，再涂一层蓝只是让 1 号看起来像可点元素。
+    /// 现在一律纯墨（`rank` 是本页这一列的重音），颜色留给真正的语义（Bus Factor 结论、增删）。
 
     /// 目录热点：字典无序，按次数降序、目录名升序取前 3。
     static func topDirectories(_ author: AuthorStats, limit: Int = 3) -> [(String, Int)] {
@@ -101,14 +97,14 @@ struct ContributorRow: View {
                     HStack(spacing: Theme.Spacing.xs) {
                         Text("#\(NumberFormat.grouped(rank))")
                             .font(CodeGitType.number(Theme.Typo.microLabel))
-                            .foregroundStyle(ContributorAnalysis.rankRole(rank).textColor)
+                            .foregroundStyle(Theme.Palette.Surface.ink)
                         Text(ContributorAnalysis.displayName(author))
                             .font(CodeGitType.prose(Theme.Typo.body).weight(.semibold))
                             .lineLimit(1)
                     }
                     Text(ContributorAnalysis.email(author))
                         .font(CodeGitType.path)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     ContributorDirectoryChips(author: author)
@@ -124,7 +120,7 @@ struct ContributorRow: View {
                             + "触达 \(NumberFormat.grouped(author.filesTouched)) 个文件")
                     Text(author.lastActiveDescription)
                         .monospacedDigit()
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -189,7 +185,7 @@ struct ContributorDirectoryChips: View {
         if directories.isEmpty {
             Text("未记录目录")
                 .monospacedDigit()
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
         } else {
             HStack(spacing: Theme.Spacing.xs) {
                 ForEach(Array(directories.enumerated()), id: \.offset) { _, entry in
@@ -209,6 +205,10 @@ struct ContributorDirectoryChips: View {
 /// 单成员 24 小时分布，高度按该成员自己的峰值归一。
 /// 柱高与间距属图表几何（WS-I §9 豁免），但颜色与空档一律走令牌：
 /// 空格子用系统分隔色，不再自造 `Color.primary.opacity(0.06)`。
+///
+/// **性能（P-1）**：旧实现每行 24 根 `RoundedRectangle` + 24 个 `.help`（30 名作者 = 720 形状 +
+/// 720 tooltip 修饰），`peak` 每柱重算。现改为**单个 `Canvas` 一次画完 24 柱**（1 个视图实例、
+/// 1 次 `peak` 计算），悬停仍按格给 tooltip，信息零丢失。
 struct ContributorHourRow: View {
     let counts: [Int]
     let tint: Color
@@ -219,37 +219,72 @@ struct ContributorHourRow: View {
     private static let peakAlpha = Theme.Palette.Opacity.gradientMid
     /// 标签列宽：两个汉字 + 余量。
     private static let labelWidth: CGFloat = Theme.Layout.minHitTarget + Theme.Spacing.xxs
+    private static let bars = 24
+
+    @State private var hoveredHour: Int? = nil
 
     var body: some View {
         HStack(spacing: Theme.Spacing.xs) {
             Text("时段")
                 .monospacedDigit()
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
                 .frame(width: Self.labelWidth, alignment: .leading)
-            HStack(alignment: .bottom, spacing: Theme.Stroke.emphasis) {
-                ForEach(0..<24, id: \.self) { hour in
-                    bar(for: hour)
+            GeometryReader { geo in
+                let width = geo.size.width
+                Canvas { ctx, size in
+                    let gap = Theme.Stroke.emphasis
+                    let cellW = max(1, (size.width - gap * CGFloat(Self.bars - 1)) / CGFloat(Self.bars))
+                    for hour in 0..<Self.bars {
+                        let value = hour < counts.count ? counts[hour] : 0
+                        let ratio = Double(value) / Double(peak)
+                        let barH = value == 0
+                            ? Theme.Stroke.emphasis
+                            : max(Theme.Stroke.emphasis, size.height * CGFloat(ratio))
+                        let x = CGFloat(hour) * (cellW + gap)
+                        let rect = CGRect(x: x, y: size.height - barH, width: cellW, height: barH)
+                        let color: Color = value == 0
+                            ? Theme.Palette.Surface.separator
+                            : tint.opacity(Self.idleAlpha + (Self.peakAlpha - Self.idleAlpha) * ratio)
+                        ctx.fill(Path(roundedRect: rect, cornerRadius: 0), with: .color(color))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let point):
+                        let cellW = width / CGFloat(Self.bars)
+                        let idx = Int((point.x / cellW).rounded(.down))
+                        hoveredHour = (0..<Self.bars).contains(idx) ? idx : nil
+                    case .ended:
+                        hoveredHour = nil
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if let h = hoveredHour, h < counts.count {
+                        Text("\(String(format: "%02d", h)):00 · \(counts[h]) 次提交")
+                            .font(CodeGitType.number(Theme.Typo.microLabel))
+                            .padding(Theme.Spacing.xxs)
+                            // 悬停浮层悬在内容之上 —— 这正是 `.floating` 的定义场景。
+                            // 原来写 `.background(.regularMaterial, …)` 是把 M0 刚砍掉的材质
+                            // 请回内容层（无内容可折射时退化成平涂半透明灰，比页面底暗 6~13 阶），
+                            // 而 `cornerRadius: 4` 是令牌里没有的裸魔法数。投影与底一律由基座给。
+                            .surface(layer: .floating, shape: .rounded(Theme.Radius.sm))
+                            .offset(y: Self.height + 2)
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: Self.height)
         }
         .frame(height: Self.height)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("各小时提交分布，峰值 \(peak) 次")
+        .help(hoverHelp)
     }
 
     private var peak: Int { max(1, counts.max() ?? 0) }
 
-    @ViewBuilder
-    private func bar(for hour: Int) -> some View {
-        let value = hour < counts.count ? counts[hour] : 0
-        let ratio = Double(value) / Double(peak)
-        RoundedRectangle(cornerRadius: Theme.Radius.none, style: .continuous)
-            .fill(value == 0 ? Theme.Palette.Surface.separator
-                             : tint.opacity(Self.idleAlpha + (Self.peakAlpha - Self.idleAlpha) * ratio))
-            .frame(maxWidth: .infinity)
-            .frame(height: value == 0 ? Theme.Stroke.emphasis
-                                      : max(Theme.Stroke.emphasis, Self.height * CGFloat(ratio)))
-            .help("\(String(format: "%02d", hour)):00 · \(value) 次提交")
+    private var hoverHelp: String {
+        let peakHour = counts.enumerated().max(by: { $0.element < $1.element })?.offset ?? 0
+        return "各小时提交分布：峰值 \(peak) 次，最忙 \(String(format: "%02d", peakHour)):00"
     }
 }

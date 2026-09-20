@@ -158,7 +158,10 @@ struct CodeHotspotRow: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Text(CodeViewFormat.directoryTail(hotspot.path, root: root))
                             .font(CodeGitType.path)
-                            .foregroundStyle(.tertiary)
+                            // 路径是元数据、可以弱，但**不能用 `.tertiary`**：
+                            // 本轮把 `.tertiary` 从五页整体清零，因为「弱」这件事
+                            // 已经由 10pt 字号表达了，再降透明度就滑向"可以不读"。
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .frame(maxWidth: .infinity, alignment: .leading)
