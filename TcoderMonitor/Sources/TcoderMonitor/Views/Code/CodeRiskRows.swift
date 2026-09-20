@@ -353,7 +353,7 @@ struct CodeComplexityRow: View {
                             .truncationMode(.middle)
                         Text(CodeViewFormat.pathTail(hotspot.filePath, root: root))
                             .font(CodeGitType.path)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
