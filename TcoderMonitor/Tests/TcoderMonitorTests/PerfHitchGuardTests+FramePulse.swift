@@ -67,10 +67,10 @@ extension PerfHitchGuardTests {
     /// 两把尺子的分位定义必须一字对齐（`scripts/trace_report.py` 的 `percentile()`）。
     func testPercentileMatchesTheExternalRuler() {
         let values = (1...2340).map { Double($0) / 100.0 }   // 0.01ms ~ 23.40ms
-        XCTAssertEqual(percentile(values, 0.50), 11.71, accuracy: 0.001)
-        XCTAssertEqual(percentile(values, 0.95), 22.24, accuracy: 0.001)
-        XCTAssertEqual(percentile(values, 0.99), 23.17, accuracy: 0.001)
-        XCTAssertEqual(percentile([Double](), 0.5), 0, "空样本要如实给 0，不能崩")
+        XCTAssertEqual(FramePulse.percentile(values, 0.50), 11.71, accuracy: 0.001)
+        XCTAssertEqual(FramePulse.percentile(values, 0.95), 22.24, accuracy: 0.001)
+        XCTAssertEqual(FramePulse.percentile(values, 0.99), 23.17, accuracy: 0.001)
+        XCTAssertEqual(FramePulse.percentile([Double](), 0.5), 0, "空样本要如实给 0，不能崩")
     }
 
     func testFrameIntervalDistributionCountsHitchesAgainstRealHz() {
@@ -108,4 +108,49 @@ extension PerfHitchGuardTests {
 
     static func makeFormatter() -> DateFormatter { DateFormatter() }
 
+}
+
+
+// MARK: - 只被测试使用的分布类型（收官轮自 `Sources/.../FramePulseDistributions.swift` 搬入）
+//
+// 为什么搬：这两个类型不在生产路径上（`FramePulse` 的摘要行用的是 `percentile`），
+// 留在 `Sources/**` 就成了 `SourceFileReachabilityTests` 点名的「零调用实现文件」——
+// 那正是本仓规约禁止的形状（不许留无调用方的实现文件）。搬进测试目标之后，
+// 它们仍是断言要用的模型，但不再冒充生产代码。类型与语义一字未改。
+struct FrameIntervalDistribution {
+    var values: [Double] = []
+    var capacity = FramePulse.ringCapacity
+
+    mutating func record(_ ms: Double) {
+        guard ms > 0 else { return }
+        values.append(ms)
+        if values.count > capacity { values.removeFirst(values.count - capacity) }
+    }
+
+    func hitchCount(expectedIntervalMs: Double, factor: Double = 1.5) -> Int {
+        values.filter { $0 > expectedIntervalMs * factor }.count
+    }
+
+    var p50: Double { FramePulse.percentile(values, 0.50) }
+    var p95: Double { FramePulse.percentile(values, 0.95) }
+    var p99: Double { FramePulse.percentile(values, 0.99) }
+    var maximum: Double { values.max() ?? 0 }
+}
+
+/// 心跳看门狗的间隔统计（纯函数）。
+struct HeartbeatGapDistribution {
+    var values: [Double] = []
+    var capacity = FramePulse.heartbeatCapacity
+
+    mutating func record(gapMs: Double) {
+        guard gapMs >= 0 else { return }
+        values.append(gapMs)
+        if values.count > capacity { values.removeFirst(values.count - capacity) }
+    }
+
+    var p50: Double { FramePulse.percentile(values, 0.50) }
+    var p95: Double { FramePulse.percentile(values, 0.95) }
+    var p99: Double { FramePulse.percentile(values, 0.99) }
+    var maximum: Double { values.max() ?? 0 }
+    var isEmpty: Bool { values.isEmpty }
 }

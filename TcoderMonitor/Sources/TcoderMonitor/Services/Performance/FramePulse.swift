@@ -243,16 +243,16 @@ public final class FramePulse: @unchecked Sendable {
 
     /// 调用方必须已持有 `lock`（属性 `summaryLine` 与内部落盘共用这一份实现）。
     private func makeSummaryLineLocked() -> String {
-        let p50 = percentile(frameIntervals, 0.50)
-        let p95 = percentile(frameIntervals, 0.95)
-        let p99 = percentile(frameIntervals, 0.99)
+        let p50 = Self.percentile(frameIntervals, 0.50)
+        let p95 = Self.percentile(frameIntervals, 0.95)
+        let p99 = Self.percentile(frameIntervals, 0.99)
         let run = max(0.001, Date().timeIntervalSince(startedAt))
         return "hz=\(f1(measuredRefreshHz))(\(refreshRateSource)) "
             + "期望间隔=\(f2(expectedIntervalMs))ms "
             + "帧数=\(totalFrameCount) 帧间隔p50=\(f2(p50)) p95=\(f2(p95)) p99=\(f2(p99)) max=\(f2(largestIntervalMs))ms "
             + "hitch(>1.5x)=\(totalHitchCount) hitch/s=\(f2(Double(totalHitchCount) / run)) "
             + "心跳拍数=\(heartbeatTickCount) 心跳最大间隔=\(f1(largestHeartbeatGapMs))ms "
-            + "心跳p50=\(f1(percentile(heartbeatGaps, 0.50))) p95=\(f1(percentile(heartbeatGaps, 0.95))) "
+            + "心跳p50=\(f1(Self.percentile(heartbeatGaps, 0.50))) p95=\(f1(Self.percentile(heartbeatGaps, 0.95))) "
             + "带hitch的拍=\(ticksWithHitch)/\(heartbeatTickCount)"
     }
 
@@ -277,9 +277,9 @@ public final class FramePulse: @unchecked Sendable {
         defer { lock.unlock() }
         return Readout(refreshHz: measuredRefreshHz, refreshRateSource: refreshRateSource,
                        expectedIntervalMs: expectedIntervalMs, frameCount: totalFrameCount,
-                       frameP50Ms: percentile(frameIntervals, 0.50),
-                       frameP95Ms: percentile(frameIntervals, 0.95),
-                       frameP99Ms: percentile(frameIntervals, 0.99),
+                       frameP50Ms: Self.percentile(frameIntervals, 0.50),
+                       frameP95Ms: Self.percentile(frameIntervals, 0.95),
+                       frameP99Ms: Self.percentile(frameIntervals, 0.99),
                        frameMaxMs: largestIntervalMs, hitchCount: totalHitchCount,
                        heartbeatTicks: heartbeatTickCount,
                        heartbeatMaxGapMs: largestHeartbeatGapMs, ticksWithHitch: ticksWithHitch)
