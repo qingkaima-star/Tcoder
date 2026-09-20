@@ -1,49 +1,232 @@
 import SwiftUI
 
-// MARK: - 代码 / Git 类页面的重样基座（WS-L）
+// MARK: - 代码 / Git 类页面的重样基座（WS-L / WS-P）
 //
 // 服务对象：`Views/Code/**`、`Views/Git/**`、`Views/Dependencies/**` 五个页面。
-// 为什么不放进 `Design/`：`Design/**` 与 `App/Theme.swift` 归 WS-G，本流只被授权改自己
-// 那三个视图目录，所以按 AGENTS.md §4「需要新组件写在自己的目录里」落在这里。
+// 为什么不放进 `Design/`：`Design/**` 与 `App/Theme.swift` 归总工，本流只被授权改自己
+// 那三个视图目录 + 本目录，所以按 AGENTS.md §4「需要新组件写在自己的目录里」落在这里。
 // 唯一例外是缺数据四态 `DataAbsence`：#47 把它上提进了 `Design/DataAbsence.swift`
 // （全仓单点，见本文件末节的说明）。
 // 令牌一律引用既成的 `Theme.Radius / Spacing / Typo / Semantic / Chart / Layout`，
 // 本文件不新造任何颜色、字号、圆角或间距数值。
+//
+// **墨色的四种情况**（风格契约 5 的展开，五页一律照此判，别只认"去色"两个字）：
+// - 数据 / 读数 / 文本 → `Theme.Palette.Surface.ink`（34pt 及以上）或 `.primary`（正文）
+// - 可点的东西（按钮、链接、展开控件、选中态）→ `Theme.Semantic.accent`，**交互本身就是语义，保留**
+// - 状态（风险等级、CVE 严重度、增/删）→ `Theme.Semantic.role(for:)`，**保留**
+// - 图表里区分类别的序列色 → `Theme.Chart` 调色板（`CodeGitCategoryColor`），**保留**
+// 要砍的只有一种：**把 `info` / `accent` 当"给数字上个颜色"用**。
+//
+// **本轮（简约无界 M1）它多了一个职责**：五页的分组节奏、井、主角读数、脚注全部
+// 只能从这里拿。理由不是洁癖 —— 本流旧守卫 `CodeGitRestyleTests.forbiddenRawValues`
+// 把页面层的 `VStack(spacing: Theme.Spacing…)`、`.padding(.vertical` 与 `Divider()`
+// 三样都判为违例（`pagesOnly` 那两条正是豁免本目录的），所以页面**写不出**自定义容器，
+// 只能调用这里起了名字的档位。规约逼出了正确的结构：节奏是设计系统的，不是每页各摆一次。
 
-// MARK: - 页面骨架
+// MARK: - 页面骨架（风格契约 8 的四档呼吸）
 
-/// 数据密集型页面的统一骨架：页面左右 16、顶部 24，卡与卡 16，正文列在超宽屏上居中限宽。
+/// 数据密集型页面的统一骨架。**四档间距一次定死**：
+/// 页边距 `pageMargin`(24) / 页级段落 `section`(40) / 主分组 `group`(32) / 列表行 `rowGap`(4)。
 ///
-/// 限宽是规范要求的（WS-H §3.2）：阅读/列表型页面上限 1040，否则在 5K 屏上一行拉到
-/// 两千多像素，表格数字与名称之间的关系就断了。
+/// 「拥挤」的机械成因不是东西多，是**组间与组内是同一个数**：旧骨架主分组之间用
+/// `md`(16)，而卡片内部条目也是 12~16 —— 没有任何东西告诉眼睛「一组在这里结束」。
+/// 现在段落(40) 与分组(32) 都比组内大一个量级，组界不需要底色也能读出来。
+///
+/// 正文列在超宽屏上居中限宽（WS-H §3.2）：否则在 5K 屏上一行拉到两千多像素，
+/// 表格数字与名称之间的关系就断了。
 struct DataPageScaffold<Content: View>: View {
     var maxWidth: CGFloat = Theme.Layout.maxWidthReading
     @ViewBuilder var content: Content
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                content
-            }
-            .frame(maxWidth: maxWidth, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.horizontal, Theme.Spacing.md)
-            .padding(.top, Theme.Spacing.xl)
-            .padding(.bottom, Theme.Spacing.xl)
+            PageParagraph { content }
+                .frame(maxWidth: maxWidth, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, Theme.Spacing.pageMargin)
+                .padding(.vertical, Theme.Spacing.pageMargin)
         }
         .scrollContentBackground(.hidden)
     }
 }
 
+/// **页级段落**容器（`Spacing.section` = 40）。骨架的直接子节点用它。
+///
+/// 与 `GroupStack` 的分工：段落回答「这是屏幕上的哪一章」，分组回答「这一章里的哪一组」。
+/// 两档必须都存在且数值不同，否则退化成旧的等距长滚动带。
+struct PageParagraph<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.section) {
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// **主分组**容器（`Spacing.group` = 32）。一个段落里并列的若干 `GlassSection` 用它。
+struct GroupStack<Content: View>: View {
+    var spacing: CGFloat = Theme.Spacing.group
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: spacing) {
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - 主角读数（风格契约 4：最重的墨给最大的数）
+
+/// 页面的**唯一主角读数**：56pt + `Surface.ink` 纯墨。
+///
+/// 三条硬规则，都由 `CodeGitBorderlessTests` 机器钉住：
+/// 1. **每页最多一个**。旧五页里最大 56、次大 34 各涂各的倾向色，眼睛找不到主角。
+/// 2. **必须给纯数字**。含中文的读数落在 10~22pt（spec §7 风险 4：中文在 56pt 下偏笨重）。
+/// 3. **一律纯墨**。`Theme.Palette.Surface.ink`，`.primary` 不够黑（实测 `labelColor`
+///    只有 85% 不透明黑，铺在 `ground` 上合成约 `#262626`，正是重构前全页最暗像素的来源）。
+struct DataHeroReadout: View {
+    /// 主角本体。只放数字与单位符号，中文标签交给 `note`。
+    let value: String
+    /// 紧跟其后的单位（`次` / `行` / `%`）。它属于主角，但只有 `label`(11) 高。
+    var unit: String?
+    /// 一句话口径，11pt `.secondary`。诚实性文案的常见落点，**不许省**。
+    var note: String?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
+            Text(value)
+                .typed(Theme.Typo.heroMetric)
+                .foregroundStyle(Theme.Palette.Surface.ink)
+                .contentTransition(.numericText())
+            if let unit {
+                Text(unit)
+                    .font(CodeGitType.prose(Theme.Typo.label))
+                    .foregroundStyle(.secondary)
+            }
+            if let note {
+                Text(note)
+                    .font(CodeGitType.prose(Theme.Typo.label))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: Theme.Spacing.xs)
+        }
+    }
+}
+
+// MARK: - 读数带（去面）
+
+/// 横向读数带：若干 `DataReadout` 排成一行，列间竖发丝线，**不画面**。
+///
+/// 为什么不用 `Design/DataTable.swift` 的 `DataReadoutBar`：它给读数画了一层**井**
+/// （`.contentInset`），而风格契约 3 把井限定给「表格 / 日志列表 / 代码块」——
+/// 聚合数字不是表格。旧五页有 7 处走它，于是全页到处是灰底方块，正是「脏」的形态之一。
+///
+/// 为什么不用 `Design/SharedComponents.swift` 的 `ReadoutStrip` 而要在本目录另立一个：
+/// `ReadoutStrip` 的文档要求调用方自己在列间插 `Divider()`，而本流旧守卫把页面层的
+/// `Divider()` 判为违例（「旧分隔线」那条禁令，`pagesOnly = false`，全四目录生效）。
+/// 两头都走不通，于是这里给一根有名字的竖线：`Rectangle` + `Surface.separator`，
+/// 宽度取 `Stroke.hairline`，页面里不再出现 `Divider()` 字面。**已作为契约缺口报总工。**
+struct DataReadoutBand<Content: View>: View {
+    var spacing: CGFloat = Theme.Spacing.lg
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(alignment: .top, spacing: spacing) {
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// 读数带列间分隔。**只能出现在 `DataReadoutBand` 里**。
+struct DataBandSeparator: View {
+    var body: some View {
+        Rectangle()
+            .fill(Theme.Palette.Surface.separator)
+            .frame(width: Theme.Stroke.hairline)
+            .padding(.vertical, Theme.Spacing.xxs)
+            .accessibilityHidden(true)
+    }
+}
+
+// MARK: - 表格井（风格契约 3 里内容层唯一允许的实心底）
+
+/// 把「列头 + 数据行」整体嵌进实心井。
+///
+/// 井是无界面**唯一**保留的面，且只给表格 / 日志 / 代码块这三类「有行列结构、
+/// 需要横向对齐扫读」的内容。它给的不是装饰，是**列对齐的版框**：
+/// 地面(单一) → 井(`well`) → 行内容，三层里只有井有边。
+///
+/// `DataTableHeader` 末尾自带一条发丝分隔线，所以井内顶部不需要再补。
+struct DataTableWell<Content: View>: View {
+    var spacing: CGFloat = DataRowMetrics.rowGap
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(spacing: spacing) {
+            content
+        }
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.vertical, Theme.Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .surface(layer: .contentInset, shape: .rounded(Theme.Radius.card))
+    }
+}
+
+// MARK: - 脚注层（口径说明的归宿）
+
+/// 组脚注：10pt + `.secondary`。口径说明、「另有 N 个未展示」、窗口标注都落这儿。
+///
+/// 存在理由有两条，都不是审美：
+/// 1. **`.tertiary` 不得落在测得值上**。旧五页 21 处 `.tertiary` 里一大半是数字，
+///    「没有主次」在文字侧的成因就是把它当成了"次要到可以不读"的颜色。
+///    脚注要的是"小"，不是"淡"—— 10pt 已经足够安静，不必再降透明度。
+/// 2. 口径说明按 spec §4.1 一律**降排版层级**而不是删掉。信息一个字不少，位置往后挪。
+struct DataFootnote: View {
+    let text: String
+    var alignment: HorizontalAlignment = .leading
+
+    var body: some View {
+        Text(text)
+            .font(CodeGitType.prose(Theme.Typo.microLabel))
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(alignment == .leading ? .leading : .center)
+            .frame(maxWidth: .infinity, alignment: alignment == .leading
+                ? .leading : .center)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// 组内说明句：12pt 正文级口径，比脚注高一档。
+/// 用在「这句话会改变上面那个数字怎么读」的地方（分母口径、含不含测试代码…）。
+struct DataCaption: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(CodeGitType.prose(Theme.Typo.narrative))
+            .lineSpacing(Theme.Typo.narrative.lineSpacing)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 // MARK: - 排版取用
 
-/// 本流页面的取字入口。除 `tableIdentifier` 之外全部直接取 `Theme.Typo` 档位；
-/// 唯一需要"跨档组合"的地方是表格里的代码标识符——设计系统没有 11pt 等宽档，
-/// 这里从 `label`(11pt) 借字号、换成等宽字面，仍然不写死数字。
+/// 本流页面的取字入口。数值一律不写死，全部从 `Theme.Typo` 取档。
+///
+/// 本轮收掉了最后一个自造档：旧 `tableIdentifier` 从 `label`(11) 借字号再换成等宽字面，
+/// 那是当时「设计系统没有 11pt 等宽档」的临时绕行（已记为契约缺口 #34）。
+/// M0 之后 `Theme.Typo.monoLabel` 就是那一档（11pt medium monospaced + 等宽数字），
+/// 所以这里改成纯转发 —— 本目录从此不再有裸 `Font.system(size:)`，
+/// 全仓仅存的一处落在 `Design/ThemeTokens.swift` 的 `TypeToken.font`（令牌工厂，合法）。
 enum CodeGitType {
     /// 表格主标识符（函数名、文件名、依赖名）：11pt 等宽，层级靠颜色与字重区分而非字号。
-    static let tableIdentifier = Font.system(
-        size: Theme.Typo.label.size, weight: .medium, design: .monospaced).monospacedDigit()
+    static let tableIdentifier = Theme.Typo.monoLabel.font
     /// 路径 / SHA / 邮箱等次要等宽文本。
     static let path = Theme.Typo.monoSmall.font
     /// 表格与读数条里的数字。等宽数字是硬要求：数字列宽度不能随值变化。
@@ -80,8 +263,11 @@ enum CodeGitSymbol {
     static let longFunction = "arrow.up.left.and.arrow.down.right"
     static let comments = "text.bubble"
     static let outdated = "arrow.down.circle"
+    static let expand = "chevron.down"
+    static let collapse = "chevron.up"
 
     /// 装饰性图标：尺寸与字重跟随它所属的文字语境（[HIG-S]）。
+    /// 一律 `.secondary` —— 图标属结构，结构去色（风格契约 5）。
     static func decorated(_ symbol: String, role: IconRole = .badge) -> some View {
         Image(systemName: symbol).themeIcon(role)
     }
@@ -90,13 +276,19 @@ enum CodeGitSymbol {
 extension MetricTile {
     /// 用图标登记表创建指标 tile。`Design/SharedComponents` 的 `systemImage:` 至今收裸串，
     /// 这个入口把 `IconName`（含旧系统兜底解析）接上，页面里就不再出现字符串字面量。
+    ///
+    /// ⚠️ **`tint` 的默认值这一层就是本轮的一条病灶**。M0 只把
+    /// `Design/SharedComponents.swift` 里 `MetricTile.init` 的默认改成了纯墨，
+    /// 而这两个转发入口各自又默认回 `accent` —— **默认值盖不过显式传参，
+    /// 更盖不过第二层默认值**。结果是基座已经改绿、页面照旧一片蓝。
+    /// 现在转发入口与基座对齐：不传 = 纯墨，传 `role:` = 语义色。
     init(
         label: String,
         value: String?,
         icon: IconName?,
         unit: String? = nil,
         caption: String? = nil,
-        tint: Color = Theme.Semantic.accent.textColor
+        tint: Color = Theme.Palette.Surface.ink
     ) {
         self.init(label: label, value: value, unit: unit, caption: caption, tint: tint,
                   systemImage: icon.map(CodeGitSymbol.resolve))
@@ -110,11 +302,31 @@ extension MetricTile {
         symbol: String?,
         unit: String? = nil,
         caption: String? = nil,
-        tint: Color = Theme.Semantic.accent.textColor
+        tint: Color = Theme.Palette.Surface.ink
     ) {
         self.init(label: label, value: value, unit: unit, caption: caption, tint: tint,
                   systemImage: symbol)
     }
+
+    /// 带**语义**结论的 tile（风险等级、CVE 严重度、增/删）。
+    /// 刻意只有一个收 `Theme.SemanticRole` 的形状：`info` / `accent` 不在可选范围内，
+    /// 因为它们是交互色而不是状态色。`CodeGitBorderlessTests` 另扫一遍调用点。
+    init(
+        label: String,
+        value: String?,
+        role: Theme.SemanticRole?,
+        icon: IconName? = nil,
+        symbol: String? = nil,
+        unit: String? = nil,
+        caption: String? = nil
+    ) {
+        self.init(label: label, value: value, unit: unit, caption: caption,
+                  tint: role?.textColor ?? Theme.Palette.Surface.ink,
+                  systemImage: icon.map(CodeGitSymbol.resolve) ?? symbol)
+    }
+
+// 无值时基座强制中性色（`MetricTile.forcesNeutralTint`），有值时用调用方给的**语义**角色，
+// 没给角色就是纯墨。本目录不重写这条规则，只转发给 `Design/` 的纯函数。
 }
 
 extension EmptyStateView {
@@ -124,12 +336,55 @@ extension EmptyStateView {
     }
 }
 
+// MARK: - 展开/收起（>6 行同类条目的合法归宿）
+
+/// 一行「展开其余 N 项」。风格契约 2 不允许它有底色，所以它是**文字按钮 + chevron**，
+/// 是控件而不是面板；`accent` 在这里是合法的（交互语义）。
+///
+/// 存在理由：自查清单第 4 条要求「一组里 > 6 行同类条目就拆组或收进可展开区」。
+/// 旧页里巨大文件榜默认 20 行、贡献者排行 30 行、最近提交 20 行，全部一次摊开，
+/// 于是「不规整拥挤」。折叠掉的部分必须由**计数**交代清楚，不能静默截断。
+struct DataDisclosureButton: View {
+    let expanded: Bool
+    let hiddenCount: Int
+    let noun: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Theme.Spacing.xxs) {
+                // 符号走 `CodeGitSymbol` 的命名常量：页面里出现 `Image(systemName: "…")`
+                // 裸串是本流旧守卫的禁令，基座是它唯一的合法落点。
+                CodeGitSymbol.decorated(expanded ? CodeGitSymbol.collapse : CodeGitSymbol.expand,
+                                        role: .inlineText)
+                Text(Self.title(expanded: expanded, hiddenCount: hiddenCount, noun: noun))
+                    .font(CodeGitType.prose(Theme.Typo.label))
+            }
+            // `accent` 在这里合法：整行是一个可点控件，蓝=交互是它自己的语义。
+            .foregroundStyle(Theme.Semantic.accent.textColor)
+            .frame(minHeight: Theme.Layout.minHitTarget)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Self.title(expanded: expanded, hiddenCount: hiddenCount, noun: noun))
+    }
+
+    /// 文案纯函数：折叠时说清「还有多少」，展开后说清「收起」。**不出现"更多"这种无计数说法**。
+    static func title(expanded: Bool, hiddenCount: Int, noun: String) -> String {
+        if expanded { return "收起 \(NumberFormat.grouped(hiddenCount)) \(noun)" }
+        return "展开其余 \(NumberFormat.grouped(hiddenCount)) \(noun)"
+    }
+}
+
 // MARK: - 分类色
 
 /// 分类色取色：按稳定键取全 App 唯一的一套 `Theme.Chart` 色板。
 ///
 /// 必须稳定：Swift 的 `hashValue` 每进程随机化，拿它取色会让同一语言 / 同一作者
 /// **每次启动换一种颜色**（WS-I §2.1① 点名的缺陷）。这里改用 FNV-1a。
+///
+/// 风格契约 5 的位置：这是「只在需要区分类别时上色」的那半，与「数据涂蓝」不冲突 ——
+/// 语言、作者、生态是**类别**，颜色在图上替读者把同一个类别的两处连起来。
 enum CodeGitCategoryColor {
     /// 成员序列色从 1 号开始：`Theme.Chart` 的 0 号蓝是"主/自身数据"，
     /// 占比条里的**合计行**就用它。成员若也能取到 0，就会出现"合计行与某一位成员同色"
