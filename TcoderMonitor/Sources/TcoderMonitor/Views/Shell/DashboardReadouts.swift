@@ -120,13 +120,13 @@ struct CPUHistoryChart: View {
                 y: .value("CPU", snapshot.cpuUsage * 100)
             )
             .interpolationMethod(.monotone)
-            .foregroundStyle(Theme.Chart.areaGradient(at: 0))
+            .foregroundStyle(ChartSeries.gradient())
             LineMark(
                 x: .value("时间", snapshot.timestamp),
                 y: .value("CPU", snapshot.cpuUsage * 100)
             )
             .interpolationMethod(.monotone)
-            .foregroundStyle(Theme.Chart.color(at: 0))
+            .foregroundStyle(ChartSeries.lineColor)
             .lineStyle(StrokeStyle(lineWidth: Theme.Stroke.chartLine))
         }
         .chartYScale(domain: 0...100)

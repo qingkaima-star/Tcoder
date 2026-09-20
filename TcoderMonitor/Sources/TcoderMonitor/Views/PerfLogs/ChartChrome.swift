@@ -13,49 +13,8 @@ import Charts
 //   3. **轴必须自报口径**：单位写在刻度上（`%` / `条`），收窄过要写明不是 0 起点，
 //      否则两张同构的 0…100 图会被读成同一件事（总工截图复核提的问题 3）。
 
-/// 三页图表的唯一落笔口径。
-///
-/// **「简约无界」把这里的号位表整个删掉了**（原 `cpu = 0 / memory = 2 / disk = 4 / network = 6`
-/// 四枚 `Theme.Chart` 分类色）。删的理由不是审美，是**那些色在这里没有对手**：
-/// `LiveSeriesChart` 是单序列图，一张图只有一条线，"按号位取色"解决的问题
-/// （同一张图里分辨哪条是哪条）在三页里根本不存在。于是蓝/橙/紫/青四枚色
-/// 全部变成「倾向色涂在非语义数据上」——磁盘吞吐既不比网络好也不比网络差，
-/// 但旧代码把它涂成紫色、网络涂成青色，眼睛就无端读出「这两件事有区别」来。
-/// 风格契约 5「数据序列默认灰阶，只在需要区分类别时上色」在这一页的落地就是删掉旋钮。
-///
-/// 保留的只有**语义**那一支：严重度 / 风险 / 分数档是有序的，
-/// 走 `Theme.Semantic` 才能保住「崩溃比错误更深」的单调色阶。
-enum ChartSeries {
-    /// 单序列曲线的主线色：纯墨。
-    ///
-    /// 曲线加粗到 `Stroke.emphasis`(2pt) 压在面积之上，所以顶色降到 0.16 也不会
-    /// 出现总工截图复核问题 1 里「面积把自己的线糊住、整张图读成纯色矩形」的情况。
-    static let lineColor = Theme.Palette.Surface.ink
-
-    /// 面积顶色。**走令牌，不留字面量**。
-    ///
-    /// 旧写法是这个常量自己等于 `0.16`，注释写着「要还原成规范值就把本常量改回
-    /// `Opacity.gradientTop`」——那正是本轮的病灶形状：令牌 `gradientAreaSoft` 已经
-    /// 定义好了（值就是 0.16），页面却还在自己养一份。现在两份合成一份，
-    /// `PerfLogsBorderlessTests` 钉住这条不许回退。
-    static let areaTopOpacity = Theme.Palette.Opacity.gradientAreaSoft
-
-    /// 面积渐变：与主线同色，`areaTopOpacity` → `gradientFloor`。
-    static func gradient(for color: Color = lineColor) -> LinearGradient {
-        LinearGradient(
-            stops: [
-                .init(color: color.opacity(areaTopOpacity), location: 0),
-                .init(color: color.opacity(Theme.Palette.Opacity.gradientFloor), location: 1),
-            ],
-            startPoint: .top, endPoint: .bottom)
-    }
-
-    /// 严重度 / 风险 / 分数是**有序**语义，走语义角色的图形层，
-    /// 这样「崩溃比错误更深」在色阶上保持单调。
-    static func color(for severity: LogSeverity) -> Color { Theme.Semantic.role(for: severity).graphicColor }
-    static func color(for risk: RiskLevel) -> Color { Theme.Semantic.role(for: risk).graphicColor }
-    static func color(forScore score: Int?) -> Color { Theme.Semantic.role(forScore: score).graphicColor }
-}
+// `ChartSeries` 已上提进 `Design/ChartTokens.swift`（本轮 M1 集成）：
+// 它是全仓图表取色的唯一规则，另两条页面流也要用同一份，不能各养一套。
 
 /// 时间轴刻度方式。秒级用于实时曲线，天级用于日志与评分历史。
 enum TimeAxis: Equatable {
