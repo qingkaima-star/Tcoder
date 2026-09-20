@@ -16,6 +16,8 @@ struct PerformanceProcessGroupsCard: View {
     let groups: [ProcessGroupSnapshot]
     let context: SampleContext
     let isTruncated: Bool
+    /// 节拍文案（唯一真值派生），透传给组卡的「下一步」提示。
+    let intervalText: String
     let onRemove: (UUID) -> Void
 
     var body: some View {
@@ -49,6 +51,7 @@ struct PerformanceProcessGroupsCard: View {
                 PerformanceGroupCard(group: item,
                                      context: context,
                                      isTruncated: isTruncated,
+                                     intervalText: intervalText,
                                      onRemove: { onRemove(item.id) })
             }
         }
@@ -68,6 +71,7 @@ struct PerformanceGroupCard: View {
     let group: ProcessGroupSnapshot
     let context: SampleContext
     let isTruncated: Bool
+    let intervalText: String
     let onRemove: () -> Void
 
     private static let cellColumns = [GridItem(.flexible(), spacing: Theme.Spacing.md),
@@ -105,7 +109,8 @@ struct PerformanceGroupCard: View {
             ThemedIcon(statusIcon, role: .badge)
                 .foregroundStyle(PerformanceGroupCard.badgeRole(for: state).textColor)
                 .help(PerformanceGroupCard.copy(for: state, pattern: pattern,
-                                                totalProcesses: context.snapshot?.processCount).title)
+                                                totalProcesses: context.snapshot?.processCount,
+                                                intervalText: intervalText).title)
             SemanticBadge(PerformanceGroupCard.badgeText(for: state),
                           role: PerformanceGroupCard.badgeRole(for: state))
             Spacer(minLength: Theme.Spacing.xs)
@@ -154,14 +159,20 @@ struct PerformanceGroupCard: View {
     }
 
     /// 三段式：现状 / 为什么 / 下一步（《40 WS-H》§7.4）。
-    static func copy(for state: GroupMatchState, pattern: String, totalProcesses: Int?) ->
+    ///
+    /// `intervalText` 是节拍文案，**默认值也从唯一真值算出来**（性能 spec §5.1：
+    /// 页面里再写一个 `1.5 秒` 字面量，节拍一改界面就说谎）。调用方有 monitor 时应显式传
+    /// `monitor.sampleIntervalText`；默认值只为让纯函数面在单测里可直接调。
+    static func copy(for state: GroupMatchState, pattern: String, totalProcesses: Int?,
+                     intervalText: String =
+                        "\(Double(MachSystemMonitor.defaultSampleIntervalMilliseconds) / 1000) 秒") ->
         (title: String, message: String, nextStep: String) {
         let scanned = totalProcesses.map { NumberFormat.grouped($0) } ?? Live.missing
         switch state {
         case .waitingFirstSample:
             return ("正在采集首个样本",
                     "首个样本到达后才按匹配模式统计，不预先给出估算值。",
-                    "保持「继续」状态，下一帧（约 1.5 秒后）会立即出数。")
+                    "保持「继续」状态，下一帧（约 \(intervalText)后）会立即出数。")
         case .pausedWithoutMatch:
             return ("采样已暂停",
                     "暂停期间不再查找进程，这里显示的是最后一次采集的结果：全系统 \(scanned) 个进程里没有命中「\(pattern)」。",
@@ -192,7 +203,8 @@ struct PerformanceGroupCard: View {
 
     private var emptyBlock: some View {
         let copy = PerformanceGroupCard.copy(for: state, pattern: pattern,
-                                             totalProcesses: context.snapshot?.processCount)
+                                             totalProcesses: context.snapshot?.processCount,
+                                             intervalText: intervalText)
         return VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             Text(copy.title)
                 .font(Theme.Typo.cardTitle.font)

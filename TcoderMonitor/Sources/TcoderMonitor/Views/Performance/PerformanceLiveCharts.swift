@@ -10,6 +10,9 @@ struct PerformanceLiveCharts: View {
     let points: [SystemSnapshot]
     let context: SampleContext
     let windowSeconds: TimeInterval
+    /// 节奏文案，由页面从 `MachSystemMonitor` 的唯一真值派生（暂停时显示"采样已暂停"，
+    /// 而不是继续宣称一个固定节奏）。页面里不许再写第二个节拍字面量（性能 spec §5.1）。
+    let cadenceText: String
 
     /// 两个点连出来是一条直线，看起来像「趋势」，其实是采样未到；三个点起才画。
     private static let minPointsToPlot = 3
@@ -34,7 +37,7 @@ struct PerformanceLiveCharts: View {
     }
 
     private var subtitle: String {
-        "最近 \(NumberFormat.grouped(points.count)) 点 · 每 1.5 秒 · 窗口约 \(Int(windowSeconds)) 秒"
+        "最近 \(NumberFormat.grouped(points.count)) 点 · \(cadenceText) · 窗口约 \(Int(windowSeconds)) 秒"
     }
 
     private var trustedMemory: [SystemSnapshot] { SystemReadings.trustedMemoryPoints(points) }

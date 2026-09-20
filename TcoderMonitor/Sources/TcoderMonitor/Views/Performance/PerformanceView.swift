@@ -15,16 +15,22 @@ struct PerformanceView: View {
 
     @State private var sortKey: ProcessSortKey = .cpuCores
 
-    /// 曲线滚动窗口点数。`MachSystemMonitor` 按 1500 毫秒采样 → 90 点 ≈ 135 秒。
+    /// 曲线滚动窗口点数。**只给点数**——节拍与窗口秒数都由 `MachSystemMonitor`
+    /// 那份唯一真值派生（性能 spec §5.1：页面里再写一个 `1.5` 就是第二个真值来源，
+    /// 节拍一改，界面必然说谎）。90 点 × 1.5 秒 ≈ 135 秒。
     private static let chartPointLimit = 90
-    private static let sampleIntervalText = "1.5 秒"
-    private static var windowSeconds: TimeInterval { Double(chartPointLimit) * 1.5 }
 
     private var monitor: MachSystemMonitor { state.monitor }
     private var context: SampleContext { SampleContext.from(monitor) }
 
+    /// 节奏文案。**暂停时不许继续宣称"每 X 秒"**——那时屏幕上的数不再按那个节奏更新。
+    /// 读数本身仍是真的（末值有效），说谎的是"节奏"这两个字（性能 spec §5.1 第 4 条）。
+    private var cadenceText: String {
+        context.isPaused ? "采样已暂停" : "每 \(monitor.sampleIntervalText)"
+    }
+
     var body: some View {
-        // 版框：组间 32 / 页边距 24 / 顶部段落 40（风格契约 8），三页共用一份。
+        // 版框走基座那一份页骨架（组间 32 / 页边距 24 / 顶部段落 40，全仓只许一份）。
         Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthDense) {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 header
@@ -34,10 +40,12 @@ struct PerformanceView: View {
             PerformanceSystemTiles(context: context)
             PerformanceLiveCharts(points: chartWindow,
                                   context: context,
-                                  windowSeconds: Self.windowSeconds)
+                                  windowSeconds: monitor.windowSeconds(pointCount: Self.chartPointLimit),
+                                  cadenceText: cadenceText)
             PerformanceProcessGroupsCard(groups: monitor.trackedGroups,
                                          context: context,
                                          isTruncated: monitor.processMetricsTruncated,
+                                         intervalText: monitor.sampleIntervalText,
                                          onRemove: { monitor.removeGroup(id: $0) })
             PerformanceProcessTableCard(rows: rankedProcesses,
                                         context: context,
@@ -80,7 +88,7 @@ struct PerformanceView: View {
         HStack(spacing: Theme.Spacing.xs) {
             Text("上次采样 \(DateFormat.sinceDescription(monitor.lastSampleAt))"
                  + " · 采样点 \(NumberFormat.grouped(monitor.history.count))"
-                 + " · 间隔 \(Self.sampleIntervalText)")
+                 + " · 间隔 \(monitor.sampleIntervalText)")
                 .typed(Theme.Typo.label)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
