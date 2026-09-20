@@ -322,6 +322,24 @@ final class BorderlessSurfaceGuardTests: XCTestCase {
                       "唯一那份页骨架必须住在 Design/，实测：\(decls)")
     }
 
+    /// 全仓图表取色规则只许存在**一份**，且住在 `Design/`。
+    ///
+    /// 起因（M1 集成时实测）：三家并行各长出一套图表取色约定 —— WS-W 用纯墨主线、
+    /// WS-O 的总览曲线用 `Theme.Chart.color(at: 0)`（索引色板 = 蓝）、WS-P 的 Git 图
+    /// 用第三套透明度组合。结果**同一条 CPU 历史曲线在总览上是蓝的、在性能页上是黑的**。
+    /// 这是「东一个系一个」在代码层最后的形态，所以把它钉成机器断言。
+    func test_chartColorRuleHasExactlyOneHome() throws {
+        let all = try Self.sourceFiles(under: "")
+        let decls = all.filter { file in
+            Self.codeLines(file.content).contains { line in
+                let t = line.trimmingCharacters(in: .whitespaces)
+                return t.hasPrefix("enum ChartSeries") || t.hasPrefix("struct ChartSeries")
+            }
+        }.map(\.path)
+        XCTAssertEqual(decls, ["Design/ChartTokens.swift"],
+                       "`ChartSeries` 必须只有一份且住在 Design/（全仓图表取色唯一规则）。实测：\(decls)")
+    }
+
     // MARK: - 元测试：确认四个扫描器都不是假绿
 
     func test_scannersCatchSyntheticViolations() {
