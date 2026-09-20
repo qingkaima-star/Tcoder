@@ -15,6 +15,8 @@
 #   SWITCH_MODE=argv        每页起一个新实例并用 -selectedDetailSection 传页名（默认 single）
 #   SWITCH_MODE=single      只起一个实例，靠 defaults write 实时切页（SwiftUI @AppStorage 会响应）
 #   SKIP_PROVENANCE=1       跳过"dist 二进制 == 当前源码"证明（默认不跳，跳了截图就不可信）
+#   CAPTURE_TERM=1          收尾对**本脚本自己起的、二进制路径核对一致的**那一个 pid 发 SIGTERM；
+#                           默认只通报 pid 等人工 Cmd+Q。绝不按 bundle id 广播 quit（那会全机生效）
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -73,13 +75,12 @@ if [ -n "$STRAY" ]; then
 fi
 
 # ── 拍图互斥锁（2026-09-20 由双总工裁定加入）──────────────────────────────
-# 本脚本收尾用 `osascript -e "tell application id \"com.tcoder.monitor\" to quit"`
-# 请实例自行退出。**按 bundle id 的 quit 是全机生效的**：它会命中该 bundle 的
-# **所有**实例，不只是本脚本自己起的那个。三条页面流并行取证时，一家收尾会把
-# 另两家正在拍的实例一起退掉 —— 那两家的九页会拍成空窗或半屏，而且失败是静默的
-# （脚本只看文件是否非空，退得早的实例也可能留下"非空但是错的"图）。
-#
-# 不用 kill/pkill：仓库规约明令不得向任何进程发信号。
+# 加入时的直接理由是"收尾那句 `osascript tell application id … to quit` 按 bundle id
+# **全机生效**，一家收尾会把另两家正在拍的实例一起退掉"。**那条 quit 已在下面被移除**
+# （见 `retire_instance`），但锁仍然保留，因为还剩两条真的互斥：
+#   ① 深色/浅色是靠 `osascript … set dark mode` 翻**全机外观**翻出来的，一家翻另一家就白拍；
+#   ② 截图取的是屏幕上的真实窗口，两家同屏会互相遮挡。
+# 不用 kill/pkill 广播：仓库规约是不向任何进程发信号；要退出也只退**自己起的**那一个。
 # 用 `mkdir` 取锁，因为它是原子操作，且不依赖任何额外工具。
 CAPTURE_LOCK="${CAPTURE_LOCK:-/tmp/tcoder-capture.lock}"
 CAPTURE_LOCK_TIMEOUT="${CAPTURE_LOCK_TIMEOUT:-900}"
@@ -157,6 +158,25 @@ launch_instance() {  # launch_instance [页名]；echo pid
   echo "$!"
 }
 
+# 退出实例：**绝不按 bundle id 广播 quit**（那句会命中全机所有实例，包括别的流正在拍的、
+# 以及正在做帧测量的那一个——2026-09-20 三家互杀到九页拍成 0 张就是这么来的）。
+# 默认只通报 pid 请人工 Cmd+Q；`CAPTURE_TERM=1` 才发信号，且**只发给本脚本自己起的、
+# 并且二进制路径核对一致的那一个 pid**（核对失败就只通报，不动手）。
+retire_instance() {  # retire_instance <pid> <页名>
+  local pid="$1" name="${2:-}" who
+  case "$pid" in ''|*[!0-9]*) return 0 ;; esac
+  ps -p "$pid" > /dev/null 2>&1 || return 0     # 已经不在了，什么都不做
+  who=$(ps -p "$pid" -o comm= 2>/dev/null | tr -d ' ')
+  if [ "${CAPTURE_TERM:-0}" = "1" ] && [ "$who" = "$BIN" ]; then
+    kill -TERM "$pid" 2>/dev/null || true
+    echo "    已对自己起的 pid $pid（$name）发 SIGTERM"
+  else
+    [ "${CAPTURE_TERM:-0}" = "1" ] && [ "$who" != "$BIN" ] \
+      && echo "    ⚠ pid $pid 的二进制是「$who」不是 $BIN —— 不是本脚本起的，拒绝发信号"
+    echo "    待人工退出：pid $pid（$name）在 $SANDBOX 沙箱里，不影响用户状态"
+  fi
+}
+
 if [ "$SWITCH_MODE" = "single" ]; then
   defaults delete "$DOMAIN" selectedDetailSection 2>/dev/null || true
   PID=$(launch_instance "")
@@ -169,9 +189,8 @@ if [ "$SWITCH_MODE" = "single" ]; then
     sleep 3
     if ! capture "$PID" "$name"; then FAILED=$((FAILED + 1)); fi
   done
-  echo "    收尾：请求本实例自行退出（不发信号，走 App 自己的 quit 事件）"
-  osascript -e "tell application id \"$DOMAIN\" to quit" 2>/dev/null || \
-    echo "    ⚠ quit 事件没送达，实例 $PID 需人工 Cmd+Q（它在沙箱里，不影响用户状态）"
+  echo "    收尾：只处理本脚本起的那一个 pid（不再按 bundle id 广播 quit）"
+  retire_instance "$PID" "九页共用实例"
 else
   for name in "${SECTIONS[@]}"; do
     PID=$(launch_instance "$name")
@@ -181,7 +200,7 @@ else
     wait_for_reports "$PID" 300
     sleep 3
     if ! capture "$PID" "$name"; then FAILED=$((FAILED + 1)); fi
-    osascript -e "tell application id \"$DOMAIN\" to quit" 2>/dev/null || true
+    retire_instance "$PID" "$name"
     sleep 2
   done
 fi
