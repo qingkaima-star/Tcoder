@@ -54,7 +54,7 @@
 | Views 内动态色成员（`.textColor/.graphicColor/.badgeFill/.onFillColor`） | 115 | **116** | 差 1，无实质影响 |
 | `id: \.offset` / `id: \.self` | 8 / 7 | **4 / 8**（另有 `\.element` 6、`\.key` 1、`\.raw` 1） | **两个数写反了**，工单 P-5 按实测派 |
 | "全仓 0 个 Lazy" | 0 个 LazyVStack | `LazyVStack` 确实 **0**，但 **`LazyVGrid` 已有 11 处**（总览/健康/代码/依赖/日志/性能/Git/贡献者的 tile 网格） | 工单 P-2 必须收窄成**只改长列表**，误改已是 Lazy 的网格属于白烧 |
-| "`LogsView.attachedItems` 在 body 里做 `stat()`，每次 body 3~4 轮 syscall" | 3~4 轮 | **body 路径上只有 1 处**：`LogsView.attachedItems` → `fileSize(of:)` → `FileManager.attributesOfItem`（每附加文件一次）；另一处 `FileManager.fileExists` 在 `chooseLogFiles()` **按钮动作里，不在渲染路径** | ① 工单 W-1 降级为"1 处"；② **T5-③ 守卫若只正则匹配 `stat(` 会永远得 0 = 假零守卫** |
+| "`LogsView.attachedItems` 在 body 里做 `stat()`，每次 body 3~4 轮 syscall" | 3~4 轮 | **两个半边各对一半**：符号不是 `stat(` 而是 `FileManager.attributesOfItem`（定义处 1 个：`LogsView.fileSize(of:)`）；但 `attachedItems` 在**一次 body 里被求值 3 次**（`LogsView.body` 的 `if !attachedItems.isEmpty`、"已附加 N 个文件" 文案、`ForEach(attachedItems)`），每次求值对**每个附加文件**一趟同步 syscall ⇒ "3~4 轮"说的是求值次数，没错。另：`fileExists` 在 `chooseLogFiles()` 按钮动作里，**不属渲染路径、不用改** | 工单 W-1 已按实测改写；② **T5-③ 守卫若只正则匹配 `stat(` 会永远得 0 = 假零守卫** |
 | Views 内 `.font(` | 183（含 Design） | **Views 内 148**，Views+Design 合计 183 | 口径分两个数写，别当同一个 |
 | `trustedMemoryPoints` 每 tick 跑几遍 | 3 遍 / 270 个 `SampleContext` | **4 遍 / 360 个**：`PerformanceLiveCharts.memoryAxis` 一次 body 内访问 `trustedMemory` **两次**（`.map` 求 peak + `isEmpty` 判空）、曲线再取一次、`SystemReadings.rejectedMemoryPoints` 又跑一遍——**而它只是为了拿一个计数，把整数组重过滤一遍就把结果丢掉** | 工单 W-2 已按实测改写；这第四遍是最容易改也最没人想到要改的 |
 | 全仓 `#available` | 4 处全在 `Design/Glass.swift` | 9 处，分布在 `Design/Glass.swift` + `Design/GlassComponents.swift` | 两份都在 `Design/**`，**"页面不散写"红线未被违反**，不改工单 |
@@ -252,9 +252,9 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 
 | 工 | 改动前实测病因 | 交回判据 |
 |---|---|---|
-| W-1 `body` 内文件 I/O 归零 | **实测 1 处**（勘查曾报 3~4 轮，见 §1.2）：`LogsView.attachedItems` → `fileSize(of:)` → `FileManager.attributesOfItem`，每附加文件一次同步 stat；另一处 `fileExists` 在 `chooseLogFiles()` 按钮动作里，**不属渲染路径、不用改** | 挪进 `@State` + `.task`；R 的 T5-③ 守卫名下页命中 **0** |
+| W-1 `body` 内同步 I/O 归零 | `LogsView.attachedItems` 在**一次 body 里被求值 3 次**，每次对每个附加文件走一趟 `FileManager.attributesOfItem`（`LogsView.fileSize(of:)`） | 求值挪进 `@State` + `.task`，或把 `attachedItems` 改存储属性；R 的 T5-③ 守卫该流命中数**只减不增**（`fileExists` 在按钮动作里，不计入、不改） |
 | W-2 图表降本 | `LiveSeriesChart.body` 每点 AreaMark+LineMark，**每 mark 现场构造 `LinearGradient` + 动态 `NSColor`**（C 包已把构造变成缓存，但重算面还在）；`trustedMemoryPoints` 每 tick 被跑 **4 遍 = 360 个 `SampleContext`**（`memoryAxis` 内访问 `trustedMemory` 两次 + 曲线一次 + `rejectedMemoryPoints` 为拿计数再一遍） | 停在该页跑 `idle`，app-update ≤ 8.33ms；`trustedMemoryPoints` 每 tick **≤ 1 遍**（`trustedMemory` 改存储属性或由 P 的缓存供给；计数不许靠重过滤整数组来求） |
-| W-3 轴标签 formatter | `LiveSeriesChart.xLabel(for:)` 每个刻度现造 `DateFormatter()`（~5 标签 ×2 图 ×每 tick） | 提 `static let`；R 的 T5-① 守卫该文件命中 0 |
+| W-3 轴标签 formatter | **实测唯一定义点：`Views/PerfLogs/ChartChrome.swift` 的 `DateFormatter()`**（总工工单初稿误写成 `LiveSeriesChart.xLabel`，已改）；它在轴标签循环里逐次现造 | 提 `static let`；R 的 T5-① 守卫该文件命中 0 |
 | W-4 进程榜 | `PerformanceProcessTable.row`：20 行 × 6 个 `LiveNumber` 格式化 + 每行 2 处 `.help` 拼串；`PerformanceView.rankedProcesses` → `MachSystemMonitor.processesByMemory` 每次访问全量 `sorted`（本机 `ps ax` = 920） | 排序消费 P 缓存的榜单（**不再自算**）；榜长与内容逐位不变 |
 | W-5 消费 P 的细粒度契约 | 现状：性能页整页 body 读每秒变化的值 | 改读 P 在 M0 交付的细粒度入口 + P 的《必须迁移清单》，粗 API 棘轮该流命中数 → 0 |
 
