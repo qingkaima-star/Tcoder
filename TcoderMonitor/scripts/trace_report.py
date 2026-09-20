@@ -93,6 +93,12 @@ def threads_print(args, per, leaf, anyf, pairs):
     total_all = sum(per.values())
     total = per[target]
     print("\n== %s  %d 样本（占全进程 %.1f%%）==" % (target[:60], total, 100.0 * total / max(1, total_all)))
+    threads_print_stack_share(args, anyf, target, total)
+    threads_print_leaf_and_pairs(args, leaf, pairs, target)
+    return target, total, total_all
+
+
+def threads_print_stack_share(args, anyf, target, total):
     print("栈中出现频率前 %d（已剥掉事件循环本体帧）：" % args.top)
     shown = 0
     for (tname, f), cnt in anyf.most_common(4000):
@@ -104,6 +110,9 @@ def threads_print(args, per, leaf, anyf, pairs):
     if loop:
         print("  （事件循环本体占 %.1f%%：%s —— 说明主线程绝大部分样本是在**等事件**，不是算不动）"
               % (100.0 * loop[0] / total, loop[1][:48]))
+
+
+def threads_print_leaf_and_pairs(args, leaf, pairs, target):
     print("\n叶子帧（自身耗时）前 %d：" % args.leaf)
     shown = 0
     for (tname, f), cnt in leaf.most_common(4000):
@@ -116,7 +125,6 @@ def threads_print(args, per, leaf, anyf, pairs):
         if tname == target and cnt >= 3 and shown < args.pairs:
             print("  %6d  %s <- %s" % (cnt, a[:44], b[:44]))
             shown += 1
-    return target, total, total_all
 
 
 def threads_write_json(args, anyf, target, total, total_all):
@@ -281,14 +289,8 @@ def summary_header(meta):
 
 def summary_refresh_row(loaded, args):
     # 1) 刷新率：预算的分母，必须实测而不是假定 120
+    rates = summary_display_rates(loaded)
     disp = loaded["device-display-info"]
-    rates = {}
-    if disp["doc"] is not None:
-        for row in disp["doc"].rows():
-            name = find_tag(row, "metal-object-label") or find_tag(row, "display-name")
-            for c in [c for c in row if c.tag == "uint32"]:
-                if c.fmt and c.fmt.isdigit() and 10 <= int(c.fmt) <= 1000 and name is not None:
-                    rates[name.fmt] = int(c.fmt)
     max_hz = max(rates.values()) if rates else (disp["json"] or {}).get("max_hz", 0)
     shown = " / ".join("%s=%dHz" % (k, v) for k, v in list(rates.items())[:2]) if rates else (
         "未覆盖" if not disp["present"] else "表里没读到屏幕")
@@ -296,6 +298,19 @@ def summary_refresh_row(loaded, args):
     fmt_row("内建/外接最大刷新率", "120 / 120 Hz", shown or "未覆盖",
             ("预算 %.3f ms" % budget) if max_hz else "未采")
     return budget
+
+
+def summary_display_rates(loaded):
+    """每块屏的最大刷新率（同一个 uint32 取值式，与 `displays` 子命令一字一样）。"""
+    rates = {}
+    disp = loaded["device-display-info"]
+    if disp["doc"] is not None:
+        for row in disp["doc"].rows():
+            name = find_tag(row, "metal-object-label") or find_tag(row, "display-name")
+            for c in [c for c in row if c.tag == "uint32"]:
+                if c.fmt and c.fmt.isdigit() and 10 <= int(c.fmt) <= 1000 and name is not None:
+                    rates[name.fmt] = int(c.fmt)
+    return rates
 
 
 def summary_render_rows(loaded, budget):
@@ -558,7 +573,14 @@ def cmd_migration(args):
 def build_parser():
     p = argparse.ArgumentParser(description="xctrace XML → 性能读数（含 id/ref 解引用）")
     sub = p.add_subparsers(dest="cmd", required=True)
+    # 两个小节按"吃 XML 文件"与"吃输出目录"分，注册顺序一字未动——
+    # argparse 的 --help 子命令列表就是按注册顺序出的，重排等于改读数。
+    add_xml_subcommands(sub)
+    add_directory_subcommands(sub)
+    return p
 
+
+def add_xml_subcommands(sub):
     d = sub.add_parser("durations", help="时长分布：hitches / hitches-updates / potential-hangs / renders")
     d.add_argument("xml")
     d.add_argument("--label", default="")
@@ -587,6 +609,8 @@ def build_parser():
     f.add_argument("--json", default=None)
     f.set_defaults(func=cmd_fps)
 
+
+def add_directory_subcommands(sub):
     m = sub.add_parser("summary", help="读一个输出目录，打印与 spec §1 同形状的对照表")
     m.add_argument("directory")
     m.add_argument("--seconds", type=int, default=0)
@@ -606,7 +630,6 @@ def build_parser():
     g.add_argument("--module-root", default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     g.add_argument("--strict", action="store_true", help="还有粗粒度读点就非零退出（给 CI/门禁用）")
     g.set_defaults(func=cmd_migration)
-    return p
 
 
 def main(argv=None):
