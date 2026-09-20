@@ -90,6 +90,12 @@ enum ProcessInspector {
     }
 
     /// 全系统进程枚举 + 指标。previous 为上一轮累计值。
+    ///
+    /// 原先这里是 71 行 / CC 24 的一整段（自扫点名本包剩下的最后一个热点）。
+    /// 现在 `sweep` 只管「拿到 pid 名单 + 两处预算的止损」，单个 pid 怎么取数、名字怎么退、
+    /// CPU 怎么算，全交给 `SweepProbes.snapshot(for:)`。
+    /// **两处预算的语义没动**：sweep 硬预算超时是 `break`（宁可少几个进程），
+    /// fd 超预算只丢 fd 数并标 truncated，其余指标照收。
     static func sweep(previous: [Int32: ProcessCPUState], elapsed: TimeInterval) -> ProcessSweep {
         let startedAt = monotonicNanos()
         var result = ProcessSweep(elapsed: elapsed)
@@ -100,66 +106,100 @@ enum ProcessInspector {
         result.processes.reserveCapacity(pids.count)
         result.states.reserveCapacity(pids.count)
 
-        var pathBuffer = [CChar](repeating: 0, count: pathBufferSize)
-        let fdDeadline = startedAt &+ fdBudgetNanos
-
+        var probes = SweepProbes(startedAt: startedAt, previous: previous, elapsed: elapsed)
         for pid in pids {
             guard pid > 0 else { continue }
 
-            let now = monotonicNanos()
-            if now &- startedAt > sweepBudgetNanos {
+            if monotonicNanos() &- startedAt > sweepBudgetNanos {
                 result.truncated = true
                 break
             }
+            guard let snapshot = probes.snapshot(for: pid) else { continue }
+            if probes.fdBudgetExhausted { result.truncated = true }
 
-            guard var bsd = bsdInfo(for: pid) else { continue }
+            result.processes.append(snapshot.process)
+            result.states[pid] = snapshot.state
+        }
+        return result
+    }
 
-            let commandLinePath = executablePath(for: pid, buffer: &pathBuffer)
+    /// 一轮 sweep 里逐 pid 的取数上下文：上一轮累计值、窗口长度、fd 预算的截止点，
+    /// 以及 `proc_pidpath` 那块跨 pid 复用的路径缓冲区（原先这些都是 `sweep` 的局部量）。
+    struct SweepProbes {
+        let startedAt: UInt64
+        let previous: [Int32: ProcessCPUState]
+        let elapsed: TimeInterval
+        let fdDeadline: UInt64
+        var pathBuffer = [CChar](repeating: 0, count: ProcessInspector.pathBufferSize)
+        /// 本轮里至少有一个 pid 因为过了 fd 预算而没拿到打开文件数。
+        var fdBudgetExhausted = false
 
-            var name = cString(&bsd.pbi_name)
-            if name.isEmpty { name = cString(&bsd.pbi_comm) }
-            if name.isEmpty, let commandLinePath { name = (commandLinePath as NSString).lastPathComponent }
-            if name.isEmpty { name = "pid \(pid)" }
+        init(startedAt: UInt64, previous: [Int32: ProcessCPUState], elapsed: TimeInterval) {
+            self.startedAt = startedAt
+            self.previous = previous
+            self.elapsed = elapsed
+            fdDeadline = startedAt &+ ProcessInspector.fdBudgetNanos
+        }
 
-            let usage = rusageInfo(for: pid)
-            let task = taskInfo(for: pid)
+        /// 一个 pid 的展示快照 + 下一轮要用的累计值。拿不到 bsd 信息（无权限 / 刚退出）就不算这个进程。
+        mutating func snapshot(for pid: Int32) -> (process: ProcessSnapshot, state: ProcessCPUState)? {
+            guard var bsd = ProcessInspector.bsdInfo(for: pid) else { return nil }
+            let commandLinePath = ProcessInspector.executablePath(for: pid, buffer: &pathBuffer)
+            let usage = ProcessInspector.rusageInfo(for: pid)
+            let task = ProcessInspector.taskInfo(for: pid)
 
             let cpuNano = usage?.cpuNano ?? 0
             var resident = usage?.residentBytes ?? 0
             if resident == 0, let task { resident = task.pti_resident_size }
-
-            var openFiles = 0
-            if monotonicNanos() < fdDeadline {
-                openFiles = openFileCount(for: pid)
-            } else {
-                result.truncated = true
-            }
+            let openFiles = openFileCountIfAffordable(pid)
+            let name = ProcessInspector.processName(bsd: &bsd, pid: pid, commandLinePath: commandLinePath)
 
             // 没见过的 pid（新进程 / 上一轮没采到）不能瞎算，CPU 记 0。
             let cpu: Double
             if let prev = previous[pid] {
-                cpu = cpuUsage(previousNano: prev.cpuNano, currentNano: cpuNano, elapsed: elapsed)
+                cpu = ProcessInspector.cpuUsage(previousNano: prev.cpuNano, currentNano: cpuNano,
+                                               elapsed: elapsed)
             } else {
                 cpu = 0
             }
 
-            let startSeconds = bsd.pbi_start_tvsec
-            let startTime = startSeconds > 0 ? Date(timeIntervalSince1970: TimeInterval(startSeconds)) : nil
-
-            result.processes.append(ProcessSnapshot(
+            return (ProcessSnapshot(
                 pid: pid,
                 name: name,
                 cpuUsage: cpu,
                 memoryBytes: resident,
                 threadCount: task.map { Int($0.pti_threadnum) } ?? 0,
                 openFileCount: openFiles,
-                startTime: startTime,
+                startTime: ProcessInspector.startTime(of: bsd),
                 commandLine: commandLinePath ?? name,
                 parentPID: Int32(bitPattern: bsd.pbi_ppid)
-            ))
-            result.states[pid] = ProcessCPUState(pid: pid, cpuNano: cpuNano, residentBytes: resident)
+            ), ProcessCPUState(pid: pid, cpuNano: cpuNano, residentBytes: resident))
         }
-        return result
+
+        /// 打开文件数最贵（要为整个 fd 表问一次内核），超预算就只丢这一个指标，其余照收。
+        mutating func openFileCountIfAffordable(_ pid: Int32) -> Int {
+            guard ProcessInspector.monotonicNanos() < fdDeadline else {
+                fdBudgetExhausted = true
+                return 0
+            }
+            return ProcessInspector.openFileCount(for: pid)
+        }
+    }
+
+    /// 进程名的逐级退回：libproc 的 pbi_name → pbi_comm → 可执行路径末段 → `pid N`。
+    static func processName(bsd: inout proc_bsdinfo, pid: Int32, commandLinePath: String?) -> String {
+        var name = cString(&bsd.pbi_name)
+        if name.isEmpty { name = cString(&bsd.pbi_comm) }
+        if name.isEmpty, let commandLinePath { name = (commandLinePath as NSString).lastPathComponent }
+        if name.isEmpty { name = "pid \(pid)" }
+        return name
+    }
+
+    /// 内核不给启动时间（字段为 0）时返回 nil，视图才显示 `--` 而不是伪造 epoch。
+    static func startTime(of bsd: proc_bsdinfo) -> Date? {
+        let startSeconds = bsd.pbi_start_tvsec
+        guard startSeconds > 0 else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(startSeconds))
     }
 
     /// 没有匹配的 group 也返回空快照，视图才能显示「未检测到进程」而不是伪造 0。
@@ -192,14 +232,16 @@ enum ProcessInspector {
 
     // MARK: - Per-pid libproc probes
 
-    private struct RusageInfo {
+    /// 可见性说明（2026-09-20 拆分所致）：原先是 `private`，`SweepProbes.snapshot(for:)` 取不到就
+    /// 放宽到模块内可见。它仍嵌在 `ProcessInspector` 之下，不进模块命名空间，字段一个没动。
+    struct RusageInfo {
         var cpuNano: UInt64
         var residentBytes: UInt64
         var diskReadBytes: UInt64
         var diskWriteBytes: UInt64
     }
 
-    private static func listAllPids() -> [pid_t] {
+    static func listAllPids() -> [pid_t] {
         let needed = proc_listallpids(nil, 0)
         guard needed > 0 else { return [] }
         // pid 数在两次调用之间可能变化，留 256 个余量并封顶。
@@ -217,7 +259,7 @@ enum ProcessInspector {
         return Array(pids.prefix(filled))
     }
 
-    private static func bsdInfo(for pid: Int32) -> proc_bsdinfo? {
+    static func bsdInfo(for pid: Int32) -> proc_bsdinfo? {
         var info = proc_bsdinfo()
         let read = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info,
                                Int32(MemoryLayout<proc_bsdinfo>.size))
@@ -225,7 +267,7 @@ enum ProcessInspector {
         return info
     }
 
-    private static func taskInfo(for pid: Int32) -> proc_taskinfo? {
+    static func taskInfo(for pid: Int32) -> proc_taskinfo? {
         var info = proc_taskinfo()
         let read = proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &info,
                                Int32(MemoryLayout<proc_taskinfo>.size))
@@ -233,13 +275,13 @@ enum ProcessInspector {
         return info
     }
 
-    private static func openFileCount(for pid: Int32) -> Int {
+    static func openFileCount(for pid: Int32) -> Int {
         let bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
         guard bytes > 0 else { return 0 }
         return Int(bytes) / MemoryLayout<proc_fdinfo>.stride
     }
 
-    private static func executablePath(for pid: Int32, buffer: inout [CChar]) -> String? {
+    static func executablePath(for pid: Int32, buffer: inout [CChar]) -> String? {
         guard !buffer.isEmpty else { return nil }
         return buffer.withUnsafeMutableBufferPointer { ptr -> String? in
             guard let base = ptr.baseAddress else { return nil }
@@ -251,7 +293,7 @@ enum ProcessInspector {
     }
 
     /// v4 -> v3 -> v2 -> v0 逐级降级；任一失败（EPERM / 进程刚退出）就换下一档。
-    private static func rusageInfo(for pid: Int32) -> RusageInfo? {
+    static func rusageInfo(for pid: Int32) -> RusageInfo? {
         var v4 = rusage_info_v4()
         if callRusage(pid, flavor: RUSAGE_INFO_V4, info: &v4) {
             return RusageInfo(cpuNano: v4.ri_user_time &+ v4.ri_system_time,
@@ -312,7 +354,7 @@ enum ProcessInspector {
     }
 
     /// 单调时钟，避免用户改系统时间导致预算算歪。
-    private static func monotonicNanos() -> UInt64 {
+    static func monotonicNanos() -> UInt64 {
         DispatchTime.now().uptimeNanoseconds
     }
 }
