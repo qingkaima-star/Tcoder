@@ -12,9 +12,9 @@ import SwiftUI
 // WS-M `LiveNumber`、WS-K `StatLine`）。这里收成一套。
 //
 // ⚠️ 关于"缺证据必须中性"：#28 曾在这里配 `Theme.Evidence` 三态类型把它焊进类型，
-// 因页面零引用已删。**该规则目前回到"靠约定 + 各页自己写对"的层面**，
-// 全仓 15 处手写 `?? Theme.Placeholder.missingValue` 已逐处列进《42》§14；
-// #34 若要做回类型级强制，正解是上提 WS-L 那份**有活用户**的 `DataAbsence`，不是重造我这版。
+// 因页面零引用已删。**#47 的正解不是重造我这版**，而是上提 WS-L 那份有活用户的
+// `DataAbsence` —— 它现在住在 `Design/DataAbsence.swift`，四态（多一个「除零算不出」），
+// 全仓 15 处手写占位写法已逐处换走，剩余处数由 `DesignAbsenceStateTests` 只减不增地把守。
 
 // MARK: 键值读数
 

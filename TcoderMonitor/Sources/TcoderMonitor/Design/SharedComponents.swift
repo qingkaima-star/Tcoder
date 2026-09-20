@@ -81,8 +81,8 @@ struct MetricTile: View {
         .surface(layer: .contentInset, shape: .rounded(Theme.Radius.md))
     }
 
-    /// 缺证据时的显示值。纯函数，供单测钉住。
-    static func displayValue(_ raw: String?) -> String { raw ?? Theme.Placeholder.missingValue }
+    /// 缺证据时的显示值。纯函数，供单测钉住。字面走全仓单点 `DataAbsence`（#47）。
+    static func displayValue(_ raw: String?) -> String { DataAbsence.optional(raw).display }
 
     /// 无值时是否强制中性色（忽略调用方给的倾向色）。
     /// 单独抽成谓词是为了可测——`Color` 由动态 `NSColor` 包出来，两次取值不相等。

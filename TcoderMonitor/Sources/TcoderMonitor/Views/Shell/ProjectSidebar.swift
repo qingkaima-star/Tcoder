@@ -307,14 +307,14 @@ struct LiveCPUBadge: View {
         HStack(spacing: Theme.Spacing.xxs) {
             ThemedIcon(.cpu, role: .badge)
                 .foregroundStyle(.secondary)
-            Text(snapshot.map { "\(Int(($0.cpuUsage * 100).rounded()))%" }
-                ?? Theme.Placeholder.missingValue)
+            Text(DataAbsence.optional(
+                    snapshot.map { "\(Int(($0.cpuUsage * 100).rounded()))%" }).display)
                 .font(Theme.Typo.monoSmall.font)
                 .frame(width: ShellLayout.liveReadoutColumnWidth, alignment: .trailing)
             Text("·")
                 .foregroundStyle(.tertiary)
-            Text(snapshot.map { ByteFormat.string($0.memoryUsedBytes, precision: 1) }
-                ?? Theme.Placeholder.missingValue)
+            Text(DataAbsence.optional(
+                    snapshot.map { ByteFormat.string($0.memoryUsedBytes, precision: 1) }).display)
                 .font(Theme.Typo.monoSmall.font)
         }
         .foregroundStyle(.secondary)
