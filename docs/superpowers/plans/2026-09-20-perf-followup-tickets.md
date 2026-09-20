@@ -29,15 +29,22 @@ ceiling=0，扫描分母含 `.py/.sh/.md`）。你**没有改阈值**，只把�
 
 1. 测量前先 `scripts/perf_harness.sh selfcheck`，六项全绿才算"这把尺子可用"；它红了所有读数作废。
 2. 交互期那一档（T1）**不做合成滚动输入**：本机 System Events 权限被拒，`CGEvent` 会被静默丢弃，
-   只会量产"交互期 0 hitch"的假绿。改成**真人滚 10 秒 + `TCODER_PERF_PROBE=1` + `probe --interaction`**：
+   只会量产"交互期 0 hitch"的假绿。两条正规路，各管一件事：
 
    ```bash
-   TCODER_PERF_PROBE=1 dist/Tcoder.app/Contents/MacOS/TcoderMonitor &   # 唯一实例、前台、无并发编译
-   # ……用鼠标在页面上真实滚动 10 秒……
-   ./scripts/perf_harness.sh probe            # 退出码 0 达标 / 1 未达标 / 2 没确认交互（只算 idle）
+   # 路 A：xctrace 外部尺子（改前/改后**都能用**，所以前后对比只能走这条）
+   ./scripts/perf_harness.sh interact          # 录制那 20 s 里请持续滚动被测窗口
+   ./scripts/perf_harness.sh report <该目录>    # 表头会写「测量期间：interaction — 有资格答 T1」
+
+   # 路 B：App 内常驻探针（只有装了 FramePulse 的改后产物有，改前对照物没有 ⇒ 只能单向看趋势）
+   TCODER_PERF_PROBE=1 dist/Tcoder.app/Contents/MacOS/TcoderMonitor &
+   # ……真实滚动 10 秒……
+   ./scripts/perf_harness.sh probe --interaction   # 0 达标 / 1 未达标 / 2 没确认交互（只算 idle）
    ```
 
-   不带 `--interaction` 只会被判成 idle 读数——**别拿它当 T1 达标**。
+   **前后对比必须同路同档**：改前那棵封存产物 `/tmp/tcoder-before.app`（rev `415f0f0`）
+   里根本没有 `FramePulse`，拿路 B 量改后、拿路 A 量改前 = 两把不同的尺子比同一个数，不作数。
+   不带 `--interaction` / 不写 `period=interaction` 的读数一律只算 idle——**别拿它当 T1 达标**。
 3. 禁则棘轮现在每次跑都打「现量/上限」。我把 `dynamicNSColor` 从 107 拧到 **86**
    （你们 `165faa7` 已经还掉 21 处，而那 21 处当时藏在余量里没人看见）。
    四条现在**零余量**：`1/1 86/86 10/10 2/2`——再新增一处当场红。

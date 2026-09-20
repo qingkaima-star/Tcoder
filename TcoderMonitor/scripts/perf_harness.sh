@@ -2,8 +2,10 @@
 # =============================================================================
 # perf_harness.sh —— Tcoder 性能契约（120Hz）的外部尺子。spec §4.1。
 #
-# 三档测量 + 两档不采数的（selfcheck 连 App 都不起、probe 只读已有脉冲文件）：
+# 四档测量（idle / interact / switch，report 是重打）+ 两档不采数的（selfcheck 连 App 都不起、
+# probe 只读已有脉冲文件）：
 #   idle       attach 现有实例，录 Animation Hitches + Time Profiler，量心跳期（spec §1 那一档）
+#   interact   录法同 idle，唯一区别是**录制期间人持续滚动** ⇒ 才有资格答 T1（交互期 hitch=0）
 #   switch     逐页冷启动（-selectedDetailSection 中文页名），量首帧与冷构建成本
 #   report     读已有输出目录，重打汇总表（不重录，省时间也省磁盘）
 #   probe      读 `FramePulse` 落盘的脉冲文件 → 交互期 p95 与 hitch 判定（T1 的唯一入口）
@@ -34,6 +36,7 @@
 #
 # 用法:
 #   scripts/perf_harness.sh idle [输出目录]
+#   scripts/perf_harness.sh interact [输出目录]    # 录制期间人持续滚动
 #   scripts/perf_harness.sh switch [输出目录]
 #   scripts/perf_harness.sh report <输出目录>
 #   scripts/perf_harness.sh probe [脉冲文件] [--interaction]   # 缺省取 /tmp 上最新那份
@@ -296,16 +299,26 @@ PY
 # =============================================================================
 cmd_idle() {
   local out="${1:-/tmp/tcoder-perf-$REV}"
-  echo "==> idle 档：attach 现有实例录心跳（release 口径；rev=$REV dirty=$DIRTY）"
+  # period 决定这一批读数**有资格回答哪个问题**：idle 只能答"心跳期"，T1（交互期 hitch=0）
+  # 只认 period=interaction 的样本。写进 meta 是为了让 report 阶段还能看见它——
+  # 否则过两天没人记得当时到底碰没碰鼠标，就会拿心跳期的数去交交互期的结论。
+  local period="${PERIOD:-idle}"
+  [ "$period" = "interaction" ] \
+    && echo "==> interact 档：**录制期间请持续滚动/拖窗**，停下就不算交互期" \
+    || echo "==> idle 档：attach 现有实例录心跳（release 口径；rev=$REV dirty=$DIRTY）"
   [ -x "$TRACE_REPORT" ] || die "缺 scripts/trace_report.py"
   require_idle_target
   mkdir -p "$out" || die "建不了 $out"
-  meta_write "$out" "mode=idle" "pid=$PID" "binary=$TARGET_BINARY" \
+  meta_write "$out" "mode=idle" "period=$period" "pid=$PID" "binary=$TARGET_BINARY" \
     "hitches_seconds=$SECONDS_HITCHES" "tp_seconds=$SECONDS_TP" "coexisting_instances=${COEXIST:-1}" \
     "templates=$TEMPLATE_HITCH + $TEMPLATE_TP" "build_flavor=$TARGET_FLAVOR"
   preflight_context "$out" "$PID"
 
-  echo "==> 1/4 录 Animation Hitches ${SECONDS_HITCHES}s（这期间不去碰鼠标键盘，否则量的就不是心跳）"
+  if [ "$period" = "interaction" ]; then
+    echo "==> 1/4 录 Animation Hitches ${SECONDS_HITCHES}s（**这 ${SECONDS_HITCHES}s 请持续滚动被测窗口**）"
+  else
+    echo "==> 1/4 录 Animation Hitches ${SECONDS_HITCHES}s（这期间不去碰鼠标键盘，否则量的就不是心跳）"
+  fi
   run rm -rf "$out/hitches.trace"
   run xcrun xctrace record --template "$TEMPLATE_HITCH" --attach "$PID" \
     --time-limit "${SECONDS_HITCHES}s" --output "$out/hitches.trace" --no-prompt --quiet
@@ -570,8 +583,34 @@ PY
   [ "$c_idle" -eq 2 ] && [ "$c_live" -eq 0 ] && [ "$c_junk" -ne 0 ] \
     && ok "framepulse：达标/未达标/坏数据/未确认交互 四种结果互不混淆"
 
+  # 7) 测量期间必须**印在汇总表上**，且 idle 那一档要明说"不许拿去交 T1"
+  #    （§1 基线是心跳期量的、T1 要的是交互期，两批数同形状不同含义——不写出来一定会被人混用）
+  mkdir -p "$out/period-idle" "$out/period-live"
+  printf '{"rev":"合成","hitches_seconds":20,"period":"idle"}' > "$out/period-idle/meta.json"
+  printf '{"rev":"合成","hitches_seconds":20,"period":"interaction"}' > "$out/period-live/meta.json"
+  python3 "$TRACE_REPORT" summary "$out/period-idle" > "$out/period-idle.txt" 2>&1 || true
+  python3 "$TRACE_REPORT" summary "$out/period-live" > "$out/period-live.txt" 2>&1 || true
+  # 断言钉的是**那句拒绝**（`不许…交 T1`），不是"测量期间"四个字：
+  # 第一版只 grep「只答心跳期」，把拒绝的后半句删掉它照样绿——反向验才抓出来。
+  grep -q '不许.*交 T1' "$out/period-idle.txt" \
+    || fail "idle 汇总表没写「不许拿去交 T1」——同形状不同含义的两批数一定会被混用"
+  grep -q "有资格答 T1" "$out/period-live.txt" \
+    || fail "interaction 汇总表没标出来，那 interact 档与 idle 就无法区分"
+  grep -q "测量期间：idle" "$out/period-idle.txt" \
+    && grep -q "测量期间：interaction" "$out/period-live.txt" \
+    && ok "summary：测量期间进表头，两种期间各说各的资格"
+
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
+}
+
+# =============================================================================
+# interact —— 交互期那一档（T1 唯一有资格的样本）：录法同 idle，区别只在"人在滚"
+# =============================================================================
+cmd_interact() {
+  # 不复制一份录制逻辑，只换 period 与提示语——两档共享同一实现，
+  # 才不会哪天只修了 idle 那一半、两档的口径悄悄分叉。
+  PERIOD=interaction cmd_idle "${1:-/tmp/tcoder-perf-interact-$REV}"
 }
 
 main() {
@@ -579,11 +618,12 @@ main() {
   shift || true
   case "$cmd" in
     idle) cmd_idle "$@" ;;
+    interact) cmd_interact "$@" ;;
     switch) cmd_switch "$@" ;;
     report) cmd_report "$@" ;;
     probe) cmd_probe "$@" ;;
     selfcheck) cmd_selfcheck "$@" ;;
-    *) sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 }
 main "$@"
