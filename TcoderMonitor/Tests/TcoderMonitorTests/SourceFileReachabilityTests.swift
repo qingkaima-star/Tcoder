@@ -55,7 +55,10 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 三个建议构建器被同类型的 `suggestions(for:)` 调用；拆的理由是该函数 138 行、CC 17）。
     /// 120 → 125（并入 ws/x2-runtimesvc：WS-X2/WS-X5 在 Logs / Git / Dependencies 三域
     /// 按自扫名册拆出的实现分片；引用证据见该分支 5 笔提交与本流 00:24 的合并说明）。
-    static let censusBaseline = 125
+    /// 125 → 130（并入 ws/x6-scale：WS-X6 按自扫名册拆出的实现分片——
+    /// `HealthCurveShapes`/`PerfReadoutCells`/`MachSystemMonitor+Groups` 等；
+    /// 引用证据见该分支 4 笔提交，全部是既有类型的 extension 分片或被既有类型持有的类型）。
+    static let censusBaseline = 130
 
     static let prunedDirectories: Set<String> = [".git", ".build", ".swiftpm", ".worktrees",
                                                         "node_modules", "DerivedData", "dist", "build", "out"]
