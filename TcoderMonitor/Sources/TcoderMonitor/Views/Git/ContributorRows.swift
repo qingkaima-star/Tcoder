@@ -86,6 +86,13 @@ struct ContributorRow: View {
         return min(1, max(0, value))
     }
 
+    /// 这一格的**态**：`authorShare` 给不出数，是因为分母（非合并提交数）为 0，
+    /// 属「算不出」而不是「没扫」——两者的字面必须不同（《42》§14.3 第 1 条）。
+    private var shareAbsence: DataAbsence {
+        DataAbsence.optional(share.map { NumberFormat.percent($0, precision: 1) },
+                             absent: .indeterminate)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             HStack(alignment: .firstTextBaseline, spacing: DataRowMetrics.cellGap) {
@@ -124,14 +131,12 @@ struct ContributorRow: View {
             HStack(spacing: DataRowMetrics.cellGap) {
                 MiniBarGauge(fraction: share ?? 0, tint: tint, height: DataGaugeHeight.inline)
                     .frame(maxWidth: .infinity)
-                Text(share.map { NumberFormat.percent($0, precision: 1) }
-                     ?? Theme.Placeholder.missingValue)
+                Text(shareAbsence.display)
                     .font(CodeGitType.number(Theme.Typo.microLabel))
                     .foregroundStyle(.secondary)
                     .tableCell(DataColumns.column(DataColumns.shareBar, 1))
-                    .help(share == nil
-                          ? "报告里没有可用的提交分母，占比无法计算"
-                          : "占非合并提交 \(NumberFormat.grouped(git.commitScope.authorBasis)) 次的比例")
+                    .help(shareAbsence.help(denominator: "报告里的非合并提交数")
+                          ?? "占非合并提交 \(NumberFormat.grouped(git.commitScope.authorBasis)) 次的比例")
             }
 
             ContributorHourRow(counts: author.activityByHour, tint: tint)

@@ -8,12 +8,21 @@ import SwiftUI
 //      换成登记表里的对勾与三角，才是「已确认」与「需注意」的双通道。
 
 struct HealthRing: View {
-    /// nil = 未评分。必须画成空心灰圈 + `--`，不能画成 0 分。
+    /// nil = 未评分。必须画成空心灰圈 + `DataAbsence.notAnalysed` 的字面，不能画成 0 分。
     var score: Int?
     var grade: HealthGrade?
     var trend: Int?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// 环心**数字位**的唯一字符串来源：`readout`（眼睛）与 `accessibilitySummary`（读屏）
+    /// 都只从这里取（《42》§14.3 第 2 条）。
+    ///
+    /// 谁在这两个出口各自写字面（哪怕写的都是 `--`），下一次措辞改动就会只落到其中一边，
+    /// 于是看到环里是 `--`、VoiceOver 念出另一句。`DesignAbsenceStateTests` 把这条钉成断言。
+    static func scoreText(for score: Int?) -> String {
+        DataAbsence.optional(score.map(String.init)).display
+    }
 
     var body: some View {
         let role = Theme.Semantic.role(forScore: score)
@@ -40,19 +49,26 @@ struct HealthRing: View {
         .accessibilityValue(accessibilitySummary)
     }
 
-    /// 环心里三处信息（分数、等级、趋势）在视觉上并排，读屏要一次说全，
+    /// 读屏出口：环心里三处信息（分数、等级、趋势）在视觉上并排，读屏要一次说全，
     /// 否则会只念一个数字、把「A」和「+3」丢掉。
-    private var accessibilitySummary: String {
-        guard let score else { return Theme.Placeholder.missingValue }
-        var parts = ["\(score) 分"]
+    ///
+    /// 未评分那一支**必须**与视觉出口 `scoreText(for:)` 给同一个串（《42》§14.3 第 2 条）：
+    /// 只改这边的措辞，`DesignAbsenceStateTests` 那条「两个出口同串」就红。
+    static func accessibilityText(score: Int?, grade: HealthGrade?, trend: Int?) -> String {
+        guard let score else { return scoreText(for: nil) }
+        var parts = ["\(scoreText(for: score)) 分"]
         if let grade { parts.append("\(grade.rawValue) 级") }
         if let trend, trend != 0 { parts.append("较上次 \(NumberFormat.signed(trend))") }
         return parts.joined(separator: "，")
     }
 
+    private var accessibilitySummary: String {
+        Self.accessibilityText(score: score, grade: grade, trend: trend)
+    }
+
     private func readout(role: Theme.SemanticRole) -> some View {
         VStack(spacing: Theme.Spacing.xs) {
-            Text(score.map(String.init) ?? Theme.Placeholder.missingValue)
+            Text(Self.scoreText(for: score))
                 .font(Theme.Typo.heroMetric.font)
                 .foregroundStyle(score == nil ? Theme.Semantic.neutral.textColor
                                               : role.textColor)

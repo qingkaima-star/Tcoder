@@ -191,8 +191,12 @@ enum ProcessMetric {
 // MARK: - 显示层：三态一律走这里
 
 /// 把「可选读数」变成界面文字。规则只有一条：**没证据不产出数字**。
+///
+/// 这一层是 WS-M 三页的本地入口，但字面本身已收敛到全仓单点 `Design/DataAbsence.swift`：
+/// 这里所有 `nil` 都属 `notAnalysed`（没采到这一帧），
+/// 「查了但是空的」与「分母为 0 算不出」是另外两态，不走这个 `guard … else`。
 enum Live {
-    static let missing = Theme.Placeholder.missingValue
+    static let missing = DataAbsence.notAnalysed.display
 
     static func text(_ raw: String?) -> String { raw ?? missing }
 

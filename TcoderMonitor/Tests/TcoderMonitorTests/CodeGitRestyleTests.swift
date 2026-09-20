@@ -208,13 +208,16 @@ final class CodeGitRestyleTests: XCTestCase {
         XCTAssertEqual(DataAbsence.value("0").effectiveRole(Theme.Semantic.success).name, "success")
     }
 
+    /// #47 之后这三处不再是 `--`：分母为 0 属「算不出」，`--` 只留给「没扫/没查」，
+    /// 否则用户分不清"这项目真的没有"和"我们没查"（《42》§14.3 第 1 条）。
+    /// 字面单点在 `Design/DataAbsence.swift`，四态本身由 `DesignAbsenceStateTests` 钉。
     func testAverageFileLinesUnknownIsPlaceholderNotZero() {
-        XCTAssertEqual(CodeScaleSection.averageFileLines(CodeMetrics()), "--")
+        XCTAssertEqual(CodeScaleSection.averageFileLines(CodeMetrics()), "算不出")
         XCTAssertEqual(CodeScaleSection.averageFileLines(CodeMetrics(totalFiles: 4, totalLines: 40)), "10.0")
-        XCTAssertEqual(CodeMetricsSummaryGrid.shareOf(10, CodeMetrics()), "--",
-                       "总行数为 0 时没有「占比」这个结论可言")
+        XCTAssertEqual(CodeMetricsSummaryGrid.shareOf(10, CodeMetrics()), "算不出",
+                       "总行数为 0 时没有「占比」这个结论可言，但也不是没扫")
         XCTAssertEqual(CodeRiskAnalysis.averageComplexityValue(CodeMetrics(totalFiles: 1, totalLines: 10)),
-                       "--", "一个函数都没识别出来时不能显示 0")
+                       "算不出", "一个函数都没识别出来时不能显示 0，也不能显示成「没查」")
     }
 
     func testLanguageMixMergesTailHonestly() {

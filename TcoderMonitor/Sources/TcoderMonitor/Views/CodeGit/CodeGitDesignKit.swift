@@ -5,6 +5,8 @@ import SwiftUI
 // 服务对象：`Views/Code/**`、`Views/Git/**`、`Views/Dependencies/**` 五个页面。
 // 为什么不放进 `Design/`：`Design/**` 与 `App/Theme.swift` 归 WS-G，本流只被授权改自己
 // 那三个视图目录，所以按 AGENTS.md §4「需要新组件写在自己的目录里」落在这里。
+// 唯一例外是缺数据四态 `DataAbsence`：#47 把它上提进了 `Design/DataAbsence.swift`
+// （全仓单点，见本文件末节的说明）。
 // 令牌一律引用既成的 `Theme.Radius / Spacing / Typo / Semantic / Chart / Layout`，
 // 本文件不新造任何颜色、字号、圆角或间距数值。
 
@@ -148,35 +150,8 @@ enum CodeGitCategoryColor {
     static func color(for key: String) -> Color { Theme.Chart.color(at: index(for: key)) }
 }
 
-// MARK: - 缺数据三态
-
-/// 数字的三种状态。**把 ③ 渲染成 0 或绿色结论，就是把"没有证据"说成"没有问题"**，
-/// 这是监控类 App 最贵的一类错（AGENTS.md §4 / WS-H §7.3）。
-enum DataAbsence: Equatable {
-    /// ① 有数据：真值字符串，含测得的 0。
-    case value(String)
-    /// ② 扫过了、确实为空：给 0 并写明「未发现」。
-    case measuredEmpty
-    /// ③ 没扫 / 不适用 / 扫失败：一律 `--`，不给倾向色、不给对勾。
-    case notAnalysed
-
-    /// 数字位显示值。
-    var display: String {
-        switch self {
-        case .value(let text): return text
-        case .measuredEmpty: return NumberFormat.grouped(0)
-        case .notAnalysed: return Theme.Placeholder.missingValue
-        }
-    }
-
-    /// 没证据时强制退回中性角色，不接受调用方给的倾向色——「没查」本身不该带倾向。
-    /// 返回角色而不是 `Color`：动态色无法在单测里比较，角色名可以。
-    func effectiveRole(_ role: Theme.SemanticRole) -> Theme.SemanticRole {
-        self == .notAnalysed ? Theme.Semantic.neutral : role
-    }
-
-    func tint(_ role: Theme.SemanticRole) -> Color { effectiveRole(role).textColor }
-
-    /// 是否允许给出结论性措辞（绿色对勾、「无风险」之类）。
-    var permitsConclusion: Bool { self != .notAnalysed }
-}
+// MARK: - 缺数据态
+//
+// 本流原先在这里自带一份三态 `DataAbsence`。#47 把它**上提进 `Design/DataAbsence.swift`**
+// 成全仓单点，并补了第四态 ③ `indeterminate`（除零/分母为 0，与 ④「没扫/没查」不是一回事）。
+// 页面一律用那一份，不要再在本目录里补第二个枚举。

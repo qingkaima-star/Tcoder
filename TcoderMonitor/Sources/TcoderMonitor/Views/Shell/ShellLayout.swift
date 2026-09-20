@@ -53,11 +53,12 @@ enum ShellLayout {
     static let guideDash: [CGFloat] = [Theme.Stroke.hairline, Theme.Spacing.xxs]
 }
 
-// MARK: - 缺数据三态句式（WS-H §7.3）
+// MARK: - 缺数据的说明句式（WS-H §7.3）
 //
-// 三态：① 有数据（含真 0）② 查了但是空的 ③ 没查 / 查不了。
-// 把 ③ 渲染成 `0` 或绿色结论，等于把「我们没有证据」伪装成「我们查过、是安全的」。
-// 数字位统一走 `Theme.Placeholder.missingValue`（`--`），这里只管说明文字。
+// 数字位的四态（实测值 / 未发现 / 算不出 / 未分析）在 `Design/DataAbsence.swift`，
+// 这里只管**说明文字**：数字位说不了「为什么空」，说明句负责把「没查」和
+// 「查了但是空的」这两句话讲开。把「没查」渲染成 `0` 或绿色结论，
+// 等于把「我们没有证据」伪装成「我们查过、是安全的」。
 
 enum ShellCopy {
     /// ③ 尚未跑过分析器。
