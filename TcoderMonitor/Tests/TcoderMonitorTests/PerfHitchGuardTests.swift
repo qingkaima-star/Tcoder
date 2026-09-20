@@ -50,8 +50,13 @@ final class PerfHitchGuardTests: XCTestCase {
     ///   → 归 **M0 / C 令牌缓存包（总工）**：`ColorToken.swift` 改成缓存后，
     ///     这一条的语义从"每次访问 new NSColor"降级为"引用一个缓存值"，
     ///     届时要由总工把它从禁则表里摘掉或重定基线——**在 C 包落地前它必须 ≤ 88**。
-    /// - `fullSort` **2** —— `Git/ContributorsView.swift` 的 `ContributorAnalysis.sorted(...)` 1 处
-    ///   + `Logs/LogsMetricGrid.swift` 的 `grouped.keys.sorted()` 1 处。
+    /// - `fullSort` **10** —— 2026-09-20 17:00 由总工**复量校正**（原记 2 是错的）。
+    ///   原值 2 是用只认 `.sorted(` 的正则量出来的，而仓库里真实写法以**尾随闭包**
+    ///   `.sorted { … }` 为主，于是 8 处漏计（实测清单见 `testRenderPathViolationsDoNotGrowBeyondBaseline`
+    ///   的报错体）。这正是本仓反复记的失效模式：**正则过窄 → 分母虚低 → 守卫看着有牙其实是假绿**。
+    ///   现在的规则同时认 `.sorted(` 与 `.sorted {`，基线按**今天的真值**重新钉成 10，目标仍是 0。
+    ///   （同一次校正里 `fullSort` 的坏样例用的就是尾随闭包写法，元测试当场把它打红——
+    ///   规则过窄这件事是被 `testScannerFiresOnBadSamples` 抓出来的。）
     ///   → 归 **M1 / WS-P 与 WS-W**（body 内派生集合缓存），终点 0。
     /// - `syncFileIO` **2** —— `Logs/LogsView.swift` 的 `fileExists(atPath:)` 与
     ///   `attributesOfItem(atPath:)` 各 1 处（经 `attachedItems` → `fileSize(of:)` 两跳进渲染路径）。
@@ -59,7 +64,7 @@ final class PerfHitchGuardTests: XCTestCase {
     static let knownBaseline: [String: Int] = [
         "directFormatters": 1,
         "dynamicNSColor": 88,
-        "fullSort": 2,
+        "fullSort": 10,
         "syncFileIO": 2,
     ]
 
@@ -332,7 +337,10 @@ enum PerfHitchScan {
     static let rules: [(name: String, pattern: String)] = [
         ("directFormatters", #"(?<![\w.])(?:NSColor|DateFormatter|NumberFormatter)\s*\("#),
         ("dynamicNSColor", #"\.textColor\b"#),
-        ("fullSort", #"\.sorted\s*\("#),
+        // 尾随闭包 `.sorted { … }` 与带参 `.sorted(by:)` 都是全量排序，两个形状都要抓：
+        // 只写 `\.sorted\s*\(` 会漏掉尾随闭包那种写法，而 `badSamples` 里用的正是它——
+        // 元测试 `testScannerFiresOnBadSamples` 就是靠这个把"规则过窄"照出来的。
+        ("fullSort", #"\.sorted\s*(?:\(|\{)"#),
         ("syncFileIO", #"(?<![\w.])(?:l?stat)\s*\(|(?:Data|String)\(contentsOf:|contents\(ofDirectory|contents\(ofPath:|attributesOfItem\(|fileExists\(|FileManager"#),
     ]
 
@@ -553,7 +561,13 @@ enum PerfHitchScan {
                 let ns = segment as NSString
                 regex.enumerateMatches(in: segment, range: NSRange(location: 0, length: ns.length)) { m, _, _ in
                     guard let m, m.range.location != NSNotFound else { return }
-                    let line = leadingLines + ns.substring(to: m.range.location).components(separatedBy: "\n").count - 1
+                    // 行号 = 命中点之前的换行总数 + 1。
+                    // `leadingLines` 是跨度起点的换行数；第二项是「跨度起点 → 命中点」这段前缀
+                    // 按 `\n` 切出来的段数，等于该前缀内部换行数 **+ 1**。两项相加已含那个 +1，
+                    // 所以这里**不再减一**——改前多减了一次，报出的行号整体小 1，
+                    // `rawLines[line - 1]` 于是取到命中行的**上一行**，元测试
+                    // `testScannerFindsTheKnownRealOccurrences` 就是靠这个发现的。
+                    let line = leadingLines + ns.substring(to: m.range.location).components(separatedBy: "\n").count
                     let key = "\(rule.name):\(line)"
                     if found.contains(key) { return }
                     found.insert(key)

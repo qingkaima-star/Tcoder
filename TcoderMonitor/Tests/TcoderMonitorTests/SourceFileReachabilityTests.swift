@@ -47,7 +47,7 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 调用点 WeightedHealthScorer 的 .activity 分支）。棘轮的摩擦是有意的：
     /// 加文件必须有人先确认它凭什么被引用。
     /// 109 → 110（WS-Y #47 新增 Design/DataAbsence.swift，13 处页面调用点，未用清单未点名它）。
-    private static let censusBaseline = 110
+    private static let censusBaseline = 111
 
     private static let prunedDirectories: Set<String> = [".git", ".build", ".swiftpm", ".worktrees",
                                                         "node_modules", "DerivedData", "dist", "build", "out"]

@@ -478,8 +478,14 @@ final class DesignTokenCacheGuardTests: XCTestCase {
                        "IconRole.cardHeader 的缓存 Font 与规范构造式不同值")
         XCTAssertEqual(tier.font, Theme.Typo.narrative.font, "同为 12pt regular 的两档应同值")
         XCTAssertEqual(tierWithTracking.tracking, 0.6, accuracy: 0.0001)
-        XCTAssertEqual(tierWithTracking.font, tier.font.monospacedDigit(),
+        // 与**同一份规范**（12pt medium）的显式构造式比，只验证「monospacedDigits 这条判断
+        // 在缓存后仍要生效」。改前这里拿 `tier.font`（12pt **regular**）去比，
+        // 两边字重根本不同，是老版构造式与令牌不同值，不是缓存的问题。
+        XCTAssertEqual(tierWithTracking.font,
+                       Font.system(size: 12, weight: .medium, design: .default).monospacedDigit(),
                        "monospacedDigits 这条判断在缓存后仍要生效")
+        XCTAssertNotEqual(tierWithTracking.font, tier.font,
+                          "同一 12pt 下 regular 与 medium 必须仍是两个 Font（缓存没把字重抹平）")
         _ = gradient
         _ = gradientDefault
     }
@@ -590,7 +596,10 @@ final class DesignTokenCacheGuardTests: XCTestCase {
         XCTAssertTrue(Self.perAccessConstructorHits(in: [("Design/Doc.swift", commented)]).isEmpty,
                       "注释被当成代码判红了 —— 守卫会拦住所有解释「为什么禁」的注释")
         // 反对照组：同一行注释后面跟着真代码时，代码仍要被抓到（不许过度剥）
-        let codeAfterComment = "var color: Color { Color(nsColor: x) }  // 旧写法\n"
+        // 反对照组：同一行注释后面跟着真代码时，代码仍要被抓到（不许过度剥）。
+        // 样本里放**两个**命中写法（`Color(nsColor:` + `NSColor(name:`）——只放一个的话
+        // 期望值只能是 1，而「整行被注释剥掉」这种失效会把计数打到 0，正是本样本要抓的。
+        let codeAfterComment = "var color: Color { Color(nsColor: NSColor(name: nil) { _ in .black }) }  // 旧写法\n"
         XCTAssertEqual(Self.perAccessConstructorHits(in: [("Design/Mix.swift", codeAfterComment)]).count, 2,
                       "行尾注释把真代码一起剥掉了 → 守卫会假绿")
 
