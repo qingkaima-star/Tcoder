@@ -283,6 +283,43 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 `git merge main` 后 `build --build-tests` + `test` 双绿 + `premerge_check.sh` 回执、
 **每组先过门再 commit**（子代理有 150 轮上限）、Obsidian 名下笔记贴真实输出。
 
+## 5.3 M0 交付的细粒度契约（三家直接消费，别自己造第二套）
+
+`MachSystemMonitor` 现在把每次 tick 的读数装进 **9 个独立观察格**
+（`@Observable final class PerfCell<Value: Equatable>`，挂在 `let` 上——`let` 不进观察图，
+所以**写 A 格不会唤醒只读 B 格的视图**；`apply()` 同值直接返回 `false`，不产生第二次唤醒）：
+
+| 读法（`state.monitor.…`） | 里面是什么 | 该用它的地方 |
+|---|---|---|
+| `cpu.value` → `PerfCPULead` | `usage: Double?`（**无上一帧即 nil，不是 0**）、`coreCount`、`load1/5/15`、`thermal`、`uptimeSeconds` | `LiveCPUBadge`、CPU tile、侧栏底栏 |
+| `memory.value` → `PerfMemoryLead` | `usedBytes`、`totalBytes`、`pressure` | 内存 tile / 内存卡 |
+| `rates.value` → `PerfRateLead` | 读写盘与网络四个 `UInt64?`（**全可选**，两帧才出数） | 磁盘/网络 tile |
+| `ledger.value` → `PerfProcessLedger` | `systemWideCount`、`countIsSystemWide`、`measuredCount`、`metricsTruncated` | 进程榜副标题、"被测 N / 共 M"口径 |
+| `pulse.value` → `PerfPulse` | `sampleAt: Date?`、`historyCount` | 一切"最近 N 点 · 每 X 秒 · 窗口约 Y 秒"类副标题 |
+| `curve.value` → `[SystemSnapshot]` | **已经切好窗口**（`curveWindowPoints`），视图里**不要再 `suffix`** | 实时曲线、总览历史曲线 |
+| `cpuRanking.value` / `memoryRanking.value` | 排好序的前 N 个 `ProcessSnapshot` | 进程榜两张表——**视图内一律不再 `sorted`** |
+| `groupRanking.value` | `[ProcessGroupSnapshot]` | 分组卡 |
+
+**节拍与窗口**：`sampleIntervalMilliseconds` / `sampleIntervalText`（例「1.5 秒」）/
+`windowSeconds(pointCount:)`；数值真值只有 `defaultSampleIntervalMilliseconds` 一处（§5.1）。
+
+**交互暂停**（页面只在**切页动画**这类自己知道的时机用；滚动与拖窗已由 `AppState` 的
+`NSEvent` 监视器统一接管，页面**不要**再接第二条）：
+`beginInteractionPause(.pageTransition)` / `endInteractionPause(.pageTransition)`，
+状态读 `isInteractionPaused`；源枚举 `LivePauseSource = .pointerStream | .windowDrag | .pageTransition`。
+
+**旧的粗表面**（`latestSnapshot` / `history` / `topProcesses` / `allProcesses` / `trackedGroups`）
+**暂时保留是为了让三家不必同批改完就能编译**，但它们仍会带动整棵 body：
+`PerfInvalidationRatchetTests` 数着"还在读粗表面"的调用点，**只减不增、终点 0**。
+迁完一处就少一处；**不许新增对粗表面的读**，也不许把新页面架在它上面。
+
+## 5.4 待量化后才决定做不做的（登记，不预先动手）
+
+| 项 | 证据 | 为什么现在不改 |
+|---|---|---|
+| `ProjectStore` 的主线程编码+落盘 | `@MainActor` 下 `encoder.encode(...)` 用 `.prettyPrinted + .sortedKeys`，随后 `data.write(..., .atomic)`；`save(report:)` / `persist()` / `persistHistory()` 三个口都在主线程，扫描完成回投时触发（单报告实测 29–43 KB） | ① **没有毫秒数**——它到底贡献多少主线程占用未测；② 挪到后台要引入串行队列与"退出前未 flush 就丢报告"的新风险，而 `e2e_check.sh` / `verify_pages.sh` 正是靠读回这些 JSON 判定的。持久化投机手术失败一次的成本，比它可能省下的几毫秒大得多。**等受控测量给出它的占比再决定。** |
+| `ProjectStore.load()` 启动同步解码 4 份报告 | 勘查标"中" | 同上，缺绝对值；先量冷启动（T4）再判断值不值得异步化。 |
+
 ## 6. 验收判据（改完必须交这些）
 
 1. `perf_harness.sh after` 与**§1.3 重定后的受控基线**逐列同形状对齐（**不是** run1 那张未受控的表）：
