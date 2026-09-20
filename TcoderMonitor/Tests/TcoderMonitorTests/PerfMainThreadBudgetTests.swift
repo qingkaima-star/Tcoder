@@ -157,4 +157,99 @@ final class PerfMainThreadBudgetTests: XCTestCase {
         XCTAssertEqual(encodeOnly.count, 15)
         XCTAssertEqual(bootLoads.count, 7)
     }
+
+    // MARK: - WS-X3 拆分时丢失的两件（总工 00:40 自 main 逐字取回）
+    //
+    // 用「main 的用例名集合 vs 合并后」比对抓到：这两段在机械拆分中掉了，而 realisticSweep
+    // 是该用例唯一的进程规模夹具，缺它整条心跳归因测试没有输入。搬运不改判据与数字。
+    /// 真实形状的 sweep：PID / 名字 / 命令行 / 内存都不同，排序与组匹配才不会走在空集上。
+    /// 写成显式循环 + 先算好各分量：`(0..<n).map { ProcessSnapshot(9 个带插值的实参) }`
+    /// 会让类型检查器超时（实测报 "unable to type-check this expression in reasonable time"）。
+    private func realisticSweep(_ count: Int) -> ProcessSweep {
+        var processes: [ProcessSnapshot] = []
+        processes.reserveCapacity(count)
+        for i in 0..<count {
+            let pid = Int32(1000 + i)
+            let name = "proc-" + String(i % 97)
+            let cpu = Double(i) * 0.37
+            let memory = UInt64(i) * 4_096_000
+            let start = Date(timeIntervalSince1970: 1_790_000_000 + Double(i))
+            let command = "/usr/bin/proc-" + String(i) + " --flag " + String(i)
+            processes.append(ProcessSnapshot(pid: pid, name: name, cpuUsage: cpu, memoryBytes: memory,
+                                             threadCount: 1 + (i % 64), openFileCount: i % 256,
+                                             startTime: start, commandLine: command, parentPID: 1))
+        }
+        return ProcessSweep(processes: processes, states: [:], elapsed: 1.5,
+                            truncated: false, visiblePIDCount: count)
+    }
+
+    func testHeartbeatSplitIsMeasuredNotGuessed() throws {
+        let sweep = realisticSweep(900)          // 实测全机 sweep 260~920 进程，取上沿
+        let snapshot = SystemSnapshot()
+        let previous = SystemCounters()            // 有上一帧 ⇒ 差分量在场，走的才是真实分支
+        let groups = (0..<12).map { TrackedProcessGroup(title: "服务 \($0)", matchPattern: "p\($0)") }
+        let probe = ProcessCountProbe(count: 900, isSystemWide: true)
+
+        var deriveCosts: [Double] = []
+        for _ in 0..<15 {
+            deriveCosts.append(timed({
+                _ = PerfLeads.derive(previous: previous, snapshot: snapshot, sweep: sweep,
+                                     totalProbe: probe, groups: groups, topLimit: 20)
+            }))
+        }
+
+        // publish 半：九格各写一次**真的变了**的值（"同值不写"另有用例钉）。
+        // 载荷取真实形状：两张 20 条榜单、一条 90 点曲线、一张组表、若干标量格。
+        let leads = PerfLeads.derive(previous: previous, snapshot: snapshot, sweep: sweep,
+                                     totalProbe: probe, groups: groups, topLimit: 20)
+        let cpuCell = PerfCell<PerfCPULead>(.empty)
+        let memoryCell = PerfCell<PerfMemoryLead>(.empty)
+        let ratesCell = PerfCell<PerfRateLead>(.empty)
+        let ledgerCell = PerfCell<PerfProcessLedger>(.empty)
+        let pulseCell = PerfCell<PerfPulse>(.empty)
+        let cpuRankCell = PerfCell<[ProcessSnapshot]>([])
+        let memRankCell = PerfCell<[ProcessSnapshot]>([])
+        let groupRankCell = PerfCell<[ProcessGroupSnapshot]>([])
+        let curveCell = PerfCell<[SystemSnapshot]>([])
+        var publishCosts: [Double] = []
+        for round in 0..<15 {
+            var shifted = snapshot
+            shifted.cpuUsage = Double(round) / 100.0
+            let curve = Array(repeating: shifted, count: 90)
+            let groupsNow = leads.groups
+            let cpuRank = leads.cpuRanking
+            let memRank = leads.memoryRanking
+            publishCosts.append(timed({
+                cpuCell.apply(leads.cpu)
+                memoryCell.apply(leads.memory)
+                ratesCell.apply(leads.rates)
+                ledgerCell.apply(leads.ledger)
+                pulseCell.apply(PerfPulse(sampleAt: Date(), historyCount: round))
+                cpuRankCell.apply(cpuRank)
+                memRankCell.apply(memRank)
+                groupRankCell.apply(groupsNow)
+                curveCell.apply(curve)
+            }))
+        }
+
+        let lines = [
+            "sweep 规模 \(sweep.processes.count) 进程 / 分组 \(groups.count) 条（实测全机 sweep 260~920，取上沿）",
+            "后台派生 derive()   \(stats(deriveCosts))   ← 不在主线程",
+            "主线程 publish 九格 \(stats(publishCosts))   ← 这才是 T2 预算里的固定开销",
+            "对照：spec T2 心跳期主线程占用 ≤ 4.0 ms",
+            "口径：publish 若远小于 4 ms，则超预算的部分只能来自视图图重算（工单 §0.4 第 1 步）。"
+                + "本测试不设阈值，只出归因用的量级。",
+        ]
+        let text = lines.joined(separator: "\n")
+        let out = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tcoder-perf-heartbeat-split.txt")
+        try text.write(to: out, atomically: true, encoding: .utf8)
+        print("【心跳归因】derive 中位 \(String(format: "%.2f", deriveCosts.sorted()[deriveCosts.count / 2])) ms（后台）"
+            + " / publish 中位 \(String(format: "%.2f", publishCosts.sorted()[publishCosts.count / 2])) ms（主线程）"
+            + "（完整读数落 \(out.path)）")
+        XCTAssertEqual(deriveCosts.count, 15)
+        XCTAssertEqual(publishCosts.count, 15)
+        XCTAssertEqual(leads.cpuRanking.count, 20, "榜单必须是 20 条，否则 publish 是对空数组做无用功")
+        XCTAssertFalse(leads.memoryRanking.isEmpty, "派生没产出榜单 = 夹具退化，读数无意义")
+    }
 }

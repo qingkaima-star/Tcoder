@@ -29,17 +29,17 @@ final class PerformanceSamplerTests: XCTestCase {
     // MARK: - 夹具
 
     /// 与真实机器核数对齐，避免 `cpuCoreCount` 的断言在两种合理实现之间产生歧义。
-    private var coreCount: Int { max(1, ProcessInfoWrapper.processorCount) }
+    var coreCount: Int { max(1, ProcessInfoWrapper.processorCount) }
 
-    private func ticks(user: UInt32 = 0, system: UInt32 = 0, idle: UInt32 = 0, nice: UInt32 = 0) -> CoreTicks {
+    func ticks(user: UInt32 = 0, system: UInt32 = 0, idle: UInt32 = 0, nice: UInt32 = 0) -> CoreTicks {
         CoreTicks(user: user, system: system, idle: idle, nice: nice)
     }
 
-    private func coreArray(_ tick: CoreTicks, count: Int? = nil) -> [CoreTicks] {
+    func coreArray(_ tick: CoreTicks, count: Int? = nil) -> [CoreTicks] {
         Array(repeating: tick, count: count ?? coreCount)
     }
 
-    private func memory(
+    func memory(
         pageSize: UInt64 = 16_384,
         active: UInt64 = 1_000,
         inactive: UInt64 = 500,
@@ -54,7 +54,7 @@ final class PerformanceSamplerTests: XCTestCase {
                    speculative: speculative, purgeable: purgeable)
     }
 
-    private func counters(
+    func counters(
         at date: Date,
         cores tick: [CoreTicks],
         memory vmCounters: VmCounters,
@@ -68,7 +68,7 @@ final class PerformanceSamplerTests: XCTestCase {
                        networkInBytes: networkIn, networkOutBytes: networkOut)
     }
 
-    private func process(
+    func process(
         pid: Int32,
         name: String,
         cpu: Double = 0,
@@ -83,23 +83,23 @@ final class PerformanceSamplerTests: XCTestCase {
                         startTime: nil, commandLine: commandLine, parentPID: parentPID)
     }
 
-    private func systemSnapshot(atSecond second: Double) -> SystemSnapshot {
+    func systemSnapshot(atSecond second: Double) -> SystemSnapshot {
         SystemSnapshot(timestamp: Date(timeIntervalSince1970: second))
     }
 
-    private func javaGroup() -> TrackedProcessGroup {
+    func javaGroup() -> TrackedProcessGroup {
         TrackedProcessGroup(title: "Java 服务", matchPattern: "java", isBuiltIn: true)
     }
 
-    private func nodeGroup() -> TrackedProcessGroup {
+    func nodeGroup() -> TrackedProcessGroup {
         TrackedProcessGroup(title: "Node 服务", matchPattern: "node", isBuiltIn: false)
     }
 
-    private func mysqlGroup() -> TrackedProcessGroup {
+    func mysqlGroup() -> TrackedProcessGroup {
         TrackedProcessGroup(title: "MySQL", matchPattern: "mysqld", isBuiltIn: false)
     }
 
-    private func fixtureProcesses() -> [ProcessSnapshot] {
+    func fixtureProcesses() -> [ProcessSnapshot] {
         [
             process(pid: 900_011, name: "java", cpu: 1.5, memory: 200, threads: 20, openFiles: 300,
                     commandLine: "/usr/bin/java -jar app.jar"),
@@ -112,7 +112,7 @@ final class PerformanceSamplerTests: XCTestCase {
         ]
     }
 
-    private static let epoch = Date(timeIntervalSince1970: 1_700_000_000)
+    static let epoch = Date(timeIntervalSince1970: 1_700_000_000)
 
     // MARK: - 1. SystemSampler.cpuUsage
 
@@ -306,381 +306,22 @@ final class PerformanceSamplerTests: XCTestCase {
 
     // MARK: - 5. snapshot(previous: nil)
 
-    func testSnapshotWithoutPreviousHasNoRatesAndNoCPUUsage() {
-        let current = counters(
-            at: Self.epoch.addingTimeInterval(10),
-            cores: coreArray(ticks(user: 100, system: 100, idle: 100)),
-            memory: memory(),
-            diskRead: 100_000, diskWrite: 200_000, networkIn: 300_000, networkOut: 400_000
-        )
-        let snapshot = SystemSampler().snapshot(previous: nil, current: current, processCount: 42)
-        XCTAssertEqual(snapshot.cpuUsage, 0, accuracy: 1e-9, "首个采样点没有基线，占用率必须是 0")
-        XCTAssertEqual(snapshot.diskReadBytesPerSecond, 0, "首个采样点磁盘读速率必须是 0")
-        XCTAssertEqual(snapshot.diskWriteBytesPerSecond, 0, "首个采样点磁盘写速率必须是 0")
-        XCTAssertEqual(snapshot.networkInBytesPerSecond, 0, "首个采样点网络入速率必须是 0")
-        XCTAssertEqual(snapshot.networkOutBytesPerSecond, 0, "首个采样点网络出速率必须是 0")
-    }
-
-    func testSnapshotWithoutPreviousReportsCoreCountMemoryTotalAndProcessCount() {
-        let current = counters(at: Self.epoch, cores: coreArray(ticks(idle: 10)), memory: memory(),
-                               diskRead: 0, diskWrite: 0, networkIn: 0, networkOut: 0)
-        let snapshot = SystemSampler().snapshot(previous: nil, current: current, processCount: 7)
-        XCTAssertEqual(snapshot.cpuCoreCount, ProcessInfoWrapper.processorCount, "核数必须来自 ProcessInfoWrapper")
-        XCTAssertEqual(snapshot.memoryTotalBytes, ProcessInfoWrapper.physicalMemory, "内存总量必须来自 ProcessInfoWrapper")
-        XCTAssertEqual(snapshot.processCount, 7, "processCount 必须原样透传")
-    }
-
     // MARK: - 6. snapshot(previous: current:)
-
-    func testSnapshotRatesAgreeWithBytesPerSecondHelper() {
-        let previousCores = coreArray(ticks())
-        let currentCores = coreArray(ticks(user: 100, system: 100, idle: 300))
-        let previous = counters(at: Self.epoch, cores: previousCores, memory: memory(),
-                                diskRead: 100_000, diskWrite: 200_000, networkIn: 300_000, networkOut: 400_000)
-        let current = counters(at: Self.epoch.addingTimeInterval(2), cores: currentCores, memory: memory(),
-                               diskRead: 104_000, diskWrite: 206_000, networkIn: 308_000, networkOut: 410_000)
-        let snapshot = SystemSampler().snapshot(previous: previous, current: current, processCount: 3)
-
-        XCTAssertEqual(snapshot.diskReadBytesPerSecond,
-                       SystemSampler.bytesPerSecond(previous: 100_000, current: 104_000, elapsed: 2),
-                       "磁盘读速率必须与 bytesPerSecond 一致")
-        XCTAssertEqual(snapshot.diskWriteBytesPerSecond,
-                       SystemSampler.bytesPerSecond(previous: 200_000, current: 206_000, elapsed: 2),
-                       "磁盘写速率必须与 bytesPerSecond 一致")
-        XCTAssertEqual(snapshot.networkInBytesPerSecond,
-                       SystemSampler.bytesPerSecond(previous: 300_000, current: 308_000, elapsed: 2),
-                       "网络入速率必须与 bytesPerSecond 一致")
-        XCTAssertEqual(snapshot.networkOutBytesPerSecond,
-                       SystemSampler.bytesPerSecond(previous: 400_000, current: 410_000, elapsed: 2),
-                       "网络出速率必须与 bytesPerSecond 一致")
-        XCTAssertEqual(snapshot.cpuUsage,
-                       SystemSampler.cpuUsage(previous: previousCores, current: currentCores),
-                       accuracy: 1e-12, "占用率必须与 cpuUsage 一致")
-    }
-
-    func testSnapshotRatesAreExactBytesPerSecondOverTwoSeconds() {
-        let previousCores = coreArray(ticks())
-        let currentCores = coreArray(ticks(user: 100, system: 100, idle: 300))
-        let previous = counters(at: Self.epoch, cores: previousCores, memory: memory(),
-                                diskRead: 1_000, diskWrite: 2_000, networkIn: 3_000, networkOut: 4_000)
-        let current = counters(at: Self.epoch.addingTimeInterval(2), cores: currentCores, memory: memory(),
-                               diskRead: 5_000, diskWrite: 8_000, networkIn: 11_000, networkOut: 14_000)
-        let snapshot = SystemSampler().snapshot(previous: previous, current: current, processCount: 1)
-        XCTAssertEqual(snapshot.diskReadBytesPerSecond, 2_000, "4000 字节 / 2 秒 = 2000")
-        XCTAssertEqual(snapshot.diskWriteBytesPerSecond, 3_000, "6000 字节 / 2 秒 = 3000")
-        XCTAssertEqual(snapshot.networkInBytesPerSecond, 4_000, "8000 字节 / 2 秒 = 4000")
-        XCTAssertEqual(snapshot.networkOutBytesPerSecond, 5_000, "10000 字节 / 2 秒 = 5000")
-        XCTAssertEqual(snapshot.cpuUsage, 0.4, accuracy: 1e-9, "两个点的差值必须给出 0.4")
-    }
-
-    func testSnapshotMemoryFieldsAgreeWithCounters() {
-        let current = counters(at: Self.epoch, cores: coreArray(ticks(idle: 30)), memory: memory(),
-                               diskRead: 0, diskWrite: 0, networkIn: 0, networkOut: 0)
-        let snapshot = SystemSampler().snapshot(previous: nil, current: current, processCount: 1)
-        XCTAssertEqual(snapshot.memoryUsedBytes,
-                       SystemSampler.memoryUsedBytes(current.vm, totalBytes: snapshot.memoryTotalBytes),
-                       "已用内存必须由 current.vm 与总量共同推得")
-        XCTAssertGreaterThan(snapshot.memoryTotalBytes, 0, "内存总量必须为正，否则 memoryFraction 无意义")
-        let expectedFraction = Double(snapshot.memoryUsedBytes) / Double(snapshot.memoryTotalBytes)
-        XCTAssertEqual(snapshot.memoryFraction, expectedFraction, accuracy: 1e-12,
-                       "memoryFraction 必须等于 used/total")
-        XCTAssertEqual(snapshot.memoryPressure, SystemSampler.pressure(for: snapshot.memoryFraction),
-                       "压力档位必须来自 pressure(for: memoryFraction)")
-    }
-
-    func testSnapshotMarksNearFullMemoryAsCritical() {
-        let pageSize: UInt64 = 16_384
-        // 造出约 90% 物理内存占用的计数器。
-        let targetPages = ProcessInfoWrapper.physicalMemory * 9 / (10 * pageSize)
-        let fixture = counters(at: Self.epoch, cores: coreArray(ticks(idle: 10)),
-                               memory: memory(pageSize: pageSize, active: targetPages - 400, wired: 200, compressed: 200),
-                               diskRead: 0, diskWrite: 0, networkIn: 0, networkOut: 0)
-        let snapshot = SystemSampler().snapshot(previous: nil, current: fixture, processCount: 1)
-        XCTAssertGreaterThan(snapshot.memoryFraction, 0.85, "夹具本身必须构造出 >=85% 的占比")
-        XCTAssertEqual(snapshot.memoryPressure, .critical, ">=85% 必须判为紧张")
-    }
 
     // MARK: - 7. ProcessInspector.cpuUsage
 
-    func testProcessCPUUsageOfOneSaturatedCoreForOneAndHalfSecondsIsOne() {
-        XCTAssertEqual(ProcessInspector.cpuUsage(previousNano: 1_000_000_000, currentNano: 2_500_000_000, elapsed: 1.5),
-                       1, accuracy: 1e-9, "1.5 秒 CPU 时间 / 1.5 秒墙钟 = 1.0")
-    }
-
-    func testProcessCPUUsageCanExceedOneOnMulticore() {
-        // 3 秒 CPU 时间 / 1.5 秒墙钟 = 2.0（两个核同时满载）
-        XCTAssertEqual(ProcessInspector.cpuUsage(previousNano: 1_000_000_000, currentNano: 4_000_000_000, elapsed: 1.5),
-                       2, accuracy: 1e-9, "多核并行时占用率允许超过 1")
-    }
-
-    func testProcessCPUUsageIsZeroWhenCountersWrapBackwards() {
-        XCTAssertEqual(ProcessInspector.cpuUsage(previousNano: 9_000_000_000, currentNano: 1_000_000_000, elapsed: 1.5),
-                       0, accuracy: 1e-9, "current < previous 必须返回 0")
-    }
-
-    func testProcessCPUUsageIsZeroWhenElapsedIsNotPositive() {
-        XCTAssertEqual(ProcessInspector.cpuUsage(previousNano: 1_000_000_000, currentNano: 2_000_000_000, elapsed: 0),
-                       0, accuracy: 1e-9, "elapsed 为 0 必须返回 0 而不是除零")
-        XCTAssertEqual(ProcessInspector.cpuUsage(previousNano: 1_000_000_000, currentNano: 2_000_000_000, elapsed: -1),
-                       0, accuracy: 1e-9, "elapsed 为负必须返回 0")
-    }
-
     // MARK: - 8. ProcessInspector.matches
-
-    func testMatchesIsCaseInsensitiveAgainstProcessName() {
-        let java = process(pid: 900_001, name: "java", commandLine: "/usr/bin/java -jar app.jar")
-        XCTAssertTrue(ProcessInspector.matches(java, pattern: "JAVA"), "pattern 必须不区分大小写命中 name")
-        XCTAssertTrue(ProcessInspector.matches(java, pattern: "java"), "大小写完全一致时必须命中")
-    }
-
-    func testMatchesIsCaseInsensitiveAgainstCommandLine() {
-        let launcher = process(pid: 900_002, name: "com.example.Launcher", commandLine: "/usr/bin/Java -version")
-        XCTAssertTrue(ProcessInspector.matches(launcher, pattern: "JAVA"), "name 不命中时必须回落到 commandLine")
-    }
-
-    func testMatchesTrimsSurroundingWhitespaceInPattern() {
-        let java = process(pid: 900_003, name: "java", commandLine: "/usr/bin/java")
-        XCTAssertTrue(ProcessInspector.matches(java, pattern: "  java  "), "pattern 前后空格必须被 trim")
-        XCTAssertTrue(ProcessInspector.matches(java, pattern: "\tJava\n"), "制表符与换行也必须被 trim")
-    }
-
-    func testMatchesRejectsEmptyOrBlankPattern() {
-        let java = process(pid: 900_004, name: "java", commandLine: "/usr/bin/java")
-        XCTAssertFalse(ProcessInspector.matches(java, pattern: ""), "空 pattern 必须为 false，否则一个组会吸走所有进程")
-        XCTAssertFalse(ProcessInspector.matches(java, pattern: "   "), "纯空白 pattern 必须为 false")
-        XCTAssertFalse(ProcessInspector.matches(java, pattern: "\t \n"), "纯制表/换行 pattern 必须为 false")
-    }
-
-    func testMatchesRejectsUnrelatedProcess() {
-        let java = process(pid: 900_005, name: "java", commandLine: "/usr/bin/java -jar app.jar")
-        XCTAssertFalse(ProcessInspector.matches(java, pattern: "nginx"), "不相关 pattern 必须为 false")
-        XCTAssertFalse(ProcessInspector.matches(java, pattern: "com.example.Other"), "看似同族但并不命中时必须为 false")
-    }
 
     // MARK: - 9. ProcessInspector.groupSnapshots
 
-    func testGroupSnapshotsReturnsOneEntryPerGroupIncludingEmptyOnes() {
-        let java = javaGroup()
-        let node = nodeGroup()
-        let mysql = mysqlGroup()
-        let result = ProcessInspector.groupSnapshots(for: [java, node, mysql], processes: fixtureProcesses())
-
-        XCTAssertEqual(result.count, 3, "每个被跟踪组都必须恰好一条结果")
-        XCTAssertEqual(Set(result.map { $0.group.id }), Set([java.id, node.id, mysql.id]),
-                       "结果的 group id 集合必须与入参一致（顺序放宽，见文件头第 8 条）")
-
-        let mysqlSnapshot = result.first { $0.group.id == mysql.id }
-        XCTAssertNotNil(mysqlSnapshot, "无匹配的组不得被丢弃（视图靠它区分「未检测到」与「没有这个组」）")
-        XCTAssertTrue(mysqlSnapshot?.matchedProcesses.isEmpty ?? false, "无匹配的组 matchedProcesses 必须为空")
-        XCTAssertEqual(mysqlSnapshot?.processCount, 0, "无匹配的组进程数必须是 0")
-        XCTAssertEqual(mysqlSnapshot?.totalCPU ?? -1, 0, accuracy: 1e-9, "无匹配的组 CPU 必须是 0")
-        XCTAssertEqual(mysqlSnapshot?.totalMemoryBytes, UInt64(0), "无匹配的组内存必须是 0")
-        XCTAssertEqual(mysqlSnapshot?.totalThreads, 0, "无匹配的组线程数必须是 0")
-        XCTAssertEqual(mysqlSnapshot?.totalOpenFiles, 0, "无匹配的组打开文件数必须是 0")
-    }
-
-    func testGroupSnapshotsSumsMetricsOfMatchedProcesses() {
-        let java = javaGroup()
-        let node = nodeGroup()
-        let result = ProcessInspector.groupSnapshots(for: [java, node], processes: fixtureProcesses())
-
-        let javaSnapshot = result.first { $0.group.id == java.id }
-        XCTAssertNotNil(javaSnapshot, "Java 组必须出现在结果里")
-        XCTAssertEqual(javaSnapshot?.processCount, 2, "两个 java 进程必须被同一个组捕获")
-        XCTAssertEqual(javaSnapshot?.totalCPU ?? -1, 2.0, accuracy: 1e-9, "totalCPU 必须是匹配进程之和")
-        XCTAssertEqual(javaSnapshot?.totalMemoryBytes, UInt64(300), "totalMemoryBytes 必须是匹配进程之和")
-        XCTAssertEqual(javaSnapshot?.totalThreads, 25, "totalThreads 必须是匹配进程之和")
-        XCTAssertEqual(javaSnapshot?.totalOpenFiles, 312, "totalOpenFiles 必须是匹配进程之和")
-
-        let nodeSnapshot = result.first { $0.group.id == node.id }
-        XCTAssertEqual(nodeSnapshot?.processCount, 1, "node 组只能命中 node 进程")
-        XCTAssertEqual(nodeSnapshot?.totalCPU ?? -1, 2.0, accuracy: 1e-9, "node 组 CPU 必须是该进程单独的值")
-        XCTAssertEqual(nodeSnapshot?.totalMemoryBytes, UInt64(400), "node 组内存必须是该进程单独的值")
-    }
-
-    func testGroupSnapshotsSortsMatchedProcessesByCPUDescending() {
-        let java = javaGroup()
-        let processes = [
-            process(pid: 900_021, name: "java-low", cpu: 0.3, commandLine: "/usr/bin/java"),
-            process(pid: 900_022, name: "java-high", cpu: 2.5, commandLine: "/usr/bin/java"),
-            process(pid: 900_023, name: "java-mid", cpu: 1.1, commandLine: "/usr/bin/java"),
-        ]
-        let result = ProcessInspector.groupSnapshots(for: [java], processes: processes)
-        let cpus = result.first?.matchedProcesses.map { $0.cpuUsage } ?? []
-        XCTAssertEqual(cpus, [2.5, 1.1, 0.3], "matchedProcesses 必须按 cpuUsage 降序，视图才能直接展示")
-    }
-
-    func testGroupSnapshotsWithNoProcessesReturnsEveryGroupEmpty() {
-        let java = javaGroup()
-        let node = nodeGroup()
-        let result = ProcessInspector.groupSnapshots(for: [java, node], processes: [])
-        XCTAssertEqual(result.count, 2, "没有任何进程时也必须为每个组留一行")
-        XCTAssertTrue(result.allSatisfy { $0.processCount == 0 }, "所有组的进程数必须是 0")
-    }
-
     // MARK: - 10. PerformanceHistory
-
-    func testPerformanceHistoryKeepsOnlyNewestSnapshotsAtCapacity() {
-        var history = PerformanceHistory()
-        XCTAssertEqual(history.capacity, 600, "默认容量必须是 600")
-        for index in 0..<601 {
-            history.append(systemSnapshot(atSecond: Double(index)))
-        }
-        XCTAssertEqual(history.snapshots.count, 600, "超出容量后必须只保留 600 个点")
-        let keptSeconds = (1...600).map { Double($0) }
-        XCTAssertEqual(history.snapshots.map { $0.id }, keptSeconds,
-                       "必须淘汰最旧的点、保留最新的 600 个")
-    }
-
-    func testPerformanceHistoryRemoveAllEmptiesSnapshotsButKeepsCapacity() {
-        var history = PerformanceHistory()
-        for index in 0..<5 { history.append(systemSnapshot(atSecond: Double(index))) }
-        XCTAssertEqual(history.snapshots.count, 5, "未超容量时必须全部保留")
-        history.removeAll()
-        XCTAssertTrue(history.snapshots.isEmpty, "removeAll 之后必须为空")
-        XCTAssertEqual(history.capacity, 600, "removeAll 不得改动容量")
-    }
 
     // MARK: - 11. 真实读取的结构合理性烟测（不断言任何具体数值）
 
-    func testSamplerReadProducesStructurallySaneCounters() throws {
-        let sampler = SystemSampler()
-        let first = sampler.read()
-        let second = sampler.read()
-        XCTAssertGreaterThanOrEqual(first.cores.count, 1, "至少要有一个核的 tick")
-        let vm = try XCTUnwrap(first.vm, "本机 host_statistics64 应当成功；nil 说明测试环境异常")
-        XCTAssertGreaterThan(vm.pageSize, 0, "pageSize 必须是来自公开 sysctl 的正数")
-        XCTAssertGreaterThan(first.timestamp.timeIntervalSince1970, 1_700_000_000, "时间戳必须是近期时间")
-
-        let snapshot = sampler.snapshot(previous: first, current: second, processCount: 3)
-        XCTAssertTrue(snapshot.cpuUsage >= 0 && snapshot.cpuUsage <= 1, "真实占用率必须被 clamp 在 0...1")
-        XCTAssertEqual(snapshot.processCount, 3, "processCount 必须原样透传")
-        XCTAssertGreaterThanOrEqual(snapshot.memoryTotalBytes, 1, "真实内存总量必须是正数")
-    }
-
-    func testProcessInspectorEnumerationDoesNotTrap() {
-        let count = ProcessInspector.processCount()
-        XCTAssertGreaterThanOrEqual(count, 1, "至少能看到当前测试进程自身")
-        XCTAssertGreaterThanOrEqual(ProcessInspector.visibleProcessCount(), 1)
-        XCTAssertLessThanOrEqual(ProcessInspector.visibleProcessCount(), count,
-                                "可逐进程查询的子集不可能大于全系统总数")
-        let io = BlockStorageSampler.ioBytes()
-        XCTAssertGreaterThan(io.read + io.write, 0, "IOKit 必须能拿到真实块设备累计量，且不需要 root")
-    }
-
     // MARK: - 12. MachSystemMonitor 烟测（@MainActor）
-
-    /// 有限轮询：每 300ms 一次、最多 3 次；条件不成立也不失败（见文件头第 6 条）。
-    @MainActor
-    private func pollUntil(_ condition: @escaping @MainActor () -> Bool) async {
-        var remaining = 3
-        while !condition() && remaining > 0 {
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            remaining -= 1
-        }
-    }
-
-    /// 无论测试体走哪条路径，都保证采样循环被关掉。
-    private func registerStopTeardown(for monitor: MachSystemMonitor) {
-        addTeardownBlock {
-            Task { @MainActor in
-                monitor.stop()
-            }
-        }
-    }
-
-    @MainActor func testMonitorSamplingProducesSnapshot() async {
-        let monitor = MachSystemMonitor()
-        registerStopTeardown(for: monitor)
-
-        _ = monitor.sampleNow()
-        let second = monitor.sampleNow()
-        XCTAssertNotNil(second, "第二次 sampleNow 必须产出快照")
-        XCTAssertNotNil(monitor.latestSnapshot, "latestSnapshot 必须被 sampleNow 填充")
-        XCTAssertGreaterThanOrEqual(monitor.history.count, 1, "history 至少要落一个点")
-
-        if let snapshot = second {
-            XCTAssertTrue(snapshot.cpuUsage >= 0 && snapshot.cpuUsage <= 1, "真实占用率必须落在 0...1")
-            XCTAssertGreaterThan(snapshot.memoryTotalBytes, 0, "真实内存总量必须是正数")
-            XCTAssertGreaterThan(snapshot.cpuCoreCount, 0, "核数必须是正数")
-        }
-
-        let tops = monitor.topProcesses
-        XCTAssertTrue((0...20).contains(tops.count), "topProcesses 必须被限制在 20 条以内，实得 \(tops.count)")
-        if tops.count >= 2 {
-            for index in 1..<tops.count {
-                XCTAssertGreaterThanOrEqual(tops[index - 1].cpuUsage, tops[index].cpuUsage,
-                                            "topProcesses 必须按 cpuUsage 降序")
-            }
-        }
-        for entry in tops {
-            XCTAssertGreaterThan(entry.pid, 0, "进程 pid 必须为正")
-        }
-
-        await pollUntil { monitor.trackedGroups.count >= TrackedProcessGroup.builtInDefaults.count }
-        XCTAssertGreaterThanOrEqual(monitor.trackedGroups.count, TrackedProcessGroup.builtInDefaults.count,
-                                    "trackedGroups 必须覆盖全部内置组（放宽，见文件头第 4 条）")
-        for title in TrackedProcessGroup.builtInDefaults.map({ $0.title }) {
-            XCTAssertTrue(monitor.trackedGroups.contains { $0.group.title == title },
-                          "内置组「\(title)」必须出现在 trackedGroups 里")
-        }
-
-        monitor.start(intervalMilliseconds: 200)
-        XCTAssertTrue(monitor.isRunning, "start 之后 isRunning 必须为真")
-        await pollUntil { monitor.history.count > 1 }
-        monitor.stop()
-        XCTAssertFalse(monitor.isRunning, "测试结束前必须停掉采样循环")
-    }
-
-    @MainActor func testMonitorStartIsIdempotentAndStopHaltsSampling() async {
-        let monitor = MachSystemMonitor()
-        registerStopTeardown(for: monitor)
-
-        monitor.start(intervalMilliseconds: 1_000)
-        monitor.start(intervalMilliseconds: 1_000)
-        monitor.start(intervalMilliseconds: 1_000)
-        XCTAssertTrue(monitor.isRunning, "重复 start 之后仍处于运行态")
-
-        monitor.stop()
-        XCTAssertFalse(monitor.isRunning, "一次 stop 就必须终止全部可能叠加的采样循环")
-
-        let before = monitor.history.count
-        try? await Task.sleep(nanoseconds: 300_000_000)
-        let after = monitor.history.count
-        XCTAssertLessThanOrEqual(after - before, 4, "stop 之后不得有多倍采样（放宽，见文件头第 7 条）")
-    }
-
-    @MainActor func testMonitorAddAndRemoveTrackedGroup() async throws {
-        let monitor = MachSystemMonitor()
-        registerStopTeardown(for: monitor)
-        let absentPattern = "definitely-not-a-real-process-xyz"
-
-        XCTAssertEqual(TrackedProcessGroup.builtInDefaults.count, 5, "内置默认组必须是 5 个")
-        let baselineCount = monitor.groups().count
-
-        monitor.addGroup(title: "临时组", matchPattern: absentPattern)
-        let afterAdd = monitor.groups()
-        XCTAssertEqual(afterAdd.count, baselineCount + 1, "addGroup 之后 groups() 数量必须 +1")
-        let added = try XCTUnwrap(afterAdd.first { $0.matchPattern == absentPattern },
-                                  "新增组必须出现在 groups() 里")
-        XCTAssertEqual(added.title, "临时组", "新增组的标题必须被记录")
-        XCTAssertEqual(added.matchPattern, absentPattern, "新增组的匹配串必须被记录")
-
-        _ = monitor.sampleNow()
-        await pollUntil { monitor.trackedGroups.contains { $0.group.id == added.id } }
-        if let tracked = monitor.trackedGroups.first(where: { $0.group.id == added.id }) {
-            XCTAssertEqual(tracked.processCount, 0, "不存在的进程名不得匹配到任何进程")
-            XCTAssertTrue(tracked.matchedProcesses.isEmpty, "不存在的进程名不得有 matchedProcesses")
-        } else {
-            // 放宽（见文件头第 5 条）：实现可能只在后台采样循环里刷新 trackedGroups。
-            XCTAssertEqual(monitor.groups().count, baselineCount + 1, "至少 groups() 必须已经更新")
-        }
-
-        monitor.removeGroup(id: added.id)
-        XCTAssertEqual(monitor.groups().count, baselineCount, "removeGroup 之后必须回到基线数量")
-        XCTAssertFalse(monitor.groups().contains { $0.id == added.id }, "移除后 groups() 不得再包含该组")
-
-        monitor.stop()
-        XCTAssertFalse(monitor.isRunning, "测试结束必须 stop()，不留后台循环")
-    }
 }
+
+// MARK: - 9) ~ 12) 快照派生 / 分组聚合 / 历史容量 / MachSystemMonitor 烟测
+//
+// 这两段已各成一个文件（WS-X3 TestSplit，用例本体一字未改）：
+// `PerformanceSamplerTests+SnapshotAndGroups.swift`、`PerformanceSamplerTests+MonitorLifecycle.swift`。
