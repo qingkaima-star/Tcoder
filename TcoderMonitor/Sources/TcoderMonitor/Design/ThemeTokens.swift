@@ -363,18 +363,19 @@ extension Theme {
 
     /// 版面锚点（WS-H §3.2 / §3.4）。把断点写成令牌，页面里就不该再出现魔法宽度。
     enum Layout {
-        /// 阅读/列表型页面上限
-        static let maxWidthReading: CGFloat = 1040
-        /// 概览型。1120 → 1200：读数带取代四块灰盒后，横向需要更多留白撑住版框。
-        static let maxWidthOverview: CGFloat = 1200
-        /// 数据密集型（性能、健康）
-        static let maxWidthDense: CGFloat = 1240
-        /// 指标 tile 自适应最小宽度（一行四 → 自动折两列/单列）
+        /// **九页共用一个版框宽度**。原来三档（reading 1040 / overview 1200 / dense 1240）
+        /// 的直接后果是：切一次 tab 内容整体左右跳 100pt，实拍量到左边距 585 / 610–650 / 965
+        /// 三套、右边距五套 —— 用户判词「不规整」在版面上指的就是这个。
+        /// 取 1240 是因为它是最窄的那档装不下的表（健康五列、性能图例）实测要的宽度，
+        /// 版框只能按最宽的住户定；阅读型的行宽问题另有出口（段落组件自己收口），
+        /// 不该拿整页版框去替一段文字让步。
+        static let maxWidthPage: CGFloat = 1240
         /// 键值行的**标签列**宽。原来标签左、值右、中间一个 `Spacer`，
         /// 在 1040–1240pt 的页宽上就是"两个词被拉到相距约 1900px，中间没有结构"
         /// （依赖页三行、Git 页路径行都这样，是「对不齐」观感的主因之一）。
         /// 改成真正的两列：标签占定宽，值紧跟其后左对齐 —— 值与值之间于是能竖向比对。
         static let fieldLabelWidth: CGFloat = 160
+        /// 指标 tile 自适应最小宽度（一行四 → 自动折两列/单列）
         static let tileMinWidth: CGFloat = 220
         /// 双列内容卡并排所需的最小列宽
         static let twoColumnMinWidth: CGFloat = 420

@@ -260,12 +260,11 @@ extension Theme {
         }
 
         struct Scaffold<Content: View>: View {
-            var maxWidth: CGFloat
             @ViewBuilder var content: Content
 
-            init(maxWidth: CGFloat = Theme.Layout.maxWidthReading,
-                 @ViewBuilder content: () -> Content) {
-                self.maxWidth = maxWidth
+            /// **没有 `maxWidth` 参数是刻意的**：版框宽度全仓一个值，页面想跳也跳不了。
+            /// 三档时代的切 tab 左右跳 100pt，就是「不规整」的来源（见 `Layout.maxWidthPage`）。
+            init(@ViewBuilder content: () -> Content) {
                 self.content = content()
             }
 
@@ -274,7 +273,7 @@ extension Theme {
                     VStack(alignment: .leading, spacing: Theme.Spacing.group) {
                         content
                     }
-                    .frame(maxWidth: maxWidth, alignment: .leading)
+                    .frame(maxWidth: Theme.Layout.maxWidthPage, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.horizontal, Theme.Spacing.pageMargin)
                     // 页头之上与页尾各给一整段呼吸：这一档存在的意义就是

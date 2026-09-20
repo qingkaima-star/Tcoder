@@ -31,7 +31,7 @@ struct PerformanceView: View {
 
     var body: some View {
         // 版框走基座那一份页骨架（组间 32 / 页边距 24 / 顶部段落 40，全仓只许一份）。
-        Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthDense) {
+        Theme.Page.Scaffold {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 header
                 sampleStats

@@ -394,8 +394,11 @@ final class ShellBorderlessTests: XCTestCase {
                       "这些文件自己写了一遍页骨架，请改用 `Theme.Page.Scaffold`：\(handRolled)")
         let dashboard = try XCTUnwrap(
             Self.shellSources().first { $0.path == "DashboardView.swift" }).content
-        XCTAssertTrue(dashboard.contains("Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthOverview"),
-                        "总览没接基座页骨架，或限宽档没走 overview（1200）")
+        XCTAssertTrue(dashboard.contains("Theme.Page.Scaffold {"),
+                        "总览没接基座页骨架。版框宽度现在只有基座一个出口，"
+                        + "页面不再传 `maxWidth:`（三档会让切 tab 时内容整体左右跳）")
+        XCTAssertFalse(dashboard.contains("Theme.Page.Scaffold(maxWidth:"),
+                       "页面自己挑版框宽度 = 又想单开一档，九页边距会再次分叉")
     }
 
     func test_scaffoldScannerCatchesSyntheticDuplication() {

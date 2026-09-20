@@ -21,7 +21,7 @@ struct LogsView: View {
     var body: some View {
         @Bindable var state = state
 
-        Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthReading) {
+        Theme.Page.Scaffold {
                 header(window: $state.logWindowDays)
                 banners
                 LogsMetricGrid(logs: report?.logs, code: report?.code)

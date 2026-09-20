@@ -13,7 +13,7 @@ struct HealthView: View {
     @Environment(AppState.self) private var state
 
     var body: some View {
-        Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthDense) {
+        Theme.Page.Scaffold {
             header
             if let health = report?.health {
                 if health.components.isEmpty {
