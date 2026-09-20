@@ -166,7 +166,11 @@ struct CPUHistoryChart: View {
         // `BorderlessSurfaceGuardTests.test_areaChartsClipTheirPlotArea`。
         .chartPlotStyle { $0.clipped() }
         .chartYAxis {
-            AxisMarks(values: [0, 50, 100]) { _ in
+            // **必须显式 `.leading`**：SwiftUI 的默认是 `.automatic`，在这张图上落到**右边**，
+            // 而性能/健康/日志/Git 四页的曲线全都显式写了 `.leading` ——
+            // 于是同一个 App 里"纵轴一会儿在左一会儿在右"（实拍总览页 100/50/0 靠右）。
+            // 守卫：`test_yAxisLabelsAllSitOnTheLeadingSide`。
+            AxisMarks(position: .leading, values: [0, 50, 100]) { _ in
                 AxisGridLine().foregroundStyle(Theme.Palette.Surface.separator)
                 AxisValueLabel().font(Theme.Typo.microLabel.font.monospacedDigit())
             }
