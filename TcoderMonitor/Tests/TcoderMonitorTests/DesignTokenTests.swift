@@ -157,7 +157,7 @@ final class DesignTokenTests: XCTestCase {
 
     func testLayoutAnchorsMatchSpecifiedWidths() {
         XCTAssertEqual(Theme.Layout.maxWidthReading, 1040)
-        XCTAssertEqual(Theme.Layout.maxWidthOverview, 1120)
+        XCTAssertEqual(Theme.Layout.maxWidthOverview, 1200)
         XCTAssertEqual(Theme.Layout.maxWidthDense, 1240)
         XCTAssertEqual(Theme.Layout.tileMinWidth, 220)
         XCTAssertLessThan(Theme.Layout.tileMinWidth, Theme.Layout.twoColumnMinWidth)

@@ -34,6 +34,29 @@ extension Theme {
             /// 表格/区块分隔线。内容卡不再用 1px 描边分层（WS-H §3.3），
             /// 只有确有分隔语义的地方用它。
             static let separator = Color(nsColor: .separatorColor)
+
+            // ↓ 「简约无界」四个地面令牌。取值权威 = 本轮 spec §1 风格契约 1/3/4。
+            //
+            // 这四条存在的首要理由是**反证**：旧实现的内容层走 `.regularMaterial`，
+            // 而材质背后无内容时在 macOS 上退化成一平涂半透明灰，实测每层都比窗口白底更暗
+            // （`#FFFFFF → #E9EBED → #E3E5E7`，相邻只有 1.05:1，低于人眼 ~1.15:1 的分层阈值），
+            // 叠三层就是「黑黢黢、很脏」。同一段里 `Surface.card` 早在 `controlBackgroundColor`
+            // 上定义好了却**全仓零引用** —— 所以《BorderlessSurfaceGuardTests》现在既查
+            // 「画了不该画的」也查「定义了没人用的」，只查前者会原样复发。
+
+            /// 唯一页面底色（风格契约 1）。参考图两处取样对比 1.00:1 = 全页只有一个面。
+            static let ground = DualColor(lightHex: 0xF1F1F3, darkHex: 0x1C1C1E).color
+            /// 井：内容层唯一允许的实心底（风格契约 3），只给表格 / 日志列表 / 代码块。
+            static let well = DualColor(lightHex: 0xEAEAEC, darkHex: 0x2A2A2C).color
+            /// 控件层在 macOS ≤ 15 的实心兜底（26 上由系统玻璃接管）。
+            static let control = DualColor(lightHex: 0xFFFFFF, darkHex: 0x2D2D2F).color
+            /// 主读数纯墨（风格契约 4）。34pt 及以上的数字必须用它。
+            ///
+            /// **为什么不能用 `.primary`**：macOS 的 `labelColor` 是 85% 不透明黑，
+            /// 铺在 `ground` 上合成出来约 `#262626` —— 实测正是重构前全页最暗像素
+            /// `#2F2F2F` 的来源，而它落在**小号正文**上；参考图最暗像素 `#000000`
+            /// 落在**最大的数字**上。「没有主次」在像素层面的定义就是这个错位。
+            static let ink = DualColor(lightHex: 0x0A0A0A, darkHex: 0xF2F2F5).color
         }
 
         /// 透明度只留三档，收编现仓散落的 0.04/0.08/0.12/0.14/0.15/0.25。
@@ -232,10 +255,19 @@ extension Theme {
         /// 但 §3.1 的间距刻度里没有 6 这一档。此处按 §9 的显式值单列，
         /// 是否并回刻度交总工定夺（已写进笔记 42 的冲突清单）。
         static let chip: CGFloat = 6
-        /// 内容卡内边距（规范用 lg=20 取代现状 14）。
-        static let cardPadding: CGFloat = 20
+        /// 内容卡内边距。20 → 24（无界面靠更大的内边距补回被拿掉的盒体边界）。
+        static let cardPadding: CGFloat = 24
         /// 紧凑卡 / 指标 tile 内边距。
         static let tilePadding: CGFloat = 16
+
+        /// 主分组间距（风格契约 8）。
+        ///
+        /// 「拥挤」的机械成因不是东西多，是**组间与组内是同一个数**：旧总览主区块之间用
+        /// `md`=16、网格里用 `gutter`=12，而卡片内部条目间距也是 12 —— 没有任何东西告诉
+        /// 眼睛「一组在这里结束」。这一档存在的唯一目的就是把组界显出来。
+        static let group: CGFloat = 32
+        /// 页面左右内边距。16 → 24：无界面里留白就是版框，边距太窄会让整页读起来像一坨。
+        static let pageMargin: CGFloat = 24
     }
 
     /// 从现仓 7 种收敛到 5 档（WS-H §3.3）。同心原则：外层 lg → 内层 md/sm。
@@ -278,8 +310,8 @@ extension Theme {
     enum Layout {
         /// 阅读/列表型页面上限
         static let maxWidthReading: CGFloat = 1040
-        /// 概览型
-        static let maxWidthOverview: CGFloat = 1120
+        /// 概览型。1120 → 1200：读数带取代四块灰盒后，横向需要更多留白撑住版框。
+        static let maxWidthOverview: CGFloat = 1200
         /// 数据密集型（性能、健康）
         static let maxWidthDense: CGFloat = 1240
         /// 指标 tile 自适应最小宽度（一行四 → 自动折两列/单列）
@@ -326,6 +358,15 @@ extension Theme {
         let monospacedDigits: Bool
         /// 中文正文用 1.5–1.6 倍行高（WS-H §4.2），换算成 SwiftUI 的 lineSpacing 追加值。
         let lineSpacing: CGFloat
+        /// 字距（pt）。无界风格里分区标题是**唯一的分组线索**，靠加字距把它从正文里
+        /// 拎出来，而不是靠底色、描边或图标色。带默认值，故 12 处既有成员式初始化不受影响。
+        ///
+        /// ⚠️ **`Font` 没有任何字距 API**（实测 `Font.kerning` 与 `Font.tracking` 都不存在，
+        /// 字距只在 `Text` / `View` 层）。所以这一档**不经过 `font`**，由 `View.typed(_:)`
+        /// 一次性套上（`Design/SharedComponents.swift`）。
+        /// 用 `.font(token.font)` 会静默丢掉字距 —— 分区标题一律走 `.typed(...)`，
+        /// 《BorderlessSurfaceGuardTests》钉着这条。
+        var tracking: CGFloat = 0
 
         var font: Font {
             let base = Font.system(size: size, weight: weight, design: design)
@@ -339,14 +380,30 @@ extension Theme {
     ///
     /// 数字一律弃用 `.rounded`：向活动监视器的原生观感靠拢，这是刻意的取舍（WS-H §4.1）。
     enum Typo {
-        // 数据大字
-        static let heroMetric = TypeToken(name: "heroMetric", size: 40, weight: .bold, design: .default, monospacedDigits: true, lineSpacing: 4)
-        static let metricNumber = TypeToken(name: "metricNumber", size: 28, weight: .semibold, design: .default, monospacedDigits: true, lineSpacing: 4)
-        static let metricMid = TypeToken(name: "metricMid", size: 18, weight: .semibold, design: .default, monospacedDigits: true, lineSpacing: 3)
+        // 数据大字。
+        //
+        // 「简约无界」把跨度从 4:1（旧 40/28/18）拉到 5.6:1。旧值不是审美选择，是
+        // 「没有主次」的定量形态之一：全仓 122 次 `Typo.*` 引用里 67% 挤在 10–12pt，
+        // 大字档只占 6%，`heroMetric` 全仓仅 3 处调用 —— 最大与最小差 4 倍，
+        // 眼睛无从判断哪个才是这一页的主角。
+        static let heroMetric = TypeToken(name: "heroMetric", size: 56, weight: .bold, design: .default, monospacedDigits: true, lineSpacing: 4)
+        static let metricNumber = TypeToken(name: "metricNumber", size: 34, weight: .semibold, design: .default, monospacedDigits: true, lineSpacing: 4)
+        /// 必须与 `pageTitle` 一起抬：`DesignTokenTests` 钉的是严格递减链
+        /// `heroMetric > metricNumber > metricMid > pageTitle > cardTitle`，
+        /// 只抬 `pageTitle` 而把这一档留在 18 会破链，且报的是「字号顺序」而不是「值不对」，
+        /// 很容易被误归因成别人改坏了。
+        static let metricMid = TypeToken(name: "metricMid", size: 22, weight: .semibold, design: .default, monospacedDigits: true, lineSpacing: 3)
 
         // 中文标题 / 正文 / 说明
-        static let pageTitle = TypeToken(name: "pageTitle", size: 17, weight: .semibold, design: .default, monospacedDigits: false, lineSpacing: 2)
+        static let pageTitle = TypeToken(name: "pageTitle", size: 20, weight: .semibold, design: .default, monospacedDigits: false, lineSpacing: 2)
         static let cardTitle = TypeToken(name: "cardTitle", size: 13, weight: .semibold, design: .default, monospacedDigits: false, lineSpacing: 2)
+        /// **分区标题的唯一档**，取代 `cardTitle` 承担这件事。
+        ///
+        /// 这是对 WS-H §4 的一处修订（本轮 spec §1.1 备案）：无界面里标题是**唯一的分组线索**
+        /// —— 没有卡面、没有描边、没有图标底色替它说话 —— 所以它必须比内容更轻、更安静，
+        /// 而不是更像一块面板的名字。13pt semibold 会被读成「这里开始有一个盒子」。
+        /// 字距 0.6pt 是把它从正文里拎出来的唯一手段。
+        static let groupLabel = TypeToken(name: "groupLabel", size: 10, weight: .medium, design: .default, monospacedDigits: false, lineSpacing: 2, tracking: 0.6)
         static let body = TypeToken(name: "body", size: 13, weight: .regular, design: .default, monospacedDigits: false, lineSpacing: 3)
         static let narrative = TypeToken(name: "narrative", size: 12, weight: .regular, design: .default, monospacedDigits: false, lineSpacing: 3)
         static let label = TypeToken(name: "label", size: 11, weight: .regular, design: .default, monospacedDigits: false, lineSpacing: 2)
@@ -364,7 +421,7 @@ extension Theme {
 
         static let all: [TypeToken] = [
             heroMetric, metricNumber, metricMid,
-            pageTitle, cardTitle, body, narrative, label, microLabel,
+            pageTitle, cardTitle, groupLabel, body, narrative, label, microLabel,
             monoBody, monoSmall, monoLabel,
         ]
 
