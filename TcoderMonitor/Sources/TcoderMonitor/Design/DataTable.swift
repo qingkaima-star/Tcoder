@@ -246,8 +246,11 @@ struct DataFieldRow: View {
                 .font(CodeGitType.prose(Theme.Typo.label))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            Spacer(minLength: Theme.Spacing.sm)
+                .frame(width: Theme.Layout.fieldLabelWidth, alignment: .leading)
+            // 值**左对齐紧跟标签**，不再 `Spacer` 顶到行尾：
+            // 一屏三行键值时，值们竖向成列才可比；拉到两端只剩一条条下划线。
             valueText
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
