@@ -116,7 +116,11 @@ struct MetricTile: View {
                     // 原来是 `.tertiary`：测得值不得用 tertiary。全仓 42 处 `.tertiary`
                     // 里落在数字上的那些，是「没有主次」在文字侧的另一半成因。
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    // **口径脚注不许截断**：`lineLimit(2)` + 定高 72 让超两行的口径整段消失，
+                    // 而 caption 装的正是"这个数字怎么量出来的"——丢掉它等于把可核对性丢掉。
+                    // 与定宽表格格相反：格子里宁可截不可撑（撑了五列基线全断），
+                    // 脚注宁可撑不可截（行高由条带里最高的那格决定，顶部对齐后数字仍同高）。
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, minHeight: Theme.Layout.tileHeightCompact,

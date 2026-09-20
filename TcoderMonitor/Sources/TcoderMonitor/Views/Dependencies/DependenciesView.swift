@@ -86,14 +86,22 @@ struct DependencySummaryGrid: View {
 
     var body: some View {
         let verdict = DependencySafetyVerdict(deps)
-        GlassSection("依赖规模", subtitle: "清单直接声明数 · 不含锁文件里的传递依赖", icon: .package) {
+        GlassSection("依赖规模", subtitle: "按清单文件统计", icon: .package) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 DataHeroReadout(value: NumberFormat.grouped(deps.totalDependencies),
                                 unit: "项",
-                                note: "\(NumberFormat.grouped(deps.ecosystems.count)) 个生态的清单直接声明，"
-                                    + "不含锁文件解析出的传递依赖")
+                                // 「N 个生态」这个数已经站在下面读数带的第一格里了，
+                                // 主角的 note 只留口径本身（"不含传递依赖"是必须读到的那句）。
+                                note: "清单直接声明，不含锁文件解析出的传递依赖")
 
                 ReadoutStrip {
+                    MetricTile(
+                        label: "生态",
+                        value: NumberFormat.grouped(deps.ecosystems.count),
+                        unit: "个",
+                        caption: "清单来源，名单见下方「风险总览」"
+                    )
+                    DataBandSeparator()
                     MetricTile(
                         label: "运行时 / 开发",
                         value: "\(NumberFormat.grouped(deps.productionCount)) / \(NumberFormat.grouped(deps.devCount))",
@@ -150,22 +158,10 @@ struct DependencyOverviewSection: View {
             trailing: AnyView(SafetyVerdictBadge(verdict: verdict))
         ) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                ReadoutStrip {
-                    DataReadout(label: "生态", value: NumberFormat.grouped(deps.ecosystems.count),
-                                caption: "清单来源", unit: "个")
-                    DataBandSeparator()
-                    DataReadout(label: "依赖", value: NumberFormat.grouped(deps.totalDependencies),
-                                caption: "直接声明", unit: "项")
-                    DataBandSeparator()
-                    DataReadout(label: "过旧", value: NumberFormat.grouped(deps.outdatedCount),
-                                unit: "项",
-                                role: deps.outdatedCount > 0 ? Theme.Semantic.warning : nil)
-                    DataBandSeparator()
-                    DataReadout(label: "漏洞", value: NumberFormat.grouped(deps.vulnerableCount),
-                                caption: verdict.mayClaimSafe ? "已核对" : "未核对", unit: "条",
-                                role: verdict.role)
-                }
-
+                // 这一节**不再摆一条读数带**：原来这里的「生态/依赖/过旧/漏洞」四格
+                // 与上一节「依赖规模」的 hero + 读数带是同一批数（隔 32pt 说两遍，
+                // 且两带格数不同、分隔线错位）。数只在上一次，这一节只留**它独有的东西**：
+                // 结论徽标 + 三行来源核对。
                 VStack(spacing: DataRowMetrics.rowGap) {
                     DataFieldRow(label: "联网查询",
                                  value: deps.networkLookupPerformed ? "是" : "否", style: .text,

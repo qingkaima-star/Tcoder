@@ -25,7 +25,7 @@ struct DashboardView: View {
     private var report: ProjectReport? { state.selectedReport }
 
     var body: some View {
-        Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthOverview) {
+        Theme.Page.Scaffold {
             Theme.Page.Header(title: "总览", icon: .dashboard)
             HealthHeroCard(health: report?.health)
             // 紧跟 hero 的是**本机读数带**（CPU / 内存 / 今日错误 / 最近提交），

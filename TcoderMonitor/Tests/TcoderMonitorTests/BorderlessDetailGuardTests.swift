@@ -1,15 +1,19 @@
+import Foundation
+import SwiftUI
 import XCTest
 @testable import TcoderMonitor
 
-// MARK: - 第三轮·批次 A：绘图溢出与上屏字面量（自 BorderlessSurfaceGuardTests.swift 原样搬出）
+// MARK: - 「简约无界」风格契约守卫（批次 A / G / H / H5）
 //
-// 搬的理由是机械的：本 App 自扫点名原文件越过 400 行「巨大文件」线，
-// 而 `X3TestSizeAuditTests` 用同一口径钉着它。判据、合成样例与数字一字未改；
-// 内容取 main 的最新版本（含批次 A 之后补的注释与用例）。
-// `isCode` 原是 private：跨文件复用就放宽到模块内可见（本仓先例见 ComplexityCounting.swift 顶部）。
-extension BorderlessSurfaceGuardTests {
+// 从 `BorderlessSurfaceGuardTests` 拆出来：那份写满 900 行撞上了自扫闸门
+// （超 800 行的文件上限 0，阈值冻结，拆文件才是修复）。
+// 尺子（`sourceFiles` / `codeLines` / `isCode`）不在这里重复实现，
+// 两份守卫都走 `SurfaceScanKit`；`SurfaceScanKit` 自己的反向自证在
+// `BorderlessSurfaceGuardTests.test_sourceScannerActuallyFindsFiles`。
 
-// MARK: - 第三轮·批次 A：绘图溢出与上屏字面量
+final class BorderlessDetailGuardTests: XCTestCase {
+
+    // MARK: - 第三轮·批次 A：绘图溢出与上屏字面量
 
     /// 画了 `AreaMark`（面积填充）却**没有裁绘图区**的位置。
     ///
@@ -20,12 +24,12 @@ extension BorderlessSurfaceGuardTests {
     /// 而轴收在 75…100 的那一片灰。
     static func unclippedAreaCharts(in files: [(path: String, content: String)]) -> [String] {
         files.compactMap { file in
-            let code = Self.codeLines(file.content)
+            let code = SurfaceScanKit.codeLines(file.content)
             guard code.contains(where: { $0.contains("AreaMark(") }) else { return nil }
             guard !code.contains(where: { $0.contains("chartPlotStyle") && $0.contains("clipped") })
             else { return nil }
             let line = file.content.split(separator: "\n", omittingEmptySubsequences: false)
-                .firstIndex(where: { Self.isCode($0) && $0.contains("AreaMark(") })
+                .firstIndex(where: { SurfaceScanKit.isCode($0) && $0.contains("AreaMark(") })
             return "\(file.path):\(line.map { $0 + 1 } ?? 0)"
         }
     }
@@ -39,20 +43,14 @@ extension BorderlessSurfaceGuardTests {
                 .split(separator: "\n", omittingEmptySubsequences: false)
                 .enumerated()
                 .compactMap { index, raw in
-                    guard Self.isCode(raw), raw.contains("\""), raw.contains("**") else { return nil }
+                    guard SurfaceScanKit.isCode(raw), raw.contains("\""), raw.contains("**") else { return nil }
                     return "\(file.path):\(index + 1)"
                 }
         }
     }
 
-    /// 与 `codeLines` 同一个「整行注释」判据 —— 两个扫描器必须共用，否则会出现
-    /// 一个豁免注释、另一个不豁免的分歧。
-    static func isCode(_ line: some StringProtocol) -> Bool {
-        !line.trimmingCharacters(in: .whitespaces).hasPrefix("//")
-    }
-
     func test_areaChartsClipTheirPlotArea() throws {
-        let views = try Self.sourceFiles(under: "Views")
+        let views = try SurfaceScanKit.sourceFiles(under: "Views")
         let offenders = Self.unclippedAreaCharts(in: views)
         XCTAssertTrue(offenders.isEmpty,
                       "这些文件画了 AreaMark 却没裁绘图区，轴一收窄就会盖住下面的区块：\(offenders)")
@@ -61,7 +59,7 @@ extension BorderlessSurfaceGuardTests {
     }
 
     func test_noMarkdownStarsReachTheScreen() throws {
-        let offenders = Self.markdownStarsInUIStrings(in: try Self.sourceFiles(under: "Views"))
+        let offenders = Self.markdownStarsInUIStrings(in: try SurfaceScanKit.sourceFiles(under: "Views"))
         XCTAssertTrue(offenders.isEmpty, "UI 串里出现 markdown 星号，会原样显示给用户：\(offenders)")
     }
 
@@ -97,14 +95,14 @@ extension BorderlessSurfaceGuardTests {
             file.content.split(separator: "\n", omittingEmptySubsequences: false)
                 .enumerated()
                 .compactMap { index, raw in
-                    guard isCode(raw), raw.contains("Theme.Page.Header(") else { return nil }
+                    guard SurfaceScanKit.isCode(raw), raw.contains("Theme.Page.Header(") else { return nil }
                     return "\(file.path):\(index + 1)"
                 }
         }
     }
 
     func test_everyPageDeclaresExactlyOnePageHeader() throws {
-        let hits = Self.pageHeaderDeclarations(in: try Self.sourceFiles(under: "Views"))
+        let hits = Self.pageHeaderDeclarations(in: try SurfaceScanKit.sourceFiles(under: "Views"))
         let paths = Set(hits.map { String($0.prefix(while: { $0 != ":" })) })
         XCTAssertEqual(paths.count, 9,
                        "声明页级 H1 的页面数不是 9（九页各一处）：\(paths.sorted())")
@@ -139,14 +137,14 @@ extension BorderlessSurfaceGuardTests {
             file.content.split(separator: "\n", omittingEmptySubsequences: false)
                 .enumerated()
                 .compactMap { index, raw in
-                    guard isCode(raw), raw.contains(".pickerStyle(.segmented)") else { return nil }
+                    guard SurfaceScanKit.isCode(raw), raw.contains(".pickerStyle(.segmented)") else { return nil }
                     return "\(file.path):\(index + 1)"
                 }
         }
     }
 
     func test_noBoxedSegmentedPickersRemain() throws {
-        let offenders = Self.boxedSegmentedPickers(in: try Self.sourceFiles(under: "Views"))
+        let offenders = Self.boxedSegmentedPickers(in: try SurfaceScanKit.sourceFiles(under: "Views"))
         XCTAssertTrue(offenders.isEmpty,
                       "又出现盒式分段选择器（灰底选中），改走 TextSegmentedPicker：\(offenders)")
     }
@@ -171,7 +169,7 @@ extension BorderlessSurfaceGuardTests {
             return file.content.split(separator: "\n", omittingEmptySubsequences: false)
                 .enumerated()
                 .compactMap { index, raw in
-                    guard isCode(raw), raw.contains("Divider()") else { return nil }
+                    guard SurfaceScanKit.isCode(raw), raw.contains("Divider()") else { return nil }
                     return "\(file.path):\(index + 1)"
                 }
         }
@@ -183,7 +181,7 @@ extension BorderlessSurfaceGuardTests {
     ]
 
     func test_dividerIsConfinedToSystemMenus() throws {
-        let offenders = Self.strayDividers(in: try Self.sourceFiles(under: "Views"),
+        let offenders = Self.strayDividers(in: try SurfaceScanKit.sourceFiles(under: "Views"),
                                            allowed: Self.dividerAllowlist)
         XCTAssertTrue(offenders.isEmpty,
                       "内容层又出现第三种分隔线画法，竖线用 DataBandSeparator、横线用 DataRowSeparator：\(offenders)")
@@ -211,7 +209,7 @@ extension BorderlessSurfaceGuardTests {
                 .enumerated()
                 .compactMap { index, raw in
                     let line = String(raw)
-                    guard isCode(line), let start = line.range(of: "caption: \"") else { return nil }
+                    guard SurfaceScanKit.isCode(line), let start = line.range(of: "caption: \"") else { return nil }
                     let rest = line[start.upperBound...]
                     guard let end = rest.firstIndex(of: "\"") else { return nil }
                     let text = rest[..<end]
@@ -223,7 +221,7 @@ extension BorderlessSurfaceGuardTests {
     }
 
     func test_pureUnitsGoToUnitNotCaption() throws {
-        let offenders = Self.pureUnitCaptions(in: try Self.sourceFiles(under: "Views"))
+        let offenders = Self.pureUnitCaptions(in: try SurfaceScanKit.sourceFiles(under: "Views"))
         XCTAssertTrue(offenders.isEmpty,
                       "这些格把量词写成了口径（应改用 unit:）：\(offenders)")
     }
@@ -293,7 +291,7 @@ extension BorderlessSurfaceGuardTests {
     }
 
     func test_multiPathGlueIsConfinedToTooltips() throws {
-        let offenders = Self.pathGlueOutsideHelp(in: try Self.sourceFiles(under: "Views"))
+        let offenders = Self.pathGlueOutsideHelp(in: try SurfaceScanKit.sourceFiles(under: "Views"))
         XCTAssertTrue(offenders.isEmpty,
                       "多路径粘连串又被放回单元格，应改用 CodeDuplicationBlockRow.occurrenceLines：\(offenders)")
     }
@@ -319,13 +317,213 @@ extension BorderlessSurfaceGuardTests {
                        "粘连串换了个非 tooltip 函数名就溜过去了")
     }
 
-    /// 反向自证：`sourceFiles` 真读到了文件。否则上面所有「扫不到就算通过」的断言
-    /// 会集体假绿 —— 这是扫描型守卫最经典的死法。
-    func test_sourceScannerActuallyFindsFiles() throws {
-        let design = try Self.sourceFiles(under: "Design")
-        XCTAssertGreaterThanOrEqual(design.count, 9, "Design/ 只扫到 \(design.count) 个文件")
-        XCTAssertTrue(design.contains { $0.path.hasSuffix("Glass.swift") })
-        XCTAssertEqual(Self.shadowHits(in: design).count, 1,
-                       "元测试：真源码里的投影数必须与契约断言一致")
+    // MARK: 批次 H5：版框宽度只有一个出口
+
+    /// 页骨架**不接受** `maxWidth:`。三档时代（reading 1040 / overview 1200 / dense 1240）
+    /// 切一次 tab 内容整体左右跳 100pt，实拍量到左边距三套、右边距五套 —— 用户判词
+    /// 「不规整」在版面上指的就是这个。收口方式不是"提醒大家别传"，而是没有参数可传。
+    static func pageWidthOverrides(in files: [(path: String, content: String)]) -> [String] {
+        files.filter { $0.content.contains("Scaffold(maxWidth:") }.map(\.path)
+    }
+
+    func test_noPageChoosesItsOwnFrameWidth() throws {
+        let offenders = Self.pageWidthOverrides(in: try SurfaceScanKit.sourceFiles(under: ""))
+        XCTAssertTrue(offenders.isEmpty,
+                      "又有页面给版框单开一档宽度，九页边距会再次分叉：\(offenders)")
+        // 令牌侧同样只许一个出口，否则第二档只是"暂时没人用"，下一轮就有人用。
+        let tokens = try SurfaceScanKit.sourceFiles(under: "Design")
+            .filter { $0.path.hasSuffix("ThemeTokens.swift") }
+            .flatMap { SurfaceScanKit.codeLines($0.content) }
+            .filter { $0.contains("static let maxWidth") }
+        XCTAssertEqual(tokens.count, 1,
+                       "版框宽度令牌有 \(tokens.count) 份：\(tokens)")
+    }
+
+    func test_pageWidthScannerDetectsInjectedOverride() {
+        let injected = [(path: "Views/FakeView.swift",
+                         content: "  Theme.Page.Scaffold(maxWidth: 900) {\n")]
+        XCTAssertEqual(Self.pageWidthOverrides(in: injected), ["Views/FakeView.swift"])
+        let clean = [(path: "Views/FakeView.swift", content: "  Theme.Page.Scaffold {\n")]
+        XCTAssertTrue(Self.pageWidthOverrides(in: clean).isEmpty)
+    }
+
+    // MARK: 批次 H5：同一页的读数带格数一致
+
+    /// 读数带的格数由 `DataBandSeparator()` 的条数决定（n 格 = n-1 条）。
+    /// **同页两带格数不同 = 分隔线竖向错位**：上下两条带摆在一起，格与格对不上，
+    /// 就是「对不齐」这一条在版面剩下的最后一点成因（依赖页原来是 4 格带 + 3 格带）。
+    static func stripSlotCounts(_ content: String) -> [Int] {
+        var counts: [Int] = []
+        var open: Int?
+        var depth = 0
+        for raw in content.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(raw)
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("//") { continue }
+            let balance = line.filter { $0 == "{" }.count - line.filter { $0 == "}" }.count
+            if open == nil {
+                if trimmed.contains("ReadoutStrip") {
+                    open = 0
+                    depth = max(balance, 0)
+                    if depth == 0 { counts.append(1); open = nil }
+                }
+                continue
+            }
+            if trimmed.contains("DataBandSeparator()") { open = open.map { $0 + 1 } }
+            depth += balance
+            if depth <= 0 {
+                counts.append((open ?? 0) + 1)
+                open = nil
+            }
+        }
+        return counts
+    }
+
+    static func mismatchedStripCounts(in files: [(path: String, content: String)]) -> [String] {
+        files.compactMap { file in
+            let counts = Self.stripSlotCounts(file.content)
+            guard counts.count > 1, Set(counts).count > 1 else { return nil }
+            return "\(file.path): 读数带格数 \(counts)"
+        }
+    }
+
+    func test_readoutStripsShareOneSlotCountPerPage() throws {
+        let offenders = Self.mismatchedStripCounts(in: try SurfaceScanKit.sourceFiles(under: "Views"))
+        XCTAssertTrue(offenders.isEmpty,
+                      "同一页里两条读数带格数不同，分隔线会竖向错位：\(offenders)")
+    }
+
+    func test_stripCountScannerDetectsMismatchAndIgnoresAgreement() {
+        let mixed = [(path: "Views/FakeView.swift", content: """
+        Theme.Page.Scaffold {
+            ReadoutStrip {
+                MetricTile(label: "a", value: "1")
+                DataBandSeparator()
+                MetricTile(label: "b", value: "2")
+            }
+            ReadoutStrip {
+                MetricTile(label: "c", value: "3")
+            }
+        }
+        """)]
+        XCTAssertEqual(Self.stripSlotCounts(mixed[0].content), [2, 1],
+                       "扫描器没数出两条带的格数")
+        XCTAssertEqual(Self.mismatchedStripCounts(in: mixed), ["Views/FakeView.swift: 读数带格数 [2, 1]"])
+        let even = [(path: "Views/FakeView.swift", content: """
+        ReadoutStrip {
+            MetricTile(label: "a", value: "1")
+            DataBandSeparator()
+            MetricTile(label: "b", value: "2")
+        }
+        ReadoutStrip {
+            MetricTile(label: "c", value: "3")
+            DataBandSeparator()
+            MetricTile(label: "d", value: "4")
+        }
+        """)]
+        XCTAssertTrue(Self.mismatchedStripCounts(in: even).isEmpty,
+                      "两条带格数相同却被判错位")
+    }
+
+    // MARK: 批次 H5：同一句口径一屏只许一处
+
+    /// 逐字符扫一行里的字符串字面量。不用正则是因为 `"` 的转义形态（`\"`、`\(`）
+    /// 在正则里要写四层反斜杠，上一批就是被这个炸出 `unterminated string literal` 的。
+    private static func stringLiterals(in line: String) -> [String] {
+        let chars = Array(line)
+        var out: [String] = []
+        var i = 0
+        while i < chars.count {
+            guard chars[i] == "\"" else { i += 1; continue }
+            var body = ""
+            i += 1
+            while i < chars.count {
+                if chars[i] == "\\", i + 1 < chars.count {
+                    body.append("\\"); body.append(chars[i + 1]); i += 2; continue
+                }
+                if chars[i] == "\"" { break }
+                body.append(chars[i]); i += 1
+            }
+            i += 1
+            out.append(body)
+        }
+        return out
+    }
+
+    /// 把 `\(...)` 插值整段摘掉、把 `\n` / `\"` 还原，得到"这句话本身的形状"。
+    /// 不摘插值的话，同一个句式换个数字就不算重复了 —— 而重复的正是句式。
+    private static func sentenceShape(_ body: String) -> String {
+        let chars = Array(body)
+        var out = ""
+        var i = 0
+        while i < chars.count {
+            if chars[i] == "\\", i + 1 < chars.count {
+                let next = chars[i + 1]
+                if next == "(" {
+                    var depth = 1
+                    i += 2
+                    while i < chars.count, depth > 0 {
+                        if chars[i] == "(" { depth += 1 }
+                        if chars[i] == ")" { depth -= 1 }
+                        i += 1
+                    }
+                    continue
+                }
+                out.append(next == "n" || next == "t" ? " " : next)
+                i += 2
+                continue
+            }
+            out.append(chars[i]); i += 1
+        }
+        return out
+    }
+
+    /// 同一份页面文件里**逐字重复的长句**（摘掉插值后仍 ≥14 字、含汉字）。短标签重复是术语复用，
+    /// 长句重复就是"一屏说五遍"—— 用户判词「太乱了」在密度这一维的落点。
+    /// 收口方式是"每屏一处权威落点，其余引用它"，**不是删掉诚实性信息**（红线）。
+    static func repeatedBasisSentences(in files: [(path: String, content: String)]) -> [String] {
+        files.flatMap { file -> [String] in
+            var seen: [String: Int] = [:]
+            for raw in file.content.split(separator: "\n", omittingEmptySubsequences: false) {
+                let line = String(raw)
+                if line.trimmingCharacters(in: .whitespaces).hasPrefix("//") { continue }
+                for body in stringLiterals(in: line) {
+                    let shape = sentenceShape(body)
+                    let hasHan = shape.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) }
+                    guard hasHan, shape.count >= 14 else { continue }
+                    seen[shape, default: 0] += 1
+                }
+            }
+            return seen.filter { $0.value >= 2 }
+                .map { "\(file.path): 同一句长文案出现 \($0.value) 次 —— \($0.key)" }
+                .sorted()
+        }
+    }
+
+    func test_noVerbatimLongSentenceTwiceOnOnePage() throws {
+        let offenders = Self.repeatedBasisSentences(in: try SurfaceScanKit.sourceFiles(under: "Views"))
+        XCTAssertTrue(offenders.isEmpty,
+                      "同一页又出现逐字重复的口径长句，请留一处权威落点、其余改为引用："
+                          + "\(offenders)")
+    }
+
+    func test_repetitionScannerFlagsDupAndIgnoresDistinctSentences() {
+        let dup = [(path: "Views/FakeView.swift", content: """
+            Text("离线未核对时不得把 0 画成安全")
+            Text("离线未核对时不得把 0 画成安全")
+            """)]
+        XCTAssertEqual(Self.repeatedBasisSentences(in: dup).count, 1, "逐字重复没抓到")
+        let digitsOnlyDiffer = [(path: "Views/FakeView.swift", content: """
+            Text("窗口内非合并提交 \\(NumberFormat.grouped(a)) 次，作者占比的分母就是这个数")
+            Text("窗口内非合并提交 \\(NumberFormat.grouped(b)) 次，作者占比的分母就是这个数")
+            Text("另一句完全不同的口径说明文字，说的是联网核对的覆盖范围")
+            """)]
+        XCTAssertEqual(Self.repeatedBasisSentences(in: digitsOnlyDiffer).count, 1,
+                       "只换数字的同句式重复没抓到（插值没摘干净）")
+        let short = [(path: "Views/FakeView.swift", content: """
+            Text("生态")
+            Text("生态")
+            """)]
+        XCTAssertTrue(Self.repeatedBasisSentences(in: short).isEmpty, "术语复用被误判成口径重复")
     }
 }

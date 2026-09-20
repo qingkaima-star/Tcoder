@@ -103,14 +103,15 @@ enum HealthBreakdown {
     /// 权重格 hover 的唯一文案出口。每句只陈述这一行能证实的部分。
     static func weightTooltip(for row: ScoreRow, rows: [ScoreRow], missingCount: Int) -> String {
         let published = NumberFormat.percent(row.effectiveWeight, precision: 1)
-        guard let base = row.baseWeight else {
-            return "该维度不在内置权重表里，直接采用评分器给出的权重 \(published)。"
-        }
+        // 「表里没有这一档」在两个分支里是同一句话（无 `baseWeight` / 有 `baseWeight`
+        // 但判据归因到 scorerOnly），写两遍就有两份改漏的机会。
+        let notInTable = "该维度不在内置权重表里，直接采用评分器给出的权重 \(published)。"
+        guard let base = row.baseWeight else { return notInTable }
         let raw = NumberFormat.percent(base, precision: 1)
         let tableSumText = NumberFormat.percent(Self.tableWeightSum, precision: 0)
         switch shiftCause(for: row, rows: rows, missingCount: missingCount) {
         case .scorerOnly:
-            return "该维度不在内置权重表里，直接采用评分器给出的权重 \(published)。"
+            return notInTable
         case .asIntended:
             return "本次乘数 \(published)，与内置表原始权重 \(raw) 一致。"
         case .tableNormalization:

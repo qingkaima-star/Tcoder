@@ -28,7 +28,7 @@ extension PerfLogsBorderlessTests {
                       "本流域里又长出了第二份页骨架（只许用 `Theme.Page.Scaffold`）：\(ownScaffold)")
         for page in ["PerformanceView", "LogsView", "HealthView"] {
             XCTAssertTrue(files.contains { $0.path.hasSuffix("\(page).swift")
-                && $0.content.contains("Theme.Page.Scaffold(") },
+                && $0.content.contains("Theme.Page.Scaffold {") },
                           "\(page).swift 没走基座页骨架，组间距就不受 `Spacing.group` 那条断言保护")
         }
     }
