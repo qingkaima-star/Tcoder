@@ -158,13 +158,31 @@ final class LocalizationGuardTests: XCTestCase {
 
     // MARK: - 守卫 3：译文不许烂尾（键必须在代码里真实出现）
 
+    /// 键必须作为**完整的字符串字面量**出现在源码里。
+    ///
+    /// 原来用 `allSource.contains(key)`，于是**长键的前缀**会被当成"还活着"：
+    /// P3-4 把 `"口径：报告只有汇总粒度，未区分测试代码 · 来源 "` 这个碎片键换成整句键
+    /// `"口径：报告只有汇总粒度，未区分测试代码 · 来源 %1$@"` 之后，碎片键其实已经没人用了，
+    ///  substring 判据却照样放行 —— 正是守卫 3 要抓的"改了原文没同步目录"。
+    static func staleKeys(keys: [String], source: String) -> [String] {
+        keys.filter { !source.contains("\"" + $0 + "\"") }
+    }
+
     func test_noStaleKeysInCatalog() throws {
         let entries = try Self.catalog()
         let allSource = try Self.walkFiles(in: Self.packageRoot.appendingPathComponent("Sources/TcoderMonitor").path)
             .reduce("") { $0 + ((try? String(contentsOfFile: $1, encoding: .utf8)) ?? "") }
-        let stale = entries.map(\.key).filter { !allSource.contains($0) }
+        let stale = Self.staleKeys(keys: entries.map(\.key), source: allSource)
         XCTAssertTrue(stale.isEmpty,
                       "目录里有 \(stale.count) 条代码中已不存在的键（改了原文没同步目录）：\(stale)")
+    }
+
+    func test_staleKeyScannerRejectsPrefixOnlyMatches() {
+        let source = ##"Text(localizedFormat("口径 · 来源 %1$@", x))"## 
+        // 碎片键只作为长键的前缀出现 → 必须判成烂尾
+        XCTAssertEqual(Self.staleKeys(keys: ["口径 · 来源"], source: source), ["口径 · 来源"])
+        // 完整字面量在场 → 放行
+        XCTAssertTrue(Self.staleKeys(keys: ["口径 · 来源 %1$@"], source: source).isEmpty)
     }
 
     // MARK: - 守卫 4：键值两端的格式占位符必须一致

@@ -280,7 +280,7 @@ struct ProjectRow: View {
     private var metaLine: some View {
         HStack(spacing: Theme.Spacing.xs) {
             if let code = report?.code {
-                metricCell("\(NumberFormat.compact(code.codeLines)) 行",
+                metricCell(localizedFormat("%1$@ 行", NumberFormat.compact(code.codeLines)),
                            width: ShellLayout.lineCountColumnWidth)
             } else {
                 Text(ShellCopy.notAnalyzed(.codeSize))
@@ -288,7 +288,7 @@ struct ProjectRow: View {
                     .lineLimit(1)
             }
             if let score = report?.health?.overall {
-                metricCell("健康 \(score)", width: ShellLayout.healthColumnWidth)
+                metricCell(localizedFormat("健康 %@", score), width: ShellLayout.healthColumnWidth)
             }
         }
         // 原来是 `.tertiary`：这一格里是**测得值**（行数、健康分），

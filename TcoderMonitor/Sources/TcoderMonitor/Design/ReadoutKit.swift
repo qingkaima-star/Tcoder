@@ -328,6 +328,19 @@ func localizedCopy(_ text: String) -> String {
     NSLocalizedString(text, bundle: .main, comment: "")
 }
 
+/// 带实参的整句查表 + 格式化。
+///
+/// **写法是硬约束**：占位符用位置式（`%1$@`、`%@`），而句子里的**字面百分号必须写 `%%`**。
+/// `String(format:)` 遇到裸 `%` 后面跟非转换字符会静默吃掉尾巴（实测
+/// 「95% 的提交…」→「95 的提交…」，方案 §9）—— 不崩、不报错，
+/// 一个诚实性陈述就这么被改义。
+///
+/// 键查不到时 `String(format: 键, args)` 仍然把占位符填回中文原句，
+/// 所以缺一条译文的表现依旧是"退回正确的中文"。
+func localizedFormat(_ key: String, _ args: CVarArg...) -> String {
+    String(format: localizedCopy(key), arguments: args)
+}
+
 extension View {
     /// 有 help 才挂 tooltip，避免给整表每个单元格塞一个空 help。
     @ViewBuilder

@@ -95,7 +95,7 @@ struct DashboardView: View {
     /// `fileCompositionGroup` / `coverageStrip` 三组。
     private var codeScaleGroup: some View {
         GlassSection("代码规模",
-                     subtitle: report?.code.map { "最近扫描 \(DateFormat.sinceDescription($0.scannedAt))" },
+                     subtitle: report?.code.map { localizedFormat("最近扫描 %@", DateFormat.sinceDescription($0.scannedAt)) },
                      icon: .code) {
             if let code = report?.code {
                 VStack(alignment: .leading, spacing: Theme.Spacing.group) {
@@ -177,7 +177,8 @@ struct DashboardView: View {
     private var topErrorsCard: some View {
         GlassSection("高频错误",
                      subtitle: report?.logs.map {
-                         "共 \(NumberFormat.grouped($0.errorCount + $0.exceptionCount)) 条错误"
+                         localizedFormat("共 %1$@ 条错误",
+                                           NumberFormat.grouped($0.errorCount + $0.exceptionCount))
                      },
                      icon: .logs) {
             if let logs = report?.logs, logs.hasData, !logs.topErrors.isEmpty {
@@ -194,7 +195,8 @@ struct DashboardView: View {
                         ? ShellCopy.scannedButFoundNone(.errors)
                         : ShellCopy.notAnalyzed(.errorLogs),
                     message: (report?.logs?.hasData == true)
-                        ? "已扫描 \(NumberFormat.grouped(report?.logs?.scannedFiles.count ?? 0)) 个日志文件，没有命中错误行。"
+                        ? localizedFormat("已扫描 %1$@ 个日志文件，没有命中错误行。",
+                                              NumberFormat.grouped(report?.logs?.scannedFiles.count ?? 0))
                         : "在项目内放置 Logs/error.log 或 crash.log，或用「附加日志文件」手动选择。"
                 )
             }
@@ -205,7 +207,7 @@ struct DashboardView: View {
 
     private var branchSubtitle: String? {
         guard let branch = report?.git?.branch, !branch.isEmpty else { return nil }
-        return "分支 \(branch)"
+        return localizedFormat("分支 %@", branch)
     }
 
     /// 测试覆盖率只在仓库真出了报告时才出现，没报告就不画，避免读成一个假的 0%。
@@ -250,8 +252,10 @@ struct DashboardView: View {
                             .foregroundStyle(.secondary)
                     }
                     if let branch = coverage.overallBranchPercent {
-                        Text("分支覆盖 \(Self.percentOf100(branch, precision: 1)) · 来源 "
-                             + coverage.reports.map { $0.toolName }.joined(separator: " / "))
+                        Text(localizedFormat("分支覆盖 %1$@ · 来源 %2$@",
+                                                 Self.percentOf100(branch, precision: 1),
+                                                 coverage.reports.map { $0.toolName }
+                                                     .joined(separator: " / ")))
                             .font(Theme.Typo.microLabel.font.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -263,16 +267,21 @@ struct DashboardView: View {
     /// 口径说明一行字：报告没有源文件粒度时必须明说「等同全量」，
     /// 不能让一个没区分过的数字顶着「生产码」的标签。
     private func coverageCaliberLine(_ coverage: CoverageMetrics) -> String {
+        let sources = coverage.reports.map { $0.toolName }.joined(separator: " / ")
         guard coverage.scopeIsSeparated, let full = coverage.allSourcesLinePercent,
               let production = coverage.overallLinePercent else {
-            return "口径：报告只有汇总粒度，未区分测试代码 · 来源 "
-                + coverage.reports.map { $0.toolName }.joined(separator: " / ")
+            return localizedFormat("口径：报告只有汇总粒度，未区分测试代码 · 来源 %1$@", sources)
         }
         let gap = full - production
-        let gapText = gap >= 0.05 ? "，含测试代码 \(Self.percentOf100(full, precision: 1))（不用于评分）"
-                                  : "，与含测试代码的口径一致"
-        return "口径：仅生产码（已排除 Tests/、PackageTests、.build、*Tests.swift）"
-            + gapText + " · 差 \(Self.percentOf100(gap, precision: 1)) 来自测试代码"
+        // 三种情况 = 三条**整句键**。原来这里是「前缀键 + 碎片键 + 后缀碎片」拼出来的，
+        // 英文里三段的位置和中文不一样（`差 X 来自测试代码` 要挪到句中），
+        // 碎片各翻一次必然拼出坏英文 —— 整句成键是唯一不撒谎的做法。
+        if gap < 0.05 {
+            return localizedCopy("口径：仅生产码（已排除 Tests/、PackageTests、.build、*Tests.swift），与含测试代码的口径一致")
+        }
+        return localizedFormat("口径：仅生产码（已排除 Tests/、PackageTests、.build、*Tests.swift），含测试代码 %1$@（不用于评分） · 差 %2$@ 来自测试代码",
+                               Self.percentOf100(full, precision: 1),
+                               Self.percentOf100(gap, precision: 1))
     }
 
     /// `CoverageMetrics.linePercent` 已经是 0...100，而 `NumberFormat.percent` 收的是
@@ -290,7 +299,7 @@ struct DashboardView: View {
                 .foregroundStyle(Theme.Semantic.warning.textColor)
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 if !failed.isEmpty {
-                    Text("未能完成：\(failed.joined(separator: "、"))")
+                    Text(localizedFormat("未能完成：%1$@", failed.joined(separator: "、")))
                         .font(Theme.Typo.cardTitle.font)
                         .foregroundStyle(Theme.Semantic.warning.textColor)
                     Text(message)
@@ -360,7 +369,9 @@ private struct ErrorClusterRow: View {
                 Text(cluster.displayMessage)
                     .font(Theme.Typo.monoSmall.font)
                     .lineLimit(1)
-                Text("首次 \(cluster.firstSeenDescription) · 最近 \(cluster.lastSeenDescription)")
+                Text(localizedFormat("首次 %1$@ · 最近 %2$@",
+                                      cluster.firstSeenDescription,
+                                      cluster.lastSeenDescription))
                     .font(Theme.Typo.microLabel.font)
                     .foregroundStyle(.secondary)
             }

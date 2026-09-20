@@ -56,9 +56,9 @@ struct HealthRing: View {
     /// 只改这边的措辞，`DesignAbsenceStateTests` 那条「两个出口同串」就红。
     static func accessibilityText(score: Int?, grade: HealthGrade?, trend: Int?) -> String {
         guard let score else { return scoreText(for: nil) }
-        var parts = ["\(scoreText(for: score)) 分"]
-        if let grade { parts.append("\(grade.rawValue) 级") }
-        if let trend, trend != 0 { parts.append("较上次 \(NumberFormat.signed(trend))") }
+        var parts = [localizedFormat("%1$@ 分", scoreText(for: score))]
+        if let grade { parts.append(localizedFormat("%1$@ 级", grade.rawValue)) }
+        if let trend, trend != 0 { parts.append(localizedFormat("较上次 %@", NumberFormat.signed(trend))) }
         return parts.joined(separator: "，")
     }
 

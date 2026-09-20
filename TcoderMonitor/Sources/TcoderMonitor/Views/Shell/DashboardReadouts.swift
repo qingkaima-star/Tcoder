@@ -253,7 +253,9 @@ struct DashboardLiveReadout: View {
             value: snapshot.map { String(Int(($0.cpuUsage * 100).rounded())) },
             unit: "%",
             caption: snapshot.map {
-                "\(NumberFormat.grouped($0.cpuCoreCount)) 核 · 负载 \(String(format: "%.2f", $0.loadAverage1))"
+                localizedFormat("%1$@ 核 · 负载 %2$@",
+                                NumberFormat.grouped($0.cpuCoreCount),
+                                String(format: "%.2f", $0.loadAverage1))
             },
             systemImage: IconName.cpu.rawValue
         )
@@ -265,8 +267,9 @@ struct DashboardLiveReadout: View {
             label: "内存",
             value: snapshot.map { ByteFormat.string($0.memoryUsedBytes, precision: 1) },
             caption: snapshot.map {
-                "共 \(ByteFormat.string($0.memoryTotalBytes, precision: 0)) · "
-                    + NumberFormat.percent($0.memoryFraction, precision: 0)
+                localizedFormat("共 %1$@ · %2$@",
+                                ByteFormat.string($0.memoryTotalBytes, precision: 0),
+                                NumberFormat.percent($0.memoryFraction, precision: 0))
             },
             systemImage: IconName.memory.rawValue
         )
@@ -276,8 +279,9 @@ struct DashboardLiveReadout: View {
         let logs = report?.logs
         let caption: String?
         if logs?.hasData == true {
-            caption = "崩溃 \(NumberFormat.grouped(logs?.crashCount ?? 0)) · "
-                + "异常 \(NumberFormat.grouped(logs?.exceptionCount ?? 0))"
+            caption = localizedFormat("崩溃 %1$@ · 异常 %2$@",
+                                      NumberFormat.grouped(logs?.crashCount ?? 0),
+                                      NumberFormat.grouped(logs?.exceptionCount ?? 0))
         } else {
             caption = logs == nil ? ShellCopy.notAnalyzed(.errorLogs)
                 : ShellCopy.cannotAnalyze(.noLogFiles)
@@ -300,8 +304,9 @@ struct DashboardLiveReadout: View {
                 DateFormat.sinceDescription($0.lastCommitAt).replacingOccurrences(of: " 前", with: "")
             },
             caption: report?.git.map {
-                "\(NumberFormat.grouped($0.totalCommits)) 次提交 · "
-                    + "\(NumberFormat.grouped($0.activeAuthorCount)) 位贡献者"
+                localizedFormat("%1$@ 次提交 · %2$@ 位贡献者",
+                                NumberFormat.grouped($0.totalCommits),
+                                NumberFormat.grouped($0.activeAuthorCount))
             } ?? ShellCopy.notAnalyzed(.gitHistory),
             systemImage: IconName.git.rawValue
         )
@@ -320,7 +325,7 @@ struct DashboardLiveReadout: View {
     private var cadenceSubtitle: String {
         state.monitor.isInteractionPaused
             ? "本机 · 采样已暂停"
-            : "本机 · 每 \(state.monitor.sampleIntervalText)采样"
+            : localizedFormat("本机 · 每 %@采样", state.monitor.sampleIntervalText)
     }
 
     private var livePerformanceGroup: some View {

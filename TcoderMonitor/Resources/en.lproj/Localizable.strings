@@ -22,7 +22,6 @@
 "重新分析" = "Re-analyse";
 "重新采样" = "Re-sample";
 "暂停" = "Pause";
-"已暂停" = "Paused";
 "重试" = "Retry";
 
 /* ===== 九页页名（Theme.Page.Header）===== */
@@ -71,9 +70,6 @@
 "单元测试" = "Unit Tests";
 "无报告" = "No Report";
 "集成测试" = "Integration Tests";
-"口径：报告只有汇总粒度，未区分测试代码 · 来源 " = "Basis: the report is aggregate-only and doesn't separate test code · Source ";
-"，与含测试代码的口径一致" = ", consistent with the basis that includes test code";
-"口径：仅生产码（已排除 Tests/、PackageTests、.build、*Tests.swift）" = "Basis: production code only (excludes Tests/, PackageTests, .build, *Tests.swift)";
 "点击右上角「重新分析」，扫描代码规模、Git 历史、日志与依赖之后这里会出现评分与结论。" = "Click Re-analyse in the top-right. Once code size, Git history, logs and dependencies have been scanned, the score and findings appear here.";
 "优点与风险项" = "Strengths and Risks";
 "时间" = "Time";
@@ -107,3 +103,27 @@
 "已完成扫描，未发现优点与风险项" = "Scan complete — no strengths or risks found";
 "无法分析：未接入任何日志文件" = "Cannot analyse: no log files attached";
 "无法分析：该目录不是 Git 仓库，或提交记录为空" = "Cannot analyse: this folder isn't a Git repository, or it has no commits";
+
+/* ===== P3-4 总览实时读数带（整句 + 位置占位符；字面百分号必须写 %%） ===== */
+"%1$@ 核 · 负载 %2$@" = "%1$@ cores · load %2$@";
+"共 %1$@ · %2$@" = "%1$@ total · %2$@";
+"崩溃 %1$@ · 异常 %2$@" = "%1$@ crashes · %2$@ exceptions";
+"%1$@ 次提交 · %2$@ 位贡献者" = "%1$@ commits · %2$@ contributors";
+"本机 · 每 %@采样" = "This machine · sampling every %@";
+
+/* ===== P3-4 总览页其余整句（含数字的句式一律整句成键） ===== */
+"最近扫描 %@" = "Last scanned %@";
+"共 %1$@ 条错误" = "%1$@ errors in total";
+"已扫描 %1$@ 个日志文件，没有命中错误行。" = "Scanned %1$@ log files and found no error lines.";
+"分支 %@" = "Branch %@";
+"分支覆盖 %1$@ · 来源 %2$@" = "Branch coverage %1$@ · Source %2$@";
+"口径：报告只有汇总粒度，未区分测试代码 · 来源 %1$@" = "Basis: the report is aggregate-only and doesn't separate test code · Source %1$@";
+"口径：仅生产码（已排除 Tests/、PackageTests、.build、*Tests.swift），与含测试代码的口径一致" = "Basis: production code only (excludes Tests/, PackageTests, .build, *Tests.swift) — same as the all-sources basis";
+"口径：仅生产码（已排除 Tests/、PackageTests、.build、*Tests.swift），含测试代码 %1$@（不用于评分） · 差 %2$@ 来自测试代码" = "Basis: production code only (excludes Tests/, PackageTests, .build, *Tests.swift); all sources including test code %1$@ (not scored) · %2$@ of it comes from test code";
+"未能完成：%1$@" = "Not completed: %1$@";
+"首次 %1$@ · 最近 %2$@" = "First %1$@ · last %2$@";
+"%1$@ 分" = "%1$@ points";
+"%1$@ 级" = "Grade %1$@";
+"较上次 %@" = "%@ vs last run";
+"%1$@ 行" = "%1$@ lines";
+"健康 %@" = "Health %@";
