@@ -156,20 +156,19 @@ final class HonestyP1HealthTests: XCTestCase {
                        "overall 必须等于 Σ(score·weight)：\(result.overall) vs \(reconstructed)")
     }
 
-    // MARK: - 缺日志维度：偏高默认分必须自报（优点口径由 WS-C 的
-    //         `testStabilityPraiseRequiresActuallyScannedLogs` 钉，此处不重复）
+    // MARK: - 缺日志维度：不再给默认分，整个维度缺席（#46）。
+    //         优点口径仍由 WS-C 的 `testStabilityPraiseRequiresActuallyScannedLogs` 钉。
 
-    func testStabilityDefaultScoreDisclosesItselfInTheDetail() {
+    func testStabilityIsAbsentRatherThanDefaultedWhenNoLogsScanned() {
         var logs = LogSummary()
         logs.totalLinesScanned = 0
         let result = WeightedHealthScorer().score(HealthInputs(logs: logs))
 
-        guard let stability = result.components.first(where: { $0.name == HealthDimension.stability.rawValue }) else {
-            return XCTFail("运行稳定性维度按既有口径应当在场（默认分），实际 \(componentList(result.components))")
-        }
-        XCTAssertTrue(stability.detail.contains("默认值"),
-                      "偏高的默认分必须在 detail 里自报，否则读者会当成测出来的好结果：\(stability.detail)")
-        XCTAssertNotEqual(stability.risk, .none, "没证据的维度不得报「无风险」，实际 \(stability.risk)")
+        XCTAssertFalse(result.components.contains { $0.name == HealthDimension.stability.rawValue },
+                       "零日志时这个维度必须缺席：它曾是全表权重最高的一项（0.178），"
+                           + "按默认分在场等于用『没查』换 15 分。实得 \(componentList(result.components))")
+        XCTAssertTrue(result.recommendations.contains { $0.contains("没有可扫描的日志") },
+                      "缺席必须说明原因，实得 \(result.recommendations)")
     }
 
     // MARK: - 夹具

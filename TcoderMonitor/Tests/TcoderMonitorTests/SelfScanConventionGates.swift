@@ -237,8 +237,9 @@ final class SelfScanConventionGates: SelfScanHarnessCase {
         // ① 修好之后（#44）：评分与 Git 页同分母。以前这里钉的是"被合并提交稀释"的现状态。
         XCTAssertEqual(scored, pageShare, accuracy: 1.0,
                        "评分必须与 Git 页同一个分母（非合并总体）；若又漂回 diluted，就是分母被换回去了")
-        XCTAssertLessThan(scored, diluted + 30,
-                          "辅助方向：若哪天合并提交少到不再拉开差距，上面那条 diluted 前提就没了，删掉本条")
+        XCTAssertGreaterThan(scored, diluted + 30,
+                             "辅助方向：证明这条 pin 仍有意义——含合并的分母确实会把集中度压低 30 个点以上。"
+                           + "若哪天合并提交少到不再拉开差距，就删掉本条与 diluted 那两行")
         print("【集中度两个数】Git 页=\(Int(pageShare))%（等于 git 非合并口径）"
             + " 健康分=\(Int(scored))%（同一个分母，已修）"
             + " 反例分母=\(Int(diluted))%（若误用含合并的 \(git.totalCommits) 次会算成这样）")

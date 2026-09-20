@@ -132,7 +132,12 @@ final class CodeGitRestyleTests: XCTestCase {
                               authors: [author("A", "a@x", commits: 34),
                                         author("B", "b@x", commits: 14)])
         XCTAssertEqual(ContributorAnalysis.busFactorRisk(git), .high)
-        XCTAssertNotEqual(git.busFactorRisk, .high, "模型用含合并的分母，会系统性低估集中度")
+        // #44 修好后翻正：以前模型用含合并的 62 当分母（55% → medium），
+        // 与视图不同总体；现在两侧必须同一个分母、同一个结论。
+        XCTAssertEqual(git.busFactorRisk, .high,
+                       "模型的分母已换成作者总体（非合并），应与视图同为 71% → high")
+        XCTAssertEqual(git.busFactorRisk, ContributorAnalysis.busFactorRisk(git),
+                       "模型与视图两套实现必须同分母同结论，否则又会各说一套")
         XCTAssertTrue(ContributorBusFactorSection.message(for: git).contains("分母 = 48 次非合并提交"),
                       ContributorBusFactorSection.message(for: git))
     }
