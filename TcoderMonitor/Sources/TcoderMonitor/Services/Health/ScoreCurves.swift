@@ -215,8 +215,10 @@ enum HealthCurves {
 
     // MARK: - 协作分布
 
-    static func busFactor(risk: RiskLevel, topAuthorShare: Double, activeAuthors: Int, totalCommits: Int) -> CurveResult {
-        if totalCommits == 0 {
+    /// `commitBasis` 是**作者统计的总体**（非合并提交数），不是 `totalCommits`（含合并）。
+    /// 分子 `topAuthorShare` 来自作者表，分母若换成含合并的总数就是两个总体相除（缺陷 #44）。
+    static func busFactor(risk: RiskLevel, topAuthorShare: Double, activeAuthors: Int, commitBasis: Int) -> CurveResult {
+        if commitBasis == 0 {
             return CurveResult(score: 70, detail: "提交记录过少，暂不评估协作分布", risk: .none)
         }
         let base = ScoreCurve.piecewise(Double(risk.rank), through: [
@@ -229,13 +231,13 @@ enum HealthCurves {
         else if share < 0.7 { adjustment = -6 }
         else { adjustment = -22 }
         var score = ScoreCurve.clamped(base + adjustment)
-        let singlePoint = activeAuthors == 1 && totalCommits > 50
+        let singlePoint = activeAuthors == 1 && commitBasis > 50
         if singlePoint { score = Swift.min(score, 8) }
         let shareText = String(format: "%.0f%%", share * 100)
         let detail = joined([
             "最高作者占比 \(shareText)",
             "\(whole(activeAuthors)) 位活跃作者",
-            "\(whole(totalCommits)) 次提交",
+            "\(whole(commitBasis)) 次非合并提交",
             share >= 0.7 ? "单人包揽重扣 22 分" : "",
             singlePoint ? "单点作者封顶 8 分" : ""
         ])

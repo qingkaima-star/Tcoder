@@ -215,7 +215,9 @@ WS-L 另背一条**功能性诚实修正**（不是美化）：界面显示"提�
 - 统一用设计系统组件：`GlassSection`（分区卡的事实标准：46 处调用 / 22 个文件）、`MetricTile`、`RiskBadge`、
   `SeverityBadge`、`MiniBarGauge`、`EmptyStateView`、`BannerRow`/`BannerStyle`、`StatLine`、`Theme.*`。
   `SectionCard` 与 `Design/TableKit.swift` 整文件已因零引用删除（2026-09-20，WS-G #28），**别再往回加**；
-  表格列头现走 WS-M 的 `TableHeaderCell` 与 WS-L 的 `DataColumns` 两套，收敛方案见待办 #34。
+  表格列头自 `d6345e5`（WS-Q #34）起**只剩 WS-L 那套 `DataTableHeader` + 列数组**（`Views/CodeGit/CodeGitTable.swift`），
+  `TableHeaderCell` 与 `Grid`/`GridRow` 排布已删除，`TableHeaderConvergenceTests` 钉住不许回来；
+  列系统仍住在 WS-L 目录下（归属错位，上提进 `Design/` 需总工拍板）。
   需要新组件写在你自己的目录里，不要往 `Theme.swift` 里加。
 - 文案一律简体中文；数字用 `NumberFormat.grouped/compact/percent`、`ByteFormat.string/rate/bitRate`、
   `DateFormat.sinceDescription`。

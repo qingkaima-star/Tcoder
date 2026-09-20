@@ -234,14 +234,15 @@ final class SelfScanConventionGates: SelfScanHarnessCase {
         let scored = try XCTUnwrap(percent(in: collaboration.detail, after: "最高作者占比"),
                                    "协作分布 detail 里解析不出『最高作者占比 X%』，本钉失效")
 
-        // ① 评分用的是被稀释的那个数（现状；修好后把下面两行对调）。
-        XCTAssertEqual(scored, diluted, accuracy: 1.0,
-                       "评分不再被合并提交稀释了？把这条改成 XCTAssertEqual(scored, pageShare, accuracy: 1.0)")
-        XCTAssertGreaterThan(abs(scored - pageShare), 5,
-                             "评分与 Git 页已经同分母了——把上面那条翻正，本条删掉。"
-                           + "当前：评分 \(Int(scored))% vs Git 页 \(Int(pageShare))%")
+        // ① 修好之后（#44）：评分与 Git 页同分母。以前这里钉的是"被合并提交稀释"的现状态。
+        XCTAssertEqual(scored, pageShare, accuracy: 1.0,
+                       "评分必须与 Git 页同一个分母（非合并总体）；若又漂回 diluted，就是分母被换回去了")
+        XCTAssertGreaterThan(scored, diluted + 30,
+                             "辅助方向：证明这条 pin 仍有意义——含合并的分母确实会把集中度压低 30 个点以上。"
+                           + "若哪天合并提交少到不再拉开差距，就删掉本条与 diluted 那两行")
         print("【集中度两个数】Git 页=\(Int(pageShare))%（等于 git 非合并口径）"
-            + " 健康分=\(Int(scored))%（被 \(git.totalCommits - git.commitsAnalyzed) 个合并提交稀释）")
+            + " 健康分=\(Int(scored))%（同一个分母，已修）"
+            + " 反例分母=\(Int(diluted))%（若误用含合并的 \(git.totalCommits) 次会算成这样）")
     }
 
     // MARK: - 巨大文件榜截断的机制测试（不依赖仓库当下有没有债）

@@ -44,6 +44,7 @@ fi
 
 mkdir -p "$OUT"
 rm -f "$OUT"/*.png
+FAILED=0
 
 for name in "${SECTIONS[@]}"; do
   osascript -e 'tell application id "com.tcoder.monitor" to quit' 2>/dev/null || true
@@ -57,15 +58,29 @@ for name in "${SECTIONS[@]}"; do
   sleep 7
   PID=$(pgrep -f "dist/Tcoder Monitor.app/Contents/MacOS/TcoderMonitor" | head -1 || true)
   if [ -z "$PID" ]; then echo "  $name -> !! 未找到本次 dist 实例（有无响应退出的调试实例残留？）"; continue; fi
-  WIN=$(xcrun swift "$WINLIST" "$PID" 2>/dev/null | head -1 | cut -f1)
+  WIN=$(xcrun swift "$WINLIST" "$PID" 2>/dev/null | head -1 | cut -d'|' -f1)
+  # 分隔符必须是 `|`：winlist.swift 打印的是 `窗口号|标题|宽度`，
+  # 而 `cut -f1` 默认按制表符切，会把整行原样交给 screencapture -l，
+  # 于是每张图都拍不出文件、只打印 "0 字节"，脚本却照样跑到最后。
   if [ -z "$WIN" ]; then echo "  $name -> !! 无窗口"; continue; fi
   file="$OUT/${name}.png"
   screencapture -x -o -l"$WIN" "$file" 2>/dev/null
   size=$(stat -f '%z' "$file" 2>/dev/null || echo 0)
   # 空白窗口和渲染出内容的窗口，PNG 体积差得很远，用它做粗筛
   echo "  $name -> ${size} 字节"
+  if [ "$size" -lt 20000 ]; then
+    # 20KB 以下基本只可能是"窗口没拍出来"。以前这里只打印不判失败，
+    # 于是九行全打 0 字节、脚本仍以 exit 0 收场——取证脚本最坏的失效就是这种。
+    echo "    ↑ 体积过小，判这页没拍到"; FAILED=$((FAILED + 1))
+  fi
 done
 
 osascript -e 'tell application id "com.tcoder.monitor" to quit' 2>/dev/null || true
 defaults delete com.tcoder.monitor selectedDetailSection 2>/dev/null || true
 echo "截图目录: $OUT"
+N=$(ls -1 "$OUT"/*.png 2>/dev/null | wc -l | tr -d ' ')
+echo "产出 $N 张 / 9 页，判失败 $FAILED 页"
+if [ "$N" != "9" ] || [ "$FAILED" != "0" ]; then
+  echo "==> ❌ 九页不齐或有页没拍到，本次取证不作数"
+  exit 1
+fi

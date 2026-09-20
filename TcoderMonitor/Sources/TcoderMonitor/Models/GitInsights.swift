@@ -70,10 +70,19 @@ struct GitInsights: Codable, Equatable, Sendable {
         return activityByHour.firstIndex(of: maxCount)
     }
     var topAuthor: AuthorStats? { authors.max { $0.commits < $1.commits } }
+
+    /// 作者统计的总体：作者表按 `--no-merges` 建（AGENTS §21 定的口径），
+    /// 所以任何"某作者占多少"的比值都必须以这个求和为分母。
+    /// 拿 `totalCommits`（含合并）当分母是**分子分母来自两个不同总体**，
+    /// 本仓实测会把 139/152 = 91.4% 的集中度算成 139/271 = 51%，
+    /// 于是单点风险被腰斩、协作分布分量白拿分（缺陷 #44）。
+    var authorBasisCommits: Int { authors.reduce(0) { $0 + $1.commits } }
+
     var busFactorRisk: RiskLevel {
-        guard let top = topAuthor, totalCommits > 0 else { return .none }
-        let share = Double(top.commits) / Double(totalCommits)
-        if activeAuthorCount <= 1 && totalCommits > 50 { return .critical }
+        let basis = authorBasisCommits
+        guard let top = topAuthor, basis > 0 else { return .none }
+        let share = Double(top.commits) / Double(basis)
+        if activeAuthorCount <= 1 && basis > 50 { return .critical }
         if share > 0.7 { return .high }
         if share > 0.5 { return .medium }
         return .low
