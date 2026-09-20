@@ -59,6 +59,13 @@ final class AppState {
         // 节拍数值只在 `MachSystemMonitor.defaultSampleIntervalMilliseconds` 定义一次
         // （性能 spec §5.1）；这里再写一个 1_500 就是第二个真值来源。
         monitor.start(intervalMilliseconds: MachSystemMonitor.defaultSampleIntervalMilliseconds)
+        // 第四轮性能尺子的**产品侧唯一接线点**（`FramePulse.swift` 自己的注释就指定在这里）。
+        // 这里不写的话，`FramePulse` 就是一个**产品代码零调用**的实现文件 —— 而 `AGENTS.md`
+        // 第四轮红线 8 明写「必须接线进产品代码后才允许合入」。实测过后果：它靠 5 处无关的
+        // `NSWorkspace.shared` 白拿了「④static 简写」证据混过可达性守卫，那把尺子其实是空的。
+        // 默认零开销：只有 `TCODER_PERF_PROBE=1` 时 `startIfNeeded()` 才建 `displayLink`，
+        // 否则立刻返回 false、无任何副作用（由 `PerfHitchGuardTests` 两条用例钉住）。
+        FramePulse.shared.startIfNeeded()
         startInteractionGating()
         bootstrapIfNeeded()
     }
