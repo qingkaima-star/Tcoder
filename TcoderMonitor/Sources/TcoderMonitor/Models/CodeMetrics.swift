@@ -17,6 +17,15 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     var fixmeCount: Int = 0
 
     var hugeFiles: [FileHotspot] = []
+    /// 越过「巨大文件」行数线的**真个数**。`hugeFiles` 是封顶榜单（只留最大的 20 个），
+    /// 拿它的 `count` 当占比分子会在大仓库上把问题**报小**——本 App 扫自己实测：
+    /// 榜内 20 个 / 实际 38 个，占比被报成 10.5% 而真值是 20%。
+    ///
+    /// Optional 是落盘兼容要求（旧报告没这个字段）。缺它时评分器退回榜内计数，
+    /// 那是**偏松**的口径，所以 detail 必须写明用的是哪一个（`WeightedHealthScorer.codeQualityOutcome`）。
+    var hugeFileCount: Int? = nil
+    /// 占比分子的唯一取法，两处消费方（评分器与界面）都走它，免得各写一份口径。
+    var reportedHugeFileCount: Int { hugeFileCount ?? hugeFiles.count }
     var topComplexFunctions: [FunctionHotspot] = []
     var longFunctions: Int = 0
     var averageFunctionLength: Int = 0

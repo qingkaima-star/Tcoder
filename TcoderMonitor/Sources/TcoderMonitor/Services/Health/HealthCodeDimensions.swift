@@ -99,10 +99,19 @@ extension WeightedHealthScorer {
 
     func codeQualityOutcome(_ inputs: HealthInputs) -> DimensionOutcome {
         guard let code = inputs.code, code.totalFiles > 0 else { return .absent }
-        let curve = HealthCurves.codeQuality(hugeFileRatio: Double(code.hugeFiles.count) / Double(max(code.totalFiles, 1)),
-                                             averageFunctionLength: code.averageFunctionLength,
-                                             longFunctions: code.longFunctions,
-                                             totalFiles: code.totalFiles)
+        // 分子用**真个数**（`CodeMetrics.hugeFileCount`），不是被截断到 20 的榜单长度：
+        // 否则仓库越大越显干净（本 App 扫自己一度把 38/190 = 20% 报成 10.5%）。
+        // 旧报告没这个字段时退回榜内计数——那是偏松的口径，必须在 detail 里承认。
+        let hugeCount = code.reportedHugeFileCount
+        let raw = HealthCurves.codeQuality(hugeFileRatio: Double(hugeCount) / Double(max(code.totalFiles, 1)),
+                                           averageFunctionLength: code.averageFunctionLength,
+                                           longFunctions: code.longFunctions,
+                                           totalFiles: code.totalFiles)
+        let curve = hugeCount > code.hugeFiles.count
+            ? CurveResult(score: raw.score,
+                          detail: raw.detail + "（榜内只列 \(code.hugeFiles.count) 个，实际 \(hugeCount) 个）",
+                          risk: raw.risk)
+            : raw
         guard let worst = code.hugeFiles.max(by: { $0.lineCount < $1.lineCount }) else {
             return DimensionOutcome(curve: curve, strengths: codeQualityStrengths(curve))
         }

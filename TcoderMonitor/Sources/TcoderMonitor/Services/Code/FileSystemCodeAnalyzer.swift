@@ -196,7 +196,11 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
 
         let largest = files.map(\.totalLineCount).max() ?? 0
         metrics.largestFileLineCount = largest
-        metrics.hugeFiles = hugeFiles(files: files, functionsPerFile: functionsPerFile)
+        // 榜单封顶 20 个是给界面用的；**占比的分子必须用真个数**，否则仓库越大越显干净
+        // （本 App 扫自己：榜内 20 / 实际 38，占比会从 20% 被报成 10.5%）。
+        let huge = hugeFiles(files: files, functionsPerFile: functionsPerFile)
+        metrics.hugeFileCount = huge.count
+        metrics.hugeFiles = Array(huge.prefix(20))
 
         let hotspots = hotspots(files: files, functionsPerFile: functionsPerFile)
         metrics.topComplexFunctions = Array(hotspots.sorted {
@@ -269,7 +273,7 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
                 )
             )
         }
-        return Array(result.sorted { $0.lineCount > $1.lineCount }.prefix(20))
+        return result.sorted { $0.lineCount > $1.lineCount }
     }
 
     private func hotspots(
