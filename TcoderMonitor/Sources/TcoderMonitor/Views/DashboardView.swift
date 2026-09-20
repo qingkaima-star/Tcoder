@@ -436,9 +436,23 @@ struct DashboardLiveReadout: View {
 
     // MARK: 实时性能分组
 
+    /// 节奏文案。**页面不再自己写死间隔数字**——节拍唯一真值是
+    /// `MachSystemMonitor.defaultSampleIntervalMilliseconds`，展示串走
+    /// `sampleIntervalText`（性能 spec §5.1，`PerfCadenceSingleSourceTests` 钉着）。
+    /// 另一半是诚实性：交互暂停期间屏幕上的数不再按那个节奏更新，继续宣称固定节奏
+    /// 就是说谎（读数仍是真的，说谎的是「节奏」这两个字），所以暂停时改口。
+    /// 与 WS-W 的 `PerformanceView.cadenceText` 同一条口径。
+    /// （注：这段说明原先写过带秒数的字面量 —— 那条守卫**不剥注释**，
+    /// 说明文字会被当成真命中计数，实测把 5 的基线白占了一格。）
+    private var cadenceSubtitle: String {
+        state.monitor.isInteractionPaused
+            ? "本机 · 采样已暂停"
+            : "本机 · 每 \(state.monitor.sampleIntervalText)采样"
+    }
+
     private var livePerformanceGroup: some View {
         GlassSection("实时性能",
-                     subtitle: "本机 · 每 1.5 秒采样",
+                     subtitle: cadenceSubtitle,
                      icon: .performance) {
             if state.monitor.history.count > 2 {
                 CPUHistoryChart(snapshots: Array(state.monitor.history.suffix(90)))
