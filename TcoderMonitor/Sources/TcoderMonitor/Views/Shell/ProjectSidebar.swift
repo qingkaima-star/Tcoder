@@ -130,17 +130,14 @@ struct ProjectSidebar: View {
         return true
     }
 
+    /// 侧栏底栏。**独立成 struct**（`SidebarLiveFooter`）：
+    /// 它读 `state.monitor.latestSnapshot`，而 `ProjectSidebar.body` 已不再读 `monitor`
+    /// 任何属性 —— 否则每 1.5s 一次心跳会把整个 `List`（含全部 `ProjectRow`）
+    /// 一起失效重建（O-1，性能规格 §5.2）。独立成视图后，`latestSnapshot` 的失效域
+    /// 只落在这一个 body 上，侧栏项目行不再随心跳重建。
     @ViewBuilder
     private var sidebarFooter: some View {
-        HStack(spacing: Theme.Spacing.xs) {
-            GlassButton("添加项目", icon: .add, style: .bordered) {
-                showImporter = true
-            }
-            Spacer(minLength: Theme.Spacing.xs)
-            LiveCPUBadge(snapshot: state.monitor.latestSnapshot)
-        }
-        .padding(.horizontal, Theme.Spacing.sm)
-        .padding(.vertical, Theme.Spacing.xs)
+        SidebarLiveFooter(showImporter: $showImporter)
     }
 }
 
@@ -378,6 +375,35 @@ struct HealthDot: View {
 }
 
 // MARK: - 实时读数（侧栏底栏）
+
+/// 侧栏底栏的实时读数（本机 CPU / 已用内存）。
+///
+/// **必须独立成 struct**：它读 `state.monitor.latestSnapshot`，而 `ProjectSidebar`
+/// 的 `body` 不再读 `monitor` 任何属性。SwiftUI 的 `@Observable` 失效域按「正在求值
+/// 的 view body」划分 —— 如果这里写成 `ProjectSidebar` 的计算属性，读 `latestSnapshot`
+/// 会发生在 `ProjectSidebar.body` 的求值过程中，于是每次心跳（每 1.5s）都让整个
+/// `List`（含全部 `ProjectRow`）整段失效、整段重建（潜在交互卡顿的根因之一，性能规格 §5.2 O-1）。
+/// 独立成视图后，失效域只落在本 body，侧栏项目行不再随心跳重建。
+///
+/// 注：当前仍订阅整份 `latestSnapshot`，未用 M0 的细粒度读模型（M0 尚未进 main 且
+/// `Services/**` 不在本流可写范围）。隔离已使失效域退出 `List`；M0 落地后可进一步改成
+/// 只订阅 `cpuUsage` / `memoryUsedBytes` 单字段，但本修复不依赖它。
+struct SidebarLiveFooter: View {
+    @Environment(AppState.self) private var state
+    @Binding var showImporter: Bool
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.xs) {
+            GlassButton("添加项目", icon: .add, style: .bordered) {
+                showImporter = true
+            }
+            Spacer(minLength: Theme.Spacing.xs)
+            LiveCPUBadge(snapshot: state.monitor.latestSnapshot)
+        }
+        .padding(.horizontal, Theme.Spacing.sm)
+        .padding(.vertical, Theme.Spacing.xs)
+    }
+}
 
 struct LiveCPUBadge: View {
     var snapshot: SystemSnapshot?
