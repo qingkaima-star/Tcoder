@@ -186,9 +186,20 @@ extension Theme {
         }
     }
 
-    /// 数据密集型页面的统一骨架：左右 16、顶 24、卡与卡 16，正文列超宽屏居中限宽。
+    /// 数据密集型页面的**唯一**骨架：页边距 24 / 分组间 32 / 页级段落 40，
+    /// 正文列在超宽屏上居中限宽。
+    ///
     /// 限宽是规范要求的（WS-H §3.2）：否则 5K 屏上一行拉到两千多像素，
     /// 表格数字与名称之间的关系就断了。
+    ///
+    /// **本轮（M0→M1）把三档间距换成 `Spacing.pageMargin/group/section`**。
+    /// 旧值是 `md`(16) 组间 + `md`(16) 页边距 + `xl`(24) 顶底 —— 而卡片**内部**条目间距
+    /// 也是 12~16。组间与组内同一个数，正是 spec 根因⑤「间距没有呼吸档」的定量形态，
+    /// 也就是「拥挤」的机械成因。
+    ///
+    /// 曾并存过三份同职责骨架（本件、`Views/CodeGit/CodeGitDesignKit.swift` 的
+    /// `DataPageScaffold` 逐字复制品、WS-W 在 `Views/PerfLogs/BorderlessPage.swift` 的临时变体）。
+    /// 后两份应删除并改回本件；`BorderlessPageGuardTests` 钉住「全仓只许一份页骨架」。
     enum Page {
         struct Scaffold<Content: View>: View {
             var maxWidth: CGFloat
@@ -202,14 +213,16 @@ extension Theme {
 
             var body: some View {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.group) {
                         content
                     }
                     .frame(maxWidth: maxWidth, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.horizontal, Theme.Spacing.md)
-                    .padding(.top, Theme.Spacing.xl)
-                    .padding(.bottom, Theme.Spacing.xl)
+                    .padding(.horizontal, Theme.Spacing.pageMargin)
+                    // 页头之上与页尾各给一整段呼吸：这一档存在的意义就是
+                    // 「页级段落 ≠ 分组间距」。`Spacing.section` 自定义起全仓零引用。
+                    .padding(.top, Theme.Spacing.section)
+                    .padding(.bottom, Theme.Spacing.section)
                 }
                 .scrollContentBackground(.hidden)
             }
