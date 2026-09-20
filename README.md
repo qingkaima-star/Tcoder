@@ -69,6 +69,11 @@ open "dist/Tcoder Monitor.app"
 # 否则 exit 1 —— 避免拿旧 dist 二进制截出九张"看着可信"的废图。
 ./scripts/verify_pages.sh
 
+# 同一件事的**隔离版**：自带 /tmp 沙箱支持目录（走 TCODER_SUPPORT_DIR），
+# 所以不要求"本机零实例"，也不会与正在运行的实例互相回写项目列表。
+# 它同样先做"dist 二进制 == 当前源码"的来源证明，拍完还会核对九张图不许字节相同。
+./scripts/capture_pages_isolated.sh /tmp/tcoder-pages
+
 # 真实仓库取证（默认跳过，因为要对数十万行做全量分析）：
 # 断言的是诚实性——提交总数不得是截断采样值、不在仓库根也要认出父仓库、
 # 无覆盖率报告时 hasData 必须为 false 而不是 0%。
