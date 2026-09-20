@@ -2,6 +2,14 @@
 import XCTest
 @testable import TcoderMonitor
 
+// MARK: - 契约 E：历史窗口截断的诚实报数
+//
+// totalCommits 是仓库真值（含 merge），commitsAnalyzed 只是被 `-n 窗口` 截断后实际解析的
+// 非合并提交数。两者不等就必须置 historyTruncated，UI 才有机会声明「以下统计只是窗口」。
+// 说明：规格建议「造超过 maxCommits 的仓」，但 20,001 次 `git commit --allow-empty` 要 6~7 分钟，
+// 不适合放单测；这里把窗口上限做成可注入参数（`init(commitWindowLimit:)`），
+// 用 12 个提交 + 上限 5 走完全相同的代码路径；真实的 2 万条上限由 Homebrew 压测覆盖（见工作日志）。
+
 final class GitHistoryTruncationTests: XCTestCase {
     private var sandbox = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
 

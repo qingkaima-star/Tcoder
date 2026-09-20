@@ -260,12 +260,24 @@ final class SelfScanDogfoodTests: SelfScanHarnessCase {
         let root = Self.repoRoot.path
         var lines: [String] = []
         func emit(_ text: String) { lines.append(text) }
-        func rel(_ path: String) -> String {
-            path.hasPrefix(root) ? String(path.dropFirst(root.count + 1)) : path
-        }
+        // WS-X3 拆分：本函数原判 CC 16 / 116 行，十个章节的渲染各成一个方法；
+        // 每章的 emit 文本逐字未改（同一份输入下第 1/2/5~9 节的输出与拆分前逐行相同）。
         emit("\n======== Tcoder 自食其果：扫自己 ========")
         emit("扫描根目录：\(root)")
+        try emitCodeScaleAndDuplicationSections(scan, root: root, into: &lines, truth: truth)
+        try emitHugeFileAndHotspotSections(scan, root: root, into: &lines)
+        try emitLogAndDependencySections(scan, root: root, into: &lines)
+        try emitCoverageAndGitSections(scan, root: root, into: &lines)
+        try emitHealthSection(scan, root: root, into: &lines)
+        try await emitComplexityCensusSection(scan, root: root, into: &lines, truth: truth)
+        emit("==========================================")
+        try writeEvidence(lines.joined(separator: "\n") + "\n")
+        print("【取证落盘】\(Self.evidenceURL.path)（\(lines.count) 行）")
+    }
 
+    /// 取证转储的一节（WS-X3 拆分：`testFullSelfScanEvidenceDump` 原 116 行 / CC 16）。1. 代码规模 + 2. 重复率。
+    private func emitCodeScaleAndDuplicationSections(_ scan: SelfScan, root: String, into lines: inout [String], truth: [GroundTruthFile]) throws {
+        func emit(_ text: String) { lines.append(text) }
         emit("—— 1. 代码规模 ——")
         let code = scan.code
         emit([
@@ -284,6 +296,11 @@ final class SelfScanDogfoodTests: SelfScanHarnessCase {
             emit("  重复 \(block.lineCount) 行 相似=\(String(format: "%.2f", block.similarity)) \(paths)")
         }
 
+    }
+    /// 取证转储的一节（WS-X3 拆分：`testFullSelfScanEvidenceDump` 原 116 行 / CC 16）。3. 巨大文件榜 + 4. 高圈复杂度榜。
+    private func emitHugeFileAndHotspotSections(_ scan: SelfScan, root: String, into lines: inout [String]) throws {
+        let code = scan.code   // 与第 1 节同源：巨大文件榜与热点榜都读它
+        func emit(_ text: String) { lines.append(text) }
         emit("—— 3. 巨大文件榜 ——")
         for file in code.hugeFiles {
             let rel = file.path.hasPrefix(root) ? String(file.path.dropFirst(root.count + 1)) : file.path
@@ -298,6 +315,10 @@ final class SelfScanDogfoodTests: SelfScanHarnessCase {
                 + "\(hotspot.name)（\(hotspot.lineCount) 行，\(hotspot.parameterCount) 参）")
         }
 
+    }
+    /// 取证转储的一节（WS-X3 拆分：`testFullSelfScanEvidenceDump` 原 116 行 / CC 16）。5. 日志分析 + 6. 依赖。
+    private func emitLogAndDependencySections(_ scan: SelfScan, root: String, into lines: inout [String]) throws {
+        func emit(_ text: String) { lines.append(text) }
         emit("—— 5. 日志分析 ——")
         let logs = scan.logs
         emit("hasData=\(logs.hasData) 扫文件=\(logs.scannedFiles.count) 总行=\(logs.totalLinesScanned) "
@@ -324,6 +345,10 @@ final class SelfScanDogfoodTests: SelfScanHarnessCase {
         }
         if !deps.networkLookupNote.isEmpty { emit("  联网说明：\(deps.networkLookupNote)") }
 
+    }
+    /// 取证转储的一节（WS-X3 拆分：`testFullSelfScanEvidenceDump` 原 116 行 / CC 16）。7. 覆盖率 + 8. Git。
+    private func emitCoverageAndGitSections(_ scan: SelfScan, root: String, into lines: inout [String]) throws {
+        func emit(_ text: String) { lines.append(text) }
         emit("—— 7. 覆盖率 ——")
         emit("hasData=\(scan.coverage.hasData) 报告数=\(scan.coverage.reports.count) 扫描文件=\(scan.coverage.scannedFileCount) "
             + "行覆盖=\(scan.coverage.overallLinePercent.map { String(format: "%.1f%%", $0) } ?? "nil")")
@@ -340,6 +365,10 @@ final class SelfScanDogfoodTests: SelfScanHarnessCase {
             emit("  \(author.name) <\(author.email)> 提交=\(author.commits) +\(author.additions)/-\(author.deletions) 风险=\(git.busFactorRisk.rawValue)")
         }
 
+    }
+    /// 取证转储的一节（WS-X3 拆分：`testFullSelfScanEvidenceDump` 原 116 行 / CC 16）。9. 健康评分与全部分量。
+    private func emitHealthSection(_ scan: SelfScan, root: String, into lines: inout [String]) throws {
+        func emit(_ text: String) { lines.append(text) }
         emit("—— 9. 健康评分与全部分量 ——")
         let health = scan.health
         emit("总分=\(health.overall) 等级=\(health.grade.rawValue)")
@@ -353,6 +382,10 @@ final class SelfScanDogfoodTests: SelfScanHarnessCase {
         emit("问题：\(health.issues)")
         emit("建议：\(health.recommendations)")
 
+    }
+    /// 取证转储的一节（WS-X3 拆分：`testFullSelfScanEvidenceDump` 原 116 行 / CC 16）。10. 普查 vs 榜单（绕开 prefix(20) 自己数）。
+    private func emitComplexityCensusSection(_ scan: SelfScan, root: String, into lines: inout [String], truth: [GroundTruthFile]) async throws {
+        func emit(_ text: String) { lines.append(text) }
         let census = try await complexityCensus()
         emit("—— 10. 普查 vs 榜单（绕开 prefix(20) 自己数）——")
         emit("全仓函数 \(census.functionCount) 个，全仓均复杂度 \(String(format: "%.2f", census.repoMean))，"
@@ -362,8 +395,5 @@ final class SelfScanDogfoodTests: SelfScanHarnessCase {
             + "其均值 \(String(format: "%.1f", census.hotspotMean)) ← 评分现在用的就是这个数")
         emit("独立口径 >\(Self.toolHighFileLines) 行的 .swift 文件 \(truth.filter { $0.lines > Self.toolHighFileLines }.count) 个，"
             + ">1000 行 \(truth.filter { $0.lines > Self.thousandLineBar }.count) 个")
-        emit("==========================================")
-        try writeEvidence(lines.joined(separator: "\n") + "\n")
-        print("【取证落盘】\(Self.evidenceURL.path)（\(lines.count) 行）")
     }
 }

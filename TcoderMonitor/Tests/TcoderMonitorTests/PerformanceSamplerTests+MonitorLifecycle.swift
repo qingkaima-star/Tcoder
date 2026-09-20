@@ -50,6 +50,7 @@ extension PerformanceSamplerTests {
         XCTAssertGreaterThan(io.read + io.write, 0, "IOKit 必须能拿到真实块设备累计量，且不需要 root")
     }
 
+    /// 有限轮询：每 300ms 一次、最多 3 次；条件不成立也不失败（见文件头第 6 条）。
     @MainActor
     private func pollUntil(_ condition: @escaping @MainActor () -> Bool) async {
         var remaining = 3
