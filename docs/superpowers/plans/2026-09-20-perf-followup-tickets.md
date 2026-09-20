@@ -282,6 +282,18 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 
 ### 第 2 步：帧率复测（分两小步，因为其中一步需要人手）
 
+> **顺带要量的一个新数（01:59 立，别让它停在推理上）**：我这轮把 6 处读点判成"顺手"，
+> 依据是它们的宿主属性走 `write(\.x,…)` 等值闸门。但**"有闸门"不等于"闸门真的经常关"**——
+> `measuredProcessCount` 在一台真机器上每 tick 都在变的话，skip 率接近 0，那这 6 处就仍然每 tick 抖。
+> 好消息是不管 skip 率多少，排序不变（无闸门那两处**必然**每 tick 换值，闸门写最多和它一样频繁），
+> 所以派单顺序不依赖这个数；但这个数会决定"顺手"是"零收益"还是"小收益"，
+> 而且**它已经可测**：`lastPublishStats` 就在产品里（`@ObservationIgnored`，不进观察图），
+> `ticks`/`writes`/`skips` 三个数，跑 `idle` 档时顺手读一次台账即可。
+> 量法：`writes + skips` 应等于 `ticks × 12`（7 个细格 + 5 个闸门粗属性），
+> 不等就是记账漏了一格——那才是这条读数的第一用途。
+> **口径提醒**：这条量的是"闸门有没有在关"，不是"页面有没有重算"，两件事分别由
+> `idle` 档的 xctrace app-update 与这里的 stats 管，别拿一个数交两条验收。
+
 ```bash
 ./scripts/perf_harness.sh selfcheck          # 11 项，红了所有读数作废——先量尺子再量代码
 ./scripts/perf_harness.sh idle   /tmp/tcoder-perf-after-<rev>     # 2a：不需要人，只要机器安静
@@ -352,6 +364,13 @@ WS-X3 把这两条守卫的**宿主文件按行数拆成了 extension**——
    `consumerDirectories` / `knownBaseline`）**留在主文件里没搬**，所以 `trace_report.py migration`
    那把"从守卫里现读尺子"的机器在 X3 树上照样跑得出 `16/16/0`——**拆文件没有把尺子的取数口拆断**。
    若后续谁把这些常量搬进 extension，`migration` 会**报错而不是用一份手抄的旧尺子**，那是设计行为。
+   **01:57 又实测了一遍落位兼容性，结论比 01:31 乐观**：X3 把 `moduleRoot` / `Line` / `Doc` /
+   `codeLines` / `scanHits` / `documents` / `scannedConsumerDocs` **留在宿主文件里、而且已经全部
+   放开成 `internal`**（逐条 `grep` 核过 `.worktrees/x3-testsplit`）——与我 01:54 为了跨文件共用
+   做的六处放开**是同一批成员、同一个可见性**。
+   ⇒ 我的 `+CoarseWeighting.swift` 对着他们的布局**不需要任何改动就能编译**，
+   重新落位缩成两小步：`reslicePattern` 那两条测试挪进 `+CoarseRatchet.swift`、
+   `knownBaseline` 与台账明细的改动留在 `PerfHitchGuardTests.swift` 主文件。
 1. **§0.4 第 1 步**：**10 处承重**粗读点迁完（`python3 scripts/trace_report.py migration` 报 0）
    → 我再把 `coarseCallSiteCeiling` 拧 0、翻 `consumptionGateOpen`；
 2. **§0.4 第 2 步**：约 5 分钟安静窗口（`idle`×3 不需要人；`interact`×3 需要你持续滚 20 秒）。
