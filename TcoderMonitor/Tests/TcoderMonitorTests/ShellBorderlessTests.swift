@@ -479,6 +479,69 @@ final class ShellBorderlessTests: XCTestCase {
                       "外壳层一处都没经 .typed 套 groupLabel → 分组标题没有唯一落点")
     }
 
+    // MARK: - ⑤ 倾向色不许当数据色用（总工 2026-09-20 补的硬要求）
+    //
+    // 病灶的**形状**比病灶本身值得记下来：M0 已经把 `MetricTile.tint` 的默认值改成纯墨，
+    // 但「改默认值」救不了「调用点显式传参」—— 总工在 main `415f0f0` 实拍上仍然看到
+    // CPU `16%`、内存 `28.4 GB`、最近提交 `15 分钟前` 三个蓝数。
+    // 所以基座换默认值之后，必须回头把每个显式覆盖点扫一遍，这条守卫就是那一次扫的回执。
+    //
+    // **只禁「把信息色/交互色涂在读数上」这一件事**。accent 作为**交互语义**是合法的，
+    // 不在禁用之列：侧栏选中行的淡底胶囊、拖放落点高亮、`SemanticBadge("示例")` 的 role、
+    // 按钮 —— 那些是「可点/可选中」的意思，不是数据。一律砍 accent 会把导航做哑。
+
+    /// 读数被涂信息色/倾向色的两种落地形状。
+    static let dataHueNeedles = [
+        "tint: Theme.Semantic.info",
+        "tint: Theme.Semantic.accent",
+        ".foregroundStyle(Theme.Semantic.info",
+        ".foregroundStyle(Theme.Semantic.accent",
+    ]
+
+    static func dataHueUses(in files: [(path: String, content: String)]) -> [String] {
+        files.flatMap { file in
+            file.content.split(separator: "\n", omittingEmptySubsequences: false)
+                .enumerated()
+                .compactMap { index, raw in
+                    let line = String(raw)
+                    guard !isComment(line) else { return nil }
+                    guard let needle = dataHueNeedles.first(where: { line.contains($0) })
+                    else { return nil }
+                    return "\(file.path):\(index + 1) \(needle)"
+                }
+        }
+    }
+
+    func test_readoutsAreNeverTintedWithInfoOrAccent() throws {
+        let hits = Self.dataHueUses(in: try Self.shellSources())
+        XCTAssertTrue(hits.isEmpty,
+                      "读数被涂成信息色/交互色（风格契约 5「颜色只承载语义」）：\(hits)")
+    }
+
+    /// 元测试：脏样本必须红，且**合法用法不许误伤** ——
+    /// 否则下一次有人拿 accent 做选中态就会被这条判红，然后去把它整个删掉。
+    func test_dataHueScannerCatchesSyntheticTilesAndSparesInteraction() {
+        let dirty = [(path: "Views/DashboardView.swift", content: """
+        MetricTile(label: "CPU", value: cpu, tint: Theme.Semantic.info.textColor)
+        Text(NumberFormat.grouped(code.codeLines)).foregroundStyle(Theme.Semantic.info.textColor)
+        """)]
+        XCTAssertEqual(Self.dataHueUses(in: dirty).count, 2,
+                       "蓝数回来了也不会红 → 这条守卫是假绿")
+
+        let legal = [(path: "Views/Shell/ProjectSidebar.swift", content: """
+        Capsule().fill(Theme.Semantic.accent.graphicColor.opacity(Theme.Palette.Opacity.badgeFill))
+        SemanticBadge("示例", role: Theme.Semantic.accent)
+        private var iconTint: Color { isDropTargeted ? Theme.Semantic.accent.textColor : .secondary }
+        """)]
+        XCTAssertTrue(Self.dataHueUses(in: legal).isEmpty,
+                      "选中态 / 落点高亮 / 徽标用 accent 是交互语义，误伤会把守卫逼成豁免")
+
+        let commented = [(path: "Views/DashboardView.swift",
+                          content: "// 原来这里传的是 tint: Theme.Semantic.info.textColor\n")]
+        XCTAssertTrue(Self.dataHueUses(in: commented).isEmpty,
+                      "注释里交代历史就被判红 → 一年后没人记得它为什么错")
+    }
+
     // MARK: - 今日错误的着色（语义色只留给真有危险的那一态）
 
     /// 判据做成**谓词**而不是返回 `Color`：`Color` 由动态 `NSColor` 包出来，
