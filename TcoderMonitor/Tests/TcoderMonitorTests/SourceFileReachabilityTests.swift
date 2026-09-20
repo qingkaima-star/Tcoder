@@ -47,7 +47,7 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 调用点 WeightedHealthScorer 的 .activity 分支）。棘轮的摩擦是有意的：
     /// 加文件必须有人先确认它凭什么被引用。
     /// 109 → 110（WS-Y #47 新增 Design/DataAbsence.swift，13 处页面调用点，未用清单未点名它）。
-    private static let censusBaseline = 110
+    private static let censusBaseline = 111
 
     private static let prunedDirectories: Set<String> = [".git", ".build", ".swiftpm", ".worktrees",
                                                         "node_modules", "DerivedData", "dist", "build", "out"]
@@ -64,7 +64,15 @@ final class SourceFileReachabilityTests: XCTestCase {
 
     // MARK: - 数据模型
 
-    private struct RDoc { var relativePath: String; var raw: String; var isProduction: Bool }
+    // MARK: - 可见性说明（2026-09-20 拆分所致，**不要改回 private**）
+    //
+    // `RDoc` / `Rule` / `Evidence` / `ScanOutcome` / `Gate` / `leadingDotRE` / `buildOutcome` /
+    // `gate` / `synth` 原先是 `private`。本轮补元测试后本文件涨到 880 行、撞上 800 行闸门，
+    // 按「闸门不降、把文件拆开才是修复」拆出了 `SourceFileReachabilityMetaTests.swift`；
+    // `private` 在同类型的跨文件 extension 里不可见，所以这几个声明放成了 `internal`。
+    // **改回 `private` 会让那个文件编不过。**
+
+    struct RDoc { var relativePath: String; var raw: String; var isProduction: Bool }
 
     private struct OwnerMember: Hashable, Comparable {
         var owner: String; var member: String
@@ -83,14 +91,14 @@ final class SourceFileReachabilityTests: XCTestCase {
         var owners = Set<String>()
     }
 
-    private enum Rule: String, CaseIterable {
+    enum Rule: String, CaseIterable {
         case uniqueType = "①唯一类型名", qualified = "②限定引用"
         case dispatcher = "③同作用域派发", staticShorthand = "④static 简写"
     }
 
-    private struct Evidence: Hashable { var rule: Rule; var symbol: String; var witness: String }
+    struct Evidence: Hashable { var rule: Rule; var symbol: String; var witness: String }
 
-    private struct ScanOutcome {
+    struct ScanOutcome {
         var productionFiles: [String] = []
         var testFileCount = 0
         var inUse: [String] = []
@@ -102,7 +110,7 @@ final class SourceFileReachabilityTests: XCTestCase {
         var strippedFileCount = 0
     }
 
-    private struct Gate { var reasons: [String]; var pass: Bool { reasons.isEmpty } }
+    struct Gate { var reasons: [String]; var pass: Bool { reasons.isEmpty } }
 
     /// 整词 / 限定 / 前导点简写三张倒排索引（键 → 出现过的实现文件集合）。
     /// 用索引而不是逐条跑正则：候选符号上千个，逐条正则会跑到分钟级。
@@ -238,7 +246,9 @@ final class SourceFileReachabilityTests: XCTestCase {
     private static let staticRE = try! NSRegularExpression(pattern: #"\bstatic\b|\bclass[ \t]+func\b"#)
     private static let wordRE = try! NSRegularExpression(pattern: #"[A-Za-z_]\w*"#)
     private static let dottedRE = try! NSRegularExpression(pattern: #"\b([A-Za-z_]\w*)\.([A-Za-z_]\w*)\b"#)
-    private static let leadingDotRE = try! NSRegularExpression(pattern: #"\.([A-Za-z_]\w*)"#)
+    /// 前导点简写索引。`(?<![\w.])` 是**必须的**：少了它 `NSWorkspace.shared` 也会被收进来，
+    /// 于是任何声明了 `static ... shared` 的类型都被别的类型白送证据（2026-09-20 真漏过一次）。
+    static let leadingDotRE = try! NSRegularExpression(pattern: #"(?<![\w.])\.([A-Za-z_]\w*)"#)
     /// 元测试 5 的独立复核口径：行首 ≤ 4 空白 + 修饰词 + 类型关键字 + 名字。故意**不借用**引擎的
     /// 花括号深度逻辑——两把尺子不许共享同一个盲区。
     private static let independentTypeSiteRE = try! NSRegularExpression(
@@ -344,7 +354,7 @@ final class SourceFileReachabilityTests: XCTestCase {
         guard let first = hits.min() else { return nil }
         return hits.filter { $0 != first }.first { analyses[$0]?.types.contains(owner) == true } ?? first
     }
-    private static func buildOutcome(_ docs: [RDoc], whitelist: Set<String>) -> ScanOutcome {
+    static func buildOutcome(_ docs: [RDoc], whitelist: Set<String>) -> ScanOutcome {
         var code: [String: String] = [:]
         var analyses: [String: RAnalysis] = [:]
         var out = ScanOutcome()
@@ -395,6 +405,10 @@ final class SourceFileReachabilityTests: XCTestCase {
                     list.append(Evidence(rule: .dispatcher, symbol: sym, witness: w))
                 }
                 guard a.staticMembers.contains(key) else { continue }
+                // 取词式必须带前导限制，否则 `NSWorkspace.shared` 会被当成前导点简写、
+                // 白送证据（真漏过一次）。完整说明与两条元测试见
+                // `SourceFileReachabilityMetaTests.swift`。
+                // 元测试：`testStaticShorthandNeedsTheOwnerInScope` + `testLeadingDotRegexRequiresABareDot`。
                 let dotHits = Array((index.dot[key.member] ?? []).filter { $0 != path })
                 if let w = bestHit(dotHits, preferring: key.owner, analyses: analyses) {
                     list.append(Evidence(rule: .staticShorthand, symbol: sym, witness: w))
@@ -416,7 +430,7 @@ final class SourceFileReachabilityTests: XCTestCase {
 
     /// 判定门口：真跑那一轮与合成夹具走的是**同一份**代码。
     /// 分母为 0 一律判失败——「没扫到东西」绝不能等于「交付干净」。
-    private static func gate(_ out: ScanOutcome, whitelist: Set<String>) -> Gate {
+    static func gate(_ out: ScanOutcome, whitelist: Set<String>) -> Gate {
         var reasons: [String] = []
         if out.productionFiles.isEmpty {
             reasons.append("分母为 0：一个实现文件都没扫到。这是扫描器坏了，不是代码干净。")
@@ -480,7 +494,7 @@ final class SourceFileReachabilityTests: XCTestCase {
         return (docs, Self.buildOutcome(docs, whitelist: Self.frameworkWhitelist))
     }
 
-    private func synth(_ items: [(String, String, Bool)]) -> [RDoc] {
+    func synth(_ items: [(String, String, Bool)]) -> [RDoc] {
         items.map { RDoc(relativePath: $0.0, raw: $0.1, isProduction: $0.2) } }
 
     private func firstEvidence(_ out: ScanOutcome, _ path: String) -> String {
@@ -586,24 +600,6 @@ final class SourceFileReachabilityTests: XCTestCase {
         }
         print("【WS-U 分片专项】不声明顶层类型的分片文件 \(shards.count) 个，逐个判在用，误杀 \(killed.count) 个：\n"
             + report.joined(separator: "\n"))
-    }
-
-    // MARK: - 元测试 3：分母为 0 必须判失败
-
-    func testEmptyScanIsReportedAsFailure() {
-        let g = Self.gate(ScanOutcome(), whitelist: [])
-        XCTAssertFalse(g.pass, "分母为 0 却判通过 = 永真绿")
-        XCTAssertTrue(g.reasons.first?.hasPrefix("分母为 0") == true, "必须点名分母问题：\(g.reasons)")
-        // 只有测试文件、实现面为空，同样不许蒙过去
-        let onlyTests = Self.buildOutcome(synth([("WSUBare.swift", "struct WSUBare { let x = 1 }", false)]),
-                                          whitelist: [])
-        XCTAssertFalse(Self.gate(onlyTests, whitelist: []).pass, "实现面为 0 而测试面非 0，也必须失败")
-        // 分母虚高（路径解析半失效）也要失败：合成 2 个实现文件 < 100
-        let tiny = Self.buildOutcome(synth([
-            ("WSUTinyA.swift", "struct WSUTinyA { let wsuTinyField = 1 }", true),
-            ("WSUTinyB.swift", "enum WSUTinyB { static func use() { _ = WSUTinyA() } }", true)]), whitelist: [])
-        XCTAssertTrue(Self.gate(tiny, whitelist: []).reasons.contains { $0.contains("路径解析静默失效") },
-                      "小分母必须被当成扫描器故障，而不是「真干净」")
     }
 
     // MARK: - 元测试 4：脱敏真的起作用
