@@ -104,6 +104,14 @@ extension Theme {
         /// 系统动态色优先的角色（如 accent 跟随用户强调色）在这里放 `Color`；
         /// 为 nil 表示该角色的 graphic 是数值令牌、可参与对比度断言。
         let systemGraphic: Color?
+        /// badge 底色两档预计算（`Opacity.badgeFill` 铺在对应外观的图形色上）。
+        ///
+        /// 存在理由与 `DualColor.color` 同源：`badgeFill(in:)` 是徽标/提示条每行都要
+        /// 调的口子，改前每次调用现算 `token.color.opacity(0.15)`，于是每次视图图更新
+        /// 按徽标数 new 一批 `Color`。这里在 init 里算好，方法体退化成一次分支取值，
+        /// **结果与改前逐字节相同**（同一个 `ColorToken.color` 乘同一个透明度）。
+        let badgeFillLight: Color
+        let badgeFillDark: Color
 
         init(name: String, textLight: UInt32, textDark: UInt32,
              graphicLight: UInt32, graphicDark: UInt32,
@@ -113,6 +121,8 @@ extension Theme {
             self.graphic = DualColor(lightHex: graphicLight, darkHex: graphicDark)
             self.onFill = onFill
             self.systemGraphic = nil
+            self.badgeFillLight = Self.makeBadgeFill(of: self.graphic.light)
+            self.badgeFillDark = Self.makeBadgeFill(of: self.graphic.dark)
         }
 
         /// 跟随系统色的角色（accent）。无法用数值断言，报告里单列。
@@ -122,6 +132,14 @@ extension Theme {
             self.graphic = DualColor(lightHex: 0x0A82FF, darkHex: 0x0A84FF)
             self.onFill = DualColor(lightHex: 0x111111, darkHex: 0x111111)
             self.systemGraphic = system
+            self.badgeFillLight = Self.makeBadgeFill(of: self.graphic.light)
+            self.badgeFillDark = Self.makeBadgeFill(of: self.graphic.dark)
+        }
+
+        /// badge 底色的构造点。**写成静态函数而不是计算属性**，理由同
+        /// `DualColor.makeDynamicNSColor`：计算属性体就是"每次访问现造"。
+        private static func makeBadgeFill(of token: ColorToken) -> Color {
+            token.color.opacity(Theme.Palette.Opacity.badgeFill)
         }
 
         var textColor: Color { text.color }
@@ -130,8 +148,12 @@ extension Theme {
         var onFillColor: Color { onFill.color }
 
         /// badge 底色：图形色低透明度铺在表面上（WS-H §9 统一 0.15）。
+        /// 值已在 init 里算好，这里只做选择，不再 new `Color`。
         func badgeFill(in appearance: DesignAppearance = .light) -> Color {
-            graphic.token(in: appearance).color.opacity(Theme.Palette.Opacity.badgeFill)
+            switch appearance {
+            case .light: return badgeFillLight
+            case .dark: return badgeFillDark
+            }
         }
 
         /// 以下三个对比度口子供单测与自检使用。
@@ -368,9 +390,27 @@ extension Theme {
         /// 《BorderlessSurfaceGuardTests》钉着这条。
         var tracking: CGFloat = 0
 
-        var font: Font {
+        /// 该档的 `Font`，**在令牌构造时算一次**（13 档 = 全 App 13 个 `Font` 对象）。
+        ///
+        /// 改前它是计算属性 `var font: Font { Font.system(...) }`，而 `.font(` 全仓有
+        /// 183 处调用、其中不少在 `ForEach` / `AxisMark` 闭包里 —— 每次视图图更新都
+        /// 重新 new 一批 `Font`。`Theme.Typo.*` 全部住在 `static let` 上，所以把 `Font`
+        /// 收进 init 就等于"每档只造一次"，取用退化成一次成员读取。
+        /// 这是**纯缓存改造**：`token.font` 的名字、类型、调用形状一字未动。
+        let font: Font
+
+        init(name: String, size: CGFloat, weight: Font.Weight, design: Font.Design,
+             monospacedDigits: Bool, lineSpacing: CGFloat, tracking: CGFloat = 0) {
+            self.name = name
+            self.size = size
+            self.weight = weight
+            self.design = design
+            self.monospacedDigits = monospacedDigits
+            self.lineSpacing = lineSpacing
+            self.tracking = tracking
             let base = Font.system(size: size, weight: weight, design: design)
-            return monospacedDigits ? base.monospacedDigit() : base
+            self.font = monospacedDigits ? base.monospacedDigit() : base
+            DesignTokenMeter.record(.font)
         }
     }
 

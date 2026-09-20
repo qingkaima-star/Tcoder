@@ -49,7 +49,34 @@ enum IconRole: CaseIterable {
         }
     }
 
-    var font: Font { .system(textStyle, weight: weight) }
+    /// 该档的 `Font`，**每档只造一次**。
+    ///
+    /// 写成"五枚 `static let` + 穷尽 switch"而不是查表，是因为穷尽 switch 让
+    /// 「新增一档却忘了给它配字」在**编译期**就报错；查表则会静默退化成运行时现造。
+    /// 改前这里是 `var font: Font { .system(textStyle, weight: weight) }`，
+    /// 而 `ThemedIcon` 的图标遍布列表行与徽标，每 tick 都在重造 `Font`。
+    var font: Font {
+        switch self {
+        case .navigation: return Self.navigationFont
+        case .cardHeader: return Self.cardHeaderFont
+        case .inlineText: return Self.inlineTextFont
+        case .badge: return Self.badgeFont
+        case .hero: return Self.heroFont
+        }
+    }
+
+    /// 构造点（函数，不是计算属性——体里的 `.system(` 因此不构成"每次访问现造"）。
+    /// 计数走与 `TypeToken` 同一个通道：Design 里每一处造 `Font` 的地方都要被数到。
+    private static func makeFont(for role: IconRole) -> Font {
+        DesignTokenMeter.record(.font)
+        return .system(role.textStyle, weight: role.weight)
+    }
+
+    private static let navigationFont = makeFont(for: .navigation)
+    private static let cardHeaderFont = makeFont(for: .cardHeader)
+    private static let inlineTextFont = makeFont(for: .inlineText)
+    private static let badgeFont = makeFont(for: .badge)
+    private static let heroFont = makeFont(for: .hero)
 }
 
 /// 符号在本机解析不到时的兜底链。
