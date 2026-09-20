@@ -8,8 +8,11 @@ import SwiftUI
 ///     落在**最大的数字**上。现在主读数一律 `Surface.ink`，蓝不再当数据色用（风格契约 4/5）。
 ///   · 「没有主次」在文字侧的另一半是四块灰盒 tile → 收成一条 `ReadoutStrip`
 ///     （列间发丝线），一次去掉 4 个面 + 4 份投影。
-///   · 组间与组内是同一个数（`md`16 / `gutter`12）→ 组间 `Spacing.group`(32)、
-///     段落间 `Spacing.section`(40)、页边距 `Spacing.pageMargin`(24)。
+///   · 组间与组内是同一个数（`md`16 / `gutter`12）→ 版面交给基座**唯一那份**页骨架
+///     `Theme.Page.Scaffold`：页边距 24 / 组间 32 / 顶底段落 40（风格契约 8）。
+///     本页不再自己写 `ScrollView + VStack + padding + 限宽` —— 实测全仓并存过三份
+///     同职责骨架（基座 `Page.Scaffold`、`DataPageScaffold` 逐字复制品、WS-W 的
+///     `BorderlessPage` 临时变体），那正是「东一个系一个」在代码层的形态。
 ///   · 「代码规模」一张卡塞了 大数 + 5 条占比 + 3 个 StatLine + 覆盖率 4 行说明 → 拆成
 ///     代码规模 / 文件构成 / 测试覆盖率 三组，覆盖率口径说明降到 10pt 脚注。
 ///
@@ -22,26 +25,18 @@ struct DashboardView: View {
     private var report: ProjectReport? { state.selectedReport }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.section) {
-                HealthHeroCard(health: report?.health)
-                scaleSegment
-                DashboardLiveReadout()
-                listSegment
-                if let error = state.lastError {
-                    failureCard(error)
-                }
+        Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthOverview) {
+            HealthHeroCard(health: report?.health)
+            scaleSegment
+            DashboardLiveReadout()
+            listSegment
+            if let error = state.lastError {
+                failureCard(error)
             }
-            .padding(.horizontal, Theme.Spacing.pageMargin)
-            .padding(.top, Theme.Spacing.section)
-            .padding(.bottom, Theme.Spacing.section)
-            .frame(maxWidth: Theme.Layout.maxWidthOverview)
-            .frame(maxWidth: .infinity)
         }
-        .scrollContentBackground(.hidden)
     }
 
-    /// 本机读数 + 代码规模这一段。组内用 `group`(32)，段与段之间用 `section`(40)。
+    /// 代码规模这一段（实时读数已单独成 `DashboardLiveReadout`，见其注释的失效域理由）。
     private var scaleSegment: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.group) {
             codeScaleGroup

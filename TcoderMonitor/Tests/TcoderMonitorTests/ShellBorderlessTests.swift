@@ -368,11 +368,56 @@ final class ShellBorderlessTests: XCTestCase {
 
     func test_spacingAndSurfaceTokensAreWiredIntoTheShellLayer() throws {
         let joined = try Self.shellSources().map(\.content).joined(separator: "\n")
-        for token in ["Spacing.group", "Spacing.section", "Spacing.pageMargin",
+        for token in ["Spacing.group", "Spacing.pageMargin",
                       "Palette.Surface.ground", "Palette.Surface.ink"] {
             XCTAssertTrue(joined.contains(token),
                           "\(token) 在外壳/总览里零引用 —— 基座定义了没人用，正是上一轮的病因复发")
         }
+        // `Spacing.section`(40) 不再要求页面自己写：它住在**唯一那份页骨架**里。
+        // 页面再自己铺一遍顶底段落，就是第五份骨架（见下一条）。
+    }
+
+    /// 页骨架只许一份（main `48443d9`）。实测并存过三份同职责骨架
+    /// （基座 `Theme.Page.Scaffold`、`CodeGitDesignKit.DataPageScaffold` 逐字复制品、
+    /// WS-W 的 `Views/PerfLogs/BorderlessPage.swift`）—— 用户原话「不要东一个系一个」。
+    /// 总览原来那份 `ScrollView + VStack + padding + 限宽` 是第四份，本轮改回基座。
+    static func handRolledScaffolds(in files: [(path: String, content: String)]) -> [String] {
+        files.filter { file in
+            file.content.contains("ScrollView {") && !file.content.contains("Page.Scaffold")
+        }.map(\.path)
+    }
+
+    func test_overviewPageUsesTheSingleBaseScaffold() throws {
+        let handRolled = Self.handRolledScaffolds(in: try Self.shellSources())
+        XCTAssertTrue(handRolled.isEmpty,
+                      "这些文件自己写了一遍页骨架，请改用 `Theme.Page.Scaffold`：\(handRolled)")
+        let dashboard = try XCTUnwrap(
+            Self.shellSources().first { $0.path == "DashboardView.swift" }).content
+        XCTAssertTrue(dashboard.contains("Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthOverview"),
+                        "总览没接基座页骨架，或限宽档没走 overview（1200）")
+    }
+
+    func test_scaffoldScannerCatchesSyntheticDuplication() {
+        let handRolled = [(path: "Views/FakeView.swift", content: """
+        struct FakeView: View {
+            var body: some View {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.md) { content }
+                        .padding(.horizontal, Theme.Spacing.md)
+                }
+            }
+        }
+        """)]
+        XCTAssertEqual(Self.handRolledScaffolds(in: handRolled), ["Views/FakeView.swift"],
+                       "自造页骨架扫不出来 → 第五份骨架悄悄长回来")
+        let baseUser = [(path: "Views/FakeView.swift", content: """
+        struct FakeView: View {
+            var body: some View { Theme.Page.Scaffold { content } }
+        }
+        struct PageScaffold: View { var body: some View { ScrollView { EmptyView() } } }
+        """)]
+        XCTAssertTrue(Self.handRolledScaffolds(in: baseUser).isEmpty,
+                      "基座自己那份骨架被误伤 —— 那正是唯一允许画 ScrollView 的地方")
     }
 
     // MARK: - 风格契约 6/7：外壳层零投影、零材质胶囊
