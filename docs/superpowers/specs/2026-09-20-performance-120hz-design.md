@@ -148,8 +148,28 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 
 ## 3. 目标（T1~T9，全部可机器断言）
 
-- **T1 交互期不掉帧**：切页 / 滚动 / 悬停 / 拖窗 / resize 期间 p95 帧间隔 ≤ **8.4 ms**、p99 ≤ 16.7 ms；
-  **hitch 帧 = 0**；硬上限 <1/s 且 hitch ratio <0.1%。
+### 3.0 口径出处（Apple 原文，不是我自己推的）
+
+来源：Apple Developer Tech Talk **《Explore UI animation hitches and the render loop》**
+（`developer.apple.com/videos/play/tech-talks/10855/`），以及其推荐的配套会话
+《Eliminate animation hitches with XCTest》（WWDC20 `wwdc2020/10077`）、
+《Find and fix hitches in the commit phase》《Demystify and eliminate hitches in the render phase》。
+
+| Apple 原文口径 | 本规范怎么用 |
+|---|---|
+| hitch =「**any time a frame appears on screen later than expected**」 | 判据定义，不自造 |
+| 帧预算：60 Hz 每 **16.67 ms** 出一帧；ProMotion 120 Hz 每 **8.33 ms** 一帧 | T1/T2 的预算值来源（本机 `device-display-info` 实测 120Hz ⇒ 8.33ms） |
+| 正式指标是 **Hitch Time Ratio**（一段时间内 hitch 总时长 ÷ 该段时间，单位 **hitch-ms/秒**） | **主指标改用它**；我原先写的"hitch ratio < 0.1%"是自造口径，**撤销** |
+| 档位：**<5 无感**；**5–10 用户可察觉、需排查**；**>10 严重影响体验、需立刻处理**；**理想 = 0** | T1 验收线 = **<5，目标 0**；run1 实测 **11.67 ms/s** 属"危急"档 |
+| hitch 分 **commit hitch**（本进程错过 VSYNC：布局/绘制/事件处理慢）与 **render hitch**（render server 侧） | 归因分层：本轮打的全是 commit 侧（`_updateViewGraph`），render 侧实测健康 |
+
+**本仓库的算法**：`HTR = Σ max(0, 帧时长 − 预算) / 录制秒数`，数据源是
+`Animation Hitches` 模板的 `hitches` 表（帧时长）。这是 Apple 定义的**保守上界**
+（它按"晚了多少"算，我们按整帧时长减预算算，不会低估）。已实现进 `trace_report.py`。
+
+- **T1 交互期不掉帧**：切页 / 滚动 / 悬停 / 拖窗 / resize 期间 **Hitch Time Ratio < 5 ms/s，目标 0**；
+  p95 帧间隔 ≤ **8.4 ms**、p99 ≤ 16.7 ms。改动前基线（未受控，见 §1.3）**= 11.67 ms/s（`perf_harness.sh report` 实算，非口算）= Apple 的"危急"档**。
+
 - **T2 心跳不越一帧**：1.5 s 一次 publish 引起的 **app-update 相位 ≤ 8.33 ms**（冲刺目标 4.0 ms）。
   起点 10.8~24.8 ms ⇒ 需要 **2~6 倍**收窄，只靠"少画几个点"不可能达到，必须收失效面。
 - **T3 交互优先**：滚动 / 拖窗期间冻结实时写入，交互停止 150 ms 后恢复（用户已批准）。

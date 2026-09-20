@@ -44,6 +44,7 @@ BASELINE = {
     "hitches": 7,
     "hitch_seconds": 20,
     "hitch_per_second": 0.35,
+    "hitch_time_ratio_ms_per_s": 11.67,  # 工具实测（run1，20s）；Apple 危急档门限是 >10
     "hitch_frame_ms_min": 33.33,
     "hitch_frame_ms_max": 58.33,
     "app_update_ms": [10.8, 11.1, 13.2, 15.0, 16.0, 18.6, 24.8],
@@ -580,9 +581,17 @@ def cmd_summary(args):
         fmt_row("hitch 帧时长", "33.33~58.33 ms (4~7 帧)",
                 ("%.2f~%.2f ms" % (min(hitch), max(hitch))) if hitch else "无 hitch",
                 "超" if hitch and max(hitch) > budget else "达标")
+        # Hitch Time Ratio：Apple 的正式指标（tech-talk 10855）——
+        # 本实现取 Σ max(0, 帧时长 − 预算) / 秒数，是"晚了多少"的保守上界。
+        # 档位（Apple 原文）：<5 无感 / 5~10 可察觉需排查 / >10 危急需立刻处理 / 理想 0。
+        htr = (sum(max(0.0, d - budget) for d in hitch) / seconds) if seconds else 0.0
+        band = "理想(0)" if not hitch else ("无感" if htr < 5 else ("可察觉·需排查" if htr <= 10 else "危急·立刻处理"))
+        fmt_row("Hitch Time Ratio (ms/s)", "%.2f（危急档）" % BASELINE.get("hitch_time_ratio_ms_per_s", 12.9),
+                "%.2f（%d 帧迟到，预算 %.3f ms）" % (htr, len(hitch), budget), band)
     else:
         fmt_row("hitch 次数 / 速率", "7 次 / 0.35 每秒", "未覆盖", "—")
         fmt_row("hitch 帧时长", "33.33~58.33 ms (4~7 帧)", "未覆盖", "—")
+        fmt_row("Hitch Time Ratio (ms/s)", "11.67（危急档）", "未覆盖", "—")
 
     # 5) potential-hangs（主线程被占住多久）
     hangs = disp_values(loaded["potential-hangs"])
