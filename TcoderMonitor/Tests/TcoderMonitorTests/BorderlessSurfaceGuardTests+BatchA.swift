@@ -242,6 +242,83 @@ extension BorderlessSurfaceGuardTests {
                       "真口径串被误判成量词（长度/首字判据太松）")
     }
 
+    // MARK: 批次 H：一格之内不许用空格粘多段路径
+
+    /// `occurrenceTitles(...)` 是"把多条路径用三个空格粘成一个长串"的写法。
+    /// 它**只允许**出现在 tooltip 一侧：要么直接挂在 `help:` / `.themeHelp(` 上，
+    /// 要么被名为 `hint`/`help`/`tooltip` 的 tooltip 构造器收着（这类函数的返回值只喂 `.help`）。
+    /// 一旦回到表格单元格，就是实拍里那个样子：两条长路径挤成一团、第二行顶到
+    /// 隔壁数字列跟前，列与列之间只剩空格当分隔，表就没有表了。
+    static func pathGlueOutsideHelp(in files: [(path: String, content: String)]) -> [String] {
+        // 按"行"匹配是错的：`help:` 与它的实参经常跨行写，合法的 tooltip 调用会被误判，
+        // 而这条守卫第一次跑就踩在这里。改成在整份文本上找调用点，回看上下文。
+        // 也不动用正则 —— 只需要子串与最近的 `func 名字(`，这个匹配不需要正则。
+        let needle = "occurrenceTitles("
+        let tooltipWords = ["help", "hint", "tooltip"]
+        var out: [String] = []
+        for file in files {
+            var search = file.content.startIndex
+            while let hit = file.content.range(of: needle, range: search..<file.content.endIndex) {
+                let head = file.content[file.content.startIndex..<hit.lowerBound]
+                // 直接 tooltip 入口：回看 160 个字符（够覆盖跨行的 `help:`），
+                // 并且必须大小写无关 —— `.themeHelp(` 里是大写 H，第二次跑就漏在这里。
+                let window = head.suffix(160).lowercased()
+                let atTooltipEntry = tooltipWords.contains { window.contains($0) }
+                let owner = Self.enclosingFuncName(in: head)
+                let ownedByTooltip = owner.map { name in
+                    tooltipWords.contains { name.contains($0) }
+                } ?? false
+                if !atTooltipEntry, !ownedByTooltip, owner != "occurrenceTitles" {
+                    let line = head.split(separator: "\n", omittingEmptySubsequences: false).count
+                    out.append("\(file.path):\(line)")
+                }
+                search = hit.upperBound
+            }
+        }
+        return out
+    }
+
+    /// 离调用点最近的那个 `func 名字(`。nil 表示调用点在函数体外（顶层属性、body 之外的静态成员）。
+    private static func enclosingFuncName(in head: Substring) -> String? {
+        guard let marker = head.range(of: "func ", options: .backwards) else { return nil }
+        var cursor = marker.upperBound
+        var name = ""
+        while cursor < head.endIndex {
+            let ch = head[cursor]
+            guard ch.isLetter || ch.isNumber || ch == "_" else { break }
+            name.append(ch)
+            head.formIndex(after: &cursor)
+        }
+        return name.isEmpty ? nil : name
+    }
+
+    func test_multiPathGlueIsConfinedToTooltips() throws {
+        let offenders = Self.pathGlueOutsideHelp(in: try Self.sourceFiles(under: "Views"))
+        XCTAssertTrue(offenders.isEmpty,
+                      "多路径粘连串又被放回单元格，应改用 CodeDuplicationBlockRow.occurrenceLines：\(offenders)")
+    }
+
+    func test_pathGlueScannerAllowsTooltipButFlagsCells() {
+        let cell = [(path: "Views/Fake.swift",
+                     content: "  Text(Self.occurrenceTitles(block, root: root))\n")]
+        XCTAssertEqual(Self.pathGlueOutsideHelp(in: cell).count, 1, "单元格里的粘连串没抓到")
+        let help = [(path: "Views/Fake.swift",
+                     content: "  .themeHelp(Self.occurrenceTitles(block, root: root))\n"
+                         + "  static func occurrenceTitles(_ b: Int) -> String { \"\" }\n")]
+        XCTAssertTrue(Self.pathGlueOutsideHelp(in: help).isEmpty,
+                      "help: 与定义本身被误判")
+        let builder = [(path: "Views/Fake.swift",
+                        content: "  static func hint(_ b: Int) -> String {\n"
+                            + "    \"相似度 1 · \"\n        + occurrenceTitles(b, root: \"\")\n  }\n")]
+        XCTAssertTrue(Self.pathGlueOutsideHelp(in: builder).isEmpty,
+                      "名为 hint 的 tooltip 构造器被误判")
+        let notTooltip = [(path: "Views/Fake.swift",
+                           content: "  static func label(_ b: Int) -> String {\n"
+                               + "    occurrenceTitles(b, root: \"\")\n  }\n")]
+        XCTAssertEqual(Self.pathGlueOutsideHelp(in: notTooltip).count, 1,
+                       "粘连串换了个非 tooltip 函数名就溜过去了")
+    }
+
     /// 反向自证：`sourceFiles` 真读到了文件。否则上面所有「扫不到就算通过」的断言
     /// 会集体假绿 —— 这是扫描型守卫最经典的死法。
     func test_sourceScannerActuallyFindsFiles() throws {

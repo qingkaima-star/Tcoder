@@ -77,7 +77,9 @@ final class LocalizationGuardTests: XCTestCase {
         // ICU 正则**不认** Swift 的 `\u{4E00}` 写法，只认 `\u4E00`。
         // 写成前者时 `try?` 把编译失败吞成 nil，函数直接返回 [:] ——
         // 于是"没有任何未迁移的中文串"这个结论是假的。元测试抓的就是这个。
-        let pattern = #"Text\(\s*(?:verbatim:\s*)?"((?:[^"\\]|\\.)*[\u4E00-\u9FFF](?:[^"\\]|\\.)*)""#
+        // 三类入口都算：`Text` / `Button` / 本仓自己的 `GlassButton`。
+        // 少扫一类，就会出现"守卫绿了、按钮还是中文"的假完成。
+        let pattern = #"(?:Text|Button|GlassButton)\(\s*(?:verbatim:\s*)?"((?:[^"\\]|\\.)*[\u4E00-\u9FFF](?:[^"\\]|\\.)*)""#
         let re = try! NSRegularExpression(pattern: pattern, options: [])
         var out: [String: Set<String>] = [:]
         for file in files {
@@ -97,7 +99,7 @@ final class LocalizationGuardTests: XCTestCase {
     private static func sourceFiles() throws -> [(path: String, content: String)] {
         let root = packageRoot.appendingPathComponent("Sources/TcoderMonitor").path
         var out: [(String, String)] = []
-        for sub in ["Views", "Design"] {
+        for sub in ["Views", "Design", "App"] {
             for url in walkFiles(in: "\(root)/\(sub)") where url.hasSuffix(".swift") {
                 out.append((String(url.dropFirst(root.count + 1)),
                             (try? String(contentsOfFile: url, encoding: .utf8)) ?? ""))
@@ -122,7 +124,9 @@ final class LocalizationGuardTests: XCTestCase {
     /// 任何人加一句中文而涨，涨了就"合法"，等于没有闸门；而"某个文件已经干净"
     /// 是一个可复核的事实，退回去就会立刻红。
     private static let migratedFiles: Set<String> = [
-        // P1 尚未开始逐页迁移；P2 起每迁完一页把它的相对路径加进来。
+        "Views/Shell/ProjectSidebar.swift",
+        "App/TcoderMonitorApp.swift",
+        "Views/Shell/DashboardHero.swift",
     ]
 
     func test_migratedFilesHaveNoUnregisteredUILiterals() throws {
@@ -163,6 +167,35 @@ final class LocalizationGuardTests: XCTestCase {
                       "目录里有 \(stale.count) 条代码中已不存在的键（改了原文没同步目录）：\(stale)")
     }
 
+    // MARK: - 守卫 4：键值两端的格式占位符必须一致
+
+    /// 抽出串里的**格式占位符**（`%@` / `%d` / `%lld` / `%f` / `%%` …）。
+    /// 裸 `%`（后面不跟转换字符）**不算占位符** —— 这样「95% 的提交…」这类中文键
+    /// 今天就能过，而翻译时把 `%@` 翻丢、写错顺序、多写一个都会被抓到。
+    static func formatSpecs(in text: String) -> [String] {
+        let re = try! NSRegularExpression(pattern: #"%%|%[0-9]*[$]?[@a-zA-Z]{1,3}"#, options: [])
+        let range = NSRange(text.startIndex..., in: text)
+        return re.matches(in: text, options: [], range: range).compactMap {
+            Range($0.range, in: text).map { String(text[$0]) }
+        }
+    }
+
+    func test_catalogPlaceholdersMatch() throws {
+        let offenders = try Self.catalog().compactMap { entry -> String? in
+            let k = Self.formatSpecs(in: entry.key), v = Self.formatSpecs(in: entry.value)
+            return k == v ? nil : "\(entry.key) → 键 \(k) / 值 \(v)"
+        }
+        XCTAssertTrue(offenders.isEmpty,
+                      "译文里的格式占位符与原文不一致（会静默改义或崩）：\(offenders)")
+    }
+
+    /// 元测试：占位符比对必须真能抓错，且**不把裸百分号当占位符误伤**。
+    func test_placeholderScannerDetectsMismatchButIgnoresBarePercent() {
+        XCTAssertEqual(Self.formatSpecs(in: "共 %@ 次，占 %lld%%"), ["%@", "%lld", "%%"])
+        XCTAssertTrue(Self.formatSpecs(in: "95% 的提交由一人完成").isEmpty,
+                      "裸 % 被当成占位符 —— 会把所有含百分号的中文键误判")
+    }
+
     // MARK: - 元测试：三条守卫各自的扫描器必须真能抓到坏样例
 
     func test_scannersDetectInjectedViolations() {
@@ -171,6 +204,12 @@ final class LocalizationGuardTests: XCTestCase {
                       content: "  Text(\"尚未翻译的句子\")\n// Text(\"注释里的\")\n")]
         XCTAssertEqual(Self.uiLiteralsNeedingKeys(in: dirty)["Views/Fake.swift"],
                        ["尚未翻译的句子"], "界面串扫描器失灵或没剥注释")
+        // 只扫 Text、不扫按钮 = "守卫绿了、按钮还是中文"的假完成
+        let buttons = [(path: "Views/Fake.swift",
+                        content: ##"  GlassButton("添加项目", icon: .add)"## + "\n"
+                            + ##"  Button("移除", role: .destructive) {}"## + "\n")]
+        XCTAssertEqual(Self.uiLiteralsNeedingKeys(in: buttons)["Views/Fake.swift"]?.count, 2,
+                       "按钮标题没被算进界面串")
 
         // 守卫 2/3 的目录解析器：能读键值、能剥块注释与行注释。
         let parsed = Self.parseCatalog("""
