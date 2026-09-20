@@ -149,6 +149,24 @@ struct MetricTile: View {
 ///
 /// 分隔线由**调用方**在 tile 之间插 `Divider()`（SwiftUI 的 `Divider` 在 `HStack`
 /// 里画竖线）。不在这里自动插：各页 tile 数不同，自动插会让守卫数不出真实线数。
+/// 读数带 / 列之间的**唯一竖线**画法（发丝宽 + 上下留一小截，不顶满格高）。
+///
+/// 原来全站有三种竖线：这一条、SwiftUI 的 `Divider()`、以及 `DataRowSeparator()`
+/// 的横版 —— 同一件事三种画法，粗细与颜色各不相同，同屏两张表就能看出不一致。
+/// 现在分工写死：**竖线用它，横线用 `DataRowSeparator()`，`Divider()` 只许留在
+/// 系统菜单里**（守卫 `BorderlessSurfaceGuardTests.test_dividerIsConfinedToSystemMenus`）。
+/// 从 `Views/CodeGit/` 上提到这里，是因为它服务的对象（`ReadoutStrip`）就在本文件。
+/// 读数带列间分隔。**只能出现在 `DataReadoutBand` 里**。
+struct DataBandSeparator: View {
+    var body: some View {
+        Rectangle()
+            .fill(Theme.Palette.Surface.separator)
+            .frame(width: Theme.Stroke.hairline)
+            .padding(.vertical, Theme.Spacing.xxs)
+            .accessibilityHidden(true)
+    }
+}
+
 struct ReadoutStrip<Content: View>: View {
     @ViewBuilder var content: Content
 
@@ -235,15 +253,45 @@ struct MiniBarGauge: View {
 }
 
 /// 空态。数据缺失时必须走这里，而不是显示 0 假装是真实结果。
+/// **节级**空态：一行说明，不占版面。
+///
+/// 与 `EmptyStateView`（**页级**空态：图标 + 标题 + 解释 + 140pt 留白）的分工是刻意的：
+/// 错误日志页实拍里，"没有可读的日志文件"这件事被说了四遍 —— 顶部横幅一遍、
+/// 「错误概览」副标题一遍、「错误趋势」整块空态一遍、「高频错误」整块空态又一遍，
+/// 每遍都带一枚大图标和 140pt 留白，于是页面看起来是坏的。
+/// 页级空态负责"这一屏为什么没有内容 + 下一步做什么"，说一次；
+/// 节级空态只负责"这一节因此画不出什么"，一行、`secondary`、不铺留白。
+struct SectionEmptyNote: View {
+    var text: String
+    var icon: IconName = .info
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+            ThemedIcon(icon, role: .badge)
+                .foregroundStyle(.tertiary)
+            Text(text)
+                .font(Theme.Typo.label.font)
+                // `.secondary` 而不是 `.tertiary`：这是一句要读的说明，
+                // 实拍里 tertiary 的 11pt 灰字几乎读不出（清单 3.11 的伴生问题）。
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
 struct EmptyStateView: View {
     var icon: String = "tray"
     var title: String
     var message: String
 
     var body: some View {
-        VStack(spacing: Theme.Spacing.xs) {
+        // **左对齐**。全站九页都是左基线，只有空态居中 —— 实拍里它是全 App 唯一的
+        // 居中段落，浮在一整块空白正中，看起来像"没加载完"而不是"这里没有数据"。
+        // 空态是一句陈述，不是一枚奖章，不需要被供在页面中间。
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             Image(systemName: icon)
-                .themeIcon(.hero)
+                .themeIcon(.cardHeader)
                 .foregroundStyle(.tertiary)
             Text(title)
                 .font(Theme.Typo.cardTitle.font)
@@ -251,11 +299,50 @@ struct EmptyStateView: View {
             Text(message)
                 .font(Theme.Typo.label.font)
                 .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
+                .multilineTextAlignment(.leading)
                 .lineSpacing(Theme.Typo.label.lineSpacing)
         }
-        .frame(maxWidth: .infinity, minHeight: Theme.Layout.emptyMinHeight)
+        .frame(maxWidth: .infinity, minHeight: Theme.Layout.emptyMinHeight, alignment: .topLeading)
         .padding(Theme.Spacing.xl)
+    }
+}
+
+/// 周期/档位选择器：一排纯文字，选中项加粗、取纯墨并画一条发丝下划线。
+///
+/// 为什么不用 `.pickerStyle(.segmented)`：它给选中项画一枚**灰底胶囊**，
+/// 那是白底改造之后全站仅剩的一处"灰底选中"（错误日志页实拍），
+/// 而且与钉死的绿色强调、与侧栏的实心选中态都对不齐 —— 同一件事第三种画法。
+/// 参考图的周期选择器就是 `Week / Month / Quarter / Year` 一排字，
+/// 靠字重与下划线表达选中，一个底色都不铺。
+struct TextSegmentedPicker<Value: Hashable>: View {
+    var options: [Value]
+    var label: (Value) -> String
+    var selection: Value
+    var onSelect: (Value) -> Void
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.md) {
+            ForEach(options, id: \.self) { option in
+                let isOn = option == selection
+                Button { onSelect(option) } label: {
+                    Text(label(option))
+                        .font(isOn ? Theme.Typo.label.font.weight(.semibold)
+                                   : Theme.Typo.label.font)
+                        .foregroundStyle(isOn ? Theme.Palette.Surface.ink : Color.secondary)
+                        .padding(.bottom, Theme.Spacing.xxs)
+                        .overlay(alignment: .bottom) {
+                            if isOn {
+                                Rectangle()
+                                    .fill(Theme.Palette.Surface.ink)
+                                    .frame(height: Theme.Stroke.hairline)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isOn ? .isSelected : [])
+            }
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 

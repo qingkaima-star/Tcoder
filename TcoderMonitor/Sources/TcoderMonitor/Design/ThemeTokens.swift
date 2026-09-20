@@ -370,6 +370,11 @@ extension Theme {
         /// 数据密集型（性能、健康）
         static let maxWidthDense: CGFloat = 1240
         /// 指标 tile 自适应最小宽度（一行四 → 自动折两列/单列）
+        /// 键值行的**标签列**宽。原来标签左、值右、中间一个 `Spacer`，
+        /// 在 1040–1240pt 的页宽上就是"两个词被拉到相距约 1900px，中间没有结构"
+        /// （依赖页三行、Git 页路径行都这样，是「对不齐」观感的主因之一）。
+        /// 改成真正的两列：标签占定宽，值紧跟其后左对齐 —— 值与值之间于是能竖向比对。
+        static let fieldLabelWidth: CGFloat = 160
         static let tileMinWidth: CGFloat = 220
         /// 双列内容卡并排所需的最小列宽
         static let twoColumnMinWidth: CGFloat = 420

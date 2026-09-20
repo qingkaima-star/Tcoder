@@ -152,17 +152,17 @@ struct DependencyOverviewSection: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 ReadoutStrip {
                     DataReadout(label: "生态", value: NumberFormat.grouped(deps.ecosystems.count),
-                                caption: "个清单来源")
+                                caption: "清单来源", unit: "个")
                     DataBandSeparator()
                     DataReadout(label: "依赖", value: NumberFormat.grouped(deps.totalDependencies),
-                                caption: "项直接声明")
+                                caption: "直接声明", unit: "项")
                     DataBandSeparator()
                     DataReadout(label: "过旧", value: NumberFormat.grouped(deps.outdatedCount),
-                                caption: "项",
+                                unit: "项",
                                 role: deps.outdatedCount > 0 ? Theme.Semantic.warning : nil)
                     DataBandSeparator()
                     DataReadout(label: "漏洞", value: NumberFormat.grouped(deps.vulnerableCount),
-                                caption: verdict.mayClaimSafe ? "条已核对" : "条（未核对）",
+                                caption: verdict.mayClaimSafe ? "已核对" : "未核对", unit: "条",
                                 role: verdict.role)
                 }
 
