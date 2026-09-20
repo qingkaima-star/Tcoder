@@ -162,43 +162,6 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
    实测方式：`perf_harness.sh` 的 `scroll` 档（驱动得起就用它），驱动不起来就交 `FramePulse` 内建读数，
    两者都拿不到就**明写"未覆盖"**，不许拿 idle 档的数冒充。
 
-## 5.1 M1 性能工单（与无界工单**同一次交付**，两家合并执行）
-
-每条都带"改动前实测"与"交回时要拿出的数"。**没有数的报告按未完成处理。**
-
-### WS-O 外壳与总览 —— 性能包
-
-| 工 | 改动前实测病因 | 交回判据 |
-|---|---|---|
-| O-1 侧栏脱离心跳失效面 | `ProjectSidebar.sidebarFooter` 读 `monitor.latestSnapshot`，其失效域含整个 `List` 内容闭包 → **每 1.5s 重建全部项目行**（`ProjectSidebar.projectsSection`、`ProjectRow.body`） | 停在总览页跑 `perf_harness.sh idle`，`potential-hangs` 从 **13 次/25s → 0**；`ProjectRow` 路径上不再出现每秒级重建 |
-| O-2 总览脱离整页重算 | `DashboardView.snapshot` + `livePerformanceCard` + `CPUHistoryChart.body`：一次 publish 让 4 枚 tile + 3 张静态卡 + 90 点×2 mark 全量重算；主线程 **64.3%** 样本在 `AG::Graph::UpdateStack::update()` | 主线程热点第一名**不再是** `_updateViewGraph`；总览页 app-update 相位 ≤ 8.33ms |
-| O-3 `AnyView` 归零 | `GlassSection.trailing: AnyView?` 声明 1 处，Views 内 `AnyView` 13 处 | 全仓 `AnyView` 计数 **0**，且写进守卫（元测试自证抓得住坏样例） |
-| O-4 切页首帧 | 无实测（待 `switch` 档基线） | 交 `switch` 档改前/改后同形状读数；**测不到就明写"未覆盖"** |
-
-### WS-P 代码与 Git 五页 —— 性能包
-
-| 工 | 改动前实测病因 | 交回判据 |
-|---|---|---|
-| P-1 密集矩阵降本 | `ContributorHourRow.bar(for:)`：30 行 × 24 柱 = **720 个 `RoundedRectangle` + 720 个 `.help(String(format:))`**，且 `peak` 每柱重算；`GitActivityHeatmap.body` 非懒 **168 格 + 168 tooltip**，`intensity` 内两次 `.max()` | 改 `Canvas` 或懒加载；交回给出**视图实例数改前/改后**（同一计数口径：`grep -c` 的调用点数 + 渲染期实例数算法要写清） |
-| P-2 长列表懒加载 | **`LazyVStack` 实测仍为 0、`Table(` 为 0**（但 tile 网格已有 **11 处 `LazyVGrid`，那些别动**）；`DependenciesView.body` 用 `ScrollView{VStack}` 一次实例化 N 生态 × 40 行 | 名下五页**长列表**改 lazy；列头仍只能用 `Design/DataTable.swift`（红线 1，只许调用不许改） |
-| P-3 body 内派生集合缓存 | `DependencySafetyVerdict` 在 body 里被构 4 次（每次 `flatMap`+`filter` 全量依赖）；`CodeRiskAnalysis.suggestions` ≈10 次 filter/map/max/reduce；`CodeDuplicationBlockRow.hint` 对**全部** occurrence 做 `pathTail`；`HealthView.historyPoints` 每 body 重排 | 命中数进 R 的 T5 棘轮基线并**只减不增**；名下页目标 0 |
-| P-4 扫描离开主线程 | 实测扫描耗时 **Git 11.4s / 8.0s、代码 1830ms**；5 分析器 `async let` 并发 + 16 路 `classifyConcurrently`，扫描期 CPU 抢占为"高" | 扫描运行中点击响应 ≤ 100ms（T7），并给出 `perf_harness.sh` 扫描期读数；**扫描结果数值必须逐位不变**（不许为提速改口径） |
-| P-5 稳定 identity | 实测 `id: \.self` **8 处**、`id: \.offset` **4 处**（勘查曾把两个数写反，见 §1.2；另有 `\.element` 6、`\.key` 1、`\.raw` 1 属可接受形状） | 名下页 `\.offset` 归零、`\.self` 只允许留在真正不可变且唯一的字符串键上，逐条给理由 |
-
-### WS-W 性能·日志·评分 —— 性能包
-
-| 工 | 改动前实测病因 | 交回判据 |
-|---|---|---|
-| W-1 `body` 内文件 I/O 归零 | **实测 1 处**（勘查曾报 3~4 轮，见 §1.2）：`LogsView.attachedItems` → `fileSize(of:)` → `FileManager.attributesOfItem`，每附加文件一次同步 stat；另一处 `fileExists` 在 `chooseLogFiles()` 按钮动作里，**不属渲染路径、不用改** | 挪进 `@State` + `.task`；R 的 T5-③ 守卫名下页命中 **0** |
-| W-2 图表降本 | `LiveSeriesChart.body` 每点 AreaMark+LineMark，**每 mark 现场构造 `LinearGradient` + 动态 `NSColor`**（C 包已把构造变成缓存，但重算面还在）；`trustedMemoryPoints` 每 tick 被跑 **4 遍 = 360 个 `SampleContext`**（`memoryAxis` 内访问 `trustedMemory` 两次 + 曲线一次 + `rejectedMemoryPoints` 为拿计数再一遍） | 停在该页跑 `idle`，app-update ≤ 8.33ms；`trustedMemoryPoints` 每 tick **≤ 1 遍**（`trustedMemory` 改存储属性或由 P 的缓存供给；计数不许靠重过滤整数组来求） |
-| W-3 轴标签 formatter | `LiveSeriesChart.xLabel(for:)` 每个刻度现造 `DateFormatter()`（~5 标签 ×2 图 ×每 tick） | 提 `static let`；R 的 T5-① 守卫该文件命中 0 |
-| W-4 进程榜 | `PerformanceProcessTable.row`：20 行 × 6 个 `LiveNumber` 格式化 + 每行 2 处 `.help` 拼串；`PerformanceView.rankedProcesses` → `MachSystemMonitor.processesByMemory` 每次访问全量 `sorted`（本机 `ps ax` = 920） | 排序消费 P 缓存的榜单（**不再自算**）；榜长与内容逐位不变 |
-| W-5 消费 P 的细粒度契约 | 现状：性能页整页 body 读每秒变化的值 | 改读 P 在 M0 交付的细粒度入口 + P 的《必须迁移清单》，粗 API 棘轮该流命中数 → 0 |
-
-**三家共同**：`AnyView` 归零（各自名下）、T5 三条守卫全绿且元测试自证、
-`git merge main` 后 `build --build-tests` + `test` 双绿 + `premerge_check.sh` 回执、
-**每组先过门再 commit**（子代理有 150 轮上限）、Obsidian 名下笔记贴真实输出。
-
 ## 5. 分工（零文件重叠，按"谁消费谁负责"）
 
 ### M0 总工串行（不占三家名额，`ws/perf-base` 一棵树，我 merge）
@@ -236,6 +199,71 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 逐家过门合入 → 终测（同一把尺子复测，前后逐列对齐）→ `capture_pages_isolated.sh` 九页×深浅取证 →
 更新 `docs/九页实拍读数.md`、`README.md`、`docs/口径与已知限制.md`、Obsidian `90` →
 确认 `ahead=0 && dirty=0` 后 `git worktree remove` + `git branch -d` 清树。
+
+## 5.1 跨流共同禁则：采样节拍与窗口只许一个来源（15:50 实拆）
+
+`docs/口径与已知限制.md` 记的是"三处独立字面量"，**实测是六处，而且节拍本身也有两处来源**：
+
+| 形状 | 位置 | 风险 |
+|---|---|---|
+| 节拍代码来源 × **2** | `AppState` 的 `monitor.start(intervalMilliseconds: 1_500)`、`MachSystemMonitor` 内部默认路径的 `start(intervalMilliseconds: 1_500)` | 两处各写一份，改一处另一处照旧跳 1.5s |
+| 显示字面量 × **4** | `DashboardView` 副标题"每 1.5 秒采样"、`PerformanceLiveCharts` 副标题"每 1.5 秒"、`PerformanceProcessGroups` 提示"约 1.5 秒后"、`PerformanceView.sampleIntervalText` | 节拍一改，界面就**说谎** |
+| 节拍进算术 × **1** | `PerformanceView.windowSeconds`（`Double(chartPointLimit) * 1.5`） | 窗口秒数静默失配，而它同时是曲线轴的依据 |
+
+**规矩（M0 由 P 落，M1 由三家消费）**：
+
+1. `MachSystemMonitor` 暴露**唯一**节拍真值（毫秒数 + 由它派生的展示文案 + 由它派生的窗口秒数），
+   `AppState` 只在启动处传一次，不许再出现第二个 `1_500`。
+2. 上述 4 处显示点与 1 处算术点**一律改为读该真值**；页面里**不许再出现 `1.5` 这个字面量**
+   （`ChartChrome` 的 1.5pt 线宽、`HealthComponentTable` 的 ±1.5 容差、`barRadius 1.5`、
+   侧栏宽度注释里的 1.5 GB 与节拍无关，**不在禁列**，守卫的锚点必须按语义区分，不许整词 grep `1.5` 判红）。
+3. 守卫：`Views/**` 里"采样节拍语义"的 `1.5` 字面量计数**只减不增**，基线 = 本表 5（4 显示 + 1 算术），
+   目标 0 由 WS-O（1 处）+ WS-W（4 处）在 M1 清零。**元测试要用真形状**
+   （`"每 1.5 秒"` 这种字符串），并且必须证明它不会把 `barRadius: CGFloat = 1.5` 误判成违规——
+   两个方向都要测，否则这把尺子量的是个模糊集。
+4. T3 交互期暂停让"上一次刷新距今"可以大于节拍值，**副标题不许继续显示"每 1.5 秒"当现状**：
+   读数本身仍是真的（末值有效），但节奏文案要么随暂停态调整、要么由 P 提供"最近一次发布时间"入口，
+   由 WS-W 在 M1 决定画法并交《预期视觉变化清单》。**这条不许 silently 选一个**。
+
+## 5.2 M1 性能工单（与无界工单**同一次交付**，两家合并执行）
+
+每条都带"改动前实测"与"交回时要拿出的数"。**没有数的报告按未完成处理。**
+
+### WS-O 外壳与总览 —— 性能包
+
+| 工 | 改动前实测病因 | 交回判据 |
+|---|---|---|
+| O-1 侧栏脱离心跳失效面 | `ProjectSidebar.sidebarFooter` 读 `monitor.latestSnapshot`，其失效域含整个 `List` 内容闭包 → **每 1.5s 重建全部项目行**（`ProjectSidebar.projectsSection`、`ProjectRow.body`） | 停在总览页跑 `perf_harness.sh idle`，`potential-hangs` 从 **13 次/25s → 0**；`ProjectRow` 路径上不再出现每秒级重建 |
+| O-2 总览脱离整页重算 | `DashboardView.snapshot` + `livePerformanceCard` + `CPUHistoryChart.body`：一次 publish 让 4 枚 tile + 3 张静态卡 + 90 点×2 mark 全量重算；主线程 **64.3%** 样本在 `AG::Graph::UpdateStack::update()` | 主线程热点第一名**不再是** `_updateViewGraph`；总览页 app-update 相位 ≤ 8.33ms |
+| O-3 `AnyView` 归零 | `GlassSection.trailing: AnyView?` 声明 1 处，Views 内 `AnyView` 13 处 | 全仓 `AnyView` 计数 **0**，且写进守卫（元测试自证抓得住坏样例） |
+| O-4 切页首帧 | 无实测（待 `switch` 档基线） | 交 `switch` 档改前/改后同形状读数；**测不到就明写"未覆盖"** |
+
+### WS-P 代码与 Git 五页 —— 性能包
+
+| 工 | 改动前实测病因 | 交回判据 |
+|---|---|---|
+| P-1 密集矩阵降本 | `ContributorHourRow.bar(for:)`：30 行 × 24 柱 = **720 个 `RoundedRectangle` + 720 个 `.help(String(format:))`**，且 `peak` 每柱重算；`GitActivityHeatmap.body` 非懒 **168 格 + 168 tooltip**，`intensity` 内两次 `.max()` | 改 `Canvas` 或懒加载；交回给出**视图实例数改前/改后**（同一计数口径：`grep -c` 的调用点数 + 渲染期实例数算法要写清） |
+| P-2 长列表懒加载 | **`LazyVStack` 实测仍为 0、`Table(` 为 0**（但 tile 网格已有 **11 处 `LazyVGrid`，那些别动**）；`DependenciesView.body` 用 `ScrollView{VStack}` 一次实例化 N 生态 × 40 行 | 名下五页**长列表**改 lazy；列头仍只能用 `Design/DataTable.swift`（红线 1，只许调用不许改） |
+| P-3 body 内派生集合缓存 | `DependencySafetyVerdict` 在 body 里被构 4 次（每次 `flatMap`+`filter` 全量依赖）；`CodeRiskAnalysis.suggestions` ≈10 次 filter/map/max/reduce；`CodeDuplicationBlockRow.hint` 对**全部** occurrence 做 `pathTail`；`HealthView.historyPoints` 每 body 重排 | 命中数进 R 的 T5 棘轮基线并**只减不增**；名下页目标 0 |
+| P-4 扫描离开主线程 | 实测扫描耗时 **Git 11.4s / 8.0s、代码 1830ms**；5 分析器 `async let` 并发 + 16 路 `classifyConcurrently`，扫描期 CPU 抢占为"高" | 扫描运行中点击响应 ≤ 100ms（T7），并给出 `perf_harness.sh` 扫描期读数；**扫描结果数值必须逐位不变**（不许为提速改口径） |
+| P-5 稳定 identity | 实测 `id: \.self` **8 处**、`id: \.offset` **4 处**（勘查曾把两个数写反，见 §1.2；另有 `\.element` 6、`\.key` 1、`\.raw` 1 属可接受形状） | 名下页 `\.offset` 归零、`\.self` 只允许留在真正不可变且唯一的字符串键上，逐条给理由 |
+
+### WS-W 性能·日志·评分 —— 性能包
+
+| 工 | 改动前实测病因 | 交回判据 |
+|---|---|---|
+| W-1 `body` 内文件 I/O 归零 | **实测 1 处**（勘查曾报 3~4 轮，见 §1.2）：`LogsView.attachedItems` → `fileSize(of:)` → `FileManager.attributesOfItem`，每附加文件一次同步 stat；另一处 `fileExists` 在 `chooseLogFiles()` 按钮动作里，**不属渲染路径、不用改** | 挪进 `@State` + `.task`；R 的 T5-③ 守卫名下页命中 **0** |
+| W-2 图表降本 | `LiveSeriesChart.body` 每点 AreaMark+LineMark，**每 mark 现场构造 `LinearGradient` + 动态 `NSColor`**（C 包已把构造变成缓存，但重算面还在）；`trustedMemoryPoints` 每 tick 被跑 **4 遍 = 360 个 `SampleContext`**（`memoryAxis` 内访问 `trustedMemory` 两次 + 曲线一次 + `rejectedMemoryPoints` 为拿计数再一遍） | 停在该页跑 `idle`，app-update ≤ 8.33ms；`trustedMemoryPoints` 每 tick **≤ 1 遍**（`trustedMemory` 改存储属性或由 P 的缓存供给；计数不许靠重过滤整数组来求） |
+| W-3 轴标签 formatter | `LiveSeriesChart.xLabel(for:)` 每个刻度现造 `DateFormatter()`（~5 标签 ×2 图 ×每 tick） | 提 `static let`；R 的 T5-① 守卫该文件命中 0 |
+| W-4 进程榜 | `PerformanceProcessTable.row`：20 行 × 6 个 `LiveNumber` 格式化 + 每行 2 处 `.help` 拼串；`PerformanceView.rankedProcesses` → `MachSystemMonitor.processesByMemory` 每次访问全量 `sorted`（本机 `ps ax` = 920） | 排序消费 P 缓存的榜单（**不再自算**）；榜长与内容逐位不变 |
+| W-5 消费 P 的细粒度契约 | 现状：性能页整页 body 读每秒变化的值 | 改读 P 在 M0 交付的细粒度入口 + P 的《必须迁移清单》，粗 API 棘轮该流命中数 → 0 |
+
+**三家共同**：`AnyView` 归零（各自名下）、T5 三条守卫全绿且元测试自证、
+**§5.1 的节拍唯一来源迁移**（WS-O 名下 1 处：`DashboardView` 副标题；WS-W 名下 4 处：
+`PerformanceLiveCharts` 副标题、`PerformanceProcessGroups` 提示语、`PerformanceView.sampleIntervalText`
+与 `windowSeconds` 的算术；WS-P 名下 0 处）、
+`git merge main` 后 `build --build-tests` + `test` 双绿 + `premerge_check.sh` 回执、
+**每组先过门再 commit**（子代理有 150 轮上限）、Obsidian 名下笔记贴真实输出。
 
 ## 6. 验收判据（改完必须交这些）
 
