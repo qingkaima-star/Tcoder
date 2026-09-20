@@ -217,6 +217,8 @@ final class ShellGitAnalyzer: GitAnalysisProviding {
     /// * `historyTruncated` = 前者大于后者。因此只要仓库里有 merge 提交，这个标志就为真 ——
     ///   它表达的是「下面的统计没覆盖全部历史」，而不是「进程出错」。
     /// * `authors` / `activityByHour` / `commitsPerPeriod` / `recentCommits` 一律只覆盖已分析窗口。
+    /// * `commitsPerPeriod` 的日/周/月桶边界按**提交者自己的时区**切（`GitAggregation.authorCalendar`），
+    ///   与逐时/逐日直方图同一把尺子；不再用 UTC 切桶却用本地贴标签（缺陷 #42）。
     static func makeInsights(commits: [ParsedCommit],
                              branch: String,
                              headSHA: String,
@@ -228,7 +230,7 @@ final class ShellGitAnalyzer: GitAnalysisProviding {
         let first = dates.min()
         let last = dates.max()
         let granularity = GitAggregation.granularity(forFirst: first, last: last)
-        let calendar = GitAggregation.defaultCalendar()
+        let calendar = GitAggregation.authorCalendar(for: commits)
 
         var insights = GitInsights()
         insights.analyzedAt = now
