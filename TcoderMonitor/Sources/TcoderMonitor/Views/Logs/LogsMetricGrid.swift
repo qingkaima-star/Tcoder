@@ -103,7 +103,11 @@ struct LogsMetricGrid: View {
                       icon: IconName) -> some View {
         MetricTile(label: label,
                    value: count == nil ? nil : NumberFormat.grouped(count ?? 0),
-                   caption: caption,
+                   // **没数就不重复解释**。原来四格各挂一句「未发现日志文件」，
+                   // 而本节副标题刚说过一次「没有可读的日志文件，下方数值一律 --」——
+                   // 一句诚实性陈述被复述五遍，读起来像坏了，也把页面压成四块同构灰格。
+                   // 口径只留一个权威落点（节副标题），这一改删的是**重复**，不是诚实性信息。
+                   caption: count == nil ? nil : caption,
                    systemImage: icon.rawValue)
     }
 

@@ -505,6 +505,37 @@ final class BorderlessSurfaceGuardTests: XCTestCase {
         XCTAssertTrue(Self.pageHeaderDeclarations(in: commented).isEmpty, "注释被误判成声明")
     }
 
+    // MARK: 批次 G：不许再有"盒式选择器"
+
+    /// `.pickerStyle(.segmented)` 的命中位置。系统分段控件给选中项画一枚**灰底胶囊**，
+    /// 那是地面改白之后仅剩的"灰底选中"语言，且与侧栏实心绿选中态、与参考图的
+    /// `Week / Month / Quarter / Year` 文字档位都对不齐。全站统一走 `TextSegmentedPicker`。
+    static func boxedSegmentedPickers(in files: [(path: String, content: String)]) -> [String] {
+        files.flatMap { file in
+            file.content.split(separator: "\n", omittingEmptySubsequences: false)
+                .enumerated()
+                .compactMap { index, raw in
+                    guard isCode(raw), raw.contains(".pickerStyle(.segmented)") else { return nil }
+                    return "\(file.path):\(index + 1)"
+                }
+        }
+    }
+
+    func test_noBoxedSegmentedPickersRemain() throws {
+        let offenders = Self.boxedSegmentedPickers(in: try Self.sourceFiles(under: "Views"))
+        XCTAssertTrue(offenders.isEmpty,
+                      "又出现盒式分段选择器（灰底选中），改走 TextSegmentedPicker：\(offenders)")
+    }
+
+    func test_boxedPickerScannerDetectsInjectedUse() {
+        let dirty = [(path: "Views/Fake.swift",
+                      content: "  Picker(\"x\", selection: $s) {}\n    .pickerStyle(.segmented)\n")]
+        XCTAssertEqual(Self.boxedSegmentedPickers(in: dirty).count, 1, "盒式选择器坏样例没抓到")
+        let clean = [(path: "Views/Fake.swift",
+                      content: "// 原来写 .pickerStyle(.segmented)，已换掉\n")]
+        XCTAssertTrue(Self.boxedSegmentedPickers(in: clean).isEmpty, "注释里的写法被误判")
+    }
+
     /// 反向自证：`sourceFiles` 真读到了文件。否则上面所有「扫不到就算通过」的断言
     /// 会集体假绿 —— 这是扫描型守卫最经典的死法。
     func test_sourceScannerActuallyFindsFiles() throws {

@@ -241,9 +241,12 @@ struct EmptyStateView: View {
     var message: String
 
     var body: some View {
-        VStack(spacing: Theme.Spacing.xs) {
+        // **左对齐**。全站九页都是左基线，只有空态居中 —— 实拍里它是全 App 唯一的
+        // 居中段落，浮在一整块空白正中，看起来像"没加载完"而不是"这里没有数据"。
+        // 空态是一句陈述，不是一枚奖章，不需要被供在页面中间。
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             Image(systemName: icon)
-                .themeIcon(.hero)
+                .themeIcon(.cardHeader)
                 .foregroundStyle(.tertiary)
             Text(title)
                 .font(Theme.Typo.cardTitle.font)
@@ -251,11 +254,50 @@ struct EmptyStateView: View {
             Text(message)
                 .font(Theme.Typo.label.font)
                 .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
+                .multilineTextAlignment(.leading)
                 .lineSpacing(Theme.Typo.label.lineSpacing)
         }
-        .frame(maxWidth: .infinity, minHeight: Theme.Layout.emptyMinHeight)
+        .frame(maxWidth: .infinity, minHeight: Theme.Layout.emptyMinHeight, alignment: .topLeading)
         .padding(Theme.Spacing.xl)
+    }
+}
+
+/// 周期/档位选择器：一排纯文字，选中项加粗、取纯墨并画一条发丝下划线。
+///
+/// 为什么不用 `.pickerStyle(.segmented)`：它给选中项画一枚**灰底胶囊**，
+/// 那是白底改造之后全站仅剩的一处"灰底选中"（错误日志页实拍），
+/// 而且与钉死的绿色强调、与侧栏的实心选中态都对不齐 —— 同一件事第三种画法。
+/// 参考图的周期选择器就是 `Week / Month / Quarter / Year` 一排字，
+/// 靠字重与下划线表达选中，一个底色都不铺。
+struct TextSegmentedPicker<Value: Hashable>: View {
+    var options: [Value]
+    var label: (Value) -> String
+    var selection: Value
+    var onSelect: (Value) -> Void
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.md) {
+            ForEach(options, id: \.self) { option in
+                let isOn = option == selection
+                Button { onSelect(option) } label: {
+                    Text(label(option))
+                        .font(isOn ? Theme.Typo.label.font.weight(.semibold)
+                                   : Theme.Typo.label.font)
+                        .foregroundStyle(isOn ? Theme.Palette.Surface.ink : Color.secondary)
+                        .padding(.bottom, Theme.Spacing.xxs)
+                        .overlay(alignment: .bottom) {
+                            if isOn {
+                                Rectangle()
+                                    .fill(Theme.Palette.Surface.ink)
+                                    .frame(height: Theme.Stroke.hairline)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isOn ? .isSelected : [])
+            }
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 

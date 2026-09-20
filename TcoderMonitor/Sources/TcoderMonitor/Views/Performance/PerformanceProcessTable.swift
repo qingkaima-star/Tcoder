@@ -56,13 +56,15 @@ struct PerformanceProcessTableCard: View {
     }
 
     private var sortPicker: some View {
-        Picker("排序", selection: $sortKey) {
-            ForEach(ProcessSortKey.allCases) { key in Text(key.title).tag(key) }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .frame(width: PerfLogWidths.sortPicker)
-        .help("切换排序口径；两种都是全系统范围的占用排序")
+        // 与错误日志页的时间窗口同一套：一排纯文字 + 发丝下划线。
+        // 原来 `.segmented` 给选中项画灰底胶囊（白底之后全站仅剩的两处灰底选中之一），
+        // 还要靠 `PerfLogWidths.sortPicker` 定宽去框住它 —— 文字选择器不需要框。
+        TextSegmentedPicker(options: ProcessSortKey.allCases,
+                            label: \.title,
+                            selection: sortKey,
+                            onSelect: { sortKey = $0 })
+            .accessibilityLabel("排序")
+            .help("切换排序口径；两种都是全系统范围的占用排序")
     }
 
     /// 表头与行都从 `DataColumns.processes` 取布局（#34 收敛前这里是 `Grid` +
