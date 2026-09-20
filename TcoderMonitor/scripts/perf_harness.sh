@@ -600,6 +600,37 @@ PY
     && grep -q "测量期间：interaction" "$out/period-live.txt" \
     && ok "summary：测量期间进表头，两种期间各说各的资格"
 
+  # 8) `migration` 报告：口径必须**从守卫源码里读**，读不到要炸，不许退回 0/0
+  #    （工单 §0.1 那张手写表会腐烂——行号会漂；命令化之后各家能自己反复跑）
+  local fake="$out/fake-tree"
+  mkdir -p "$fake/Tests/TcoderMonitorTests" "$fake/Sources/TcoderMonitor/Views"
+  cat > "$fake/Tests/TcoderMonitorTests/PerfInvalidationRatchetTests.swift" <<'SWIFT'
+    static let coarsePattern = #"monitor\s*\.\s*(latestSnapshot|history)\b"#
+    static let finePattern = #"monitor\s*\.\s*(cpu|pulse)\s*\.\s*value\b"#
+    static let coarseCallSiteCeiling = 7
+    private static let consumerDirectories = ["Sources/TcoderMonitor/Views"]
+SWIFT
+  cat > "$fake/Sources/TcoderMonitor/Views/Fake.swift" <<'SWIFT'
+  // 文档注释里提到 monitor.latestSnapshot 不算调用点（与守卫同一条豁免）
+  Text(monitor.cpu.value.title)
+  Chart(monitor.history)
+SWIFT
+  local mig
+  if mig=$(python3 "$TRACE_REPORT" migration --module-root "$fake" 2>&1) \
+     && printf '%s' "$mig" | grep -q "粗粒度读点 1 处 / 登记上限 7 处" \
+     && printf '%s' "$mig" | grep -q "细粒度读点 1 处"; then
+    ok "migration：真扫到 1 处粗读 + 1 处细读、上限取自守卫文件、注释行按同一条豁免"
+  else
+    fail "migration 报告数不对（口径漂移或扫描失效）：$(printf '%s' "$mig" | head -3)"
+  fi
+  sed -i '' 's/static let coarsePattern/static let coarsePatternRenamed/' \
+    "$fake/Tests/TcoderMonitorTests/PerfInvalidationRatchetTests.swift"
+  if python3 "$TRACE_REPORT" migration --module-root "$fake" > /dev/null 2>&1; then
+    fail "守卫常量被改名时 migration 仍退 0 —— 它会静默用旧口径报数，正是「第二把尺子」的来路"
+  else
+    ok "migration：读不到守卫常量就炸（拒绝退回手抄正则）"
+  fi
+
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
 }
