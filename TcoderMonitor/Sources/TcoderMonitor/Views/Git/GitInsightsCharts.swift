@@ -3,9 +3,14 @@ import Charts
 
 // MARK: - Git 洞察页的图表与表格行（WS-L）
 //
-// 图表是这页唯一允许"比文字更抢眼"的东西，所以线宽、面积渐变、坐标轴字号全部取自令牌：
-// 曲线 1.5pt（`Stroke.chartLine`）、面积 0.30 → 0.02（`Opacity.gradientTop/gradientFloor`）、
+// 图表是这页唯一允许"比文字更抢眼"的东西，所以线宽、取色、坐标轴字号全部取自令牌：
 // 轴标签 10pt（`Typo.microLabel`，全仓文字下限）。
+//
+// **取色一律走 `ChartSeries`**（本轮集成修正）：这页的趋势柱与 24×7 矩阵都是
+// **单序列**，所以颜色只有一个 —— 主线纯墨，空格子走分隔色。以前它们各自取
+// `Theme.Chart` 的 0 号位并自养两个 alpha 端点，于是同一段历史在总览上是蓝的、
+// 在这页也是蓝的、在性能页是黑的：三家各一套约定。多类别（语言占比、作者占比条）
+// 才用 `CodeGitCategoryColor` 的稳定索引色，那一档没动。
 
 func gitBucketLabel(_ granularity: BucketGranularity) -> String {
     switch granularity {
@@ -31,7 +36,11 @@ struct GitCommitTrendChart: View {
                 x: .value("时间", bucket.date, unit: calendarUnit),
                 y: .value("提交", bucket.commits)
             )
-            .foregroundStyle(Theme.Chart.color(at: CodeGitCategoryColor.aggregateIndex))
+            // 单序列图：一张图只有一批柱子，"按号位取色"要解决的问题（分辨哪条是哪条）
+            // 在这里不存在。旧写法取 `Theme.Chart` 的 0 号位，于是同一段历史在总览上是
+            // 蓝的、在这页也是蓝的、在性能页是黑的 —— 三套约定并存。收进 `ChartSeries`
+            // 的唯一规则：单序列 = 纯墨（`Design/ChartTokens.swift` 上提后全仓同此）。
+            .foregroundStyle(ChartSeries.lineColor)
             .cornerRadius(Self.barCorner)
         }
         .chartXAxis {
@@ -82,46 +91,89 @@ struct GitActivityHeatmap: View {
     let weekdayCounts: [Int]
 
     private static let weekdayNames = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-    /// 空格子与最忙格子的不透明度，两端都取自透明度刻度，不再是 0.08/0.85 这种杂值。
-    private static let idleAlpha = Theme.Palette.Opacity.badgeFill / 2
-    private static let peakAlpha = Theme.Palette.Opacity.gradientBottom
     /// 星期标签列宽：容纳「周三」两个汉字 + 一字母余量。
     private static let rowLabelWidth = Theme.Spacing.xl
     /// 矩阵格子的间隙属图表几何，不是榜单行节奏——所以它不走 `DataRowMetrics`，
     /// 但也不留裸 `VStack(spacing: Theme.Spacing…)`，免得下一个人以为漏了统一。
     private static let cellGap = Theme.Spacing.xxs
 
+    @State private var hovered: (weekday: Int, hour: Int)? = nil
+
+    private static var gridHeight: CGFloat { Self.rowLabelWidth * 7 + Self.cellGap * 6 }
+    private static var totalHeight: CGFloat { 2 + Self.gridHeight + 14 }
+
     var body: some View {
-        VStack(spacing: Self.cellGap) {
-            ForEach(0..<7, id: \.self) { weekday in
-                HStack(spacing: Self.cellGap) {
-                    Text(Self.weekdayNames[weekday])
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                        .frame(width: Self.rowLabelWidth, alignment: .leading)
-                    ForEach(0..<24, id: \.self) { hour in
-                        let strength = intensity(hour: hour, weekday: weekday)
-                        Rectangle()
-                            .fill(Theme.Chart.color(at: CodeGitCategoryColor.aggregateIndex)
-                                .opacity(Self.idleAlpha + (Self.peakAlpha - Self.idleAlpha) * strength))
-                            .frame(maxWidth: .infinity, minHeight: Self.rowLabelWidth)
-                            .help("\(Self.weekdayNames[weekday]) \(hour):00 — 近似强度 "
-                                + "\(Int((strength * 100).rounded()))%")
+        GeometryReader { geo in
+            let size = geo.size
+            let labelW = Self.rowLabelWidth
+            let gap = Self.cellGap
+            let topPad: CGFloat = 2
+            let axisH: CGFloat = 14
+            let cellW = max(1, (size.width - labelW - gap * 23) / 24)
+            let cellH = Self.rowLabelWidth
+            Canvas { ctx, _ in
+                for w in 0..<7 {
+                    let y = topPad + CGFloat(w) * (cellH + gap)
+                    ctx.draw(
+                        Text(Self.weekdayNames[w])
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .font(CodeGitType.number(Theme.Typo.microLabel)),
+                        at: CGPoint(x: 0, y: y + cellH / 2), anchor: .leading)
+                    for h in 0..<24 {
+                        let strength = intensity(hour: h, weekday: w)
+                        let x = labelW + CGFloat(h) * (cellW + gap)
+                        let rect = CGRect(x: x, y: y, width: cellW, height: cellH)
+                        // 强度已经是 0~1 的归一比，直接当不透明度用：
+                        // 空格子 = 分隔色（与 `ContributorHourRow` 的零柱同一约定），
+                        // 有值的格子 = 主线纯墨按强度加浓。
+                        // 旧写法在这里自养 `idleAlpha = badgeFill/2` 与
+                        // `peakAlpha = Opacity.gradientBottom` 两个端点常量，而
+                        // `gradientBottom` 的令牌含义是「面积渐变的收尾值」——
+                        // 借一个语义属于别处的令牌当热力峰值，就是本轮要收掉的第三套
+                        // 图表取色约定。现在端点不再需要常量：0 与 1 由强度本身给出。
+                        let color = strength > 0
+                            ? ChartSeries.lineColor.opacity(strength)
+                            : Theme.Palette.Surface.separator
+                        ctx.fill(Path(roundedRect: rect, cornerRadius: 2), with: .color(color))
                     }
                 }
+                for h in 0..<24 where [0, 6, 12, 18].contains(h) {
+                    let x = labelW + CGFloat(h) * (cellW + gap) + cellW / 2
+                    ctx.draw(
+                        Text("\(h)")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .font(CodeGitType.number(Theme.Typo.microLabel)),
+                        at: CGPoint(x: x, y: topPad + Self.gridHeight + axisH / 2), anchor: .center)
+                }
             }
-            HStack(spacing: Self.cellGap) {
-                Color.clear.frame(width: Self.rowLabelWidth, height: Theme.Stroke.hairline)
-                ForEach(0..<24, id: \.self) { hour in
-                    Text([0, 6, 12, 18].contains(hour) ? "\(hour)" : "")
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let point):
+                    let w = Int(((point.y - topPad) / (cellH + gap)).rounded(.down))
+                    let h = Int(((point.x - labelW) / (cellW + gap)).rounded(.down))
+                    hovered = (0..<7).contains(w) && (0..<24).contains(h) ? (w, h) : nil
+                case .ended:
+                    hovered = nil
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if let cell = hovered {
+                    let strength = intensity(hour: cell.hour, weekday: cell.weekday)
+                    Text("\(Self.weekdayNames[cell.weekday]) \(String(format: "%02d", cell.hour)):00 — 近似强度 "
+                        + "\(Int((strength * 100).rounded()))%")
                         .font(CodeGitType.number(Theme.Typo.microLabel))
-                        .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity)
+                        .padding(Theme.Spacing.xxs)
+                        // 同 ContributorHourRow：悬停浮层属 `.floating`，不散写材质与圆角数字。
+                        .surface(layer: .floating, shape: .rounded(Theme.Radius.sm))
                 }
             }
         }
+        .frame(height: Self.totalHeight)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("24 小时与星期的近似活跃分布矩阵")
+        .help("提交活跃度按星期与小时近似分布；强度为两条边际归一边际的平均值，是近似值")
     }
 
     /// 两条边际全零 = 时间戳根本没解析出来，这是「没有数据」，不是「没人半夜提交」。
@@ -152,9 +204,12 @@ struct GitCommitRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: DataRowMetrics.cellGap) {
+            // SHA 是一行**标识符文本**，不是按钮：它没有动作、不导航，`.textSelection`
+            // 只是让人能复制。以前给它涂 accent 蓝，于是表里每一行都像可点，
+            // 而真正可点的行（巨大文件榜）反而没有蓝。标识符一律等宽 + `.secondary`。
             Text(String(commit.sha.prefix(7)))
                 .font(CodeGitType.path)
-                .foregroundStyle(Theme.Semantic.accent.textColor)
+                .foregroundStyle(.secondary)
                 .tableCell(DataColumns.column(columns, 0))
                 .textSelection(.enabled)
 
@@ -166,7 +221,7 @@ struct GitCommitRow: View {
                     + "\(LogRecency.describe(commit.date)) · "
                     + "\(DateFormat.full.string(from: commit.date))")
                     .monospacedDigit()
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -219,7 +274,7 @@ struct GitNestedCandidateRow: View {
                     }
                     Text(candidate.path)
                         .font(CodeGitType.path)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .textSelection(.enabled)
@@ -242,7 +297,7 @@ struct GitNestedCandidateRow: View {
 
             Text(candidate.lastCommitAt.map { LogRecency.describe($0) } ?? "无提交")
                 .monospacedDigit()
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
                 .tableCell(DataColumns.column(columns, 3))
         }
         .dataTableRow()

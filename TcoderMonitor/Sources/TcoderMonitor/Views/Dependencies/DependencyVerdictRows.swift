@@ -291,11 +291,11 @@ struct VulnerabilityRow: View {
                     }
                     Text(item.source)
                         .monospacedDigit()
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                     if !item.aliases.isEmpty {
                         Text(item.aliases.prefix(2).joined(separator: " "))
                             .font(CodeGitType.path)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                 }
