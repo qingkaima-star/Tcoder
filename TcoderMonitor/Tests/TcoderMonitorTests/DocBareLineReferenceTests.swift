@@ -15,7 +15,12 @@ import XCTest
 ///      （向上扫到空行或 `#` 标题为止；先取本行内该 token 之前的，再取本行内的，再向上）；
 ///   2. 回指不到 ⇒ 判失效；
 ///   3. 回指到的文件不存在、或行号超过该文件行数 ⇒ 判失效；
-///   4. 分母正向断言：至少要有 50 条裸行号被扫到，否则说明这条判据在空转。
+///   4. 分母正向断言：扫到的裸行号必须 > 0，否则说明这条判据在空转。
+///      这里曾经钉的是「至少 50 条」，那是一个会把人往错方向逼的判据：
+///      WS-Z2 把 §3.8 之后的行号引用清到 32 条时它判红，于是为了变绿，
+///      只能把 21 条已经换成符号锚点的引用原样放回去（它逐条回源码核过指向才放，
+///      但**方向是反的**）。"扫描器坏了"由索引规模断言与
+///      `live + dead == total` 恒等式负责；拿存量债的条数当哨兵＝奖励留债。
 final class DocBareLineReferenceTests: XCTestCase {
 
     private static let repoRoot: URL = URL(fileURLWithPath: #filePath)
@@ -195,7 +200,7 @@ final class DocBareLineReferenceTests: XCTestCase {
         let (all, perDoc) = try scannedAll()
         print("【#41 裸行号】扫到 \(all.total) 条：判活 \(all.live)、判死 \(all.dead.count)"
               + "（" + perDoc.map { "\($0.0) \($0.1.total)" }.joined(separator: "，") + "）")
-        XCTAssertGreaterThanOrEqual(all.total, 50,
+        XCTAssertGreaterThan(all.total, 0,
                                     "只扫到 \(all.total) 条裸行号引用，不像这两份文档的真实规模 ⇒ 判据在空转")
         XCTAssertTrue(all.dead.isEmpty, """
         有 \(all.dead.count) 条裸行号引用不可验证：

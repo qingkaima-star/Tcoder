@@ -215,7 +215,7 @@ final class WeightedHealthScorer: HealthScoringProviding {
             // 而 85 × 权重 0.178 是全表最高的一项贡献（15.1 分），等于用"没查"换分（缺陷 #46）。
             // 现在与依赖健康、测试覆盖同一处理：缺席、不参与归一化，并把原因写进建议里。
             if logs.totalLinesScanned == 0 {
-                recommendations.append("没有可扫描的日志，运行稳定性不参与本次评分；放入 Logs/error.log 或在依赖页附加日志文件后，这个维度才会出现。")
+                recommendations.append("没有可扫描的日志，运行稳定性不参与本次评分；把日志文件放进项目目录或 ~/Library/Logs，或在「错误日志」页点「附加日志」，这个维度才会出现。")
                 return nil
             }
             // 密度需要代码规模做分母；没有 code 时退化成「按绝对值当每千行计」，

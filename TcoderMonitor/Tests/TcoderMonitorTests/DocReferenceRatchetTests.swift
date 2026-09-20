@@ -40,6 +40,10 @@ final class DocReferenceRatchetTests: XCTestCase {
         .deletingLastPathComponent()
         .deletingLastPathComponent()
 
+    /// 2026-09-20 在 main `713f121` 上实测：四份文档共 92 条 `File.swift:NN` 形状的行号引用。
+    /// 这个数是**基线**，不是"合法额度"——它只许往下调。
+    private static let fileLineReferenceCeiling = 92
+
     private static let docs: [String] = ["README.md", "docs/使用说明.md",
                                        "docs/口径与已知限制.md", "docs/九页实拍读数.md"]
 
@@ -259,6 +263,18 @@ final class DocReferenceRatchetTests: XCTestCase {
                        """)
         XCTAssertGreaterThan(scan.symbolFileScopedLive, 0,
                              "文件名作用域这条路径一次都没走到，说明豁免逻辑没被执行、口径可能又漂了")
+
+        // #48：行号类锚点的判据是"文件存在 + 行号在界内"，**它守不住指向错位**。
+        // 只读审计实测过 9 条"在界内但指错地方"的（`:135` 指着 `SeverityBadge.icon`
+        // 却用来支撑 `displayValue` 那句话；10 条 CVE 行号整体 +1 偏移），
+        // 它们全都判活。要让判据真的能验指向，就得把"被引用行须含同段提到的标识符"
+        // 做成启发式——那种误报会把人训练成"红了就忽略"，不值。
+        // 所以这里改用**只减不增棘轮**：行号引用条数只许往下走，
+        // 让 §4.6"只写符号不写行号"这条规约变成机器守得住的事。
+        XCTAssertLessThanOrEqual(scan.fileCount, Self.fileLineReferenceCeiling,
+                                 "行号引用从 \(Self.fileLineReferenceCeiling) 涨到 \(scan.fileCount) 条："
+                               + "新增一律写成 `文件名` 的 `类型.成员`，不要写行号。"
+                               + "确实清掉了若干条，就把基线改成新的实测值（只许往下调）。")
 
         print("【#29 分母】在锚引用 \(scan.symbolCount + scan.fileCount) 条"
             + "（符号 \(scan.symbolCount)：按文件名作用域判活 \(scan.symbolFileScopedLive)"
