@@ -36,9 +36,8 @@ struct LogsErrorClustersCard: View {
                            title: "尚无错误签名数据",
                            message: "该项目还没有日志分析结果，点「重新分析」后再来查看聚类。")
         } else if let logs, !logs.hasData {
-            EmptyStateView(icon: IconName.emptyUnknown.rawValue,
-                           title: "没有可读的日志文件",
-                           message: "在项目目录或 ~/Library/Logs 放入 error.log、crash.log，或用「附加日志」手动选择后重新分析。")
+            // 原因与下一步**页顶横幅已经说过一次**，这里只说本节画不出什么。
+            SectionEmptyNote(text: "本窗口没有可归类的错误行。", icon: .emptyUnknown)
         } else if let logs {
             // ② 查了但空的句式：给出扫过的行数，让「0」成为一个结论而不是空白。
             EmptyStateView(icon: IconName.noRisk.rawValue,
