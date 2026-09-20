@@ -1,9 +1,12 @@
-# 性能追加工单（发给 UI 总工的三条页面流）
+# 性能追加工单（第四轮 120Hz → 现由接管的总工一人执行，见 §0.4）
 
 - 发件：第四轮「120Hz 性能」总工（`ws/perf-base`）
-- 收件：第三轮「简约无界」UI 总工 —— 由你排进对应流的**追加**批次
+- 收件：~~第三轮「简约无界」UI 总工~~ → **22:40 起两条线合成一个人**（`AGENTS.md`「单人接管」）：
+  下面所有工单直接由那一个人执行，不必再走「派给哪家」的形状；**执行清单见 §0.4**。
 - 依据裁定：用户 2026-09-20 16:57（`AGENTS.md`「双总工协作裁定」）——页面树归 UI 总工派发与收回，
   性能侧只出工单、**不另起会话写 `Views/**`**。本文件就是那份工单，性能轮不动手写这些文件。
+  **22:40 更新**：两条线的执行者已合成同一个人，所以"不碰 `Views/**`"这条对**性能侧的会话**仍然成立
+  （我依然不写页面），但它不再是这批工单的前置障碍——工单与执行现在同属一人。
 - 度量口径：本文件的**调用点计数一律以守卫自己的正则为准**
   （`PerfHitchGuardTests` / `PerfInvalidationRatchetTests`）。
   头一版写在 `main = 96761b7` 上、用顺手 `git grep | wc -l` 量的数已作废——**行数不是调用点**
@@ -164,6 +167,64 @@ python3 scripts/trace_report.py migration --strict   # 挂进自家收尾检查�
 里面跑：`idle` ×3（心跳期，对 T2）与 `interact` ×3（交互期，对 T1，需要有人持续滚动）。
 **改前对照组**已封存 `/tmp/tcoder-before.app`（rev `415f0f0`，sha `54005bc4…`）——
 它里面没有 `FramePulse`，所以前后对比只能走 xctrace 那两档，不能拿 `probe` 比。
+
+## 0.4 【取代 §0.2/§0.3 的派工形状】单人接管后的执行清单——按值排序，每条自带验收命令
+
+用户 22:40 裁定：**性能总工停手，两条线合成一个人**（`AGENTS.md`「22:40 单人接管」）。
+所以 §0.1/§0.2/§0.3 里"派给 WS-O / 派给 WS-W / 各建新树"那套**派发形状作废**（内容仍有效），
+下面这份是替它：一个人、按顺序、每条都有机器验收。**红线一条不撤**——它们约束的是做法不是人。
+
+### 第 1 步（收益最大）：把 16 处粗读点迁成细粒度格
+
+```bash
+python3 scripts/trace_report.py migration            # 还剩哪几处 + 该换成哪个格
+python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零退出
+```
+- 位置：`PerformanceView` 10、`DashboardView` 3、`LiveReadings` 2、`ProjectSidebar` 1；
+- 换成什么：`docs/superpowers/specs/2026-09-20-performance-120hz-design.md` §5.3 的实名契约
+  （`monitor.cpu.value` / `.memory.value` / `.rates.value` / `.ledger.value` / `.pulse.value` /
+  `.cpuRanking.value` / `.memoryRanking.value` / `.groupRanking.value` / `.curve.value`）；
+- 三条不要做：不要新增第 17 处（棘轮零余量当场红）、不要用 `AnyView` / `id: \.offset` 绕失效面、
+  不要对 `curve.value` 再 `suffix` 或对 ranking 再 `sorted`（采集侧各做一次）；
+- **验收不看谁说了什么，看这三样**：`migration` 报 0 处 → 总工把 `coarseCallSiteCeiling` 拧成 0
+  → 再把 `consumptionGateOpen` 翻成 `true`。**没迁完就翻会当场判红**，所以"它翻得动"就是证据。
+- 顺带把 W-6 一起收：`isCollectingForDisplay` 目前仍 0 读取（"重新采样"点了最长 1.5 s 没反馈）。
+
+### 第 2 步：帧率复测（分两小步，因为其中一步需要人手）
+
+```bash
+./scripts/perf_harness.sh selfcheck          # 11 项，红了所有读数作废——先量尺子再量代码
+./scripts/perf_harness.sh idle   /tmp/tcoder-perf-after-<rev>     # 2a：不需要人，只要机器安静
+./scripts/perf_harness.sh interact /tmp/tcoder-perf-interact-<rev> # 2b：**这 20 s 要有人持续滚动**
+./scripts/perf_harness.sh report <目录>       # 表头会写测量期间，idle 那批明说不得交 T1
+```
+- 五维闸门：实例数=1、前台是被测 App、有在屏窗口、load1 ≤ 核数×1.5 且无并发 swiftc、**人手静默 ≥5 s**；
+  任一不合格脚本直接拒跑（那不是脚本坏，是它在拦第三次"未受控基线"）。
+- **改前对照**只能走 xctrace：`/tmp/tcoder-before.app`（rev `415f0f0`、sha `54005bc4…`）里
+  没有 `FramePulse`。`probe` 档只对改后产物有意义，不许左右互比。
+- 合格判据：HTR <5 ms/s（目标 0）、app-update ≤8.33 ms、`potential-hangs` 归 0、
+  热点第一名不再是 `_updateViewGraph`。**每次都要 3 个样本，单样本不进结论。**
+
+### 第 3 步：M2 收尾
+
+- 九页 × 深浅取证：`SWITCH_MODE=argv` + 自己的 `CAPTURE_SANDBOX` + 目录名带短 HEAD，
+  **按 `CAPTURE_LOCK` 排队别绕锁**；深色用 `osascript … set dark mode`（`defaults write` 无效），
+  翻完立刻翻回；每趟逐张量平均亮度（浅 0.95–0.98 / 深 0.15–0.16），被污染的页重拍。
+  收尾退出现在只处理自己那个 pid（`CAPTURE_TERM=1`），**不会再按 bundle id 全机杀实例**。
+- 文档：《九页实拍读数》《README》《口径与已知限制》三处按新读数更正，未覆盖项**明写未覆盖**。
+- 清树：三家已清；剩 `ws/perf-base` 由性能侧在第 1、2 步交回后清（`git worktree remove` + `git branch -d`）。
+  `/Users/one/WorkBuddy/…` 那棵树在仓库目录外，**按禁区规则不去动**。
+
+### 已经量化掉、不要再重开的两件事（§5.4 结案）
+
+| 项 | 我量 | UI 总工独立复跑 | 判定 |
+|---|---|---|---|
+| 一次 `upsertReport`（主线程） | 中位 0.5 ms | 中位 **0.58 ms** | **不动**：占 T2 预算约 1/8，且不在 1.5 s 节拍下触发 |
+| 启动 `load()` 解码 4 份真报告 | 中位 1.3 ms | 中位 **1.25 ms** | **不动**：占 T4 冷启动 0.13% |
+
+两个操作者、同一台机器、同一档量级 ⇒ 这条结案可以认为是稳的。
+它的价值是**把候选排除了**：持久化不占主线程预算，所以剩下的怀疑对象只有视图图更新，
+也就是第 1 步那 16 处。
 
 ## 0. 消费什么（都已进 main，不用等）
 
