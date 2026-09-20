@@ -389,8 +389,36 @@ WS-X3 把这两条守卫的**宿主文件按行数拆成了 extension**——
 不要把任何阈值调松来变绿（`ceiling = 0` 与 ≤800 行那条一样，"改这里的数字不是修复"）；
 不要拿 `probe` 去和改前对照物比（`/tmp/tcoder-before.app` 里没有 `FramePulse`，只能同走 xctrace）。
 
-## 0. 消费什么（都已进 main，不用等）
+## 0.6 【01:55~02:02 实测】那 10 处该**折进观感批次**做，不要另起一趟派单
 
+数了主线上最近六笔碰过哪些文件，结论很直接：**迁移的四个目标文件正是观感批次反复重写的文件**。
+
+| 目标文件 | 最近被谁碰 | 时间 |
+|---|---|---|
+| `DashboardView.swift` | 批次 H1（分隔线收口） | 01:55 |
+| `PerformanceView.swift` | 批次 E、批次 ABC | 更早几笔 |
+| `ProjectSidebar.swift` | 批次 H1 之前的 4efcfee、批次 ABC | 同一批 |
+| `PerfLogs/LiveReadings.swift` | 近期**没有**观感批次碰它 | — |
+
+⇒ 另起一趟"性能迁移派单"必然和下一批观感改动撞在同一批行上：**两拨人改同一个 body 的同几行**，
+这就是 21:15 那条"性能侧不许写 `Views/**`"裁定要防的事，它到现在仍然是对的。
+更省的做法是**在同一批观感改动里顺手换掉读法**：那几行本来就要重写，
+换 `monitor.curve.value` / `monitor.pulse.value` 与换一种分隔线画法是同一次编辑，
+**不多花一次合并、不多花一遍门禁、也不多占一次实机测量窗口**。
+
+给接管者的三句可执行版本（都是 1:1，零判断）：
+`Array(history.suffix(90))` → `curve.value`（四处：`DashboardView:458/459`、`PerformanceView:63/95`）；
+`history.count` → `pulse.value.historyCount`（`LiveReadings:26`）；
+`lastSampleAt` → `pulse.value.sampleAt`（`PerformanceView:94`）；
+`latestSnapshot?.processCount` → `ledger.value.systemWideCount`（`PerformanceView:54`）。
+剩下 3 处（`SampleContext`、`DashboardView.snapshot` 别名、`LiveCPUBadge(snapshot:)`）要改接收方入参，
+适合作为**单独一小批**，和"分隔线收口"这种纯视觉改动混在一起反而看不清是谁的效果。
+
+**验收仍然不认口头**：`python3 scripts/trace_report.py migration` 报 0 → 我把
+`coarseCallSiteCeiling` 拧 0 → 再翻 `consumptionGateOpen`。**这批折进哪一轮做都行，
+但只要它没做，T1（交互期 hitch = 0）就没有可交的证据**，而这是目标里排第一的那条。
+
+## 0. 消费什么（都已进 main，不用等）
 
 `state.monitor` 上的 9 个独立观察格与派生入口，签名与语义见
 `docs/superpowers/specs/2026-09-20-performance-120hz-design.md` §5.3。要点：
