@@ -41,8 +41,17 @@ struct GlassCard<Content: View>: View {
     }
 }
 
-/// 带标题行的分区卡——页面里绝大多数卡片的默认形态（41 处在用）。
-/// 同心圆角（WS-H §3.3）：外层 `Radius.card`(16)，内部 tile 用 `Radius.md`(10)。
+/// 带标题行的分区——页面里绝大多数分区的默认形态（40 处在用）。
+///
+/// **它不再是一块面板**（风格契约 1/2）：不画背景、不描边、不投影。它的全部职责是
+/// 「一个 `groupLabel` 小标题 + 内容 + 组间距」。
+///
+/// 旧实现内部套 `GlassCard(layer: .content)` = 一层 `.regularMaterial` 灰 + 一份投影，
+/// 40 处调用点于是叠出「整个界面黑黢黢、很脏」的观感。
+///
+/// `padding` 默认值从 `Theme.Spacing.cardPadding` 改成 **0**：这 40 处里绝大多数
+/// 不显式传，改默认值即一次性去掉卡内 24pt 内边距（无界面里内边距是给盒体用的，
+/// 盒体没了它就没理由存在）。页面若确实要留内边距，显式传 `Theme.Spacing.cardPadding`。
 struct GlassSection<Content: View>: View {
     var title: String
     var subtitle: String?
@@ -58,7 +67,7 @@ struct GlassSection<Content: View>: View {
         subtitle: String? = nil,
         icon: IconName? = nil,
         trailing: AnyView? = nil,
-        padding: CGFloat = Theme.Spacing.cardPadding,
+        padding: CGFloat = 0,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
@@ -70,10 +79,12 @@ struct GlassSection<Content: View>: View {
     }
 
     var body: some View {
-        GlassCard(padding: padding, spacing: Theme.Spacing.sm) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             header
             content
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(padding)
     }
 
     private var header: some View {
@@ -81,10 +92,14 @@ struct GlassSection<Content: View>: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 HStack(spacing: Theme.Spacing.xs) {
                     if let icon {
+                        // 原来是 `Theme.Semantic.accent.textColor`：图标属结构，
+                        // 结构一律灰阶，蓝留给交互（风格契约 5）。
                         ThemedIcon(icon, role: .cardHeader)
-                            .foregroundStyle(Theme.Semantic.accent.textColor)
+                            .foregroundStyle(Color.secondary)
                     }
-                    Text(title).font(Theme.Typo.cardTitle.font)
+                    Text(title)
+                        .typed(Theme.Typo.groupLabel)
+                        .foregroundStyle(.secondary)
                 }
                 if let subtitle {
                     Text(subtitle)

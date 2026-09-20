@@ -3,34 +3,49 @@ import SwiftUI
 // MARK: - 表面与玻璃闸门（全仓唯一落点）
 //
 // 本文件是 **唯一** 允许出现 `glassEffect` 与 `#available(macOS 26.0, *)` 的地方。
-// 页面只调 `GlassCard` / `GlassSection` / `GlassToolbar` / `GlassButton`。
+// 页面只调 `GlassCard` / `GlassSection` / `GlassToolbar` / `GlassButton`，
+// 或直接用 `View.surface(layer:shape:)`。
 // 将来收紧部署下限时，只需要改这一个文件。
 //
 // ── API 结论来自 `swiftc -typecheck` 编译探针（笔记 42），与《35 基线》有三处出入 ──
 //   1. `glassEffect` 的参数类型是 **`Glass`**，不是基线里猜的 `GlassEffect`。
-//      基线 §2 那条 ❌ 是类型名写错，不是 API 不存在：`Glass` 可以存进变量、可以链式修饰。
-//   2. `Glass` 只有 `regular` / `identity` / `clear` 三个成员
-//      （`.thin` / `.thick` / `.adaptive` / `.glossy` 探针均报 "has no member"）。
-//   3. 基线没提的坑：`.containerBackground(.thinMaterial, for: .window)` 的 `.window`
-//      **要 macOS 15**，在 `-target arm64-apple-macos14.0` 下直接编译失败。
-//      它属于 Scene 配置（`App/TcoderMonitorApp.swift`，WS-G 无权改），已列为交总工的缺口。
+//   2. `Glass` 只有 `regular` / `identity` / `clear` 三个成员。
+//   3. `.containerBackground(…, for: .window)` 的 `.window` **要 macOS 15**，
+//      属 Scene 配置（`App/TcoderMonitorApp.swift`），已列为交总工的缺口。
 //
-// 实测 `if #available(macOS 26.0, *)` 包裹后，整套玻璃 API 在 macOS 14 目标下编译通过，
-// 所以不需要、也不允许把 `Package.swift` 的 `.v14` 抬高。
+// ── 「简约无界」对本文件的重写（本轮 spec §2.1）──────────────────────────────
 //
-// ── 分层规则（WS-H §9，Apple「Don't use Liquid Glass in the content layer」）──
-//   内容层：标准材质 `.regularMaterial`，**不放玻璃、不加 1px 描边**，靠间距 + 同心圆角分层。
-//           附带好处：内容层在 macOS 14/15/26 上长得一模一样，不存在第二种形态。
-//   控件层：侧栏、工具条、按钮 —— 只有这里在 26 上吃真玻璃，更早系统退回 ultraThinMaterial。
+// 旧版把三个层都路由到同一个 `materialLayer`，于是有两处系统性错误：
+//
+//   ① 内容层填 `.regularMaterial`。材质背后无内容时在 macOS 上退化成一平涂半透明灰，
+//      实测每一层都比窗口白底更暗：`#FFFFFF → 卡 #E9EBED → tile #E3E5E7`，
+//      相邻只有 1.05–1.07:1，低于人眼约 1.15:1 的分层阈值。叠三层 = 「黑黢黢、很脏」。
+//      正解不是"换个更淡的材质"，而是**内容层根本不画面**（风格契约 1/2）。
+//
+//   ② `.shadow` 挂在 `materialLayer` 的公共尾巴上，三个层都吃。40 处 `GlassSection`
+//      + 29 处 `MetricTile` + 14 处显式 `surface()` 于是各带一份投影 = 「滥用投影」。
+//      正解是把投影移进 `.floating` 专属分支，全仓唯一一处（风格契约 6）。
+//
+// 附带红利：内容层不再用材质后，**macOS 14 / 15 / 26 三套系统的内容观感完全一致**
+// （原来不一致，材质在不同版本折射率不同）。真玻璃只留在控件层与浮层，
+// 这正是 Apple「Adopting Liquid Glass」与 HIG Materials 要求的分层。
 
-/// 表面所属的层。选错层是最容易犯的错：内容卡要的是 `.content`。
+/// 表面所属的层。选错层是最容易犯的错：内容分组要的是 `.content`（什么都不画）。
 enum GlassLayer: Hashable {
-    /// 内容层：标准结构材质，跨系统一致，无玻璃、无描边。
+    /// 内容层：**什么都不画**。不填背景、不描边、不投影。
+    ///
+    /// 分组的边界交给两样东西：`Theme.Spacing.group`(32) 的留白，
+    /// 与 `Theme.Typo.groupLabel`（10pt medium + 0.6pt 字距）这个安静的小标题。
     case content
-    /// 内容层里的嵌入式紧凑面（指标 tile、内嵌小卡），比外层再压一档亮度。
+    /// 井：内容层**唯一**允许的实心底，只给表格 / 日志列表 / 代码块这类
+    /// 真有"内容嵌在里面"语义的东西（风格契约 3）。
     case contentInset
-    /// 控件/导航层：macOS 26 真玻璃，更早系统材质 + 发丝描边兜底。
+    /// 控件/导航层：macOS 26 真玻璃，更早系统实心 + 发丝描边兜底。**无投影**。
     case chrome
+    /// 浮层：菜单、进度浮层这类悬在内容之上的东西。
+    /// **全仓唯一允许投影的层**（风格契约 6）—— 投影表达的是"离开纸面"，
+    /// 而一张平铺在纸上的卡片没有理由带投影。
+    case floating
 }
 
 /// 表面形状。
@@ -56,9 +71,6 @@ enum GlassEngine {
 
 extension View {
     /// 加一层设计系统表面。
-    ///
-    /// 控件层的兜底分支不是"凑合能看"：旧系统上纯材质在浅/深两种外观下都会失去边界，
-    /// 所以兜底额外加了顶缘高光（给材质方向性）和 1pt 发丝描边（把元素从窗口里拎出来）。
     @ViewBuilder
     func surface(
         layer: GlassLayer = .content,
@@ -66,42 +78,66 @@ extension View {
     ) -> some View {
         switch layer {
         case .content:
-            switch shape {
-            case .rounded(let radius):
-                materialLayer(shape: RoundedRectangle(cornerRadius: radius, style: .continuous),
-                              material: .regular, sheen: false, hairline: false, dimmed: false)
-            case .capsule:
-                materialLayer(shape: Capsule(), material: .regular,
-                              sheen: false, hairline: false, dimmed: false)
-            }
+            // 无面。这一行 `self` 就是本轮最重要的一处删除：它替掉了
+            // 「材质灰 + 3% 压黑 + 一份投影」这一整套。
+            self
         case .contentInset:
             switch shape {
             case .rounded(let radius):
-                materialLayer(shape: RoundedRectangle(cornerRadius: radius, style: .continuous),
-                              material: .regular, sheen: false, hairline: false, dimmed: true)
+                outlined(shape: RoundedRectangle(cornerRadius: radius, style: .continuous),
+                         fill: Theme.Palette.Surface.well)
             case .capsule:
-                materialLayer(shape: Capsule(), material: .regular,
-                              sheen: false, hairline: false, dimmed: true)
+                outlined(shape: Capsule(), fill: Theme.Palette.Surface.well)
             }
         case .chrome:
-            if #available(macOS 26.0, *) {
-                switch shape {
-                case .rounded(let radius):
-                    self.glassEffect(chromeGlass,
-                                     in: .rect(cornerRadius: radius, style: .continuous))
-                case .capsule:
-                    self.glassEffect(chromeGlass, in: Capsule())
-                }
-            } else {
-                switch shape {
-                case .rounded(let radius):
-                    materialLayer(shape: RoundedRectangle(cornerRadius: radius, style: .continuous),
-                                  material: .ultraThin, sheen: true, hairline: true, dimmed: false)
-                case .capsule:
-                    materialLayer(shape: Capsule(), material: .ultraThin,
-                                  sheen: true, hairline: true, dimmed: false)
-                }
+            switch shape {
+            case .rounded(let radius):
+                chromeSurface(in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            case .capsule:
+                chromeSurface(in: Capsule())
             }
+        case .floating:
+            switch shape {
+            case .rounded(let radius):
+                floatingSurface(in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            case .capsule:
+                floatingSurface(in: Capsule())
+            }
+        }
+    }
+
+    /// 实心 + 发丝描边，**无投影**。井的画法。
+    private func outlined<S: InsettableShape>(shape: S, fill: Color) -> some View {
+        background {
+            shape.fill(fill)
+            shape.strokeBorder(Theme.Palette.Surface.separator,
+                               lineWidth: Theme.Stroke.hairline)
+        }
+    }
+
+    /// 控件层：26 上吃系统玻璃，更早系统退回实心 + 发丝描边。两个分支都**不带投影**。
+    @ViewBuilder
+    private func chromeSurface<S: InsettableShape>(in shape: S) -> some View {
+        if #available(macOS 26.0, *) {
+            self.glassEffect(chromeGlass, in: shape)
+        } else {
+            outlined(shape: shape, fill: Theme.Palette.Surface.control)
+        }
+    }
+
+    /// 浮层：控件层的画法 + 全仓唯一一处投影。
+    ///
+    /// 26 上系统玻璃自带折射与悬浮感，不需要额外投影；投影只加在兜底分支上，
+    /// 因为那里没有玻璃，"离开纸面"这件事只能靠影子交代。
+    @ViewBuilder
+    private func floatingSurface<S: InsettableShape>(in shape: S) -> some View {
+        if #available(macOS 26.0, *) {
+            self.glassEffect(chromeGlass, in: shape)
+        } else {
+            outlined(shape: shape, fill: Theme.Palette.Surface.control)
+                .shadow(color: Theme.Elevation.overlay.shadowColor,
+                        radius: Theme.Elevation.overlay.radius,
+                        y: Theme.Elevation.overlay.yOffset)
         }
     }
 
@@ -109,36 +145,6 @@ extension View {
     /// 将来要染色或让 chip 响应指针就在这里加参数，不要在页面加 `#available`。
     @available(macOS 26.0, *)
     private var chromeGlass: Glass { .regular }
-
-    private func materialLayer<S: InsettableShape>(
-        shape: S,
-        material: Material,
-        sheen: Bool,
-        hairline: Bool,
-        dimmed: Bool
-    ) -> some View {
-        background {
-            shape
-                .fill(material)
-                .overlay(shape.fill(Color.primary.opacity(dimmed ? 0.03 : 0)))
-                .overlay {
-                    if sheen {
-                        shape.fill(LinearGradient(
-                            colors: [Color.white.opacity(0.14), Color.clear],
-                            startPoint: .top, endPoint: .center))
-                    }
-                }
-                .overlay {
-                    if hairline {
-                        shape.strokeBorder(Theme.Palette.Surface.separator,
-                                           lineWidth: Theme.Stroke.separator)
-                    }
-                }
-                .shadow(color: Theme.Elevation.card.shadowColor,
-                        radius: Theme.Elevation.card.radius,
-                        y: Theme.Elevation.card.yOffset)
-        }
-    }
 
     // MARK: 控件层玻璃按钮
     //

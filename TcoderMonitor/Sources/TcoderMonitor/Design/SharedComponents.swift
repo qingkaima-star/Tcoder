@@ -5,6 +5,41 @@ import SwiftUI
 // 这些是各页当前真正在调用的组件，**初始化签名一律保持原样**，
 // 这样基座换血时 11 个页面不需要同时改。内部实现已全部改走令牌与 `surface()`。
 
+// MARK: - 排版令牌的消费端入口
+//
+// `Theme.Typo` 只负责把规范里的数字变成有类型的常量（见 `ThemeTokens.swift`），
+// 下面这个扩展负责**把它们完整地套上去**。
+
+extension View {
+    /// 一次性套上某个排版令牌的全部表现：字型、字距、行高。
+    ///
+    /// 为什么不直接写 `.font(token.font)`：`Font` **没有任何字距 API**
+    /// （实测 `Font.kerning` 与 `Font.tracking` 都不存在，字距只在 `Text` / `View` 层）。
+    /// 于是 `groupLabel` 那 0.6pt 字距一旦靠调用点自己补，就一定会被漏 ——
+    /// 而无界面里字距是分区标题**唯一**的分组手段，漏掉它等于分组消失。
+    /// 收成一个入口，是为了让"漏掉"这件事没有写法可以表达。
+    ///
+    /// 住在这个文件而不是单开 `Design/Typography.swift`：单开的纯扩展文件会被
+    /// `SourceFileReachabilityTests` 判成「不声明顶层类型的匿名分片」而要求逐个取证，
+    /// 为一个 30 行的修饰器去动全仓可达性普查的分母，代价大于收益。
+    /// 这里已有 `Image.themeIcon` 这个同类先例。
+    func typed(_ token: Theme.TypeToken) -> some View {
+        self.font(token.font)
+            .tracked(token.tracking)
+            .spaced(token.lineSpacing)
+    }
+
+    @ViewBuilder
+    private func tracked(_ tracking: CGFloat) -> some View {
+        if tracking == 0 { self } else { self.tracking(tracking) }
+    }
+
+    @ViewBuilder
+    private func spaced(_ lineSpacing: CGFloat) -> some View {
+        if lineSpacing == 0 { self } else { self.lineSpacing(lineSpacing) }
+    }
+}
+
 /// 给登记表之外的裸符号名套上同一套图标规则。
 /// 存在是因为 `EmptyStateView` 的 `icon:` 参数至今收字符串（`"doc.text"`、`"waveform"`
 /// 这类没进 `IconName` 的名字）；重样时应把它们收进登记表，届时这个口子可以关掉。
@@ -16,7 +51,12 @@ extension Image {
     }
 }
 
-/// 指标 tile。紧凑档内边距 16、圆角 10（同心：外层卡 16 / 内层 tile 10）。
+/// 指标读数。**它不再是一块面**（风格契约 1）：无背景、无描边、无投影。
+///
+/// 旧版是一块 `.contentInset` 灰盒（实测 `#E3E5E7`，比页面底暗 13 个 RGB 阶）且自带一份
+/// 投影，全仓 29 处调用点 = 29 个灰盒 + 29 份投影。现在它只是三行文字：
+/// `groupLabel`(10) 标签 / `metricNumber`(34) 纯墨数字 / `label`(11) 说明。
+/// 横向排成一行时用 `ReadoutStrip`，列间发丝线替掉原来的盒体边界。
 ///
 /// `value` 收 Optional（WS-I §3.4 的空态契约）：**"没查到" 必须渲染成 `--` + 中性色，
 /// 不能渲染成 0**。0 是结论、`--` 是没证据，两者在监控类 App 里差一个事故。
@@ -34,7 +74,7 @@ struct MetricTile: View {
         value: String?,
         unit: String? = nil,
         caption: String? = nil,
-        tint: Color = Theme.Semantic.accent.textColor,
+        tint: Color = Theme.Palette.Surface.ink,
         systemImage: String? = nil
     ) {
         self.label = label
@@ -46,15 +86,16 @@ struct MetricTile: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             HStack(spacing: Theme.Spacing.xxs) {
                 if let systemImage {
                     Image(systemName: systemImage)
                         .themeIcon(.badge)
-                        .foregroundStyle(tint)
+                        // 图标不再吃倾向色：标签是结构，结构一律灰阶（风格契约 5）。
+                        .foregroundStyle(Color.secondary)
                 }
                 Text(label)
-                    .font(Theme.Typo.label.font)
+                    .typed(Theme.Typo.groupLabel)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -72,13 +113,14 @@ struct MetricTile: View {
             if let caption {
                 Text(caption)
                     .font(Theme.Typo.label.font)
-                    .foregroundStyle(.tertiary)
+                    // 原来是 `.tertiary`：测得值不得用 tertiary。全仓 42 处 `.tertiary`
+                    // 里落在数字上的那些，是「没有主次」在文字侧的另一半成因。
+                    .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
         }
         .frame(maxWidth: .infinity, minHeight: Theme.Layout.tileHeightCompact,
                alignment: .leading)
-        .surface(layer: .contentInset, shape: .rounded(Theme.Radius.md))
     }
 
     /// 缺证据时的显示值。纯函数，供单测钉住。字面走全仓单点 `DataAbsence`（#47）。
@@ -88,9 +130,33 @@ struct MetricTile: View {
     /// 单独抽成谓词是为了可测——`Color` 由动态 `NSColor` 包出来，两次取值不相等。
     static func forcesNeutralTint(for raw: String?) -> Bool { raw == nil }
 
-    /// 有值用调用方给的倾向色，无值一律中性。
+    /// 有值用调用方给的**语义**倾向色，无值一律中性。
+    ///
+    /// 调用方请只传语义色（`success` / `warning` / `danger` / `critical`）。
+    /// 把 `info` 或 `accent` 当数据色用是风格契约 5 禁止的 —— 旧
+    /// `DashboardView.codeScaleCard` 把 `182,430` 涂成 `info` 蓝，
+    /// 而蓝同时是链接与选中色，一个颜色两个意思。默认值现在是纯墨 `Surface.ink`。
     static func tint(value raw: String?, fallback: Color) -> Color {
         forcesNeutralTint(for: raw) ? Theme.Semantic.neutral.textColor : fallback
+    }
+}
+
+/// 横向读数带：若干 `MetricTile` 排成一行，**无卡面**。
+///
+/// 存在理由：旧总览是四块 `.contentInset` 灰盒，每块自带一份投影。读数带把「分组」
+/// 这件事交给发丝线与留白，一次去掉 4 个面 + 4 份投影，同时让 34pt 的纯墨数字
+/// 成为这一行唯一的重音 —— 对标活动监视器的底栏排法。
+///
+/// 分隔线由**调用方**在 tile 之间插 `Divider()`（SwiftUI 的 `Divider` 在 `HStack`
+/// 里画竖线）。不在这里自动插：各页 tile 数不同，自动插会让守卫数不出真实线数。
+struct ReadoutStrip<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Theme.Spacing.lg) {
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -193,7 +259,7 @@ struct EmptyStateView: View {
     }
 }
 
-/// 分析进行中的浮层。属控件层，所以是本页唯一一处真玻璃落点。
+/// 分析进行中的浮层。它悬在内容之上，所以是**全仓唯一**该带投影的东西（风格契约 6）。
 struct ProgressOverlay: View {
     var phase: AnalysisPhase
     var projectName: String
@@ -207,7 +273,7 @@ struct ProgressOverlay: View {
         }
         .padding(.horizontal, Theme.Spacing.sm)
         .padding(.vertical, Theme.Spacing.xs)
-        .surface(layer: .chrome, shape: .capsule)
+        .surface(layer: .floating, shape: .capsule)
     }
 }
 
