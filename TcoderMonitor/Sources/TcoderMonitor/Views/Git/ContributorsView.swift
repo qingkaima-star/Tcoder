@@ -246,7 +246,11 @@ struct ContributorConcentrationSection: View {
                     label: "前 3 名合计",
                     detail: "\(NumberFormat.grouped(topCommits)) 次",
                     fraction: Double(topCommits) / Double(base),
-                    tint: Theme.Chart.color(at: CodeGitCategoryColor.aggregateIndex)
+                    // 合计 = 「自身/主体数据」，新规则下它就是纯墨。
+                    // 旧写法取 `Theme.Chart` 的 0 号位 —— 与总览那两处「182,430 涂成
+                    // info 蓝」同一形状（本轮已由基座改成墨），这里跟着收口。
+                    // 下面每位作者仍走稳定索引色：那才是「按 key 分辨类别」的合法用途。
+                    tint: ChartSeries.lineColor
                 )
                 // 每位作者一个稳定分类色：这是「需要区分类别」的那一半，
                 // 与「给数字涂蓝」不同 —— 颜色在这里替读者把同一作者的条与点连起来。

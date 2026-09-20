@@ -468,14 +468,15 @@ final class CodeGitBorderlessTests: XCTestCase {
                       "读数条仍走 DataReadoutBar（它给数字画了一层井）。改 DataReadoutBand：\(hits)")
     }
 
-    /// 色板 0 号位只许出现在**合计行**：实测本流应为 1 处（贡献者集中度表的"前 3 名合计"）。
-    /// 本轮集成修正前这里是 3 处 —— 多出的是趋势柱与 24×7 矩阵把 0 号位当"单序列色"用了，
-    /// 那正是"同一段历史在总览是蓝的、在性能页是黑的"的第三种约定。
+    /// 色板 0 号位（"主/自身数据"）在本流**一处都不许用**：本轮 ChartSeries 收口后，
+    /// "自身/合计"的画法就是 `ChartSeries.lineColor` 纯墨，索引色只留给**按 key 分辨类别**
+    /// （语言占比条、作者占比条的成员行）。
+    /// 本流历史上是 3 处：趋势柱、24×7 矩阵（都属单序列），以及贡献者集中度表的
+    /// "前 3 名合计"——最后这处与总览那两处「182,430 涂成 info 蓝」同形状，一并收墨。
     func test_aggregatePaletteIndexIsReservedForTotalRows() throws {
         let hits = Self.aggregateIndexUses(in: try Self.pageSourceFiles())
-        XCTAssertLessThanOrEqual(hits.count, 1,
-                                 "色板 0 号位是合计行专用，实测 \(hits.count) 处：\(hits)。"
-                                     + "单序列图表请改用 ChartSeries.lineColor。")
+        XCTAssertTrue(hits.isEmpty,
+                      "色板 0 号位在本流应为 0 处：单序列与合计都改 ChartSeries.lineColor。实测：\(hits)")
     }
 
     /// 我引进的原语必须真有人用，否则本守卫的若干「零命中即通过」会变成空跑。
