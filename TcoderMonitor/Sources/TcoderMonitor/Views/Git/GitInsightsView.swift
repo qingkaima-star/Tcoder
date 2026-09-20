@@ -20,6 +20,7 @@ struct GitInsightsView: View {
 
     var body: some View {
         Theme.Page.Scaffold {
+            Theme.Page.Header(title: "Git 洞察", icon: .git)
             if let git = report?.git {
                 GroupStack {
                     GitRepositorySourceSection(git: git, selectedPath: report?.project.path ?? "")

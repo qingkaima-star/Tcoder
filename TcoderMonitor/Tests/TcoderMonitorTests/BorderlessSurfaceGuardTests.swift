@@ -461,6 +461,50 @@ final class BorderlessSurfaceGuardTests: XCTestCase {
                       "扫描器把注释里的星号误判成违规")
     }
 
+    /// 九页是否**每页都有一个页级 H1**。
+    ///
+    /// 上一版只有性能/日志/评分三页手写了标题行，另外六页直接从节标题起 ——
+    /// 于是"页面层"有三种状态（有 H1 / 没有 H1 / 项目名的 20pt 冒充 H1），
+    /// 而那三页又叠在项目名 20pt 之下，一屏两个同级大标题。
+    /// 现在标题行收进 `Theme.Page.Header`，这条断言数的是**调用点**：
+    /// 少一页就是那一页又偷偷没有 H1，多于一页要人工确认不是同一页写了两份。
+    static func pageHeaderDeclarations(in files: [(path: String, content: String)]) -> [String] {
+        files.flatMap { file in
+            file.content.split(separator: "\n", omittingEmptySubsequences: false)
+                .enumerated()
+                .compactMap { index, raw in
+                    guard isCode(raw), raw.contains("Theme.Page.Header(") else { return nil }
+                    return "\(file.path):\(index + 1)"
+                }
+        }
+    }
+
+    func test_everyPageDeclaresExactlyOnePageHeader() throws {
+        let hits = Self.pageHeaderDeclarations(in: try Self.sourceFiles(under: "Views"))
+        let paths = Set(hits.map { String($0.prefix(while: { $0 != ":" })) })
+        XCTAssertEqual(paths.count, 9,
+                       "声明页级 H1 的页面数不是 9（九页各一处）：\(paths.sorted())")
+        XCTAssertEqual(hits.count, 9,
+                       "有页面写了一份以上的 H1，一屏两个大标题就是这里：\(hits)")
+    }
+
+    /// 元测试：注入"缺一页"与"同一页两份"两种坏样例，必须都报。
+    func test_pageHeaderScannerDetectsMissingAndDuplicated() {
+        var nine: [(path: String, content: String)] = []
+        for i in 1...9 {
+            nine.append((path: "Views/P\(i).swift", content: "  Theme.Page.Header(title: \"页\")\n"))
+        }
+        XCTAssertEqual(Self.pageHeaderDeclarations(in: nine).count, 9)
+        var duplicated = nine
+        duplicated.append((path: "Views/P1.swift",
+                           content: "  Theme.Page.Header(title: \"再来一个\")\n"))
+        XCTAssertEqual(Self.pageHeaderDeclarations(in: duplicated).count, 10,
+                       "同一页写两份 H1 没被抓到")
+        let commented: [(path: String, content: String)] =
+            [(path: "Views/P1.swift", content: "// 这里原来是 Theme.Page.Header(title: \"x\")\n")]
+        XCTAssertTrue(Self.pageHeaderDeclarations(in: commented).isEmpty, "注释被误判成声明")
+    }
+
     /// 反向自证：`sourceFiles` 真读到了文件。否则上面所有「扫不到就算通过」的断言
     /// 会集体假绿 —— 这是扫描型守卫最经典的死法。
     func test_sourceScannerActuallyFindsFiles() throws {

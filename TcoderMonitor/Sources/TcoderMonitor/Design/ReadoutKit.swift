@@ -217,6 +217,61 @@ extension Theme {
     /// `DataPageScaffold` 逐字复制品、WS-W 在 `Views/PerfLogs/BorderlessPage.swift` 的临时变体）。
     /// 后两份应删除并改回本件；`BorderlessPageGuardTests` 钉住「全仓只许一份页骨架」。
     enum Page {
+        /// 页级 H1：**九页一致**，且一屏只有一个大标题。
+        ///
+        /// 原来只有性能/日志/评分三页自己手写过一份标题行（图标 + 20pt 标题 +
+        /// 「示例」徽标 + 右侧控件 + 一行口径说明），另外六页直接从节标题起 ——
+        /// 于是"页面层"这件事有三种状态；而那三页又叠在项目名的 20pt 之下，
+        /// 一屏出现两个同级大标题（用户判词「不规整」在页级上的落点）。
+        ///
+        /// 层级重排照参考图：**项目名降成面包屑（11pt 元数据），节名升成唯一 H1**。
+        /// 参考图顶部就是 `Workspaces / Sales` 一行小字，下面 `Accounting` 才是大标题。
+        struct Header<Actions: View>: View {
+            var title: String
+            var titleIcon: IconName?
+            /// 口径声明的一句话（诚实性文案的落点，不许省）。
+            var subtitle: String?
+            var showsDemoBadge: Bool
+            @ViewBuilder var actions: Actions
+
+            init(title: String,
+                 icon: IconName? = nil,
+                 subtitle: String? = nil,
+                 isDemo: Bool = false,
+                 @ViewBuilder actions: () -> Actions = { EmptyView() }) {
+                self.title = title
+                self.titleIcon = icon
+                self.subtitle = subtitle
+                self.showsDemoBadge = isDemo
+                // 存**结果**而不是闭包：与 `Scaffold.content` 同一个写法，
+                // 把非逃逸的 builder 参数在 init 里就地求值，避免
+                // "assigning non-escaping parameter to an @escaping closure"。
+                self.actions = actions()
+            }
+
+            var body: some View {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
+                        if let titleIcon {
+                            // 图标灰阶：颜色留给语义与交互，结构不抢注意力（风格契约 5）。
+                            ThemedIcon(titleIcon, role: .navigation)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(title).typed(Theme.Typo.pageTitle)
+                        if showsDemoBadge { DemoBadge() }
+                        Spacer(minLength: Theme.Spacing.md)
+                        actions
+                    }
+                    if let subtitle {
+                        Text(subtitle)
+                            .typed(Theme.Typo.label)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+
         struct Scaffold<Content: View>: View {
             var maxWidth: CGFloat
             @ViewBuilder var content: Content

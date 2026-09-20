@@ -75,25 +75,15 @@ struct PerformanceView: View {
     /// 只标「这一页是什么 + 这一页的口径」，控件由本页自己摆。
     /// 图标一律灰阶（结构去色，风格契约 5），口径句固定第二行 11pt `.secondary`。
     private var header: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
-                ThemedIcon(.performance, role: .navigation)
-                    .foregroundStyle(.secondary)
-                Text("性能监控")
-                    .typed(Theme.Typo.pageTitle)
-                if report?.project.isDemo == true {
-                    // 「示例」是**状态**而不是数据：全页唯一一处 `info`，
-                    // 标的是「这一屏数字是内置假数据」，属语义留色那一侧。
-                    DemoBadge()
-                }
-                Spacer(minLength: Theme.Spacing.md)
-                controls
-            }
-            Text("系统级实时读数只观测不干预。数值随采样刷新，取不到的一律显示 --，不会补成 0。")
-                .typed(Theme.Typo.label)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        // 三页手写的标题行收成基座一处（`Theme.Page.Header`）。
+        // 原来九页里只有这三页有 H1，且各自抄一遍同样的 HStack ——
+        // 同一段版式三份，就是"页级层级有三种状态"的成因。
+        Theme.Page.Header(
+            title: "性能监控",
+            icon: .performance,
+            subtitle: "系统级实时读数只观测不干预。数值随采样刷新，取不到的一律显示 --，不会补成 0。",
+            isDemo: report?.project.isDemo == true,
+            actions: { controls })
     }
 
     /// 采样元信息：这一屏数据有多新。它不是读数，所以留在标题下方一行、

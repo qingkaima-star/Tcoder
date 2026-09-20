@@ -29,6 +29,7 @@ struct CodeMetricsView: View {
 
     var body: some View {
         Theme.Page.Scaffold {
+            Theme.Page.Header(title: "代码规模", icon: .code)
             if let code = CodeDataGate.metrics(of: report?.code) {
                 GroupStack {
                     CodeScaleSection(code: code, root: projectRoot)

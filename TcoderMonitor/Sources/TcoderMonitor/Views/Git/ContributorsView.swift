@@ -11,6 +11,7 @@ struct ContributorsView: View {
 
     var body: some View {
         Theme.Page.Scaffold {
+            Theme.Page.Header(title: "贡献者", icon: .people)
             if let git = report?.git {
                 if git.authors.isEmpty {
                     git.authorAbsence.emptyState {
@@ -116,10 +117,17 @@ struct ContributorsMetricGrid: View {
                 DataHeroReadout(value: Self.topShare(git).map { NumberFormat.percent($0, precision: 0) }
                                     ?? DataAbsence.notAnalysed.display,
                                 unit: nil,
+                                // 分母口径**由本节副标题 `scope.headline` 说一次**，
+                                // 主角的 note 不再复述（同一个 GlassSection 里隔两行说两遍
+                                // 同一个数字）。但 `authorBasis == 0` 那一支必须自己说：
+                                // 那时 headline 给不出分母，"没有分母"这件事就是结论本身。
                                 note: (git.topAuthor.map {
                                     "\(ContributorAnalysis.displayName($0)) 一人完成 · "
                                         + "\(NumberFormat.grouped($0.commits)) 次"
-                                } ?? "无作者数据") + "（\(scope.authorBasis > 0 ? "分母 = \(NumberFormat.grouped(scope.authorBasis)) 次非合并提交" : DataAbsence.indeterminate.textDisplay)）")
+                                } ?? "无作者数据")
+                                    + (scope.authorBasis > 0
+                                       ? ""
+                                       : "（\(DataAbsence.indeterminate.textDisplay)）"))
 
                 ReadoutStrip {
                     MetricTile(
@@ -182,8 +190,12 @@ struct ContributorRankingSection: View {
         let shown = visibleRows
         GlassSection(
             "贡献者排行",
+            // 这一节只说**这一节特有的事实**（排序与可见条数）。
+            // 原来把 `commitScope.headline` 整句再嵌一遍 —— 而 headline 正是上一节
+            // 「贡献集中度读数」的副标题，于是同一屏出现两次逐字相同的口径句
+            // （用户判词「太乱了」在密度这一维的落点：一屏 5 处「非合并提交」）。
             subtitle: "按提交数降序 · 展示 \(NumberFormat.grouped(shown.count)) / "
-                + "\(NumberFormat.grouped(authors.count)) 人 · \(git.commitScope.headline)",
+                + "\(NumberFormat.grouped(authors.count)) 人",
             icon: .people
         ) {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {

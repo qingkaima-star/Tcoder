@@ -26,6 +26,7 @@ struct DashboardView: View {
 
     var body: some View {
         Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthOverview) {
+            Theme.Page.Header(title: "总览", icon: .dashboard)
             HealthHeroCard(health: report?.health)
             // 紧跟 hero 的是**本机读数带**（CPU / 内存 / 今日错误 / 最近提交），
             // 再往下才是仓库静态指标。顺序理由：读数带与实时曲线同属「本机此刻」，
