@@ -216,21 +216,48 @@ enum MissingDimensionReason {
     }
 
     /// 逐维判据：扫过了，但这一维缺哪样输入。返回 nil = 输入齐了却没算出分量（走兜底句）。
+    /// 逐维判据：扫过了，但这一维缺哪样输入。返回 nil = 输入齐了却没算出分量（走兜底句）。
+    ///
+    /// 拆的理由是机械的：原来一个 switch 里塞五段三元加一个 guard，被本 App 自扫点名 CC 16
+    /// ——它自己正是「缺证据不给分」那条判据的守门人，本身不该是热点。
+    /// 每维的措辞搬进各自的小函数，**文案与判据一字未动**。
     private static func dimensionAbsenceReason(_ dimension: HealthDimension, analyzer: String,
                                                report: ProjectReport?) -> String? {
         switch dimension {
         case .codeQuality, .complexity, .duplication, .documentation:
-            return report?.code == nil ? "「\(analyzer)」没有产出代码指标。" : nil
+            return codeAbsence(analyzer: analyzer, code: report?.code)
         case .activity, .busFactor:
-            return report?.git == nil ? "该目录不是 Git 仓库，或未取到提交历史。" : nil
+            return gitAbsence(git: report?.git)
         case .stability:
-            guard let logs = report?.logs else { return "尚未分析日志。" }
-            return logs.hasData ? nil : "未发现可读的日志文件。"
+            return stabilityAbsence(logs: report?.logs)
         case .dependencies:
-            return report?.dependencies == nil ? "未识别到依赖清单。" : nil
+            return dependencyAbsence(dependencies: report?.dependencies)
         case .testing:
-            return coverageHasData(report) ? nil : "该项目没有产出覆盖率报告，不参与计分。"
+            return testingAbsence(coverage: report?.coverage)
         }
+    }
+
+    private static func codeAbsence(analyzer: String, code: CodeMetrics?) -> String? {
+        code == nil ? "「\(analyzer)」没有产出代码指标。" : nil
+    }
+
+    private static func gitAbsence(git: GitInsights?) -> String? {
+        git == nil ? "该目录不是 Git 仓库，或未取到提交历史。" : nil
+    }
+
+    /// 唯一要分两档的一维：`logs == nil`（没分析过）与「分析了但一行没读到」是两件事，
+    /// 合成一句就把输入状态弄丢了。
+    private static func stabilityAbsence(logs: LogSummary?) -> String? {
+        guard let logs else { return "尚未分析日志。" }
+        return logs.hasData ? nil : "未发现可读的日志文件。"
+    }
+
+    private static func dependencyAbsence(dependencies: DependencyReport?) -> String? {
+        dependencies == nil ? "未识别到依赖清单。" : nil
+    }
+
+    private static func testingAbsence(coverage: CoverageMetrics?) -> String? {
+        coverage?.hasData == true ? nil : "该项目没有产出覆盖率报告，不参与计分。"
     }
 
     private static func coverageHasData(_ report: ProjectReport?) -> Bool {
