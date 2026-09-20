@@ -159,8 +159,11 @@ struct CodeDuplicationBlockRow: View {
                 }
                 .dataTableRow()
                 .padding(.horizontal, Theme.Spacing.xs)
-                .background(CodeGitRowTint.fill(Theme.Semantic.neutral),
-                            in: RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+                // 行与行之间只留发丝线，**不铺行底**。原来每行是一块 7.5% 中性灰圆角面，
+                // 二十行叠起来 = 本页 36% 的像素落在灰带里（`pixel_audit` 实测），
+                // 用户判词「不要用灰色底显脏」在这一页指的就是它。
+                // 可点性不靠底色交代：行尾本来就有打开文件的按钮 + `help` + 指针光标。
+                .overlay(alignment: .bottom) { DataRowSeparator() }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -247,8 +250,9 @@ struct CodeComplexityRow: View {
                 }
                 .dataTableRow()
                 .padding(.horizontal, Theme.Spacing.xs)
-                .background(CodeGitRowTint.fill(role),
-                            in: RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+                // 同上：热点行也不铺行底（`role` 那一份是按风险档着色，
+                // 一屏十行就是十条彩带，比灰带更抢主读数）。
+                .overlay(alignment: .bottom) { DataRowSeparator() }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

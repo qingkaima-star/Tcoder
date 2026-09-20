@@ -109,17 +109,9 @@ struct DataHeroReadout: View {
 /// `Divider()` 判为违例（「旧分隔线」那条禁令，`pagesOnly = false`，全四目录生效）。
 /// 两头都走不通，于是这里给一根有名字的竖线：`Rectangle` + `Surface.separator`，
 /// 宽度取 `Stroke.hairline`，页面里不再出现 `Divider()` 字面。**已作为契约缺口报总工。**
-struct DataReadoutBand<Content: View>: View {
-    var spacing: CGFloat = Theme.Spacing.lg
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        HStack(alignment: .top, spacing: spacing) {
-            content
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
+// `DataReadoutBand` 已删：它与基座 `ReadoutStrip` 的 body **逐字相同**
+// （同一个 `HStack(alignment: .top, spacing: lg)` + 同一条 `frame(maxWidth:.infinity,.leading)`），
+// 是"同一件事两种画法"里最纯粹的一种。三处调用点全部改走 `ReadoutStrip`。
 
 /// 读数带列间分隔。**只能出现在 `DataReadoutBand` 里**。
 struct DataBandSeparator: View {

@@ -17,6 +17,7 @@ struct DependenciesView: View {
 
     var body: some View {
         Theme.Page.Scaffold {
+            Theme.Page.Header(title: "依赖分析", icon: .package)
             GroupStack {
                 NetworkOptionsCard(
                     allowNetwork: Bindable(state).allowNetworkLookups,
@@ -149,7 +150,7 @@ struct DependencyOverviewSection: View {
             trailing: AnyView(SafetyVerdictBadge(verdict: verdict))
         ) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                DataReadoutBand {
+                ReadoutStrip {
                     DataReadout(label: "生态", value: NumberFormat.grouped(deps.ecosystems.count),
                                 caption: "个清单来源")
                     DataBandSeparator()

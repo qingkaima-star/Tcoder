@@ -11,6 +11,7 @@ struct ContributorsView: View {
 
     var body: some View {
         Theme.Page.Scaffold {
+            Theme.Page.Header(title: "贡献者", icon: .people)
             if let git = report?.git {
                 if git.authors.isEmpty {
                     git.authorAbsence.emptyState {
@@ -116,10 +117,17 @@ struct ContributorsMetricGrid: View {
                 DataHeroReadout(value: Self.topShare(git).map { NumberFormat.percent($0, precision: 0) }
                                     ?? DataAbsence.notAnalysed.display,
                                 unit: nil,
+                                // 分母口径**由本节副标题 `scope.headline` 说一次**，
+                                // 主角的 note 不再复述（同一个 GlassSection 里隔两行说两遍
+                                // 同一个数字）。但 `authorBasis == 0` 那一支必须自己说：
+                                // 那时 headline 给不出分母，"没有分母"这件事就是结论本身。
                                 note: (git.topAuthor.map {
                                     "\(ContributorAnalysis.displayName($0)) 一人完成 · "
                                         + "\(NumberFormat.grouped($0.commits)) 次"
-                                } ?? "无作者数据") + "（\(scope.authorBasis > 0 ? "分母 = \(NumberFormat.grouped(scope.authorBasis)) 次非合并提交" : DataAbsence.indeterminate.textDisplay)）")
+                                } ?? "无作者数据")
+                                    + (scope.authorBasis > 0
+                                       ? ""
+                                       : "（\(DataAbsence.indeterminate.textDisplay)）"))
 
                 ReadoutStrip {
                     MetricTile(
@@ -182,8 +190,12 @@ struct ContributorRankingSection: View {
         let shown = visibleRows
         GlassSection(
             "贡献者排行",
+            // 这一节只说**这一节特有的事实**（排序与可见条数）。
+            // 原来把 `commitScope.headline` 整句再嵌一遍 —— 而 headline 正是上一节
+            // 「贡献集中度读数」的副标题，于是同一屏出现两次逐字相同的口径句
+            // （用户判词「太乱了」在密度这一维的落点：一屏 5 处「非合并提交」）。
             subtitle: "按提交数降序 · 展示 \(NumberFormat.grouped(shown.count)) / "
-                + "\(NumberFormat.grouped(authors.count)) 人 · \(git.commitScope.headline)",
+                + "\(NumberFormat.grouped(authors.count)) 人",
             icon: .people
         ) {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
@@ -252,14 +264,15 @@ struct ContributorConcentrationSection: View {
                     // 下面每位作者仍走稳定索引色：那才是「按 key 分辨类别」的合法用途。
                     tint: ChartSeries.lineColor
                 )
-                // 每位作者一个稳定分类色：这是「需要区分类别」的那一半，
-                // 与「给数字涂蓝」不同 —— 颜色在这里替读者把同一作者的条与点连起来。
+                // 作者条也收墨。原来的自辩是「颜色替读者把同一作者的条与点连起来」，
+                // 但这一节没有配图上的点，名字就写在条左边 —— 与 `Theme.Share.Row`、
+                // `ContributorHourRow` 同一判断：不携带信息的用色就是装饰性用色。
                 ForEach(top) { author in
                     DataShareBarRow(
                         label: ContributorAnalysis.displayName(author),
                         detail: "\(NumberFormat.grouped(author.commits)) 次",
                         fraction: Double(author.commits) / Double(base),
-                        tint: ContributorAnalysis.color(for: author.email)
+                        tint: Theme.Palette.Surface.ink
                     )
                 }
             }

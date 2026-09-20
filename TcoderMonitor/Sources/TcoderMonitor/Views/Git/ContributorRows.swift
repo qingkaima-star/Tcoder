@@ -75,7 +75,12 @@ struct ContributorRow: View {
     /// 头像边长：24 可点区下限 + 一档间距，与相邻 13pt 正文成比例。
     private static let avatarSide: CGFloat = Theme.Layout.minHitTarget + Theme.Spacing.xxs
 
-    private var tint: Color { ContributorAnalysis.color(for: author.email) }
+    /// 份额条与 24 小时分布一律**纯墨**，不再按作者邮箱稳定取序列色。
+    /// 与 `Theme.Share.Row` 同一判断：作者名字就写在这两行的左边，颜色在这里不携带
+    /// 任何信息，只把页面切成橙/绿两条彩带（用户实拍：#1 橙 95.3%、#2 绿 4.7%）。
+    /// 收成墨之后，最长的那根条自然成为重点，而 24 小时分布回到参考图那种
+    /// 「单色按强度加浓」的直方图。
+    private var tint: Color { Theme.Palette.Surface.ink }
 
     private var share: Double? {
         guard let value = git.authorShare(of: author) else { return nil }
@@ -218,7 +223,9 @@ struct ContributorHourRow: View {
     private static let idleAlpha = Theme.Palette.Opacity.badgeFill
     private static let peakAlpha = Theme.Palette.Opacity.gradientMid
     /// 标签列宽：两个汉字 + 余量。
-    private static let labelWidth: CGFloat = Theme.Layout.minHitTarget + Theme.Spacing.xxs
+    /// 「时段」两字 11pt ≈ 22pt，原来给 24pt 加上列内余量后**竖排成了两行**
+    /// （实拍：「时」「段」上下叠）。留到 34pt 并把这条写清楚：它是**量出来的**，不是手感。
+    private static let labelWidth: CGFloat = 34
     private static let bars = 24
     /// 浮层**预留**出来的那一截高度。浮层必须落在自己预留的布局空间里，
     /// 不能用 `offset` 推到宿主外面 —— 原来 `offset(y: height + 2)` 把它推到

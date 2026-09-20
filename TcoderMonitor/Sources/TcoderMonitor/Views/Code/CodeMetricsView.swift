@@ -29,6 +29,7 @@ struct CodeMetricsView: View {
 
     var body: some View {
         Theme.Page.Scaffold {
+            Theme.Page.Header(title: "代码规模", icon: .code)
             if let code = CodeDataGate.metrics(of: report?.code) {
                 GroupStack {
                     CodeScaleSection(code: code, root: projectRoot)
@@ -265,7 +266,7 @@ struct CodeMarkersSection: View {
             icon: .info
         ) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                DataReadoutBand {
+                ReadoutStrip {
                     DataReadout(label: "TODO", value: NumberFormat.grouped(code.todoCount),
                                 caption: "处")
                     DataBandSeparator()
@@ -399,7 +400,7 @@ struct CodeDuplicationSummarySection: View {
             trailing: AnyView(RiskBadge(risk: code.overallRisk))
         ) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                DataReadoutBand {
+                ReadoutStrip {
                     DataReadout(label: "重复代码率",
                                 value: NumberFormat.percent(code.duplicationRatio, precision: 1),
                                 caption: "的代码行落在重复块内",

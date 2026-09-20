@@ -88,31 +88,14 @@ extension Theme {
             private static let numberFont: Font = Theme.Typo.label.font.monospacedDigit()
         }
 
-        /// 读数条容器：内嵌面，与外层内容卡形成同心圆角（外 16 / 内 10）。
-        struct Bar<Content: View>: View {
-            var spacing: CGFloat
-            @ViewBuilder var content: Content
-
-            init(spacing: CGFloat = Theme.Spacing.lg, @ViewBuilder content: () -> Content) {
-                self.spacing = spacing
-                self.content = content()
-            }
-
-            var body: some View {
-                HStack(alignment: .top, spacing: spacing) {
-                    content
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Theme.Spacing.md)
-                .padding(.vertical, Theme.Spacing.sm)
-                .surface(layer: .contentInset, shape: .rounded(Theme.Radius.md))
-            }
-        }
+        // `Theme.Readout.Bar` 已删（零调用）：它内部自带 `.contentInset`，
+        // 给一行键值读数画井。健康页两处重样时改成无面读数带之后没人用了。
+        // 与 `DataReadoutBar` 同一个教训：零调用的井壳留着，就会被请回内容层。
     }
 
-    /// 占比条行：色点 + 名称 + 量条 + 百分比 + 次数。
+    /// 占比条行：名称 + 量条 + 百分比 + 次数。
     /// 取代《45》§3.3 判为重复的 `LanguageBar` / `ShareBarRow` 两套。
-    /// 色点与量条同色，色值只能来自 `Theme.Chart`（按稳定键或按登记号位）。
+    /// 结构占比**不染色点**（风格契约 5：结构去色），要表意的用色由调用方显式传。
     enum Share {
         struct Row: View {
             var label: String
@@ -217,6 +200,65 @@ extension Theme {
     /// `DataPageScaffold` 逐字复制品、WS-W 在 `Views/PerfLogs/BorderlessPage.swift` 的临时变体）。
     /// 后两份应删除并改回本件；`BorderlessPageGuardTests` 钉住「全仓只许一份页骨架」。
     enum Page {
+        /// 页级 H1：**九页一致**，且一屏只有一个大标题。
+        ///
+        /// 原来只有性能/日志/评分三页自己手写过一份标题行（图标 + 20pt 标题 +
+        /// 「示例」徽标 + 右侧控件 + 一行口径说明），另外六页直接从节标题起 ——
+        /// 于是"页面层"这件事有三种状态；而那三页又叠在项目名的 20pt 之下，
+        /// 一屏出现两个同级大标题（用户判词「不规整」在页级上的落点）。
+        ///
+        /// 层级重排照参考图：**项目名降成面包屑（11pt 元数据），节名升成唯一 H1**。
+        /// 参考图顶部就是 `Workspaces / Sales` 一行小字，下面 `Accounting` 才是大标题。
+        struct Header<Actions: View>: View {
+            var title: String
+            var titleIcon: IconName?
+            /// 口径声明的一句话（诚实性文案的落点，不许省）。
+            var subtitle: String?
+            var showsDemoBadge: Bool
+            @ViewBuilder var actions: Actions
+
+            init(title: String,
+                 icon: IconName? = nil,
+                 subtitle: String? = nil,
+                 isDemo: Bool = false,
+                 @ViewBuilder actions: () -> Actions = { EmptyView() }) {
+                self.title = title
+                self.titleIcon = icon
+                self.subtitle = subtitle
+                self.showsDemoBadge = isDemo
+                // 存**结果**而不是闭包：与 `Scaffold.content` 同一个写法，
+                // 把非逃逸的 builder 参数在 init 里就地求值，避免
+                // "assigning non-escaping parameter to an @escaping closure"。
+                self.actions = actions()
+            }
+
+            var body: some View {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
+                        if let titleIcon {
+                            // 图标灰阶：颜色留给语义与交互，结构不抢注意力（风格契约 5）。
+                            ThemedIcon(titleIcon, role: .navigation)
+                                .foregroundStyle(.secondary)
+                        }
+                        // **必须是 `LocalizedStringKey`**：`title` 是 `String`，
+                        // `Text(String)` 走的是 verbatim 初始化、**不查本地化表**，
+                        // 于是目录里登记了英文也永远显示中文。这是双语最容易踩的空转：
+                        // 机制接好了、表也翻了，界面上一个字都没变。
+                        Text(LocalizedStringKey(title)).typed(Theme.Typo.pageTitle)
+                        if showsDemoBadge { DemoBadge() }
+                        Spacer(minLength: Theme.Spacing.md)
+                        actions
+                    }
+                    if let subtitle {
+                        Text(subtitle)
+                            .typed(Theme.Typo.label)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+
         struct Scaffold<Content: View>: View {
             var maxWidth: CGFloat
             @ViewBuilder var content: Content
