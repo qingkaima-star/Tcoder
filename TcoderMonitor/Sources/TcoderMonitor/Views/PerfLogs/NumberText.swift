@@ -1,20 +1,24 @@
 import SwiftUI
 
-// MARK: - 三页共用的「数字观感 + 页骨架」（性能 / 日志 / 健康）
+// MARK: - 三页共用的「数字观感 + 页头」（性能 / 日志 / 健康）
 //
 // 活动监视器的专业感来自两件极小的事：**列宽定死** 与 **数字等宽**。
 // 这两件事一旦各页自己写就会漂（WS-I §4 实测全仓 `.monospacedDigit()` 命中 0），
 // 所以数字取色、单元格对齐、占位符着色全部收在这一个文件里。
 //
-// 页尾另外寄居着 `BorderlessPage` / `BorderlessPageHeader`（三页共用的版框与页头）。
-// **为什么不单开一个 `BorderlessPage.swift`**：单开一个实现文件会把
-// `SourceFileReachabilityTests` 的全仓普查分母从 110 抬到 111，而那份基线不归本流域写
-// —— 于是本流交回时全仓 `test` 是红的。宁可寄居，也不去改别人的分母。
-// 正解见汇报的契约缺口：等 `Theme.Page.Scaffold` 的组间距换成 `Spacing.group`、
-// 边距换成 `Spacing.pageMargin`，这两段就该整块删掉、三页改回基座。
+// 页尾另外住着一份 `PerfLogsPageHeader`（三页共用的页头）。**它为什么不单开文件**：
+// `SourceFileReachabilityTests` 把全仓实现文件数钉成一个写死的分母（现值 110），
+// 而那份基线不归页面工作流写 —— 新增一个 `Sources/` 文件会让全仓 `test` 红在别人的守卫上。
+//
+// 这里曾经是 `BorderlessPage`（本流自造的页骨架）。总工 `48443d9` 把基座
+// `Theme.Page.Scaffold` 换成 `pageMargin/group/section` 三档并钉了「全仓只许一份页骨架」
+// （`pageScaffoldDeclarations` 按 `Scaffold` / `BorderlessPage` 字样识别），
+// 所以那份自造骨架已整块删除、三页改回基座。**本文件里任何人再想加骨架，
+// 名字里带 Scaffold 或 BorderlessPage 都会被那条守卫抓到。**
 //
 // #34 起，**列头与列宽不再归本文件管**：全仓唯一一套列系统在
-// `Views/CodeGit/CodeGitTable.swift`（`DataGridColumn` / `DataTableHeader` / `.tableCell`），
+// `Design/DataTable.swift`（`DataColumn` / `DataTableHeader` / `.tableCell`，
+// 自 `Views/CodeGit/CodeGitTable.swift` 上提），
 // 原先这里的 `TableHeaderCell` 与那 14 个 `DataColumn` 列宽常量已随收敛删除。
 // 下面剩下的三个宽度都不是列：两个是「错误聚类」列表的行内列（那张列表没有列头），
 // 一个是排序控件。
@@ -109,42 +113,7 @@ extension View {
     }
 }
 
-// MARK: - 三页共用的「简约无界」页骨架
-
-/// 数据密集型页面的无界骨架。
-///
-/// **为什么不复用基座 `Theme.Page.Scaffold`**：它的组间距写死 `Theme.Spacing.md`(16)、
-/// 左右边距也是 16。而风格契约 8 要的是「页边距 24 / 分组间 32 / 页级段落 40」——
-/// 也就是说 16 正是本轮 spec 根因⑤「间距没有呼吸档，组间与组内是同一个数」的定量形态。
-/// `Design/**` 归总工，页面流无权改，所以先在本流域内落一份把 32/24/40 三档真用起来，
-/// 并已作为「契约缺口」上报：等 `Scaffold` 换上 `Spacing.group` / `Spacing.pageMargin`，
-/// 这两段应当整块删掉、三页改回基座。留两份长期并存就是下一轮的债。
-struct BorderlessPage<Content: View>: View {
-    var maxWidth: CGFloat
-    @ViewBuilder var content: Content
-
-    init(maxWidth: CGFloat = Theme.Layout.maxWidthDense,
-         @ViewBuilder content: () -> Content) {
-        self.maxWidth = maxWidth
-        self.content = content()
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.group) {
-                content
-            }
-            .frame(maxWidth: maxWidth, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.horizontal, Theme.Spacing.pageMargin)
-            // 页头之上给一整段呼吸：这一档存在的意义就是「页级段落 ≠ 分组间距」。
-            // `Spacing.section` 自定义起全仓零引用，而那正是拥挤的机械成因。
-            .padding(.top, Theme.Spacing.section)
-            .padding(.bottom, Theme.Spacing.section)
-        }
-        .scrollContentBackground(.hidden)
-    }
-}
+// MARK: - 三页共用的页头
 
 /// 三页共用的页头：图标 + 页名 + 示例标记 + 右侧控件 + 可选的一句页级说明。
 ///
@@ -155,7 +124,7 @@ struct BorderlessPage<Content: View>: View {
 ///
 /// `note` 一律排在第二行、`label`(11) + `.secondary`，只解释「这一页的口径是什么」，
 /// 不重复任何读数。诚实性文案（只观测不干预 / 取不到不给 0 / 三态口径）就落在这里。
-struct BorderlessPageHeader<Actions: View>: View {
+struct PerfLogsPageHeader<Actions: View>: View {
     var icon: IconName
     var title: String
     var isDemo: Bool

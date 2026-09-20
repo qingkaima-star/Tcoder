@@ -13,7 +13,7 @@ struct HealthView: View {
     @Environment(AppState.self) private var state
 
     var body: some View {
-        BorderlessPage(maxWidth: Theme.Layout.maxWidthDense) {
+        Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthDense) {
             header
             if let health = report?.health {
                 if health.components.isEmpty {
@@ -31,7 +31,7 @@ struct HealthView: View {
     }
 
     private var header: some View {
-        BorderlessPageHeader(icon: .health,
+        PerfLogsPageHeader(icon: .health,
                              title: "健康评分",
                              isDemo: report?.project.isDemo == true,
                              actions: { ScanControls() })

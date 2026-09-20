@@ -263,23 +263,35 @@ final class PerfLogsBorderlessTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(Theme.Spacing.pageMargin, 24)
     }
 
-    func test_ownedPagesUseTheBorderlessSkeleton() throws {
+    func test_ownedPagesShareTheOneBaseSkeleton() throws {
+        // 本流一度自造过一份 `BorderlessPage`（因为基座 `Theme.Page.Scaffold` 组间距写死 16）。
+        // 总工 `48443d9` 把基座换成 pageMargin/group/section 三档，并钉了「全仓只许一份页骨架」，
+        // 所以那份已删除、三页改回基座。这里反过来钉住**结果**：
+        //   ① 三页都走基座那份；② 本流域里不许再出现第二份骨架声明。
         let files = try ownedFiles()
-        let scaffold = Self.hits(in: files, where: { $0.contains("Theme.Page.Scaffold") })
-        XCTAssertTrue(scaffold.isEmpty,
-                      "`Theme.Page.Scaffold` 的组间距与边距都是 16，低于契约 8 的 24：\(scaffold)")
+        let ownScaffold = Self.hits(in: files, where: { line in
+            // 与总工那份 `pageScaffoldDeclarations` 同一判据形状（先 trim 再认 `struct …: View`），
+            // 否则缩进里的声明会漏 —— 两把尺子必须同形状才比得出差异。
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            return trimmed.hasPrefix("struct ") && trimmed.contains(": View")
+                && (trimmed.contains("Scaffold") || trimmed.contains("BorderlessPage"))
+        })
+        XCTAssertTrue(ownScaffold.isEmpty,
+                      "本流域里又长出了第二份页骨架（只许用 `Theme.Page.Scaffold`）：\(ownScaffold)")
         for page in ["PerformanceView", "LogsView", "HealthView"] {
             XCTAssertTrue(files.contains { $0.path.hasSuffix("\(page).swift")
-                && $0.content.contains("BorderlessPage(") },
-                          "\(page).swift 没走三页共用的无界骨架，组间距就不受这一条守卫覆盖")
+                && $0.content.contains("Theme.Page.Scaffold(") },
+                          "\(page).swift 没走基座页骨架，组间距就不受 `Spacing.group` 那条断言保护")
         }
-        let skeleton = try XCTUnwrap(
-            files.first { $0.path.hasSuffix("NumberText.swift") },
-            "找不到三页共用的版框（现寄居在 `Views/PerfLogs/NumberText.swift`）")
-        XCTAssertTrue(skeleton.content.contains("spacing: Theme.Spacing.group"),
-                      "骨架的组间距没走 group(32)")
-        XCTAssertTrue(skeleton.content.contains(".padding(.horizontal, Theme.Spacing.pageMargin)"),
-                      "骨架的页边距没走 pageMargin(24)")
+    }
+
+    func test_pageHeaderIsSharedNotTriplicated() throws {
+        let files = try ownedFiles()
+        let sites = files.filter { $0.content.contains("PerfLogsPageHeader(icon:") }
+        XCTAssertEqual(sites.count, 3,
+                       "三页应共用一份页头（Performance / Logs / Health 各一处），实测 \(sites.map(\.path))")
+        XCTAssertTrue(files.contains { $0.content.contains("struct PerfLogsPageHeader") },
+                      "共用页头本体不在了")
     }
 
     func test_noContainerWrapsGlassSectionsInTightSpacing() throws {

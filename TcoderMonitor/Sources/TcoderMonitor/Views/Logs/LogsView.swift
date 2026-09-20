@@ -21,7 +21,7 @@ struct LogsView: View {
     var body: some View {
         @Bindable var state = state
 
-        BorderlessPage(maxWidth: Theme.Layout.maxWidthReading) {
+        Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthReading) {
                 header(window: $state.logWindowDays)
                 banners
                 LogsMetricGrid(logs: report?.logs, code: report?.code)
@@ -40,7 +40,7 @@ struct LogsView: View {
         // 内容层现在什么都不画，那是一次空操作，而它为已经不存在的盒子留了 16pt 内边距，
         // 把页头与正文之间的组间距吃掉了一截。一并去掉。
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            BorderlessPageHeader(icon: .logs,
+            PerfLogsPageHeader(icon: .logs,
                                  title: "错误日志分析",
                                  isDemo: report?.project.isDemo == true,
                                  note: subtitle,

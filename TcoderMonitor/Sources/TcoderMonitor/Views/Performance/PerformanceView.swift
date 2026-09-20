@@ -25,7 +25,7 @@ struct PerformanceView: View {
 
     var body: some View {
         // 版框：组间 32 / 页边距 24 / 顶部段落 40（风格契约 8），三页共用一份。
-        BorderlessPage(maxWidth: Theme.Layout.maxWidthDense) {
+        Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthDense) {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 header
                 sampleStats
@@ -65,7 +65,7 @@ struct PerformanceView: View {
     // MARK: - 工具条
 
     private var header: some View {
-        BorderlessPageHeader(icon: .performance,
+        PerfLogsPageHeader(icon: .performance,
                              title: "性能监控",
                              isDemo: report?.project.isDemo == true,
                              note: "系统级实时读数只观测不干预。数值随采样刷新，"
