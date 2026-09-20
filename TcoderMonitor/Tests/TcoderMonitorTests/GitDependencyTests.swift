@@ -316,7 +316,7 @@ final class GitAggregationTests: XCTestCase {
 
     func testDayBucketsZeroFillAndAscendingOrder() {
         let buckets = GitAggregation.buckets(from: [commits[0], commits[2]], granularity: .day,
-                                             calendar: GitAggregation.defaultCalendar())
+                                             calendar: GitAggregation.utcCalendar())
         XCTAssertEqual(buckets.count, 3, "首尾之间的空必须补零桶")
         XCTAssertEqual(buckets[1].commits, 0, "中间那天提交数为 0")
         XCTAssertEqual(buckets[1].additions, 0, "零填充桶的 churn 也是 0")
@@ -329,7 +329,7 @@ final class GitAggregationTests: XCTestCase {
         XCTAssertEqual(buckets[0].additions, 12, "桶内 additions 为该桶提交之和")
         XCTAssertEqual(buckets.map { $0.granularity }, Array(repeating: BucketGranularity.day, count: 3), "粒度回传")
         XCTAssertEqual(GitAggregation.buckets(from: [], granularity: .day,
-                                             calendar: GitAggregation.defaultCalendar()), [], "空输入返回空数组")
+                                             calendar: GitAggregation.utcCalendar()), [], "空输入返回空数组")
     }
 
     func testRecentCommitsKeepsOrderAndCapsAtLimit() {

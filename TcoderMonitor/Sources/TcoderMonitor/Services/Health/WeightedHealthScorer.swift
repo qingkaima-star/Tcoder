@@ -157,10 +157,38 @@ final class WeightedHealthScorer: HealthScoringProviding {
         case .activity:
             guard let git = inputs.git, git.totalCommits > 0 else { return nil }
             let daysSinceLast = git.lastCommitAt.map { Date().timeIntervalSince($0) / 86_400 }
-            let curve = HealthCurves.activity(commitsPerDay: git.commitsPerDay,
+            // 缺陷 #43：冻结区的 `git.commitsPerDay` 分母是 `max(1, Int(跨度/86400))`，
+            // 历史不足 48 小时时那个分母被兜成 1 天，"日均"就退化成"提交总数"
+            // （本仓实测 14.4 小时跨度 → 界面「提交节奏稳定（日均 271.0 次）」，271 = 总数）。
+            // 字段在冻结区不改，改成在这里**另算一个浮点跨度的速率**并按历史长度分三态：
+            // 样本不足就不写优点、分数封顶；连首末时刻都没有就承认"速率无定义"。
+            let cadence = GitCadenceEvidence.assess(git)
+            let curve = HealthCurves.activity(commitsPerDay: cadence.rateForCurve,
                                              daysSinceLastCommit: daysSinceLast,
                                              totalCommits: git.totalCommits)
-            if git.commitsPerDay >= 8 { strengths.append(String(format: "提交节奏稳定（日均 %.1f 次）", git.commitsPerDay)) }
+            switch cadence.status {
+            case .sufficient:
+                if cadence.ratePerDay >= GitCadenceEvidence.steadyCadenceCommitsPerDay {
+                    strengths.append(String(format: "提交节奏稳定（日均 %.1f 次）", cadence.ratePerDay))
+                }
+            case .shortHistory:
+                let capped = Swift.min(curve.score, GitCadenceEvidence.shortHistoryScoreCeiling)
+                recommendations.append("提交历史仅 "
+                    + "\(GitCadenceEvidence.fixed(cadence.spanDays)) 天，样本不足，"
+                    + "活跃度不宣称节奏、按 \(GitCadenceEvidence.fixed(GitCadenceEvidence.shortHistoryScoreCeiling)) 分封顶；"
+                    + "跑满一周后重扫即可解锁。")
+                return CurveResult(score: capped, detail: curve.detail + cadence.shortHistoryNote,
+                                   risk: capped < curve.score
+                                       ? GitCadenceEvidence.risk(afterCappingTo: capped) : curve.risk)
+            case .unknown:
+                recommendations.append("提交历史缺可用的首末时间，日均无法计算，"
+                    + "活跃度按曲线最低档计，等重新分析补齐两端再评。")
+                if let days = daysSinceLast, days > 14 {
+                    issues.append(String(format: "已 %.0f 天无提交", days))
+                }
+                return CurveResult(score: curve.score, detail: curve.detail + cadence.unknownNote,
+                                   risk: curve.risk)
+            }
             if let days = daysSinceLast, days > 14 { issues.append(String(format: "已 %.0f 天无提交", days)) }
             return curve
 
