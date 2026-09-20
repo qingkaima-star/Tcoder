@@ -526,4 +526,50 @@ final class BorderlessDetailGuardTests: XCTestCase {
             """)]
         XCTAssertTrue(Self.repeatedBasisSentences(in: short).isEmpty, "术语复用被误判成口径重复")
     }
+
+    // MARK: 批次 H8：纵轴刻度一律落在左边
+
+    /// SwiftUI 的 `AxisMarks` 默认 `position` 是 `.automatic`，它会随图落位 ——
+    /// 实拍总览页的 100/50/0 就跑到了**右边**，而性能/健康/日志/Git 四页的曲线
+    /// 都显式写了 `.leading`。同一个 App 里"纵轴一会儿在左一会儿在右"是典型的
+    /// 「东一个系一个」，而且只在**漏写**时发生，所以钉成机器断言。
+    static func yAxesWithoutLeadingPosition(in files: [(path: String, content: String)]) -> [String] {
+        files.flatMap { file -> [String] in
+            let lines = SurfaceScanKit.codeLines(file.content)
+            var hits: [String] = []
+            for (index, line) in lines.enumerated() where line.contains(".chartYAxis") {
+                let window = lines[index..<min(index + 6, lines.count)].joined(separator: "\n")
+                if !window.contains("position: .leading") {
+                    hits.append("\(file.path):\(index + 1)")
+                }
+            }
+            return hits
+        }
+    }
+
+    func test_yAxisLabelsAllSitOnTheLeadingSide() throws {
+        let offenders = Self.yAxesWithoutLeadingPosition(in: try SurfaceScanKit.sourceFiles(under: "Views"))
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些图的纵轴刻度没写 `position: .leading`，会自己跑到右边去：\(offenders)")
+    }
+
+    func test_yAxisScannerDetectsMissingPosition() {
+        let missing = [(path: "Views/FakeChart.swift", content: """
+            .chartYAxis {
+                AxisMarks(values: [0, 50, 100]) { _ in
+                    AxisValueLabel()
+                }
+            }
+            """)]
+        XCTAssertEqual(Self.yAxesWithoutLeadingPosition(in: missing), ["Views/FakeChart.swift:1"],
+                       "漏写 position 的图没被抓到")
+        let pinned = [(path: "Views/FakeChart.swift", content: """
+            .chartYAxis {
+                AxisMarks(position: .leading, values: [0, 50, 100]) { _ in
+                    AxisValueLabel()
+                }
+            }
+            """)]
+        XCTAssertTrue(Self.yAxesWithoutLeadingPosition(in: pinned).isEmpty, "写了 .leading 的被误判")
+    }
 }
