@@ -63,11 +63,18 @@ extension ComplexityEngine {
         var closes = 0
     }
 
+    /// 一行清洗里「一个字符处理完」的两种结局，逐字对应原 `sanitizeLine` 的 `return out` / `continue`。
+    enum SanitizeLineStep {
+        /// 本行到此为止（进了行注释、或跨行构造到这行没闭合）——原实现在这里 `return out`。
+        case lineDone
+        /// index 已推进，回到 while 顶部重新看当前字符——原实现在这里 `continue`。
+        case keepGoing
+    }
+
     static func sanitizeLine(_ raw: String, _ profile: LangProfile, _ state: inout LexState) -> LineOutput {
         var out = LineOutput()
         guard !raw.isEmpty else { return out }
         let chars = Array(raw)
-        let n = chars.count
         var i = 0
 
         // 续行：仍在跨行字符串里
@@ -77,70 +84,94 @@ extension ComplexityEngine {
             }
         }
 
-        while i < n {
-            if state.blockDepth > 0 {
-                if scanBlockComment(chars, &i, profile, &state) == false { return out }
-                continue
-            }
-            if let start = profile.blockStart, startsHere(chars, start, at: i) {
-                state.blockDepth = 1
-                i += start.count
-                if scanBlockComment(chars, &i, profile, &state) == false { return out }
-                continue
-            }
-            if matchesAnyPrefix(chars, at: i, profile.lineComments) != nil {
-                return out
-            }
-            if let delim = matchMultiLineQuote(chars, at: i, profile) {
-                state.stringDelim = delim
-                state.stringIsTemplate = delim.first == "`" && profile.backtickInterpolates
-                state.inTemplateExpression = false
-                i += delim.count
-                if scanString(chars, &i, delim, state.stringIsTemplate, profile, &state, &out) == false {
-                    return out
-                }
-                continue
-            }
-            if profile.quotes.contains(chars[i]) {
-                let quote = chars[i]
-                if let close = closingQuote(chars, quote, from: i + 1) {
-                    i = close + 1
-                    continue
-                }
-                // 本行没有闭合引号（Rust 生命周期、英文撇号）→ 当普通字符处理
-            }
-
-            let c = chars[i]
-            if state.inTemplateExpression {
-                if c == "{" {
-                    state.templateBraceDepth += 1
-                    out.text.append(c)
-                    out.opens += 1
-                    i += 1
-                    continue
-                }
-                if c == "}" {
-                    if state.templateBraceDepth == 0 {
-                        state.inTemplateExpression = false
-                        i += 1
-                        continue
-                    }
-                    state.templateBraceDepth -= 1
-                    out.text.append(c)
-                    out.closes += 1
-                    i += 1
-                    continue
-                }
-            }
-            if c == "{" {
-                out.opens += 1
-            } else if c == "}" {
-                out.closes += 1
-            }
-            out.text.append(c)
-            i += 1
+        while i < chars.count {
+            if advanceSanitizedLine(chars, &i, profile, &state, &out) == .lineDone { return out }
         }
         return out
+    }
+
+    /// 原先 79 行、CC 21 的那个 while 循环体，逐段搬到下面的小函数里；
+    /// **判定顺序一个字没改**（块注释 → 新开块注释 → 行注释 → 跨行引号 → 单行引号 → 模板插值 → 普通字符），
+    /// 每一段该 `continue` 的返回 `.keepGoing`，该 `return out` 的返回 `.lineDone`。
+    static func advanceSanitizedLine(_ chars: [Character], _ i: inout Int, _ profile: LangProfile,
+                                     _ state: inout LexState, _ out: inout LineOutput) -> SanitizeLineStep {
+        if state.blockDepth > 0 {
+            return scanBlockComment(chars, &i, profile, &state) ? .keepGoing : .lineDone
+        }
+        if let start = profile.blockStart, startsHere(chars, start, at: i) {
+            state.blockDepth = 1
+            i += start.count
+            return scanBlockComment(chars, &i, profile, &state) ? .keepGoing : .lineDone
+        }
+        if matchesAnyPrefix(chars, at: i, profile.lineComments) != nil {
+            return .lineDone
+        }
+        if let delim = matchMultiLineQuote(chars, at: i, profile) {
+            return openMultiLineQuote(chars, &i, delim, profile, &state, &out)
+        }
+        if profile.quotes.contains(chars[i]), let close = closingQuote(chars, chars[i], from: i + 1) {
+            i = close + 1
+            return .keepGoing
+        }
+        // 本行没有闭合引号（Rust 生命周期、英文撇号）→ 当普通字符处理
+
+        let c = chars[i]
+        if state.inTemplateExpression,
+           handleTemplateExpressionCharacter(c, chars, &i, &state, &out) {
+            return .keepGoing
+        }
+        recordPlainCharacter(c, &i, &out)
+        return .keepGoing
+    }
+
+    /// 进入 JS/TS/Vue 模板串或 Python docstring：置状态、吃掉定界符，再看这行内能不能闭合。
+    static func openMultiLineQuote(_ chars: [Character], _ i: inout Int, _ delim: [Character],
+                                   _ profile: LangProfile, _ state: inout LexState,
+                                   _ out: inout LineOutput) -> SanitizeLineStep {
+        state.stringDelim = delim
+        state.stringIsTemplate = delim.first == "`" && profile.backtickInterpolates
+        state.inTemplateExpression = false
+        i += delim.count
+        guard scanString(chars, &i, delim, state.stringIsTemplate, profile, &state, &out) else {
+            return .lineDone
+        }
+        return .keepGoing
+    }
+
+    /// 反引号模板串 `${ … }` 内部的 `{` / `}` 要自己配平，配平完就退出表达式态。
+    /// 返回 false 表示当前字符既不是 `{` 也不是 `}`，交给普通字符分支处理。
+    static func handleTemplateExpressionCharacter(_ c: Character, _ chars: [Character], _ i: inout Int,
+                                                  _ state: inout LexState,
+                                                  _ out: inout LineOutput) -> Bool {
+        if c == "{" {
+            state.templateBraceDepth += 1
+            out.text.append(c)
+            out.opens += 1
+            i += 1
+            return true
+        }
+        guard c == "}" else { return false }
+        if state.templateBraceDepth == 0 {
+            state.inTemplateExpression = false
+            i += 1
+            return true
+        }
+        state.templateBraceDepth -= 1
+        out.text.append(c)
+        out.closes += 1
+        i += 1
+        return true
+    }
+
+    /// 留在 cleaned 里的普通字符：只有真正的花括号才计进深度增量。
+    static func recordPlainCharacter(_ c: Character, _ i: inout Int, _ out: inout LineOutput) {
+        if c == "{" {
+            out.opens += 1
+        } else if c == "}" {
+            out.closes += 1
+        }
+        out.text.append(c)
+        i += 1
     }
 
     /// 返回 false 表示该行结束时仍在字符串内。
