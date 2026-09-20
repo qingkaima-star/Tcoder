@@ -51,12 +51,17 @@ BASELINE = {
     "potential_hang_median_ms": 42.6,
     "potential_hang_max_ms": 59.8,
     "potential_hang_total_ms": 573.0,
+    # ⚠ 本节全部数字取自 run1（2026-09-20 15:03，release，rev 465f5a6），
+    #   而 spec §1.3 已判定该样本**测量条件未受控**（当时总工正在并发跑几十个
+    #   `swiftc -typecheck` 抢满 15 核 → app-update 与 hangs 被抬高）。
+    #   它现在只作"同形状对照列"存在，等按 §4.1 协议重测后整块替换；
+    #   在此之前，任何"从 X 降到 Y"的结论都不许引用本块当 X。
     "render_p50_ms": 2.73,
-    "render_p95_ms": 4.05,
-    "render_p99_ms": 4.67,
+    "render_p95_ms": 4.06,     # 原记 4.05：手算漏了 <duration ref> → 见 spec §1.4
+    "render_p99_ms": 4.77,     # 原记 4.67，同上
     "render_max_ms": 25.12,
-    "render_over_budget_frames": 5,
-    "render_over_budget_pct": 0.21,
+    "render_over_budget_frames": 10,   # 原记 5：漏计的 54 行 ref 里正好有 5 帧
+    "render_over_budget_pct": 0.42,    # 原记 0.21
     "main_thread_samples": 684,
     "main_thread_total_samples": 807,
     "main_thread_share_pct": 84.8,
@@ -543,16 +548,16 @@ def cmd_summary(args):
         agree, why = (False, "无 XML 可比对")
         if doc is not None:
             agree, why = cross_check_durations(doc.path, render)
-        fmt_row("render 相位 (ms)", "p50 2.73 / p95 4.05 / p99 4.67 / max 25.12", cur,
+        fmt_row("render 相位 (ms)", "p50 2.73 / p95 4.06 / p99 4.77 / max 25.12", cur,
                 ("健康" if percentile(render, .95) <= budget else "超")
                 + ("" if agree else "；解析自检不一致→本行仅参考"))
-        fmt_row("render 超预算帧", "5 帧 (0.21%)",
+        fmt_row("render 超预算帧", "10 帧 (0.42%)",
                 ("%d 帧 (%.2f%%)" % (bad, pct)) if agree else "未报（两把解析不一致）",
                 ("达标" if pct < 0.1 else "超") if agree else why)
     else:
         why = "未覆盖" if not loaded["hitches-renders"]["present"] else "0 帧（未采到）"
-        fmt_row("render 相位 (ms)", "p50 2.73 / p95 4.05 / p99 4.67 / max 25.12", why, "—")
-        fmt_row("render 超预算帧", "5 帧 (0.21%)", why, "—")
+        fmt_row("render 相位 (ms)", "p50 2.73 / p95 4.06 / p99 4.77 / max 25.12", why, "—")
+        fmt_row("render 超预算帧", "10 帧 (0.42%)", why, "—")
 
     # 3) app-update 相位（一次 hitch 通常拆成 Brown+Red 两行，同 duration 走 ref）
     upd = dedupe_pairs(loaded["hitches-updates"])
