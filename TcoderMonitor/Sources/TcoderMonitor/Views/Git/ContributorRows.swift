@@ -205,6 +205,10 @@ struct ContributorDirectoryChips: View {
 /// 单成员 24 小时分布，高度按该成员自己的峰值归一。
 /// 柱高与间距属图表几何（WS-I §9 豁免），但颜色与空档一律走令牌：
 /// 空格子用系统分隔色，不再自造 `Color.primary.opacity(0.06)`。
+///
+/// **性能（P-1）**：旧实现每行 24 根 `RoundedRectangle` + 24 个 `.help`（30 名作者 = 720 形状 +
+/// 720 tooltip 修饰），`peak` 每柱重算。现改为**单个 `Canvas` 一次画完 24 柱**（1 个视图实例、
+/// 1 次 `peak` 计算），悬停仍按格给 tooltip，信息零丢失。
 struct ContributorHourRow: View {
     let counts: [Int]
     let tint: Color
@@ -215,6 +219,9 @@ struct ContributorHourRow: View {
     private static let peakAlpha = Theme.Palette.Opacity.gradientMid
     /// 标签列宽：两个汉字 + 余量。
     private static let labelWidth: CGFloat = Theme.Layout.minHitTarget + Theme.Spacing.xxs
+    private static let bars = 24
+
+    @State private var hoveredHour: Int? = nil
 
     var body: some View {
         HStack(spacing: Theme.Spacing.xs) {
@@ -222,30 +229,58 @@ struct ContributorHourRow: View {
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .frame(width: Self.labelWidth, alignment: .leading)
-            HStack(alignment: .bottom, spacing: Theme.Stroke.emphasis) {
-                ForEach(0..<24, id: \.self) { hour in
-                    bar(for: hour)
+            GeometryReader { geo in
+                let width = geo.size.width
+                Canvas { ctx, size in
+                    let gap = Theme.Stroke.emphasis
+                    let cellW = max(1, (size.width - gap * CGFloat(Self.bars - 1)) / CGFloat(Self.bars))
+                    for hour in 0..<Self.bars {
+                        let value = hour < counts.count ? counts[hour] : 0
+                        let ratio = Double(value) / Double(peak)
+                        let barH = value == 0
+                            ? Theme.Stroke.emphasis
+                            : max(Theme.Stroke.emphasis, size.height * CGFloat(ratio))
+                        let x = CGFloat(hour) * (cellW + gap)
+                        let rect = CGRect(x: x, y: size.height - barH, width: cellW, height: barH)
+                        let color: Color = value == 0
+                            ? Theme.Palette.Surface.separator
+                            : tint.opacity(Self.idleAlpha + (Self.peakAlpha - Self.idleAlpha) * ratio)
+                        ctx.fill(Path(roundedRect: rect, cornerRadius: 0), with: .color(color))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let point):
+                        let cellW = width / CGFloat(Self.bars)
+                        let idx = Int((point.x / cellW).rounded(.down))
+                        hoveredHour = (0..<Self.bars).contains(idx) ? idx : nil
+                    case .ended:
+                        hoveredHour = nil
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if let h = hoveredHour, h < counts.count {
+                        Text("\(String(format: "%02d", h)):00 · \(counts[h]) 次提交")
+                            .font(CodeGitType.number(Theme.Typo.microLabel))
+                            .padding(Theme.Spacing.xxs)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 4))
+                            .offset(y: Self.height + 2)
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: Self.height)
         }
         .frame(height: Self.height)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("各小时提交分布，峰值 \(peak) 次")
+        .help(hoverHelp)
     }
 
     private var peak: Int { max(1, counts.max() ?? 0) }
 
-    @ViewBuilder
-    private func bar(for hour: Int) -> some View {
-        let value = hour < counts.count ? counts[hour] : 0
-        let ratio = Double(value) / Double(peak)
-        RoundedRectangle(cornerRadius: Theme.Radius.none, style: .continuous)
-            .fill(value == 0 ? Theme.Palette.Surface.separator
-                             : tint.opacity(Self.idleAlpha + (Self.peakAlpha - Self.idleAlpha) * ratio))
-            .frame(maxWidth: .infinity)
-            .frame(height: value == 0 ? Theme.Stroke.emphasis
-                                      : max(Theme.Stroke.emphasis, Self.height * CGFloat(ratio)))
-            .help("\(String(format: "%02d", hour)):00 · \(value) 次提交")
+    private var hoverHelp: String {
+        let peakHour = counts.enumerated().max(by: { $0.element < $1.element })?.offset ?? 0
+        return "各小时提交分布：峰值 \(peak) 次，最忙 \(String(format: "%02d", peakHour)):00"
     }
 }

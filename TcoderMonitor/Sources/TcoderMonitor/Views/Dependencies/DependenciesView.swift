@@ -16,7 +16,7 @@ struct DependenciesView: View {
     @State private var expanded: Set<String> = []
 
     var body: some View {
-        DataPageScaffold {
+        Theme.Page.Scaffold {
             GroupStack {
                 NetworkOptionsCard(
                     allowNetwork: Bindable(state).allowNetworkLookups,

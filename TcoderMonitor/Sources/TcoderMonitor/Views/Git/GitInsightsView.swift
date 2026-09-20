@@ -19,7 +19,7 @@ struct GitInsightsView: View {
     var report: ProjectReport?
 
     var body: some View {
-        DataPageScaffold {
+        Theme.Page.Scaffold {
             if let git = report?.git {
                 GroupStack {
                     GitRepositorySourceSection(git: git, selectedPath: report?.project.path ?? "")

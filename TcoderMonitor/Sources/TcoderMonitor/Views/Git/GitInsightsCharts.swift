@@ -91,37 +91,73 @@ struct GitActivityHeatmap: View {
     /// 但也不留裸 `VStack(spacing: Theme.Spacing…)`，免得下一个人以为漏了统一。
     private static let cellGap = Theme.Spacing.xxs
 
+    @State private var hovered: (weekday: Int, hour: Int)? = nil
+
+    private static var gridHeight: CGFloat { Self.rowLabelWidth * 7 + Self.cellGap * 6 }
+    private static var totalHeight: CGFloat { 2 + Self.gridHeight + 14 }
+
     var body: some View {
-        VStack(spacing: Self.cellGap) {
-            ForEach(0..<7, id: \.self) { weekday in
-                HStack(spacing: Self.cellGap) {
-                    Text(Self.weekdayNames[weekday])
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                        .frame(width: Self.rowLabelWidth, alignment: .leading)
-                    ForEach(0..<24, id: \.self) { hour in
-                        let strength = intensity(hour: hour, weekday: weekday)
-                        Rectangle()
-                            .fill(Theme.Chart.color(at: CodeGitCategoryColor.aggregateIndex)
-                                .opacity(Self.idleAlpha + (Self.peakAlpha - Self.idleAlpha) * strength))
-                            .frame(maxWidth: .infinity, minHeight: Self.rowLabelWidth)
-                            .help("\(Self.weekdayNames[weekday]) \(hour):00 — 近似强度 "
-                                + "\(Int((strength * 100).rounded()))%")
+        GeometryReader { geo in
+            let size = geo.size
+            let labelW = Self.rowLabelWidth
+            let gap = Self.cellGap
+            let topPad: CGFloat = 2
+            let axisH: CGFloat = 14
+            let cellW = max(1, (size.width - labelW - gap * 23) / 24)
+            let cellH = Self.rowLabelWidth
+            Canvas { ctx, _ in
+                for w in 0..<7 {
+                    let y = topPad + CGFloat(w) * (cellH + gap)
+                    ctx.draw(
+                        Text(Self.weekdayNames[w])
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .font(CodeGitType.number(Theme.Typo.microLabel)),
+                        at: CGPoint(x: 0, y: y + cellH / 2), anchor: .leading)
+                    for h in 0..<24 {
+                        let strength = intensity(hour: h, weekday: w)
+                        let x = labelW + CGFloat(h) * (cellW + gap)
+                        let rect = CGRect(x: x, y: y, width: cellW, height: cellH)
+                        let color = Theme.Chart.color(at: CodeGitCategoryColor.aggregateIndex)
+                            .opacity(Self.idleAlpha + (Self.peakAlpha - Self.idleAlpha) * strength)
+                        ctx.fill(Path(roundedRect: rect, cornerRadius: 2), with: .color(color))
                     }
                 }
+                for h in 0..<24 where [0, 6, 12, 18].contains(h) {
+                    let x = labelW + CGFloat(h) * (cellW + gap) + cellW / 2
+                    ctx.draw(
+                        Text("\(h)")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .font(CodeGitType.number(Theme.Typo.microLabel)),
+                        at: CGPoint(x: x, y: topPad + Self.gridHeight + axisH / 2), anchor: .center)
+                }
             }
-            HStack(spacing: Self.cellGap) {
-                Color.clear.frame(width: Self.rowLabelWidth, height: Theme.Stroke.hairline)
-                ForEach(0..<24, id: \.self) { hour in
-                    Text([0, 6, 12, 18].contains(hour) ? "\(hour)" : "")
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let point):
+                    let w = Int(((point.y - topPad) / (cellH + gap)).rounded(.down))
+                    let h = Int(((point.x - labelW) / (cellW + gap)).rounded(.down))
+                    hovered = (0..<7).contains(w) && (0..<24).contains(h) ? (w, h) : nil
+                case .ended:
+                    hovered = nil
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if let cell = hovered {
+                    let strength = intensity(hour: cell.hour, weekday: cell.weekday)
+                    Text("\(Self.weekdayNames[cell.weekday]) \(String(format: "%02d", cell.hour)):00 — 近似强度 "
+                        + "\(Int((strength * 100).rounded()))%")
                         .font(CodeGitType.number(Theme.Typo.microLabel))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
+                        .padding(Theme.Spacing.xxs)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 4))
                 }
             }
         }
+        .frame(height: Self.totalHeight)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("24 小时与星期的近似活跃分布矩阵")
+        .help("提交活跃度按星期与小时近似分布；强度为两条边际归一边际的平均值，是近似值")
     }
 
     /// 两条边际全零 = 时间戳根本没解析出来，这是「没有数据」，不是「没人半夜提交」。

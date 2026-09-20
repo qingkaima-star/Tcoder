@@ -346,24 +346,38 @@ final class CodeGitBorderlessTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(Theme.Spacing.pageMargin, 24, "页边距必须 ≥ 24")
 
         let kit = try Self.pageSourceFiles(dirs: ["CodeGit"])
-        let scaffold = try XCTUnwrap(kit.first { $0.content.contains("struct DataPageScaffold") },
-                                     "骨架没了：五页的页边距与段落节奏失去唯一落点")
-        XCTAssertTrue(scaffold.content.contains("Spacing.pageMargin"), "页边距没接 pageMargin(24)")
-        XCTAssertTrue(scaffold.content.contains("PageParagraph"),
-                      "骨架没走段落容器 → 组间退回等距长滚动带")
-        XCTAssertTrue(scaffold.content.contains("ScrollView"),
-                      "骨架不再自带滚动，页面就会各自补一个，节奏就此失控")
-        let paragraph = try XCTUnwrap(kit.first { $0.content.contains("struct PageParagraph") })
-        XCTAssertTrue(paragraph.content.contains("Spacing.section"),
-                      "段落容器必须吃 section(40) —— 这一档曾长期全仓零引用")
-        let group = try XCTUnwrap(kit.first { $0.content.contains("struct GroupStack") })
+        let group = try XCTUnwrap(kit.first { $0.content.contains("struct GroupStack") },
+                                  "GroupStack 没了 —— 页面就会各自写 VStack 来排分组")
         XCTAssertTrue(group.content.contains("Spacing.group"), "分组容器必须吃 group(32)")
 
         // 三档真的被五页用起来：只定义不接线 = spec §0 根因⑤ 原样复发
-        let joined = try Self.pageSourceFiles(dirs: Self.pageDirs).map(\.content)
-            .joined(separator: "\n")
+        let pages = try Self.pageSourceFiles(dirs: Self.pageDirs)
+        let joined = pages.map(\.content).joined(separator: "\n")
         XCTAssertTrue(joined.contains("GroupStack"),
                       "没有页面用 GroupStack → 分组档仍是零引用死令牌")
+        XCTAssertTrue(joined.contains("Theme.Page.Scaffold"),
+                      "没有页面走基座骨架 → 24/32/40 三档对这一页完全不生效")
+    }
+
+    /// 页骨架只许一份，且必须住在 `Design/`（总工 `48443d9` 的裁定）。
+    /// 本流原来那份 `DataPageScaffold` 是基座的逐字复制品，已由 WS-P 自删。
+    /// 这条防的是"顺手又造一份"：`BorderlessSurfaceGuardTests` 那份要等 M2 闸门才生效，
+    /// 在那之前本流目录里再长出第二份骨架是没人拦的。
+    func test_thisStreamDeclinesNoSecondPageScaffold() throws {
+        let hits = Self.pageScaffoldDeclarations(in: try Self.pageSourceFiles())
+        XCTAssertTrue(hits.isEmpty,
+                      "本流四目录里又出现了页骨架声明（只许 Design/ 那一份）：\(hits)")
+    }
+
+    /// 扫描器本身形状对不对 —— 基座那份必须能被它认出来，否则上面那条是永真绿。
+    static func pageScaffoldDeclarations(in files: [(path: String, content: String)]) -> [String] {
+        files.flatMap { file in
+            numberedCodeLines(file.content).compactMap { entry in
+                guard entry.text.hasPrefix("struct "), entry.text.contains(": View") else { return nil }
+                return (entry.text.contains("Scaffold") || entry.text.contains("BorderlessPage"))
+                    ? "\(file.path):\(entry.n)" : nil
+            }
+        }
     }
 
     func test_pagesDoNotHandRollTheirGroupContainers() throws {
@@ -382,8 +396,8 @@ final class CodeGitBorderlessTests: XCTestCase {
             }
             XCTAssertFalse(entries.isEmpty, "页面「\(page)」找不到入口文件：\(owned)")
             for entry in entries {
-                XCTAssertTrue(entry.content.contains("DataPageScaffold"),
-                              "页面「\(page)」的 \(entry.path) 没走 DataPageScaffold")
+                XCTAssertTrue(entry.content.contains("Theme.Page.Scaffold"),
+                              "页面「\(page)」的 \(entry.path) 没走基座唯一骨架 Theme.Page.Scaffold")
             }
         }
     }
@@ -472,7 +486,7 @@ final class CodeGitBorderlessTests: XCTestCase {
             + "    GlassSection(\"乙\") { EmptyView() }\n}"
         XCTAssertEqual(Self.handRolledGroupContainers(in: [("Code/A.swift", dirtyStack)]).count, 1,
                        "页面自己排 GlassSection 没抓到 → 间距档位形同虚设")
-        let namedStack = "DataPageScaffold {\n"
+        let namedStack = "Theme.Page.Scaffold {\n"
             + "    GroupStack {\n"
             + "        GlassSection(\"甲\") { EmptyView() }\n"
             + "    }\n}"
@@ -490,6 +504,17 @@ final class CodeGitBorderlessTests: XCTestCase {
                       "section 内部的 VStack 被误判成手排容器 —— 缩进这一维丢了")
         XCTAssertTrue(Self.handRolledGroupContainers(in: [("CodeGit/Kit.swift", dirtyStack)]).isEmpty,
                       "基座被误判 —— 容器实现本来就只许写在基座里")
+
+        // ④b 页骨架重复：脏样本必须认得出来，否则「本流不得有第二份」是永真绿
+        XCTAssertEqual(Self.pageScaffoldDeclarations(in: [("CodeGit/Kit.swift",
+            "struct DataPageScaffold<Content: View>: View {\n    var body: some View { EmptyView() }\n}")]),
+                       ["CodeGit/Kit.swift:1"], "第二份页骨架没认出来 —— 那条断言是假的")
+        XCTAssertTrue(Self.pageScaffoldDeclarations(in: [("CodeGit/Kit.swift",
+            "struct GroupStack<Content: View>: View {\n    var body: some View { EmptyView() }\n}")]).isEmpty,
+                      "普通容器被判成页骨架 —— 五页会因此写不出分组")
+        XCTAssertTrue(Self.pageScaffoldDeclarations(in: [("CodeGit/Kit.swift",
+            "Theme.Page.Scaffold {\n}  // 用法不是声明，不该算一份")]).isEmpty,
+                      "骨架的**调用点**被当成声明 —— 那五页必然全红")
 
         // ⑤ 倾向色
         let accentTint = [("Code/A.swift", "tint: Theme.Semantic.accent.textColor)")]

@@ -23,49 +23,28 @@ import SwiftUI
 // 三样都判为违例（`pagesOnly` 那两条正是豁免本目录的），所以页面**写不出**自定义容器，
 // 只能调用这里起了名字的档位。规约逼出了正确的结构：节奏是设计系统的，不是每页各摆一次。
 
-// MARK: - 页面骨架（风格契约 8 的四档呼吸）
+// MARK: - 页面骨架：只许一份，所以本目录**不再有一份**
 
-/// 数据密集型页面的统一骨架。**四档间距一次定死**：
-/// 页边距 `pageMargin`(24) / 页级段落 `section`(40) / 主分组 `group`(32) / 列表行 `rowGap`(4)。
+// **这里原来叫 `DataPageScaffold`，本轮删了。**
+//
+// 总工在 `48443d9` 实拍三家进度时发现全仓并存三份同职责页骨架：
+// `Design/ReadoutKit.swift` 的 `Theme.Page.Scaffold`（Health/Logs/Performance 在用）、
+// 本文件这份**逐字复制品**（body 完全相同）、以及 WS-W 的 `Views/PerfLogs/BorderlessPage.swift`。
+// 那正是「东一个系一个」在代码层的形态。裁定：唯一那份住在 `Design/`，
+// 五页改用 `Theme.Page.Scaffold`，`BorderlessSurfaceGuardTests.test_exactlyOnePageScaffold`
+// 在 M2 强制只许一份。
+//
+// 随之修正的是档位分工：基座那份把 `Spacing.section`(40) 落在**页顶/页底留白**，
+// 页面内是单层 `Spacing.group`(32)。所以我原来那层 `PageParagraph`(40) 一并删掉 ——
+// 留着它就会出现「页内段落 40 > 页边距外 32」的倒挂，等于自己造第二条骨架。
+
+/// **主分组**容器（`Spacing.group` = 32）。把属于同一次阅读的几块绑在一起。
 ///
-/// 「拥挤」的机械成因不是东西多，是**组间与组内是同一个数**：旧骨架主分组之间用
-/// `md`(16)，而卡片内部条目也是 12~16 —— 没有任何东西告诉眼睛「一组在这里结束」。
-/// 现在段落(40) 与分组(32) 都比组内大一个量级，组界不需要底色也能读出来。
-///
-/// 正文列在超宽屏上居中限宽（WS-H §3.2）：否则在 5K 屏上一行拉到两千多像素，
-/// 表格数字与名称之间的关系就断了。
-struct DataPageScaffold<Content: View>: View {
-    var maxWidth: CGFloat = Theme.Layout.maxWidthReading
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        ScrollView {
-            PageParagraph { content }
-                .frame(maxWidth: maxWidth, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.horizontal, Theme.Spacing.pageMargin)
-                .padding(.vertical, Theme.Spacing.pageMargin)
-        }
-        .scrollContentBackground(.hidden)
-    }
-}
-
-/// **页级段落**容器（`Spacing.section` = 40）。骨架的直接子节点用它。
-///
-/// 与 `GroupStack` 的分工：段落回答「这是屏幕上的哪一章」，分组回答「这一章里的哪一组」。
-/// 两档必须都存在且数值不同，否则退化成旧的等距长滚动带。
-struct PageParagraph<Content: View>: View {
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.section) {
-            content
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// **主分组**容器（`Spacing.group` = 32）。一个段落里并列的若干 `GlassSection` 用它。
+/// 页面里不许自己写 `VStack(spacing: Theme.Spacing…)` 来排 `GlassSection`：
+/// 两条规矩从不同方向逼到同一个结论 —— `CodeGitRestyleTests.forbiddenRawValues`
+/// 把那种紧贴写法判为 `pagesOnly` 违例（基座豁免，因为容器实现只能写在基座），
+/// `CodeGitBorderlessTests.handRolledGroupContainers` 则直接抓「VStack 里排着 section」。
+/// 理由是同一个：**间距一旦由页面各自摆，档位就不归设计系统管了**。
 struct GroupStack<Content: View>: View {
     var spacing: CGFloat = Theme.Spacing.group
     @ViewBuilder var content: Content

@@ -28,7 +28,7 @@ struct CodeMetricsView: View {
     static let hotspotRowLimit = 8
 
     var body: some View {
-        DataPageScaffold {
+        Theme.Page.Scaffold {
             if let code = CodeDataGate.metrics(of: report?.code) {
                 GroupStack {
                     CodeScaleSection(code: code, root: projectRoot)

@@ -20,7 +20,7 @@ struct CodeRiskView: View {
     var report: ProjectReport?
 
     var body: some View {
-        DataPageScaffold {
+        Theme.Page.Scaffold {
             if let code = CodeDataGate.metrics(of: report?.code) {
                 GroupStack {
                     CodeRiskOverviewSection(code: code)

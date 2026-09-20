@@ -10,7 +10,7 @@ struct ContributorsView: View {
     var report: ProjectReport?
 
     var body: some View {
-        DataPageScaffold {
+        Theme.Page.Scaffold {
             if let git = report?.git {
                 if git.authors.isEmpty {
                     git.authorAbsence.emptyState {
