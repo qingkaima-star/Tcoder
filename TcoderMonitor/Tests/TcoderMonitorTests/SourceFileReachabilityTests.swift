@@ -40,9 +40,14 @@ final class SourceFileReachabilityTests: XCTestCase {
     private static let sourceDirName = "Sources/TcoderMonitor"
     private static let testDirName = "Tests/TcoderMonitorTests"
 
-    /// 普查基线：`Sources/TcoderMonitor/**` 共 108 个文件。钉住它是为了堵死
+    /// 普查基线：`Sources/TcoderMonitor/**` 的文件数。钉住它是为了堵死
     /// 「目录解析失效 → 分母掉到个位数 → 零死文件通过」这条永真绿路径。
-    private static let censusBaseline = 108
+    ///
+    /// 108 → 109（WS-T #43）：新增 `Services/Health/GitCadenceEvidence.swift`。
+    /// 它**不是**孤儿文件——生产调用点在 `WeightedHealthScorer.swift` 的 `.activity` 分支
+    /// （`let cadence = GitCadenceEvidence.assess(git)`），本守卫的"未用清单"也没有点名它，
+    /// 红的原因只有分母不等。这正是这条棘轮想要的摩擦：加文件必须有人看一眼它凭什么被引用。
+    private static let censusBaseline = 109
 
     private static let prunedDirectories: Set<String> = [".git", ".build", ".swiftpm", ".worktrees",
                                                         "node_modules", "DerivedData", "dist", "build", "out"]
@@ -487,14 +492,14 @@ final class SourceFileReachabilityTests: XCTestCase {
         Rule.allCases.map { "\($0.rawValue) \(tally[$0] ?? 0)" }.joined(separator: " · ")
     }
 
-    // MARK: - 主门：108 个实现文件逐个要有外部调用证据
+    // MARK: - 主门：每个实现文件逐个要有外部调用证据（分母见 censusBaseline）
 
     func testEveryImplementationFileHasExternalCallEvidence() throws {
         let (docs, out) = try realOutcome()
         let g = Self.gate(out, whitelist: Self.frameworkWhitelist)
         XCTAssertTrue(g.pass, g.reasons.joined(separator: "\n"))
         XCTAssertEqual(out.productionFiles.count, docs.filter { $0.isProduction }.count, "分母与扫描面不一致")
-        XCTAssertGreaterThan(out.productionFiles.count, 100, "分母必须 > 100（普查基线 108）")
+        XCTAssertGreaterThan(out.productionFiles.count, 100, "分母必须 > 100（普查基线见 censusBaseline）")
         XCTAssertGreaterThan(out.testFileCount, 50, "测试面也没扫到 → 目录解析八成是坏的")
         XCTAssertEqual(out.inUse.count + out.unused.count + out.whitelisted.count, out.productionFiles.count,
                        "在用 + 未用 + 白名单 必须等于分母，不许有没归类的文件")
