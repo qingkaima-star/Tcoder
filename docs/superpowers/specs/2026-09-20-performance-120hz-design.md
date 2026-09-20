@@ -191,6 +191,18 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 - **T5 主线程禁则**（静态守卫钉死，见 §4）：`body` 与图表 Mark 闭包内 **0 次** new
   `NSColor` / `DateFormatter` / `NumberFormatter` / `Font`；**0 次**全量 `sorted`/`filter`/`reduce`；
   **0 次**同步文件 I/O（`stat`/`Data(contentsOf:)`/JSON 解码）。
+  - **T5 的"零"到底指什么（2026-09-20 23:35 明写，防止被读成"把令牌引用删光"）**。
+    C 包落地后 `ColorToken`/`ThemeTokens` 的 `color`/`font` 已是**存储常量**，
+    守卫里 `dynamicNSColor` 那条正则量的东西随之变了：**不再是"每 tick new 多少个 `NSColor`"，
+    而是"渲染路径里引用令牌成员的次数"**。所以四条禁则的终点并不一样：
+    | 规则 | 现量/上限 | 终点 | 为什么 |
+    |---|---|---|---|
+    | `directFormatters` | 1/1 | **0** | 真违规：渲染路径里现造 formatter |
+    | `fullSort` | 10/10 | **0** | 真违规：body 内全量排序（缓存或挪到 publish） |
+    | `syncFileIO` | 2/2 | **0** | 真违规：body 内 `exists`/`attributesOfItem` |
+    | `dynamicNSColor` | 86/86 | **不是 0** | 取色本身没错，错的是"每次访问现造"。达标判据换成两件事：① `Design/**` 里不许再出现 `var color: Color {` 这类计算属性（已有守卫）；② 引用点不许嵌在 O(n) 循环 / Mark 闭包里重复求值（棘轮只减不增 + 人工核）。 |
+    **不许为了凑"零动态色"去删令牌引用**——那会同时砸掉观感一致性与 T8（颜色承载语义），
+    属于"为了指标改语义"，是本规范第一条禁止的事。
 - **T6 合成层预算**：内容层 0 填充、投影只给 `.floating`、每屏材质/backdrop 层 ≤ 2。
   理由记在观感账上（§1.1），不记在帧率账上。
 - **T7 扫描期仍可交互**：扫描（实测 Git 11.4 s / 代码 1830 ms）运行中点击响应 ≤ 100 ms，
