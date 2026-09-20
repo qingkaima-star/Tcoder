@@ -107,6 +107,18 @@ final class CoverageAnalyzer: CoverageProviding {
     /// 把测试代码从计分分母里剔出去。其余四种格式只有汇总数字，标成
     /// `.aggregateOnly` 让它们的生产码口径**明说等同全量**，而不是假装区分过。
     private func parseLCov(text: String, url: URL) -> CoverageReport? {
+        var tally = LCovTally()
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            tally.consume(raw.trimmingCharacters(in: .whitespaces))
+        }
+        guard tally.allLinesFound > 0 else { return nil }
+        return tally.report(url: url)
+    }
+
+    /// lcov 的逐行累加器。从 `parseLCov` 里分出来只为了一个理由：那段循环被本 App
+    /// 自扫点名 CC 16（超过 `complexFunctionBar`）。语义一字未动——
+    /// `SF:` 决定归属、`end_of_record` 关掉归属、没有归属的计数不许悄悄进生产码。
+    struct LCovTally {
         var allLinesFound = 0, allLinesHit = 0
         var prodLinesFound = 0, prodLinesHit = 0
         var allBranchesFound = 0, allBranchesHit = 0
@@ -115,50 +127,56 @@ final class CoverageAnalyzer: CoverageProviding {
         var inProductionRecord = false
         var sawSourceFileRecord = false
 
-        for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
+        mutating func consume(_ line: String) {
             if line.hasPrefix("SF:") {
                 let path = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
                 sawSourceFileRecord = true
                 inProductionRecord = CoverageScope.isProductionSource(path: path)
-                continue
+                return
             }
             // 没有 SF: 归属的计数不允许悄悄算进生产码。
             if line == "end_of_record" { inProductionRecord = false }
-
-            func add(_ value: Int, toAll all: inout Int, toProduction production: inout Int) {
-                all += value
-                if inProductionRecord { production += value }
-            }
+            let value = CoverageAnalyzer.int(after: line)
             switch line.prefix(3) {
-            case "LF:": add(Self.int(after: line), toAll: &allLinesFound, toProduction: &prodLinesFound)
-            case "LH:": add(Self.int(after: line), toAll: &allLinesHit, toProduction: &prodLinesHit)
-            case "BRF": add(Self.int(after: line), toAll: &allBranchesFound, toProduction: &prodBranchesFound)
-            case "BRH": add(Self.int(after: line), toAll: &allBranchesHit, toProduction: &prodBranchesHit)
-            case "FNF": functionsFound += Self.int(after: line)
-            case "FNH": functionsHit += Self.int(after: line)
+            case "LF:": add(value, toAll: \.allLinesFound, toProduction: \.prodLinesFound)
+            case "LH:": add(value, toAll: \.allLinesHit, toProduction: \.prodLinesHit)
+            case "BRF": add(value, toAll: \.allBranchesFound, toProduction: \.prodBranchesFound)
+            case "BRH": add(value, toAll: \.allBranchesHit, toProduction: \.prodBranchesHit)
+            case "FNF": functionsFound += value
+            case "FNH": functionsHit += value
             default: break
             }
         }
-        guard allLinesFound > 0 else { return nil }
 
-        let separated = sawSourceFileRecord
-        let linesCovered = separated ? prodLinesHit : allLinesHit
-        let linesTotal = separated ? prodLinesFound : allLinesFound
-        let branchesCovered = separated ? prodBranchesHit : allBranchesHit
-        let branchesFound = separated ? prodBranchesFound : allBranchesFound
-        return CoverageReport(
-            path: url.path,
-            kind: Self.classify(url: url),
-            toolName: "lcov",
-            linesCovered: linesCovered, linesTotal: linesTotal,
-            branchesCovered: branchesCovered, branchesTotal: branchesFound > 0 ? branchesFound : nil,
-            methodsCovered: functionsHit, methodsTotal: functionsFound,
-            allLinesCovered: allLinesHit, allLinesTotal: allLinesFound,
-            allBranchesCovered: allBranchesHit,
-            allBranchesTotal: allBranchesFound > 0 ? allBranchesFound : nil,
-            scopeGranularity: separated ? .perSourceFile : .aggregateOnly
-        )
+        /// 走 keyPath 而不是 `inout`：两个 `inout` 同时指向 self 的属性会撞
+        /// 独占访问检查（编译器直接判错），而"全量 + 生产码"成对累加正是这里的形状。
+        private mutating func add(_ value: Int,
+                                  toAll all: WritableKeyPath<LCovTally, Int>,
+                                  toProduction production: WritableKeyPath<LCovTally, Int>) {
+            self[keyPath: all] += value
+            if inProductionRecord { self[keyPath: production] += value }
+        }
+
+        /// `separated` = 这份报告真带 `SF:` 记录，才有资格谈"生产码口径"；
+        /// 没有 SF: 时全量与生产码同值，且 `scopeGranularity` 必须落到 `.aggregateOnly`。
+        func report(url: URL) -> CoverageReport {
+            let separated = sawSourceFileRecord
+            let prodBranches = separated ? prodBranchesFound : allBranchesFound
+            return CoverageReport(
+                path: url.path,
+                kind: CoverageAnalyzer.classify(url: url),
+                toolName: "lcov",
+                linesCovered: separated ? prodLinesHit : allLinesHit,
+                linesTotal: separated ? prodLinesFound : allLinesFound,
+                branchesCovered: separated ? prodBranchesHit : allBranchesHit,
+                branchesTotal: prodBranches > 0 ? prodBranches : nil,
+                methodsCovered: functionsHit, methodsTotal: functionsFound,
+                allLinesCovered: allLinesHit, allLinesTotal: allLinesFound,
+                allBranchesCovered: allBranchesHit,
+                allBranchesTotal: allBranchesFound > 0 ? allBranchesFound : nil,
+                scopeGranularity: separated ? .perSourceFile : .aggregateOnly
+            )
+        }
     }
 
     private func parseIstanbulSummary(text: String, url: URL) -> CoverageReport? {
@@ -203,23 +221,9 @@ final class CoverageAnalyzer: CoverageProviding {
     private func parseJaCoCo(text: String, url: URL) -> CoverageReport? {
         // Report-level counters are the last ones in the document; per-package and
         // per-class counters appear earlier and would double-count.
-        func totals(for type: String) -> (missed: Int, covered: Int)? {
-            let pattern = "<counter\\s+type=\"\(type)\"\\s+missed=\"(\\d+)\"\\s+covered=\"(\\d+)\"\\s*/>"
-            guard let regex = try? NSRegularExpression(pattern: pattern),
-                  let match = regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).last,
-                  match.numberOfRanges == 3 else { return nil }
-            func value(_ index: Int) -> Int {
-                let range = match.range(at: index)
-                guard range.location != NSNotFound,
-                      let swiftRange = Range(range, in: text) else { return 0 }
-                return Int(text[swiftRange]) ?? 0
-            }
-            return (value(1), value(2))
-        }
-
-        guard let line = totals(for: "LINE") else { return nil }
-        let branch = totals(for: "BRANCH")
-        let method = totals(for: "METHOD")
+        guard let line = Self.jacocoTotals(for: "LINE", in: text) else { return nil }
+        let branch = Self.jacocoTotals(for: "BRANCH", in: text)
+        let method = Self.jacocoTotals(for: "METHOD", in: text)
         let total = line.missed + line.covered
         guard total > 0 else { return nil }
         return CoverageReport(
@@ -228,14 +232,39 @@ final class CoverageAnalyzer: CoverageProviding {
             toolName: "JaCoCo",
             linesCovered: line.covered, linesTotal: total,
             branchesCovered: branch?.covered ?? 0,
-            branchesTotal: branch.map { $0.missed + $0.covered }.flatMap { $0 > 0 ? $0 : nil },
+            branchesTotal: Self.jacocoSumIfPositive(branch),
             methodsCovered: method?.covered ?? 0,
-            methodsTotal: method.map { $0.missed + $0.covered } ?? 0,
+            methodsTotal: Self.jacocoSum(method),
             allLinesCovered: line.covered, allLinesTotal: total,
             allBranchesCovered: branch?.covered ?? 0,
-            allBranchesTotal: branch.map { $0.missed + $0.covered }.flatMap { $0 > 0 ? $0 : nil },
+            allBranchesTotal: Self.jacocoSumIfPositive(branch),
             scopeGranularity: .aggregateOnly
         )
+    }
+
+    static func jacocoTotals(for type: String, in text: String) -> (missed: Int, covered: Int)? {
+        let pattern = "<counter\\s+type=\"\(type)\"\\s+missed=\"(\\d+)\"\\s+covered=\"(\\d+)\"\\s*/>"
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).last,
+              match.numberOfRanges == 3 else { return nil }
+        return (jacocoValue(at: 1, of: match, in: text), jacocoValue(at: 2, of: match, in: text))
+    }
+
+    static func jacocoValue(at index: Int, of match: NSTextCheckingResult, in text: String) -> Int {
+        let range = match.range(at: index)
+        guard range.location != NSNotFound, let swiftRange = Range(range, in: text) else { return 0 }
+        return Int(text[swiftRange]) ?? 0
+    }
+
+    /// 分支总数为 0 时报 nil（"这份报告没有分支数据"），不是报 0（"分支覆盖 0%"）。
+    static func jacocoSumIfPositive(_ counter: (missed: Int, covered: Int)?) -> Int? {
+        guard let counter else { return nil }
+        let sum = counter.missed + counter.covered
+        return sum > 0 ? sum : nil
+    }
+
+    static func jacocoSum(_ counter: (missed: Int, covered: Int)?) -> Int {
+        counter.map { $0.missed + $0.covered } ?? 0
     }
 
     private func parseCoveragePy(text: String, url: URL) -> CoverageReport? {
