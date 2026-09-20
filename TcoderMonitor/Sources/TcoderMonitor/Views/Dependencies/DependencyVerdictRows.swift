@@ -275,11 +275,14 @@ struct VulnerabilityRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: DataRowMetrics.cellGap) {
-            /// 严重度左侧标尺：宽度取描边强调档，高度随行内容拉伸，不再钉死 34pt。
+            /// 严重度左侧标尺：宽度取描边强调档，**高度跟着这一行的内容走**。
+            /// 原来写死 `maxHeight: xl + lg`（44pt），而一条公告的正文最多 5 段约 90pt
+            /// —— 标尺在半路就断了，行左边界看起来错位一半。`maxHeight: .infinity`
+            /// 在 `HStack(alignment: .top)` 里就是"取同排最高兄弟的高度"。
             Capsule()
                 .fill(role.graphicColor)
                 .frame(width: Theme.Stroke.emphasis)
-                .frame(maxHeight: Theme.Spacing.xl + Theme.Spacing.lg)
+                .frame(maxHeight: .infinity)
                 .accessibilityLabel("严重度 \(item.severity.rawValue)")
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {

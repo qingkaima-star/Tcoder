@@ -68,7 +68,10 @@ struct PerformanceSystemTiles: View {
                 label: "CPU",
                 value: fraction == nil ? nil : Live.percent(fraction, precision: 0),
                 caption: cpuCaption(cores: cores),
-                tint: role.textColor,
+                // 34pt 的主读数一律纯墨（风格契约 4）。档位语义交给下面那条量条
+                // （`gauged(..., graphic: role.graphicColor)`）—— 参考图就是这个分工：
+                // 数字负责读，小面积色负责说"这值要紧"。
+                // 原来四格里两格被涂成绿/红，两格是墨，同排读数互相抢注意力。
                 systemImage: IconName.cpu.rawValue
             ),
             fraction: fraction,
@@ -90,7 +93,7 @@ struct PerformanceSystemTiles: View {
                 caption: used == nil
                     ? (SystemReadings.memoryGapReason(context) ?? "等待首个样本")
                     : "在用 \(Live.percent(fraction, precision: 0)) · 压力 \(pressure?.rawValue ?? Live.missing)",
-                tint: role.textColor,
+                tint: Theme.Palette.Surface.ink,
                 systemImage: IconName.memory.rawValue
             ),
             fraction: fraction,

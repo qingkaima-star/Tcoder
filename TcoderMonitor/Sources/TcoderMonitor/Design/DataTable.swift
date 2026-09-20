@@ -42,10 +42,15 @@ struct DataGridColumn: Equatable {
     let help: String?
 
     init(_ title: String, _ width: CGFloat? = nil,
-         _ alignment: DataGridColumnAlignment = .trailing, help: String? = nil) {
+         _ alignment: DataGridColumnAlignment? = nil, help: String? = nil) {
         self.title = title
         self.width = width
-        self.alignment = alignment
+        // **弹性列（无定宽）= 名称列 = 一律左对齐**，这个规则收在构造点。
+        // 原来默认对齐是尾对齐（数字列占多数），名称列漏写 `.leading` 就会把表头拉到
+        // 列右边 —— 代码规模页「来源」、贡献者页「来源」、Git 洞察页「目录」三张表
+        // 各现形一次，而同文件注释早就写了"名称列一律显式写 .leading"：
+        // 一条只能靠记性的规则就是没有规则。显式传入仍然优先。
+        self.alignment = alignment ?? (width == nil ? .leading : .trailing)
         self.help = help
     }
 }
@@ -166,6 +171,12 @@ extension View {
     func tableCell(_ column: DataGridColumn) -> some View {
         if let width = column.width {
             frame(width: width, alignment: column.alignment.frameAlignment)
+                // **定宽格不许折行**，这条收在这里而不是逐格写 `lineLimit`：
+                // 一个数字在 56pt 的格里换成两行，就把整行抬高、五列基线全断
+                // （Git 洞察「增/删」列遇 `+1,234,567`、依赖「版本」列遇
+                // `>=1.2.3, <2.0.0` 都是这个形状）。宁可截，不可撑。
+                // 弹性列（名称 / 详情）不在此列 —— 它们本来就该换行，行高由最长按钮决定。
+                .lineLimit(1)
         } else {
             frame(maxWidth: .infinity, alignment: column.alignment.frameAlignment)
         }
@@ -452,7 +463,8 @@ struct DataNotice: View {
         .padding(.horizontal, Theme.Spacing.md)
         .padding(.vertical, Theme.Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(role.badgeFill(), in: RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+        // 与 `BannerRow` 同一份配方（原来这里自己铺了一层 15% 色底 = 第二种画法）。
+        .bannerRuleSurface(role)
         .accessibilityElement(children: .combine)
     }
 }
