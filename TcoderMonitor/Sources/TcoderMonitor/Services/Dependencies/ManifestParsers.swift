@@ -80,36 +80,10 @@ enum ManifestParsers {
         guard let ecosystem = ManifestFileName.ecosystem(for: fileName) else { return nil }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
 
-        let raw: [DependencyRecord]
-        switch ecosystem {
-        case .npm:
-            raw = packageJSONDependencies(text, manifestPath: manifestPath)
-        case .maven:
-            raw = pomXMLDependencies(text, manifestPath: manifestPath)
-        case .gradle:
-            raw = gradleDependencies(text, manifestPath: manifestPath)
-        case .swiftPM:
-            raw = swiftPackageDependencies(text, manifestPath: manifestPath)
-        case .python:
-            let lower = fileName.lowercased()
-            if lower.hasPrefix("requirements") && lower.hasSuffix(".txt") {
-                raw = requirementsTxtDependencies(text, manifestPath: manifestPath)
-            } else {
-                raw = pyprojectDependencies(text, manifestPath: manifestPath)
-            }
-        case .go:
-            raw = goModDependencies(text, manifestPath: manifestPath)
-        case .cargo:
-            raw = cargoTomlDependencies(text, manifestPath: manifestPath)
-        case .cocoapods:
-            raw = podfileDependencies(text, manifestPath: manifestPath)
-        case .ruby:
-            raw = gemfileDependencies(text, manifestPath: manifestPath)
-        case .nuget:
-            raw = nugetPackagesConfigDependencies(text, manifestPath: manifestPath)
-        case .unknown:
-            return nil
-        }
+        let raw = dependencies(for: ecosystem,
+                               fileName: fileName,
+                               text: text,
+                               manifestPath: manifestPath)
 
         let dependencies = dedupe(raw)
         guard !dependencies.isEmpty else { return nil }
@@ -136,37 +110,48 @@ enum ManifestParsers {
         return found
     }
 
-    /// 生态 + 依赖名集合 -> 人类可读框架标记（去重、按命中次数排序、最多 8 个）。
-    static func frameworkMarkers(ecosystem: DependencyEcosystem, dependencyNames: [String]) -> [String] {
-        var counts: [String: Int] = [:]
-        for name in dependencyNames {
-            let tokens = tokens(of: name)
-            guard !tokens.isEmpty else { continue }
-            // 连接形式用于兜住 camelCase 拆出的碎片："MyBatis" -> [my, batis] ~ "mybatis"
-            let joined = tokens.joined()
-            var hits: [String] = []
-            for rule in markerRules where rule.matches(ecosystem) {
-                let isHit = rule.keys.contains { phrase in
-                    containsPhrase(tokens, phrase) || joined == phrase.joined()
-                }
-                guard isHit else { continue }
-                if !hits.contains(rule.marker) { hits.append(rule.marker) }
-            }
-            for marker in hits { counts[marker, default: 0] += 1 }
+    /// 生态 -> 该生态的清单解析器。`parse` 只做「认文件 + 收尾」，分派表单独一处，
+    /// 这样 11 个 `case` 的判定成本全落在这个函数里，`parse` 自己回到个位数复杂度。
+    /// 每个分支调用的解析函数与拆分前**逐字相同**，包含 `.unknown` 返回空数组这一条
+    /// （原先是 `return nil` 直接结束 `parse`，现在由「去重后为空 -> nil」接住，
+    /// 结果同样是 nil：`.unknown` 走不到 `ManifestFileName.ecosystem(for:)` 的成功分支）。
+    static func dependencies(for ecosystem: DependencyEcosystem,
+                             fileName: String,
+                             text: String,
+                             manifestPath: String) -> [DependencyRecord] {
+        switch ecosystem {
+        case .npm:
+            return packageJSONDependencies(text, manifestPath: manifestPath)
+        case .maven:
+            return pomXMLDependencies(text, manifestPath: manifestPath)
+        case .gradle:
+            return gradleDependencies(text, manifestPath: manifestPath)
+        case .swiftPM:
+            return swiftPackageDependencies(text, manifestPath: manifestPath)
+        case .python:
+            return pythonDependencies(fileName: fileName, text: text, manifestPath: manifestPath)
+        case .go:
+            return goModDependencies(text, manifestPath: manifestPath)
+        case .cargo:
+            return cargoTomlDependencies(text, manifestPath: manifestPath)
+        case .cocoapods:
+            return podfileDependencies(text, manifestPath: manifestPath)
+        case .ruby:
+            return gemfileDependencies(text, manifestPath: manifestPath)
+        case .nuget:
+            return nugetPackagesConfigDependencies(text, manifestPath: manifestPath)
+        case .unknown:
+            return []
         }
-        let sorted = counts.sorted { lhs, rhs in
-            if lhs.value != rhs.value { return lhs.value > rhs.value }
-            return lhs.key.localizedCaseInsensitiveCompare(rhs.key) == .orderedAscending
-        }
-        return Array(sorted.prefix(8).map(\.key))
     }
 
-    /// 按生态在目录清单里找锁文件名，返回找到的第一个（没有则 nil）。
-    static func lockfileName(for ecosystem: DependencyEcosystem, in directoryListing: Set<String>) -> String? {
-        for candidate in lockfileCandidates[ecosystem] ?? [] where directoryListing.contains(candidate) {
-            return candidate
+    /// Python 系清单按文件名分流：`requirements*.txt` 走行式解析，其余走 pyproject/setup/Pipfile。
+    static func pythonDependencies(fileName: String, text: String, manifestPath: String) -> [DependencyRecord] {
+        let lower = fileName.lowercased()
+        if lower.hasPrefix("requirements") && lower.hasSuffix(".txt") {
+            return requirementsTxtDependencies(text, manifestPath: manifestPath)
         }
-        return nil
+        return pyprojectDependencies(text, manifestPath: manifestPath)
     }
 }
 
@@ -302,223 +287,76 @@ extension ManifestParsers {
         return line
     }
 
-    // MARK: - 分词 / 框架标记
+    // MARK: - Ruby 语法系清单（Podfile / Gemfile）共用的逐行扫描器
 
-    /// 把依赖名切成小写 token：按非字母数字切，并拆 camelCase（"SwiftUI" -> swift, ui）。
-    static func tokens(of name: String) -> [String] {
-        let chars = Array(name)
-        var result: [String] = []
-        var current = ""
-        for index in 0..<chars.count {
-            let ch = chars[index]
-            if !(ch.isLetter || ch.isNumber) {
-                if !current.isEmpty { result.append(current); current = "" }
+    /// Podfile 与 Gemfile 是同一套 Ruby 块语法，此前各自手写了一遍逐行扫描
+    /// （工具点名的 15 行 87% 相似块就是这个）。这里把公共骨架收成一份，
+    /// 差异全部下沉成 `RubyStyleWalk` 的六个钩子，每个钩子的表达式**逐字照抄原分支**：
+    /// - `isEntry`：原 `pod ` / `gem ` 的四种前缀写法；
+    /// - `entryScope`：Podfile 的 `testables` 判定 / Gemfile 的行内 `groups:` 判定；
+    /// - `isGroup` + `groupScope`：只有 Gemfile 有 `group :test do` 这条专属分支；
+    /// - `opensBlock`：Podfile 只看 ` do` / `{`，Gemfile 额外认 `if `；
+    /// - `blockScope`：Podfile 用 `blockScope(line) ?? inherited`，Gemfile 原样继承。
+    /// 判定顺序与拆分前两处完全一致：空行 → `end` → 声明行 → 组块 → 普通块。
+    /// 其中「声明行前缀命中但包名为空」这一条原代码是 `continue`（不再往下看开块），
+    /// 这里同样直接跳过本行，没有把它降级成「继续匹配后面的分支」。
+    struct RubyStyleWalk {
+        let isEntry: (String) -> Bool
+        let entryScope: (String, DependencyScope) -> DependencyScope
+        let isGroup: (String) -> Bool
+        let groupScope: (String) -> DependencyScope
+        let opensBlock: (String) -> Bool
+        let blockScope: (String, DependencyScope) -> DependencyScope
+        let ecosystem: DependencyEcosystem
+    }
+
+    static func rubyStyleDependencies(_ text: String,
+                                      manifestPath: String,
+                                      walk: RubyStyleWalk) -> [DependencyRecord] {
+        var records: [DependencyRecord] = []
+        var depth = 0
+        var scopes: [DependencyScope] = []
+        for rawLine in lines(text) {
+            let line = trim(stripHashComment(rawLine))
+            if line.isEmpty { continue }
+            if line == "end" || line.hasPrefix("end ") {
+                if depth > 0 { depth -= 1 }
+                while scopes.count > depth { scopes.removeLast() }
                 continue
             }
-            if ch.isUppercase && !current.isEmpty && index > 0 {
-                let prev = chars[index - 1]
-                let prevIsLowerOrDigit = prev.isNumber || (prev.isLetter && prev.isLowercase)
-                let nextIsLower = index + 1 < chars.count && chars[index + 1].isLetter && chars[index + 1].isLowercase
-                if prevIsLowerOrDigit || (prev.isUppercase && nextIsLower) {
-                    result.append(current)
-                    current = ""
+            let inherited = scopes.last ?? .runtime
+            if walk.isEntry(line) {
+                if let entry = rubyStyleEntry(line, inherited: inherited, manifestPath: manifestPath, walk: walk) {
+                    records.append(entry)
                 }
+                continue
             }
-            current.append(Character(ch.lowercased()))
+            if walk.isGroup(line) {
+                depth += 1
+                scopes.append(walk.groupScope(line))
+                continue
+            }
+            if walk.opensBlock(line) {
+                depth += 1
+                scopes.append(walk.blockScope(line, inherited))
+            }
         }
-        if !current.isEmpty { result.append(current) }
-        return result.filter { !$0.isEmpty }
+        return dedupe(records)
     }
 
-    static func containsPhrase(_ tokens: [String], _ phrase: [String]) -> Bool {
-        guard !phrase.isEmpty, tokens.count >= phrase.count else { return false }
-        for start in 0...(tokens.count - phrase.count) {
-            if Array(tokens[start..<(start + phrase.count)]) == phrase { return true }
-        }
-        return false
+    /// 声明行 -> 记录。取第一个引号串当包名、其余当版本约束，与拆分前两处逐字相同；
+    /// 包名为空返回 nil（调用方照样 `continue`，与原行为一致）。
+    static func rubyStyleEntry(_ line: String,
+                               inherited: DependencyScope,
+                               manifestPath: String,
+                               walk: RubyStyleWalk) -> DependencyRecord? {
+        let strings = quotedStrings(line)
+        guard let name = strings.first, !name.isEmpty else { return nil }
+        let scope = walk.entryScope(line, inherited)
+        let version = versionConstraint(from: Array(strings.dropFirst())) ?? undeclaredVersion
+        return record(name, version, walk.ecosystem, scope, manifestPath)
     }
 
-    struct MarkerRule {
-        let marker: String
-        /// 空集表示不限生态。
-        let ecosystems: Set<DependencyEcosystem>
-        let keys: [[String]]
-        func matches(_ ecosystem: DependencyEcosystem) -> Bool {
-            ecosystems.isEmpty || ecosystems.contains(ecosystem)
-        }
-    }
-
-    static let markerRules: [MarkerRule] = [
-        // 前端 / npm
-        MarkerRule(marker: "React", ecosystems: [], keys: [["react"]]),
-        MarkerRule(marker: "React DOM", ecosystems: [.npm, .unknown], keys: [["react", "dom"]]),
-        MarkerRule(marker: "React Native", ecosystems: [.npm, .maven, .gradle, .unknown], keys: [["react", "native"]]),
-        MarkerRule(marker: "Redux", ecosystems: [.npm, .unknown], keys: [["redux"], ["rematch"]]),
-        MarkerRule(marker: "MobX", ecosystems: [.npm, .unknown], keys: [["mobx"]]),
-        MarkerRule(marker: "Vue", ecosystems: [.npm, .unknown], keys: [["vue"]]),
-        MarkerRule(marker: "Vue Router", ecosystems: [.npm, .unknown], keys: [["vue", "router"]]),
-        MarkerRule(marker: "Pinia", ecosystems: [.npm, .unknown], keys: [["pinia"]]),
-        MarkerRule(marker: "Vite", ecosystems: [.npm, .unknown], keys: [["vite"], ["vitejs"], ["vitest"]]),
-        MarkerRule(marker: "Next.js", ecosystems: [.npm, .unknown], keys: [["next"]]),
-        MarkerRule(marker: "Nuxt", ecosystems: [.npm, .unknown], keys: [["nuxt"]]),
-        MarkerRule(marker: "Angular", ecosystems: [.npm, .unknown], keys: [["angular"]]),
-        MarkerRule(marker: "Svelte", ecosystems: [.npm, .unknown], keys: [["svelte"]]),
-        MarkerRule(marker: "Express", ecosystems: [.npm, .unknown], keys: [["express"]]),
-        MarkerRule(marker: "Koa", ecosystems: [.npm, .unknown], keys: [["koa"]]),
-        MarkerRule(marker: "NestJS", ecosystems: [.npm, .unknown], keys: [["nestjs"], ["nest"]]),
-        MarkerRule(marker: "TypeScript", ecosystems: [.npm, .unknown], keys: [["typescript"], ["ts", "node"]]),
-        MarkerRule(marker: "Electron", ecosystems: [.npm, .unknown], keys: [["electron"]]),
-        MarkerRule(marker: "Tailwind CSS", ecosystems: [.npm, .unknown], keys: [["tailwindcss"], ["tailwind", "css"], ["tailwind"]]),
-        MarkerRule(marker: "Webpack", ecosystems: [.npm, .unknown], keys: [["webpack"]]),
-        MarkerRule(marker: "Babel", ecosystems: [.npm, .unknown], keys: [["babel"]]),
-        MarkerRule(marker: "ESLint", ecosystems: [.npm, .unknown], keys: [["eslint"]]),
-        MarkerRule(marker: "Prettier", ecosystems: [.npm, .unknown], keys: [["prettier"]]),
-        MarkerRule(marker: "Jest", ecosystems: [.npm, .unknown], keys: [["jest"]]),
-        MarkerRule(marker: "Axios", ecosystems: [.npm, .unknown], keys: [["axios"]]),
-        MarkerRule(marker: "Lodash", ecosystems: [.npm, .unknown], keys: [["lodash"]]),
-        MarkerRule(marker: "Moment.js", ecosystems: [.npm, .unknown], keys: [["moment"]]),
-        MarkerRule(marker: "Day.js", ecosystems: [.npm, .unknown], keys: [["dayjs"]]),
-        MarkerRule(marker: "ECharts", ecosystems: [.npm, .unknown], keys: [["echarts"]]),
-        MarkerRule(marker: "Ant Design", ecosystems: [.npm, .unknown], keys: [["antd"], ["ant", "design"]]),
-        MarkerRule(marker: "Element Plus", ecosystems: [.npm, .unknown], keys: [["element", "plus"], ["element", "ui"]]),
-        MarkerRule(marker: "Prisma", ecosystems: [.npm, .unknown], keys: [["prisma"]]),
-        MarkerRule(marker: "jQuery", ecosystems: [.npm, .unknown], keys: [["jquery"]]),
-        // JVM
-        MarkerRule(marker: "Spring Boot", ecosystems: [.maven, .gradle, .unknown], keys: [["spring", "boot"]]),
-        MarkerRule(marker: "Spring Cloud", ecosystems: [.maven, .gradle, .unknown], keys: [["spring", "cloud"]]),
-        MarkerRule(marker: "Spring Security", ecosystems: [.maven, .gradle, .unknown], keys: [["spring", "security"]]),
-        MarkerRule(marker: "MyBatis", ecosystems: [.maven, .gradle, .unknown], keys: [["mybatis"]]),
-        MarkerRule(marker: "MyBatis-Plus", ecosystems: [.maven, .gradle, .unknown], keys: [["mybatis", "plus"]]),
-        MarkerRule(marker: "Lombok", ecosystems: [.maven, .gradle, .unknown], keys: [["lombok"]]),
-        MarkerRule(marker: "Netty", ecosystems: [.maven, .gradle, .unknown], keys: [["netty"]]),
-        MarkerRule(marker: "Jackson", ecosystems: [.maven, .gradle, .unknown], keys: [["jackson"]]),
-        MarkerRule(marker: "Gson", ecosystems: [.maven, .gradle, .unknown], keys: [["gson"]]),
-        MarkerRule(marker: "Fastjson", ecosystems: [.maven, .gradle, .unknown], keys: [["fastjson"]]),
-        MarkerRule(marker: "Kotlin", ecosystems: [.maven, .gradle, .unknown], keys: [["kotlin"]]),
-        MarkerRule(marker: "Ktor", ecosystems: [.maven, .gradle, .unknown], keys: [["ktor"]]),
-        MarkerRule(marker: "Apache Commons", ecosystems: [.maven, .gradle, .unknown], keys: [["commons"]]),
-        MarkerRule(marker: "Guava", ecosystems: [.maven, .gradle, .unknown], keys: [["guava"]]),
-        MarkerRule(marker: "JUnit", ecosystems: [.maven, .gradle, .unknown], keys: [["junit"]]),
-        MarkerRule(marker: "Mockito", ecosystems: [.maven, .gradle, .unknown], keys: [["mockito"]]),
-        MarkerRule(marker: "Log4j", ecosystems: [.maven, .gradle, .unknown], keys: [["log4j"]]),
-        MarkerRule(marker: "SLF4J", ecosystems: [.maven, .gradle, .unknown], keys: [["slf4j"]]),
-        MarkerRule(marker: "Logback", ecosystems: [.maven, .gradle, .unknown], keys: [["logback"]]),
-        MarkerRule(marker: "Druid", ecosystems: [.maven, .gradle, .unknown], keys: [["druid"]]),
-        MarkerRule(marker: "HikariCP", ecosystems: [.maven, .gradle, .unknown], keys: [["hikari"]]),
-        MarkerRule(marker: "Flyway", ecosystems: [.maven, .gradle, .unknown], keys: [["flyway"]]),
-        MarkerRule(marker: "Dubbo", ecosystems: [.maven, .gradle, .unknown], keys: [["dubbo"]]),
-        MarkerRule(marker: "Nacos", ecosystems: [.maven, .gradle, .unknown], keys: [["nacos"]]),
-        MarkerRule(marker: "Seata", ecosystems: [.maven, .gradle, .unknown], keys: [["seata"]]),
-        MarkerRule(marker: "Sentinel", ecosystems: [.maven, .gradle, .unknown], keys: [["sentinel"]]),
-        MarkerRule(marker: "ShardingSphere", ecosystems: [.maven, .gradle, .unknown], keys: [["shardingsphere"], ["sharding", "sphere"]]),
-        MarkerRule(marker: "XXL-JOB", ecosystems: [.maven, .gradle, .unknown], keys: [["xxl"]]),
-        MarkerRule(marker: "Hutool", ecosystems: [.maven, .gradle, .unknown], keys: [["hutool"]]),
-        MarkerRule(marker: "OkHttp", ecosystems: [.maven, .gradle, .unknown, .cocoapods], keys: [["okhttp"]]),
-        MarkerRule(marker: "Retrofit", ecosystems: [.maven, .gradle, .unknown], keys: [["retrofit"]]),
-        MarkerRule(marker: "gRPC", ecosystems: [.maven, .gradle, .go, .python, .unknown], keys: [["grpc"]]),
-        MarkerRule(marker: "Protobuf", ecosystems: [.maven, .gradle, .go, .python, .npm, .unknown], keys: [["protobuf"], ["proto", "buf"]]),
-        MarkerRule(marker: "Elasticsearch", ecosystems: [.maven, .gradle, .npm, .python, .unknown], keys: [["elasticsearch"]]),
-        MarkerRule(marker: "Kafka", ecosystems: [.maven, .gradle, .python, .go, .unknown], keys: [["kafka"]]),
-        MarkerRule(marker: "Redis", ecosystems: [.maven, .gradle, .python, .go, .npm, .ruby, .cocoapods, .unknown], keys: [["redis"], ["lettuce"]]),
-        MarkerRule(marker: "Android Gradle Plugin", ecosystems: [.gradle, .maven], keys: [["android", "tools"], ["gradle", "android"]]),
-        MarkerRule(marker: "Android", ecosystems: [.gradle, .maven], keys: [["androidx"], ["android"]]),
-        // Swift / ObjC
-        MarkerRule(marker: "SwiftUI", ecosystems: [], keys: [["swift", "ui"], ["swiftui"]]),
-        MarkerRule(marker: "GRDB", ecosystems: [.swiftPM, .cocoapods, .unknown], keys: [["grdb"]]),
-        MarkerRule(marker: "Alamofire", ecosystems: [.swiftPM, .cocoapods, .unknown], keys: [["alamofire"]]),
-        MarkerRule(marker: "SnapKit", ecosystems: [.swiftPM, .cocoapods, .unknown], keys: [["snapkit"], ["snap", "kit"]]),
-        MarkerRule(marker: "Moya", ecosystems: [.swiftPM, .cocoapods, .unknown], keys: [["moya"]]),
-        MarkerRule(marker: "Kingfisher", ecosystems: [.swiftPM, .cocoapods, .unknown], keys: [["kingfisher"]]),
-        MarkerRule(marker: "RxSwift", ecosystems: [.swiftPM, .cocoapods, .unknown], keys: [["rx", "swift"], ["rxcocoa"]]),
-        MarkerRule(marker: "Realm", ecosystems: [.swiftPM, .cocoapods, .unknown], keys: [["realm"]]),
-        MarkerRule(marker: "SDWebImage", ecosystems: [.cocoapods, .swiftPM, .unknown], keys: [["sd", "web", "image"], ["web", "image"]]),
-        MarkerRule(marker: "YYModel", ecosystems: [.cocoapods, .swiftPM, .unknown], keys: [["yy", "model"]]),
-        MarkerRule(marker: "SwiftLint", ecosystems: [.swiftPM, .cocoapods, .unknown], keys: [["swiftlint"]]),
-        MarkerRule(marker: "Firebase", ecosystems: [.cocoapods, .swiftPM, .gradle, .npm, .unknown], keys: [["firebase"]]),
-        // Go
-        MarkerRule(marker: "Gin", ecosystems: [.go, .unknown], keys: [["gin"]]),
-        MarkerRule(marker: "Echo", ecosystems: [.go, .unknown], keys: [["echo"]]),
-        MarkerRule(marker: "Fiber", ecosystems: [.go, .unknown], keys: [["fiber"]]),
-        MarkerRule(marker: "GORM", ecosystems: [.go, .unknown], keys: [["gorm"]]),
-        MarkerRule(marker: "Cobra", ecosystems: [.go, .unknown], keys: [["cobra"]]),
-        MarkerRule(marker: "Viper", ecosystems: [.go, .unknown], keys: [["viper"]]),
-        // Rust
-        MarkerRule(marker: "Tokio", ecosystems: [.cargo, .unknown], keys: [["tokio"]]),
-        MarkerRule(marker: "Serde", ecosystems: [.cargo, .unknown], keys: [["serde"]]),
-        MarkerRule(marker: "Actix Web", ecosystems: [.cargo, .unknown], keys: [["actix"]]),
-        MarkerRule(marker: "Reqwest", ecosystems: [.cargo, .unknown], keys: [["reqwest"]]),
-        MarkerRule(marker: "Clap", ecosystems: [.cargo, .unknown], keys: [["clap"]]),
-        MarkerRule(marker: "Rocket", ecosystems: [.cargo, .unknown], keys: [["rocket"]]),
-        MarkerRule(marker: "Anyhow", ecosystems: [.cargo, .unknown], keys: [["anyhow"]]),
-        // Python
-        MarkerRule(marker: "Django", ecosystems: [.python, .unknown], keys: [["django"]]),
-        MarkerRule(marker: "Django REST Framework", ecosystems: [.python, .unknown], keys: [["djangorestframework"], ["rest", "framework"]]),
-        MarkerRule(marker: "Flask", ecosystems: [.python, .unknown], keys: [["flask"]]),
-        MarkerRule(marker: "FastAPI", ecosystems: [.python, .unknown], keys: [["fastapi"]]),
-        MarkerRule(marker: "Uvicorn", ecosystems: [.python, .unknown], keys: [["uvicorn"]]),
-        MarkerRule(marker: "Gunicorn", ecosystems: [.python, .unknown], keys: [["gunicorn"]]),
-        MarkerRule(marker: "Pydantic", ecosystems: [.python, .unknown], keys: [["pydantic"]]),
-        MarkerRule(marker: "SQLAlchemy", ecosystems: [.python, .unknown], keys: [["sqlalchemy"], ["active", "record"]]),
-        MarkerRule(marker: "Alembic", ecosystems: [.python, .unknown], keys: [["alembic"]]),
-        MarkerRule(marker: "Celery", ecosystems: [.python, .unknown], keys: [["celery"]]),
-        MarkerRule(marker: "NumPy", ecosystems: [.python, .unknown], keys: [["numpy"]]),
-        MarkerRule(marker: "Pandas", ecosystems: [.python, .unknown], keys: [["pandas"]]),
-        MarkerRule(marker: "SciPy", ecosystems: [.python, .unknown], keys: [["scipy"]]),
-        MarkerRule(marker: "Matplotlib", ecosystems: [.python, .unknown], keys: [["matplotlib"]]),
-        MarkerRule(marker: "Scikit-learn", ecosystems: [.python, .unknown], keys: [["scikit"]]),
-        MarkerRule(marker: "PyTorch", ecosystems: [.python, .unknown], keys: [["pytorch"], ["torch"]]),
-        MarkerRule(marker: "TensorFlow", ecosystems: [.python, .unknown], keys: [["tensorflow"]]),
-        MarkerRule(marker: "Jupyter", ecosystems: [.python, .unknown], keys: [["jupyter"], ["ipykernel"], ["ipython"]]),
-        MarkerRule(marker: "pytest", ecosystems: [.python, .unknown], keys: [["pytest"]]),
-        MarkerRule(marker: "Requests", ecosystems: [.python, .unknown], keys: [["requests"], ["httpx"], ["aiohttp"]]),
-        MarkerRule(marker: "Ruff", ecosystems: [.python, .unknown], keys: [["ruff"]]),
-        MarkerRule(marker: "Mypy", ecosystems: [.python, .unknown], keys: [["mypy"]]),
-        MarkerRule(marker: "Poetry", ecosystems: [.python, .unknown], keys: [["poetry"]]),
-        // Ruby
-        MarkerRule(marker: "Ruby on Rails", ecosystems: [.ruby, .unknown], keys: [
-            ["rails"], ["railties"], ["activerecord"], ["activesupport"], ["actionpack"], ["actionview"],
-        ]),
-        MarkerRule(marker: "RSpec", ecosystems: [.ruby, .unknown], keys: [["rspec"]]),
-        MarkerRule(marker: "Sidekiq", ecosystems: [.ruby, .unknown], keys: [["sidekiq"]]),
-        MarkerRule(marker: "Puma", ecosystems: [.ruby, .unknown], keys: [["puma"]]),
-        MarkerRule(marker: "Devise", ecosystems: [.ruby, .unknown], keys: [["devise"]]),
-        MarkerRule(marker: "Nokogiri", ecosystems: [.ruby, .unknown], keys: [["nokogiri"]]),
-        MarkerRule(marker: "Minitest", ecosystems: [.ruby, .unknown], keys: [["minitest"]]),
-        MarkerRule(marker: "RuboCop", ecosystems: [.ruby, .unknown], keys: [["rubocop"]]),
-        MarkerRule(marker: "SimpleCov", ecosystems: [.ruby, .unknown], keys: [["simplecov"], ["simple", "cov"]]),
-        MarkerRule(marker: "Bundler", ecosystems: [.ruby, .unknown], keys: [["bundler"]]),
-        // .NET
-        MarkerRule(marker: "ASP.NET Core", ecosystems: [.nuget, .unknown], keys: [["aspnetcore"], ["asp", "net"], ["net", "core"]]),
-        MarkerRule(marker: "Entity Framework Core", ecosystems: [.nuget, .unknown], keys: [["entity", "framework"]]),
-        MarkerRule(marker: "Newtonsoft.Json", ecosystems: [.nuget, .unknown], keys: [["newtonsoft"]]),
-        MarkerRule(marker: "Serilog", ecosystems: [.nuget, .unknown], keys: [["serilog"]]),
-        MarkerRule(marker: "Dapper", ecosystems: [.nuget, .unknown], keys: [["dapper"]]),
-        MarkerRule(marker: "xUnit", ecosystems: [.nuget, .unknown], keys: [["xunit"]]),
-        MarkerRule(marker: "NUnit", ecosystems: [.nuget, .unknown], keys: [["nunit"]]),
-        MarkerRule(marker: "Moq", ecosystems: [.nuget, .unknown], keys: [["moq"]]),
-    ]
-
-    // MARK: - 锁文件判定表
-
-    static let lockfileCandidates: [DependencyEcosystem: [String]] = [
-        .npm: [
-            "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "pnpm-lock.yml",
-            "yarn.lock", "bun.lockb", "bun.lock", "deno.lock",
-        ],
-        .maven: [],
-        .gradle: ["gradle.lockfile", "dependencies.lock"],
-        .swiftPM: ["Package.resolved"],
-        .python: [
-            "poetry.lock", "Pipfile.lock", "uv.lock", "pdm.lock",
-            "requirements.lock", "requirements.txt.lock", "conda-lock.json",
-        ],
-        .go: ["go.sum"],
-        .cargo: ["Cargo.lock"],
-        .cocoapods: ["Podfile.lock"],
-        .ruby: ["Gemfile.lock"],
-        .nuget: ["packages.lock.json"],
-        .unknown: [],
-    ]
 }
 
 // MARK: - 下标安全访问

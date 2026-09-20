@@ -96,33 +96,20 @@ extension ManifestParsers {
 
 extension ManifestParsers {
     /// Podfile -> [DependencyRecord]。`target 'Tests'` 段内或带 `:testables` 的记为 .test。
+    /// 逐行骨架走 `rubyStyleDependencies`（与 Gemfile 共用一份），这里只给 Podfile 的三个钩子。
     static func podfileDependencies(_ text: String, manifestPath: String) -> [DependencyRecord] {
-        var records: [DependencyRecord] = []
-        var depth = 0
-        var scopes: [DependencyScope] = []
-        for rawLine in lines(text) {
-            let line = trim(stripHashComment(rawLine))
-            if line.isEmpty { continue }
-            if line == "end" || line.hasPrefix("end ") {
-                if depth > 0 { depth -= 1 }
-                while scopes.count > depth { scopes.removeLast() }
-                continue
-            }
-            let inherited = scopes.last ?? .runtime
-            if line.hasPrefix("pod ") || line.hasPrefix("pod(") || line.hasPrefix("pod '") || line.hasPrefix("pod \"") {
-                let strings = quotedStrings(line)
-                guard let name = strings.first, !name.isEmpty else { continue }
-                let scope = (line.contains("testables") || inherited == .test) ? DependencyScope.test : inherited
-                let version = versionConstraint(from: Array(strings.dropFirst())) ?? undeclaredVersion
-                records.append(record(name, version, .cocoapods, scope, manifestPath))
-                continue
-            }
-            if opensBlock(line) {
-                depth += 1
-                scopes.append(blockScope(line) ?? inherited)
-            }
-        }
-        return dedupe(records)
+        rubyStyleDependencies(text, manifestPath: manifestPath, walk: RubyStyleWalk(
+            isEntry: { $0.hasPrefix("pod ") || $0.hasPrefix("pod(")
+                || $0.hasPrefix("pod '") || $0.hasPrefix("pod \"") },
+            entryScope: { line, inherited in
+                (line.contains("testables") || inherited == .test) ? DependencyScope.test : inherited
+            },
+            isGroup: { _ in false },
+            groupScope: { _ in .runtime },
+            opensBlock: { opensBlock($0) },
+            blockScope: { line, inherited in blockScope(line) ?? inherited },
+            ecosystem: .cocoapods
+        ))
     }
 
     static func blockScope(_ line: String) -> DependencyScope? {

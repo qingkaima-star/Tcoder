@@ -8,18 +8,9 @@ import Foundation
 // MARK: - 内部：纯文本段解析
 
 extension CrashReportParser {
-    /// 段内规则：
-    /// - 首个特征词（不论类别）一定成为主事件；
-    /// - 之后的锚点特征词：单报告段里只并进主事件，累积型段里各自成为新主事件；
-    /// - 非锚点特征词（Exception Codes / Termination Reason / Thread N Crashed …）
-    ///   永远并进当前主事件，最多并 4 条；
-    /// - 堆栈帧行追加到「上一条主事件」的 stackFrames（最多 12 帧），
-    ///   同时产一条 isContinuation = true 的事件（上层不计数，只贡献 sourceFiles）。
-    static func parseTextSegment(lines: [String],
-                                 lineNumberOffset: Int,
-                                 path: String,
-                                 modifiedAt: Date,
-                                 singleReport: Bool) -> [LogEvent] {
+    /// 段内可变状态。原先这些是 `parseTextSegment` 里的七个局部变量，
+    /// 收进一个结构体只为把逐行判定拆成小函数，**初值与含义一字未改**。
+    struct CrashSegmentState {
         var events: [LogEvent] = []
         var primaryIndexes: [Int] = []
         var currentPrimary: Int?
@@ -27,100 +18,143 @@ extension CrashReportParser {
         var sawCrashedThread = false
         var inCrashedBlock = false
         var segmentDate: Date?
+    }
 
-        func flushDetails() {
-            defer { details = [] }
-            guard let index = currentPrimary, index < events.count, !details.isEmpty else { return }
-            // 机器字段（Exception Codes / Termination Reason / Thread N Crashed …）并进 rawLine 供排查，
-            // 标题按统一口径重排，不再用「 · 」把整段拼起来当标题。
-            let haystack = ([events[index].rawLine] + details).joined(separator: " ")
-            events[index].rawLine = haystack
-            events[index].message = CrashReportParser.title(haystack: haystack,
-                                                            symbol: events[index].stackFrames.first,
-                                                            procName: nil)
-        }
-
+    /// 段内规则（与拆分前逐字一致）：
+    /// - 首个特征词（不论类别）一定成为主事件；
+    /// - 之后的锚点特征词：单报告段里只并进主事件，累积型段里各自成为新主事件；
+    /// - 非锚点特征词（Exception Codes / Termination Reason / Thread N Crashed …）
+    ///   永远并进当前主事件，最多并 4 条；
+    /// - 堆栈帧行追加到「上一条主事件」的 stackFrames（最多 12 帧），
+    ///   同时产一条 isContinuation = true 的事件（上层不计数，只贡献 sourceFiles）。
+    /// 本函数只保留逐行驱动与两处 `maxTextEvents` 上限判断。
+    static func parseTextSegment(lines: [String],
+                                 lineNumberOffset: Int,
+                                 path: String,
+                                 modifiedAt: Date,
+                                 singleReport: Bool) -> [LogEvent] {
+        var state = CrashSegmentState()
         for (offset, line) in lines.enumerated() {
             guard !line.isEmpty else { continue }
             let number = lineNumberOffset + offset + 1
+            observeCrashedThreadBlock(line, in: &state)
+            noteSegmentDate(line, modifiedAt: modifiedAt, in: &state)
 
-            // 崩溃线程块跟踪：帧只在 Crashed 块里收（整段没出现过线程表就一律收）。
-            if crashedThreadPattern.matches(line) {
-                sawCrashedThread = true
-                inCrashedBlock = true
-            } else if anyThreadPattern.matches(line) {
-                inCrashedBlock = false
-            }
-            if sectionStopPattern.matches(line) { inCrashedBlock = false }
-
-            if let label = dateLabelPattern.firstGroup(in: line, 1),
-               let parsed = date(from: label, referenceDate: modifiedAt) {
-                segmentDate = parsed
-            }
-
-            // 1) 堆栈帧行：追加到上一条主事件 + 产一条 isContinuation 事件
-            if isStackFrame(line), inCrashedBlock || !sawCrashedThread, let anchor = currentPrimary {
-                let frame = frameText(line)
-                if events[anchor].stackFrames.count < textMaxFrames {
-                    events[anchor].stackFrames.append(frame)
-                }
-                events.append(LogEvent(
-                    date: events[anchor].date,
-                    severity: .crash,
-                    rawLine: line,
-                    message: normalize(frame),
-                    sourceLogPath: path,
-                    lineNumber: number,
-                    stackFrames: [frame],
-                    sourceFiles: sourceFiles(in: line),
-                    isCrash: true,
-                    isContinuation: true
-                ))
-                if events.count >= maxTextEvents { break }
+            if consumeCrashFrameLine(line, number: number, path: path, in: &state) {
+                if state.events.count >= maxTextEvents { break }
                 continue
             }
-
-            // 2) 崩溃特征词
-            guard let cue = matchedCue(in: line) else { continue }
-            if currentPrimary == nil || (!singleReport && cue.startsReport) {
-                flushDetails()
-                let parsed = LogLineParser.parseLine(line, number: number, sourcePath: path, referenceDate: modifiedAt)
-                events.append(LogEvent(
-                    date: parsed.date ?? segmentDate ?? modifiedAt,
-                    severity: .crash,
-                    rawLine: line,
-                    message: baseMessage(for: parsed),
-                    sourceLogPath: path,
-                    lineNumber: number,
-                    stackFrames: [],
-                    sourceFiles: sourceFiles(in: line),
-                    isCrash: true,
-                    isContinuation: false
-                ))
-                let anchor = events.count - 1
-                currentPrimary = anchor
-                primaryIndexes.append(anchor)
-            } else if details.count < 4 {
-                details.append(clip(line, 160))
-            }
-
-            if events.count >= maxTextEvents { break }
+            consumeCrashCueLine(line, number: number, path: path, modifiedAt: modifiedAt,
+                                singleReport: singleReport, in: &state)
+            if state.events.count >= maxTextEvents { break }
         }
-        flushDetails()
+        flushCrashDetails(in: &state)
+        applySegmentDate(singleReport: singleReport, in: &state)
+        backfillPrimarySourceFiles(in: &state)
+        return state.events
+    }
 
-        // 单报告段：段里那次崩溃的时间以 `Date/Time:` 为准（比文件 mtime 可信）。
-        if singleReport, let segmentDate {
-            for index in events.indices { events[index].date = segmentDate }
+    /// 崩溃线程块跟踪：帧只在 Crashed 块里收（整段没出现过线程表就一律收）。
+    static func observeCrashedThreadBlock(_ line: String, in state: inout CrashSegmentState) {
+        if crashedThreadPattern.matches(line) {
+            state.sawCrashedThread = true
+            state.inCrashedBlock = true
+        } else if anyThreadPattern.matches(line) {
+            state.inCrashedBlock = false
         }
-        // 主事件的 sourceFiles 补上它自己帧里出现过的文件。
-        for index in primaryIndexes where index < events.count {
-            var files = events[index].sourceFiles
-            for frame in events[index].stackFrames {
+        if sectionStopPattern.matches(line) { state.inCrashedBlock = false }
+    }
+
+    static func noteSegmentDate(_ line: String, modifiedAt: Date, in state: inout CrashSegmentState) {
+        guard let label = dateLabelPattern.firstGroup(in: line, 1),
+              let parsed = date(from: label, referenceDate: modifiedAt) else { return }
+        state.segmentDate = parsed
+    }
+
+    /// 1) 堆栈帧行：追加到上一条主事件 + 产一条 isContinuation 事件。
+    /// 返回 true 表示这一行确实是帧行且已被消费（调用方据此 `continue`），
+    /// 判定式 `isStackFrame && (inCrashedBlock || !sawCrashedThread) && currentPrimary != nil`
+    /// 与拆分前的三元条件逐个操作数相同。
+    static func consumeCrashFrameLine(_ line: String, number: Int, path: String,
+                                      in state: inout CrashSegmentState) -> Bool {
+        guard isStackFrame(line), state.inCrashedBlock || !state.sawCrashedThread,
+              let anchor = state.currentPrimary else { return false }
+        let frame = frameText(line)
+        if state.events[anchor].stackFrames.count < textMaxFrames {
+            state.events[anchor].stackFrames.append(frame)
+        }
+        state.events.append(LogEvent(
+            date: state.events[anchor].date,
+            severity: .crash,
+            rawLine: line,
+            message: normalize(frame),
+            sourceLogPath: path,
+            lineNumber: number,
+            stackFrames: [frame],
+            sourceFiles: sourceFiles(in: line),
+            isCrash: true,
+            isContinuation: true
+        ))
+        return true
+    }
+
+    /// 2) 崩溃特征词：够格就另起主事件，否则并进当前主事件的机器字段（最多 4 条）。
+    static func consumeCrashCueLine(_ line: String, number: Int, path: String,
+                                    modifiedAt: Date, singleReport: Bool,
+                                    in state: inout CrashSegmentState) {
+        guard let cue = matchedCue(in: line) else { return }
+        if state.currentPrimary == nil || (!singleReport && cue.startsReport) {
+            flushCrashDetails(in: &state)
+            let parsed = LogLineParser.parseLine(line, number: number, sourcePath: path, referenceDate: modifiedAt)
+            state.events.append(LogEvent(
+                date: parsed.date ?? state.segmentDate ?? modifiedAt,
+                severity: .crash,
+                rawLine: line,
+                message: baseMessage(for: parsed),
+                sourceLogPath: path,
+                lineNumber: number,
+                stackFrames: [],
+                sourceFiles: sourceFiles(in: line),
+                isCrash: true,
+                isContinuation: false
+            ))
+            let anchor = state.events.count - 1
+            state.currentPrimary = anchor
+            state.primaryIndexes.append(anchor)
+        } else if state.details.count < 4 {
+            state.details.append(clip(line, 160))
+        }
+    }
+
+    /// 把攒下的机器字段并进当前主事件：rawLine 拼接后按统一口径重排标题。
+    static func flushCrashDetails(in state: inout CrashSegmentState) {
+        defer { state.details = [] }
+        guard let index = state.currentPrimary, index < state.events.count,
+              !state.details.isEmpty else { return }
+        // 机器字段（Exception Codes / Termination Reason / Thread N Crashed …）并进 rawLine 供排查，
+        // 标题按统一口径重排，不再用「 · 」把整段拼起来当标题。
+        let haystack = ([state.events[index].rawLine] + state.details).joined(separator: " ")
+        state.events[index].rawLine = haystack
+        state.events[index].message = CrashReportParser.title(haystack: haystack,
+                                                              symbol: state.events[index].stackFrames.first,
+                                                              procName: nil)
+    }
+
+    /// 单报告段：段里那次崩溃的时间以 `Date/Time:` 为准（比文件 mtime 可信）。
+    static func applySegmentDate(singleReport: Bool, in state: inout CrashSegmentState) {
+        guard singleReport, let segmentDate = state.segmentDate else { return }
+        for index in state.events.indices { state.events[index].date = segmentDate }
+    }
+
+    /// 主事件的 sourceFiles 补上它自己帧里出现过的文件（每事件最多 8 个）。
+    static func backfillPrimarySourceFiles(in state: inout CrashSegmentState) {
+        for index in state.primaryIndexes where index < state.events.count {
+            var files = state.events[index].sourceFiles
+            for frame in state.events[index].stackFrames {
                 for file in sourceFiles(in: frame) where !files.contains(file) { files.append(file) }
             }
-            events[index].sourceFiles = Array(files.prefix(8))
+            state.events[index].sourceFiles = Array(files.prefix(8))
         }
-        return events
     }
 
     /// 与文本日志保持一致的归一化：优先 signature(for:)，退回 message，再退回整行。

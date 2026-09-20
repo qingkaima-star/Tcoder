@@ -53,17 +53,70 @@ enum CrashReportParser {
     }
 
     /// Apple DiagnosticReports 的 .ips：第一行是 header JSON，其余是 body JSON。
+    ///
+    /// 本函数只留「取两段 JSON → 取事实 → 取栈 → 有没有证据 → 拼 rawLine → 出事件」这条主线；
+    /// 四段取值分别抽在下面四个函数里，**每个键的候选顺序、`?? ` 回退链、裁剪长度、
+    /// 「宁少不假」的 hasEvidence 判据、以及 rawParts 的拼接顺序全部逐字照抄**。
     static func parseDiagnosticReport(text: String, path: String, modifiedAt: Date) -> [LogEvent] {
         guard startsWithBrace(text) else { return [] }
-        // header 独占一行；body 是剩下的全部（可能 pretty-print 成很多行）。
+        let sections = ipsJSONSections(text)
+        guard !sections.body.isEmpty || !sections.header.isEmpty else { return [] }
+
+        let facts = ipsDiagnosticFacts(body: sections.body, header: sections.header, path: path)
+        let stack = ipsDiagnosticStack(body: sections.body)
+        guard ipsHasEvidence(facts: facts, stack: stack) else { return [] }
+
+        // rawLine 装全部机器字段（含 Exception Type / signal / subtype）供排查与签名，
+        // displayMessage 走 `title(...)` 这条统一口径：人先看懂「什么异常、崩在哪个符号」。
+        let rawLine = ipsRawLine(path: path, facts: facts,
+                                 threadLabel: stack.threadLabel, asiLines: stack.asiLines)
+        let message = title(haystack: rawLine, symbol: stack.frames.first, procName: facts.procName)
+
+        let event = LogEvent(
+            date: ipsDate(body: sections.body, header: sections.header, path: path, modifiedAt: modifiedAt),
+            severity: .crash,
+            rawLine: rawLine,
+            message: message,
+            sourceLogPath: path,
+            lineNumber: 1,
+            stackFrames: stack.frames,
+            sourceFiles: stack.sourceFiles,
+            isCrash: true,
+            isContinuation: false
+        )
+        return [event]
+    }
+
+    /// header 独占一行；body 是剩下的全部（可能 pretty-print 成很多行）。
+    static func ipsJSONSections(_ text: String) -> (header: [String: Any], body: [String: Any]) {
         let pieces = text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
         let headerText = pieces.first.map(String.init) ?? ""
         let bodyText = pieces.count > 1 ? String(pieces[1]) : ""
         let header = jsonDictionary(headerText) ?? [:]
         // 少数 .ips 是单行 JSON：body 解不开时整体再试一次，再不行退化成 header。
         let body = jsonDictionary(bodyText) ?? jsonDictionary(text) ?? header
-        guard !body.isEmpty || !header.isEmpty else { return [] }
+        return (header, body)
+    }
 
+    /// 一份 .ips 的机器事实。每条 `firstNonEmpty([...])` 的候选顺序与拆分前一字不差。
+    struct IPSDiagnosticFacts {
+        var exceptionType: String?
+        var signal: String?
+        var codes: String?
+        var subtype: String?
+        var terminationText: String?
+        var terminationFlags: String?
+        var bugType: String?
+        var procName: String
+        var appVersion: String?
+        var appSession: String?
+        var incidentID: String?
+        var osVersion: String?
+        var product: String?
+    }
+
+    static func ipsDiagnosticFacts(body: [String: Any], header: [String: Any],
+                                   path: String) -> IPSDiagnosticFacts {
         let exception = dictionary(body["exception"]) ?? dictionary(header["exception"])
         let termination = dictionary(body["termination"]) ?? dictionary(header["termination"])
 
@@ -102,7 +155,22 @@ enum CrashReportParser {
         let osVersion = firstNonEmpty([string(body["os_version"]), string(header["os_version"])])
         let product = firstNonEmpty([string(body["product"]), string(header["product"])])
 
-        // 线程：找 triggered / crashed 的那一个，只取前 8 帧
+        return IPSDiagnosticFacts(exceptionType: exceptionType, signal: signal, codes: codes,
+                                  subtype: subtype, terminationText: terminationText,
+                                  terminationFlags: terminationFlags, bugType: bugType,
+                                  procName: procName, appVersion: appVersion, appSession: appSession,
+                                  incidentID: incidentID, osVersion: osVersion, product: product)
+    }
+
+    /// 线程与堆栈：找 triggered / crashed 的那一个，只取前 `ipsMaxFrames` 帧。
+    struct IPSDiagnosticStack {
+        var frames: [String]
+        var sourceFiles: [String]
+        var asiLines: [String]
+        var threadLabel: String?
+    }
+
+    static func ipsDiagnosticStack(body: [String: Any]) -> IPSDiagnosticStack {
         let threads = arrayOfDictionaries(body["threads"])
         let imageNames = usedImageNames(body["usedImages"])
         let triggered = threads.first { boolValue($0["triggered"]) || boolValue($0["crashed"]) }
@@ -123,51 +191,57 @@ enum CrashReportParser {
             stackFrames.append(built.frame)
             if let file = built.file, !sourceFiles.contains(file) { sourceFiles.append(file) }
         }
-        let asiLines = flattenASI(dictionary(body["asi"]))
         let threadLabel = firstNonEmpty([
             string(triggered?["name"]),
             string(triggered?["queue"]),
             string(triggered?["threadName"]),
         ])
+        return IPSDiagnosticStack(frames: stackFrames, sourceFiles: sourceFiles,
+                                  asiLines: flattenASI(dictionary(body["asi"])), threadLabel: threadLabel)
+    }
 
-        // 一个崩溃事实都没读到就返回 []，由 events(for:) 决定要不要合成兜底事件。
-        let hasEvidence = exceptionType != nil || signal != nil || subtype != nil || codes != nil
-            || terminationText != nil || bugType != nil || !stackFrames.isEmpty || !asiLines.isEmpty
-        guard hasEvidence else { return [] }
+    /// 一个崩溃事实都没读到就返回 false，由 events(for:) 决定要不要合成兜底事件。
+    /// 八条判据与它们的或运算顺序，逐字照抄拆分前那一句。
+    static func ipsHasEvidence(facts: IPSDiagnosticFacts, stack: IPSDiagnosticStack) -> Bool {
+        facts.exceptionType != nil || facts.signal != nil || facts.subtype != nil || facts.codes != nil
+            || facts.terminationText != nil || facts.bugType != nil
+            || !stack.frames.isEmpty || !stack.asiLines.isEmpty
+    }
 
-        // rawLine 装全部机器字段（含 Exception Type / signal / subtype）供排查与签名，
-        // displayMessage 走 `title(...)` 这条统一口径：人先看懂「什么异常、崩在哪个符号」。
-        var rawParts: [String] = ["崩溃报告 \(path)", "proc=\(procName)"]
-        if let exceptionType { rawParts.append("Exception Type: " + clip(normalize(exceptionType), 60)) }
-        if let signal { rawParts.append("signal " + clip(normalize(signal), 40)) }
-        if let subtype { rawParts.append("subtype " + clip(normalize(subtype), 120)) }
-        if let bugType { rawParts.append("bug_type " + clip(bugType, 40)) }
-        if let codes { rawParts.append("codes " + clip(codes, 120)) }
-        if let terminationText { rawParts.append("Termination Reason: " + clip(normalize(terminationText), 160)) }
-        if let terminationFlags { rawParts.append("flags " + clip(terminationFlags, 40)) }
-        if let threadLabel { rawParts.append("thread " + clip(normalize(threadLabel), 80)) }
-        rawParts.append(contentsOf: asiLines.prefix(4).map { clip($0, 160) })
-        if let appVersion { rawParts.append("app_version=" + clip(normalize(appVersion), 60)) }
-        if let appSession { rawParts.append("session=" + clip(normalize(appSession), 60)) }
-        if let incidentID { rawParts.append("incident=" + clip(normalize(incidentID), 60)) }
-        if let product { rawParts.append("product=" + clip(normalize(product), 60)) }
-        if let osVersion { rawParts.append("os=" + clip(normalize(osVersion), 80)) }
-        let rawLine = rawParts.joined(separator: " ")
-        let message = title(haystack: rawLine, symbol: stackFrames.first, procName: procName)
+    /// rawLine 的拼装顺序就是拆分前那 15 个 append 的顺序：
+    /// 崩溃报告路径 → proc → 异常四件套与终止原因 → 线程 → asi 前 4 条 → 身份五件套。
+    /// 每段的裁剪长度（60/40/120/160/80）一字未改。
+    static func ipsRawLine(path: String, facts: IPSDiagnosticFacts,
+                           threadLabel: String?, asiLines: [String]) -> String {
+        var rawParts: [String] = ["崩溃报告 \(path)", "proc=\(facts.procName)"]
+        rawParts.append(contentsOf: ipsCrashFactParts(facts, threadLabel: threadLabel, asiLines: asiLines))
+        rawParts.append(contentsOf: ipsIdentityFactParts(facts))
+        return rawParts.joined(separator: " ")
+    }
 
-        let event = LogEvent(
-            date: ipsDate(body: body, header: header, path: path, modifiedAt: modifiedAt),
-            severity: .crash,
-            rawLine: rawLine,
-            message: message,
-            sourceLogPath: path,
-            lineNumber: 1,
-            stackFrames: stackFrames,
-            sourceFiles: sourceFiles,
-            isCrash: true,
-            isContinuation: false
-        )
-        return [event]
+    static func ipsCrashFactParts(_ facts: IPSDiagnosticFacts,
+                                  threadLabel: String?, asiLines: [String]) -> [String] {
+        var parts: [String] = []
+        if let exceptionType = facts.exceptionType { parts.append("Exception Type: " + clip(normalize(exceptionType), 60)) }
+        if let signal = facts.signal { parts.append("signal " + clip(normalize(signal), 40)) }
+        if let subtype = facts.subtype { parts.append("subtype " + clip(normalize(subtype), 120)) }
+        if let bugType = facts.bugType { parts.append("bug_type " + clip(bugType, 40)) }
+        if let codes = facts.codes { parts.append("codes " + clip(codes, 120)) }
+        if let terminationText = facts.terminationText { parts.append("Termination Reason: " + clip(normalize(terminationText), 160)) }
+        if let terminationFlags = facts.terminationFlags { parts.append("flags " + clip(terminationFlags, 40)) }
+        if let threadLabel { parts.append("thread " + clip(normalize(threadLabel), 80)) }
+        parts.append(contentsOf: asiLines.prefix(4).map { clip($0, 160) })
+        return parts
+    }
+
+    static func ipsIdentityFactParts(_ facts: IPSDiagnosticFacts) -> [String] {
+        var parts: [String] = []
+        if let appVersion = facts.appVersion { parts.append("app_version=" + clip(normalize(appVersion), 60)) }
+        if let appSession = facts.appSession { parts.append("session=" + clip(normalize(appSession), 60)) }
+        if let incidentID = facts.incidentID { parts.append("incident=" + clip(normalize(incidentID), 60)) }
+        if let product = facts.product { parts.append("product=" + clip(normalize(product), 60)) }
+        if let osVersion = facts.osVersion { parts.append("os=" + clip(normalize(osVersion), 80)) }
+        return parts
     }
 
     /// 纯文本崩溃日志（crash.log / .crash / 含堆栈的 abort 输出）。
