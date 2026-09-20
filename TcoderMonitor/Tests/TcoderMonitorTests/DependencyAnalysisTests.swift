@@ -382,6 +382,24 @@ final class DependencySafetyVerdictTests: XCTestCase {
                        "离线文案里不能出现「未发现已知漏洞」这种 all-clear")
     }
 
+    /// 读数带格子里的短脚注：**压缩重复，但状态词一个不许少**。
+    /// 清单 3.16 要求"每屏一处权威落点"，`summaryCaption` 的全文留在口径条那一处；
+    /// 这一格只许留下核对状态 —— 少了它，`0 条` 就会被读成"查过、没有病"。
+    func testVerdictTileCaptionKeepsTheHonestyStateAndPointsAtTheAuthority() {
+        let offline = DependencySafetyVerdict(report(networkPerformed: false, versions: []))
+        let online = DependencySafetyVerdict(report(networkPerformed: true, versions: [.onlineRegistry]))
+        XCTAssertTrue(offline.tileCaption.contains("未联网核对"), offline.tileCaption)
+        XCTAssertFalse(online.tileCaption.contains("未联网"), online.tileCaption)
+        XCTAssertFalse(offline.tileCaption.contains("未发现已知漏洞"),
+                       "短脚注里更不许出现 all-clear：" + offline.tileCaption)
+        for verdict in [offline, online] {
+            XCTAssertLessThanOrEqual(verdict.tileCaption.count, 24,
+                                     "脚注超过一行就会把四格读数带撑成高低不齐：" + verdict.tileCaption)
+            XCTAssertTrue(verdict.tileCaption.contains("见上方") || verdict.tileCaption.contains("见下方"),
+                          "短脚注必须指出全口径的权威落点：" + verdict.tileCaption)
+        }
+    }
+
     /// 契约层 `uncoveredEcosystemNames` 拿 displayName 去比 ["npm","maven","python"]，
     /// 于是 npm（displayName 是 "npm / Node.js"）被误报成"未覆盖生态"。
     /// 服务层改成从规则表推导，这里把两边差异钉住。

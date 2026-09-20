@@ -99,7 +99,7 @@ struct DependencySummaryGrid: View {
                         label: "生态",
                         value: NumberFormat.grouped(deps.ecosystems.count),
                         unit: "个",
-                        caption: "清单来源，名单见下方「风险总览」"
+                        caption: "清单来源，名单在上方「风险总览」"
                     )
                     DataBandSeparator()
                     MetricTile(
@@ -125,8 +125,13 @@ struct DependencySummaryGrid: View {
                         role: verdict.role,
                         icon: .vulnerable,
                         unit: "条",
-                        caption: verdict.summaryCaption
+                        caption: verdict.tileCaption
                     )
+                    // 全口径（覆盖哪些生态、快照截至何时、几项有版本数据）**上屏一次**
+                    // 就够了 —— 它已经在上方「风险总览」的口径条里逐字写着。
+                    // 这里挂成 tooltip 而不是删掉：`summaryCaption` 那份全文仍然一 hover 就在，
+                    // #25 那组诚实线断言盯的也是它（见 HonestyP1SnapshotDateTests）。
+                        .help(verdict.summaryCaption)
                 }
             }
         }

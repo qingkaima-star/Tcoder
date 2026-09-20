@@ -50,15 +50,22 @@ extension Theme {
             }
 
             var body: some View {
+                // **与 `DataFieldRow` 同一套两列几何**（标签定宽、值紧跟左对齐）。
+                // 这里原来是 `label + Spacer + 值`：版框从 1040 收到 1240 之后，
+                // 「上次 …………… 无记录」被拉到相距约 1500px，中间什么都没有 ——
+                // 同一个毛病 H3 已经在 `DataFieldRow` 上治过一遍，而这是它的第二份实现。
+                // 两份壳可以并存（字档不同），**列宽只能有一个来源**，所以走同一个令牌。
                 HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
                     Text(label)
                         .font(Theme.Typo.label.font)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                    Spacer(minLength: Theme.Spacing.xs)
+                        .frame(width: Theme.Layout.fieldLabelWidth, alignment: .leading)
                     valueText
                         .themeHelp(help)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(minHeight: Theme.Layout.rowHeightCompact)
             }
 
