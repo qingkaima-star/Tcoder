@@ -32,6 +32,7 @@
 "Git 洞察" = "Git Insights";
 "贡献者" = "Contributors";
 "性能监控" = "Performance";
+"错误日志" = "Error Logs";   // 侧栏导航用短词；页头是下面那条长名
 "错误日志分析" = "Error Logs";
 "依赖分析" = "Dependencies";
 "健康评分" = "Health Score";
