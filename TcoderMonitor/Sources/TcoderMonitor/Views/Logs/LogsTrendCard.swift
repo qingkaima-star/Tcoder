@@ -13,7 +13,7 @@ struct LogsTrendCard: View {
     var body: some View {
         GlassSection("错误趋势", subtitle: subtitle, icon: .chartLine) {
             if let buckets = plottableBuckets {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                     LogTrendChart(buckets: buckets)
                         .frame(height: Theme.Layout.trendChartHeight)
                     NoteLine(footnote(buckets))
