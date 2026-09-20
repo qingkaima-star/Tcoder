@@ -311,12 +311,38 @@ final class MachSystemMonitor: SystemMonitoringProviding {
         addGroup(title: title, matchPattern: matchPattern)
     }
 
+    // MARK: 采样节拍唯一真值（性能 spec §5.1）
+    //
+    // 此前节拍在 `AppState` 与 `toggleRunning()` 里各写了一次 `1_500`，
+    // 而界面有 4 处把「1.5 秒」当字面量写死、还有 1 处把它写进算术
+    // （`PerformanceView.windowSeconds`）。改节拍只动一处必然说谎。
+    // 所以：数值只在这里定义一次，展示文案与窗口秒数都从它派生。
+
+    nonisolated static let defaultSampleIntervalMilliseconds: UInt64 = 1_500
+
+    /// 实际生效的节拍（`start(intervalMilliseconds:)` 记下的那个，含 500ms 下限）。
+    private(set) var sampleIntervalMilliseconds: UInt64 = MachSystemMonitor.defaultSampleIntervalMilliseconds
+
+    /// 页面副标题/提示语唯一该用的节拍文案，例：「1.5 秒」。
+    var sampleIntervalText: String {
+        let seconds = Double(sampleIntervalMilliseconds) / 1000
+        return seconds == seconds.rounded()
+            ? "\(Int(seconds)) 秒"
+            : String(format: "%.1f 秒", seconds)
+    }
+
+    /// 曲线滚动窗口的秒数——**由节拍派生**，不许页面自己乘一个魔法数。
+    func windowSeconds(pointCount: Int) -> TimeInterval {
+        Double(pointCount) * Double(sampleIntervalMilliseconds) / 1000
+    }
+
     // MARK: Lifecycle
 
     func start(intervalMilliseconds: UInt64) {
         guard loopTask == nil else { return }
         isRunning = true
         let milliseconds = max(500, intervalMilliseconds)
+        sampleIntervalMilliseconds = milliseconds
         loopTask = Task.detached(priority: .utility) { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: milliseconds * 1_000_000)
@@ -324,7 +350,7 @@ final class MachSystemMonitor: SystemMonitoringProviding {
                 await self?.scheduleCollection()
             }
         }
-        // First sample arrives immediately so the dashboard is not blank for 1.5s.
+        // First sample arrives immediately so the dashboard is not blank for one interval.
         Task { @MainActor in self.scheduleCollection() }
     }
 
@@ -333,7 +359,7 @@ final class MachSystemMonitor: SystemMonitoringProviding {
         if isRunning {
             stop()
         } else {
-            start(intervalMilliseconds: 1_500)
+            start(intervalMilliseconds: sampleIntervalMilliseconds)
         }
     }
 

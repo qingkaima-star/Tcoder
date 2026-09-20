@@ -56,7 +56,9 @@ final class AppState {
     init() {
         store = ProjectStore()
         monitor = MachSystemMonitor()
-        monitor.start(intervalMilliseconds: 1_500)
+        // 节拍数值只在 `MachSystemMonitor.defaultSampleIntervalMilliseconds` 定义一次
+        // （性能 spec §5.1）；这里再写一个 1_500 就是第二个真值来源。
+        monitor.start(intervalMilliseconds: MachSystemMonitor.defaultSampleIntervalMilliseconds)
         startInteractionGating()
         bootstrapIfNeeded()
     }
