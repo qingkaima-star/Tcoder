@@ -24,7 +24,8 @@ final class DocBareLineReferenceTests: XCTestCase {
         .deletingLastPathComponent()      // TcoderMonitor
         .deletingLastPathComponent()      // 工作树根
 
-    private static let docs: [String] = ["README.md", "docs/使用说明.md"]
+    private static let docs: [String] = ["README.md", "docs/使用说明.md",
+                                       "docs/口径与已知限制.md", "docs/九页实拍读数.md"]
 
     /// ``` `:349` ``` / ``` `:77-105` ``` / ``` `:58,59,119` ```
     private static let barePattern = try! NSRegularExpression(

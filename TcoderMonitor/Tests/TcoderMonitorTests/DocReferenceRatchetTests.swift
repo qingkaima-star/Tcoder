@@ -40,7 +40,8 @@ final class DocReferenceRatchetTests: XCTestCase {
         .deletingLastPathComponent()
         .deletingLastPathComponent()
 
-    private static let docs: [String] = ["README.md", "docs/使用说明.md"]
+    private static let docs: [String] = ["README.md", "docs/使用说明.md",
+                                       "docs/口径与已知限制.md", "docs/九页实拍读数.md"]
 
     /// 我们自己的文件类型：这类锚点必须能在仓库里找到实体文件。
     private static let repoFileExtensions: Set<String> = ["swift", "md", "sh"]
