@@ -279,8 +279,8 @@ struct DashboardLiveReadout: View {
             caption = "崩溃 \(NumberFormat.grouped(logs?.crashCount ?? 0)) · "
                 + "异常 \(NumberFormat.grouped(logs?.exceptionCount ?? 0))"
         } else {
-            caption = logs == nil ? ShellCopy.notAnalyzed("错误日志")
-                : ShellCopy.cannotAnalyze("未接入任何日志文件")
+            caption = logs == nil ? ShellCopy.notAnalyzed(.errorLogs)
+                : ShellCopy.cannotAnalyze(.noLogFiles)
         }
         let count = logs?.hasData == true ? logs?.todayErrorCount : nil
         return MetricTile(
@@ -302,7 +302,7 @@ struct DashboardLiveReadout: View {
             caption: report?.git.map {
                 "\(NumberFormat.grouped($0.totalCommits)) 次提交 · "
                     + "\(NumberFormat.grouped($0.activeAuthorCount)) 位贡献者"
-            } ?? ShellCopy.notAnalyzed("Git 历史"),
+            } ?? ShellCopy.notAnalyzed(.gitHistory),
             systemImage: IconName.git.rawValue
         )
     }

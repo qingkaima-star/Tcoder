@@ -283,7 +283,7 @@ struct ProjectRow: View {
                 metricCell("\(NumberFormat.compact(code.codeLines)) 行",
                            width: ShellLayout.lineCountColumnWidth)
             } else {
-                Text(ShellCopy.notAnalyzed("代码规模"))
+                Text(ShellCopy.notAnalyzed(.codeSize))
                     .font(Theme.Typo.microLabel.font)
                     .lineLimit(1)
             }

@@ -149,7 +149,7 @@ struct HealthHeroCard: View {
         } else {
             EmptyStateView(
                 icon: IconName.emptyUnknown.rawValue,
-                title: ShellCopy.notAnalyzed("该项目"),
+                title: ShellCopy.notAnalyzed(.thisProject),
                 message: "点击右上角「重新分析」，扫描代码规模、Git 历史、日志与依赖之后这里会出现评分与结论。"
             )
         }
@@ -161,7 +161,7 @@ struct HealthHeroCard: View {
         let strengths = Array(health.strengths.prefix(3))
         let issues = Array(health.issues.prefix(3))
         if strengths.isEmpty && issues.isEmpty {
-            Text(ShellCopy.scannedButFoundNone("优点与风险项"))
+            Text(ShellCopy.scannedButFoundNone(.strengthsAndRisks))
                 .font(Theme.Typo.narrative.font)
                 .foregroundStyle(.secondary)
         } else {

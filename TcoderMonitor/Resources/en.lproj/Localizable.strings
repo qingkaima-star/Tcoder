@@ -94,3 +94,16 @@
 "添加第一个项目" = "Add Your First Project";
 "添加更多项目" = "Add More Projects";
 "本机实时 CPU / 已用内存" = "Live CPU / memory in use on this machine";
+
+/* ===== P3-3 缺数据句式（整句成键，碎片不翻：方案 §7.3） ===== */
+"尚未分析该项目" = "This project isn't analysed yet";
+"尚未分析全部指标" = "No metrics analysed yet";
+"尚未分析Git 历史" = "Git history not analysed yet";
+"尚未分析代码规模" = "Code size not analysed yet";
+"尚未分析错误日志" = "Error logs not analysed yet";
+"已完成扫描，未发现提交记录" = "Scan complete — no commits found";
+"已完成扫描，未发现错误" = "Scan complete — no errors found";
+"已完成扫描，未发现错误级别日志" = "Scan complete — no error-level logs found";
+"已完成扫描，未发现优点与风险项" = "Scan complete — no strengths or risks found";
+"无法分析：未接入任何日志文件" = "Cannot analyse: no log files attached";
+"无法分析：该目录不是 Git 仓库，或提交记录为空" = "Cannot analyse: this folder isn't a Git repository, or it has no commits";

@@ -90,7 +90,7 @@ struct ProjectDetailView: View {
             // 表头三态：一次都没扫过就明说「尚未分析」，用 `unverified`（问号）而不是
             // `noRisk`（对勾）—— 对勾会把「没查」渲染成「查过、安全」。
             if state.selectedProject != nil && state.selectedReport == nil && !state.isScanning {
-                SemanticBadge(ShellCopy.notAnalyzed("全部指标"),
+                SemanticBadge(ShellCopy.notAnalyzed(.allMetrics),
                               role: Theme.Semantic.neutral,
                               icon: .unverified)
             }

@@ -30,12 +30,12 @@ final class ShellDesignTests: XCTestCase {
     }
 
     func testThreeStateCopyNeverFakesAZOrGreenCheck() {
-        let pending = ShellCopy.notAnalyzed("错误日志")
+        let pending = ShellCopy.notAnalyzed(.errorLogs)
         XCTAssertTrue(pending.contains("尚未"), "③ 态句式：\(pending)")
         XCTAssertFalse(pending.contains("0"), "缺数据的说明里不得出现数字 0：\(pending)")
         XCTAssertFalse(pending.contains("无风险"), "③ 态不得给出安全结论：\(pending)")
 
-        let emptyScan = ShellCopy.scannedButFoundNone("提交记录")
+        let emptyScan = ShellCopy.scannedButFoundNone(.commits)
         XCTAssertTrue(emptyScan.contains("已完成扫描"), "② 态必须交代「查过」：\(emptyScan)")
 
         XCTAssertEqual(Theme.Placeholder.missingValue, "--",

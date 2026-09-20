@@ -124,7 +124,7 @@ struct DashboardView: View {
                 }
             } else {
                 EmptyStateView(icon: IconName.code.rawValue,
-                               title: ShellCopy.notAnalyzed("代码规模"),
+                               title: ShellCopy.notAnalyzed(.codeSize),
                                message: "选择项目目录后自动统计。")
             }
         }
@@ -140,7 +140,7 @@ struct DashboardView: View {
                     StatLine(label: "空行", value: NumberFormat.grouped(code.blankLines))
                 }
             } else {
-                Text(ShellCopy.notAnalyzed("代码规模"))
+                Text(ShellCopy.notAnalyzed(.codeSize))
                     .font(Theme.Typo.label.font)
                     .foregroundStyle(.secondary)
             }
@@ -164,9 +164,9 @@ struct DashboardView: View {
             } else {
                 EmptyStateView(
                     icon: IconName.git.rawValue,
-                    title: report?.git == nil ? ShellCopy.notAnalyzed("Git 历史")
-                                             : ShellCopy.scannedButFoundNone("提交记录"),
-                    message: ShellCopy.cannotAnalyze("该目录不是 Git 仓库，或提交记录为空")
+                    title: report?.git == nil ? ShellCopy.notAnalyzed(.gitHistory)
+                                             : ShellCopy.scannedButFoundNone(.commits),
+                    message: ShellCopy.cannotAnalyze(.notAGitRepo)
                 )
             }
         }
@@ -191,8 +191,8 @@ struct DashboardView: View {
                     icon: (report?.logs?.hasData == true) ? IconName.noRisk.rawValue
                         : IconName.emptyTray.rawValue,
                     title: (report?.logs?.hasData == true)
-                        ? ShellCopy.scannedButFoundNone("错误")
-                        : ShellCopy.notAnalyzed("错误日志"),
+                        ? ShellCopy.scannedButFoundNone(.errors)
+                        : ShellCopy.notAnalyzed(.errorLogs),
                     message: (report?.logs?.hasData == true)
                         ? "已扫描 \(NumberFormat.grouped(report?.logs?.scannedFiles.count ?? 0)) 个日志文件，没有命中错误行。"
                         : "在项目内放置 Logs/error.log 或 crash.log，或用「附加日志文件」手动选择。"
