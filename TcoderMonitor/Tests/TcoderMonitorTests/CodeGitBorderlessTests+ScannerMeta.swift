@@ -198,8 +198,9 @@ extension CodeGitBorderlessTests {
         let all = try Self.pageSourceFiles()
         // 13 → 14（收官轮 WS-X0）：自扫点名 CodeRiskAnalysis.suggestions 138 行 / CC 17，
         // 拆出的实现分片落在同目录 Code/CodeRiskAdvice.swift；归属没动。
-        XCTAssertEqual(all.count, 14,
-                       "本流应有 14 个视图文件（Code 5 / Git 5 / Dependencies 2 / CodeGit 2）；"
+        // 14 → 15（收官轮 WS-X7）：CodeMetricsView 427 行拆出同目录 Code/CodeMetricsSections.swift；归属没动。
+        XCTAssertEqual(all.count, 15,
+                       "本流应有 15 个视图文件（Code 6 / Git 5 / Dependencies 2 / CodeGit 2）；"
                           + "数量变了说明有文件被新增或删除（CodeGitRestyleTests 钉着同一个数）")
         for dir in Self.scannedDirs {
             XCTAssertTrue(all.contains { $0.path.hasPrefix("\(dir)/") },

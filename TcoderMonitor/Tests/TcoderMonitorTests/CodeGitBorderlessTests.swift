@@ -25,7 +25,7 @@ import XCTest
 /// 于是全部零命中、绿灯、债原样留着。本项目已经真栽过一次（这正是
 /// `CodeGitRestyleTests.testRatchetPatternsActuallyDetectTheirOwnViolations` 存在的理由）。
 /// 所以每个扫描器都配**双向**样本：脏样本必须被抓到，干净样本不得被误判；
-/// 外加 `test_sourceScannerActuallyFindsFiles` 反向自证真读到了 13 个文件。
+/// 外加 `test_sourceScannerActuallyFindsFiles` 反向自证真读到了 15 个文件。
 final class CodeGitBorderlessTests: XCTestCase {
 
     // MARK: - 页面归属表
@@ -35,7 +35,7 @@ final class CodeGitBorderlessTests: XCTestCase {
     /// 若将来有人把第二枚主角塞进共用文件，这里会让该页变红 —— 那是 fail-safe，
     /// 正确反应是把主角挪回它自己的页面文件，不是给共用文件开豁免。
     static let pageFiles: [String: [String]] = [
-        "代码规模": ["Code/CodeMetricsView.swift"],
+        "代码规模": ["Code/CodeMetricsView.swift", "Code/CodeMetricsSections.swift"],
         "复杂度风险": ["Code/CodeRiskView.swift", "Code/CodeRiskRows.swift"],
         "Git 洞察": ["Git/GitInsightsView.swift", "Git/GitInsightsSections.swift",
                      "Git/GitInsightsCharts.swift"],

@@ -58,7 +58,11 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 125 → 130（并入 ws/x6-scale：WS-X6 按自扫名册拆出的实现分片——
     /// `HealthCurveShapes`/`PerfReadoutCells`/`MachSystemMonitor+Groups` 等；
     /// 引用证据见该分支 4 笔提交，全部是既有类型的 extension 分片或被既有类型持有的类型）。
-    static let censusBaseline = 130
+    /// 130 → 135（并入 ws/x7-views：WS-X7 拆 Design/ 与 Views/ 最后五枚 >400 行文件，
+    /// 新增 `Design/ThemePalette`/`Design/ThemeMetrics`/`Design/DataRows`/
+    /// `Views/Shell/SidebarRows`/`Views/Code/CodeMetricsSections`；
+    /// 守卫实报「在用 134 · 未用 0 · 零调用清单：无」）。
+    static let censusBaseline = 135
 
     static let prunedDirectories: Set<String> = [".git", ".build", ".swiftpm", ".worktrees",
                                                         "node_modules", "DerivedData", "dist", "build", "out"]

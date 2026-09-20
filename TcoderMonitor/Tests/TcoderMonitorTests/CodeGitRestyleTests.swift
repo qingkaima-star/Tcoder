@@ -97,7 +97,9 @@ final class CodeGitRestyleTests: XCTestCase {
         // （本轮 spec §2.4）。它被 6 个目录的 10 个文件共用，留在一个页面目录下
         // 等于让该页独占全仓的列系统。这条断言本来就是「归属被动过就要响」，
         // 它响了，改的是**记录**而不是把断言删掉。
-        XCTAssertEqual(out.count, 14, "WS-L/WS-P 名下应有 14 个视图文件（Code 5 / Git 5 / Dependencies 2 / CodeGit 2），数量变了说明归属被动过；列系统已上提进 Design/，见 Design/DataTable.swift")
+        // 14 → 15（收官轮 WS-X7）：自扫点名 `CodeMetricsView.swift` 427 行 >400，
+        // 页面私有三分组搬进同目录新文件 `Code/CodeMetricsSections.swift`；归属没动，仍是 Code 目录。
+        XCTAssertEqual(out.count, 15, "WS-L/WS-P 名下应有 15 个视图文件（Code 6 / Git 5 / Dependencies 2 / CodeGit 2），数量变了说明归属被动过；列系统已上提进 Design/，见 Design/DataTable.swift")
         return out
     }
 }
