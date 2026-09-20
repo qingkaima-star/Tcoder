@@ -51,7 +51,9 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// `HealthCodeDimensions` / `HealthTeamDimensions` / `HealthRuntimeDimensions`，调用点都是
     /// `WeightedHealthScorer.evaluate` 的九个 case。拆的理由是机械的：
     /// `evaluate` 单函数 CC 60、220 行，被本 App 自扫点名成全仓第一高）。
-    private static let censusBaseline = 114
+    /// 114 → 115（WS-X0 新增 Views/Code/CodeRiskAdvice.swift：`extension CodeRiskAnalysis`，
+    /// 三个建议构建器被同类型的 `suggestions(for:)` 调用；拆的理由是该函数 138 行、CC 17）。
+    private static let censusBaseline = 115
 
     private static let prunedDirectories: Set<String> = [".git", ".build", ".swiftpm", ".worktrees",
                                                         "node_modules", "DerivedData", "dist", "build", "out"]

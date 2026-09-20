@@ -625,10 +625,13 @@ final class CodeGitRestyleTests: XCTestCase {
             }
         }
         // 14 → 13：`CodeGit/CodeGitTable.swift` 于 M0 上提为 `Design/DataTable.swift`
+        // 13 → 14（收官轮 WS-X0）：本 App 自扫点名 `CodeRiskAnalysis.suggestions` 138 行 / CC 17，
+        // 按类拆出的三个构建器落在同目录新文件 `Code/CodeRiskAdvice.swift`（原文件留在 400 行线内）。
+        // 归属没动：多的是 Code 目录里的一处实现分片，仍归本流。
         // （本轮 spec §2.4）。它被 6 个目录的 10 个文件共用，留在一个页面目录下
         // 等于让该页独占全仓的列系统。这条断言本来就是「归属被动过就要响」，
         // 它响了，改的是**记录**而不是把断言删掉。
-        XCTAssertEqual(out.count, 13, "WS-L/WS-P 名下应有 13 个视图文件（Code 4 / Git 5 / Dependencies 2 / CodeGit 2），数量变了说明归属被动过；列系统已上提进 Design/，见 Design/DataTable.swift")
+        XCTAssertEqual(out.count, 14, "WS-L/WS-P 名下应有 14 个视图文件（Code 5 / Git 5 / Dependencies 2 / CodeGit 2），数量变了说明归属被动过；列系统已上提进 Design/，见 Design/DataTable.swift")
         return out
     }
 }

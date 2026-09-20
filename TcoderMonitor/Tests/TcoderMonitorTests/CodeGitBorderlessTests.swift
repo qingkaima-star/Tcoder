@@ -679,8 +679,11 @@ final class CodeGitBorderlessTests: XCTestCase {
     /// 反向自证：扫描器真读到了文件。否则本文件所有「空 = 通过」的断言集体假绿。
     func test_sourceScannerActuallyFindsFiles() throws {
         let all = try Self.pageSourceFiles()
-        XCTAssertEqual(all.count, 13,
-                       "本流应有 13 个视图文件（Code 4 / Git 5 / Dependencies 2 / CodeGit 2）；"
+        // 13 → 14（收官轮 WS-X0）：自扫点名 `CodeRiskAnalysis.suggestions` 138 行 / CC 17，
+        // 拆出的实现分片落在同目录 `Code/CodeRiskAdvice.swift`；归属没动，与
+        // CodeGitRestyleTests 钉的是同一个数（两处必须一起改，否则这两把尺子互相看不见）。
+        XCTAssertEqual(all.count, 14,
+                       "本流应有 14 个视图文件（Code 5 / Git 5 / Dependencies 2 / CodeGit 2）；"
                           + "数量变了说明有文件被新增或删除（CodeGitRestyleTests 钉着同一个数）")
         for dir in Self.scannedDirs {
             XCTAssertTrue(all.contains { $0.path.hasPrefix("\(dir)/") },
