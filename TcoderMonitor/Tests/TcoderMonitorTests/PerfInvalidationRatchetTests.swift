@@ -16,6 +16,9 @@ import XCTest
 /// 本仓教训：两套口径并存时，错的那套常在喂数据。基线取本文件写作时实测的调用点数，
 /// 目标 0 由三家在 M1 清零；谁新增一处粗粒度读点，这里就红。
 ///
+/// 【「完成」由 §3 的 `consumptionGateOpen` 定义】只减不增挡不住「原地踏步还宣布达标」：
+/// 16 处一处不迁，那两条断言照样绿。所以达标与否看闸门，不看棘轮。
+///
 /// 【元测试】扫描型守卫最坏的失效不是报错而是**正则写坏 → 永远 0 命中还常绿**。
 /// 所以每条扫描都配一个故意造的坏样例（必须被看见）与一个合规样例（不得被误伤），
 /// 并要求分母（扫到的文件数 / 行数）足够大，"没扫到东西"一律判失败。
@@ -192,7 +195,84 @@ final class PerfInvalidationRatchetTests: XCTestCase {
                        "细粒度正则本该认出全部 \(Self.migratedSamples.count) 条合规写法，实得 \(fine.count) 条")
     }
 
-    // MARK: - 3. 采集侧不许退回旧形状
+    // MARK: - 3. 「完成」的机器定义：细粒度消费闸门
+
+    /// **M1 迁移闸门**。16 处粗粒度读点全部迁完、并且把 `coarseCallSiteCeiling` 一起拧成 0
+    /// 之后，由总工翻成 `true`。
+    ///
+    /// 【为什么非要有这条】这轮的收益全部长在**消费侧**：采集侧改成细粒度格只是必要条件，
+    /// 页面继续读 `monitor.latestSnapshot` 的话，每 tick 重算的还是那几整棵 body。
+    /// 实测细粒度读点 = 0 处，也就是这轮在页面上**一点都没落地**。
+    /// 而现有断言全是"只减不增"——16 处原封不动也能常绿，我随时可以在这个状态下宣布
+    /// "120Hz 达标"。闸门把"完成"写死成机器可判的四态，见 `ConsumptionState`。
+    ///
+    /// 与 `BorderlessSurfaceGuardTests.m2WiringComplete` 同一套路子：测试在场、
+    /// 当前不拦路、但**除了真完成之外没有一个状态可以静默绿**。
+    private static let consumptionGateOpen = false
+
+    enum ConsumptionState: Equatable {
+        /// 债还在（粗读点或上限任一未归零）。今天真状态。
+        case debtOutstanding(coarse: Int, ceiling: Int)
+        /// 债清完了却没人翻闸门——本文件该被撤除，不能一直挂着当"永远欠着"。
+        case debtRepaidButGateShut(fine: Int)
+        /// 唯一的"完成"。
+        case done(fine: Int)
+        /// 提前翻闸门：拿一个还没落地的状态去报成功。
+        case openedTooEarly(coarse: Int, ceiling: Int, fine: Int)
+    }
+
+    /// 状态机本身是纯函数：元测试用合成数字直接验它，不必改动真仓库就能证明它不是摆设。
+    static func consumptionState(coarse: Int, fine: Int, ceiling: Int, gateOpen: Bool) -> ConsumptionState {
+        if gateOpen {
+            return ceiling == 0 && coarse == 0 && fine > 0
+                ? .done(fine: fine)
+                : .openedTooEarly(coarse: coarse, ceiling: ceiling, fine: fine)
+        }
+        if coarse > 0 || ceiling > 0 { return .debtOutstanding(coarse: coarse, ceiling: ceiling) }
+        return .debtRepaidButGateShut(fine: fine)
+    }
+
+    func testConsumptionGateIsHonestAboutItsState() throws {
+        let docs = try scannedConsumerDocs()
+        let coarse = try Self.scanHits(pattern: Self.coarsePattern, in: docs).count
+        let fine = try Self.scanHits(pattern: Self.finePattern, in: docs).count
+        let state = Self.consumptionState(coarse: coarse, fine: fine,
+                                          ceiling: Self.coarseCallSiteCeiling,
+                                          gateOpen: Self.consumptionGateOpen)
+        switch state {
+        case .debtOutstanding(let c, let ceiling):
+            print("【消费闸门】关。粗读点 \(c) 处 / 上限 \(ceiling) 处 / 细读点 \(fine) 处"
+                + " —— 这轮的收益还没在页面上落地，任何「T1/T2 达标」的结论都不成立。")
+        case .debtRepaidButGateShut(let fine):
+            XCTFail("粗读点与上限都已归零（细读点 \(fine) 处），闸门却还关着："
+                  + "由总工把 consumptionGateOpen 翻成 true，或干脆撤除本文件，别让它长期挂着。")
+        case .openedTooEarly(let c, let ceiling, let fine):
+            XCTFail("闸门被翻成 true，但消费侧没完成：粗读点 \(c) 处 / 上限 \(ceiling) 处 / 细读点 \(fine) 处。"
+                  + "这正是「拿没落地的状态报 120Hz 达标」的形状。")
+        case .done(let fine):
+            print("【消费闸门】开。粗读点 0 处，细读点 \(fine) 处 —— 可以按帧率复测判 T1/T2。")
+        }
+    }
+
+    func testConsumptionGateCatchesSyntheticStates() {
+        let cases: [(name: String, coarse: Int, fine: Int, ceiling: Int, open: Bool,
+                     expect: ConsumptionState)] = [
+            ("今天的真状态：16 处粗读、0 处细读、闸门关", 16, 0, 16, false, .debtOutstanding(coarse: 16, ceiling: 16)),
+            ("粗读清了但上限没拧（回归还能藏进去）", 0, 12, 16, false, .debtOutstanding(coarse: 0, ceiling: 16)),
+            ("债清完却忘了翻闸门", 0, 12, 0, false, .debtRepaidButGateShut(fine: 12)),
+            ("提前翻闸门：还有粗读点", 3, 12, 0, true, .openedTooEarly(coarse: 3, ceiling: 0, fine: 12)),
+            ("提前翻闸门：细读点为 0（迁了但没人读，或正则坏了）", 0, 0, 0, true,
+             .openedTooEarly(coarse: 0, ceiling: 0, fine: 0)),
+            ("真完成", 0, 12, 0, true, .done(fine: 12)),
+        ]
+        for item in cases {
+            let got = Self.consumptionState(coarse: item.coarse, fine: item.fine,
+                                            ceiling: item.ceiling, gateOpen: item.open)
+            XCTAssertEqual(got, item.expect, "状态机认错了：\(item.name)")
+        }
+    }
+
+    // MARK: - 4. 采集侧不许退回旧形状
 
     func testServiceSideKeepsDerivedValuesCachedAndNarrow() throws {
         let docs = try scannedServiceDocs()
@@ -207,7 +287,7 @@ final class PerfInvalidationRatchetTests: XCTestCase {
                       "`allProcesses` 必须留在观察图外（视图零读点），否则每 tick 白搭一次整片失效")
     }
 
-    // MARK: - 4. 失效面真的收窄了（运行期行为，不是 grep 出来的）
+    // MARK: - 5. 失效面真的收窄了（运行期行为，不是 grep 出来的）
 
     @MainActor
     func testWritingOneCellDoesNotWakeReadersOfAnother() {
@@ -239,7 +319,7 @@ final class PerfInvalidationRatchetTests: XCTestCase {
         XCTAssertEqual(woke, 1, "落了一帧就必须唤醒整帧读者——兼容层不能变成死值")
     }
 
-    // MARK: - 5. T3 暂停：引用计数 + 暂停期的帧不丢、不补 0
+    // MARK: - 6. T3 暂停：引用计数 + 暂停期的帧不丢、不补 0
 
     @MainActor
     func testPauseIsReferenceCountedAcrossCallers() {
@@ -293,7 +373,7 @@ final class PerfInvalidationRatchetTests: XCTestCase {
         XCTAssertEqual(monitor.cpu.value.coreCount, snapshot.cpuCoreCount)
     }
 
-    // MARK: - 6. T8 诚实性：细粒度格不得比粗粒度层更 loose
+    // MARK: - 7. T8 诚实性：细粒度格不得比粗粒度层更 loose
 
     func testLeadsGiveNoDerivativeWithoutPreviousFrame() {
         var snapshot = SystemSnapshot()
@@ -370,7 +450,7 @@ final class PerfInvalidationRatchetTests: XCTestCase {
         XCTAssertTrue(monitor.curve.value.isEmpty)
     }
 
-    // MARK: - 7. 契约面存在性（名字要稳：三家照这个名字迁，名字没了必须红）
+    // MARK: - 8. 契约面存在性（名字要稳：三家照这个名字迁，名字没了必须红）
 
     func testFineGrainedContractSurfaceStillExists() throws {
         let docs = try scannedServiceDocs()

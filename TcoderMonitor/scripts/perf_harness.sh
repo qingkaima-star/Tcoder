@@ -2,15 +2,21 @@
 # =============================================================================
 # perf_harness.sh —— Tcoder 性能契约（120Hz）的外部尺子。spec §4.1。
 #
-# 三档测量，全部**只读**：
-#   idle    attach 现有实例，录 Animation Hitches + Time Profiler，量心跳期（spec §1 那一档）
-#   switch  逐页冷启动（-selectedDetailSection 中文页名），量首帧与冷构建成本
-#   report  读已有输出目录，重打汇总表（不重录，省时间也省磁盘）
+# 三档测量 + 两档不采数的（selfcheck 连 App 都不起、probe 只读已有脉冲文件）：
+#   idle       attach 现有实例，录 Animation Hitches + Time Profiler，量心跳期（spec §1 那一档）
+#   switch     逐页冷启动（-selectedDetailSection 中文页名），量首帧与冷构建成本
+#   report     读已有输出目录，重打汇总表（不重录，省时间也省磁盘）
+#   probe      读 `FramePulse` 落盘的脉冲文件 → 交互期 p95 与 hitch 判定（T1 的唯一入口）
+#   selfcheck  不采任何东西：拿合成夹具把尺子自己量一遍（见 cmd_selfcheck）
 #
 # ## 为什么这里绝不出现 kill / 信号
-# AGENTS.md -1.3：进程监控只读展示。本脚本只 `pgrep` / `ps -p` 只读探活，
-# 需要实例自行退出时走 `osascript ... quit`（App 自己的退出事件），不发信号。
-# idle 档连 quit 都不需要——它 attach 的是**别人已经开着的**实例。
+# AGENTS.md -1.3：进程监控只读展示。本脚本只 `pgrep` / `lsof` 只读探活。
+# **2026-09-20 更正**：这里原先写着"需要退出时走 `osascript ... quit`"——那句已经作废。
+# 实测 `tell application id "com.tcoder.monitor" to quit` 是**按 bundle id 全机命中**，
+# 不分工作树也不分沙箱，会连带杀掉别人正在跑的实例（第三轮取证事故，两家互杀到 0 张图）。
+# 现在 switch 档默认**只打印 pid**，由人工 Cmd+Q；确需自动退出时 `SWITCH_TERM=1`
+# 才对自己 `$!` 起的那一个 pid 发 SIGTERM（用户 2026-09-20 明确授权，且绝不广播）。
+# idle 档连退出都不需要——它 attach 的是**别人已经开着的**实例。
 #
 # ## 为什么开头就要拦住多实例
 # xctrace 按名字 attach 会挑错进程；而 spec §7.5 要求采样期间只有被采的那一个实例
@@ -30,6 +36,8 @@
 #   scripts/perf_harness.sh idle [输出目录]
 #   scripts/perf_harness.sh switch [输出目录]
 #   scripts/perf_harness.sh report <输出目录>
+#   scripts/perf_harness.sh probe [脉冲文件] [--interaction]   # 缺省取 /tmp 上最新那份
+#   scripts/perf_harness.sh selfcheck          # 不采数据，只验尺子自己还活着
 # 传参（都有默认值，别改默认值来"让它过"）:
 #   SECONDS_HITCHES=20   idle 档 Animation Hitches 录制秒数
 #   SECONDS_TP=25        idle 档 Time Profiler 录制秒数（spec §1 主线程样本就是 25 s 档）
@@ -51,6 +59,7 @@ SECONDS_LAUNCH="${SECONDS_LAUNCH:-10}"
 PERF_BIN="${PERF_BIN:-$PWD/dist/Tcoder.app/Contents/MacOS/TcoderMonitor}"
 WINLIST="$PWD/scripts/winlist.swift"
 TRACE_REPORT="$PWD/scripts/trace_report.py"
+PULSE_REPORT="$PWD/scripts/perf_framepulse.py"
 DOMAIN="com.tcoder.monitor"
 UUID="11111111-2222-3333-4444-555555555555"
 DRY_RUN="${DRY_RUN:-0}"
@@ -249,6 +258,9 @@ export_table() {  # export_table <trace> <schema> <outdir>
 
 meta_write() {  # meta_write <outdir> <键=值...>
   local out="$1"; shift
+  # 目录由本函数自己保证存在：cmd_switch 的 mkdir 在 per-page 循环里，
+  # DRY_RUN 下整段被跳过，于是第一次 meta_write 会写进不存在的目录（实测 traceback）。
+  mkdir -p "$out" 2>/dev/null || { echo "    ⚠ meta_write 建不了 $out，本条 meta 丢失" >&2; return 0; }
   python3 - "$out/meta.json" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REV" "$DIRTY" "$@" <<'PY'
 import json, os, sys
 path, ts, rev, dirty = sys.argv[1:5]
@@ -443,6 +455,125 @@ PY
   [ -d "$out/pages" ] && python3 "$TRACE_REPORT" switches "$out/pages"
 }
 
+# =============================================================================
+# probe —— 读 FramePulse 的落盘脉冲（交互期 hitch 的唯一入口，零采样）
+# =============================================================================
+cmd_probe() {
+  local file="${1:-}"
+  [ -n "$file" ] || file=$(ls -t /tmp/tcoder-framepulse-*.txt 2>/dev/null | head -1)
+  [ -n "$file" ] || die "找不到 /tmp/tcoder-framepulse-*.txt：探针没开。开法是 TCODER_PERF_PROBE=1 起 App"
+  echo "==> probe 档：读 $file"
+  echo "    交互期结论只有在测量窗口内**真的有人在滚动/拖窗**时才成立，"
+  echo "    所以判 T1 要自己带 --interaction 声明；不带就只会得到 idle 读数（退出码 2，不是达标）。"
+  python3 "$PULSE_REPORT" "$file" "${@:2}"
+}
+
+# =============================================================================
+# selfcheck —— 不起 App、不碰 xctrace，拿合成夹具验这把尺子自己还活着
+# =============================================================================
+cmd_selfcheck() {
+  local out="${1:-/tmp/tcoder-perf-selfcheck-$REV}"
+  echo "==> selfcheck 档：验尺子（合成夹具，零采样，秒级）"
+  rm -rf "$out"; mkdir -p "$out"
+  local fails=0
+  local checked=0
+  fail() { echo "  ✗ $1"; fails=$((fails+1)); }
+  ok()   { echo "  ✓ $1"; checked=$((checked+1)); }
+
+  # 1) 三层文件都要在、都要编译得过、且没有一个撞本仓 ≤800 行棘轮
+  #    （`SelfScanDogfoodTests` 的分母含 .py，ceiling=0：2026-09-20 就是 trace_report.py
+  #     长到 819 行把 main 判红的，那次没人提前发现，因为没人跑过它。）
+  local f lines pylog="$out/py_compile.log"
+  : > "$pylog"
+  for f in trace_report.py perf_trace_xml.py perf_trace_metrics.py perf_framepulse.py; do
+    [ -f "scripts/$f" ] || { fail "缺 scripts/$f（尺子被拆走了一层）"; continue; }
+    lines=$(wc -l < "scripts/$f" | tr -d ' ')
+    [ "$lines" -le 800 ] || fail "scripts/$f 已 $lines 行，撞 ≤800 行棘轮——拆开它，别拧阈值"
+    python3 -m py_compile "scripts/$f" >> "$pylog" 2>&1 || fail "scripts/$f 编译不过，见 $pylog"
+  done
+  ( cd scripts && python3 -c 'import perf_trace_metrics, perf_trace_xml' ) 2>> "$pylog" \
+    || fail "两个子模块 import 不上（入口靠 sys.path 找同目录模块，改名/挪目录会静默断在这里）"
+  rm -rf scripts/__pycache__
+  [ "$fails" -eq 0 ] && ok "四把尺子文件齐全，都编译得过，都没超 800 行"
+
+  # 2) switch 档的逐页表：有数据的那页必须真出数，缺项的必须显式写缺
+  #    （钉的是 2026-09-20 实修的那个缺陷：cmd_switches 里 `cur` 未定义，
+  #     **只有存在逐页子目录时才炸**，夹具为空时它"通过"，于是坏了很久没人知道。）
+  local fx="$out/switch-fixture"
+  mkdir -p "$fx/01-总览" "$fx/02-性能"
+  printf '{"page":"总览","first_frame_ms":412}' > "$fx/01-总览/meta.json"
+  printf '{"total_ms":1234.5,"max_period_ms":600.1,"max_period":"Process Launch"}' > "$fx/01-总览/life-cycle-period.json"
+  printf '{"page":"性能"}' > "$fx/02-性能/meta.json"
+  local rows
+  if python3 "$TRACE_REPORT" switches "$fx" > "$out/switch.txt" 2> "$out/switch.err"; then
+    rows=$(grep -c '^| ' "$out/switch.txt" || true)
+    [ "$rows" -eq 3 ] || fail "switches 只打出 $rows 行表格（应为表头 + 2 页）：$(cat "$out/switch.txt")"
+    grep -q '412 ms' "$out/switch.txt" || fail "first_frame_ms 没进表——switch 档唯一要报的就是它"
+    grep -q '未观测到' "$out/switch.txt" || fail "缺 meta 的页必须显式写「未观测到」，留空会被读成 0"
+    grep -q '未覆盖' "$out/switch.txt" || fail "缺 life-cycle 的页必须显式写「未覆盖」，不能用 0.0 冒充"
+    [ "$rows" -eq 3 ] && ok "switches：两页合成夹具，读数与两种缺项三态都对"
+  else
+    fail "switches 崩了（尺子坏了，读数一律不可信）：$(tail -3 "$out/switch.err" | tr '\n' ' ')"
+  fi
+
+  # 3) 空表要报"未采到"，而不是报"n=0 达标"
+  printf '<table><schema name="hitches"/><row/></table>\n' > "$out/empty.xml"
+  if python3 "$TRACE_REPORT" durations "$out/empty.xml" > "$out/durations.txt" 2>&1 \
+     && grep -q 'n=0（未采到）' "$out/durations.txt"; then
+    ok "durations：空表如实写「未采到」，没有把 0 帧当成达标"
+  else
+    fail "durations 对空表的读数不对（要看 $out/durations.txt）"
+  fi
+
+  # 4) 垃圾输入必须非零退出：否则"读不到文件"和"真的 0 hitch"在退出码上无法区分
+  if python3 "$TRACE_REPORT" durations "$out/根本没有这个文件.xml" > /dev/null 2>&1; then
+    fail "拿不存在的 XML 还退 0 —— 那任何一次测量失败都会伪装成「0 次 hitch，完美」"
+  else
+    ok "缺文件非零退出（测量失败与达标是两种可区分的结果）"
+  fi
+
+  # 5) 反向元测试：`cross_check_durations` 这把复核尺必须真的抓得住不一致
+  #    （它只在两把解析不一致时才拒绝出数；如果它对什么都不一致，等于永真绿）
+  cat > "$out/xcheck.xml" <<'XML'
+<table><schema name="hitches-renders"/>
+<row><duration id="1" fmt="10.00 ms">10000000</duration></row>
+<row><duration ref="1"/></row>
+<row><duration id="2" fmt="99.00 ms">99000000</duration></row>
+</table>
+XML
+  local xmsg
+  xmsg=$( cd scripts && python3 - "$out/xcheck.xml" <<'PY' 2>&1
+import sys
+from perf_trace_xml import cross_check_durations
+agree, why = cross_check_durations(sys.argv[1], [10.0, 10.0, 99.0])
+bad, bad_why = cross_check_durations(sys.argv[1], [10.0, 10.0, 10.0])
+if not agree:
+    print("两把解析本该一致，却判不一致：%s" % why); sys.exit(1)
+if bad:
+    print("两把解析本该不一致，却放行：%s" % bad_why); sys.exit(1)
+print("%s / %s" % (why, bad_why)); sys.exit(0)
+PY
+) && ok "cross_check：一致样本放行、错配样本拦截（$xmsg）" \
+  || fail "cross_check_durations 这把复核尺失效：$xmsg"
+
+  # 6) 交互期那把尺子（perf_framepulse.py）：0 / 1 / 2 三个退出码必须是三种意思
+  #    （格式与产品是否脱钩由 `PerfFramePulseRulerTests` 拿真实摘要行对账，这里只管判定方向）
+  printf 'hz=120.0(合成) 期望间隔=8.33ms 帧数=5000 帧间隔p50=8.33 p95=8.40 p99=8.50 max=9.00ms hitch(>1.5x)=0 hitch/s=0.00 心跳拍数=10 心跳最大间隔=1520.0ms 心跳p50=1500.0 p95=1510.0 带hitch的拍=0/10\n' > "$out/pulse-good.txt"
+  printf '# 探针没开\n不是摘要行\n' > "$out/pulse-junk.txt"
+  local c_idle c_live c_junk
+  python3 "$PULSE_REPORT" "$out/pulse-good.txt" > "$out/pulse-idle.txt" 2>&1; c_idle=$?
+  python3 "$PULSE_REPORT" "$out/pulse-good.txt" --interaction > "$out/pulse-live.txt" 2>&1; c_live=$?
+  python3 "$PULSE_REPORT" "$out/pulse-junk.txt" --interaction > "$out/pulse-junk.txt" 2>&1; c_junk=$?
+  [ "$c_idle" -eq 2 ] || fail "健康读数在未声明交互时退出码应为 2（第三种意思），实得 $c_idle"
+  [ "$c_live" -eq 0 ] || fail "健康读数声明交互后应判达标（0），实得 $c_live：$(cat "$out/pulse-live.txt")"
+  [ "$c_junk" -ne 0 ] || fail "坏数据被判成了达标——一次失败的测量会伪装成「0 hitch，完美」"
+  [ "$c_idle" -eq 2 ] && [ "$c_live" -eq 0 ] && [ "$c_junk" -ne 0 ] \
+    && ok "framepulse：达标/未达标/坏数据/未确认交互 四种结果互不混淆"
+
+  echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
+  [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
+}
+
 main() {
   local cmd="${1:-}"
   shift || true
@@ -450,7 +581,9 @@ main() {
     idle) cmd_idle "$@" ;;
     switch) cmd_switch "$@" ;;
     report) cmd_report "$@" ;;
-    *) sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    probe) cmd_probe "$@" ;;
+    selfcheck) cmd_selfcheck "$@" ;;
+    *) sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 }
 main "$@"
