@@ -1,8 +1,10 @@
+import AppKit
 import SwiftUI
 import Observation
 
 /// Root application model. Chief-engineer owned — workstreams must not edit this file;
 /// they implement the service protocols and the views they are assigned.
+/// 本轮（性能轮 P 包）例外：T3 交互期暂停的**接线**只能在编排器里做，页面零改动。
 @MainActor
 @Observable
 final class AppState {
@@ -30,11 +32,80 @@ final class AppState {
 
     static let demoProjectPath = "demo://tcoder-sample"
 
+    // MARK: T3 交互期暂停（滚动 / 拖窗 / resize 期间冻结实时写入）
+    //
+    // 规范红线四条都落在这段代码里：
+    // 1. **只在 `AppState` 实现**：用 `NSEvent` 本地监视器 + `NSWindow` 通知，macOS 14 就有，
+    //    不用 macOS 15+ 的 `onScrollPhaseChange`；页面零改动、`Design/**` 零新增 `#available`。
+    // 2. **引用计数式**：`MachSystemMonitor` 持票，这里只是其中一个持票人；
+    //    切页 / 拖窗与滚动同时在场上时，谁结束都不许提前解冻另一个。
+    // 3. **停止 150 毫秒后恢复**：每个事件都重置自己那一源的沉降定时器，
+    //    滚动条一路拖就一直暂停，手放开 150 ms 才恢复写界面。
+    // 4. **暂停期跳过的帧仍要进环形缓冲**：这里只按"要不要写界面"，
+    //    采集与入环在 `MachSystemMonitor.ingest` 里照旧逐帧发生，
+    //    恢复后曲线是完整真实轨迹，既没有 0 也没有空白。
+
+    /// 交互停止多久之后恢复实时写入。
+    nonisolated static let interactionSettleNanoseconds: UInt64 = 150_000_000
+
+    @ObservationIgnored private var pointerEventMonitor: Any?
+    @ObservationIgnored private var windowObservers: [NSObjectProtocol] = []
+    @ObservationIgnored private var pointerSettleTask: Task<Void, Never>?
+    @ObservationIgnored private var windowSettleTask: Task<Void, Never>?
+
     init() {
         store = ProjectStore()
         monitor = MachSystemMonitor()
         monitor.start(intervalMilliseconds: 1_500)
+        startInteractionGating()
         bootstrapIfNeeded()
+    }
+
+    /// 装上交互监视器。`AppState` 与 App 同生命周期，所以故意不摘：
+    /// 摘掉就等于把 T3 的暂停关掉。
+    private func startInteractionGating() {
+        guard pointerEventMonitor == nil else { return }
+        // 只监视"用户正在拖着东西"的事件：滚动与三种拖拽。返回事件本身，绝不吞掉。
+        pointerEventMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.scrollWheel, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged]
+        ) { [weak self] event in
+            MainActor.assumeIsolated { self?.notePointerStreamActivity() }
+            return event
+        }
+
+        let center = NotificationCenter.default
+        // live resize 与拖标题栏移动窗口都不走本 App 的事件流（窗口服务器在处理它们），
+        // 所以这两条得靠窗口通知补，否则"拖窗不掉帧"这一半根本没被监视到。
+        let windowKinds: [NSNotification.Name] = [NSWindow.willStartLiveResizeNotification,
+                                                  NSWindow.didEndLiveResizeNotification,
+                                                  NSWindow.didMoveNotification]
+        for name in windowKinds {
+            windowObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                MainActor.assumeIsolated { self?.noteWindowActivity() }
+            })
+        }
+    }
+
+    /// 滚动 / 拖拽：每一帧事件都续一次票，并重置 150 ms 沉降定时器。
+    private func notePointerStreamActivity() {
+        monitor.beginInteractionPause(.pointerStream)
+        pointerSettleTask?.cancel()
+        pointerSettleTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: AppState.interactionSettleNanoseconds)
+            guard !Task.isCancelled else { return }
+            self?.monitor.endInteractionPause(.pointerStream)
+        }
+    }
+
+    /// 拖窗 / 改变窗口尺寸：live resize 开始即暂停，结束（或移动事件沉降）后 150 ms 归还票。
+    private func noteWindowActivity() {
+        monitor.beginInteractionPause(.windowDrag)
+        windowSettleTask?.cancel()
+        windowSettleTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: AppState.interactionSettleNanoseconds)
+            guard !Task.isCancelled else { return }
+            self?.monitor.endInteractionPause(.windowDrag)
+        }
     }
 
     /// 选中项目的**唯一**判定处：落盘选中（仍存在于列表里）> 第一个非示例项目 > 第一个。
