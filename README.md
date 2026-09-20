@@ -32,7 +32,7 @@ Apple Silicon 原生 macOS App（Swift + SwiftUI），对本地开发项目做�
 | 依赖分析 | `package.json` / `pom.xml` / `build.gradle(.kts)` / `settings.gradle(.kts)` / `Package.swift` / `requirements.txt`（含 `requirements-*.txt`、`dev-requirements.txt` 派生名）/ `pyproject.toml` / `setup.py` / `Pipfile` / `go.mod` / `Cargo.toml` / `Podfile` / `Gemfile` / `packages.config` —— 共 16 个精确文件名外加派生规则，以 `ManifestParsers.swift` 的
 `ManifestFileName.table`（清单名 → 生态）与 `ManifestFileName.ecosystem(for:)`（派生名判定）为准；
 版本过旧与已知漏洞，可选在线查 OSV.dev 与 npm registry |
-| 健康评分 | 9 维加权评分与优点/问题/建议。**启发式本地计算，未调用任何外部模型**，界面已如实标注 |
+| 健康评分 | 9 维加权评分与优点/问题/建议，另并列**工程质量（代码口径）**副读数。**启发式本地计算，未调用任何外部模型**，界面已如实标注 |
 
 > 上表是开发向速览。逐页「给我看什么 / 数字怎么算的 / 什么时候会不准」见
 > [`docs/使用说明.md`](docs/使用说明.md) 第 3 节；页面名称以侧栏为准
