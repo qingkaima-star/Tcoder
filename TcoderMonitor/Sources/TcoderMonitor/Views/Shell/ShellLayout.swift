@@ -7,10 +7,11 @@ import SwiftUI
 // 页面里不再出现裸数字（WS-I §2.6 的工单口径：列宽/尺寸改命名常量表，参照 `DepColumns`）。
 
 enum ShellLayout {
-    /// 侧栏三档宽度。min 取 220 是为了「复杂度风险」这类四字标题 + 健康点 + 行数副标题
-    /// 在一行内不折行；max 收到 340 防止拉宽侧栏后把 1080 起窗的内容区挤到不可用。
-    static let sidebarMinWidth: CGFloat = 220
-    static let sidebarIdealWidth: CGFloat = 260
+    /// 侧栏三档宽度。220 → 240：项目行从「48pt 两行卡」收成「30pt 单行」之后，
+    /// 项目名与右侧两格定宽读数（`37k 行` / `健康 61`）挤在同一行，220 下名字被截成
+    /// `Tcoder…`（17:17 实拍实测）。max 收到 340 防止拉宽侧栏把 1080 起窗的内容区挤到不可用。
+    static let sidebarMinWidth: CGFloat = 240
+    static let sidebarIdealWidth: CGFloat = 272
     static let sidebarMaxWidth: CGFloat = 340
 
     /// 健康评分环的描边宽度。环是「一个数字 + 一圈进度」，描边必须粗到能从 40pt 数字

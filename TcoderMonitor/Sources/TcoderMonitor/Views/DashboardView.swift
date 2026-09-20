@@ -27,8 +27,12 @@ struct DashboardView: View {
     var body: some View {
         Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthOverview) {
             HealthHeroCard(health: report?.health)
-            scaleSegment
+            // 紧跟 hero 的是**本机读数带**（CPU / 内存 / 今日错误 / 最近提交），
+            // 再往下才是仓库静态指标。顺序理由：读数带与实时曲线同属「本机此刻」，
+            // 拆开放会让眼睛在两种时间尺度之间来回跳；而它整体是一个独立子视图，
+            // 1.5s 心跳的失效域只落在它身上（性能轮 O-2）。
             DashboardLiveReadout()
+            scaleSegment
             listSegment
             if let error = state.lastError {
                 failureCard(error)

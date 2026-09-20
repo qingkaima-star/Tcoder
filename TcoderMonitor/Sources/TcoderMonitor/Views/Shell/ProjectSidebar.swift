@@ -296,6 +296,9 @@ struct ProjectRow: View {
             Text(project.name)
                 .font(Theme.Typo.body.font)
                 .lineLimit(1)
+                // 单行截断是刻意的（名字给右侧两格读数让位），所以完整名字必须
+                // 悬停可得 —— 否则「看得见一半」比「看不见」更难查。
+                .help(project.name)
             if project.isDemo {
                 // 原来这里是一套就地自造的淡色胶囊（8pt + 0.15 底），
                 // 与 PerformanceView 的 PerfTag 逐行重复（WS-I §3.1）→ 改用基座件。
