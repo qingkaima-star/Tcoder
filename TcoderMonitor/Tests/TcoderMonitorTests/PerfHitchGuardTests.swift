@@ -63,7 +63,7 @@ final class PerfHitchGuardTests: XCTestCase {
     ///   → 归 **M1 / WS-W**（spec §5 点名"LogsView.attachedItems 的 body 内 stat() 移出"），终点 0。
     static let knownBaseline: [String: Int] = [
         "directFormatters": 1,
-        "dynamicNSColor": 88,
+        "dynamicNSColor": 107,
         "fullSort": 10,
         "syncFileIO": 2,
     ]
@@ -71,7 +71,10 @@ final class PerfHitchGuardTests: XCTestCase {
     /// 每条规则的负责人 / 里程碑，只在报错时打出来，避免"基线是遮羞布"。
     static let ownerNotes: [String: String] = [
         "directFormatters": "M1 WS-W：DateFormatter/NumberFormatter 提 static let（终点 0）",
-        "dynamicNSColor": "M0 总工 C 包：ColorToken 缓存 NSColor（落地后重定基线，落地前只减不增）",
+        "dynamicNSColor": "语义已变（C 包落地后）：令牌由「每次访问现造」改成缓存之后，本条量的不再是分配次数，"
+            + "而是**渲染路径里引用令牌成员的次数**——它仍是重算面的代理指标（引用越多＝每 tick 求值越密），"
+            + "但不再等于「每 tick new 多少个 NSColor」。落地前 88（只认 .textColor），"
+            + "放宽到四成员后实测 107（+19 处 .graphicColor，全在图表 Mark/循环里）。终点仍由 M1 各流按页面收敛。",
         "fullSort": "M1 WS-P/WS-W：body 内派生集合缓存或移到 publish 里算（终点 0）",
         "syncFileIO": "M1 WS-W：渲染路径的文件尺寸/存在性检查移到扫描期（终点 0）",
     ]
@@ -392,8 +395,12 @@ enum PerfHitchScan {
         ("directFormatters", [#"let c = NSColor(name: nil) { _ in .black }"#,
                               "let formatter = DateFormatter()",
                               "let nf = NumberFormatter()"]),
-        ("dynamicNSColor", ["Text(\"x\").foregroundStyle(role.textColor)"]),
-        ("fullSort", ["let rows = allRows.sorted { $0.name < $1.name }"]),
+        ("dynamicNSColor", ["Text(\"x\").foregroundStyle(role.textColor)",
+                            "LineMark(x: .value(\"t\", p.t)).foregroundStyle(series.graphicColor)",
+                            "RoundedRectangle().fill(state.badgeFill)",
+                            "Image(systemName: \"x\").foregroundStyle(colorSet.onFillColor)"]),
+        ("fullSort", ["let rows = allRows.sorted { $0.name < $1.name }",
+                      "let names = allNames.sorted(by: { $0.count > $1.count })"]),
         ("syncFileIO", ["guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }",
                         "if FileManager.default.fileExists(atPath: project.path) {",
                         "let kids = try FileManager.default.contentsOfDirectory(atPath: root)",
