@@ -63,7 +63,7 @@ final class PerfHitchGuardTests: XCTestCase {
     ///   → 归 **M1 / WS-W**（spec §5 点名"LogsView.attachedItems 的 body 内 stat() 移出"），终点 0。
     static let knownBaseline: [String: Int] = [
         "directFormatters": 1,
-        "dynamicNSColor": 86,   // 2026-09-20 由 107 拧到实测 86，见下方 ownerNotes
+        "dynamicNSColor": 59,   // 2026-09-21 由 86 拧到实测 59（接管者的颜色面积收敛又还掉 27 处），见 ownerNotes
         "fullSort": 10,
         "syncFileIO": 2,
     ]
@@ -76,6 +76,8 @@ final class PerfHitchGuardTests: XCTestCase {
             + "但不再等于「每 tick new 多少个 NSColor」。落地前 88（只认 .textColor），"
             + "放宽到四成员后实测 107（+19 处 .graphicColor，全在图表 Mark/循环里）。终点仍由 M1 各流按页面收敛。"
             + "**2026-09-20 拧到 86**：`165faa7`（M1-集成，图表取色上提进 Design/）还掉了 21 处 Views 侧引用，"
+            + "**2026-09-21 再拧到 59**：`c60abbd`（观感·批次 ABC 颜色面积收敛）又还掉 27 处。"
+            + "两次都是同一条『现量/上限』打印＋$TMPDIR 台账抓出来的——不打印就没人知道基线在漏。"
             + "而这条棘轮当时不报现量、没人看得见那 21 处余量——现在它每次跑都打「现量/上限」。",
         "fullSort": "M1 WS-P/WS-W：body 内派生集合缓存或移到 publish 里算（终点 0）",
         "syncFileIO": "M1 WS-W：渲染路径的文件尺寸/存在性检查移到扫描期（终点 0）",
@@ -121,6 +123,12 @@ final class PerfHitchGuardTests: XCTestCase {
             return now < baseline ? "\(rule) \(now)/\(baseline)（可拧到 \(now)）" : "\(rule) \(now)/\(baseline)"
         }.joined(separator: "  ")
         print("【渲染路径禁则】现量/上限 —— \(debt)")
+        // 同一条数**再落一份文件**：`swift test` 会丢子进程 stdout 的后半段
+        // （本仓记过），实测 2026-09-20 的 premerge 日志里就没有这行 print
+        // ——只靠 print 的"现量"没法被机器读，拧基线的人（包括下一次的我）就拿不到余量。
+        let ledger = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("tcoder-perf-renderpath-debt.txt")
+        try? "HEAD=\(Date()) \(debt)\n".write(to: ledger, atomically: true, encoding: .utf8)
         XCTAssertTrue(problems.isEmpty, problems.joined(separator: "\n"))
     }
 

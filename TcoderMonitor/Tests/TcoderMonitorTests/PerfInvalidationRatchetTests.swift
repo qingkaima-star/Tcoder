@@ -145,6 +145,14 @@ final class PerfInvalidationRatchetTests: XCTestCase {
         print("【粗 API 棘轮】消费方文件 \(docs.count) 个 / \(lines) 行，粗粒度读点 \(hits.count) 处"
             + "（上限 \(Self.coarseCallSiteCeiling)，目标 0），细粒度读点 "
             + "\(try Self.scanHits(pattern: Self.finePattern, in: docs).count) 处")
+        // 同一行数落一份文件：`swift test` 会丢子进程 stdout 的后半段，
+        // 只靠 print 的话"还剩几处"就进不了机器（迁移验收要的正是这个数）。
+        let fineCount = try Self.scanHits(pattern: Self.finePattern, in: docs).count
+        let ledger = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("tcoder-perf-migration-debt.txt")
+        let ledgerText = "coarse=\(hits.count) ceiling=\(Self.coarseCallSiteCeiling) "
+            + "fine=\(fineCount) files=\(docs.count) lines=\(lines)\n"
+        try? ledgerText.write(to: ledger, atomically: true, encoding: .utf8)
     }
 
     /// 基线本身不许是"假零"：只要上限还大于 0，今天就必须真扫得到东西。

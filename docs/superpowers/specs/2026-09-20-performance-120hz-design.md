@@ -211,7 +211,7 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
     | `directFormatters` | 1/1 | **0** | 真违规：渲染路径里现造 formatter |
     | `fullSort` | 10/10 | **0** | 真违规：body 内全量排序（缓存或挪到 publish） |
     | `syncFileIO` | 2/2 | **0** | 真违规：body 内 `exists`/`attributesOfItem` |
-    | `dynamicNSColor` | 86/86 | **不是 0** | 取色本身没错，错的是"每次访问现造"。达标判据换成两件事：① `Design/**` 里不许再出现 `var color: Color {` 这类计算属性（已有守卫）；② 引用点不许嵌在 O(n) 循环 / Mark 闭包里重复求值（棘轮只减不增 + 人工核）。 |
+    | `dynamicNSColor` | 59/59（2026-09-21 复拧） | **不是 0** | 取色本身没错，错的是"每次访问现造"。达标判据换成两件事：① `Design/**` 里不许再出现 `var color: Color {` 这类计算属性（已有守卫）；② 引用点不许嵌在 O(n) 循环 / Mark 闭包里重复求值（棘轮只减不增 + 人工核）。 |
     **不许为了凑"零动态色"去删令牌引用**——那会同时砸掉观感一致性与 T8（颜色承载语义），
     属于"为了指标改语义"，是本规范第一条禁止的事。
 - **T6 合成层预算**：内容层 0 填充、投影只给 `.floating`、每屏材质/backdrop 层 ≤ 2。
