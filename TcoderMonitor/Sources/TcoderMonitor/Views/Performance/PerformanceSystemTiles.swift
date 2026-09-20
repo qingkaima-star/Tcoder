@@ -101,11 +101,9 @@ struct PerformanceSystemTiles: View {
                 caption: total == nil
                     ? "首个差分帧到达前不给速率"
                     : "读 \(Live.rate(SystemReadings.diskReadBytesPerSecond(context))) / 写 \(Live.rate(SystemReadings.diskWriteBytesPerSecond(context)))",
-                tint: ChartSeries.color(ChartSeries.disk),
                 systemImage: IconName.disk.rawValue
             ),
-            fraction: nil,
-            graphic: ChartSeries.color(ChartSeries.disk)
+            fraction: nil
         )
     }
 
@@ -118,23 +116,25 @@ struct PerformanceSystemTiles: View {
                 caption: total == nil
                     ? "首个差分帧到达前不给速率"
                     : "↓ \(Live.bitRate(SystemReadings.networkInBytesPerSecond(context))) / ↑ \(Live.bitRate(SystemReadings.networkOutBytesPerSecond(context)))",
-                tint: ChartSeries.color(ChartSeries.network),
                 systemImage: IconName.network.rawValue
             ),
-            fraction: nil,
-            graphic: ChartSeries.color(ChartSeries.network)
+            fraction: nil
         )
     }
 
     /// tile 下面挂一条量表；无数据时保留等高占位，不让整块高度跳动。
+    ///
+    /// `graphic` 只收**语义**图形色（`LoadLevel.role.graphicColor`）。吞吐类指标没有
+    /// 可信分母、也没有好坏分档，所以既不给它画量表、也不给它涂分类色 ——
+    /// 旧写法把磁盘涂紫、网络涂青，是无端让眼睛读出「这两件事性质不同」。
     @ViewBuilder
-    private func gauged(_ tile: MetricTile, fraction: Double?, graphic: Color) -> some View {
+    private func gauged(_ tile: MetricTile, fraction: Double?, graphic: Color? = nil) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             tile
-            if let fraction {
-                MiniBarGauge(fraction: fraction, tint: graphic, height: BarThickness.tile)
+            if let fraction, let graphic {
+                MiniBarGauge(fraction: fraction, tint: graphic, height: Theme.Layout.gaugeInline)
             } else {
-                Color.clear.frame(height: BarThickness.tile)
+                Color.clear.frame(height: Theme.Layout.gaugeInline)
             }
         }
     }

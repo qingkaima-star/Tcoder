@@ -270,7 +270,7 @@ struct HealthComponentTable: View {
             HStack(spacing: Theme.Spacing.xxs) {
                 MiniBarGauge(fraction: Double(row.score) / 100,
                              tint: role.graphicColor,
-                             height: BarThickness.component)
+                             height: Theme.Layout.gaugeInline)
                     .frame(width: DataColumns.healthScoreGauge)
                 LiveNumber(String(row.score), tier: Theme.Typo.monoSmall,
                            tint: role.textColor)

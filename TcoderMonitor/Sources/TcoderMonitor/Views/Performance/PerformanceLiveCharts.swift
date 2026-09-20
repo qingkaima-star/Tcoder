@@ -65,14 +65,12 @@ struct PerformanceLiveCharts: View {
         let axis = cpuAxis
         return VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             SeriesLegend(name: "CPU 占用率",
-                         series: ChartSeries.cpu,
                          basis: Self.cpuBasis(context: context),
                          value: Live.percent(SystemReadings.cpuFraction(context), precision: 0))
             LiveSeriesChart(points: points,
                             xOf: \.timestamp,
                             yOf: { $0.cpuUsage * ChartScale.percentMax },
                             valueName: "占用率",
-                            series: ChartSeries.cpu,
                             axis: axis,
                             timeAxis: timeAxis,
                             summary: cpuSummary(axis),
@@ -87,7 +85,6 @@ struct PerformanceLiveCharts: View {
         let trusted = trustedMemory
         return VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             SeriesLegend(name: "内存在用率",
-                         series: ChartSeries.memory,
                          basis: Self.memoryBasis(context: context),
                          value: Live.percent(SystemReadings.memoryFraction(context), precision: 0))
             if trusted.count >= Self.minPointsToPlot {
@@ -95,7 +92,6 @@ struct PerformanceLiveCharts: View {
                                 xOf: \.timestamp,
                                 yOf: { $0.memoryFraction * ChartScale.percentMax },
                                 valueName: "在用率",
-                                series: ChartSeries.memory,
                                 axis: axis,
                                 timeAxis: timeAxis,
                                 summary: memorySummary(trusted.count, axis),

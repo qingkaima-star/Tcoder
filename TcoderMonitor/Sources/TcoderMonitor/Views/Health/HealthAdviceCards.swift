@@ -147,7 +147,8 @@ struct HealthTrendChart: View {
         Chart(points) { point in
             LineMark(x: .value("时间", point.date), y: .value("分数", Double(point.score)))
                 .interpolationMethod(.monotone)
-                .foregroundStyle(ChartSeries.color(ChartSeries.healthTrend))
+                // 趋势线本身是结构 → 纯墨；**语义在点上**（每个点按当次分数档着色）。
+                .foregroundStyle(ChartSeries.lineColor)
                 .lineStyle(StrokeStyle(lineWidth: Theme.Stroke.chartLine))
 
             PointMark(x: .value("时间", point.date), y: .value("分数", Double(point.score)))

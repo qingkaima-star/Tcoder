@@ -4,39 +4,45 @@ import Charts
 // MARK: - 三页共用的图表层
 //
 // 三条硬规则：
-//   1. **颜色只有一个来源**：分类序列走 `Theme.Chart`，带严重度语义的走 `Theme.Semantic.*.graphicColor`。
-//      页面里再出现一个 `Color(...)` 就等于再造一套调色板——现状正是两套彼此不同的散色。
+//   1. **颜色只有一个来源**：单序列曲线一律纯墨（`ChartSeries.lineColor`），
+//      带严重度 / 风险 / 分数语义的走 `Theme.Semantic.*.graphicColor`。
+//      三页没有「一张图里两条以上序列」的场合，所以 `Theme.Chart` 分类板在这儿无调用方
+//      （本轮删掉四枚号位常量的理由见 `ChartSeries` 注释）。
 //   2. **轴不能跟着数据抖**：纵轴走台阶函数，横轴走固定 stride 或相对秒数，
 //      实时追加一帧时刻度不会重新洗牌。
 //   3. **轴必须自报口径**：单位写在刻度上（`%` / `条`），收窄过要写明不是 0 起点，
 //      否则两张同构的 0…100 图会被读成同一件事（总工截图复核提的问题 3）。
 
-/// 序列取号表。**新增图表必须在这里登记号位**，不在页面里挑颜色。
+/// 三页图表的唯一落笔口径。
+///
+/// **「简约无界」把这里的号位表整个删掉了**（原 `cpu = 0 / memory = 2 / disk = 4 / network = 6`
+/// 四枚 `Theme.Chart` 分类色）。删的理由不是审美，是**那些色在这里没有对手**：
+/// `LiveSeriesChart` 是单序列图，一张图只有一条线，"按号位取色"解决的问题
+/// （同一张图里分辨哪条是哪条）在三页里根本不存在。于是蓝/橙/紫/青四枚色
+/// 全部变成「倾向色涂在非语义数据上」——磁盘吞吐既不比网络好也不比网络差，
+/// 但旧代码把它涂成紫色、网络涂成青色，眼睛就无端读出「这两件事有区别」来。
+/// 风格契约 5「数据序列默认灰阶，只在需要区分类别时上色」在这一页的落地就是删掉旋钮。
+///
+/// 保留的只有**语义**那一支：严重度 / 风险 / 分数档是有序的，
+/// 走 `Theme.Semantic` 才能保住「崩溃比错误更深」的单调色阶。
 enum ChartSeries {
-    /// 资源曲线：按色相距离取号，避免相邻两条读成同色。
-    static let cpu = 0        // 蓝 · 主 / 自身数据
-    static let memory = 2     // 橙 · 关注
-    static let disk = 4       // 紫
-    static let network = 6    // 青
-    static let healthTrend = 0
-
-    static func color(_ index: Int) -> Color { Theme.Chart.color(at: index) }
-
-    /// 面积填充顶色不透明度。
+    /// 单序列曲线的主线色：纯墨。
     ///
-    /// ⚠️ 偏离《40 WS-H》§5.4 的 0.30，是有实测依据的偏离：95% 上下的内存曲线用 0.30 填充时，
-    /// 面积把自己的 1.5pt 曲线糊在下面，整张图读成一个纯色矩形——监控页里
-    /// 「只看得出满、看不出走势」是硬伤（总工截图复核问题 1）。
-    /// 这里取 0.16（约为规范档的一半，仍明显高于 `Opacity.gradientFloor` 0.02），
-    /// 同时把曲线加到 `Stroke.emphasis`(2pt) 压在填充之上。
-    /// **要还原成规范值**：把本常量改回 `Theme.Palette.Opacity.gradientTop`
-    /// 并把 `lineWidth` 退回 `Theme.Stroke.chartLine`。
-    static let areaTopOpacity = 0.16
+    /// 曲线加粗到 `Stroke.emphasis`(2pt) 压在面积之上，所以顶色降到 0.16 也不会
+    /// 出现总工截图复核问题 1 里「面积把自己的线糊住、整张图读成纯色矩形」的情况。
+    static let lineColor = Theme.Palette.Surface.ink
 
-    /// 面积渐变：同色顶到底 `areaTopOpacity` → `gradientFloor`。
-    static func gradient(_ index: Int) -> LinearGradient {
-        let color = color(index)
-        return LinearGradient(
+    /// 面积顶色。**走令牌，不留字面量**。
+    ///
+    /// 旧写法是这个常量自己等于 `0.16`，注释写着「要还原成规范值就把本常量改回
+    /// `Opacity.gradientTop`」——那正是本轮的病灶形状：令牌 `gradientAreaSoft` 已经
+    /// 定义好了（值就是 0.16），页面却还在自己养一份。现在两份合成一份，
+    /// `PerfLogsBorderlessTests` 钉住这条不许回退。
+    static let areaTopOpacity = Theme.Palette.Opacity.gradientAreaSoft
+
+    /// 面积渐变：与主线同色，`areaTopOpacity` → `gradientFloor`。
+    static func gradient(for color: Color = lineColor) -> LinearGradient {
+        LinearGradient(
             stops: [
                 .init(color: color.opacity(areaTopOpacity), location: 0),
                 .init(color: color.opacity(Theme.Palette.Opacity.gradientFloor), location: 1),
@@ -44,7 +50,7 @@ enum ChartSeries {
             startPoint: .top, endPoint: .bottom)
     }
 
-    /// 严重度 / 风险 / 分数是**有序**语义，走语义角色的图形层而不是分类板的序号，
+    /// 严重度 / 风险 / 分数是**有序**语义，走语义角色的图形层，
     /// 这样「崩溃比错误更深」在色阶上保持单调。
     static func color(for severity: LogSeverity) -> Color { Theme.Semantic.role(for: severity).graphicColor }
     static func color(for risk: RiskLevel) -> Color { Theme.Semantic.role(for: risk).graphicColor }
@@ -204,11 +210,10 @@ struct LiveSeriesChart<Point: Identifiable>: View {
     let xOf: (Point) -> Date
     let yOf: (Point) -> Double
     let valueName: String
-    let series: Int
     let axis: ChartAxis
     let timeAxis: TimeAxis
-    let yLabel: (Double) -> String
     let summary: String
+    let yLabel: (Double) -> String
     /// 非 nil 时横轴改用「距今 N 秒」，以这个时间为「现在」。
     let relativeReference: Date?
 
@@ -216,7 +221,6 @@ struct LiveSeriesChart<Point: Identifiable>: View {
          xOf: @escaping (Point) -> Date,
          yOf: @escaping (Point) -> Double,
          valueName: String,
-         series: Int,
          axis: ChartAxis,
          timeAxis: TimeAxis,
          summary: String,
@@ -226,7 +230,6 @@ struct LiveSeriesChart<Point: Identifiable>: View {
         self.xOf = xOf
         self.yOf = yOf
         self.valueName = valueName
-        self.series = series
         self.axis = axis
         self.timeAxis = timeAxis
         self.summary = summary
@@ -238,10 +241,10 @@ struct LiveSeriesChart<Point: Identifiable>: View {
         Chart(points) { point in
             AreaMark(x: .value("时间", xOf(point)), y: .value(valueName, yOf(point)))
                 .interpolationMethod(.monotone)
-                .foregroundStyle(ChartSeries.gradient(series))
+                .foregroundStyle(ChartSeries.gradient())
             LineMark(x: .value("时间", xOf(point)), y: .value(valueName, yOf(point)))
                 .interpolationMethod(.monotone)
-                .foregroundStyle(ChartSeries.color(series))
+                .foregroundStyle(ChartSeries.lineColor)
                 .lineStyle(StrokeStyle(lineWidth: Theme.Stroke.emphasis))
         }
         .chartYScale(domain: axis.minValue...axis.maxValue)
@@ -303,34 +306,33 @@ extension ChartScale {
     static func plainLabel(_ value: Double) -> String { ChartAxis.plain(value) }
 }
 
-/// 图例 + 当前读数：色块、名称、**分子分母口径**、读数四件事都在一行。
+/// 图的抬头 + 当前读数：名称、**分子分母口径**、读数三件事都在一行。
+///
+/// 原来行首有一枚按号位取色的圆点，本轮删了：单序列图里没有需要分辨的两条线，
+/// 那枚点不携带任何信息，只是把「磁盘=紫、网络=青」这种无中生有的倾向性涂在版面上
+/// （风格契约 5）。颜色没了之后名称从 10pt 抬到 11pt 补回识别度 ——
+/// **层级靠字号与墨色分，不靠色相分**，这就是「简约无界」在一行图例上的落地。
 struct SeriesLegend: View {
-    /// 图例色点直径。属图表几何（WS-I §9 列为例外），跟着 10pt 文字量出来的一格。
-    private static let dotDiameter: CGFloat = 6
-
     var name: String
-    var series: Int
     /// 分子 / 分母的交代，例如「已用 12.4 GB / 总量 32 GB」。
     var basis: String?
     var value: String
 
     var body: some View {
-        HStack(spacing: Theme.Spacing.xxs) {
-            Circle()
-                .fill(ChartSeries.color(series))
-                .frame(width: Self.dotDiameter, height: Self.dotDiameter)
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
             Text(name)
-                .font(Theme.Typo.microLabel.font)
+                .font(Theme.Typo.label.font)
                 .foregroundStyle(.secondary)
             if let basis {
+                // 口径里带的是测得值（已用字节 / 总量），不得用 `.tertiary`。
                 Text(basis)
                     .font(Theme.Typo.microLabel.font)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
             Spacer(minLength: Theme.Spacing.xs)
-            // 读数用墨色：曲线色只负责「哪条线」，小字号彩字在白卡上过不了 4.5:1。
+            // 读数用墨色：小字号彩字在浅底上过不了 4.5:1，而且颜色在这里不表意。
             LiveNumber(value, tier: Theme.Typo.monoBody)
         }
     }

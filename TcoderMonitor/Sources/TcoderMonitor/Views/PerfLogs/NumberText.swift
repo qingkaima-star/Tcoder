@@ -23,14 +23,16 @@ enum PerfLogWidths {
     static let sortPicker: CGFloat = 208
 }
 
-/// 量表厚度。《40 WS-H》§9 只给两档：分量表 4、tile 内 5–6，
-/// 页面不再各写一个 height 魔法数（占位空行也用同一档，保证等高）。
-enum BarThickness {
-    static let tile: CGFloat = 5
-    static let component: CGFloat = 4
-}
+// 量表厚度不再在本文件造档：`BarThickness`（tile 5 / component 4）已收口到
+// `Theme.Layout.gaugeInline`(5) / `gaugeMetric`(6)。分量表原来那个 4pt 在基座里没有对应档，
+// 差 1pt 换掉一份私有刻度是划算的 —— 「令牌定义了却没人用」正是本轮的病因。
 
 /// 会实时变化的数字。等宽 + 右对齐 + 定宽三件事一起做，缺证据时强制中性色。
+///
+/// 默认前景是**纯墨 `Surface.ink`** 而不是 `.primary`：`labelColor` 只有 85% 黑，
+/// 铺在 `ground` 上合成出来约 `#262626`，而参考图最暗像素落在最大的数字上（`#000000`）。
+/// 「最重的墨给最重要的数」在这个组件上的落地就是：凡是要人盯着读的那个跳动的数，
+/// 一律墨色；`.primary` 退回给 13pt 以下正文。
 struct LiveNumber: View {
     var text: String
     var tier: Theme.TypeToken
@@ -39,7 +41,7 @@ struct LiveNumber: View {
 
     init(_ text: String,
          tier: Theme.TypeToken = Theme.Typo.metricMid,
-         tint: Color = .primary,
+         tint: Color = Theme.Palette.Surface.ink,
          width: CGFloat? = nil) {
         self.text = text
         self.tier = tier
