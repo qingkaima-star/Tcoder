@@ -56,20 +56,21 @@ final class SelfScanConventionGates: SelfScanHarnessCase {
                       "detail 没报出分母（独立普查 \(census.functionCount) 个函数）："
                     + "不报样本量的均值没有意义。当前 detail：\(complexity.detail)")
 
-        // —— 仍在身（产品口径）：detail 里"N 个函数 CC≥16"数的还是被 prefix(20)
-        //    截断的榜单条数，而真实普查见下面 print。修好后把这条翻正为
-        //    "detail 含 \u{201c}\(census.atLeast16) 个函数\u{201d}"。
+        // —— 已翻正（收官轮 2026-09-21）：这条原本钉的是「detail 里 N 个函数 CC≥16 数的
+        //    是被 prefix(20) 截断的榜单条数，而不是普查真值」——当时全仓真实 54 个、榜上写 20。
+        //    三包把全仓拆到 \(census.atLeast16) 个之后，榜内计数与普查真值第一次对得上，
+        //    于是按这条门自己写好的修法翻正：改判「detail 必须含普查真值」，
+        //    并删掉「全仓必须多于榜单条数」那前提已消失的断言。
         XCTAssertEqual(code.topComplexFunctions.count, 20,
                        "榜单截断长度变了，本门与 48 号笔记里的措辞要同步")
-        XCTAssertTrue(complexity.detail.contains("\(code.topComplexFunctions.count) 个函数"),
-                      "detail 不再引用截断条数 \(code.topComplexFunctions.count)，说明普查计数已进契约，"
-                    + "请把本断言改为 detail 含 \"\(census.atLeast16) 个函数\"")
-        XCTAssertGreaterThan(census.atLeast16, code.topComplexFunctions.count,
-                             "全仓 CC≥\(Self.complexFunctionBar) 已经不多于榜单条数，截断不再误导人，"
-                           + "连同上面那条一起删掉")
+        XCTAssertTrue(complexity.detail.contains("\(census.atLeast16) 个函数"),
+                      "detail 里的 CC≥16 计数必须等于独立普查真值 \(census.atLeast16)，"
+                    + "实际：\(complexity.detail)")
+        XCTAssertFalse(complexity.detail.contains("热点样本"),
+                       "有全仓均值时不许再退回热点样本口径：\(complexity.detail)")
 
         print("【普查 vs 榜单】真实 CC≥\(Self.complexFunctionBar) 共 \(census.atLeast16) 个，"
-            + "而工具 detail 报的是 \(code.topComplexFunctions.count) 个（榜单截断条数）")
+            + "detail 报的也是这个数（翻正前：真实 54 / detail 20）")
     }
 
     /// 手算可验证的普查门：用一个我能逐个点数函数的最小夹具，

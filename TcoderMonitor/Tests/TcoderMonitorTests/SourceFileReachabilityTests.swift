@@ -53,7 +53,9 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// `evaluate` 单函数 CC 60、220 行，被本 App 自扫点名成全仓第一高）。
     /// 114 → 115（WS-X0 新增 Views/Code/CodeRiskAdvice.swift：`extension CodeRiskAnalysis`，
     /// 三个建议构建器被同类型的 `suggestions(for:)` 调用；拆的理由是该函数 138 行、CC 17）。
-    static let censusBaseline = 120
+    /// 120 → 125（并入 ws/x2-runtimesvc：WS-X2/WS-X5 在 Logs / Git / Dependencies 三域
+    /// 按自扫名册拆出的实现分片；引用证据见该分支 5 笔提交与本流 00:24 的合并说明）。
+    static let censusBaseline = 125
 
     static let prunedDirectories: Set<String> = [".git", ".build", ".swiftpm", ".worktrees",
                                                         "node_modules", "DerivedData", "dist", "build", "out"]
