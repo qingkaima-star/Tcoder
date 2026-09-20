@@ -218,7 +218,19 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 - **顺手的 6 处**（读已闸门属性）：`PerformanceView` 45 / 47 / 53 / 55 / 68 / 69。
   它们和 `:54` 在**同一个 body**里，所以单独迁它们**测不出差异**——那一屏仍被 `latestSnapshot` 拽着重算。
   既然人到现场了，一并改掉是对的（棘轮要的是 0，不是"有效的 0"），但**别把收益记在它们头上**。
-- 顺序建议：**一个文件一次过**，先 `LiveReadings`（见下）→ `PerformanceView` → `DashboardView` → `ProjectSidebar`。
+- 10 处承重里，**7 处是 1:1 换名**（`curve.value` 直接顶 `Array(history.suffix(90))`、
+  `pulse.value.historyCount` 顶 `history.count`、`pulse.value.sampleAt` 顶 `lastSampleAt`、
+  `ledger.value.systemWideCount` 顶 `latestSnapshot?.processCount`；四 + 一 + 一 + 一 正好七处），
+  剩下 **3 处是"把整份快照递给别人"**，性质和 `SampleContext` 一样，要改的是**接收方的入参**：
+  1. `LiveReadings.swift:25` `SampleContext(snapshot:)` —— 喂着 `PerformanceView` 里五个子视图；
+  2. `DashboardView.swift:333` `private var snapshot: SystemSnapshot? { monitor.latestSnapshot }`
+     —— 页内 10 处读点共用这个别名，实际只碰 `disk*/network*` 四个速率字段（都在 `rates.value`）；
+  3. `ProjectSidebar.swift:443` `LiveCPUBadge(snapshot: monitor.latestSnapshot)` —— 子视图收整份快照，
+     它要的只是 `cpu.value.usage`（＋ `coreCount`）。
+  这三处**不要**原地换成 `monitor.latestSnapshot` 的另一种写法：那还是同一棵 body 每 tick 重算。
+- 顺序建议：**先做那 7 处 1:1 的**（零判断、当场能让 `migration` 掉 7 个），
+  再按 `ProjectSidebar` → `DashboardView` → `PerformanceView`+`LiveReadings` 做那 3 处（由小到大，
+  `LiveCPUBadge` 只有一枚徽章、`SampleContext` 要动五个子视图的入参，放最后）。
 
 `SampleContext`（`LiveReadings.swift:15`）是唯一需要决策的一处，其余都是 1:1 换名。
 它是"整份 `SystemSnapshot` 塞进一个值"，喂着 `PerformanceView`/`SystemTiles`/`ProcessTable`/
