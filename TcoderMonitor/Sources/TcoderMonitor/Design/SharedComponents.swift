@@ -68,6 +68,19 @@ struct MetricTile: View {
     var caption: String?
     var tint: Color
     var systemImage: String?
+    /// 量条槽。**位置是规则，不是选择**：量条属于数字，必须钉在值下面那一行，
+    /// 同排四格才在同一条基线上。原来它由调用方叠在整枚 tile **之后**，
+    /// 于是本格脚注一换行（两行口径）就把量条推下去约 20pt ——
+    /// 实拍性能页：CPU 的条比内存低半格，磁盘/网络根本没有条，四格基线全断。
+    var gauge: MetricGauge = .none
+
+    /// 量条槽的三种状态。`.empty` 是**占位等高**：同排有别的格子画条时，
+    /// 没有可信分母的格子也要把那一行留出来（画一条假的满格线比不画更误导）。
+    enum MetricGauge {
+        case none
+        case empty
+        case value(Double, Color)
+    }
 
     init(
         label: String,
@@ -75,7 +88,8 @@ struct MetricTile: View {
         unit: String? = nil,
         caption: String? = nil,
         tint: Color = Theme.Palette.Surface.ink,
-        systemImage: String? = nil
+        systemImage: String? = nil,
+        gauge: MetricGauge = .none
     ) {
         self.label = label
         self.value = value
@@ -83,6 +97,7 @@ struct MetricTile: View {
         self.caption = caption
         self.tint = tint
         self.systemImage = systemImage
+        self.gauge = gauge
     }
 
     var body: some View {
@@ -109,6 +124,16 @@ struct MetricTile: View {
                         .font(Theme.Typo.label.font)
                         .foregroundStyle(.secondary)
                 }
+            }
+            // 量条钉在**值与脚注之间**，四格才共一条基线（见 `MetricGauge` 那段注释）。
+            switch gauge {
+            case .none:
+                EmptyView()
+            case .empty:
+                Color.clear.frame(height: Theme.Layout.gaugeInline)
+            case let .value(fraction, graphic):
+                MiniBarGauge(fraction: fraction, tint: graphic,
+                             height: Theme.Layout.gaugeInline)
             }
             if let caption {
                 Text(caption)

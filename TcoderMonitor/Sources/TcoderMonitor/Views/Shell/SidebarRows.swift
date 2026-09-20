@@ -59,7 +59,7 @@ struct AnalysisSectionRow: View {
                 .lineLimit(1)
             Spacer(minLength: Theme.Spacing.xxs)
         }
-        .foregroundStyle(isSelected ? Theme.Semantic.accent.onFillColor : Color.secondary)
+        .foregroundStyle(isSelected ? selectionTextColor : Color.secondary)
         .padding(.horizontal, ShellLayout.rowPadding)
         .padding(.vertical, Theme.Spacing.xxs)
         .frame(maxWidth: .infinity, minHeight: ShellLayout.rowMinHeight, alignment: .leading)
@@ -84,6 +84,18 @@ struct AnalysisSectionRow: View {
             ? Color(nsColor: .quaternaryLabelColor)
             : Theme.Semantic.accent.graphicColor
     }
+
+    /// 反色文字**只在强调色底上成立**。底色退成中性灰时文字必须跟着退回纯墨：
+    /// 白字压 `quaternaryLabelColor` 实测只有约 1.3:1 —— 实拍九页侧栏**每一页**的
+    /// 当前页名都读不清，因为截图时窗口不是 key 窗口，选中态正是那枚灰底。
+    private var selectionTextColor: Color {
+        Self.usesReversedText(active: activeState)
+            ? Theme.Semantic.accent.onFillColor : Theme.Palette.Surface.ink
+    }
+
+    /// 纯函数，供单测钉住（`Color` 由动态 `NSColor` 包出来，两次取值不相等，测不了）。
+    /// `.key`（键盘驱动的活动态）与 `.active` 一样是强调色底，只有 `.inactive` 退灰。
+    static func usesReversedText(active: ControlActiveState) -> Bool { active != .inactive }
 }
 
 /// 项目健康色点。**未评分必须是空心灰圈**，不能是红点。

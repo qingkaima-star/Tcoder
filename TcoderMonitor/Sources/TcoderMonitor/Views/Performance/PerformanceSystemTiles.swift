@@ -63,19 +63,16 @@ struct PerformanceSystemTiles: View {
         let fraction = SystemReadings.cpuFraction(context)
         let role = LoadLevel.role(for: fraction)
         let cores = SystemReadings.coresInUse(context)
-        return gauged(
-            MetricTile(
-                label: "CPU",
-                value: fraction == nil ? nil : Live.percent(fraction, precision: 0),
-                caption: cpuCaption(cores: cores),
-                // 34pt 的主读数一律纯墨（风格契约 4）。档位语义交给下面那条量条
-                // （`gauged(..., graphic: role.graphicColor)`）—— 参考图就是这个分工：
-                // 数字负责读，小面积色负责说"这值要紧"。
-                // 原来四格里两格被涂成绿/红，两格是墨，同排读数互相抢注意力。
-                systemImage: IconName.cpu.rawValue
-            ),
-            fraction: fraction,
-            graphic: role.graphicColor
+        return MetricTile(
+            label: "CPU",
+            value: fraction == nil ? nil : Live.percent(fraction, precision: 0),
+            caption: cpuCaption(cores: cores),
+            // 34pt 的主读数一律纯墨（风格契约 4）。档位语义交给值下面那条量条
+            // （`gauge: Self.gaugeSlot(fraction, role)`）—— 参考图就是这个分工：
+            // 数字负责读，小面积色负责说"这值要紧"。
+            // 原来四格里两格被涂成绿/红，两格是墨，同排读数互相抢注意力。
+            systemImage: IconName.cpu.rawValue,
+            gauge: Self.gaugeSlot(fraction, role)
         )
     }
 
@@ -85,49 +82,42 @@ struct PerformanceSystemTiles: View {
         let fraction = SystemReadings.memoryFraction(context)
         let pressure = SystemReadings.memoryPressure(context)
         let role = LoadLevel.role(for: fraction)
-        return gauged(
-            MetricTile(
-                label: "内存",
+        return MetricTile(
+            label: "内存",
                 value: used == nil ? nil : Live.bytes(used, precision: 1),
                 unit: (used != nil && total != nil) ? "/ \(Live.bytes(total, precision: 0))" : nil,
                 caption: used == nil
                     ? (SystemReadings.memoryGapReason(context) ?? "等待首个样本")
                     : "在用 \(Live.percent(fraction, precision: 0)) · 压力 \(pressure?.rawValue ?? Live.missing)",
-                tint: Theme.Palette.Surface.ink,
-                systemImage: IconName.memory.rawValue
-            ),
-            fraction: fraction,
-            graphic: role.graphicColor
+            tint: Theme.Palette.Surface.ink,
+            systemImage: IconName.memory.rawValue,
+            gauge: Self.gaugeSlot(fraction, role)
         )
     }
 
     private var diskTile: some View {
         let total = SystemReadings.diskBytesPerSecond(context)
-        return gauged(
-            MetricTile(
-                label: "磁盘吞吐",
+        return MetricTile(
+            label: "磁盘吞吐",
                 value: total == nil ? nil : Live.rate(total),
                 caption: total == nil
                     ? "首个差分帧到达前不给速率"
                     : "读 \(Live.rate(SystemReadings.diskReadBytesPerSecond(context))) / 写 \(Live.rate(SystemReadings.diskWriteBytesPerSecond(context)))",
-                systemImage: IconName.disk.rawValue
-            ),
-            fraction: nil
+            systemImage: IconName.disk.rawValue,
+            gauge: .empty   // 没有可信分母：留等高占位，不画假条
         )
     }
 
     private var networkTile: some View {
         let total = SystemReadings.networkBytesPerSecond(context)
-        return gauged(
-            MetricTile(
-                label: "网络吞吐",
+        return MetricTile(
+            label: "网络吞吐",
                 value: total == nil ? nil : Live.bitRate(total),
                 caption: total == nil
                     ? "首个差分帧到达前不给速率"
                     : "↓ \(Live.bitRate(SystemReadings.networkInBytesPerSecond(context))) / ↑ \(Live.bitRate(SystemReadings.networkOutBytesPerSecond(context)))",
-                systemImage: IconName.network.rawValue
-            ),
-            fraction: nil
+            systemImage: IconName.network.rawValue,
+            gauge: .empty
         )
     }
 
@@ -137,15 +127,12 @@ struct PerformanceSystemTiles: View {
     /// 可信分母、也没有好坏分档，所以既不给它画量表、也不给它涂分类色 ——
     /// 旧写法把磁盘涂紫、网络涂青，是无端让眼睛读出「这两件事性质不同」。
     @ViewBuilder
-    private func gauged(_ tile: MetricTile, fraction: Double?, graphic: Color? = nil) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-            tile
-            if let fraction, let graphic {
-                MiniBarGauge(fraction: fraction, tint: graphic, height: Theme.Layout.gaugeInline)
-            } else {
-                Color.clear.frame(height: Theme.Layout.gaugeInline)
-            }
-        }
+    /// 量条槽的取值。**没有可信分母时占等高而不画条**（画一条假的满格线比不画更误导）。
+    /// 槽位本身归 `MetricTile` 管：它必须钉在值与脚注之间，四格才共一条基线 ——
+    /// 原来叠在 tile 之后，本格脚注一换行就把量条推下去约 20pt（实拍四格基线全断）。
+    static func gaugeSlot(_ fraction: Double?, _ role: Theme.SemanticRole?) -> MetricTile.MetricGauge {
+        guard let fraction, let role else { return .empty }
+        return .value(fraction, role.graphicColor)
     }
 
     private func cpuCaption(cores: Double?) -> String {

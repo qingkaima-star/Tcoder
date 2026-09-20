@@ -70,8 +70,9 @@ struct CodeRiskOverviewSection: View {
                                 unit: "个")
                     DataBandSeparator()
                     DataReadout(label: "平均函数长度",
-                                value: "\(NumberFormat.grouped(code.averageFunctionLength)) 行",
-                                caption: "仅 ≥2 行的函数")
+                                value: NumberFormat.grouped(code.averageFunctionLength),
+                                caption: "仅 ≥2 行的函数",
+                                unit: "行")
                     DataBandSeparator()
                     DataReadout(label: "巨大文件", value: NumberFormat.grouped(code.hugeFiles.count),
                                 unit: "个")
