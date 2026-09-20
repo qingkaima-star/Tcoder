@@ -3,7 +3,16 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>zh_CN</string>
+	<string>zh-Hans</string>
+	<!-- 原生支持的语言。**源语言是简体中文**：全部界面文案的权威文本是中文，
+	     英文是译文（见 docs/中英双语方案.md §1.1）。本地化键就用中文原文，
+	     所以缺译文时 macOS 退回显示键本身 = 正确的中文，而不是漏出机器键。
+	     没有这两条，系统可能整段不查表，或在语言菜单里给出一个并不存在的语言。 -->
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>zh-Hans</string>
+		<string>en</string>
+	</array>
 	<key>CFBundleExecutable</key>
 	<string>TcoderMonitor</string>
 	<key>CFBundleIdentifier</key>
