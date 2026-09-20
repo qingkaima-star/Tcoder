@@ -611,6 +611,22 @@ final class ShellBorderlessTests: XCTestCase {
                                     "10pt 等宽下 8 个字符不可能小于 41pt —— 字体取错了")
     }
 
+    /// 底栏那一行读数的**同行预算**。上一处修正只量了单个格子（够宽），
+    /// 却漏了「同一行还塞着别的」—— 过约束时 `.frame(width:)` 会被压缩、
+    /// 文字在格内折行（18:29 实拍：`36.9 GB` 折成三行）。所以格子够宽之外，
+    /// 整行自然宽度也必须装得下侧栏最小宽度扣掉左右内边距。
+    func test_liveReadoutRowFitsInsideTheSidebarBudget() {
+        let iconAndSeparator: CGFloat = 30        // 图标 + 间隔点「·」的保守估计
+        let gaps = 3 * Theme.Spacing.xxs          // 三处 4pt 间隙
+        let rowWidth = ShellLayout.liveReadoutColumnWidth   // CPU 格
+            + Self.width(of: "180.5 GB")                     // 内存读数实际要宽（不受定宽约束的那半）
+            + ShellLayout.liveReadoutColumnWidth
+            + iconAndSeparator + gaps
+        let usable = ShellLayout.sidebarMinWidth - 2 * Theme.Spacing.sm
+        XCTAssertLessThanOrEqual(rowWidth, usable,
+                                 "底栏读数行要 \(rowWidth)pt，侧栏最小宽度只给 \(usable)pt —— 会被过约束折行")
+    }
+
     /// 用 `monoSmall` 那一档（10pt 等宽字族）真实量一段文字的宽度。
     private static func width(of text: String) -> CGFloat {
         let attributes: [NSAttributedString.Key: Any] = [

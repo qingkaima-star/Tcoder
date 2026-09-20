@@ -395,13 +395,21 @@ struct SidebarLiveFooter: View {
     @Environment(AppState.self) private var state
     @Binding var showImporter: Bool
 
+    /// 两行式底栏。**不是一行**：18:29 实拍实测，「按钮 + CPU 定宽格 + 内存定宽格」
+    /// 挤在同一行时总宽超出侧栏可用宽，`.frame(width:)` 在过约束的 `HStack` 里会被压缩，
+    /// 于是 `36.9 GB` 在格子里折成三行（`36.` / `9` / `GB`），把底栏撑歪。
+    /// 定宽格本身够宽（见 `ShellBorderlessTests.test_sidebarLiveReadoutColumnFitsTheWorstCase`），
+    /// 不够的是**同一行的预算** —— 所以把读数单独成行，并另加一条同行预算断言。
     var body: some View {
-        HStack(spacing: Theme.Spacing.xs) {
-            GlassButton("添加项目", icon: .add, style: .bordered) {
-                showImporter = true
+        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+            HStack(spacing: Theme.Spacing.xs) {
+                GlassButton("添加项目", icon: .add, style: .bordered) {
+                    showImporter = true
+                }
+                Spacer(minLength: Theme.Spacing.xs)
             }
-            Spacer(minLength: Theme.Spacing.xs)
             LiveCPUBadge(snapshot: state.monitor.latestSnapshot)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, Theme.Spacing.sm)
         .padding(.vertical, Theme.Spacing.xs)
