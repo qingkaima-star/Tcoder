@@ -117,6 +117,54 @@ python3 scripts/trace_report.py migration --module-root ../<你的树>/TcoderMon
 **提前翻闸门 → 判红**。所以「16 处迁完 + 上限拧成 0」是这套工单里唯一一条**能改变 T1/T2 可否判定**的项。
 16 处迁完后请回报，由我把上限拧成 0 并翻闸门，然后才做帧率复测。
 
+## 0.2 【派工单】三家合完之后，这 16 处仍无人做——请按流重派（用户 21:15 裁定：仍归 UI 总工派发）
+
+现状不是"差不多做完了"，而是**这项目前一行未动**。三个独立来源数到同一个数：
+
+| 量法 | 粗粒度读点 | 细粒度读点 |
+|---|---|---|
+| Swift 守卫 `PerfInvalidationRatchetTests`（跑全量时） | 16 | 0 |
+| 我另写的 python 复算（`git show <ref>` 逐 ref） | 16（main / p / o / w 四个 ref 全同） | 0 |
+| `trace_report.py migration`（正则与上限直接读守卫源码） | 16 | 0 |
+
+⇒ **`165faa7`～`5f996d4` 三家的无界化合完，性能契约在页面侧的消费量仍是 0**。
+M0 把一次 tick 的写入面收窄了，页面继续读粗表面，所以用户端的流畅度**不会因为这一轮变好**——
+把这句话写在这里，是为了让"三家已合入"不被误读成"性能轮已交付"。
+
+### 请这样派（每家一条自验命令，不用回来问我）
+
+```bash
+git merge main                                   # 先取我这包：migration 命令与守卫都在里面
+python3 scripts/trace_report.py migration        # 我还剩哪几处、该换成哪个格
+python3 scripts/trace_report.py migration --strict   # 挂进自家收尾检查：还有剩余就非零退出
+```
+
+| 派给 | 文件与处数 | 换成 |
+|---|---|---|
+| **WS-O** | `DashboardView.swift` 3 处（`latestSnapshot` ×1、`history` ×2）、`ProjectSidebar.swift` 1 处（`latestSnapshot`） | `pulse.value` / `curve.value`（已切窗口）/ `cpu.value`（badge 只要 CPU） |
+| **WS-W** | `PerformanceView.swift` 10 处、`LiveReadings.swift` 2 处 | 见 §0.1 表；`ledger.value` / `cpuRanking.value` / `memoryRanking.value` / `groupRanking.value` / `pulse.value.sampleAt` |
+| **WS-P** | 0 处 | 本项无工（其余 P 工单照旧） |
+
+三条红线（都会被当场拦，别试）：
+1. **不要新增第 17 处**——棘轮零余量（`1/1 86/86 10/10 2/2`），多一处立即红；
+2. **不要用 `AnyView` / `id: \.offset` 绕失效面**——那只是把重建换个名字，守卫与本工单都不认；
+3. **不要对 `curve.value` 再 `suffix`、对 `cpuRanking.value` 再 `sorted`**——排序与切窗已在采集侧做一次。
+
+### 交回标准（我不接受口头完成）
+
+- `migration` 报 **0 处粗读**（这是唯一读数，命令自己会写"请总工把上限拧成 0"）；
+- 我随后把 `coarseCallSiteCeiling` 拧成 0 并翻 `consumptionGateOpen = true`——
+  这个闸门是四态的，**没迁完就翻会当场判红**，所以它翻得动本身就是证据；
+- `W-1 / W-2 / W-3 / W-6` 逐项附自己的验证命令输出。
+
+### 交回之后我需要的一个窗口（M2 终测）
+
+一次 **约 5 分钟**的安静窗口：本机只有被测的那**一个**实例、它在前台、无并发编译
+（`perf_harness.sh` 的 `preflight_context` 会自己判，不合格它直接拒跑，不会给我假数）。
+里面跑：`idle` ×3（心跳期，对 T2）与 `interact` ×3（交互期，对 T1，需要有人持续滚动）。
+**改前对照组**已封存 `/tmp/tcoder-before.app`（rev `415f0f0`，sha `54005bc4…`）——
+它里面没有 `FramePulse`，所以前后对比只能走 xctrace 那两档，不能拿 `probe` 比。
+
 ## 0. 消费什么（都已进 main，不用等）
 
 
