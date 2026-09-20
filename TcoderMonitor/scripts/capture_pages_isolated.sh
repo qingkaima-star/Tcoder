@@ -72,6 +72,33 @@ if [ -n "$STRAY" ]; then
   echo "    它们与本脚本各自的沙箱互不相干，故不拒拍；本脚本也不会向它们发任何信号。"
 fi
 
+# ── 拍图互斥锁（2026-09-20 由双总工裁定加入）──────────────────────────────
+# 本脚本收尾用 `osascript -e "tell application id \"com.tcoder.monitor\" to quit"`
+# 请实例自行退出。**按 bundle id 的 quit 是全机生效的**：它会命中该 bundle 的
+# **所有**实例，不只是本脚本自己起的那个。三条页面流并行取证时，一家收尾会把
+# 另两家正在拍的实例一起退掉 —— 那两家的九页会拍成空窗或半屏，而且失败是静默的
+# （脚本只看文件是否非空，退得早的实例也可能留下"非空但是错的"图）。
+#
+# 不用 kill/pkill：仓库规约明令不得向任何进程发信号。
+# 用 `mkdir` 取锁，因为它是原子操作，且不依赖任何额外工具。
+CAPTURE_LOCK="${CAPTURE_LOCK:-/tmp/tcoder-capture.lock}"
+CAPTURE_LOCK_TIMEOUT="${CAPTURE_LOCK_TIMEOUT:-900}"
+_lock_waited=0
+while ! mkdir "$CAPTURE_LOCK" 2>/dev/null; do
+  if [ "$_lock_waited" -ge "$CAPTURE_LOCK_TIMEOUT" ]; then
+    echo "!! 等拍图锁超时 ${CAPTURE_LOCK_TIMEOUT}s（持有者见 $CAPTURE_LOCK/holder）"
+    cat "$CAPTURE_LOCK/holder" 2>/dev/null | sed 's/^/     /'
+    die "取证没跑成，不是脚本坏了：另一条流正占着拍图"
+  fi
+  [ "$_lock_waited" -eq 0 ] && echo "==> 拍图锁被占（另一条流正在取证，按 bundle id 的 quit 会全机生效），排队中…"
+  sleep 5; _lock_waited=$((_lock_waited + 5))
+done
+printf 'holder=%s\npid=%s\nout=%s\nsince=%s\n' \
+  "${TCODER_STREAM_NAME:-$(basename "$(pwd)")}" "$$" "$OUT" "$(date +%H:%M:%S)" > "$CAPTURE_LOCK/holder"
+# 无论正常结束、die 还是被中断，都要放锁，否则下一次要等满超时
+trap 'rm -rf "$CAPTURE_LOCK" 2>/dev/null || true' EXIT INT TERM
+echo "    已取拍图锁 $CAPTURE_LOCK（$(cat "$CAPTURE_LOCK/holder" | tr '\n' ' ')）"
+
 mkdir -p "$OUT" || die "建不了输出目录"
 rm -f "$OUT"/*.png
 
