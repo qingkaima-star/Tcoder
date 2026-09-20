@@ -258,6 +258,56 @@ final class BorderlessSurfaceGuardTests: XCTestCase {
         XCTAssertTrue(joined.contains("Spacing.pageMargin"))
     }
 
+    /// 页骨架的**声明**位置：`struct Xxx(page)Scaffold…: View` 或 `Theme.Page.Scaffold`。
+    /// 本轮实测发现过三份同职责骨架并存（基座 `Page.Scaffold`、
+    /// `CodeGitDesignKit.DataPageScaffold` 逐字复制品、WS-W 的 `BorderlessPage`）——
+    /// 用户原话「不要东一个系一个」在代码层面的形态就是这个。
+    static func pageScaffoldDeclarations(in files: [(path: String, content: String)]) -> [String] {
+        files.flatMap { file in
+            codeLines(file.content)
+                .enumerated()
+                .compactMap { index, line in
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    guard trimmed.hasPrefix("struct "), trimmed.contains(": View") else { return nil }
+                    let isScaffold = trimmed.contains("Scaffold") || trimmed.contains("BorderlessPage")
+                    return isScaffold ? "\(file.path):\(index + 1)" : nil
+                }
+        }
+    }
+
+    /// 基座那份页骨架必须在 `Design/`，且用的是新呼吸档（不是 16）。
+    /// 这条 M0 就能硬断言。
+    func test_basePageScaffoldUsesTheBreathingRhythm() throws {
+        let design = try Self.sourceFiles(under: "Design")
+        let scaffold = design.filter { Self.pageScaffoldDeclarations(in: [$0]).isEmpty == false }
+        XCTAssertFalse(scaffold.isEmpty, "Design/ 里没有页骨架了 —— 基座被拆了？")
+        let body = scaffold.map(\.content).joined(separator: "\n")
+        XCTAssertTrue(body.contains("Spacing.group"),
+                      "基座页骨架的组间距没换成 `Spacing.group`(32)，还是 16 = 拥挤没修")
+        XCTAssertTrue(body.contains("Spacing.pageMargin"),
+                      "基座页骨架的页边距没换成 `Spacing.pageMargin`(24)")
+        XCTAssertTrue(body.contains("Spacing.section"),
+                      "基座页骨架的页级段落没换成 `Spacing.section`(40)")
+    }
+
+    /// 全仓只许存在**一份**页骨架。
+    ///
+    /// 现在挂 skip 是因为 `Views/CodeGit/CodeGitDesignKit.swift` 里还有一份
+    /// `DataPageScaffold` —— 它是基座那份的**逐字复制品**（body 完全相同），
+    /// 归 WS-P，且 WS-P 正在改那个文件。总工替它删会毁掉在途工作并造出冲突，
+    /// 所以由 WS-P 自己删、M2 由总工强制。与 `m2WiringComplete` 同一套路子。
+    func test_exactlyOnePageScaffold() throws {
+        try XCTSkipIf(!Self.m2WiringComplete,
+                      "待 M2 撤除跳过（实施计划 Task 10）：DataPageScaffold 归 WS-P 自删")
+        let all = try Self.sourceFiles(under: "")
+        let decls = Self.pageScaffoldDeclarations(in: all)
+        XCTAssertEqual(decls.count, 1,
+                       "页骨架有 \(decls.count) 份并存（只许 1 份）：\(decls)。"
+                       + "页面流请改用 `Theme.Page.Scaffold`，不要各造一份。")
+        XCTAssertTrue(decls.first?.hasPrefix("Design/") == true,
+                      "唯一那份页骨架必须住在 Design/，实测：\(decls)")
+    }
+
     // MARK: - 元测试：确认四个扫描器都不是假绿
 
     func test_scannersCatchSyntheticViolations() {
