@@ -38,42 +38,55 @@ struct ProjectDetailView: View {
     /// Scan only when this project has never been attempted. Keying off a missing
     /// section instead would re-scan forever whenever one analyzer legitimately
     /// cannot produce data (a folder that simply isn't a git repo).
+    /// 面包屑里的分隔点。`·` 是**版式符号**不是内容，走 `.tertiary`。
+    private var breadcrumbDot: some View {
+        Text("·")
+            .font(Theme.Typo.label.font)
+            .foregroundStyle(.tertiary)
+            .accessibilityHidden(true)
+    }
+
     private func maybeAutoScan() {
         guard let project = state.selectedProject, !project.isDemo else { return }
         guard state.store.report(for: project)?.hasBeenScanned == false else { return }
         state.scan(project: project)
     }
 
-    /// 页头：项目名是这一列唯一的主角（`pageTitle` 20），
-    /// 路径与分析时间收成**一行** `label`(11)。
-    /// 二者都是元数据，可以走 `.tertiary`；测得值不行（风格契约 4）。
+    /// 项目行 = **面包屑**，不是 H1。
+    ///
+    /// 原来项目名是 20pt 的 `pageTitle`，于是有页标题的那三页一屏出现两个同级大标题
+    /// （项目名 + 节名），而另外六页又只有项目名 —— 页级层级三种状态。
+    /// 参考图的分工：顶部 `Workspaces / Sales` 是一行小字元数据，
+    /// 下面 `Accounting` 才是唯一的大标题。这里照同一分工：
+    /// 项目名/路径/分析时间收成一行 11pt 元数据，H1 交给各页的 `Theme.Page.Header`。
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
             if let project = state.selectedProject {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                    Text(project.name).font(Theme.Typo.pageTitle.font)
-                    HStack(spacing: Theme.Spacing.xs) {
-                        Text(project.path)
-                            .font(Theme.Typo.label.font.monospacedDigit())
-                            // 红线允许路径/时间戳用 `.tertiary`，但 17:25 深色实拍实测：
-                            // 11pt 元数据在 `#1C1C1E` 上几乎读不出。基座自己也已经把
-                            // `MetricTile` 的 caption 从 tertiary 升到 secondary，这里跟同一档。
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .help(project.path)
-                        if let scanned = project.lastScanAt {
-                            Text("·")
-                                .font(Theme.Typo.label.font)
-                                .foregroundStyle(.tertiary)
-                            Text("分析于 \(DateFormat.sinceDescription(scanned))")
-                                .font(Theme.Typo.label.font.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                Text(project.name)
+                    .font(Theme.Typo.label.font.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(project.name)
+                breadcrumbDot
+                Text(project.path)
+                    .font(Theme.Typo.label.font.monospacedDigit())
+                    // 红线允许路径/时间戳用 `.tertiary`，但 17:25 深色实拍实测：
+                    // 11pt 元数据在深底上几乎读不出，所以与 `MetricTile` caption 同档。
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(project.path)
+                if let scanned = project.lastScanAt {
+                    breadcrumbDot
+                    Text("分析于 \(DateFormat.sinceDescription(scanned))")
+                        .font(Theme.Typo.label.font.monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
             } else {
-                Text("Tcoder").font(Theme.Typo.pageTitle.font)
+                Text("Tcoder")
+                    .font(Theme.Typo.label.font.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: Theme.Spacing.md)

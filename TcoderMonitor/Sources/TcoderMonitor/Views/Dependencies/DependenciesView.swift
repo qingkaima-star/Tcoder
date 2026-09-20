@@ -17,6 +17,7 @@ struct DependenciesView: View {
 
     var body: some View {
         Theme.Page.Scaffold {
+            Theme.Page.Header(title: "依赖分析", icon: .package)
             GroupStack {
                 NetworkOptionsCard(
                     allowNetwork: Bindable(state).allowNetworkLookups,

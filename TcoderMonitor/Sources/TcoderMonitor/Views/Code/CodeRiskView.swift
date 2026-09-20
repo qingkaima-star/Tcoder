@@ -21,6 +21,7 @@ struct CodeRiskView: View {
 
     var body: some View {
         Theme.Page.Scaffold {
+            Theme.Page.Header(title: "复杂度风险", icon: .complexity)
             if let code = CodeDataGate.metrics(of: report?.code) {
                 GroupStack {
                     CodeRiskOverviewSection(code: code)

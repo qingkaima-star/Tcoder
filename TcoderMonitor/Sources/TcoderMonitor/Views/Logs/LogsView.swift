@@ -40,22 +40,11 @@ struct LogsView: View {
         // 内容层现在什么都不画，那是一次空操作，而它为已经不存在的盒子留了 16pt 内边距，
         // 把标题与正文之间的组间距吃掉了一截。一并去掉。
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
-                ThemedIcon(.logs, role: .navigation)
-                    .foregroundStyle(.secondary)
-                Text("错误日志分析")
-                    .typed(Theme.Typo.pageTitle)
-                if report?.project.isDemo == true {
-                    // 「示例」是**状态**而不是数据（全页唯一一处 `info`，语义留色侧）。
-                    DemoBadge()
-                }
-                Spacer(minLength: Theme.Spacing.md)
-                actions(window: window)
-            }
-            Text(subtitle)
-                .typed(Theme.Typo.label)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            Theme.Page.Header(title: "错误日志分析",
+                              icon: .logs,
+                              subtitle: subtitle,
+                              isDemo: report?.project.isDemo == true,
+                              actions: { actions(window: window) })
             if let note = pendingRescanNote {
                 NoteLine(note, role: Theme.Semantic.warning, icon: .riskWarning)
             }
