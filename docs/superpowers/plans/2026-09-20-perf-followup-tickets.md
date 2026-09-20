@@ -193,6 +193,51 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
   → 再把 `consumptionGateOpen` 翻成 `true`。**没迁完就翻会当场判红**，所以"它翻得动"就是证据。
 - 顺带把 W-6 一起收：`isCollectingForDisplay` 目前仍 0 读取（"重新采样"点了最长 1.5 s 没反馈）。
 
+#### 但请按这张表加权，别对 16 处平均使力（09-21 01:2x 读 `publish()` 实测，含对我自己上一条的更正）
+
+> **这张表现在有机器出处**，不是一份会腐烂的手抄名单：
+> `testCoarseReadoutSitesSplitIntoLoadBearingAndIncidental` 每次跑都打印
+> `承重 N / 顺手 M / 合计 K` 并落台账 `$TMPDIR/tcoder-perf-migration-weighting.txt`，
+> 分类由 `classifyCoarseWrites(declarations:tickBody:symbols:)` **从 `publish()` 源码现读**
+> （符号名单从 `coarsePattern` 的交替组取，只有一处真相）。
+> 谁改了闸门写法而没回来改口径，那两条测试会红——它已经在第一次跑的时候抓到我一处口径错
+> （`refreshGroups()` 里的一次性裸写被算成了每 tick 成本），所以下面的数字是过了这一关的。
+
+机制只有一条：`publish()` 里**只有两处是无闸门写**，而它们的值每 tick 必然变——
+
+| 粗属性 | 写法（`MachSystemMonitor.publish` 内） | 每 tick 真的换值吗 | 读它的代价 |
+|---|---|---|---|
+| `latestSnapshot`（`:535`）、`history`（`:544`） | `latestSnapshot = batch.snapshot` / `history = frames` **无闸门** | 是（`timestamp` 每帧新、数组每帧追加） | **每次心跳都重算读它的那棵 body** |
+| `topProcesses` / `processesByMemory` / `trackedGroups` / `measuredProcessCount` / `processMetricsTruncated` | 走 `write(\…, &stats)` **等值闸门** | 不一定（榜单/计数常整帧不变，闸门会 skip） | 只在值真变时重算 |
+
+所以 16 处**不是 16 份等价收益**：
+
+- **承重的 10 处**（读上面那两个无闸门属性）：`DashboardView` 333 / 458 / 459、
+  `LiveReadings` 25 / 26、`ProjectSidebar` 443、`PerformanceView` 54 / 63 / 94 / 95。
+  `PerformanceView:94` 的 `monitor.lastSampleAt` 其实是 `latestSnapshot?.timestamp`（`:280`），也算这一类。
+- **顺手的 6 处**（读已闸门属性）：`PerformanceView` 45 / 47 / 53 / 55 / 68 / 69。
+  它们和 `:54` 在**同一个 body**里，所以单独迁它们**测不出差异**——那一屏仍被 `latestSnapshot` 拽着重算。
+  既然人到现场了，一并改掉是对的（棘轮要的是 0，不是"有效的 0"），但**别把收益记在它们头上**。
+- 顺序建议：**一个文件一次过**，先 `LiveReadings`（见下）→ `PerformanceView` → `DashboardView` → `ProjectSidebar`。
+
+`SampleContext`（`LiveReadings.swift:15`）是唯一需要决策的一处，其余都是 1:1 换名。
+它是"整份 `SystemSnapshot` 塞进一个值"，喂着 `PerformanceView`/`SystemTiles`/`ProcessTable`/
+`LiveCharts`/`ProcessGroups` 五处的 `let context: SampleContext`——**只要它还在，那一屏就还整棵重算**。
+它的 20 个纯读数函数不需要新契约：把视图里经 `ctx.snapshot` 读到的字段逐个对过去，
+**14 个不同字段全部已在九格里**（`cpuUsage/cpuCoreCount/thermalState/uptimeSeconds`→`cpu`，
+`memoryUsedBytes/memoryTotalBytes/memoryPressure`→`memory`，`disk*/network*` 四个→`rates`，
+`processCount`→`ledger.systemWideCount`＋`countIsSystemWide` 管"全系统 vs 本用户子集"三态，
+`historyCount/lastSampleAt`→`pulse`，榜单→`cpuRanking/memoryRanking`）。
+也就是说**契约侧没有缺口**，缺口只在"改签名"：把 `ctx.snapshot?.x` 换成读对应的格。
+一个提醒：`PerfCPULead.usage` 等是 `Double?`，比 `SystemSnapshot` 的裸 `Double` **更能表达"没取到"**，
+所以换过去之后 `cpuFraction/memoryGapReason` 那几条的三态判据要**逐条重看**，不要机械替换后沿用旧的
+"snapshot 为 nil 才算缺"——那是把更强的诚实性降级掉（同 §0.0 的红线：诚实性语义一条不降）。
+
+还有一条**留给 `trace_report.py` 的下一个人**（我这轮故意不动它：`ws/x2-runtimesvc` 正在二次拆这个文件，
+我改就是撞车）：`migration` 现在只报"还剩 16 处"，应该把上面的 `承重/顺手` 分级一起打出来，
+让派单的人一眼看见"先做哪 10 处"。分级逻辑已经有了（守卫里的 `classifyCoarseWrites`），
+照它读 `coarsePattern` 的写法再读一遍 `tickBody` 就行——**别手抄第二份名单**，那正是 #44 的形状。
+
 ### 第 2 步：帧率复测（分两小步，因为其中一步需要人手）
 
 ```bash
@@ -227,7 +272,7 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 
 两个操作者、同一台机器、同一档量级 ⇒ 这条结案可以认为是稳的。
 它的价值是**把候选排除了**：持久化不占主线程预算，所以剩下的怀疑对象只有视图图更新，
-也就是第 1 步那 16 处。
+也就是第 1 步那 **10 处承重读点**（不是 16 处——见上面的加权表）。
 
 ## 0.5 交接状态（09-21 00:31）——写给"一个人接两条线"的那位，免考古
 
@@ -237,7 +282,7 @@ Design 令牌缓存、尺子五档 + `probe` + `selfcheck`（11 项）、`migrat
 五维 preflight（含**人手静默**）、四条禁则零余量 `1/1 59/59 10/10 2/2`、
 §5.4 与 **T2 两半归因**（主线程九格写入 0.01 ms / 900 进程派生 9.3 ms 在后台）。
 
-**已提交、只差合的两包**（回执已在 `/tmp`，主树一干净就落）：
+**已提交、只差合的两包**（09-21 01:2x 更正：**不再是"主树一干净就落"**，见下面第 0 条）：
 ```bash
 ls /tmp/premerge-pass-ws_perf-base-*.ok | tail -2          # 看回执对应的头
 cd TcoderMonitor && ./scripts/merge_stream.sh ws/perf-base "merge ws/perf-base: 台账 + 假迁移守卫"
@@ -245,11 +290,30 @@ cd TcoderMonitor && ./scripts/merge_stream.sh ws/perf-base "merge ws/perf-base: 
 内容 = `dynamicNSColor` 拧到 59、两条棘轮各落一份 `$TMPDIR` 台账、
 新守卫 `testPreparedCellsAreNeverReslicedOrResorted`（防"迁了个假的"）。
 
-**下一步只有两条路，都在你手上**：
-1. **§0.4 第 1 步**：16 处粗读点迁完（`python3 scripts/trace_report.py migration` 报 0）
+**合入顺序现在多了一条前置条件（09-21 01:2x 实查 `ws/x3-testsplit`）**：
+WS-X3 把这两条守卫的**宿主文件按行数拆成了 extension**——
+`PerfInvalidationRatchetTests.swift`(190) + `+CoarseRatchet.swift`(104) + `+InvalidationBehavior.swift`(209)、
+`PerfHitchGuardTests.swift`(252) + `+FramePulse.swift`(111)，而我这两包的 hunk 正落在宿主文件里。
+所以：
+0. **等 X3/X0 那批先进 main，我再把自己的两包"重新落位"到拆后的布局上**（把 `reslicePattern` 那两条测试
+   放进 `+CoarseRatchet.swift`、`knownBaseline` 的改动留在主文件），跑一遍门再合。
+   顺序反过来会变成"我先进、他们拆的时候撞我的 hunk"，冲突由不懂这套口径的人解更容易出事。
+   **好消息已经核过**：X3 把口径常量（`coarsePattern` / `finePattern` / `coarseCallSiteCeiling` /
+   `consumerDirectories` / `knownBaseline`）**留在主文件里没搬**，所以 `trace_report.py migration`
+   那把"从守卫里现读尺子"的机器在 X3 树上照样跑得出 `16/16/0`——**拆文件没有把尺子的取数口拆断**。
+   若后续谁把这些常量搬进 extension，`migration` 会**报错而不是用一份手抄的旧尺子**，那是设计行为。
+1. **§0.4 第 1 步**：**10 处承重**粗读点迁完（`python3 scripts/trace_report.py migration` 报 0）
    → 我再把 `coarseCallSiteCeiling` 拧 0、翻 `consumptionGateOpen`；
 2. **§0.4 第 2 步**：约 5 分钟安静窗口（`idle`×3 不需要人；`interact`×3 需要你持续滚 20 秒）。
    被挡过两次的真实原因都写在 `measurement-context.txt` 里，脚本会自己拒，不用你判断。
+
+**这一轮还查到两件与派单有关的事实**（都影响"下一步做什么"）：
+- **`ws/x0-chief`、`x1`、`x2`、`x3` 四棵树里 16 处读点一处没动**（01:2x 逐树跑 `migration` 全是 `16/16/0`）。
+  这批是**体量/圈复杂度拆分轮**，不是 120Hz 轮；`x2` 那位还在二次拆我的 `trace_report.py`、
+  把 `selfcheck` 搬进 `perf_selfcheck.sh`（读数我核过没变）。⇒ **交互期 hitch 的收益仍然完全押在第 1 步上**，
+  它一旦再排到下一批，这一轮的 T1 就没法结。
+- `ws/chief`（`f5c0449`，13:30）**已全部在 main 里、树是干净的**，是上一轮留下的空树。
+  不是我建的、也不归我清，报给接管者处置：`git worktree remove .worktrees/chief && git branch -d ws/chief`。
 
 **别做这三件事**（都是这一轮踩过或量过的）：
 不要为了"零动态色"删取色引用（终点不是 0，见规范 T5）；
