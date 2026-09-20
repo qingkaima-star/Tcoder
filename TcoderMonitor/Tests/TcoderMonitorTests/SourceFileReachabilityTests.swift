@@ -47,7 +47,11 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 调用点 WeightedHealthScorer 的 .activity 分支）。棘轮的摩擦是有意的：
     /// 加文件必须有人先确认它凭什么被引用。
     /// 109 → 110（WS-Y #47 新增 Design/DataAbsence.swift，13 处页面调用点，未用清单未点名它）；110 → 111（性能轮 R 包新增 Services/Performance/FramePulse.swift，调用点 `AppState.init` 的 `FramePulse.shared.startIfNeeded()`，仅 `TCODER_PERF_PROBE=1` 时真正建探针）。
-    private static let censusBaseline = 111
+    /// 111 → 114（收官轮 WS-X0 新增 `Services/Health/` 三个 `extension WeightedHealthScorer` 分片：
+    /// `HealthCodeDimensions` / `HealthTeamDimensions` / `HealthRuntimeDimensions`，调用点都是
+    /// `WeightedHealthScorer.evaluate` 的九个 case。拆的理由是机械的：
+    /// `evaluate` 单函数 CC 60、220 行，被本 App 自扫点名成全仓第一高）。
+    private static let censusBaseline = 114
 
     private static let prunedDirectories: Set<String> = [".git", ".build", ".swiftpm", ".worktrees",
                                                         "node_modules", "DerivedData", "dist", "build", "out"]
