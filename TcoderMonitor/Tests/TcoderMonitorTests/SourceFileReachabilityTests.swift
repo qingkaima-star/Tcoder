@@ -47,7 +47,10 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 它**不是**孤儿文件——生产调用点在 `WeightedHealthScorer.swift` 的 `.activity` 分支
     /// （`let cadence = GitCadenceEvidence.assess(git)`），本守卫的"未用清单"也没有点名它，
     /// 红的原因只有分母不等。这正是这条棘轮想要的摩擦：加文件必须有人看一眼它凭什么被引用。
-    private static let censusBaseline = 109
+    /// 109 → 110（WS-Y #47）：新增 `Design/DataAbsence.swift`（四态单点）。
+    /// 它被 13 处页面调用点引用（`Views/Shell/DashboardHero.swift`、`Views/Code/CodeMetricsView.swift` 等），
+    /// 本守卫的"未用清单"没有点名它，红的只是分母。
+    private static let censusBaseline = 110
 
     private static let prunedDirectories: Set<String> = [".git", ".build", ".swiftpm", ".worktrees",
                                                         "node_modules", "DerivedData", "dist", "build", "out"]
