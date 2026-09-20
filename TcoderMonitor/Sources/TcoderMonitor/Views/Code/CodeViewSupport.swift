@@ -119,7 +119,9 @@ struct CodeLanguageShareRow: View {
             label: share.language,
             detail: "\(NumberFormat.grouped(share.lineCount)) 行",
             fraction: share.share,
-            tint: CodeGitCategoryColor.color(for: share.language),
+            // 语言名就写在条的左边，颜色不携带信息 —— 与 `Theme.Share.Row`
+            // 同一判断（用户实拍：代码规模页一个小区块里绿/棕/琥珀/红/蓝五色）。
+            tint: Theme.Palette.Surface.ink,
             percentPrecision: 1
         )
         .help(onOpenHint)

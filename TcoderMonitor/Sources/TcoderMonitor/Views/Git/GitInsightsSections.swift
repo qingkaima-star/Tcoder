@@ -154,7 +154,7 @@ struct GitTrendReadoutBar: View {
     let buckets: [CommitBucket]
 
     var body: some View {
-        DataReadoutBand {
+        ReadoutStrip {
             DataReadout(label: "峰值桶", value: NumberFormat.grouped(summary.peak),
                         caption: summary.unitLabel)
             DataBandSeparator()
@@ -263,7 +263,7 @@ struct GitRepositoryInfoSection: View {
                                  style: .path)
                 }
 
-                DataReadoutBand {
+                ReadoutStrip {
                     DataReadout(label: "触达文件", value: NumberFormat.grouped(git.filesTouched),
                                 caption: "个")
                     DataBandSeparator()

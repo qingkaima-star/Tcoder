@@ -88,31 +88,14 @@ extension Theme {
             private static let numberFont: Font = Theme.Typo.label.font.monospacedDigit()
         }
 
-        /// 读数条容器：内嵌面，与外层内容卡形成同心圆角（外 16 / 内 10）。
-        struct Bar<Content: View>: View {
-            var spacing: CGFloat
-            @ViewBuilder var content: Content
-
-            init(spacing: CGFloat = Theme.Spacing.lg, @ViewBuilder content: () -> Content) {
-                self.spacing = spacing
-                self.content = content()
-            }
-
-            var body: some View {
-                HStack(alignment: .top, spacing: spacing) {
-                    content
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Theme.Spacing.md)
-                .padding(.vertical, Theme.Spacing.sm)
-                .surface(layer: .contentInset, shape: .rounded(Theme.Radius.md))
-            }
-        }
+        // `Theme.Readout.Bar` 已删（零调用）：它内部自带 `.contentInset`，
+        // 给一行键值读数画井。健康页两处重样时改成无面读数带之后没人用了。
+        // 与 `DataReadoutBar` 同一个教训：零调用的井壳留着，就会被请回内容层。
     }
 
-    /// 占比条行：色点 + 名称 + 量条 + 百分比 + 次数。
+    /// 占比条行：名称 + 量条 + 百分比 + 次数。
     /// 取代《45》§3.3 判为重复的 `LanguageBar` / `ShareBarRow` 两套。
-    /// 色点与量条同色，色值只能来自 `Theme.Chart`（按稳定键或按登记号位）。
+    /// 结构占比**不染色点**（风格契约 5：结构去色），要表意的用色由调用方显式传。
     enum Share {
         struct Row: View {
             var label: String

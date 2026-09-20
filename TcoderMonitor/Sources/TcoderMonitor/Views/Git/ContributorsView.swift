@@ -264,14 +264,15 @@ struct ContributorConcentrationSection: View {
                     // 下面每位作者仍走稳定索引色：那才是「按 key 分辨类别」的合法用途。
                     tint: ChartSeries.lineColor
                 )
-                // 每位作者一个稳定分类色：这是「需要区分类别」的那一半，
-                // 与「给数字涂蓝」不同 —— 颜色在这里替读者把同一作者的条与点连起来。
+                // 作者条也收墨。原来的自辩是「颜色替读者把同一作者的条与点连起来」，
+                // 但这一节没有配图上的点，名字就写在条左边 —— 与 `Theme.Share.Row`、
+                // `ContributorHourRow` 同一判断：不携带信息的用色就是装饰性用色。
                 ForEach(top) { author in
                     DataShareBarRow(
                         label: ContributorAnalysis.displayName(author),
                         detail: "\(NumberFormat.grouped(author.commits)) 次",
                         fraction: Double(author.commits) / Double(base),
-                        tint: ContributorAnalysis.color(for: author.email)
+                        tint: Theme.Palette.Surface.ink
                     )
                 }
             }
