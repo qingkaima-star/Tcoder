@@ -157,7 +157,7 @@ struct DashboardView: View {
                     ForEach(git.recentCommits.prefix(6)) { commit in
                         CommitRow(commit: commit)
                         if commit.id != git.recentCommits.prefix(6).last?.id {
-                            Divider()
+                            DataRowSeparator()
                         }
                     }
                 }
@@ -366,11 +366,11 @@ struct DashboardLiveReadout: View {
     private var readoutStrip: some View {
         ReadoutStrip {
             cpuTile
-            Divider()
+            DataBandSeparator()
             memoryTile
-            Divider()
+            DataBandSeparator()
             errorTile
-            Divider()
+            DataBandSeparator()
             commitTile
         }
     }

@@ -13,7 +13,7 @@ struct LogsErrorClustersCard: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                     ForEach(Array(clusters.enumerated()), id: \.element.id) { index, cluster in
                         LogErrorClusterRow(cluster: cluster)
-                        if index < clusters.count - 1 { Divider() }
+                        if index < clusters.count - 1 { DataRowSeparator() }
                     }
                 }
             } else {

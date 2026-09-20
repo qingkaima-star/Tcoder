@@ -149,6 +149,24 @@ struct MetricTile: View {
 ///
 /// 分隔线由**调用方**在 tile 之间插 `Divider()`（SwiftUI 的 `Divider` 在 `HStack`
 /// 里画竖线）。不在这里自动插：各页 tile 数不同，自动插会让守卫数不出真实线数。
+/// 读数带 / 列之间的**唯一竖线**画法（发丝宽 + 上下留一小截，不顶满格高）。
+///
+/// 原来全站有三种竖线：这一条、SwiftUI 的 `Divider()`、以及 `DataRowSeparator()`
+/// 的横版 —— 同一件事三种画法，粗细与颜色各不相同，同屏两张表就能看出不一致。
+/// 现在分工写死：**竖线用它，横线用 `DataRowSeparator()`，`Divider()` 只许留在
+/// 系统菜单里**（守卫 `BorderlessSurfaceGuardTests.test_dividerIsConfinedToSystemMenus`）。
+/// 从 `Views/CodeGit/` 上提到这里，是因为它服务的对象（`ReadoutStrip`）就在本文件。
+/// 读数带列间分隔。**只能出现在 `DataReadoutBand` 里**。
+struct DataBandSeparator: View {
+    var body: some View {
+        Rectangle()
+            .fill(Theme.Palette.Surface.separator)
+            .frame(width: Theme.Stroke.hairline)
+            .padding(.vertical, Theme.Spacing.xxs)
+            .accessibilityHidden(true)
+    }
+}
+
 struct ReadoutStrip<Content: View>: View {
     @ViewBuilder var content: Content
 

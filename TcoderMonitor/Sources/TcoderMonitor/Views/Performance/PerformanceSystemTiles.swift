@@ -34,11 +34,11 @@ struct PerformanceSystemTiles: View {
         GlassSection("系统资源", subtitle: sectionSubtitle, icon: .cpu) {
             ReadoutStrip {
                 cpuTile
-                Divider()
+                DataBandSeparator()
                 memoryTile
-                Divider()
+                DataBandSeparator()
                 diskTile
-                Divider()
+                DataBandSeparator()
                 networkTile
             }
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {

@@ -113,16 +113,8 @@ struct DataHeroReadout: View {
 // （同一个 `HStack(alignment: .top, spacing: lg)` + 同一条 `frame(maxWidth:.infinity,.leading)`），
 // 是"同一件事两种画法"里最纯粹的一种。三处调用点全部改走 `ReadoutStrip`。
 
-/// 读数带列间分隔。**只能出现在 `DataReadoutBand` 里**。
-struct DataBandSeparator: View {
-    var body: some View {
-        Rectangle()
-            .fill(Theme.Palette.Surface.separator)
-            .frame(width: Theme.Stroke.hairline)
-            .padding(.vertical, Theme.Spacing.xxs)
-            .accessibilityHidden(true)
-    }
-}
+// `DataBandSeparator` 已上提到 `Design/SharedComponents.swift`：
+// 它是全站**唯一**的竖线画法，留在某个页面目录里就会被再抄一份。
 
 // MARK: - 表格井（风格契约 3 里内容层唯一允许的实心底）
 

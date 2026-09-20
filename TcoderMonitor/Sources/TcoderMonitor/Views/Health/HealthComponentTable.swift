@@ -237,7 +237,7 @@ struct HealthComponentTable: View {
                      trailing: AnyView(Theme.Readout.Field("合计", Live.fixed(sum, digits: 1)))) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 table
-                Divider()
+                DataRowSeparator()
                 missingBlock
                 if !HealthBreakdown.isSumConsistent(sum, with: health.overall) {
                     NoteLine("分量合计 \(Live.fixed(sum, digits: 1)) 与综合分 \(health.overall) 有出入，通常是评分器的归一化或取整口径不同。",

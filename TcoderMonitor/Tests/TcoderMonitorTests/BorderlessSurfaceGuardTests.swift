@@ -536,6 +536,45 @@ final class BorderlessSurfaceGuardTests: XCTestCase {
         XCTAssertTrue(Self.boxedSegmentedPickers(in: clean).isEmpty, "注释里的写法被误判")
     }
 
+    // MARK: 批次 H：分隔线只许两种画法
+
+    /// `Divider()` 的命中位置。竖线归 `DataBandSeparator`、横线归 `DataRowSeparator`，
+    /// `Divider()` 只许留在**系统菜单**里（菜单分隔线由 AppKit 画，不是内容层规则）。
+    static func strayDividers(in files: [(path: String, content: String)],
+                              allowed: Set<String>) -> [String] {
+        files.flatMap { file in
+            guard !allowed.contains(file.path) else { return [String]() }
+            return file.content.split(separator: "\n", omittingEmptySubsequences: false)
+                .enumerated()
+                .compactMap { index, raw in
+                    guard isCode(raw), raw.contains("Divider()") else { return nil }
+                    return "\(file.path):\(index + 1)"
+                }
+        }
+    }
+
+    /// 允许 `Divider()` 的文件 + 理由。**没有理由的条目不许加进来。**
+    private static let dividerAllowlist: Set<String> = [
+        "Views/Shell/ProjectSidebar.swift",   // 右键菜单里的分组线，由 AppKit 绘制
+    ]
+
+    func test_dividerIsConfinedToSystemMenus() throws {
+        let offenders = Self.strayDividers(in: try Self.sourceFiles(under: "Views"),
+                                           allowed: Self.dividerAllowlist)
+        XCTAssertTrue(offenders.isEmpty,
+                      "内容层又出现第三种分隔线画法，竖线用 DataBandSeparator、横线用 DataRowSeparator：\(offenders)")
+    }
+
+    func test_strayDividerScannerDetectsInjectedUse() {
+        let dirty = [(path: "Views/Fake.swift", content: "  VStack { Divider() }\n")]
+        XCTAssertEqual(Self.strayDividers(in: dirty, allowed: []).count, 1, "坏样例没抓到")
+        let allowed = [(path: "Shell/Menu.swift", content: "  Divider()\n")]
+        XCTAssertTrue(Self.strayDividers(in: allowed, allowed: ["Shell/Menu.swift"]).isEmpty,
+                      "白名单没生效")
+        let commented = [(path: "Views/Fake.swift", content: "// 原来这里写 Divider()\n")]
+        XCTAssertTrue(Self.strayDividers(in: commented, allowed: []).isEmpty, "注释被误判")
+    }
+
     /// 反向自证：`sourceFiles` 真读到了文件。否则上面所有「扫不到就算通过」的断言
     /// 会集体假绿 —— 这是扫描型守卫最经典的死法。
     func test_sourceScannerActuallyFindsFiles() throws {
