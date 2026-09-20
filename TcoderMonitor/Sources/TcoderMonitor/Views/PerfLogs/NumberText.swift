@@ -1,20 +1,23 @@
 import SwiftUI
 
-// MARK: - 三页共用的「数字观感 + 页头」（性能 / 日志 / 健康）
+// MARK: - 三页共用的「数字观感」（性能 / 日志 / 健康）
 //
 // 活动监视器的专业感来自两件极小的事：**列宽定死** 与 **数字等宽**。
 // 这两件事一旦各页自己写就会漂（WS-I §4 实测全仓 `.monospacedDigit()` 命中 0），
 // 所以数字取色、单元格对齐、占位符着色全部收在这一个文件里。
 //
-// 页尾另外住着一份 `PerfLogsPageHeader`（三页共用的页头）。**它为什么不单开文件**：
-// `SourceFileReachabilityTests` 把全仓实现文件数钉成一个写死的分母（现值 110），
-// 而那份基线不归页面工作流写 —— 新增一个 `Sources/` 文件会让全仓 `test` 红在别人的守卫上。
-//
-// 这里曾经是 `BorderlessPage`（本流自造的页骨架）。总工 `48443d9` 把基座
-// `Theme.Page.Scaffold` 换成 `pageMargin/group/section` 三档并钉了「全仓只许一份页骨架」
-// （`pageScaffoldDeclarations` 按 `Scaffold` / `BorderlessPage` 字样识别），
-// 所以那份自造骨架已整块删除、三页改回基座。**本文件里任何人再想加骨架，
-// 名字里带 Scaffold 或 BorderlessPage 都会被那条守卫抓到。**
+// 本文件**只放数字与单元格的观感**。它曾先后寄居过两份"看着像共用件、其实越界"的东西，
+// 都已删除，写在这里免得有人再放回来：
+//   1. `BorderlessPage`（自造页骨架）—— 总工 `48443d9` 把基座 `Theme.Page.Scaffold`
+//      换成 `pageMargin/group/section` 三档，并钉了「全仓只许一份页骨架」
+//      （`pageScaffoldDeclarations` 按 `Scaffold` / `BorderlessPage` 字样识别）。
+//      三页现全部走 `Theme.Page.Scaffold`。**再想加骨架：名字带这两个词就会被拦。**
+//   2. `PerfLogsPageHeader`（三页共用的页头）—— 「页头」这件事全仓只许一套画法，
+//      归 `Views/ProjectDetailView.swift` 与 `Views/Shell/**`（WS-O 名下）。
+//      页面目录里养一份页头 = 两套页头并存，正是用户说的「东一个系一个」。
+//      三页现在各自写**页内小标题**（页名 + 本页口径一句 + 本页控件），
+//      不碰项目名 / 路径 / 分析时间。需要基座提供通用页头件请报契约缺口给总工，
+//      由他加进 `Design/`，**不要在页面目录里养**。
 //
 // #34 起，**列头与列宽不再归本文件管**：全仓唯一一套列系统在
 // `Design/DataTable.swift`（`DataColumn` / `DataTableHeader` / `.tableCell`，
@@ -113,57 +116,3 @@ extension View {
     }
 }
 
-// MARK: - 三页共用的页头
-
-/// 三页共用的页头：图标 + 页名 + 示例标记 + 右侧控件 + 可选的一句页级说明。
-///
-/// 原来三页各写一遍同一个 `HStack`，其中两处系统性错误：
-///   1. 页名图标涂 `Semantic.accent` 蓝 —— 图标属**结构**，结构一律灰阶（风格契约 5），
-///      蓝在这套体系里只代表交互 / 选中，静态图标吃蓝等于把交互语义稀释掉；
-///   2. 采样元信息（上次采样 / 采样点 / 间隔）与页名抢同一根水平线，读起来像页名的一部分。
-///
-/// `note` 一律排在第二行、`label`(11) + `.secondary`，只解释「这一页的口径是什么」，
-/// 不重复任何读数。诚实性文案（只观测不干预 / 取不到不给 0 / 三态口径）就落在这里。
-struct PerfLogsPageHeader<Actions: View>: View {
-    var icon: IconName
-    var title: String
-    var isDemo: Bool
-    var note: String?
-    @ViewBuilder var actions: Actions
-
-    init(icon: IconName,
-         title: String,
-         isDemo: Bool = false,
-         note: String? = nil,
-         @ViewBuilder actions: () -> Actions = { EmptyView() }) {
-        self.icon = icon
-        self.title = title
-        self.isDemo = isDemo
-        self.note = note
-        self.actions = actions()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
-                ThemedIcon(icon, role: .navigation)
-                    .foregroundStyle(.secondary)
-                Text(title)
-                    .typed(Theme.Typo.pageTitle)
-                if isDemo {
-                    // 「示例」是**状态**而不是数据：它是全页唯一一处 `info`，
-                    // 标的是「这一屏数字是内置假数据」，属语义留色那一侧。
-                    SemanticBadge("示例", role: Theme.Semantic.info)
-                }
-                Spacer(minLength: Theme.Spacing.md)
-                actions
-            }
-            if let note {
-                Text(note)
-                    .typed(Theme.Typo.label)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-}

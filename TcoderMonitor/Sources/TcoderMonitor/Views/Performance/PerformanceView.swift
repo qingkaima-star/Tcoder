@@ -70,18 +70,33 @@ struct PerformanceView: View {
         }
     }
 
-    // MARK: - 工具条
+    // MARK: - 页内小标题（页头归 WS-O：项目名 / 路径 / 分析时间在 `ProjectDetailView`）
 
+    /// 只标「这一页是什么 + 这一页的口径」，控件由本页自己摆。
+    /// 图标一律灰阶（结构去色，风格契约 5），口径句固定第二行 11pt `.secondary`。
     private var header: some View {
-        PerfLogsPageHeader(icon: .performance,
-                             title: "性能监控",
-                             isDemo: report?.project.isDemo == true,
-                             note: "系统级实时读数只观测不干预。数值随采样刷新，"
-                                 + "取不到的一律显示 --，不会补成 0。",
-                             actions: { controls })
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
+                ThemedIcon(.performance, role: .navigation)
+                    .foregroundStyle(.secondary)
+                Text("性能监控")
+                    .typed(Theme.Typo.pageTitle)
+                if report?.project.isDemo == true {
+                    // 「示例」是**状态**而不是数据：全页唯一一处 `info`，
+                    // 标的是「这一屏数字是内置假数据」，属语义留色那一侧。
+                    SemanticBadge("示例", role: Theme.Semantic.info)
+                }
+                Spacer(minLength: Theme.Spacing.md)
+                controls
+            }
+            Text("系统级实时读数只观测不干预。数值随采样刷新，取不到的一律显示 --，不会补成 0。")
+                .typed(Theme.Typo.label)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
-    /// 采样元信息：这一屏数据有多新。它不是读数，所以留在页头下方一行、
+    /// 采样元信息：这一屏数据有多新。它不是读数，所以留在标题下方一行、
     /// 11pt 次要墨，**不与页名抢水平线**（原来三枚 `Readout.Field` 与页名同排，
     /// 是「不规整拥挤」的直接来源）。三态与口径文案一字未改。
     private var sampleStats: some View {

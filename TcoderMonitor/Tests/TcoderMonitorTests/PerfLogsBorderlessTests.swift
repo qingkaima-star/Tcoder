@@ -161,6 +161,17 @@ final class PerfLogsBorderlessTests: XCTestCase {
         return counts
     }
 
+    /// 页面目录里自己养的**页头类型**声明。
+    /// 「页头」（项目名 / 路径 / 分析时间 / 右侧控件）全仓只许一套画法，
+    /// 归 `Views/ProjectDetailView.swift` 与 `Views/Shell/**`（WS-O 名下）。
+    static func pageHeaderDeclarations(in files: [(path: String, content: String)]) -> [String] {
+        hits(in: files, where: { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            return trimmed.hasPrefix("struct ") && trimmed.contains(": View")
+                && trimmed.contains("PageHeader")
+        })
+    }
+
     private static func hits(in files: [(path: String, content: String)],
                              where predicate: (String) -> Bool) -> [String] {
         files.flatMap { file in
@@ -285,13 +296,22 @@ final class PerfLogsBorderlessTests: XCTestCase {
         }
     }
 
-    func test_pageHeaderIsSharedNotTriplicated() throws {
+    func test_ownedPagesDoNotOwnAPageHeaderType() throws {
+        // 「页头」这件事全仓只许一套画法，归 WS-O 的 `ProjectDetailView` / `Views/Shell/**`。
+        // 本流域曾养过一份 `PerfLogsPageHeader`（三页共用），已按总工裁定删除：
+        // 页面目录里再出现任何 `struct …PageHeader…: View` 就是第二套页头。
         let files = try ownedFiles()
-        let sites = files.filter { $0.content.contains("PerfLogsPageHeader(icon:") }
-        XCTAssertEqual(sites.count, 3,
-                       "三页应共用一份页头（Performance / Logs / Health 各一处），实测 \(sites.map(\.path))")
-        XCTAssertTrue(files.contains { $0.content.contains("struct PerfLogsPageHeader") },
-                      "共用页头本体不在了")
+        let headers = Self.pageHeaderDeclarations(in: files)
+        XCTAssertTrue(headers.isEmpty,
+                      "页面目录里养着第二套页头（归 WS-O）：\(headers)")
+        // 反向：三页各自写**页内小标题**（页名 + 本页口径），不依赖任何共用页头件。
+        for (page, title) in [("PerformanceView", "性能监控"),
+                              ("LogsView", "错误日志分析"),
+                              ("HealthView", "健康评分")] {
+            let file = try XCTUnwrap(files.first { $0.path.hasSuffix("\(page).swift") })
+            XCTAssertTrue(file.content.contains("Text(\"\(title)\")"),
+                          "\(page) 的页名不在本页里 → 页内小标题被抽走或改名了")
+        }
     }
 
     func test_noContainerWrapsGlassSectionsInTightSpacing() throws {
@@ -424,6 +444,15 @@ final class PerfLogsBorderlessTests: XCTestCase {
             }
             """)])["V/H.swift.HealthHero"], 2,
                    "同一 struct 内两枚环没数出来 → 「一页两枚主角」判据失效")
+
+        // 页头扫描器：本流真养过的那份形状必须被抓到，而普通视图不得误伤。
+        XCTAssertEqual(Self.pageHeaderDeclarations(in: [(path: "Views/PerfLogs/Fake.swift", content:
+            "struct PerfLogsPageHeader<Actions: View>: View {")]).count, 1,
+                       "页头声明扫描器失灵 → 页面目录里的第二套页头会漏")
+        XCTAssertTrue(Self.pageHeaderDeclarations(in: [(path: "Views/PerfLogs/Fake.swift", content: """
+            struct LiveNumber: View {
+            struct NoteLine: View {
+            """)]).isEmpty, "普通视图被误判成页头 → 三家会被逼着把组件改名绕守卫")
     }
 
     func test_groupSpacingScannerCatchesTightContainerAndIgnoresLooseOne() {

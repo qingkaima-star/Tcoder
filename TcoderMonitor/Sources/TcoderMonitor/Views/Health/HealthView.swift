@@ -30,11 +30,21 @@ struct HealthView: View {
         }
     }
 
+    /// 页内小标题（页头归 WS-O：项目名 / 路径 / 分析时间在 `ProjectDetailView`）。
+    /// 图标灰阶；本页的口径声明常驻在 `HeuristicClaimLine`（分数旁边），不重复写在这里。
     private var header: some View {
-        PerfLogsPageHeader(icon: .health,
-                             title: "健康评分",
-                             isDemo: report?.project.isDemo == true,
-                             actions: { ScanControls() })
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
+            ThemedIcon(.health, role: .navigation)
+                .foregroundStyle(.secondary)
+            Text("健康评分")
+                .typed(Theme.Typo.pageTitle)
+            if report?.project.isDemo == true {
+                // 「示例」是**状态**而不是数据（全页唯一一处 `info`，语义留色侧）。
+                SemanticBadge("示例", role: Theme.Semantic.info)
+            }
+            Spacer(minLength: Theme.Spacing.md)
+            ScanControls()
+        }
     }
 
     private var historyPoints: [ScoreHistoryPoint] {

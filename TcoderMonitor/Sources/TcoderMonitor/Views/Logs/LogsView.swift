@@ -33,18 +33,29 @@ struct LogsView: View {
         .onChange(of: state.logWindowDays) { _, _ in rescanForNewWindow() }
     }
 
-    // MARK: - 页头与工具条（控件层：本页唯一一处真玻璃落点）
+    // MARK: - 页内小标题与工具条（页头归 WS-O；控件层是本页唯一一处真玻璃落点）
 
     private func header(window: Binding<Int>) -> some View {
         // 原来整块 header 挂着 `.padding(md)` + `.surface(layer: .content)` ——
         // 内容层现在什么都不画，那是一次空操作，而它为已经不存在的盒子留了 16pt 内边距，
-        // 把页头与正文之间的组间距吃掉了一截。一并去掉。
+        // 把标题与正文之间的组间距吃掉了一截。一并去掉。
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            PerfLogsPageHeader(icon: .logs,
-                                 title: "错误日志分析",
-                                 isDemo: report?.project.isDemo == true,
-                                 note: subtitle,
-                                 actions: { actions(window: window) })
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
+                ThemedIcon(.logs, role: .navigation)
+                    .foregroundStyle(.secondary)
+                Text("错误日志分析")
+                    .typed(Theme.Typo.pageTitle)
+                if report?.project.isDemo == true {
+                    // 「示例」是**状态**而不是数据（全页唯一一处 `info`，语义留色侧）。
+                    SemanticBadge("示例", role: Theme.Semantic.info)
+                }
+                Spacer(minLength: Theme.Spacing.md)
+                actions(window: window)
+            }
+            Text(subtitle)
+                .typed(Theme.Typo.label)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             if let note = pendingRescanNote {
                 NoteLine(note, role: Theme.Semantic.warning, icon: .riskWarning)
             }
