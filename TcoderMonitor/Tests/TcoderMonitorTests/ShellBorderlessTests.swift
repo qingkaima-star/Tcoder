@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 import XCTest
@@ -585,6 +586,37 @@ final class ShellBorderlessTests: XCTestCase {
                           content: "// 原来这里传的是 tint: Theme.Semantic.info.textColor\n")]
         XCTAssertTrue(Self.dataHueUses(in: commented).isEmpty,
                       "注释里交代历史就被判红 → 一年后没人记得它为什么错")
+    }
+
+    // MARK: - 定宽格必须真的量过（18:00 实拍逼出来的）
+
+    /// 侧栏底栏那格实时读数。`liveReadoutColumnWidth` 一直是 40，而 `30.6 GB` 在
+    /// 10pt 等宽下就要 41pt，于是它**折成两行**把底栏撑歪 —— 实拍才看得见，
+    /// 因为这一格从来没被量过（`ShellDesignTests` 只量了项目行的两格）。
+    /// 用系统排版真实量宽，不启动 App。
+    func test_sidebarLiveReadoutColumnFitsTheWorstCase() {
+        let widest = "180.5 GB"          // 192GB 机器上用满时的真实形状
+        let needed = Self.width(of: widest)
+        XCTAssertGreaterThanOrEqual(ShellLayout.liveReadoutColumnWidth, needed,
+                                    "「\(widest)」会被折成两行；定宽格必须容得下最坏读数")
+        XCTAssertLessThan(ShellLayout.liveReadoutColumnWidth, needed * 2,
+                          "定宽格不许比最坏情况宽出一整倍（白占侧栏横向空间）")
+    }
+
+    /// 元测试：这把尺子量得出「装不下」。
+    func test_textMeasuringRulerIsNotVestigial() {
+        XCTAssertGreaterThan(Self.width(of: "180.5 GB"), Self.width(of: "9 GB"),
+                             "量宽函数失灵：长串不比短串宽")
+        XCTAssertGreaterThanOrEqual(Self.width(of: "180.5 GB"), 41,
+                                    "10pt 等宽下 8 个字符不可能小于 41pt —— 字体取错了")
+    }
+
+    /// 用 `monoSmall` 那一档（10pt 等宽字族）真实量一段文字的宽度。
+    private static func width(of text: String) -> CGFloat {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: Theme.Typo.monoSmall.size, weight: .regular),
+        ]
+        return ceil((text as NSString).size(withAttributes: attributes).width)
     }
 
     // MARK: - 今日错误的着色（语义色只留给真有危险的那一态）

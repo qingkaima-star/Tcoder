@@ -24,7 +24,12 @@ enum ShellLayout {
 
     /// 实时读数里数字列的定宽。等宽数字仍要定宽，是因为 `ByteFormat` 的
     /// 「1.5 GB / 128 MB」位数不同，不锁宽会把整条侧栏底栏推着走。
-    static let liveReadoutColumnWidth: CGFloat = 40
+    ///
+    /// 40 → 56：18:00 实拍实测 `30.6 GB` 在 40pt 里**折成两行**（`30.6` / `GB`），
+    /// 底栏被撑歪 —— 而全仓没有一条断言量过这一格（`ShellDesignTests` 只量项目行那两格）。
+    /// 「定宽格」不量就等于没钉。下限由
+    /// `ShellBorderlessTests.test_sidebarLiveReadoutColumnFitsTheWorstCase` 钉住。
+    static let liveReadoutColumnWidth: CGFloat = 56
 
     // MARK: 侧栏行
 
