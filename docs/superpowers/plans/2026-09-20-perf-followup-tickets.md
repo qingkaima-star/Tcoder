@@ -8,7 +8,41 @@
   （`git grep -h -E <模式> refs/heads/main -- 'TcoderMonitor/Sources/TcoderMonitor/Views'`）。
   严谨口径以守卫自己的计数为准（`PerfHitchGuardTests` / `PerfInvalidationRatchetTests`）。
 
+## 0.1 【最高优先】细粒度契约目前消费数为 **0**
+
+按守卫自己的正则复算 `main = a99f38b` 的 `Views/**` + `App/**`：
+
+- **粗粒度读点 16 处 = 棘轮上限 16（零余量，再加第 17 处即判红）**
+- **细粒度读点（`monitor.<格>.value`）0 处**
+
+含义说白：**M0 服务侧把一次 tick 的写入面收窄了，但页面一格都没接**，
+所以 1.5 秒一次的整棵重算**依旧在发生**，用户端目前**不会感到任何帧率改善**。
+T1/T2 在这 16 处迁完之前不可能达标——**这不是"优化项"，是其余性能工单的前置**。
+
+16 处逐条（迁完后由总工把上限往下拧，最终 0）：
+
+| 文件 | 行 | 现在这么读 | 该换成 |
+|---|---|---|---|
+| `Views/DashboardView.swift` | 332 | `state.monitor.latestSnapshot` | `monitor.pulse.value`（+ 需要的格单独读） |
+|  | 443 | `state.monitor.history.count > 2` | `monitor.pulse.value.historyCount` |
+|  | 444 | `Array(state.monitor.history.suffix(90))` | **`monitor.curve.value`**（已切好窗口，别再 `suffix`） |
+| `Views/PerfLogs/LiveReadings.swift` | 25–26 | `monitor.latestSnapshot` / `monitor.history.count` | 入参改成 `PerfPulse`，或读 `pulse.value` / `curve.value` |
+| `Views/Performance/PerformanceView.swift` | 45 | `monitor.trackedGroups` | `monitor.groupRanking.value` |
+|  | 47 / 55 | `monitor.processMetricsTruncated` ×2 | `monitor.ledger.value.metricsTruncated` |
+|  | 53 | `monitor.measuredProcessCount` | `monitor.ledger.value.measuredCount` |
+|  | 54 | `monitor.latestSnapshot?.processCount` | `monitor.ledger.value`（系统/被测计数） |
+|  | 63 | `Array(monitor.history.suffix(chartPointLimit))` | `monitor.curve.value` |
+|  | 68 | `monitor.topProcesses` | `monitor.cpuRanking.value` |
+|  | 69 | `monitor.processesByMemory` | `monitor.memoryRanking.value` |
+|  | 104 | `monitor.lastSampleAt` | `monitor.pulse.value.sampleAt` |
+|  | 105 | `monitor.history.count` | `monitor.pulse.value.historyCount` |
+| `Views/Shell/ProjectSidebar.swift` | 411 | `state.monitor.latestSnapshot`（喂 `LiveCPUBadge`） | `monitor.cpu.value`（badge 只需 CPU） |
+
+> 顺带：`isCollectingForDisplay` 也是 **0 读取**（见 W-6）。
+> 这两个 0 是同一件事的两面——**新契约没接，旧入口没撤**。
+
 ## 0. 消费什么（都已进 main，不用等）
+
 
 `state.monitor` 上的 9 个独立观察格与派生入口，签名与语义见
 `docs/superpowers/specs/2026-09-20-performance-120hz-design.md` §5.3。要点：
