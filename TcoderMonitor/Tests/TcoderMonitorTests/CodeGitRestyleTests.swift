@@ -624,7 +624,11 @@ final class CodeGitRestyleTests: XCTestCase {
                 out.append(SourceFile(name: "\(dir)/\(name)", body: body))
             }
         }
-        XCTAssertEqual(out.count, 14, "WS-L 名下应有 14 个视图文件（Code 4 / Git 5 / Dependencies 2 / CodeGit 3），数量变了说明归属被动过")
+        // 14 → 13：`CodeGit/CodeGitTable.swift` 于 M0 上提为 `Design/DataTable.swift`
+        // （本轮 spec §2.4）。它被 6 个目录的 10 个文件共用，留在一个页面目录下
+        // 等于让该页独占全仓的列系统。这条断言本来就是「归属被动过就要响」，
+        // 它响了，改的是**记录**而不是把断言删掉。
+        XCTAssertEqual(out.count, 13, "WS-L/WS-P 名下应有 13 个视图文件（Code 4 / Git 5 / Dependencies 2 / CodeGit 2），数量变了说明归属被动过；列系统已上提进 Design/，见 Design/DataTable.swift")
         return out
     }
 }

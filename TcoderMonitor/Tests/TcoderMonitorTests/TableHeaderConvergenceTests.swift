@@ -8,7 +8,7 @@ import XCTest
 // 三套里的**基座那套 `Theme.Table.Header`（`Design/TableKit.swift`）在开工前就已不存在**
 // —— 提交 `ed58dd5`（WS-G #28）判它零引用、且是「与页面两套不兼容的第三条路」，整文件删除。
 // 所以 #34 剩下的活是把**活着的两套并成一套**：
-//   留 `Views/CodeGit/CodeGitTable.swift` 的列数组系统
+//   留 `Design/DataTable.swift` 的列数组系统
 //   （`DataGridColumn` / `DataColumns` / `DataTableHeader` / `.tableCell`）；
 //   删 `Views/PerfLogs/NumberText.swift` 的逐格系统（`TableHeaderCell` + `DataColumn` 标量列宽）。
 // 留哪套不是手感：被删的基座自己的头注释写着「并集形状，与 WS-L 那套字段一一对应」，
@@ -130,7 +130,7 @@ final class TableHeaderConvergenceTests: XCTestCase {
         let definitions = try Self.scan(Self.headerDefinitionPattern, in: files)
         XCTAssertEqual(definitions.count, 1,
                        "列头组件必须全仓唯一，实际定义处：\n" + Self.describe(definitions))
-        XCTAssertTrue(definitions.first?.file.hasSuffix("Views/CodeGit/CodeGitTable.swift") == true,
+        XCTAssertTrue(definitions.first?.file.hasSuffix("Design/DataTable.swift") == true,
                       "唯一的列头组件应当与列定义同处一文件，实际在 \(definitions.first?.file ?? "nil")")
     }
 
@@ -278,7 +278,7 @@ final class TableHeaderConvergenceTests: XCTestCase {
     }
 
     func testMetaHeaderDefinitionDetectorIgnoresCompliantCodeAndProse() throws {
-        let good = [Self.synthetic("Views/CodeGit/CodeGitTable.swift",
+        let good = [Self.synthetic("Design/DataTable.swift",
                                    "/// 注释与文档里提到 TableHeaderCell 不算再造组件",
                                    "struct DataTableHeader: View {",
                                    "    let columns: [DataGridColumn]",
@@ -291,7 +291,7 @@ final class TableHeaderConvergenceTests: XCTestCase {
                                    "struct PerformanceProcessTableCard: View {}")]
         let hits = try Self.scan(Self.headerDefinitionPattern, in: good)
         XCTAssertEqual(hits.count, 1, "唯一那处合规定义被漏掉、或调用点被误判成定义，都说明尺子坏了")
-        XCTAssertEqual(hits.first?.file, "Views/CodeGit/CodeGitTable.swift")
+        XCTAssertEqual(hits.first?.file, "Design/DataTable.swift")
     }
 
     func testMetaRetiredSymbolDetectorCatchesBadAndIgnoresCommentsAndLongerNames() throws {
