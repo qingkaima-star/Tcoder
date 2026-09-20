@@ -124,28 +124,48 @@ final class SourceFileClassifier {
             }
             // TODO/FIXME 只在代码行与注释行里数（空行不可能含标记，顺带省掉一次 uppercased）；
             // 大小写不敏感按子串计次。`FIXME` 不含 `TODO` 子串，因此不会被算成 TODO。
-            if kind != .blank {
+            if kind == .comment {
+                // 只有**注释行**里的标记形状才算一笔欠账。子串口径曾经把
+                // `Text("FIXME 45 处")` 这类界面文案、讲 FIXME 用法的测试说明、
+                // 文档正文里的词全数计成待办 —— 一个把 FIXME 计数做进界面的工具，
+                // 界面上那三个字自己也在喂计数（本 App 扫自己实测：45 个 FIXME 里
+                // 真正的标记只有 2 个）。判据收紧的代价是真标记漏计，所以
+                // `SourceMarkerPrecisionTests` 双向钉：真标记必计、字符串与散文里的提及必不计。
                 let uppercased = text.uppercased()
-                todo += sourceMarkerOccurrences(of: "TODO", in: uppercased)
-                fixme += sourceMarkerOccurrences(of: "FIXME", in: uppercased)
+                todo += sourceMarkerOccurrences(of: "TODO", in: text, uppercased: uppercased)
+                fixme += sourceMarkerOccurrences(of: "FIXME", in: text, uppercased: uppercased)
             }
             lines.append(SourceLine(number: offset + 1, text: text, kind: kind))
         }
     }
 }
 
-private func sourceMarkerOccurrences(of marker: String, in uppercasedText: String) -> Int {
+/// 一行注释里有几个**待办标记**。三道判据，缺一不算：
+/// ① 词边界（`todoCount` / `fixmeCount` 是标识符，不是欠账）；
+/// ② 标记紧跟 `:`（`TODO:` / `FIXME:` 是无歧义写法），**或**标记之前只有注释引导符
+///    （`//`、`/*`、`*`、`#`、`- [ ]`、空白等）——「见 TODO 列表」这种句子中段因此不计；
+/// ③ 调用方已保证只在注释行调用（见 `LineTally.add`）。
+func sourceMarkerOccurrences(of marker: String, in text: String, uppercased uppercasedText: String) -> Int {
     var count = 0
     var searchStart = uppercasedText.startIndex
     while searchStart < uppercasedText.endIndex {
         guard let found = uppercasedText.range(of: marker, range: searchStart..<uppercasedText.endIndex) else { break }
-        // 词边界：`todoCount` / `fixmeCount` 这类标识符不是待办标记
-        if hasMarkerBoundary(text: uppercasedText, lower: found.lowerBound, upper: found.upperBound) {
+        if hasMarkerBoundary(text: uppercasedText, lower: found.lowerBound, upper: found.upperBound),
+           isDebtMarker(uppercased: uppercasedText, text: text, lower: found.lowerBound, upper: found.upperBound) {
             count += 1
         }
         searchStart = found.upperBound
     }
     return count
+}
+
+/// ② 号判据：`TODO:` 写法，或标记位于注释开头。
+func isDebtMarker(uppercased: String, text: String, lower: String.Index, upper: String.Index) -> Bool {
+    if upper < uppercased.endIndex, uppercased[upper] == ":" { return true }
+    let before = text[text.startIndex..<lower]
+    return before.allSatisfy { $0 == " " || $0 == "\t" || $0 == "/" || $0 == "*" || $0 == "#"
+        || $0 == "-" || $0 == ">" || $0 == "[" || $0 == "]" || $0 == "x" || $0 == "X" || $0 == "!"
+        || $0 == "<" || $0 == "%" }
 }
 
 private func hasMarkerBoundary(text: String, lower: String.Index, upper: String.Index) -> Bool {

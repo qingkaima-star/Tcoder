@@ -127,13 +127,19 @@ extension CodeAnalyzerTests {
         let url = try write(content + "\n", to: "Many.swift", in: root)
         guard let file = classify(url, root: root) else { return XCTFail("Swift 夹具必须分类成功") }
 
-        XCTAssertEqual(file.todoCount, 4, "第 1 行 1 个 + 第 2 行 2 个 + 第 4 行 1 个")
+        // 手算（收官轮判据收紧后）：todo = 第 1 行 `TODO:` 1 个 + 第 2 行行首那个 1 个 = 2；
+        // 第 2 行句中的第二个 TODO、第 4 行 "with TODO inside" 都不在行首、后面也不是冒号 ⇒ 不算。
+        // FIXME = 第 3 行 `FIXME:` 与第 4 行行首各 1 个 = 2（与收紧前同值，这两行本来就是真标记）。
+        // 收紧前这里报 4：同一行里"提到两次"被数成"欠两笔"。
+        XCTAssertEqual(file.todoCount, 2, "只有位于注释开头或紧跟冒号的 TODO 才算一笔")
         XCTAssertEqual(file.fixmeCount, 2, "第 3、4 行各 1 个")
     }
 
-    /// 现状记录：标记统计带**词边界**判定（`todoTotal` / `TODOS` 这类标识符不算命中），
-    /// 但不做词法分析——字符串字面量里的 TODO 依然计入，且大小写不敏感。
-    func testTodoMarkerUsesWordBoundaryButStillCountsStringLiterals() throws {
+    /// 词边界 + 位置双判据：标识符（`todoTotal` / `TODOS`）不算，**代码行里的字符串字面量也不算**。
+    /// 改名沿革：原名 `...ButStillCountsStringLiterals` 钉的是收紧前的子串口径；
+    /// 收官轮把「界面文案 `Text("FIXME 45 处")` 被数成 45 里的 3 处」这类误报修掉之后，
+    /// 那个前提反了，于是按本仓规矩**翻正并改名**（不是删用例）。大小写仍不敏感。
+    func testTodoMarkerIgnoresIdentifiersStringLiteralsAndProse() throws {
         let root = try makeFixtureRoot()
         defer { try? fm.removeItem(at: root) }
         let content = """
@@ -145,8 +151,10 @@ extension CodeAnalyzerTests {
         let url = try write(content + "\n", to: "Boundary.swift", in: root)
         guard let file = classify(url, root: root) else { return XCTFail("Swift 夹具必须分类成功") }
 
-        XCTAssertEqual(file.todoCount, 1, "只有字符串字面量里的 TODO 命中；`todoTotal`、`TODOS` 因词边界规则不得计入")
-        XCTAssertEqual(file.fixmeCount, 2, "字符串里的 FIXME + 注释里的小写 fixme 各 1 次（大小写不敏感）")
+        // 手算：todo = 0（第 1 行标识符、第 2 行在代码行的字符串里、第 4 行 TODOS 越出词边界）；
+        // fixme = 1（只有第 3 行 `// fixme lowercase counted` 是注释开头的真标记，大小写不敏感）。
+        XCTAssertEqual(file.todoCount, 0, "标识符、代码行里的字符串字面量都不是欠账")
+        XCTAssertEqual(file.fixmeCount, 1, "只数注释行开头那一个小写 fixme（大小写不敏感）")
     }
 
 }
