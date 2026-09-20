@@ -1,35 +1,29 @@
 import SwiftUI
 
-/// 内容区：页头（项目 + 当前状态）+ 页面切换条 + 当前页。
+/// 内容区：页头（项目 + 当前状态）+ 当前页。
 ///
-/// 本轮把「九页选择」从一个下拉 Picker 换成了玻璃导航条：页名是这九页的**主导航**，
-/// 藏在菜单里等于没有导航（对标系统设置的侧栏语义，WS-H §2.2）。
-/// 页头不再自造背景色：窗口底色由系统给，内容卡靠材质 + 间距分层（[LG]）。
+/// **本轮（WS-O / M1）两件事**（spec §3）：
+///   1. 页头下面那条九页 chip 条和它那条 `Divider()` 删了 —— 导航搬进侧栏的
+///      `Section("分析视图")`，腾出的 44pt 还给内容区。页头不再自造背景色。
+///   2. 全仓**第一次**把 `Theme.Palette.Surface.ground` 接到内容滚动容器上
+///      （风格契约 1「单一地面」）。基座 M0 只定义了这个令牌不接线，
+///      因为在 M0 就硬断言会逼出「为了过门随手涂一个 background」的假接线。
+///      地面只有一层：往下各页不得再有第二种填充色，唯一例外是实心井 `.contentInset`。
 struct ProjectDetailView: View {
     @Environment(AppState.self) private var state
     @AppStorage("selectedDetailSection") private var sectionRaw: String = DetailSection.overview.rawValue
 
     private var section: DetailSection { DetailSection(rawValue: sectionRaw) ?? .overview }
 
-    private var sectionBinding: Binding<DetailSection> {
-        Binding(
-            get: { DetailSection(rawValue: sectionRaw) ?? .overview },
-            set: { sectionRaw = $0.rawValue }
-        )
-    }
-
     var body: some View {
         @Bindable var state = state
 
         VStack(spacing: 0) {
             header
-            SectionNavBar(selection: sectionBinding,
-                          reportAvailable: state.selectedReport != nil)
-                .padding(.horizontal, Theme.Spacing.md)
-                .padding(.bottom, Theme.Spacing.xs)
-            Divider()
             content
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.Palette.Surface.ground)
         .onReceive(NotificationCenter.default.publisher(for: .requestSelectSection)) { note in
             if let target = note.object as? DetailSection { sectionRaw = target.rawValue }
         }
@@ -50,6 +44,9 @@ struct ProjectDetailView: View {
         state.scan(project: project)
     }
 
+    /// 页头：项目名是这一列唯一的主角（`pageTitle` 20），
+    /// 路径与分析时间收成**一行** `label`(11)。
+    /// 二者都是元数据，可以走 `.tertiary`；测得值不行（风格契约 4）。
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
             if let project = state.selectedProject {
@@ -57,14 +54,17 @@ struct ProjectDetailView: View {
                     Text(project.name).font(Theme.Typo.pageTitle.font)
                     HStack(spacing: Theme.Spacing.xs) {
                         Text(project.path)
-                            .font(Theme.Typo.monoSmall.font)
+                            .font(Theme.Typo.label.font.monospacedDigit())
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .help(project.path)
                         if let scanned = project.lastScanAt {
-                            Text("分析于 \(DateFormat.sinceDescription(scanned))")
+                            Text("·")
                                 .font(Theme.Typo.label.font)
+                                .foregroundStyle(.tertiary)
+                            Text("分析于 \(DateFormat.sinceDescription(scanned))")
+                                .font(Theme.Typo.label.font.monospacedDigit())
                                 .foregroundStyle(.tertiary)
                         }
                     }
@@ -83,8 +83,8 @@ struct ProjectDetailView: View {
                               icon: .unverified)
             }
         }
-        .padding(.horizontal, Theme.Spacing.md)
-        .padding(.top, Theme.Spacing.md)
+        .padding(.horizontal, Theme.Spacing.pageMargin)
+        .padding(.top, Theme.Spacing.lg)
         .padding(.bottom, Theme.Spacing.xs)
     }
 

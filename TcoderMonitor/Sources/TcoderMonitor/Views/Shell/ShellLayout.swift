@@ -25,13 +25,17 @@ enum ShellLayout {
     /// 「1.5 GB / 128 MB」位数不同，不锁宽会把整条侧栏底栏推着走。
     static let liveReadoutColumnWidth: CGFloat = 40
 
-    // MARK: 侧栏行卡片
+    // MARK: 侧栏行
 
-    /// 行卡最小高度。两行文字（13 semibold + 11 读数）加上下内边距的自然结果，
-    /// 也顺着 macOS 26 列表「行高与内边距更大」的方向（WS-H §2.2）。
-    static let rowMinHeight: CGFloat = 48
-    /// 行卡内边距。行间沟槽由 `List` 自己给，这里只算卡内的。
-    static let rowPadding: CGFloat = Theme.Spacing.sm
+    /// 侧栏行高。48 → 30（风格契约 7）。
+    ///
+    /// 旧值 48 是**行卡**的高度：两行文字 + 上下内边距 + 一块 `.contentInset` 材质。
+    /// 现在行卡没了，选中态交回 `.listStyle(.sidebar)` 原生绘制，行就是一行文字 ——
+    /// 还留 48pt 等于在原生列表里手工撑出第二套行距，两侧一起用力必然显挤。
+    /// 30 是「11pt 读数 + 上下各 8pt 命中余量」的自然结果，也仍在可点下限之上。
+    static let rowMinHeight: CGFloat = 30
+    /// 行内左右内边距。系统 sidebar 行本身已有缩进，这里只补图标与文字的呼吸。
+    static let rowPadding: CGFloat = Theme.Spacing.xs
 
     /// 两个读数各占一个**右对齐定宽格**。
     ///
