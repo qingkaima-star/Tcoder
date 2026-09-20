@@ -40,6 +40,30 @@ Apple Silicon 原生 macOS App（Swift + SwiftUI），对本地开发项目做�
 > 另注：「依赖分析」一行只举了常见清单名，代码实际识别 16 个清单文件名
 > （还含 `settings.gradle(.kts)`、`setup.py`、`Pipfile`、`packages.config`，见 `ManifestFileName.table`）。
 
+## 界面风格（简约无界）
+
+九页共用一套视觉规则，且**每条都有机器守卫或像素读数兜着**，不靠"看着像"：
+
+| 规则 | 落地 | 怎么被守住 |
+|---|---|---|
+| 全页只有一层地面色 | `Theme.Palette.Surface.ground`（浅 `#F1F1F3` / 深 `#1C1C1E`），内容卡**不画面** | 《BorderlessSurfaceGuardTests》的内容层无材质用例 + 九页像素读数地面占比 55–98% |
+| 井是唯一允许的填充 | `Theme.Palette.Surface.well`，只给表格/日志/代码块 | 同文件的「全仓无材质」用例 |
+| 投影只给浮层 | `View.surface` 的 `.floating` 分支，全仓 1 处 | 同文件的「投影全仓唯一且只落在浮层分支」用例 |
+| 最重的墨给最大的数 | 主读数一律 `Theme.Palette.Surface.ink`（`.primary` 不够黑：`labelColor` 只有 85% 黑） | 九页像素读数最暗像素亮度 0.000–0.004 且落在最大数字所在带 |
+| 结构去色、语义留色 | 颜色只承载状态（健康分档/风险/日志等级/增删）与交互；**序列色属于图与图例，不属于数字**，规则收在 `ChartSeries` | 同文件的「取色规则只有一份」用例 + 数据涂倾向色实测 0 处 |
+| 分组靠小标题 + 留白 | `Theme.Typo.groupLabel`（10pt medium + 0.6pt 字距），组间 `Theme.Spacing.group`(32) / 页级段落 `Theme.Spacing.section`(40) / 页边距 `Theme.Spacing.pageMargin`(24) | 同文件的「呼吸档必须有人引用」用例 |
+| 一套骨架、一套取色 | `Theme.Page.Scaffold` 与 `ChartSeries` 全仓各只有一份，都在 `Design/` | 同文件的「页骨架只许一份」用例 + 上一条 |
+
+排版令牌**唯一消费入口是 `View.typed`** —— `Font` 没有任何字距 API，
+写 `.font(Theme.Typo.groupLabel.font)` 会静默丢掉字距，所以有守卫专门抓这种写法。
+
+已知未解决：**深色下健康分 55–70 档是 Apple 系统纯黄 `#FFD60A`，比浅色的 `#D18208` 琥珀响得多**，
+深浅两态响度不对等。它在 `Theme.Semantic.warning` 里、被对比度断言钉着，改动需连带重估色阶单调性。
+
+设计规格与实施计划见 `docs/superpowers/specs/2026-09-20-borderless-minimal-ui-redesign-design.md`
+与 `docs/superpowers/plans/2026-09-20-borderless-minimal-ui-redesign.md`；
+逐页像素读数与机械反查结果见 `docs/九页实拍读数.md` §2.5。
+
 ## 构建与运行
 
 > 以下是**开发/发布向**。普通使用者不用构建：拿到 `dist/Tcoder.app` 双击即可，
