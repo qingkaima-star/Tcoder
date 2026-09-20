@@ -54,15 +54,20 @@ final class CodeGitBorderlessTests: XCTestCase {
 
     // MARK: - 扫描器（全是纯函数：喂 [(path, content)]，吐命中）
 
-    /// 去掉整行注释，但**保留原始行号**。
+    /// 去掉整行注释，但**保留原始行号与缩进**。
     ///
     /// 行号必须一路带着走：先前有一版把注释行 `filter` 掉后再报 `index + 1`，
-    /// 于是命中消息里的行号系统性偏小（`CodeMetricsView.swift:121` 实际是 135 行）。
-    /// 报错误导人去找行，比不报错更糟。
-    static func numberedCodeLines(_ content: String) -> [(n: Int, text: String)] {
+    /// 于是命中消息里的行号系统性偏小（报 121 实际 135）。报错误导人去找行，比不报错更糟。
+    /// 缩进留给 `handRolledGroupContainers` 判父子关系用。
+    static func numberedCodeLines(_ content: String) -> [(n: Int, text: String, indent: Int)] {
         content.split(separator: "\n", omittingEmptySubsequences: false)
             .enumerated()
-            .map { (index, raw) in (index + 1, String(raw).trimmingCharacters(in: .whitespaces)) }
+            .map { index, raw in
+                let text = String(raw)
+                return (index + 1,
+                        text.trimmingCharacters(in: .whitespaces),
+                        text.prefix { $0 == " " || $0 == "\t" }.count)
+            }
             .filter { !$0.text.hasPrefix("//") }
     }
 
@@ -206,7 +211,11 @@ final class CodeGitBorderlessTests: XCTestCase {
 
     /// 页面手写容器来排 `GlassSection` → 组间距不受任何命名档位管辖。
     ///
-    /// 判据：`VStack(` / `LazyVGrid(` / `ScrollView` 之后 8 行内出现 `GlassSection(` 即违规。
+    /// 判据：`VStack(` / `LazyVGrid(` / `ScrollView` 之后 8 行内出现**缩进更深**的
+    /// `GlassSection(` 即违规。缩进这一维不是可有可无 —— 少了它就分不清
+    /// 「VStack 里排着 section」（要管）与「某个 section 的内容里有个 VStack，
+    /// 它的兄弟节点恰好是下一个 section」（不该管）。第一版没判缩进，
+    /// 真在 `CodeMetricsView.swift` 的 `CodeScaleSection` 上误报了一处。
     /// 合法写法只有 `DataPageScaffold` / `PageParagraph` / `GroupStack`，
     /// 它们的档位全在基座，改一处五页同时生效。
     static func handRolledGroupContainers(in files: [(path: String,
@@ -223,7 +232,10 @@ final class CodeGitBorderlessTests: XCTestCase {
                     guard openers.contains(where: entry.text.contains) else { continue }
                     let end = min(lines.count, index + 1 + lookAhead)
                     guard index + 1 < end else { continue }
-                    if lines[(index + 1)..<end].contains(where: { $0.text.contains("GlassSection(") }) {
+                    let nests = lines[(index + 1)..<end].contains {
+                        $0.text.contains("GlassSection(") && $0.indent > entry.indent
+                    }
+                    if nests {
                         found.append("\(file.path):\(entry.n): \(entry.text.prefix(56))")
                     }
                 }
@@ -466,6 +478,16 @@ final class CodeGitBorderlessTests: XCTestCase {
             + "    }\n}"
         XCTAssertTrue(Self.handRolledGroupContainers(in: [("Code/A.swift", namedStack)]).isEmpty,
                       "命名容器被误判 —— 合法写法将无法表达")
+        // 缩进这一维的真样本：section **内部**的 VStack，它的兄弟节点恰好是下一个 section。
+        // 不判缩进就会误报（本文件第一版就真的误报了 CodeMetricsView.swift:151）。
+        let innerStack = "GlassSection(\"代码规模\") {\n"
+            + "    VStack(alignment: .leading, spacing: Theme.Spacing.md) {\n"
+            + "        DataHeroReadout(value: \"1\")\n"
+            + "    }\n"
+            + "}\n"
+            + "GlassSection(\"语言构成\") {\n    EmptyView()\n}"
+        XCTAssertTrue(Self.handRolledGroupContainers(in: [("Code/A.swift", innerStack)]).isEmpty,
+                      "section 内部的 VStack 被误判成手排容器 —— 缩进这一维丢了")
         XCTAssertTrue(Self.handRolledGroupContainers(in: [("CodeGit/Kit.swift", dirtyStack)]).isEmpty,
                       "基座被误判 —— 容器实现本来就只许写在基座里")
 
