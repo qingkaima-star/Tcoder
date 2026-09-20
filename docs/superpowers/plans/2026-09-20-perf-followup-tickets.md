@@ -29,6 +29,8 @@
 | W-3 | 轴标签 formatter | `Views/PerfLogs/ChartChrome.swift` 里仍有 1 处 `DateFormatter()` 现造（在轴标签循环内） | 提 `static let`；`PerfHitchGuardTests` 的 `directFormatters` 该文件命中 0 |
 | W-4 | 进程榜 | 榜的行数与内容口径**不许变**；排序必须消费 `memoryRanking/cpuRanking`，视图内不得再 `sorted` | 交改前/改后"视图里 `sorted` 次数" |
 | W-5 | 迁移到细粒度格 | 三页仍在读粗表面：`latestSnapshot` 4、`monitor.history` 5、`topProcesses` 1、`trackedGroups` 1（全 Views 口径） | `PerfInvalidationRatchetTests` 的粗表面基线**按流下降到 0**；不许新增粗表面读 |
+| **W-6（性能轮自己引进的，优先做）** | 「重新采样 / 立即采样」**点击后没有任何"已受理"反馈** | `sampleNow()` 现在只 `scheduleCollection()` 并立即返回最近一帧（冷启动第一帧除外）；服务侧 `isCollectingForDisplay` 在 `MachSystemMonitor` 被写 **4 次**，但 **`Views/**` 里零读取**——两个入口是 `PerformanceView.controls` 的「重新采样」与 `DashboardView.livePerformanceCard` 的「立即采样」 | **性质要说准：这不是伪造读数**——屏上那些值本来就是 ≤1.5 s 前的真实一帧，与常态节拍同旧。缺的是 T7 的交互反馈：点击 → 视觉响应 ≤100 ms。做法：按钮消费 `monitor.isCollectingForDisplay`（进行中态 / 防重复点击），或把"已排队采下一帧"写成一行状态文字。<br>这条由性能轮引入：改前 `sampleNow` 同步扫全量（占主线程，正是 T7 要消掉的东西）但按钮"看起来立刻变了"；改后不卡了，反馈却归零。**两头都要，不是二选一。** |
+
 
 已完成的一条（不必重做）：**节拍字面量 5 → 1**，`sampleIntervalText` 已接上真值。
 
