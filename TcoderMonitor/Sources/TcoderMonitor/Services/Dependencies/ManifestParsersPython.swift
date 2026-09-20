@@ -20,69 +20,95 @@ extension ManifestParsers {
     }
 
     /// pyproject.toml / Pipfile / setup.py -> [DependencyRecord]（尽力而为）。
+    /// 拆出去的三块（`pyprojectListKind` / `appendPyprojectList` / `pyprojectTableRecord`）
+    /// 各自照抄原先那一段判定，分支顺序与取值一字未改：
+    /// 前五条「整段就是一个依赖数组」的形状按原顺序判，都不命中才落到
+    /// `pythonTableScope` 的 poetry / Pipfile 形状，最后是 setup.py 的两条正则。
     static func pyprojectDependencies(_ text: String, manifestPath: String) -> [DependencyRecord] {
         var records: [DependencyRecord] = []
 
         for entry in tomlEntries(in: text) {
             let section = entry.section.lowercased()
             let key = entry.key.lowercased()
-            let value = entry.value
-
-            if section == "project", key == "dependencies" {
-                for spec in tomlStringList(value) {
-                    appendPython(spec, scope: .runtime, manifestPath: manifestPath, to: &records)
-                }
+            if let kind = pyprojectListKind(section: section, key: key) {
+                appendPyprojectList(kind, entry: entry, manifestPath: manifestPath, to: &records)
                 continue
             }
-            if section == "build-system", key == "requires" {
-                for spec in tomlStringList(value) {
-                    appendPython(spec, scope: .build, manifestPath: manifestPath, to: &records)
-                }
-                continue
-            }
-            if section == "project", key == "requires-python" {
-                if let version = numericVersionPrefix(value) {
-                    records.append(record("python", version, .python, .platform, manifestPath))
-                }
-                continue
-            }
-            if section == "dependency-groups" {
-                for spec in tomlStringList(value) {
-                    appendPython(spec, scope: .dev, manifestPath: manifestPath, to: &records)
-                }
-                continue
-            }
-            if section.hasSuffix("optional-dependencies") {
-                for spec in tomlStringList(value) {
-                    appendPython(spec, scope: .dev, manifestPath: manifestPath, to: &records)
-                }
-                continue
-            }
-
             guard let scope = pythonTableScope(section) else { continue }
-            // poetry / Pipfile 风格：name = "^1.2" 或 name = { version = "^1.2", … }
-            let name = key == "python" ? "python" : normalizePythonName(entry.key)
-            guard !name.isEmpty else { continue }
-            let declared: String?
-            if let inline = firstGroup("version\\s*=\\s*(['\"])([^'\"\\n]+)\\1", 2, in: value) {
-                declared = inline
-            } else if trim(value).hasPrefix("{") {
-                declared = nil // 只有 git / path，没写版本
-            } else {
-                declared = firstGroup("^\\s*(['\"])([^'\"\\n]+)\\1", 2, in: value)
+            if let item = pyprojectTableRecord(key: key, value: entry.value, name: entry.key,
+                                               scope: scope, manifestPath: manifestPath) {
+                records.append(item)
             }
-            let version: String
-            if let declared, let extracted = numericVersionPrefix(declared) {
-                version = extracted
-            } else if let declared, declared != "*" {
-                version = declared
-            } else {
-                version = undeclaredVersion
-            }
-            records.append(record(name, version, .python, name == "python" ? .platform : scope, manifestPath))
         }
 
         // setup.py 的 install_requires = [...] / extras_require = {...}
+        appendSetupPy(in: text, manifestPath: manifestPath, to: &records)
+        return dedupe(records)
+    }
+
+    /// 「整段就是一个依赖数组」的五种形状。判定条件与原先的五个 `if` 逐字相同，
+    /// 包括 `dependency-groups` 与 `*optional-dependencies` 两条**不看 key** 这一细节。
+    enum PyprojectListKind {
+        /// 段内每个字符串是一条 PEP 508 依赖。
+        case specs(DependencyScope)
+        /// `requires-python`：只有解得出数字前缀时产一条 `python` 平台记录。
+        case pythonPlatform
+    }
+
+    static func pyprojectListKind(section: String, key: String) -> PyprojectListKind? {
+        if section == "project", key == "dependencies" { return .specs(.runtime) }
+        if section == "build-system", key == "requires" { return .specs(.build) }
+        if section == "project", key == "requires-python" { return .pythonPlatform }
+        if section == "dependency-groups" { return .specs(.dev) }
+        if section.hasSuffix("optional-dependencies") { return .specs(.dev) }
+        return nil
+    }
+
+    static func appendPyprojectList(_ kind: PyprojectListKind,
+                                    entry: (section: String, key: String, value: String),
+                                    manifestPath: String,
+                                    to records: inout [DependencyRecord]) {
+        switch kind {
+        case .specs(let scope):
+            for spec in tomlStringList(entry.value) {
+                appendPython(spec, scope: scope, manifestPath: manifestPath, to: &records)
+            }
+        case .pythonPlatform:
+            if let version = numericVersionPrefix(entry.value) {
+                records.append(record("python", version, .python, .platform, manifestPath))
+            }
+        }
+    }
+
+    /// poetry / Pipfile 风格：`name = "^1.2"` 或 `name = { version = "^1.2", … }`。
+    /// `name` 用的是**未小写化的原 key**（与拆分前一致），判定链顺序未动。
+    static func pyprojectTableRecord(key: String,
+                                     value: String,
+                                     name rawNameKey: String,
+                                     scope: DependencyScope,
+                                     manifestPath: String) -> DependencyRecord? {
+        let name = key == "python" ? "python" : normalizePythonName(rawNameKey)
+        guard !name.isEmpty else { return nil }
+        let declared: String?
+        if let inline = firstGroup("version\\s*=\\s*(['\"])([^'\"\\n]+)\\1", 2, in: value) {
+            declared = inline
+        } else if trim(value).hasPrefix("{") {
+            declared = nil // 只有 git / path，没写版本
+        } else {
+            declared = firstGroup("^\\s*(['\"])([^'\"\\n]+)\\1", 2, in: value)
+        }
+        let version: String
+        if let declared, let extracted = numericVersionPrefix(declared) {
+            version = extracted
+        } else if let declared, declared != "*" {
+            version = declared
+        } else {
+            version = undeclaredVersion
+        }
+        return record(name, version, .python, name == "python" ? .platform : scope, manifestPath)
+    }
+
+    static func appendSetupPy(in text: String, manifestPath: String, to records: inout [DependencyRecord]) {
         for groups in matches(of: "install_requires\\s*=\\s*\\[([^\\]]*)\\]", in: text) {
             guard let body = groups[safe: 1] else { continue }
             for spec in tomlStringList(body) {
@@ -96,7 +122,6 @@ extension ManifestParsers {
                 appendPython(spec, scope: .dev, manifestPath: manifestPath, to: &records)
             }
         }
-        return dedupe(records)
     }
 
     private static func appendPython(_ spec: String, scope: DependencyScope,

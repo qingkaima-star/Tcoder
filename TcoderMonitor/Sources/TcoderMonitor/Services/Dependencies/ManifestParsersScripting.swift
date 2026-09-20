@@ -5,38 +5,19 @@ import Foundation
 
 extension ManifestParsers {
     /// Gemfile -> [DependencyRecord]。`group :test / :development / :production` 段影响 scope。
+    /// 逐行骨架走 `rubyStyleDependencies`（与 Podfile 共用一份），这里只给 Gemfile 的三个钩子：
+    /// `group ` 独占一条前置分支、`if ` 也算开块、普通块原样继承 scope。
     static func gemfileDependencies(_ text: String, manifestPath: String) -> [DependencyRecord] {
-        var records: [DependencyRecord] = []
-        var depth = 0
-        var scopes: [DependencyScope] = []
-        for rawLine in lines(text) {
-            let line = trim(stripHashComment(rawLine))
-            if line.isEmpty { continue }
-            if line == "end" || line.hasPrefix("end ") {
-                if depth > 0 { depth -= 1 }
-                while scopes.count > depth { scopes.removeLast() }
-                continue
-            }
-            let inherited = scopes.last ?? .runtime
-            if line.hasPrefix("gem ") || line.hasPrefix("gem(") || line.hasPrefix("gem '") || line.hasPrefix("gem \"") {
-                let strings = quotedStrings(line)
-                guard let name = strings.first, !name.isEmpty else { continue }
-                let scope = gemInlineScope(line) ?? inherited
-                let version = versionConstraint(from: Array(strings.dropFirst())) ?? undeclaredVersion
-                records.append(record(name, version, .ruby, scope, manifestPath))
-                continue
-            }
-            if line.hasPrefix("group ") {
-                depth += 1
-                scopes.append(gemGroupScope(line))
-                continue
-            }
-            if opensBlock(line) || line.hasPrefix("if ") {
-                depth += 1
-                scopes.append(inherited)
-            }
-        }
-        return dedupe(records)
+        rubyStyleDependencies(text, manifestPath: manifestPath, walk: RubyStyleWalk(
+            isEntry: { $0.hasPrefix("gem ") || $0.hasPrefix("gem(")
+                || $0.hasPrefix("gem '") || $0.hasPrefix("gem \"") },
+            entryScope: { line, inherited in gemInlineScope(line) ?? inherited },
+            isGroup: { $0.hasPrefix("group ") },
+            groupScope: { gemGroupScope($0) },
+            opensBlock: { opensBlock($0) || $0.hasPrefix("if ") },
+            blockScope: { _, inherited in inherited },
+            ecosystem: .ruby
+        ))
     }
 
     static func gemGroupScope(_ line: String) -> DependencyScope {
