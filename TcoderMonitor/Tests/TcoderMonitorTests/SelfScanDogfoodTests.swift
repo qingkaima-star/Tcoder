@@ -139,13 +139,34 @@ final class SelfScanDogfoodTests: SelfScanHarnessCase {
         XCTAssertTrue(hotspots.allSatisfy { $0.cyclomaticComplexity >= 1 },
                       "热点函数复杂度必须 ≥1")
         if let top = hotspots.max(by: { $0.cyclomaticComplexity < $1.cyclomaticComplexity }) {
-            XCTAssertGreaterThanOrEqual(top.cyclomaticComplexity, Self.complexFunctionBar,
-                                        "本仓库存在复杂度 ≥\(Self.complexFunctionBar) 的函数，榜单最高值不该低于它")
+            // **翻正**（2026-09-21 收官轮）：原先钉的是「榜最高值 ≥ \(Self.complexFunctionBar)」，
+            // 前提是本仓确实存在 CC≥16 的函数。四路把全仓 54 个拆到 0 个之后，
+            // 那条前提消失了——再留着就成了**要求仓库必须保持差**（本仓规矩：缺陷被修好时
+            // 要把留档断言反转成正确断言，而不是删掉，也不许反过来改实现迁就断言）。
+            // 换成不依赖债务存在、且更强的等价式：榜最高值必须等于独立普查的最高 CC。
+            let censusMax = try await independentMaxComplexity()
+            XCTAssertEqual(top.cyclomaticComplexity, censusMax,
+                           "榜单最高值与独立普查的最高 CC 不等：榜 \(top.cyclomaticComplexity) vs 普查 \(censusMax)")
+            XCTAssertGreaterThanOrEqual(censusMax, 1, "一个函数都没认出 CC 来，说明引擎空转")
         }
         let count = hotspots.filter { $0.cyclomaticComplexity >= Self.complexFunctionBar }.count
         print("【复杂度榜】榜单 \(hotspots.count) 个，≥\(Self.complexFunctionBar) 的 \(count) 个，"
             + "全仓均复杂度 \(metrics.averageCyclomaticComplexity.map { String(format: "%.2f", $0) } ?? "nil")"
             + "（分母 \(metrics.analyzedFunctionCount)）")
+    }
+
+    /// 独立数一遍全仓最高圈复杂度：绕开 `topComplexFunctions` 这条生产路径，
+    /// 直接走 `SourceTreeScanner` + `ComplexityEngine`（与自扫同一个引擎，但不经榜单截断）。
+    private func independentMaxComplexity() async throws -> Int {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // TcoderMonitorTests
+            .deletingLastPathComponent()   // Tests
+            .deletingLastPathComponent()   // TcoderMonitor
+            .deletingLastPathComponent()   // 仓库根
+        let scanned = await SourceTreeScanner(options: .default).scan(root: root)
+        let all = scanned.files.flatMap { ComplexityEngine.functions(in: $0) }
+        XCTAssertGreaterThan(all.count, 1000, "函数识别退化：只认出 \(all.count) 个函数")
+        return all.map(\.complexity).max() ?? 0
     }
 
     // MARK: - 防作弊门 4：Git 结论必须与 git 命令**同口径**对得上
