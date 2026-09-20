@@ -4,7 +4,9 @@ import XCTest
 /// OWNER: WS-X5（接手 WS-X2 RuntimeServices）。
 ///
 /// **性能两把尺子自己的**热点棘轮：`scripts/perf_harness.sh`、`scripts/perf_selfcheck.sh`、
-/// `scripts/trace_report.py` 与它的三个 python 兄弟——函数圈复杂度 / 函数行数 / 文件行数只减不增。
+/// `scripts/perf_preflight.sh`、`scripts/trace_report.py` 与它的五个 python 兄弟
+/// （解析层两件、`perf_trace_threads.py`、`perf_trace_summary.py`、`perf_framepulse.py`）
+/// ——函数圈复杂度 / 函数行数 / 文件行数只减不增。
 ///
 /// 为什么要有这一条：这两把尺子的输出是**别人的验收依据**（AGENTS.md 第四轮红线 1
 /// 「帧率结论只认 perf_harness.sh 的读数」），而它们恰好是全仓 CC 最高的一批函数所在处
@@ -25,11 +27,18 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
     static let functionLineBar = 50
     static let fileLineBar = 800
 
-    /// 六把尺子文件（`scripts/` 下）。`perf_framepulse.py` 与两个解析层模块一起纳入，
+    /// 九把尺子文件（`scripts/` 下）。`perf_framepulse.py` 与两个解析层模块一起纳入，
     /// 是因为 `cmd_selfcheck` 第 1 项要求"三层文件齐全"——它们同生共死。
+    ///
+    /// 后三名（WS-X6 规模债切片，2026-09-21）不是新写的尺子，是**从前三把里搬出来的**：
+    /// `perf_trace_threads.py` / `perf_trace_summary.py` 自 `trace_report.py` 搬出，
+    /// `perf_preflight.sh` 自 `perf_harness.sh` 搬出。不点名它们，本门的分母会从 101 个函数
+    /// 静默掉到 67 个——尺子照样"绿"，只是不再量那 34 个函数。
+    /// **搬出去的文件必须继续被量着**，否则"按职责拆文件"就等价于"拆到守卫看不见的地方"。
     static let rulerScripts: Set<String> = [
-        "perf_harness.sh", "perf_selfcheck.sh", "trace_report.py",
-        "perf_trace_xml.py", "perf_trace_metrics.py", "perf_framepulse.py",
+        "perf_harness.sh", "perf_selfcheck.sh", "perf_preflight.sh", "trace_report.py",
+        "perf_trace_xml.py", "perf_trace_metrics.py", "perf_trace_threads.py",
+        "perf_trace_summary.py", "perf_framepulse.py",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。
