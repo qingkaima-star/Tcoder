@@ -61,6 +61,7 @@ final class BorderlessSurfaceGuardTests: XCTestCase {
                 .enumerated()
                 .filter { _, line in
                     line.contains(".regularMaterial") || line.contains("ultraThinMaterial")
+                        || line.contains(".thinMaterial")
                 }
                 .map { "\(file.path):\($0.offset + 1)" }
         }
@@ -153,6 +154,19 @@ final class BorderlessSurfaceGuardTests: XCTestCase {
                       "表面系统里仍有材质填充（风格契约 1，实测会糊成 1.05:1 的脏灰）：\(hits)")
         XCTAssertTrue(glass.content.contains("case .content:"),
                       "内容层必须仍然存在（页面有 40 处靠它拿掉面板）")
+    }
+
+    /// **守卫补漏（2026-09-20 实拍抓到）**：原来只扫 `Design/`，于是
+    /// `ContributorRows` 在页面里写 `.background(.regularMaterial, …)` 做一个悬停浮层，
+    /// 本守卫**看不见**。材质被禁的理由是"它比页面底暗 1.05:1、糊成脏灰"，
+    /// 这跟它写在哪个目录无关 —— 只扫基座等于漏掉 90% 的落点。
+    /// 现在扫全仓 `Sources/**`。页面要浮层请用 `.surface(layer: .floating, …)`。
+    func test_noMaterialAnywhereInSources() throws {
+        let all = try Self.sourceFiles(under: "")
+        let hits = Self.forbiddenMaterialUses(in: all)
+        XCTAssertTrue(hits.isEmpty,
+                      "全仓仍有材质填充（含页面里散写的）。悬停/浮层请用 "
+                      + "`.surface(layer: .floating, shape: .rounded(Theme.Radius.sm))`。\(hits)")
     }
 
     // MARK: - 契约 6：投影全仓唯一，且只给浮层
@@ -256,6 +270,56 @@ final class BorderlessSurfaceGuardTests: XCTestCase {
         XCTAssertTrue(joined.contains("Spacing.section"),
                       "`Spacing.section`(40) 自定义起全仓零引用，这正是「拥挤」的机械成因")
         XCTAssertTrue(joined.contains("Spacing.pageMargin"))
+    }
+
+    /// 页骨架的**声明**位置：`struct Xxx(page)Scaffold…: View` 或 `Theme.Page.Scaffold`。
+    /// 本轮实测发现过三份同职责骨架并存（基座 `Page.Scaffold`、
+    /// `CodeGitDesignKit.DataPageScaffold` 逐字复制品、WS-W 的 `BorderlessPage`）——
+    /// 用户原话「不要东一个系一个」在代码层面的形态就是这个。
+    static func pageScaffoldDeclarations(in files: [(path: String, content: String)]) -> [String] {
+        files.flatMap { file in
+            codeLines(file.content)
+                .enumerated()
+                .compactMap { index, line in
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    guard trimmed.hasPrefix("struct "), trimmed.contains(": View") else { return nil }
+                    let isScaffold = trimmed.contains("Scaffold") || trimmed.contains("BorderlessPage")
+                    return isScaffold ? "\(file.path):\(index + 1)" : nil
+                }
+        }
+    }
+
+    /// 基座那份页骨架必须在 `Design/`，且用的是新呼吸档（不是 16）。
+    /// 这条 M0 就能硬断言。
+    func test_basePageScaffoldUsesTheBreathingRhythm() throws {
+        let design = try Self.sourceFiles(under: "Design")
+        let scaffold = design.filter { Self.pageScaffoldDeclarations(in: [$0]).isEmpty == false }
+        XCTAssertFalse(scaffold.isEmpty, "Design/ 里没有页骨架了 —— 基座被拆了？")
+        let body = scaffold.map(\.content).joined(separator: "\n")
+        XCTAssertTrue(body.contains("Spacing.group"),
+                      "基座页骨架的组间距没换成 `Spacing.group`(32)，还是 16 = 拥挤没修")
+        XCTAssertTrue(body.contains("Spacing.pageMargin"),
+                      "基座页骨架的页边距没换成 `Spacing.pageMargin`(24)")
+        XCTAssertTrue(body.contains("Spacing.section"),
+                      "基座页骨架的页级段落没换成 `Spacing.section`(40)")
+    }
+
+    /// 全仓只许存在**一份**页骨架。
+    ///
+    /// 现在挂 skip 是因为 `Views/CodeGit/CodeGitDesignKit.swift` 里还有一份
+    /// `DataPageScaffold` —— 它是基座那份的**逐字复制品**（body 完全相同），
+    /// 归 WS-P，且 WS-P 正在改那个文件。总工替它删会毁掉在途工作并造出冲突，
+    /// 所以由 WS-P 自己删、M2 由总工强制。与 `m2WiringComplete` 同一套路子。
+    func test_exactlyOnePageScaffold() throws {
+        try XCTSkipIf(!Self.m2WiringComplete,
+                      "待 M2 撤除跳过（实施计划 Task 10）：DataPageScaffold 归 WS-P 自删")
+        let all = try Self.sourceFiles(under: "")
+        let decls = Self.pageScaffoldDeclarations(in: all)
+        XCTAssertEqual(decls.count, 1,
+                       "页骨架有 \(decls.count) 份并存（只许 1 份）：\(decls)。"
+                       + "页面流请改用 `Theme.Page.Scaffold`，不要各造一份。")
+        XCTAssertTrue(decls.first?.hasPrefix("Design/") == true,
+                      "唯一那份页骨架必须住在 Design/，实测：\(decls)")
     }
 
     // MARK: - 元测试：确认四个扫描器都不是假绿
