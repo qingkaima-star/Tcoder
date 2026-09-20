@@ -72,7 +72,7 @@ extension Theme {
             private func groupFor(_ style: Style) -> some View {
                 switch style {
                 case .number:
-                    Text(value).font(Theme.Typo.label.font.monospacedDigit())
+                    Text(value).font(Self.numberFont)
                 case .identifier:
                     Text(value).font(Theme.Typo.monoLabel.font)
                 case .path:
@@ -82,6 +82,10 @@ extension Theme {
                     Text(value).font(Theme.Typo.body.font)
                 }
             }
+
+            /// `label` 档 + 等宽数字。这一档不在 `Theme.Typo` 表里（它是"借字号换属性"的
+            /// 组合），所以缓存只能落在本类型上：`static let` 一次，逐行读数不再现造 `Font`。
+            private static let numberFont: Font = Theme.Typo.label.font.monospacedDigit()
         }
 
         /// 读数条容器：内嵌面，与外层内容卡形成同心圆角（外 16 / 内 10）。

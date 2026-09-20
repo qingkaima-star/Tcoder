@@ -42,8 +42,24 @@ trap cleanup EXIT
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
 
-echo "[lock] acquired; running: swift $*"
-swift "$@"
+# 2026-09-20 环境事实：本机的工作容器本身已处于一个 sandbox 之中，**嵌套 sandbox 被拒绝**——
+# SwiftPM 为自己编译 Package.swift / 执行构建而调用的 `sandbox-exec` 一律报
+#   sandbox-exec: sandbox_apply: Operation not permitted
+# （实测：`sandbox-exec -p '(version 1)(allow default)' /bin/echo` 可以跑，
+#   但任何带 (deny default) 的实际 profile 都 EPERM，所以这不是权限写成 allow-default 就能绕的。）
+# `--disable-sandbox` 只关掉 SwiftPM 自己那层沙箱，**不改变任何编译产物**，
+# 是本环境下唯一可行的路径，因此在这里默认加上；确实需要保留 SwiftPM 沙箱时设
+# TCODER_ALLOW_SWIFTPM_SANDBOX=1。
+extra_args=()
+if [ "${TCODER_ALLOW_SWIFTPM_SANDBOX:-0}" != "1" ]; then
+  case " $* " in
+    *" --disable-sandbox "*) ;;
+    *) extra_args+=(--disable-sandbox) ;;
+  esac
+fi
+
+echo "[lock] acquired; running: swift $* ${extra_args[*]:-}"
+swift "$@" "${extra_args[@]:-}"
 code=$?
 [ $code -ne 0 ] && echo "[lock] swift exited with status $code"
 exit $code
