@@ -269,12 +269,32 @@ struct CodeDuplicationBlockRow: View {
             } label: {
                 HStack(alignment: .center, spacing: DataRowMetrics.cellGap) {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                        Text(Self.occurrenceTitles(block, root: root))
-                            .font(CodeGitType.tableIdentifier)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        // **每个 occurrence 一行、每行单段中间省略**，不再把 4 条路径
+                        // 用三个空格粘成一个长串去自动换行。原来的后果（实拍可见）：
+                        // 两条长路径在单元格里挤成一团、第二行直接顶到「行数」列跟前，
+                        // 列与列之间只剩"空格"当分隔 —— 表就没有表了。
+                        ForEach(Array(Self.occurrenceLines(block, root: root).enumerated()),
+                                id: \.offset) { _, line in
+                            Text(line.text)
+                                .font(CodeGitType.tableIdentifier)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                // 中间截断必须可回读全路径，否则"看得见一半"比看不见更难查
+                                .themeHelp(line.help)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        let rest = Self.occurrenceRestCount(block)
+                        if rest > 0 {
+                            // 汇总行写成 `Text(字面量)`：拼成 String 再交给 Text(variable)
+                            // 就永远不查表（双语方案 §7），这里没有理由留新债。
+                            Text("另有 \(NumberFormat.grouped(rest)) 处")
+                                .font(CodeGitType.tableIdentifier)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .themeHelp(Self.occurrenceTitles(block, root: root))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                     .tableCell(DataColumns.column(columns, 0))
 
@@ -316,7 +336,34 @@ struct CodeDuplicationBlockRow: View {
         NSWorkspace.shared.activateFileViewerSelecting([CodeViewFormat.resolvedURL(path, root: root)])
     }
 
-    /// 最多列 4 个 occurrence，其余如实汇总为「另有 N 处」。
+    /// 一格里最多摊开两条路径，第三条起收成「另有 N 处」。
+    /// 上限取 2 是因为整行高度由「行数/出现/相似度」三个单行数字决定，
+    /// 路径格超过两行就会把这一行拉高、五列基线断开。
+    static let occurrenceLineLimit = 2
+
+    struct OccurrenceLine {
+        let text: String
+        /// 中间截断后的回读出口：完整路径。
+        let help: String?
+    }
+
+    static func occurrenceLines(_ block: DuplicatedBlock, root: String,
+                                limit: Int = occurrenceLineLimit) -> [OccurrenceLine] {
+        block.occurrences.prefix(limit).map { occurrence in
+            OccurrenceLine(
+                text: "\(CodeViewFormat.pathTail(occurrence.path, root: root)):"
+                    + "\(NumberFormat.grouped(occurrence.startLine))",
+                help: occurrence.path)
+        }
+    }
+
+    /// 被折进「另有 N 处」的条数；算术只在这一处，视图与测试共用。
+    static func occurrenceRestCount(_ block: DuplicatedBlock,
+                                    limit: Int = occurrenceLineLimit) -> Int {
+        max(0, block.occurrences.count - limit)
+    }
+
+    /// 保留：完整拼接串。只给 tooltip（`.help` / 「另有 N 处」悬浮）与旧断言用。
     static func occurrenceTitles(_ block: DuplicatedBlock, root: String, limit: Int = 4) -> String {
         let shown = block.occurrences.prefix(limit)
             .map { "\(CodeViewFormat.pathTail($0.path, root: root)):\(NumberFormat.grouped($0.startLine))" }

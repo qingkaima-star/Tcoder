@@ -332,6 +332,29 @@ final class CodeGitRestyleTests: XCTestCase {
         XCTAssertTrue(CodeDuplicationBlockRow.hint(block, root: "/src").contains("相似度 90.0%"))
     }
 
+    /// 单元格侧的渲染契约：**一行一条路径**，折掉的条数与实际条数对得上。
+    /// 粘连串（`occurrenceTitles`）只许留在 tooltip，见 `pathGlueOutsideHelp` 守卫。
+    func testDuplicationOccurrencesRenderOnePathPerLine() {
+        let block = DuplicatedBlock(occurrences: (1...6).map {
+            DuplicatedFragment(path: "/src/dir/file\($0).swift", startLine: $0 * 10)
+        }, lineCount: 30, similarity: 0.9)
+        let lines = CodeDuplicationBlockRow.occurrenceLines(block, root: "/src")
+        XCTAssertEqual(lines.count, CodeDuplicationBlockRow.occurrenceLineLimit)
+        XCTAssertEqual(CodeDuplicationBlockRow.occurrenceRestCount(block),
+                       block.occurrences.count - lines.count,
+                       "「另有 N 处」的 N 必须等于真被折掉的条数，不能凭感觉写")
+        for line in lines {
+            XCTAssertFalse(line.text.contains("   "), "单格里又粘了多段路径：\(line.text)")
+            XCTAssertEqual(line.text.split(separator: ":").count, 2, "一行只该有一个 路径:行号：\(line.text)")
+            XCTAssertNotNil(line.help, "中间截断必须有整条路径可回读")
+        }
+        // 出现次数没超上限时不该冒出汇总行
+        let few = DuplicatedBlock(occurrences: Array(block.occurrences.prefix(2)),
+                                  lineCount: 30, similarity: 0.9)
+        XCTAssertEqual(CodeDuplicationBlockRow.occurrenceRestCount(few), 0)
+        XCTAssertEqual(CodeDuplicationBlockRow.occurrenceLines(few, root: "/src").count, 2)
+    }
+
     // MARK: - 依赖页诚实线
 
     func testUncheckedRowNeverRendersAsSafe() {
