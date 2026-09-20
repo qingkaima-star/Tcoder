@@ -150,7 +150,8 @@ struct GitActivityHeatmap: View {
                         + "\(Int((strength * 100).rounded()))%")
                         .font(CodeGitType.number(Theme.Typo.microLabel))
                         .padding(Theme.Spacing.xxs)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 4))
+                        // 同 ContributorHourRow：悬停浮层属 `.floating`，不散写材质与圆角数字。
+                        .surface(layer: .floating, shape: .rounded(Theme.Radius.sm))
                 }
             }
         }

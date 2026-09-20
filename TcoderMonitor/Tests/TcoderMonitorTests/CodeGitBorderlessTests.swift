@@ -243,6 +243,28 @@ final class CodeGitBorderlessTests: XCTestCase {
             }
     }
 
+    /// 页面里散写的**材质填充**。
+    ///
+    /// 为什么要在本流自己钉一份：基座的 `test_contentLayerDrawsNoMaterial` 在
+    /// 本流开工时的作用域只是 `Design/Glass.swift` **一个文件**，页面里散写材质它看不见。
+    /// 实测就在 `Views/Git` 抓到两处悬停浮层的 `.background(.regularMaterial, …)`
+    /// （P-1 性能重构带进来的，不在任何人的观感工单里）。
+    /// 两把尺子若共享同一个盲区，就等于没有第二把尺子。
+    static func materialUses(in files: [(path: String, content: String)]) -> [String] {
+        let needles = [".regularMaterial", ".ultraThinMaterial", ".thinMaterial", ".thickMaterial"]
+        return files.flatMap { file in
+            numberedCodeLines(file.content).compactMap { entry in
+                needles.contains(where: entry.text.contains)
+                    ? "\(file.path):\(entry.n): \(entry.text.prefix(60))" : nil
+            }
+        }
+    }
+
+    /// 浮层只能走 `.floating`，不得自己拼「材质 + 圆角数字」。
+    static func rawCornerRadii(in files: [(path: String, content: String)]) -> [String] {
+        hits(in: files, containing: "cornerRadius: ")
+    }
+
     // MARK: - 真源码定位
 
     private static let packageRoot: URL = {
@@ -446,6 +468,37 @@ final class CodeGitBorderlessTests: XCTestCase {
         }
     }
 
+    // MARK: - ⑦ 内容层不得散写材质 / 裸圆角（P-1 之后补的一族）
+
+    func test_pagesDoNotDrawMaterialsOrRawCorners() throws {
+        let files = try Self.pageSourceFiles()
+        let materials = Self.materialUses(in: files)
+        XCTAssertTrue(materials.isEmpty,
+                      "页面散写材质填充。`.regularMaterial` 是 M0 刚从内容层砍掉的东西"
+                          + "（背后无内容时退化成平涂半透明灰，比页面底暗 6~13 阶）：\(materials)")
+        let corners = Self.rawCornerRadius(in: files)
+        XCTAssertTrue(corners.isEmpty,
+                      "页面写死圆角数字。要走 `.surface(shape: .rounded(Theme.Radius.*))`："
+                          + "\(corners)")
+    }
+
+    /// SwiftUI **形状构造**里的裸圆角：`RoundedRectangle(cornerRadius: 4)`。
+    ///
+    /// 判据刻意只认这个形状，不认 `Path(roundedRect:cornerRadius:)` —— 后者是
+    /// Core Graphics 的图表几何（WS-I §9 豁免，`GitActivityHeatmap` 的柱子与
+    /// `ContributorHourRow` 的 Canvas 都在用），旧守卫的「数字尺寸」那条也只禁
+    /// `width/height:` 而不禁 `cornerRadius`。判据越界就会把合法写法逼成绕路写法。
+    static func rawCornerRadius(in files: [(path: String, content: String)]) -> [String] {
+        files.flatMap { file in
+            numberedCodeLines(file.content).compactMap { entry in
+                guard let r = entry.text.range(of: "RoundedRectangle(cornerRadius:") else { return nil }
+                let tail = entry.text[r.upperBound...].drop(while: { $0 == " " })
+                return tail.first?.isNumber == true
+                    ? "\(file.path):\(entry.n): \(entry.text.prefix(56))" : nil
+            }
+        }
+    }
+
     // MARK: - 元测试：确认每个扫描器都不是假绿
 
     func test_scannersCatchSyntheticViolations() {
@@ -573,7 +626,27 @@ final class CodeGitBorderlessTests: XCTestCase {
                                                    "DataTableWell { DataTableHeader(columns: c) }")]).isEmpty,
                       "进了井的表被判违规")
         XCTAssertEqual(Self.readoutBarsUsed(in: [("Code/A.swift", "DataReadoutBar { }")]).count, 1,
-                       "读数条画井没抓到")
+                      "读数条画井没抓到")
+
+        // ⑦ 材质与裸圆角
+        XCTAssertEqual(Self.materialUses(in: [("Git/A.swift",
+            "Text(t).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 4))")]).count, 1,
+            "页面散写材质没抓到 —— 这正是 P-1 漏进来的那一处")
+        XCTAssertEqual(Self.materialUses(in: [("Git/A.swift",
+            "Overlay().background(.thinMaterial)")]).count, 1, "thinMaterial 这一档没被抓到")
+        XCTAssertTrue(Self.materialUses(in: [("CodeGit/Kit.swift",
+            "// 旧写法 .regularMaterial 会糊成脏灰")]).isEmpty, "注释里的材质名被误判")
+        XCTAssertEqual(Self.rawCornerRadius(in: [("Git/A.swift",
+            "RoundedRectangle(cornerRadius: 4)")]).count, 1, "裸圆角数字没抓到")
+        XCTAssertTrue(Self.rawCornerRadius(in: [("Git/A.swift",
+            "RoundedRectangle(cornerRadius: Theme.Radius.md)")]).isEmpty,
+            "走令牌的圆角被判违规 —— 那等于逼页面回去写数字")
+        XCTAssertTrue(Self.rawCornerRadius(in: [("Git/A.swift",
+            "RoundedRectangle(cornerRadius: Self.barCorner)")]).isEmpty,
+            "具名常量被判成魔法数 —— 判据必须只认字面数字")
+        XCTAssertTrue(Self.rawCornerRadius(in: [("Git/A.swift",
+            "ctx.fill(Path(roundedRect: rect, cornerRadius: 2), with: .color(c))")]).isEmpty,
+            "Canvas 图表几何被判违规 —— WS-I §9 豁免这一类，判据不许越界")
     }
 
     /// 反向自证：扫描器真读到了文件。否则本文件所有「空 = 通过」的断言集体假绿。

@@ -264,7 +264,11 @@ struct ContributorHourRow: View {
                         Text("\(String(format: "%02d", h)):00 · \(counts[h]) 次提交")
                             .font(CodeGitType.number(Theme.Typo.microLabel))
                             .padding(Theme.Spacing.xxs)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 4))
+                            // 悬停浮层悬在内容之上 —— 这正是 `.floating` 的定义场景。
+                            // 原来写 `.background(.regularMaterial, …)` 是把 M0 刚砍掉的材质
+                            // 请回内容层（无内容可折射时退化成平涂半透明灰，比页面底暗 6~13 阶），
+                            // 而 `cornerRadius: 4` 是令牌里没有的裸魔法数。投影与底一律由基座给。
+                            .surface(layer: .floating, shape: .rounded(Theme.Radius.sm))
                             .offset(y: Self.height + 2)
                     }
                 }
