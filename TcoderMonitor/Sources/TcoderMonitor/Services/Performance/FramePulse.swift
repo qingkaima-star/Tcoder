@@ -307,6 +307,13 @@ public final class FramePulse: @unchecked Sendable {
         writeLineLocked("# FramePulse 启动 \(Self.stamp(startedAt)) pid=\(getpid()) "
                         + "开关=TCODER_PERF_PROBE=1 探针线程=CVDisplayLink(非主线程)")
         writeLineLocked("# 期望间隔来自运行时读到的真实 Hz，不硬编码 120")
+        // 【语义边界必须写在读数旁边】`心跳最大间隔` 是主线程 runloop 两次「结束等待」之间的
+        // **唤醒间隔**，不是"主线程被占住了多久"：那段时间没有任何事件，间隔同样会很大。
+        // 拿它当占用时长读，会把"机器很闲"读成"主线程卡了 1.5 秒"。
+        writeLineLocked("# 语义提醒：心跳拍数/心跳最大间隔 = runloop 唤醒之间的间隔，不是主线程占用时长；"
+                        + "空闲无事件时它同样会很大")
+        writeLineLocked("# 要量主线程占用与帧预算，用 xctrace 的 app-update 相位（perf_harness.sh idle）；"
+                        + "本文件的帧间隔 p95 才是 T1（交互期 hitch）的直接对象")
     }
 
     private func writeLineLocked(_ line: String) {

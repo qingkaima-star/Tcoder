@@ -244,6 +244,11 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
    + `os_signpost`，**仅 `TCODER_PERF_PROBE=1` 时启动**（常驻开销不可接受），
    读数落 `$TCODER_PERF_OUT` 或 `/tmp` 文件——**取证 print 必须落文件**，`swift test` 会丢子进程 stdout 后半段。
    它是常驻门禁的尺子，与 xctrace 这把外部尺子**互相校验**（两把尺子不得共享同一盲区）。
+   **一条语义边界（09-21 写死，也写进了脉冲文件的文件头）**：`心跳最大间隔` 是主线程 runloop
+   两次「结束等待」之间的**唤醒间隔**，不是"主线程被占住多久"——那段时间没事件时它同样很大。
+   所以 **T2（心跳主线程占用）只认 xctrace 的 `app-update` 相位**，`FramePulse` 对 T2 不举证；
+   `FramePulse` 举证的是 **T1 的帧间隔 p95**（它跟着真实出帧节拍）。
+   把这句话写进产物文件头，是因为"读错自己的仪表"不需要人犯错，只需要仪表的字段名含糊。
    2026-09-20 补：这把尺子原先**只产数不读数**（没人解析那个文件），已补
    `perf_framepulse.py` + `probe` 档，并由 `PerfFramePulseRulerTests` 拿**产品真实产出的摘要行**
    跨语言对账格式（Swift 侧改字段名 → 那条立刻红，而不是静默把"没数"读成"0 hitch"）。
