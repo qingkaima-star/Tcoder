@@ -91,6 +91,55 @@ note_target_flavor() {  # note_target_flavor <pid>
   echo "    被采二进制=$TARGET_BINARY 口径=$TARGET_FLAVOR"
 }
 
+preflight_context() {  # preflight_context <outdir> <pid>
+  local out="$1" pid="$2" f="" cores load1 front visible others hard=0
+  cores=$(sysctl -n hw.ncpu 2>/dev/null || echo 8)
+  load1=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | awk '{print $1}')
+  [ -n "$load1" ] || load1=0
+  f="$out/measurement-context.txt"
+
+  front=$(osascript -e 'tell application "System Events" to name of first application process whose frontmost is true' 2>/dev/null | tr -d '\n')
+  [ -n "$front" ] || front="未知"
+  visible=$(osascript -e "tell application \"System Events\" to get visible of process \"TcoderMonitor\"" 2>/dev/null | tr -d '\n')
+  [ -n "$visible" ] || visible="未知"
+  others=$(pgrep -x swiftc 2>/dev/null | tr '\n' ' ')
+
+  { echo "# 测量上下文（读数只有在这一组条件下才可互比）"
+    echo "时间=$(date '+%F %T')  HEAD=$(git rev-parse --short HEAD 2>/dev/null)  工作树改动数=$DIRTY"
+    echo "被采pid=$pid  二进制=$TARGET_BINARY  口径=$TARGET_FLAVOR"
+    echo "实例数=${COEXIST:-1}  前台App=$front  被测进程visible=$visible"
+    echo "load1=$load1  核数=$cores  并发swiftc=${others:-无}"
+    echo "hitches_seconds=$SECONDS_HITCHES  tp_seconds=$SECONDS_TP"
+  } > "$f" 2>/dev/null || die "写不出 $f"
+
+  echo "    上下文：前台=$front  visible=$visible  load1=$load1/$cores  并发swiftc=${others:-无}"
+
+  if [ -n "$others" ]; then
+    echo "!! 有 swiftc 在跑（$others）——它会抢满全部核，app-update 相位会被显著抬高。等它跑完再来。" >&2
+    hard=1
+  fi
+  # 负载阈值：默认 1 分钟 load 不超过核数的 1.5 倍（LOAD_MAX=<数> 可覆盖，但覆盖了就要在报告里写）
+  if awk -v l="$load1" -v c="$cores" 'BEGIN{exit !(l > c*1.5)}'; then
+    echo "!! load1=$load1 已是核数($cores)的 1.5 倍以上：整机排队，任何帧节拍读数都不作数。" >&2
+    echo "   等负载降下来，或显式 LOAD_MAX=<阈值> 重跑（那必须在报告里注明是降级条件）。" >&2
+    hard=1
+  fi
+  if [ "$front" != "TcoderMonitor" ] && [ "${ALLOW_UNFRONTMOST:-0}" != "1" ]; then
+    echo "!! 被测窗口不在前台（前台是「$front」）。macOS 会节流不在前的窗口绘制，" >&2
+    echo "   app-update 会**假性地好看**（实测：同二进制前台 10.8~24.8ms、后台 1.9~3.0ms）。" >&2
+    echo "   请把 Tcoder 窗口点到最前面并保持不动，再跑一次；" >&2
+    echo "   确实要量后台态就 ALLOW_UNFRONTMOST=1（那批只能标成『后台态』，不得当交互基线）。" >&2
+    hard=1
+  fi
+  if [ "$visible" = "false" ]; then
+    echo "!! 被测进程处于 hidden 状态，窗口根本没在画。取消隐藏再测。" >&2
+    hard=1
+  fi
+  [ "$hard" = "1" ] && [ "${IGNORE_CONTEXT_GATE:-0}" != "1" ] && die "测量上下文不达标（详见 $f）。IGNORE_CONTEXT_GATE=1 可强行跳过，但那批读数必须标注为『条件不合格』。"
+  [ "$hard" = "1" ] && echo "    ⚠ IGNORE_CONTEXT_GATE=1：条件不合格，这批读数不得进任何对比表。" >&2
+  echo "    上下文已落 $f"
+}
+
 require_idle_target() {  # 返回全局 PID；!= 1 个实例即拒跑（除非显式 ATTACH_PID=<pid>）
   local pids n
   pids=$(instance_pids)
@@ -192,6 +241,7 @@ cmd_idle() {
   meta_write "$out" "mode=idle" "pid=$PID" "binary=$TARGET_BINARY" \
     "hitches_seconds=$SECONDS_HITCHES" "tp_seconds=$SECONDS_TP" "coexisting_instances=${COEXIST:-1}" \
     "templates=$TEMPLATE_HITCH + $TEMPLATE_TP" "build_flavor=$TARGET_FLAVOR"
+  preflight_context "$out" "$PID"
 
   echo "==> 1/4 录 Animation Hitches ${SECONDS_HITCHES}s（这期间不去碰鼠标键盘，否则量的就不是心跳）"
   run rm -rf "$out/hitches.trace"
@@ -249,6 +299,16 @@ cmd_switch() {
   fi
   meta_write "$out" "mode=switch" "binary=$PERF_BIN" "launch_seconds=$SECONDS_LAUNCH" "pages=$pages"
 
+  # 冷启动首帧最容易被"别人的心跳"污染：另一个实例每 1.5s 也在打主线程，
+  # 首帧时间会莫名变长。所以默认要求机器上**一个实例都没有**。
+  local pre; pre=$(instance_pids)
+  if [ -n "$pre" ] && [ "${SWITCH_ALLOW_COEXIST:-0}" != "1" ]; then
+    echo "!! 机器上已有 Tcoder 实例在跑（$(printf '%s' "$pre" | tr '\n' ' ')），逐页冷启动会被它们的心跳污染。" >&2
+    echo "   请把它们全部 Cmd+Q 后重跑；确实要共存就 SWITCH_ALLOW_COEXIST=1（那批只能标成『共存态』）。" >&2
+    die "switch 档拒绝在多实例条件下运行"
+  fi
+  [ -n "$pre" ] && echo "    ⚠ SWITCH_ALLOW_COEXIST=1：共存态读数不得用于与独占基线对比。" >&2
+
   local n=0
   for page in $pages; do
     n=$((n + 1))
@@ -291,9 +351,20 @@ cmd_switch() {
     echo "    首帧(带采样器，窗口出现口径)=${first:-未观测到} ms；细表见 $dir/life-cycle-period.xml"
     [ -n "$first" ] && python3 "$TRACE_REPORT" lifecycle "$dir/life-cycle-period.xml" \
       --json "$dir/life-cycle-period.json" 2>/dev/null | sed 's/^/    /'
-    # 采完让它自己退出（osascript quit 事件，不发信号）；退出失败只通报不强杀。
-    osascript -e "tell application id \"$DOMAIN\" to quit" 2>/dev/null \
-      || echo "    ⚠ quit 事件未送达：实例 $pid 留在屏上需人工 Cmd+Q（它在独立沙箱里，不污染用户状态）"
+    # 收尾：绝不用 `tell application id "<bundle id>" to quit` —— 它按 bundle id **全机生效**，
+    # 会把用户自己开着的实例一起退掉（实测踩过：留下 7 个残留，且随时可能误伤）。
+    # 默认只报告该退哪个 pid，由人 Cmd+Q；确实要自动收，必须显式授权 SWITCH_TERM=1，
+    # 且只对本脚本自己起的那个 pid 发 SIGTERM —— 这是对 AGENTS.md -1.3「不发信号」的**有意偏离**，
+    # 授权与后果都要写进 meta，不留成"看起来是脚本自己会清理"的假象。
+    if [ "${SWITCH_TERM:-0}" = "1" ]; then
+      kill -TERM "$pid" 2>/dev/null \
+        && echo "    已按授权 SIGTERM 自己起的实例 pid=$pid" \
+        || echo "    ⚠ SIGTERM 失败：pid=$pid 需人工 Cmd+Q"
+      meta_write "$dir" "cleanup=SIGTERM(授权 SWITCH_TERM=1)"
+    else
+      echo "    提示：采完请人工 Cmd+Q 这个实例 pid=$pid（脚本按 bundle id 退出会误伤其它实例，故不自作主张）"
+      meta_write "$dir" "cleanup=人工(脚本未退出实例)"
+    fi
     sleep 2
   done
   [ "$DRY_RUN" = "1" ] && { echo "（DRY_RUN=1：一条命令都没执行）"; return 0; }
