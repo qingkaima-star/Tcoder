@@ -100,6 +100,9 @@ final class CodeComplexityDebtTests: XCTestCase {
         XCTAssertTrue(reports.contains { $0.name == "DuplicationEngine.swift" })
         print("【X1 分母】本包 \(reports.count) 个文件、认出 \(functions.count) 个函数，"
             + "上限口径：CC<\(Self.complexityCeiling) 函数≤\(Self.functionLineCeiling) 行 文件≤\(Self.fileLineCeiling) 行")
+        // 每个文件一行「行数 / 函数数 / 最高 CC」，是交付收据不是噪音：
+        // 下一轮想知道本包长什么样，不必再手写一遍探针。
+        print(roster(reports))
     }
 
     // MARK: - 主门 1：文件长度
@@ -127,9 +130,14 @@ final class CodeComplexityDebtTests: XCTestCase {
         本包仍有 \(hot.count) 个函数 CC ≥ \(Self.complexityCeiling)（工具判[高]风险那条线）：
         \(hot.joined(separator: "\n"))
         """)
-        let worst = reports.flatMap(\.functions).max { $0.complexity < $1.complexity }
-        print("【X1 复杂度】本包最高 CC=\(worst?.complexity ?? 0)"
-            + "（\(worst?.name ?? "-") @ \(worst.map { "\($0.lineCount) 行" } ?? "无" )）")
+        // 验收线之下的水位也要看得见：否则下一个人只能重跑一遍才知道「15 是谁、还剩多少」。
+        let ranked = reports.flatMap { report in
+            report.functions.map { (report.name, $0) }
+        }.sorted { $0.1.complexity < $1.1.complexity }
+        print("【X1 复杂度】本包最高 CC=\(ranked.last?.1.complexity ?? 0)；"
+            + "本包 CC 前十：" + ranked.suffix(10).reversed()
+                .map { "\($0.0):\($0.1.startLine) \($0.1.name)=\($0.1.complexity)/\($0.1.lineCount)行" }
+                .joined(separator: " "))
     }
 
     // MARK: - 主门 3：函数长度
