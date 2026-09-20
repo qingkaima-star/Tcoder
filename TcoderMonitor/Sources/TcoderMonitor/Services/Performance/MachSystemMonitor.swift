@@ -121,9 +121,13 @@ final class MachSystemMonitor: SystemMonitoringProviding {
     /// 页面副标题/提示语唯一该用的节拍文案，例：「1.5 秒」。
     var sampleIntervalText: String {
         let seconds = Double(sampleIntervalMilliseconds) / 1000
-        return seconds == seconds.rounded()
-            ? "\(Int(seconds)) 秒"
-            : String(format: "%.1f 秒", seconds)
+        // 整句键（方案 §7.3）：单位"秒"跟着数字一起走，英文才是 "1.5s" 而不是 "1.5 秒"。
+        // 测试进程里 Bundle.main 没有目录，localizedFormat 原样回填中文，
+        // `PerfCadenceSingleSourceTests` 钉的那串中文一个字没变。
+        return localizedFormat("%@ 秒",
+                               seconds == seconds.rounded()
+                                   ? "\(Int(seconds))"
+                                   : String(format: "%.1f", seconds))
     }
 
     /// 曲线滚动窗口的秒数——**由节拍派生**，不许页面自己乘一个魔法数。

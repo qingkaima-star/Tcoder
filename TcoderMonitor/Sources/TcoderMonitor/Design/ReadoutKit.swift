@@ -337,7 +337,14 @@ func localizedCopy(_ text: String) -> String {
 ///
 /// 键查不到时 `String(format: 键, args)` 仍然把占位符填回中文原句，
 /// 所以缺一条译文的表现依旧是"退回正确的中文"。
-func localizedFormat(_ key: String, _ args: CVarArg...) -> String {
+///
+/// **实参类型钉死成 `String`，不用 `CVarArg...`。** 2026-09-21 实测：
+/// 传一个 `Int` 给 `%@` 直接 `EXC_BAD_ACCESS`（崩在
+/// `_NSDescriptionWithStringProxyFunc`，栈顶就是 `localizedFormat`），
+/// 而 `CVarArg...` 让这种写法**编译得过**。本仓所有数字都先过
+/// `NumberFormat.grouped` / `percentOf100` 变成字符串，收 `String` 不损失表达力，
+/// 却把这一类崩溃变成编译错误。
+func localizedFormat(_ key: String, _ args: String...) -> String {
     String(format: localizedCopy(key), arguments: args)
 }
 

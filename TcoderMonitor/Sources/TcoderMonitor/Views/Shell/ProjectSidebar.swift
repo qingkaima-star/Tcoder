@@ -288,7 +288,7 @@ struct ProjectRow: View {
                     .lineLimit(1)
             }
             if let score = report?.health?.overall {
-                metricCell(localizedFormat("健康 %@", score), width: ShellLayout.healthColumnWidth)
+                metricCell(localizedFormat("健康 %@", NumberFormat.grouped(score)), width: ShellLayout.healthColumnWidth)
             }
         }
         // 原来是 `.tertiary`：这一格里是**测得值**（行数、健康分），
