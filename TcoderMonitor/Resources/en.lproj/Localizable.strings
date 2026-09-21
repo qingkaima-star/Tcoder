@@ -154,3 +154,18 @@
 "扫描到 %1$@ 个文件，但没有任何语言的有效代码行占比大于 0。" = "Scanned %1$@ files, but no language has an effective code-line share above 0.";
 "分项之和 %1$@ 与总行数相差 %2$@ 行，以扫描器输出为准。" = "The itemised sum %1$@ differs from the total by %2$@ lines; the scanner output governs.";
 "已完成扫描，单文件行数峰值为 %1$@ 行，未超过阈值。这是测得的结果，不是没扫。" = "Scan complete: the largest file peaks at %1$@ lines, under the threshold. This is a measurement, not a missed scan.";
+
+/* ===== P5-c 第二批整句键（页副标题 / 节标题 / 结论句 —— 全部出现在九页实拍里） ===== */
+"分析于 %1$@ · %2$@" = "Analysed %1$@ · %2$@";
+"分析于 %@" = "Analysed %@";
+"按提交数降序 · 展示 %1$@ / %2$@ 人" = "By commits, descending · showing %1$@ of %2$@";
+"Bus Factor %1$@ · 前 3 名合计 %2$@%3$@" = "Bus Factor %1$@ · the top 3 account for %2$@%3$@";
+"其余 %1$@ 位作者合计不足 %2$@，缺少可接手的第二人。" = "The remaining %1$@ authors together contribute under %2$@ — there is no second person who could take over.";
+"已附加 %1$@ 个文件" = "%1$@ files attached";
+"共 %1$@ 个 · 按大小降序" = "%1$@ in total · by size, descending";
+"本次扫了 %1$@ 行，没有命中错误、异常或崩溃级别的行。" = "Scanned %1$@ lines this time; none matched the error, exception or crash levels.";
+"第一次 %1$@ · 最近 %2$@" = "First seen %1$@ · latest %2$@";
+"来源文件 %@" = "Source file %@";
+"缺失维度 %1$@ 项" = "%1$@ missing dimensions";
+"按 %1$@ 分桶 · 共 %2$@ 桶%3$@" = "Bucketed by %1$@ · %2$@ buckets%3$@";
+"%@ 个空桶" = "%@ empty buckets";

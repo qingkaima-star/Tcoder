@@ -157,8 +157,9 @@ struct DependencyOverviewSection: View {
         let verdict = DependencySafetyVerdict(deps)
         GlassSection(
             "风险总览",
-            subtitle: "分析于 \(LogRecency.describe(deps.analyzedAt)) · "
-                + DateFormat.full.string(from: deps.analyzedAt),
+            subtitle: localizedFormat("分析于 %1$@ · %2$@",
+                                      LogRecency.describe(deps.analyzedAt),
+                                      DateFormat.full.string(from: deps.analyzedAt)),
             icon: .clean,
             trailing: AnyView(SafetyVerdictBadge(verdict: verdict))
         ) {

@@ -43,8 +43,8 @@ struct LogsErrorClustersCard: View {
             EmptyStateView(icon: IconName.noRisk.rawValue,
                            // 三态句式全站只有一个出处：WS-K 在 Views/Shell 里定的 ShellCopy。
                            title: ShellCopy.scannedButFoundNone(.errorLevelLogs),
-                           message: "本次扫了 \(NumberFormat.grouped(logs.totalLinesScanned)) 行，"
-                               + "没有命中错误、异常或崩溃级别的行。")
+                           message: localizedFormat("本次扫了 %1$@ 行，没有命中错误、异常或崩溃级别的行。",
+                                                    NumberFormat.grouped(logs.totalLinesScanned)))
         }
     }
 }
@@ -77,7 +77,7 @@ struct LogErrorClusterRow: View {
                 .lineLimit(2)
                 .textSelection(.enabled)
 
-            Text("第一次 \(firstSeenText) · 最近 \(lastSeenText)")
+            Text(localizedFormat("第一次 %1$@ · 最近 %2$@", firstSeenText, lastSeenText))
                 .font(Theme.Typo.microLabel.font)
                 .foregroundStyle(.tertiary)
 
@@ -144,7 +144,7 @@ struct LogErrorClusterRow: View {
             }
 
             if !cluster.sourceFile.isEmpty {
-                Text("来源文件 \(cluster.sourceFile)")
+                Text(localizedFormat("来源文件 %@", cluster.sourceFile))
                     .font(Theme.Typo.monoSmall.font)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)

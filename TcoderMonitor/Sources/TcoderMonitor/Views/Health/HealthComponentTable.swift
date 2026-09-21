@@ -365,7 +365,7 @@ struct HealthComponentTable: View {
                      + "测试覆盖只在项目真的产出了覆盖率报告时参与计分。")
         } else {
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                Text("缺失维度 \(NumberFormat.grouped(missing.count)) 项")
+                Text(localizedFormat("缺失维度 %1$@ 项", NumberFormat.grouped(missing.count)))
                     // 组内小标题全站一档：`groupLabel`（10pt medium + 0.6 字距）。
                     // 这里原来是 `cardTitle`(13 semibold)，与它上面那行节标题只差一档字重，
                     // 而日志页同一角色又用 `microLabel + .tertiary` —— 三种画法（清单 3.9）。

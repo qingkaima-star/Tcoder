@@ -132,7 +132,7 @@ struct LogsView: View {
     /// 因为它现在是这一行唯一的主角，不再靠灰底把自己从地面上拎出来。
     private var attachedFilesLine: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-            Text("已附加 \(NumberFormat.grouped(attachedItems.count)) 个文件")
+            Text(localizedFormat("已附加 %1$@ 个文件", NumberFormat.grouped(attachedItems.count)))
                 .typed(Theme.Typo.groupLabel)
                 .foregroundStyle(.secondary)
             ForEach(attachedItems) { item in

@@ -197,8 +197,9 @@ struct ContributorRankingSection: View {
             // 原来把 `commitScope.headline` 整句再嵌一遍 —— 而 headline 正是上一节
             // 「贡献集中度读数」的副标题，于是同一屏出现两次逐字相同的口径句
             // （用户判词「太乱了」在密度这一维的落点：一屏 5 处「非合并提交」）。
-            subtitle: "按提交数降序 · 展示 \(NumberFormat.grouped(shown.count)) / "
-                + "\(NumberFormat.grouped(authors.count)) 人",
+            subtitle: localizedFormat("按提交数降序 · 展示 %1$@ / %2$@ 人",
+                                       NumberFormat.grouped(shown.count),
+                                       NumberFormat.grouped(authors.count)),
             icon: .people
         ) {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
@@ -250,9 +251,10 @@ struct ContributorConcentrationSection: View {
         let topCommits = top.reduce(0) { $0 + $1.commits }
         GlassSection(
             "贡献集中度",
-            subtitle: "Bus Factor \(NumberFormat.grouped(max(1, top.count))) · 前 3 名合计 "
-                + "\(NumberFormat.percent(Double(topCommits) / Double(base), precision: 0))"
-                + scope.windowSuffix,
+            subtitle: localizedFormat("Bus Factor %1$@ · 前 3 名合计 %2$@%3$@",
+                                       NumberFormat.grouped(max(1, top.count)),
+                                       NumberFormat.percent(Double(topCommits) / Double(base), precision: 0),
+                                       scope.windowSuffix),
             icon: .chartLine
         ) {
             DataTableWell {
@@ -285,9 +287,9 @@ struct ContributorConcentrationSection: View {
                            iconLabel: "单人风险")
             } else if ContributorAnalysis.busFactorRisk(git).rank >= RiskLevel.high.rank {
                 DataNotice(
-                    text: "其余 \(NumberFormat.grouped(git.activeAuthorCount - 1)) 位作者合计不足 "
-                        + "\(NumberFormat.percent(1 - Double(top.first?.commits ?? 0) / Double(base), precision: 0))，"
-                        + "缺少可接手的第二人。",
+                    text: localizedFormat("其余 %1$@ 位作者合计不足 %2$@，缺少可接手的第二人。",
+                                          NumberFormat.grouped(git.activeAuthorCount - 1),
+                                          NumberFormat.percent(1 - Double(top.first?.commits ?? 0) / Double(base), precision: 0)),
                     role: Theme.Semantic.warning, icon: .riskWarning, iconLabel: "交接风险")
             }
         }
