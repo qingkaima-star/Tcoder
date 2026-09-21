@@ -130,9 +130,12 @@ struct GitActivitySection: View {
     var body: some View {
         GlassSection(
             "24×7 活跃分布",
-            subtitle: "数据源只有边际分布 · 单元格是小时与星期两档归一的近似强度"
-                + git.commitScope.windowSuffix,
-            icon: .chartLine
+            // 盘点表 D9「留短藏长」：屏上留的是**那条真限制本身**（数据源只有边际分布，
+            // Z 类不许整条藏），ⓘ 里是完整的近似口径原句 —— 一字未改，所以英文目录里
+            // 那条整句键仍然是活的（`LocalizationGuardTests` 守卫 3 会抓烂尾键）。
+            subtitle: "数据源只有边际分布" + git.commitScope.windowSuffix,
+            icon: .chartLine,
+            trailing: AnyView(CopyHelpBadge("数据源只有边际分布 · 单元格是小时与星期两档归一的近似强度"))
         ) {
             if GitActivityHeatmap.hasNoTimestamps(hourCounts: git.activityByHour,
                                                   weekdayCounts: git.activityByWeekday) {
@@ -236,8 +239,13 @@ struct GitNestedCandidatesSection: View {
         if git.nestedCandidates.count > 1 {
             GlassSection(
                 "所选目录下发现 \(NumberFormat.grouped(git.nestedCandidates.count)) 个仓库",
-                subtitle: "当前只分析了提交数最多的那一个；要单独分析其中某个，直接把它添加为项目",
-                icon: .package
+                // 盘点表 D8「留短藏长」：屏上留「只分析了一个」这个事实（不藏的理由是
+                // Z 类：藏掉它，用户会拿这一页的提交数当成整个目录树的数）。
+                // 后半句「怎么单独分析其中一个」是操作指引 → 进 ⓘ。ⓘ 里放**整句原句**
+                // （短标签是它的前缀），于是中英两侧的键与判据一个字都没变。
+                subtitle: "当前只分析了提交数最多的那一个",
+                icon: .package,
+                trailing: AnyView(CopyHelpBadge("当前只分析了提交数最多的那一个；要单独分析其中某个，直接把它添加为项目"))
             ) {
                 DataTableWell {
                     DataTableHeader(columns: Self.columns)
@@ -280,6 +288,10 @@ struct GitRecentCommitsSection: View {
                     EmptyStateView(
                         icon: .unverified,
                         title: "本次没有取回最近提交明细",
+                        // 盘点表 D15 判「留短藏长」，本轮**原句照旧整段上屏**：
+                        // 这一段是 `GitDataAbsence` 三分态共用的兜底空态，卡头挂 ⓘ 会在
+                        // 「不适用 / 零提交」那两态里说错话，而 `EmptyStateView` 的
+                        // `IconName` 初始化器不转发 `action:`（见汇报的契约缺口）。
                         message: "历史里有提交，但提交记录本身没有带回任何一行（旧报告或分析中断都会这样）。\n趋势与作者统计仍按已解析的部分给出，这里只说明明细缺失。"
                     )
                 }

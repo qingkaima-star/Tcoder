@@ -175,11 +175,17 @@ struct GitCommitTrendSection: View {
                     .frame(height: Theme.Layout.trendChartHeight)
             }
         } else {
-            GlassSection("提交趋势", subtitle: "分桶数据缺席", icon: .chartLine) {
+            GlassSection("提交趋势",
+                         subtitle: "分桶数据缺席",
+                         icon: .chartLine,
+                         // 盘点表 D13「留短藏长」：卡头那枚 ⓘ 里是**整段原句**，
+                         // 屏上的空态只留「没有产出分桶数据」这一条事实，
+                         // "因此给不出峰值与均值"这句推论不再占版面。
+                         trailing: AnyView(CopyHelpBadge("Git 分析没有产出按时间分桶的提交数据，因此这里无法给出峰值或均值。"))) {
                 EmptyStateView(
                     icon: .chartLine,
                     title: "暂无提交趋势",
-                    message: "Git 分析没有产出按时间分桶的提交数据，因此这里无法给出峰值或均值。"
+                    message: "Git 分析没有产出按时间分桶的提交数据。"
                 )
             }
         }
