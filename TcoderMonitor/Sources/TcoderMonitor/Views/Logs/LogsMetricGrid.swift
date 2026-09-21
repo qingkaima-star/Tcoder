@@ -67,7 +67,7 @@ struct LogsMetricGrid: View {
                      caption: warningCaption, icon: .info)
             }
             if let perKilo = LogReading.perKiloCode(logs, code: code) {
-                // **留短藏长**：屏上留这个归一后的数与"按代码规模"这五个字，
+                // **留短藏长**：屏上留这个归一后的数与「按代码规模」这五个字，
                 // 分母是哪一批行（同一次扫描的有效代码行）进 ⓘ。整句是完整句，不是半句键。
                 NoteLine("按代码规模归一：每千行 \(Live.fixed(perKilo, digits: 2)) 次", help: "今日错误按代码规模归一为每千行 \(Live.fixed(perKilo, digits: 2)) 次；分母来自同一次扫描的有效代码行。")
             }

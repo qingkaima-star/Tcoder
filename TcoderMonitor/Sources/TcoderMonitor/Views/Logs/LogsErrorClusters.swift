@@ -40,8 +40,8 @@ struct LogsErrorClustersCard: View {
     @ViewBuilder
     private var emptyState: some View {
         if logs == nil {
-            // 判词要的是"屏上的字变少"，不是"把话说三遍"：这一支整句进 ⓘ，
-            // 屏上留标题那一句（"还没有结果"这个状态本身不许藏）。
+            // 判词要的是「屏上的字变少」，不是「把话说三遍」：这一支整句进 ⓘ，
+            // 屏上留标题那一句（「还没有结果」这个状态本身不许藏）。
             EmptyStateView(icon: IconName.emptyUnknown.rawValue,
                            title: "尚无错误签名数据",
                            message: "")
@@ -51,7 +51,7 @@ struct LogsErrorClustersCard: View {
             SectionEmptyNote(text: "本窗口没有可归类的错误行。", icon: .emptyUnknown)
         } else if let logs {
             // ② 查了但空的句式：给出扫过的行数，让「0」成为一个结论而不是空白。
-            // 这一句是"扫了但没命中"的诚实性告知，整句常驻，不搬。
+            // 这一句是「扫了但没命中」的诚实性告知，整句常驻，不搬。
             EmptyStateView(icon: IconName.noRisk.rawValue,
                            // 三态句式全站只有一个出处：WS-K 在 Views/Shell 里定的 ShellCopy。
                            title: ShellCopy.scannedButFoundNone(.errorLevelLogs),

@@ -114,7 +114,7 @@ struct PerformanceView: View {
     @ViewBuilder
     private var statusBanners: some View {
         if context.isPaused {
-            // 屏上只留「暂停中 · 最后一次结果」这八个字 —— 「点继续恢复」是操作指引，
+            // 屏上只留「采样已暂停：最后一次结果」——「点继续恢复实时刷新」是操作指引，
             // 进 ⓘ（标题栏本来就摆着「继续」按钮）。诚实性两态一个不许少：
             // 暂停 + 下方是末次结果，仍然逐字上屏。
             BannerRow(text: "采样已暂停：最后一次结果", style: .warning)

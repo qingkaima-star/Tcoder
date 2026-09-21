@@ -16,7 +16,7 @@ struct LogsTrendCard: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                     LogTrendChart(buckets: buckets)
                         .frame(height: Theme.Layout.trendChartHeight)
-                    // **留短藏长**：屏上留"哪条线是什么"（读图必需），
+                    // **留短藏长**：屏上留「哪条线是什么」（读图必需），
                     // 与柱状共用纵轴、0…N、台阶取法（{1,2,2.5,5}×10ⁿ，只在这几档里跳）
                     // 这三段次级说明进同一枚 ⓘ（整句仍由 `footnote` 一处产出）。
                     NoteLine(Self.trendReading, help: footnote(buckets))
