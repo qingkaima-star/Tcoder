@@ -91,6 +91,27 @@ extension Theme {
         /// （依赖页三行、Git 页路径行都这样，是「对不齐」观感的主因之一）。
         /// 改成真正的两列：标签占定宽，值紧跟其后左对齐 —— 值与值之间于是能竖向比对。
         static let fieldLabelWidth: CGFloat = 160
+        /// **定宽标签列的宽度必须跟着界面语言走。** 160pt 是按中文最宽标签量的；
+        /// 同一批标签翻成英文后要 200pt 才不被省略号截断
+        /// （`EnglishWidthAuditTests` 逐条量过：`Comments and Maintainability` 159pt、
+        /// `Engineering Quality (code basis)` 171pt）。
+        /// 固定一档的做法等于"只测中文、英文听天由命"——英文态实拍里就是这么翻车的。
+        static let fieldLabelWidthEnglish: CGFloat = 200
+        /// 当前语言该用哪一档。判定方式刻意**不读 `Locale`**：
+        /// 取证跑的是 `-AppleLanguages "(en)"`，而 `Locale.current` 会跟着系统区域走，
+        /// 两者不一致时量出来的宽度就对不上真正上屏的那一版。查表最可靠。
+        /// 探针键**必须是目录里一定存在的键**。
+        /// 第一版用 `"口径"` 探语言，而它压根没登记过 ⇒ 查表永远回中文 ⇒
+        /// 英文档宽度从来没生效过，而守卫按 194pt 预算量当然"0 越界"——
+        /// 假绿是自己造的。现在换 `"总览"`（九页页名，目录里在），
+        /// 并由 `LocalizationGuardTests.test_languageProbeKeyIsAlwaysRegistered` 钉住它不许消失。
+        static let languageProbeKey = "总览"
+
+        static var isChineseUI: Bool { localizedCopy(languageProbeKey) == languageProbeKey }
+
+        static var fieldLabelWidthForLanguage: CGFloat {
+            isChineseUI ? fieldLabelWidth : fieldLabelWidthEnglish
+        }
         /// 指标 tile 自适应最小宽度（一行四 → 自动折两列/单列）
         static let tileMinWidth: CGFloat = 220
         /// 双列内容卡并排所需的最小列宽
