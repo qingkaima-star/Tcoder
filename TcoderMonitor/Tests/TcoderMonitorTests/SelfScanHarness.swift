@@ -37,8 +37,15 @@ class SelfScanHarnessCase: XCTestCase {
             .deletingLastPathComponent()   // 工作树根
     }()
 
+    /// `.inflight` 是 `.gitignore` 里明写的「过程遗留」目录（在途 patch、取证沙箱、
+    /// 打包中间件都往里写）。不剪掉它，本门的结果就取决于"这一刻有没有人留着产物"：
+    /// 2026-09-21 实测，一份取证沙箱里的 `reports/*.json`（1322 行）被自扫算成
+    /// "仓库新增一个超 800 行的巨大文件"，把三条无关的测试一起判红。
+    /// 同一条剪枝在 `SourceFileReachabilityTests` 与 `DocReferenceRatchetTests` 里
+    /// 各有一份副本（本仓已知重复），三处一起改，否则两边量的不是同一棵树。
     static let skipDirectoryNames: Set<String> = [
         ".git", ".build", ".swiftpm", "dist", "build", "node_modules", ".worktrees",
+        ".inflight",
     ]
 
     // MARK: - 一次性扫描缓存（六个分析器都跑一遍，多个测试复用）

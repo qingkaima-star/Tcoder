@@ -76,8 +76,11 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 且这 136 是守卫**实报**的数（`testDenominatorMatchesCensusBaseline` 跑出来填的，不是算出来的）。
     static let censusBaseline = 136
 
+    /// `.inflight` = `.gitignore` 里的「过程遗留」目录，必须与 `SelfScanHarness.skipDirectoryNames`
+    /// 一起剪；两把尺子量的树不一样时，一边绿一边红无法归因（2026-09-21 实测）。
     static let prunedDirectories: Set<String> = [".git", ".build", ".swiftpm", ".worktrees",
-                                                        "node_modules", "DerivedData", "dist", "build", "out"]
+                                                        "node_modules", "DerivedData", "dist", "build", "out",
+                                                        ".inflight"]
 
     /// 框架隐式调度的入口白名单。**只有 `@main` 一处**，且下面的门要求每个条目正文里真写着
     /// `@main`、并且它本身也拿得出证据——白名单不许变遮羞布。

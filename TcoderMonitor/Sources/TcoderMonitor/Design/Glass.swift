@@ -198,8 +198,11 @@ extension View {
         case .prominent:
             self.buttonStyle(InkCapsuleButtonStyle())
         case .bordered:
-            if #available(macOS 26.0, *) { self.buttonStyle(.glass) }
-            else { self.buttonStyle(FallbackBorderedButtonStyle()) }
+            // **不再走系统 `.glass`**（2026-09-21 实拍量出来的）：非 key 窗口下它把标签
+            // 压成 `#B6B6B6` 落在 `#FAFAFA` 上 = **1.94:1**，AA 文本线是 4.5:1 ——
+            // 一个读不清的次级按钮等于没有这个按钮。自绘发丝胶囊顺带把
+            // macOS 14/15/26 三套系统的次级按钮画法统一（与 `.prominent` 同一个理由）。
+            self.buttonStyle(HairlineCapsuleButtonStyle())
         case .plain:
             if #available(macOS 26.0, *) { self.buttonStyle(.plain) }
             else { self.buttonStyle(PlainButtonStyle()) }
@@ -246,12 +249,21 @@ struct InkCapsuleButtonStyle: ButtonStyle {
     }
 }
 
-struct FallbackBorderedButtonStyle: ButtonStyle {
+/// 次级按钮：卡面白底 + 发丝边 + **纯墨标签**。三套 macOS 同一画法。
+///
+/// 标签必须钉死成 `Surface.ink` 而不是继承系统前景 —— 这条样式存在的全部理由
+/// 就是"继承来的那一份在失焦窗口里只有 1.94:1"。
+struct HairlineCapsuleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .padding(.horizontal, Theme.Spacing.sm)
-            .padding(.vertical, Theme.Spacing.xxs)
-            .surface(layer: .chrome, shape: .rounded(Theme.Radius.md))
-            .opacity(configuration.isPressed ? 0.75 : 1)
+            .padding(.vertical, Theme.Spacing.xs)
+            .foregroundStyle(Theme.Palette.Surface.ink)
+            .background {
+                Capsule().fill(Theme.Palette.Surface.card)
+                Capsule().strokeBorder(Theme.Palette.Card.hairline,
+                                       lineWidth: Theme.Palette.Card.hairlineWidth)
+            }
+            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }

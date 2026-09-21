@@ -65,7 +65,7 @@ final class DocReferenceRatchetTests: XCTestCase {
     ]
 
     static let prunedDirectories: Set<String> = [
-        ".git", ".build", ".swiftpm", ".worktrees", "node_modules", "DerivedData",
+        ".git", ".build", ".swiftpm", ".worktrees", "node_modules", "DerivedData", ".inflight",
         "dist", "build", "out",
     ]
 
