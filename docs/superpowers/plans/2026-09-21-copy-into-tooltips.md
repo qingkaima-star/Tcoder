@@ -204,6 +204,11 @@ F12（CLI 入口不再把读不动的目录报成全零成功）合入后 main �
 
 驱动脚本 `.scratch/tools/final_proof.sh`（一次性，跑完自清），六步每步都要出声：
 
+> 补一句时效：合这页文档时 main 又前进到 `79680e6`（P6-R 的 `Views/` 版式规则）。
+> 上面六步的读数**全部在 `dc4c53f` 上量得**，不追到新头重跑 —— 理由是那一笔动的是渲染层，
+> 它要的重拍是它自己的验收责任（见取证 §2.8 末尾"失效边界"那段），
+> 而不是让 WS-CL 的交付证明跟着 main 赛跑。
+
 | 步 | 实测输出（原样摘自日志） |
 |---|---|
 | 合并前端禁（分支头 `5efc471`，已含 P6 的 `e6bcbac`） | `Executed 1033 tests, with 12 tests skipped and 0 failures (0 unexpected) in 241.032 (328.241) seconds` → `✅ ws/cli-tier4 可以合入 main` |
