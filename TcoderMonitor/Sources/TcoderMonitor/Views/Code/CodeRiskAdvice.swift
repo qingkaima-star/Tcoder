@@ -22,33 +22,34 @@ extension CodeRiskAnalysis {
         if code.duplicationRatio >= duplicationHighRatio, let block = longestBlockReference(code) {
             items.append(Item(
                 id: "duplication-high", label: "重复代码", icon: .duplicate, role: Theme.Semantic.danger,
-                text: "重复率 \(NumberFormat.percent(code.duplicationRatio, precision: 1))"
-                    + "（约 \(NumberFormat.grouped(duplicatedLines)) / "
-                    + "\(NumberFormat.grouped(code.codeLines)) 行）已达高风险档：最长一处 "
-                    + "\(NumberFormat.grouped(block.lineCount)) 行，出现在 "
-                    + occurrenceFileSummary(block) + "（共 "
-                    + "\(NumberFormat.grouped(block.occurrences.count)) 处）。"
-                    + "把这类块抽成公共工具函数或模板方法，差异部分用参数/闭包传入，只保留一份实现。"
+                text: localizedFormat("重复率 %1$@（约 %2$@ / %3$@ 行）已达高风险档：最长一处 %4$@ 行，出现在 %5$@（共 %6$@ 处）。把这类块抽成公共工具函数或模板方法，差异部分用参数/闭包传入，只保留一份实现。",
+                                      NumberFormat.percent(code.duplicationRatio, precision: 1),
+                                      NumberFormat.grouped(duplicatedLines),
+                                      NumberFormat.grouped(code.codeLines),
+                                      NumberFormat.grouped(block.lineCount),
+                                      occurrenceFileSummary(block),
+                                      NumberFormat.grouped(block.occurrences.count))
             ))
         } else if code.duplicationRatio >= duplicationNotableRatio, let block = longestBlockReference(code) {
             items.append(Item(
                 id: "duplication-notable", label: "重复代码", icon: .duplicate, role: Theme.Semantic.warning,
-                text: "重复率 \(NumberFormat.percent(code.duplicationRatio, precision: 1))"
-                    + "（约 \(NumberFormat.grouped(duplicatedLines)) / "
-                    + "\(NumberFormat.grouped(code.codeLines)) 行）：最长重复块 "
-                    + "\(NumberFormat.grouped(block.lineCount)) 行、出现在 "
-                    + occurrenceFileSummary(block) + "。改动这些文件时顺手合并成一处实现，"
-                    + "可把重复率压到 \(NumberFormat.percent(duplicationNotableRatio, precision: 0)) 以下。"
+                text: localizedFormat("重复率 %1$@（约 %2$@ / %3$@ 行）：最长重复块 %4$@ 行、出现在 %5$@。改动这些文件时顺手合并成一处实现，可把重复率压到 %6$@ 以下。",
+                                      NumberFormat.percent(code.duplicationRatio, precision: 1),
+                                      NumberFormat.grouped(duplicatedLines),
+                                      NumberFormat.grouped(code.codeLines),
+                                      NumberFormat.grouped(block.lineCount),
+                                      occurrenceFileSummary(block),
+                                      NumberFormat.percent(duplicationNotableRatio, precision: 0))
             ))
         } else if code.duplicationRatio > 0 {
             items.append(Item(
                 id: "duplication-low", label: "重复代码", icon: .duplicate, role: Theme.Semantic.neutral,
-                text: "重复率 \(NumberFormat.percent(code.duplicationRatio, precision: 1))"
-                    + "（约 \(NumberFormat.grouped(duplicatedLines)) / "
-                    + "\(NumberFormat.grouped(code.codeLines)) 行）仍在低档："
-                    + "\(NumberFormat.grouped(code.duplicatedBlocks.count)) 个重复块中最长 "
-                    + "\(NumberFormat.grouped(longestBlock)) 行，暂不需要专门重构，"
-                    + "改到相关代码时顺带去重即可。"
+                text: localizedFormat("重复率 %1$@（约 %2$@ / %3$@ 行）仍在低档：%4$@ 个重复块中最长 %5$@ 行，暂不需要专门重构，改到相关代码时顺带去重即可。",
+                                      NumberFormat.percent(code.duplicationRatio, precision: 1),
+                                      NumberFormat.grouped(duplicatedLines),
+                                      NumberFormat.grouped(code.codeLines),
+                                      NumberFormat.grouped(code.duplicatedBlocks.count),
+                                      NumberFormat.grouped(longestBlock))
             ))
         }
 
@@ -139,9 +140,11 @@ extension CodeRiskAnalysis {
             items.append(Item(
                 id: "huge-file", label: "巨大文件", icon: .duplicate,
                 role: Theme.Semantic.role(for: largest.risk),
-                text: "最大文件 \(CodeViewFormat.fileName(largest.path)) 共 "
-                    + "\(NumberFormat.grouped(largest.lineCount)) 行（项目行数峰值 "
-                    + "\(NumberFormat.grouped(code.largestFileLineCount)) 行）：\(largest.suggestion)"
+                text: localizedFormat("最大文件 %1$@ 共 %2$@ 行（项目行数峰值 %3$@ 行）：%4$@",
+                                      CodeViewFormat.fileName(largest.path),
+                                      NumberFormat.grouped(largest.lineCount),
+                                      NumberFormat.grouped(code.largestFileLineCount),
+                                      localizedCopy(largest.suggestion))
             ))
         }
 

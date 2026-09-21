@@ -76,17 +76,20 @@ struct DataHeroReadout: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
-            Text(value)
+            // 三个渲染点都必须查表：`Text(变量)` 走 verbatim 初始化，
+            // 目录里翻了也不会变（双语方案 §7.1）。`DataHeroReadout` 住在 Views/
+            // 而守卫 5 原来只扫 Design/ ⇒ 这里是漏网的渲染点（英文实拍抓到）。
+            Text(localizedCopy(value))
                 .typed(Theme.Typo.heroMetric)
                 .foregroundStyle(Theme.Palette.Surface.ink)
                 .contentTransition(.numericText())
             if let unit {
-                Text(unit)
+                Text(localizedCopy(unit))
                     .font(CodeGitType.prose(Theme.Typo.label))
                     .foregroundStyle(.secondary)
             }
             if let note {
-                Text(note)
+                Text(localizedCopy(note))
                     .font(CodeGitType.prose(Theme.Typo.label))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

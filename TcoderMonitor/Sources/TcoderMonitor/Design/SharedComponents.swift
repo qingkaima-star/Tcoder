@@ -77,6 +77,7 @@ struct MetricTile: View {
     /// 只有**数据摘要**才传数字：提交标题、路径这类长度由用户内容决定的串不是口径，
     /// 它撑成三行会把整条读数带的基线弄歪，截断 + tooltip 才是对的处理。
     var captionLineLimit: Int? = nil
+    @Environment(\.tileCaptionReserve) private var tileCaptionReserve
 
     /// 量条槽的三种状态。`.empty` 是**占位等高**：同排有别的格子画条时，
     /// 没有可信分母的格子也要把那一行留出来（画一条假的满格线比不画更误导）。
@@ -143,6 +144,7 @@ struct MetricTile: View {
             }
             if let caption {
                 Text(localizedCopy(caption))
+
                     .font(Theme.Typo.label.font)
                     // 原来是 `.tertiary`：测得值不得用 tertiary。全仓 42 处 `.tertiary`
                     // 里落在数字上的那些，是「没有主次」在文字侧的另一半成因。
@@ -154,6 +156,12 @@ struct MetricTile: View {
                     // 唯一的例外是 `captionLineLimit`：数据摘要不是口径。
                     .lineLimit(captionLineLimit)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            // 没有脚注的格子也要把那块行位留出来，否则同排底边必然差一截。
+            if caption == nil {
+                Color.clear
+                    .frame(height: TileCaptionLayout.minHeight(reserve: tileCaptionReserve))
+                    .allowsHitTesting(false)
             }
         }
         .frame(maxWidth: .infinity, minHeight: Theme.Layout.tileHeightCompact,

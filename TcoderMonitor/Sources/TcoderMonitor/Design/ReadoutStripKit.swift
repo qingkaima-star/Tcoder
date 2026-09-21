@@ -32,6 +32,39 @@ struct DataBandSeparator: View {
     }
 }
 
+/// 读数带内**脚注块预留的行数**。由 `ReadoutStrip` 注入，`MetricTile` 消费。
+///
+/// 两批实拍都点名"同排四格底边参差"：一格脚注一行、另一格两行，
+/// 而 `HStack(alignment: .top)` 只保证顶边齐 ⇒ 底边必然不齐。
+/// 正解**不是把长脚注截掉**（口径脚注截了就等于丢掉可核对性，§10.3 的红线），
+/// 而是让每格的脚注块预留同样高的行位：一行时留白，两行时填满，底边自然齐。
+private struct TileCaptionReserveKey: EnvironmentKey {
+    static let defaultValue: Int? = nil
+}
+
+extension EnvironmentValues {
+    var tileCaptionReserve: Int? {
+        get { self[TileCaptionReserveKey.self] }
+        set { self[TileCaptionReserveKey.self] = newValue }
+    }
+}
+
+/// 读数带脚注块的统一行位。**两行**：一行是数据摘要的常态，第二行留给
+/// 口径/单位这类必须完整显示的说明；要三行才说完的信息不该住在 KPI 带里
+/// （该挪到节副标题或说明区）。
+enum TileCaptionLayout {
+    static let reserveLines = 2
+
+    /// 预留高度按 `Theme.Typo.label` 的字号与中文行距算出来，不写魔法数。
+    /// `reserve == nil` = 不在读数带里（独立使用），只保证自然高度，不预留。
+    static func minHeight(reserve: Int?) -> CGFloat {
+        guard let reserve else { return 0 }
+        let lines = CGFloat(reserve)
+        let tier = Theme.Typo.label
+        return tier.size * lines + tier.lineSpacing * (lines - 1)
+    }
+}
+
 struct ReadoutStrip<Content: View>: View {
     @ViewBuilder var content: Content
 
@@ -39,6 +72,7 @@ struct ReadoutStrip<Content: View>: View {
         HStack(alignment: .top, spacing: Theme.Spacing.lg) {
             content
         }
+        .environment(\.tileCaptionReserve, TileCaptionLayout.reserveLines)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
