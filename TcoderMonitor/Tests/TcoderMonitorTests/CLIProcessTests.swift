@@ -116,6 +116,29 @@ final class CLIProcessTests: XCTestCase {
         XCTAssertTrue(r.stdout.contains("综合"), "报告读数要在，不能只有退出码")
     }
 
+    /// 第 3 档的第二格：**存在但根本读不了**的目录。
+    /// `fileExists` 对 chmod 000 的目录返回 true，所以只查存在性会把它放过去 ——
+    /// 实测放过去的后果不是"报错不明显"，是**四路各自交出全零的成功读数**
+    /// （`文件 0 · 码行 0 · scannedAt 有值`），界面于是把"没读到"画成"这是个空仓库"。
+    /// 这条测试同时是那个缺陷（改进清单 F12）的回归测试。
+    func test_realProcess_unreadableDirectoryExitsThree() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("tcoder-unreadable-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try "let x = 1\n".write(to: dir.appendingPathComponent("a.swift"), atomically: true, encoding: .utf8)
+        addTeardownBlock {
+            // 先恢复权限再删，否则 `removeItem` 会失败并把临时目录留在机器上（AGENTS §1.6 跑完自清）。
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+            try? FileManager.default.removeItem(at: dir)
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: dir.path)
+
+        let r = try launch(["score", dir.path], limit: 15)
+        XCTAssertEqual(r.rc, 3, "不可读的目录必须走第 3 档，不能交出零读数；"
+                     + "stdout=\(r.stdout.prefix(200)) stderr=\(r.stderr.prefix(200))")
+        XCTAssertTrue(r.stderr.contains("不可读"), "stderr=\(r.stderr.prefix(160))")
+    }
+
     /// 无头模式**不许碰 GUI 的状态**：窗口状态目录在调用前后必须一个字节都没动。
     /// 病灶就长这样：挂死那次进程上正开着 `com.tcoder.monitor.savedState/windows.plist`。
     func test_realProcessHeadlessWritesNoWindowState() throws {

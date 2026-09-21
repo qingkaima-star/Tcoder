@@ -220,6 +220,23 @@ final class CLIHeadlessTests: XCTestCase {
 
     // MARK: - schema 同源：JSON 要能解回同一个类型
 
+    /// `validatedURL` 的判据必须包含"可读"，不只是"存在"。
+    /// 这一条在单元层，`CLIProcessTests` 里那条在真进程层 —— 两层都要有，
+    /// 因为这个缺陷的病灶正是"存在性检查通过、可读性没人问"。
+    func test_validatedURLRejectsUnreadableDirectory() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("tcoder-url-probe-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+            try? FileManager.default.removeItem(at: dir)
+        }
+        XCTAssertNotNil(CLIScan.validatedURL(for: dir.path), "可读目录必须放行（否则上面那条真进程测试没有对照）")
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: dir.path)
+        XCTAssertNil(CLIScan.validatedURL(for: dir.path),
+                     "chmod 000 的目录被放行了 —— `fileExists` 为 true 不等于读得到")
+    }
+
     func test_scanJSONDecodesBackIntoProjectReport() async throws {
         let outcome = await scan().outcome(path: fixtureDir, allowNetwork: false)
         XCTAssertEqual(outcome.exit, .ok, "\(outcome.report?.failedSections ?? [])")
