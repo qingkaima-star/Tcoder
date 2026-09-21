@@ -22,7 +22,7 @@ struct PerformanceMatcherEditor: View {
                     TextField("匹配模式，例如 java", text: $pattern)
                         .textFieldStyle(.roundedBorder)
                         .flexCell()
-                    TextField("分组名称，例如 后端服务", text: $title)
+                    TextField("分组名称，例如「后端服务」", text: $title)
                         .textFieldStyle(.roundedBorder)
                         .flexCell()
                     GlassButton("添加分组", icon: .add, style: .prominent, isEnabled: canAdd) { add() }

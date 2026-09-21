@@ -227,7 +227,7 @@ struct RiskBadge: View {
 
     var body: some View {
         SemanticBadge(
-            "风险 \(risk.rawValue)",
+            "风险：\(risk.rawValue)",
             role: Theme.Semantic.role(for: risk),
             icon: showIcon ? RiskBadge.icon(for: risk) : nil)
     }

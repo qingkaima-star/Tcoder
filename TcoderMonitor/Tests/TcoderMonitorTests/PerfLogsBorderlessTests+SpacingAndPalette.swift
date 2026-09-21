@@ -48,7 +48,7 @@ extension PerfLogsBorderlessTests {
         // 那正是"三页三份、六页没有"的成因，所以换成"本页必须声明 Header，
         // 且页名串仍在本页"—— 抽走或改名照样红，但不再逼人手抄版式。
         for (page, title) in [("PerformanceView", "性能监控"),
-                              ("LogsView", "错误日志分析"),
+                              ("LogsView", "错误日志"),
                               ("HealthView", "健康评分")] {
             let file = try XCTUnwrap(files.first { $0.path.hasSuffix("\(page).swift") })
             XCTAssertTrue(file.content.contains("Theme.Page.Header("),

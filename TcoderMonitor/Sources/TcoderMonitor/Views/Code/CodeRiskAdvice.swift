@@ -95,7 +95,7 @@ extension CodeRiskAnalysis {
                 id: "parameters", label: "参数过多", symbol: CodeGitSymbol.parameters,
                 role: Theme.Semantic.warning,
                 text: "\(NumberFormat.grouped(manyParams.count)) 个上榜函数的参数达到或超过 "
-                    + "\(NumberFormat.grouped(manyParameterCount)) 个，最多的是 \(worst.name)"
+                    + "\(NumberFormat.grouped(manyParameterCount)) 个，最多的是\(worst.name)"
                     + "（\(NumberFormat.grouped(worst.parameterCount)) 个参数 · "
                     + "\(CodeViewFormat.fileName(worst.filePath)):\(NumberFormat.grouped(worst.startLine))）："
                     + "把成组参数收进一个配置或值类型，调用点会同步变短。"

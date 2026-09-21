@@ -184,7 +184,7 @@ struct DependencyOverviewSection: View {
                 }
 
                 if !deps.networkLookupNote.isEmpty {
-                    DataNotice(text: deps.networkLookupNote, role: Theme.Semantic.info, icon: .info,
+                    DataNotice(text: deps.networkLookupNote, role: Theme.Semantic.neutral, icon: .info,
                                iconLabel: "联网核对说明")
                 }
             }

@@ -49,7 +49,7 @@ struct GitRepositorySourceSection: View {
         if isRelocated {
             DataNotice(text: "分析的是另一个仓库：\(root)\n\(Self.discoveryCaption(git))",
                        role: git.discoveryMode == .nestedSubdirectory
-                           ? Theme.Semantic.warning : Theme.Semantic.info,
+                           ? Theme.Semantic.warning : Theme.Semantic.neutral,
                        icon: .riskWarning, iconLabel: "仓库定位偏离")
         } else {
             GlassSection("仓库来源", subtitle: Self.discoveryCaption(git), icon: .git) {
@@ -103,7 +103,7 @@ struct GitCommitScopeSection: View {
     var body: some View {
         let scope = git.commitScope
         DataNotice(text: Self.message(for: scope),
-                   role: scope.isWindowTruncated ? Theme.Semantic.warning : Theme.Semantic.info,
+                   role: scope.isWindowTruncated ? Theme.Semantic.warning : Theme.Semantic.neutral,
                    icon: scope.isWindowTruncated ? .riskWarning : .info,
                    iconLabel: "提交统计口径")
     }

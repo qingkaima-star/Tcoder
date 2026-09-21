@@ -108,16 +108,16 @@ enum HealthCurves {
             candidate += "当前没有任何维度可供评估，评分依据缺失，建议先完成代码分析与 Git 采集，再来查看总分。"
         case 1:
             let only = ranked[0]
-            candidate += "目前只有 \(only.name)（\(only.score) 分）这一个维度有可用数据，它同时也是当前最低项，建议优先\(advice(for: only.name))。"
+            candidate += "目前只有\(only.name)（\(only.score) 分）这一个维度有可用数据，它同时也是当前最低项，建议优先\(advice(for: only.name))。"
         case 2:
             let low = ranked[0]
             let high = ranked[1]
-            candidate += "主要拖累来自 \(low.name)（\(low.score) 分），\(high.name)（\(high.score) 分）是目前相对最好的一项；建议优先\(advice(for: low.name))。"
+            candidate += "主要拖累来自\(low.name)（\(low.score) 分），\(high.name)（\(high.score) 分）是目前相对最好的一项；建议优先\(advice(for: low.name))。"
         default:
             let first = ranked[0]
             let second = ranked[1]
             let best = ranked[ranked.count - 1]
-            candidate += "主要拖累来自 \(first.name)（\(first.score) 分）与 \(second.name)（\(second.score) 分）；"
+            candidate += "主要拖累来自\(first.name)（\(first.score) 分）与\(second.name)（\(second.score) 分）；"
             candidate += "\(best.name)（\(best.score) 分）是当前最稳的一项。建议优先\(advice(for: first.name))。"
         }
         return fittedNarrative(candidate)
@@ -228,7 +228,10 @@ enum HealthCurves {
         decimal(Swift.max(0, ratio) * 100, digits) + "%"
     }
 
+    /// 整数读数**必须与全站同一把尺子**：以前这里是 `String(value)`，
+    /// 于是健康页详情写"源码 63909 行"，而代码规模/复杂度风险两页写"63,909" ——
+    /// 同一个量两套记法（批次 P5 实拍点名）。收成 `NumberFormat.grouped` 的薄包装。
     static func whole(_ value: Int) -> String {
-        String(Swift.max(0, value))
+        NumberFormat.grouped(Swift.max(0, value))
     }
 }

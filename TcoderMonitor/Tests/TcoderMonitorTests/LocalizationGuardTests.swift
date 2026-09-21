@@ -319,4 +319,28 @@ final class LocalizationGuardTests: XCTestCase {
         XCTAssertEqual(LogRecency.describe(nil), "未知")
         XCTAssertEqual(ago(-30), "即将")
     }
+
+    /// `LogRecency.split` 是**语言无关**的：它切的是"已经本地化完的那一句"，
+    /// 所以中文与英文都必须切成「数字 / 其余」。
+    /// 英文侧尤其要紧 —— 词序反过来（"49 seconds ago"），任何按中文词表写的
+    /// 拆分逻辑都会在这里失效。
+    func test_recencySplitKeepsNumberAndUnitApartInBothLanguages() {
+        XCTAssertEqual(LogRecency.split("49 秒前").value, "49")
+        XCTAssertEqual(LogRecency.split("49 秒前").unit, "秒前")
+        XCTAssertEqual(LogRecency.split("2 小时前").unit, "小时前")
+        XCTAssertEqual(LogRecency.split("1,234 天前").value, "1,234")
+        // 英文：整句回来的是 "49 seconds ago"，单位段必须连着吃下 "seconds ago"
+        XCTAssertEqual(LogRecency.split("49 seconds ago").value, "49")
+        XCTAssertEqual(LogRecency.split("49 seconds ago").unit, "seconds ago")
+        XCTAssertEqual(LogRecency.split("2 hours ago").unit, "hours ago")
+        // 三态没有数字，就不该硬造单位（否则 value 会变成空串）
+        for phrase in ["昨天", "未知", "即将", "Yesterday"] {
+            XCTAssertEqual(LogRecency.split(phrase).value, phrase, "\(phrase) 被拆坏了")
+            XCTAssertNil(LogRecency.split(phrase).unit, "\(phrase) 凭空多出一段单位")
+        }
+    }
+
+
 }
+
+

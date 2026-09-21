@@ -305,7 +305,7 @@ public final class FramePulse: @unchecked Sendable {
 
     private func writeHeaderLocked() {
         writeLineLocked("# FramePulse 启动 \(Self.stamp(startedAt)) pid=\(getpid()) "
-                        + "开关=TCODER_PERF_PROBE=1 探针线程=CVDisplayLink(非主线程)")
+                        + "开关=TCODER_PERF_PROBE=1 探针线程=CVDisplayLink（非主线程）")
         writeLineLocked("# 期望间隔来自运行时读到的真实 Hz，不硬编码 120")
     }
 

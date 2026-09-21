@@ -74,18 +74,9 @@ extension DesignTokenCacheGuardTests {
     /// 任何一处被改名或改形状，这个函数就编译不过 —— 比读 diff 可靠。
     /// 顺带核一遍缓存出来的 `Font` 与规范构造式**同值**（缓存不能把值顺手改掉）。
     func test_tokenCallShapesAreUnchangedForPageFlows() {
-        let text: Color = Theme.Semantic.accent.textColor
-        let graphic: Color = Theme.Semantic.accent.graphicColor
-        let onFill: Color = Theme.Semantic.accent.onFillColor
-        let badge: Color = Theme.Semantic.warning.badgeFill()
-        let badgeDark: Color = Theme.Semantic.warning.badgeFill(in: .dark)
+        let probes = Self.tokenCallShapeProbes()
         let font: Font = Theme.Typo.metricNumber.font
         let iconFont: Font = IconRole.cardHeader.font
-        let seriesColor: Color = Theme.Chart.color(at: 3)
-        let labelColor: Color = Theme.Chart.color(forLabel: "Swift")
-        let pairColor: Color = Theme.Chart.pair(at: 3).color
-        let tokenColor: Color = Theme.Chart.token(forLabel: "Swift").color
-        let dualColor: Color = DualColor(lightHex: 0x0A0A0A, darkHex: 0xF2F2F5).color
         let gradient: LinearGradient = Theme.Chart.areaGradient(at: 2, intensity: .soft)
         let gradientDefault: LinearGradient = Theme.Chart.areaGradient(at: 2)
         // 令牌仍可被页面按同样的标签构造（新增档位不需要改 Design）
@@ -95,9 +86,11 @@ extension DesignTokenCacheGuardTests {
                                                design: .default, monospacedDigits: true,
                                                lineSpacing: 2, tracking: 0.6)
 
-        for value in [text, graphic, onFill, badge, badgeDark, seriesColor, labelColor,
-                      pairColor, tokenColor, dualColor] {
-            XCTAssertEqual(Self.resolveHex(value, under: .aqua).count, 6, "有令牌解析不出值")
+        for (name, value) in probes {
+            XCTAssertEqual(Self.resolveHex(value, under: .aqua).count, 6, "令牌 \(name) 解析不出值")
+            // 自适应底色那类"必须两态都解析得出来"的探针一并覆盖：
+            // 解析不出 = 空串，会在这里变红而不是被跳过。
+            XCTAssertFalse(Self.resolveHex(value, under: .darkAqua).isEmpty, "令牌 \(name) 深色态解析不出值")
         }
         // 缓存出来的 Font 必须仍等于规范里的构造式（探针实测：同构建的 `Font` 可判等）。
         XCTAssertEqual(font, Font.system(size: 34, weight: .semibold, design: .default).monospacedDigit(),
@@ -138,6 +131,38 @@ extension DesignTokenCacheGuardTests {
         XCTAssertEqual(Theme.Palette.Opacity.badgeFill, 0.15, accuracy: 0.0001)
     }
 
+    /// 渲染点那份底色**必须自己会换档**。批次 P5 的实锤：`badgeFill(in:)` 原来带
+    /// `= .light` 默认值，`SemanticBadge` 一句 `role.badgeFill()` 就在深色态铺了浅色档
+    /// —— 浅色档是压暗过的 `graphicLight`，铺在黑地上比深色档闷，两批实拍都把它读成
+    /// "胶囊描了一圈边"。这条断言同时是**那条默认值的墓碑**：
+    /// 谁把自适应换成固定档（或把 `.opacity` 写法改回压平形态），两态解析出的 RGB
+    /// 会立刻相同，这里当场红。
+    func test_adaptiveBadgeFillResolvesItsOwnTierInEachAppearance() {
+        var flattened: [String] = []
+        var twoTierRoles = 0
+        for role in Theme.Semantic.measurable {
+            let lightHex = Self.resolveHex(role.adaptiveBadgeFill, under: .aqua)
+            let darkHex = Self.resolveHex(role.adaptiveBadgeFill, under: .darkAqua)
+            XCTAssertEqual(lightHex, role.graphic.token(in: .light).sRGBHex,
+                           "「\(role.name)」浅色态底色不是浅色档图形色")
+            XCTAssertEqual(darkHex, role.graphic.token(in: .dark).sRGBHex,
+                           "「\(role.name)」深色态底色不是深色档图形色（渲染点拿不到外观，只能靠这份自适应）")
+            // "两态解析出不同值"只对**两档本来就不同**的角色成立：
+            // `accent` 的 graphicLight == graphicDark == #15803D 是算出来的刻意取值
+            // （理由写在它的定义处），它两态同值不是压平。判据必须跟着被检对象的约定走。
+            let tiersDiffer = role.graphic.token(in: .light).sRGBHex
+                != role.graphic.token(in: .dark).sRGBHex
+            if tiersDiffer {
+                twoTierRoles += 1
+                if lightHex == darkHex { flattened.append(role.name) }
+            }
+        }
+        XCTAssertGreaterThanOrEqual(twoTierRoles, 5,
+                                    "只有 \(twoTierRoles) 个角色的两档图形色不同 —— 反压平判据的分母太小，等于没检查")
+        XCTAssertTrue(flattened.isEmpty,
+                      "这些角色的自适应底色被压平了（两态同一个 RGB），等于回到旧 bug：\(flattened)")
+    }
+
     /// **计数尺子自己的元测试**（最重要的一条）：如果 `DesignTokenMeter` 数不到
     /// "每次访问现造"，上面那三条"命中数 ≤1"就是永真绿。
     /// 这里不造假货 —— 直接按定义构造 1000 个**新**令牌对象（新对象 = 新包装，
@@ -161,6 +186,26 @@ extension DesignTokenCacheGuardTests {
         // 渐变通道：能数到"表的规模"就说明它确实在数构造（见 ① 里那条 == 号位×档数 的断言）。
         XCTAssertGreaterThan(DesignTokenMeter.count(.gradient), 0, "渐变计数通道是死的")
         XCTAssertGreaterThan(DesignTokenMeter.count(.sRGBColor), 0, "分量色计数通道是死的")
+    }
+
+
+    /// 编译期即成立的**调用形状探针**：这些令牌的名字、类型、参数标签一处没变，
+    /// 这个字典就编译不过。抽成字典是为了让上面那条测试留在 50 行口径内
+    /// （`X3TestSizeAuditTests` 与产品同口径），不是为了少写断言。
+    static func tokenCallShapeProbes() -> [(name: String, color: Color)] {
+        [
+            ("accent.textColor", Theme.Semantic.accent.textColor),
+            ("accent.graphicColor", Theme.Semantic.accent.graphicColor),
+            ("accent.onFillColor", Theme.Semantic.accent.onFillColor),
+            ("warning.badgeFill(light)", Theme.Semantic.warning.badgeFill(in: .light)),
+            ("warning.badgeFill(dark)", Theme.Semantic.warning.badgeFill(in: .dark)),
+            ("warning.adaptiveBadgeFill", Theme.Semantic.warning.adaptiveBadgeFill),
+            ("chart.color(at:)", Theme.Chart.color(at: 3)),
+            ("chart.color(forLabel:)", Theme.Chart.color(forLabel: "Swift")),
+            ("chart.pair(at:)", Theme.Chart.pair(at: 3).color),
+            ("chart.token(forLabel:)", Theme.Chart.token(forLabel: "Swift").color),
+            ("DualColor(lightHex:darkHex:)", DualColor(lightHex: 0x0A0A0A, darkHex: 0xF2F2F5).color),
+        ]
     }
 
 }

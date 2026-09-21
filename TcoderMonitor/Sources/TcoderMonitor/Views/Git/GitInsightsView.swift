@@ -82,8 +82,12 @@ struct GitInsightsMetricGrid: View {
                     DataBandSeparator()
                     MetricTile(
                         label: "最近修改",
-                        value: git.lastCommitAt.map { LogRecency.describe($0) },
+                        // 整串「49 秒前」以前进 value ⇒ 单位词一起吃到 34pt 大数档，
+                        // 实拍里它是全页最重的墨，比本页真正的最大数还抢眼（批次 P5）。
+                        // 拆成数字 + 单位两段，与左邻「项目年龄 / 天」同一画法。
+                        value: git.lastCommitAt.map { LogRecency.split($0).value },
                         symbol: CodeGitSymbol.recency,
+                        unit: git.lastCommitAt.flatMap { LogRecency.split($0).unit },
                         caption: Self.latestCommitCaption(git),
                         // 提交标题是**用户内容**，长度不可控（实测一条 60+ 字的中文标题
                         // 把这一格撑成三行、四格基线全歪）。它不是口径，截断可回读：

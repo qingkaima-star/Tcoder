@@ -32,7 +32,6 @@
 "贡献者" = "Contributors";
 "性能监控" = "Performance";
 "错误日志" = "Error Logs";   // 侧栏导航用短词；页头是下面那条长名
-"错误日志分析" = "Error Logs";
 "依赖分析" = "Dependencies";
 "健康评分" = "Health Score";
 
@@ -44,7 +43,7 @@
 "个" = "items";
 
 /* ===== 批次 P2：外壳与导航（由 LocalizationGuardTests 的完工清单点名后登记）===== */
-"加载示例项目 (Tcoder 示例项目)" = "Load Sample Project (Tcoder Sample)";
+"加载示例项目（Tcoder 示例项目）" = "Load Sample Project (Tcoder Sample)";
 "添加项目…" = "Add Project…";
 "工程健康评分" = "Engineering Health";
 "在 Finder 中显示" = "Show in Finder";

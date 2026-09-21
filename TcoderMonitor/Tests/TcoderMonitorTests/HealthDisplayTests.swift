@@ -197,7 +197,7 @@ final class HealthDisplayTests: XCTestCase {
         XCTAssertEqual(Theme.Semantic.role(forScore: nil).name, "neutral")
         XCTAssertEqual(Theme.Semantic.role(forScore: 0).name, "critical")
         XCTAssertEqual(Theme.Semantic.role(forScore: 92).name, "success")
-        XCTAssertEqual(Theme.Semantic.role(forScore: 75).name, "healthy")
+        XCTAssertEqual(Theme.Semantic.role(forScore: 75).name, "success")
     }
 
     func testTrendAveragesRefuseEmptyInput() {

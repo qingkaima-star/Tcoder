@@ -50,13 +50,12 @@ struct ContributorBusFactorSection: View {
                    icon: Self.icon(for: git), iconLabel: "贡献集中度结论")
     }
 
+    /// 风险 → 角色一律走 `Theme.Semantic.role(for:)` 这**唯一一处**判定。
+    /// 这里原来自己写了一份 switch，且 `.low` 涂 `healthy`（青绿）—— 与全局
+    /// `role(for risk: RiskLevel)` 的 `.low → success` 不一致，是全仓第二套强调色相
+    /// 的实际来源之一（批次 P5，两批实拍独立点名"两种绿"）。
     static func role(for git: GitInsights) -> Theme.SemanticRole {
-        switch ContributorAnalysis.busFactorRisk(git) {
-        case .critical, .high: return Theme.Semantic.danger
-        case .medium: return Theme.Semantic.warning
-        case .low: return Theme.Semantic.healthy
-        case .none: return Theme.Semantic.neutral
-        }
+        Theme.Semantic.role(for: ContributorAnalysis.busFactorRisk(git))
     }
 
     static func icon(for git: GitInsights) -> IconName {
@@ -122,7 +121,7 @@ struct ContributorsMetricGrid: View {
                                 // 同一个数字）。但 `authorBasis == 0` 那一支必须自己说：
                                 // 那时 headline 给不出分母，"没有分母"这件事就是结论本身。
                                 note: (git.topAuthor.map {
-                                    "\(ContributorAnalysis.displayName($0)) 一人完成 · "
+                                    "\(ContributorAnalysis.displayName($0)) · 一人完成 · "
                                         + "\(NumberFormat.grouped($0.commits)) 次"
                                 } ?? "无作者数据")
                                     + (scope.authorBasis > 0

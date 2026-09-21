@@ -140,4 +140,32 @@ enum LogRecency {
         if days < 365 { return localizedCount("%lld 个月前", days / 30) }
         return localizedCount("%lld 年前", days / 365)
     }
+
+    /// 把 `describe` 的整句结果拆成「数字 + 单位」两段，供有 `unit` 槽的读数组件用。
+    ///
+    /// 为什么不新加 `"秒前"` 这种碎片键：双语方案的硬规矩是**整句键**（§7.3）——
+    /// 英文要反过来作词序（"5 seconds ago"）还分单复数，碎片各自翻译一定错。
+    /// 所以拆的是**已经本地化完的那一句**，两种语言都只按"前导数字 / 其余文字"切：
+    /// 中文 `49 秒前` → `49` + `秒前`；英文 `49 seconds ago` → `49` + `seconds ago`。
+    ///
+    /// 为什么非要拆：整句塞进 `MetricTile.value` 会让单位词一起吃到 `metricNumber`
+    /// 大数档。实拍 Git 洞察（批次 P5）：「49 秒前」三个字是全页最重的墨，
+    /// 比本页真正的最大数 558 还抢眼 —— "最重的墨给最大的数" 被单位词破坏了。
+    /// 无前导数字的三态（`昨天` / `未知` / `即将`）整体留在 value，不硬造单位。
+    static func split(_ text: String) -> (value: String, unit: String?) {
+        func isLead(_ character: Character) -> Bool {
+            character.isNumber || character == "." || character == "," || character.isWhitespace
+        }
+        var index = text.startIndex
+        while index < text.endIndex, isLead(text[index]) { index = text.index(after: index) }
+        let head = String(text[text.startIndex..<index]).trimmingCharacters(in: .whitespaces)
+        let tail = String(text[index...]).trimmingCharacters(in: .whitespaces)
+        guard head.contains(where: \.isNumber), !tail.isEmpty else { return (text, nil) }
+        return (head, tail)
+    }
+
+    /// `describe(date)` 再拆两段，省掉调用点的两步写法。
+    static func split(_ date: Date?) -> (value: String, unit: String?) {
+        split(describe(date))
+    }
 }

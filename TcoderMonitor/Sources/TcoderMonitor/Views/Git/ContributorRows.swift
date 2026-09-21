@@ -144,7 +144,7 @@ struct ContributorRow: View {
         }
         .dataTableRow()
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("第 \(rank) 位 \(ContributorAnalysis.displayName(author))，"
+        .accessibilityLabel("第 \(rank) 位 · \(ContributorAnalysis.displayName(author))，"
             + "\(author.commits) 次提交，新增 \(author.additions) 行，删除 \(author.deletions) 行")
     }
 }

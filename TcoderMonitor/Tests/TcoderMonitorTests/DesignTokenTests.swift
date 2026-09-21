@@ -166,7 +166,7 @@ final class DesignTokenTests: XCTestCase {
 
     func testHealthScoreColorScaleIsMonotonicAndBlueFree() {
         let severityRank: [String: Int] = [
-            "success": 0, "healthy": 1, "warning": 2, "danger": 3, "critical": 4,
+            "success": 0, "warning": 2, "danger": 3, "critical": 4,
         ]
         // 分数从 100 降到 1，严重度只能升不能降
         var previous = -1
@@ -180,6 +180,8 @@ final class DesignTokenTests: XCTestCase {
             previous = rank
         }
         XCTAssertEqual(Theme.Semantic.role(forScore: 100).name, "success")
+        XCTAssertEqual(Theme.Semantic.role(forScore: 75).name, "success",
+                       "70–84 的 teal 中间档已退役：一族绿，程度由数字承担")
         XCTAssertEqual(Theme.Semantic.role(forScore: 1).name, "danger")
     }
 

@@ -40,7 +40,7 @@ struct LogsView: View {
         // 内容层现在什么都不画，那是一次空操作，而它为已经不存在的盒子留了 16pt 内边距，
         // 把标题与正文之间的组间距吃掉了一截。一并去掉。
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            Theme.Page.Header(title: "错误日志分析",
+            Theme.Page.Header(title: "错误日志",
                               icon: .logs,
                               subtitle: subtitle,
                               isDemo: report?.project.isDemo == true,
@@ -111,7 +111,7 @@ struct LogsView: View {
     private var banners: some View {
         if report?.logs == nil {
             BannerRow(text: "该项目还没有日志分析结果。选择项目目录后点「重新分析」，或手动附加本地日志文件。",
-                      style: .info)
+                      style: .neutral)
         } else if report?.logs?.hasData == false {
             BannerRow(text: "项目目录与 ~/Library/Logs 里都没有找到可解析的日志文件。用「附加日志」手动选择 error.log、crash.log 后重新分析。",
                       style: .warning)

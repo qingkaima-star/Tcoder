@@ -50,13 +50,15 @@ struct StatLine: View {
 // MARK: - 横幅
 
 enum BannerStyle {
-    case warning, info, error
+    /// `neutral` 取代原来的 `info` 档（批次 P5）：横幅默认档决定"没人表态时长什么样"，
+    /// 原来默认蓝 ⇒ 空态说明也涂成语义色。蓝只留给日志等级这类**数据本身**。
+    case warning, neutral, error
 
     /// 横幅是「图形 + 文字」，走 `graphic` 层（验收线 3:1），不借文字层那套加深取值。
     var role: Theme.SemanticRole {
         switch self {
         case .warning: return Theme.Semantic.warning
-        case .info: return Theme.Semantic.info
+        case .neutral: return Theme.Semantic.neutral
         case .error: return Theme.Semantic.danger
         }
     }
@@ -68,7 +70,7 @@ enum BannerStyle {
     var icon: IconName {
         switch self {
         case .warning: return .riskWarning
-        case .info: return .info
+        case .neutral: return .info
         case .error: return .riskSevere
         }
     }
@@ -76,7 +78,7 @@ enum BannerStyle {
 
 struct BannerRow: View {
     var text: String
-    var style: BannerStyle = .info
+    var style: BannerStyle = .neutral
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.xs) {
@@ -300,9 +302,11 @@ struct DashboardLiveReadout: View {
     private var commitTile: some View {
         MetricTile(
             label: "最近提交",
-            value: report?.git.map {
-                DateFormat.sinceDescription($0.lastCommitAt).replacingOccurrences(of: " 前", with: "")
-            },
+            // 原来是 `sinceDescription(...).replacingOccurrences(of: " 前", with: "")`：
+            // 手工削掉一个中文词，好让大数档少打两个字 —— 英文态 "41 seconds ago" 里
+            // 根本没有 " 前"，这个补丁等于只治了半种语言（批次 P5 换成按数字/单位切分）。
+            value: report?.git.map { LogRecency.split(DateFormat.sinceDescription($0.lastCommitAt)).value },
+            unit: report?.git.map { LogRecency.split(DateFormat.sinceDescription($0.lastCommitAt)).unit } ?? nil,
             caption: report?.git.map {
                 localizedFormat("%1$@ 次提交 · %2$@ 位贡献者",
                                 NumberFormat.grouped($0.totalCommits),

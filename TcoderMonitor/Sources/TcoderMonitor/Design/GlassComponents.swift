@@ -211,6 +211,6 @@ struct SemanticBadge: View {
                 .foregroundStyle(role.textColor)
         }
         .padding(Theme.Spacing.chip)
-        .background(role.badgeFill(), in: Capsule())
+        .background(role.adaptiveBadgeFill, in: Capsule())
     }
 }

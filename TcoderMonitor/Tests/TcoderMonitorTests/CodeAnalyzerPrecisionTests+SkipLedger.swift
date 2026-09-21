@@ -124,7 +124,7 @@ extension CodeAnalyzerTests {
         XCTAssertTrue(clearing.contains { $0.contains("排除目录里的文件") && $0.contains("3 行")
             && $0.contains("vendor 3 行") }, "\(clearing)")
         XCTAssertTrue(clearing.contains { $0.contains("语言表未收录的后缀") && $0.contains("cmake") }, "\(clearing)")
-        XCTAssertTrue(clearing.contains { $0.contains("无后缀文件") && $0.contains("(无后缀) 2 行") }, "\(clearing)")
+        XCTAssertTrue(clearing.contains { $0.contains("无后缀文件") && $0.contains("（无后缀） 2 行") }, "\(clearing)")
 
         // 非审计模式：行数没数过就必须如实说没数，不许显示 0 行。
         let plain = try await FileSystemCodeAnalyzer().skipLedger(root: root, options: opts)
