@@ -190,8 +190,11 @@ final class LocalizationGuardTests: XCTestCase {
     /// `subtitleHelp:` / `captionHelp:` 进入口族后实扫 30 = 旧口径 17 + S4 新增 1
     /// + **一直在盲区的 12** —— 这些组件内部替调用方过了 `localizedCopy`，调用点
     /// 那句中文就是键）。同日登记掉 11 条（`c89e746`）落到 19：17 条内插串（进不了
+    ///
+    /// **同日 S5 合流 19 → 21（新增债显形）**：搬字那趟新造 2 条内插短句（`LogsErrorClusters`
+    /// 排序口径、`LogsMetricGrid` 每千行归一句）。还法：改 `localizedFormat` 整句键后降回 19。
     /// 目录，须改成 `localizedFormat` 整句键）+ 2 条 `Text(变量)`。逐条台账见 §6。
-    private static let unregisteredLiteralCeiling = 19
+    private static let unregisteredLiteralCeiling = 21
 
     func test_unregisteredLiteralInventoryPrintsAndShrinks() throws {
         let registered = Set(try Self.catalog().map(\.key)).union(Self.registeredStringsDictKeys())
