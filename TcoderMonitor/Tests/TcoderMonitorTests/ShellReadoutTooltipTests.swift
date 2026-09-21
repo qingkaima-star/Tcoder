@@ -65,6 +65,8 @@ final class ShellReadoutTooltipTests: XCTestCase {
     // MARK: - ② 横幅不许再挂匿名 .help
 
     /// `BannerRow(...)` 之后 ≤2 行里出现 `.help(` ⇒ 就是"整条横幅当 tooltip 宿主"的匿名形状。
+    /// `helpSlots` 只数**横幅自己**那几行里的 `help:`（跨行调用按调用块取），
+    /// 不是全站 `help:` 的总数 —— 后者会把 NoteLine/EmptyStateView 的槽一起算进来，是个假分母。
     static func anonymousBannerTooltips(in files: [(path: String, content: String)])
         -> (bannerSites: Int, helpSlots: Int, offenders: [String]) {
         var bannerSites = 0
@@ -75,12 +77,12 @@ final class ShellReadoutTooltipTests: XCTestCase {
             for (index, raw) in lines.enumerated() {
                 let line = raw.trimmingCharacters(in: .whitespaces)
                 if line.hasPrefix("//") { continue }
-                if line.contains("BannerRow(") { bannerSites += 1 }
-                if line.contains("help:") { helpSlots += 1 }
                 guard line.contains("BannerRow(") else { continue }
-                let window = lines.dropFirst(index + 1).prefix(2)
+                bannerSites += 1
+                let block = lines.dropFirst(index).prefix(3)
                     .map { $0.trimmingCharacters(in: .whitespaces) }
-                if window.contains(where: { !$0.hasPrefix("//") && $0.contains(".help(") }) {
+                if block.contains(where: { !$0.hasPrefix("//") && $0.contains("help:") }) { helpSlots += 1 }
+                if block.dropFirst().contains(where: { !$0.hasPrefix("//") && $0.contains(".help(") }) {
                     offenders.append("\(file.path):\(index + 1): \(line.prefix(56))")
                 }
             }
@@ -90,7 +92,7 @@ final class ShellReadoutTooltipTests: XCTestCase {
 
     func test_bannerCalibersRideTheHelpSlotNotAnAnonymousHelp() throws {
         let hit = Self.anonymousBannerTooltips(in: try TooltipMigrationGuardTests.viewFiles())
-        print("【ⓘ·S7 横幅】BannerRow 调用点 \(hit.bannerSites) 处 / 其中 help: 槽 \(hit.helpSlots) 处"
+        print("【ⓘ·S7 横幅】BannerRow 调用点 \(hit.bannerSites) 处 / 其中走 help: 槽 \(hit.helpSlots) 处"
               + " / 匿名 .help 形状 \(hit.offenders.count) 处")
         XCTAssertGreaterThanOrEqual(hit.bannerSites, 6,
                                     "只扫到 \(hit.bannerSites) 个横幅调用点，判据面已经缩了")
