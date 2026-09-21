@@ -55,9 +55,16 @@ struct GitRepositorySourceSection: View {
             GlassSection("仓库来源", subtitle: Self.discoveryCaption(git), icon: .git) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     DataFieldRow(label: "路径",
-                                 value: root.isEmpty ? "来源未记录（旧数据，重新分析后可见）" : root,
-                                 style: .path)
-                    DataFootnote(text: Self.discoveryDetail(git))
+                                 value: root.isEmpty ? "来源未记录" : root,
+                                 style: .path,
+                                 // 盘点表 D7「留短藏长」：屏上留「来源未记录」这个态，
+                                 // 「旧数据 / 重新分析后可见」这句怎么办才变得可见，进 ⓘ。
+                                 help: root.isEmpty
+                                     ? "来源未记录（旧数据，重新分析后可见）"
+                                     : nil)
+                    // 盘点表 D6「藏」：这一句回答的是「为什么定位到了这里」，
+                    // 是不改变任何数字读法的次级解释 ⇒ 屏上只留一枚 ⓘ，字面一字未改。
+                    CopyHelpBadge(Self.discoveryDetail(git))
                 }
             }
         }
@@ -113,99 +120,6 @@ struct GitCommitScopeSection: View {
         return scope.headline + "。趋势、时段分布与作者占比都只是这段窗口的分布，不代表全部历史。"
     }
 
-}
-
-// MARK: - 提交趋势
-
-struct GitCommitTrendSection: View {
-    let git: GitInsights
-
-    var body: some View {
-        if let granularity = git.commitsPerPeriod.first?.granularity {
-            GlassSection(
-                "提交趋势",
-                subtitle: localizedFormat("按 %1$@ 分桶 · 共 %2$@ 桶%3$@",
-                                           gitBucketLabel(granularity),
-                                           NumberFormat.grouped(git.commitsPerPeriod.count),
-                                           git.commitScope.windowSuffix),
-                icon: .chartLine
-            ) {
-                GitTrendReadoutBar(buckets: git.commitsPerPeriod)
-                GitCommitTrendChart(buckets: git.commitsPerPeriod, granularity: granularity)
-                    .frame(height: Theme.Layout.trendChartHeight)
-            }
-        } else {
-            GlassSection("提交趋势", subtitle: "分桶数据缺席", icon: .chartLine) {
-                EmptyStateView(
-                    icon: .chartLine,
-                    title: "暂无提交趋势",
-                    message: "Git 分析没有产出按时间分桶的提交数据，因此这里无法给出峰值或均值。"
-                )
-            }
-        }
-    }
-}
-
-/// 趋势图上方的读数条（WS-H §2.3 对标 Instruments 的统计读数行）。
-/// 只报数，不下结论：均值与峰值都是同一批桶的派生值。
-///
-/// 本轮两件事：`DataReadoutBar` 给四个数字画了一层井（井按契约 3 只许给表格/日志/
-/// 代码块），换成无面读数带；四个 `role` 全删 —— 峰值/均值/最冷清/桶数都是**测得值**，
-/// 旧代码把它们涂成 accent / healthy / neutral / info 四色，等于用颜色假装它们是四种结论。
-struct GitTrendReadoutBar: View {
-    let buckets: [CommitBucket]
-
-    var body: some View {
-        ReadoutStrip {
-            DataReadout(label: "峰值桶", value: NumberFormat.grouped(summary.peak),
-                        caption: summary.unitLabel)
-            DataBandSeparator()
-            DataReadout(label: "桶均值", value: String(format: "%.1f", summary.average),
-                        caption: summary.unitLabel)
-            DataBandSeparator()
-            DataReadout(label: "最冷清桶", value: NumberFormat.grouped(summary.lowest),
-                        caption: localizedFormat("%@ 个空桶", NumberFormat.grouped(summary.emptyBuckets)))
-            DataBandSeparator()
-            DataReadout(label: "桶数", value: NumberFormat.grouped(summary.count),
-                        caption: summary.spanCaption)
-        }
-    }
-
-    /// 读数算不出来时返回全零结构，由调用方决定措辞；这里是纯函数，单测直接钉。
-    struct Summary: Equatable {
-        let count: Int
-        let peak: Int
-        let lowest: Int
-        let average: Double
-        let emptyBuckets: Int
-        let unitLabel: String
-        let spanCaption: String
-    }
-
-    static func summary(of buckets: [CommitBucket]) -> Summary {
-        guard let granularity = buckets.first?.granularity else {
-            return Summary(count: 0, peak: 0, lowest: 0, average: 0, emptyBuckets: 0,
-                           unitLabel: "无分桶", spanCaption: "无分桶")
-        }
-        let commits = buckets.map(\.commits)
-        let unit = localizedFormat("每%@", gitBucketLabel(granularity))
-        let first = buckets.first?.date
-        let last = buckets.last?.date
-        let span = first != nil && last != nil
-            ? "\(DateFormat.dayMonth.string(from: first!)) → \(DateFormat.dayMonth.string(from: last!))"
-            : "时间区间未知"
-        return Summary(
-            count: buckets.count,
-            peak: commits.max() ?? 0,
-            lowest: commits.min() ?? 0,
-            average: commits.isEmpty ? 0 : Double(commits.reduce(0, +)) / Double(commits.count),
-            emptyBuckets: commits.filter { $0 == 0 }.count,
-            unitLabel: unit,
-            spanCaption: span
-        )
-    }
-
-    private var summary: Summary { Self.summary(of: buckets) }
 }
 
 // MARK: - 24×7 活跃分布
