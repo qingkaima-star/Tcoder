@@ -30,9 +30,20 @@ import SwiftUI
 // （原来不一致，材质在不同版本折射率不同）。真玻璃只留在控件层与浮层，
 // 这正是 Apple「Adopting Liquid Glass」与 HIG Materials 要求的分层。
 
-/// 表面所属的层。选错层是最容易犯的错：内容分组要的是 `.content`（什么都不画）。
+/// 表面所属的层。选错层是最容易犯的错：嵌在卡里的小分组要的是 `.content`（什么都不画）。
 enum GlassLayer: Hashable {
-    /// 内容层：**什么都不画**。不填背景、不描边、不投影。
+    /// 卡片层（批次 P6，对齐 AiX）：**白面 + 16pt 圆角 + 发丝边 + 一层软影**。
+    ///
+    /// 为什么现在允许卡片有投影，而上一版把投影全删了：上一版的地面是纯白，
+    /// 白纸上再压一张白纸当然只能靠"什么都不画"来分层；本轮地面换成 `#F7F7F7` 之后，
+    /// 卡与画布是**两个面**，投影表达的就是"这张卡浮在画布上"。
+    /// 参考图实测卡影 8% 黑 / 12pt 模糊 / y 偏移 2pt —— 一层，不许叠第二层。
+    ///
+    /// ⚠ 分层不能只靠色差：实测画布 `#F6F6F6` 对白卡只有 **1.085:1**，
+    /// 低于人眼约 1.15:1 的分层阈值 —— 参考图那 3% 的差是靠边与影补的，
+    /// 所以这一层里"边 + 影"是一体的，删掉任何一个都会退成"一整片白"。
+    case card
+    /// 内容层：**什么都不画**。卡内的分组、读数带靠它保持平铺。
     ///
     /// 分组的边界交给两样东西：`Theme.Spacing.group`(32) 的留白，
     /// 与 `Theme.Typo.groupLabel`（10pt medium + 0.6pt 字距）这个安静的小标题。
@@ -43,8 +54,7 @@ enum GlassLayer: Hashable {
     /// 控件/导航层：macOS 26 真玻璃，更早系统实心 + 发丝描边兜底。**无投影**。
     case chrome
     /// 浮层：菜单、进度浮层这类悬在内容之上的东西。
-    /// **全仓唯一允许投影的层**（风格契约 6）—— 投影表达的是"离开纸面"，
-    /// 而一张平铺在纸上的卡片没有理由带投影。
+    /// 除 `.card` 之外**唯一允许投影的层**（风格契约 6）。
     case floating
 }
 
@@ -77,6 +87,13 @@ extension View {
         shape: GlassShape = .rounded(Theme.Radius.card)
     ) -> some View {
         switch layer {
+        case .card:
+            switch shape {
+            case .rounded(let radius):
+                cardSurface(in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            case .capsule:
+                cardSurface(in: Capsule())
+            }
         case .content:
             // 无面。这一行 `self` 就是本轮最重要的一处删除：它替掉了
             // 「材质灰 + 3% 压黑 + 一份投影」这一整套。
@@ -103,6 +120,24 @@ extension View {
             case .capsule:
                 floatingSurface(in: Capsule())
             }
+        }
+    }
+
+    /// 卡片层：白面 + 发丝边 + **一层**软影。
+    ///
+    /// 画法上的两个刻意为之：
+    /// ① 影挂在**背景形状**上而不是整棵视图上 —— 挂在外面会让卡里每一行文字也带一份
+    ///   12pt 的黑影，实测就是"界面发脏"；
+    /// ② 边与影同时存在。只有发丝边在灰画布上像描了个框，只有影则糊成一团；
+    ///   参考图两者都有（边 `#EAEAEC` 0.5pt、影 8%/12/y2）。
+    private func cardSurface<S: Shape & InsettableShape>(in shape: S) -> some View {
+        background {
+            shape.fill(Theme.Palette.Surface.card)
+                .shadow(color: Theme.Palette.Card.shadowColor,
+                        radius: Theme.Palette.Card.shadowRadius,
+                        y: Theme.Palette.Card.shadowY)
+            shape.strokeBorder(Theme.Palette.Card.hairline,
+                               lineWidth: Theme.Palette.Card.hairlineWidth)
         }
     }
 
