@@ -121,15 +121,27 @@
 | `DependencySafetyVerdict.summaryCaption` 的 `.unchecked` 三段 | S4 | 暂不删：与常驻的 `deps.networkLookupNote` 并非逐字同义（截至日/未覆盖生态只在其中一份里） |
 | 「内置快照与安全公告均未命中」与安全公告卡空态句同屏两遍 | S4 新发现 | 待复核，删时须同步改 `CodeGitRestyleTests+DependencyAndAbsence` 的等值断言 |
 
-### 双语现量 19 条的构成（守卫自己打印，`TCODER_I18N_LEDGER` 落 `.scratch/`）
+### 双语现量的台账（守卫自己打印，`TCODER_I18N_LEDGER` 落该树 `.scratch/i18n-ledger.txt`）
 
-- **17 条内插串**：`"…\(x)…"` 形状进不了目录，要逐句改写成 `localizedFormat` 整句键 ——
-  集中在 `CodeRiskAdvice`（4~6 个占位符的多段建议）、`CodeRiskView`、`ShellLayout` 三句组合式空态、
-  `ContributorRows`、`GitInsightsSections`。
-- **2 条 `Text(变量)` 形状**：`Models/Performance.swift` 的内置分组标题「Java 服务」「Node 服务」。
-  渲染点在 `PerformanceProcessGroups.swift` 的 `Text(group.group.title)` ——
-  **登记键没用**（键存在≠查得中），要先把那一处改成 `Text(localizedCopy(group.group.title))` 再登记两条键。
-  该文件归 S5 写，所以这条排在 S5 合流之后由总工做，做完现量应落到 **17**。
+一天之内动了两次数字，两次都是**实扫现量**：`19 → 21`（S5 合流，搬字那趟新造 2 条内插短句，
+新增债在 diff 里显形）→ `21 → 19`（补账轮把四处 `Text(变量)` 改成查表，它们不再是"没登记的串"）。
+
+**现在这 19 条全部是内插短句**，分布 9 个文件：`CodeRiskAdvice` 4、`ShellLayout` 3、
+`GitInsightsSections` 3、`CodeRiskView` 2，`LogsMetricGrid` / `LogsErrorClusters` /
+`HealthAdviceCards` / `GitInsightsView` / `CodeViewSupport` / `ContributorRows` /
+`DependenciesView` 各 1 上下。还法只有一条：逐句改成
+`localizedFormat("整句 %1$@ …", …)` —— 键里没有插值，目录才接得住。
+**这条就是本轮留给双语流 P6 的收尾线**，不在本轮做是因为每改一句都要重写整句措辞。
+
+### 补账轮顺手补掉的一个真缺陷（`Text(变量)` 不查表）
+
+`PerformanceProcessGroups.swift` 里四处是"变量喂进 `Text`"：内置分组名（「Java 服务」「Node 服务」，
+常量住在 `Models/Performance.swift`）、分组三态短标题（纯函数返回的元组）、
+以及 `GroupMetricCell` 的 `label` / `caption`。这些位置**登记键也没用**
+（键存在≠查得中，双语方案 §7.1），已全部改成 `Text(localizedCopy(…))`，
+并登记 3 条键。防回归不是新写一条守卫，而是把该文件加进
+`LocalizationGuardTests.renderPointHosts` —— 那条闸门本来就在，判据本体一字未动，
+只是**纳管了一个文件**（它原本只管 `Design/**` 加两个点名文件）。
 
 ### 两处自伤的疤（写下来，不等别人发现）
 

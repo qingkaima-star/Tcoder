@@ -648,3 +648,9 @@
 "首个采样点" = "first sample";
 "没有命中错误行。" = "No error lines were matched.";
 "用「附加日志文件」手动选择。" = "Use 「Attach Log Files」 to pick them by hand.";
+
+// 批次 ⓘ·双语补账第二轮：两处 `Text(变量)` 的渲染点改成 `Text(localizedCopy(…))` 之后，
+// 变量里那几句中文才真的查得到表（静态棘轮本来看不见它们，是 S1/S5 交回时点名的盲区）。
+"Java 服务" = "Java service";
+"Node 服务" = "Node service";
+"未检测到匹配进程" = "No matching process detected";
