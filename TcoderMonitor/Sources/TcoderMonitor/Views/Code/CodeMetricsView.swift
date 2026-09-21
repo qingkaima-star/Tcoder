@@ -122,8 +122,8 @@ struct CodeMetricsSummaryGrid: View {
                     label: "空行数",
                     value: NumberFormat.grouped(code.blankLines),
                     unit: "行",
-                    caption: localizedFormat("空行占 %@", Self.shareOf(code.blankLines, code))
-                        + " · 与注释、代码共同构成总行数"
+                    caption: localizedFormat("空行占 %@ · 与注释、代码共同构成总行数",
+                                             Self.shareOf(code.blankLines, code))
                 )
             }
         }

@@ -550,7 +550,6 @@
 "分析于 %1$@ · 时间窗口 %2$@ 天 · 扫描 %3$@ 行" = "Analysed %1$@ · %2$@-day window · %3$@ lines scanned";
 "时间窗口 %1$@ 天 · 当前项目尚未分析" = "%1$@-day window · the current project has not been analysed";
 "主语言 %1$@ · 扫描于 %2$@" = "Main language %1$@ · scanned %2$@";
-"空行占 %@" = "Blank lines %@";
 "未联网核对，仅内置快照（覆盖 npm / Maven / Python），%@" = "Not checked online; built-in snapshot only (npm / Maven / Python), %@";
 "· 无依赖可核对" = " · no dependencies to check";
 "· %1$@ / %2$@ 项有版本数据" = " · %1$@ of %2$@ entries have version data";
@@ -559,3 +558,12 @@
 "源码里留着 %1$@ 处 FIXME（另有 %2$@ 处 TODO），平均每千行有效代码 %3$@ 条：逐条确认是修掉还是删注释，避免长期失真。" = "The source still carries %1$@ FIXME markers (%2$@ TODOs), %3$@ per thousand effective code lines: confirm each one as fix-or-delete so they do not rot.";
 "24×7 活跃分布" = "24x7 Activity Distribution";
 "本次未联网核对，0 条命中只是「没有查」，不是「没有病」。" = "Nothing was checked online this run; zero hits means \"we did not look\", not \"there is nothing wrong\".";
+"空行占 %@ · 与注释、代码共同构成总行数" = "Blank lines %@ · with comments and code these make up the total line count";
+"全仓 %1$@，但热点榜平均 %2$@：平均值被少数巨型函数拉高（超长函数 %3$@ 个），优先拆这几个而不是整体重构：%4$@。" = "Repository-wide %1$@, but the hotspot board averages %2$@: the mean is pulled up by a few giant functions (%3$@ oversized). Split these first rather than refactoring wholesale: %4$@.";
+
+/* ===== P5-e5：依赖分析口径句四段各自成键、分隔符也查表（英文态半译的最后一条） ===== */
+"未联网核对：漏洞判定只依据内置快照（覆盖 npm / Maven / Python），%@" = "Not checked online: vulnerability verdicts use only the built-in snapshot (npm / Maven / Python), %@";
+"本次未覆盖生态：%@" = "Ecosystems not covered this run: %@";
+"%@ 项版本不可比较（「*」、workspace:*、分支/修订号等）已跳过比对" = "%@ entries have incomparable versions (“*”, workspace:*, branch/revision pins, etc.) and were skipped";
+"没有可核对的依赖" = "There are no dependencies to check";
+"；" = "; ";
