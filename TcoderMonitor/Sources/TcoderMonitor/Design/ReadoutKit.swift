@@ -285,20 +285,37 @@ extension Theme {
                 self.content = content()
             }
 
+            /// 只在取证滚动那一趟用一次，之后不再干预。
+            @State private var didScrollToTail = false
+
             var body: some View {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Theme.Spacing.group) {
-                        content
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: Theme.Spacing.group) {
+                            content
+                        }
+                        .frame(maxWidth: Theme.Layout.maxWidthPage, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.horizontal, Theme.Spacing.pageMargin)
+                        // 页头之上与页尾各给一整段呼吸：这一档存在的意义就是
+                        // 「页级段落 ≠ 分组间距」。`Spacing.section` 自定义起全仓零引用。
+                        .padding(.top, Theme.Spacing.section)
+                        .padding(.bottom, Theme.Spacing.section)
+                        // 取证用的页尾锚点。**不设 `TCODER_CAPTURE_SCROLL` 时这个视图不存在**，
+                        // 所以产品路径零改动（1pt 透明条也会参与布局，不能常驻）。
+                        if CaptureScroll.scrollToTail {
+                            Color.clear.frame(height: 1).id(CaptureScroll.tailID)
+                        }
                     }
-                    .frame(maxWidth: Theme.Layout.maxWidthPage, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.horizontal, Theme.Spacing.pageMargin)
-                    // 页头之上与页尾各给一整段呼吸：这一档存在的意义就是
-                    // 「页级段落 ≠ 分组间距」。`Spacing.section` 自定义起全仓零引用。
-                    .padding(.top, Theme.Spacing.section)
-                    .padding(.bottom, Theme.Spacing.section)
+                    .scrollContentBackground(.hidden)
+                    .task {
+                        guard CaptureScroll.scrollToTail, !didScrollToTail else { return }
+                        // 等一帧布局稳定再滚，否则 `scrollTo` 会按还没展开的高度算偏移。
+                        try? await Task.sleep(nanoseconds: 500_000_000)
+                        proxy.scrollTo(CaptureScroll.tailID, anchor: .bottom)
+                        didScrollToTail = true
+                    }
                 }
-                .scrollContentBackground(.hidden)
             }
         }
     }

@@ -97,12 +97,20 @@ struct DependencySummaryGrid: View {
                                 note: "清单直接声明，不含锁文件解析出的传递依赖")
 
                 ReadoutStrip {
+                    // ⓘ 收纳轮（盘点表 H 组「生态 caption」判**藏**）：这句是纯指路
+                    // （生态名单确实逐字写在上方「风险总览」的「生态」行里），整句进 hover。
+                    // `MetricTile.caption` 是 String 槽、没有 ⓘ 位，所以把 tooltip 挂在**整格**
+                    // 上（悬停目标是 label+数字那一块，不是一个小图标像素），
+                    // 与下方「漏洞数」格挂 `summaryCaption` 的既有形状一致。
+                    // 键面一字未动（`Localizable.strings` 已有该整句键）⇒ 屏上不留半句、不新增待登记键。
+                    // `caption == nil` 时 MetricTile 仍按 `TileCaptionLayout.reserveLines` 留白，
+                    // 同排四格的底边不会差一截。
                     MetricTile(
                         label: "生态",
                         value: NumberFormat.grouped(deps.ecosystems.count),
-                        unit: "个",
-                        caption: "清单来源，名单在上方「风险总览」"
+                        unit: "个"
                     )
+                        .help("清单来源，名单在上方「风险总览」")
                     DataBandSeparator()
                     MetricTile(
                         label: "运行时 / 开发",
@@ -294,7 +302,14 @@ struct DependencyTable: View {
                             : "展开其余 \(NumberFormat.grouped(sorted.count - DependencyEcosystemSection.rowLimit)) 项",
                             style: .bordered, action: toggle)
             }
-            DataFootnote(text: Self.countNote(total: sorted.count, shown: visible.count))
+            // ⓘ 收纳轮（盘点表 H 组「DependencyTable.countNote」判留短藏长）：
+            // 屏上只留"展示了多少项"（折叠必须被计数交代），多出来的那半句排序口径进 hover。
+            // 走 Design 已有的 `DataOptionalHelp`：`help == nil` 时它一个东西都不挂，
+            // 所以"已全部展示"那一支不会凭空多一次落点。
+            DataFootnote(text: Self.countLabel(total: sorted.count, shown: visible.count))
+                .modifier(DataOptionalHelp(help: sorted.count > visible.count
+                    ? Self.countNote(total: sorted.count, shown: visible.count)
+                    : nil))
         }
     }
 
@@ -305,7 +320,16 @@ struct DependencyTable: View {
         }
     }
 
+    /// 屏上那一句：原句里"计数"那一层，逐字取前半。
+    static func countLabel(total: Int, shown: Int) -> String {
+        guard total > shown else {
+            return "共 \(NumberFormat.grouped(total)) 项，已全部展示。"
+        }
+        return "当前展示 \(NumberFormat.grouped(shown)) / \(NumberFormat.grouped(total)) 项。"
+    }
+
     /// 折叠必须被计数交代：只显示 12 行而不说「共 N 项」，用户会把 12 当成全部。
+    /// **整句**（含排序口径）现在是 ⓘ 里那一句，屏上的短句是它的前半 —— 两个落点不重叠。
     static func countNote(total: Int, shown: Int) -> String {
         guard total > shown else {
             return "共 \(NumberFormat.grouped(total)) 项，已全部展示。"
