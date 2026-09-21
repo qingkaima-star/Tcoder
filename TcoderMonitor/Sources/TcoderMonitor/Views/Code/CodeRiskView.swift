@@ -83,7 +83,7 @@ struct CodeRiskOverviewSection: View {
 
     static func subtitle(_ code: CodeMetrics) -> String {
         "最近扫描 " + DateFormat.sinceDescription(code.scannedAt)
-            + " · 耗时 " + CodeViewFormat.duration(code.durationMs)
+            + localizedFormat(" · 耗时 %@", CodeViewFormat.duration(code.durationMs))
     }
 }
 

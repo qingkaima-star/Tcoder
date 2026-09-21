@@ -188,7 +188,7 @@ struct GitTrendReadoutBar: View {
                            unitLabel: "无分桶", spanCaption: "无分桶")
         }
         let commits = buckets.map(\.commits)
-        let unit = "每\(gitBucketLabel(granularity))"
+        let unit = localizedFormat("每%@", gitBucketLabel(granularity))
         let first = buckets.first?.date
         let last = buckets.last?.date
         let span = first != nil && last != nil
