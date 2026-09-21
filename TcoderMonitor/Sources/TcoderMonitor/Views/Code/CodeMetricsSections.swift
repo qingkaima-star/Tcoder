@@ -140,13 +140,16 @@ struct CodeHotspotSection: View {
     }
 
     /// 折叠状态必须自己交代，不然「8 行」会被读成「一共只有 8 个」。
+    /// **但只交代一次**：同卡上方那枚 `DataDisclosureButton` 已经写着「展开其余 N 个未展示」，
+    /// 这里再念一遍"另有 N 个未展示"就是用户点名的"同一句念两遍"（页尾实拍
+    /// `.scratch/evidence-8de2d17/light-tail/代码规模.png`：两行相隔 40pt 逐字重复）。
+    /// 本行只留按钮**没有**的那一半 —— 列出多少 / 一共多少。
     static func truncationNote(_ code: CodeMetrics, shown: Int) -> String {
         let total = code.hugeFiles.count
         guard total > shown else {
             return "共 \(NumberFormat.grouped(total)) 个，已全部展示。"
         }
-        return "另有 \(NumberFormat.grouped(total - shown)) 个未展示 · 当前列出 "
-            + "\(NumberFormat.grouped(shown)) / \(NumberFormat.grouped(total)) 个。"
+        return "当前列出 \(NumberFormat.grouped(shown)) / \(NumberFormat.grouped(total)) 个。"
     }
 
     static func largestLineCount(_ code: CodeMetrics) -> Int {

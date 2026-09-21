@@ -225,23 +225,17 @@ struct ContributorRankingSection: View {
                         expanded.toggle()
                     }
                 }
-                DataFootnote(text: Self.truncationNote(authors: authors, shown: shown.count))
+                // 这里原本还有一行脚注「另有 N 位贡献者未展示。」—— 同一件事在**同一张卡上
+                // 说了三遍**：卡名副标题「展示 8 / 14 人」、展开按钮「展开其余 6 位贡献者」、
+                // 这行脚注。页尾实拍（.scratch/evidence-8de2d17/light-tail/贡献者.png）里
+                // 脚注就贴在按钮下面 24pt 处。删的是第三份，前两份各自还带着
+                // "列出多少 / 还有多少没列"，一条信息都没丢（B 守恒：总量仍在上界之上）。
             }
         }
     }
 
     private var visibleRows: [AuthorStats] {
         expanded ? authors : Array(authors.prefix(Self.displayLimit))
-    }
-
-    /// 副标题里的「展示 N / M」已经说了数量，这里补的是**折叠这件事本身**，
-    /// 展开之后必须翻成「已全部展示」，不能留一句过期的「另有 N 位」。
-    static func truncationNote(authors: [AuthorStats], shown: Int) -> String {
-        let total = authors.count
-        guard total > shown else {
-            return "共 \(NumberFormat.grouped(total)) 位贡献者，已全部展示。"
-        }
-        return "另有 \(NumberFormat.grouped(total - shown)) 位贡献者未展示。"
     }
 }
 

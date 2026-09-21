@@ -178,13 +178,14 @@ struct CodeDuplicationSection: View {
 
     /// 「未列出」必须一直说清楚，展开之后改成「已全部列出」，
     /// 免得那行字停在屏幕上变成假话。
+    /// 与 `CodeHotspotSection.truncationNote` 同一判断：**未列出的条数由展开按钮说一次**，
+    /// 本行只补按钮没有的「列出多少 / 一共多少」。
     static func truncationNote(_ code: CodeMetrics, shown: Int) -> String {
         let total = code.duplicatedBlocks.count
         guard total > shown else {
             return "共 \(NumberFormat.grouped(total)) 个重复块，已全部列出。"
         }
-        return "另有 \(NumberFormat.grouped(total - shown)) 个重复块未列出 · 当前 "
-            + "\(NumberFormat.grouped(shown)) / \(NumberFormat.grouped(total)) 个。"
+        return "当前列出 \(NumberFormat.grouped(shown)) / \(NumberFormat.grouped(total)) 个。"
     }
 }
 
