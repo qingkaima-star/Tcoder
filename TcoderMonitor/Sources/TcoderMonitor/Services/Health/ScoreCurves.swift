@@ -137,17 +137,30 @@ enum HealthCurves {
     }
 
     /// 长度收敛：超 80 字按子句边界丢弃，不足 40 字补固定后缀，最后再兜底截断。
+    ///
+    /// 拆成四个小函数是因为这一整块原本 CC 17，被本 App 自扫点名成
+    /// 「高圈复杂度」热点（`complexFunctionBar` = 16）。拆分**没有改任何一条判断**：
+    /// 子句边界、80/40 两个预算、垫句顺序、末尾标点改写全部原样。
     private static func fittedNarrative(_ candidate: String) -> String {
-        // **只对中文文本做长度收敛。** 这个函数的全部常量都是中文假设：
-        // 子句边界是 `。；，`、上限是 80 **字**、不足 40 字要补的垫句也是中文。
-        // 直接喂英文的后果是实测出来的：英文整句里没有 `。`，于是 clauses 只有一段、
-        // 超 80 就 `break` ⇒ result 空 ⇒ 走 `prefix(79)` **从单词中间截断**，
-        // 再补一个中文句号 `。` 和两句中文垫句 —— 比不翻还糟。
-        // 英文侧的预算由模板本身保证（四条分支各 ≤ 240 字符），版面是散文区、会换行。
-        if !candidate.contains(where: { "\u{4E00}" <= $0 && $0 <= "\u{9FFF}" }) { return candidate }
+        guard containsHan(candidate) else { return candidate }
+        return fitted(clauses: splitClauses(candidate), candidate: candidate)
+    }
+
+    /// **只对中文文本做长度收敛。** 下面全部常量都是中文假设：
+    /// 子句边界是 `。；，`、上限是 80 **字**、不足 40 字要补的垫句也是中文。
+    /// 直接喂英文的后果是实测出来的：英文整句里没有 `。`，于是 clauses 只有一段、
+    /// 超 80 就 `break` ⇒ result 空 ⇒ 走 `prefix(79)` **从单词中间截断**，
+    /// 再补一个中文句号 `。` 和两句中文垫句 —— 比不翻还糟。
+    /// 英文侧的预算由模板本身保证（四条分支各 ≤ 240 字符），版面是散文区、会换行。
+    private static func containsHan(_ text: String) -> Bool {
+        text.contains { "\u{4E00}" <= $0 && $0 <= "\u{9FFF}" }
+    }
+
+    /// 按子句边界切分；末尾不成句的一段也算一条，免得丢字。
+    private static func splitClauses(_ text: String) -> [String] {
         var clauses: [String] = []
         var current = ""
-        for character in candidate {
+        for character in text {
             current.append(character)
             if character == "。" || character == "；" || character == "，" {
                 clauses.append(current)
@@ -155,7 +168,11 @@ enum HealthCurves {
             }
         }
         if !current.isEmpty { clauses.append(current) }
+        return clauses
+    }
 
+    /// 逐子句累加到 80 字预算；一条都放不下时退回"整句截断"，再把结尾标点收成正文句号。
+    private static func fitted(clauses: [String], candidate: String) -> String {
         var result = ""
         for clause in clauses {
             if result.count + clause.count > 80 { break }
@@ -167,7 +184,12 @@ enum HealthCurves {
             result.append("。")
         }
         if !result.hasSuffix("。") { result += "。" }
+        return padded(result)
+    }
 
+    /// 不足 40 字补固定垫句（补满即停，绝不为凑长度把总预算顶破 80），最后再兜底截断。
+    private static func padded(_ text: String) -> String {
+        var result = text
         let pads = ["其余维度处于可接受区间。", "建议保持观察，待各维度数据补齐后复核。"]
         var padIndex = 0
         while result.count < 40, padIndex < pads.count, result.count + pads[padIndex].count <= 80 {
