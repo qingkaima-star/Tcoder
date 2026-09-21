@@ -31,7 +31,10 @@ DOMAIN="com.tcoder.monitor"
 UUID="11111111-2222-3333-4444-555555555555"
 SWITCH_MODE="${SWITCH_MODE:-single}"
 # 九个 DetailSection 的中文 rawValue，顺序即侧边栏顺序
-SECTIONS=("总览" "代码规模" "复杂度风险" "Git 洞察" "贡献者" "性能监控" "错误日志" "依赖分析" "健康评分")
+# 页名可以用 `CAPTURE_PAGES` 缩小（冒号分隔 —— 页名里有空格，不能按空白切）。
+# 为什么开这个口子：只改了一页的内容时，"重拍整批 36 张"会掩盖"这一页到底对不对"，
+# 而补拍那一页 4 张（深浅 × 顶尾）才是针对变了的那个变量。默认仍是九页全拍。
+IFS=':' read -r -a SECTIONS <<< "${CAPTURE_PAGES:-总览:代码规模:复杂度风险:Git 洞察:贡献者:性能监控:错误日志:依赖分析:健康评分}"
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 TARGET="${CAPTURE_TARGET:-$REPO_ROOT}"
