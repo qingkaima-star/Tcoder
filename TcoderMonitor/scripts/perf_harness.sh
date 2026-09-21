@@ -193,11 +193,15 @@ idle_write_summary() {  # idle_write_summary <outdir>：4/4 汇总表（与 spec
 # =============================================================================
 # switch —— 逐页冷启动（spec §3 T4：到可交互 ≤1.0 s、首帧 ≤3 个显示节拍）
 # =============================================================================
-switch_page_list() {  # → 页名串：PAGES 优先，否则取 capture_pages_isolated.sh 的 SECTIONS
+switch_page_list() {  # → 每行一个页名（**必须按行遍历**）
+  # 旧实现在这里 `tr '\n' ' '`，配合下面的 `for page in $pages` 做词分割 ——
+  # 而页名里有带空格的：`Git 洞察` 被切成 "Git" + "洞察" 两页，
+  # 九页扫描实际只覆盖 8 页，还有一页被用错名字起了一次 App。
+  # 实测抓到于 2026-09-21 14:53（日志里同时出现 `--> 4) Git` 与 `--> 5) 洞察`）。
   if [ -n "${PAGES:-}" ]; then
     printf '%s\n' "$PAGES"
   else
-    sections | tr '\n' ' '
+    sections
   fi
 }
 
@@ -280,9 +284,12 @@ cmd_switch() {
   switch_refuse_coexist
 
   local n=0
-  for page in $pages; do
+  while IFS= read -r page; do
+    [ -n "$page" ] || continue
     n=$((n + 1))
-    local sandbox="$out/sandbox/$(printf '%02d' "$n")-$page" dir="$out/pages/$(printf '%02d' "$n")-$page"
+    # 目录名里的空格换成下划线（页名本身照原样传给 App，只有路径要规矩）
+    local slug="${page// /_}"
+    local sandbox="$out/sandbox/$(printf '%02d' "$n")-$slug" dir="$out/pages/$(printf '%02d' "$n")-$slug"
     mkdir -p "$dir"
     echo "--> $n) $page"
     if [ "$DRY_RUN" = "1" ]; then
@@ -292,7 +299,7 @@ cmd_switch() {
     fi
     switch_record_page "$page" "$dir" "$sandbox"
     sleep 2
-  done
+  done <<< "$pages"
   [ "$DRY_RUN" = "1" ] && { echo "（DRY_RUN=1：一条命令都没执行）"; return 0; }
   echo "==> 逐页汇总"
   python3 "$TRACE_REPORT" switches "$out/pages" | tee "$out/switch-summary.txt"

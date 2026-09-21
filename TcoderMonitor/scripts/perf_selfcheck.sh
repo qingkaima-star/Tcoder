@@ -44,6 +44,7 @@ cmd_selfcheck() {
   selfcheck_baseline_text_is_derived "$out"  # 15) 对照列文字不许是字典的第二份手抄
   selfcheck_heavy_jobs_probe "$out"  # 16) 并发重活：三个名字都要认，输出必须是 pid 清单
   selfcheck_gate_matrix "$out"      # 17) 六维闸门合成矩阵：能放行，也会逐维拒
+  selfcheck_page_list_shape "$out"    # 18) 九页页名逐条完整（带空格的那条不许被拆）
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
@@ -545,4 +546,17 @@ selfcheck_gate_matrix() {  # selfcheck_gate_matrix <outdir>
   gate_feed; i18n_ledger="/tmp/x.log"; preflight_gates >/dev/null 2>&1
   [ "$hard" = "1" ] || { fail "设着漏翻台账还放行——那批量的是台账的开销"; hard_all=1; }
   [ "$hard_all" = "0" ] && ok "六维闸门矩阵：全合格放行、逐维破坏各判一次拒"
+}
+
+selfcheck_page_list_shape() {  # selfcheck_page_list_shape <outdir>
+  # 18) 九页的页名必须**逐条完整**：`Git 洞察` 这种带空格的页名是这条的活靶子。
+  #     旧实现按空格拆（`tr ' ' '\n'`），把九页拆成 10 项、少一页，而扫描一路"成功"跑完。
+  local n line
+  n=$(sections 2>/dev/null | wc -l | tr -d ' ')
+  [ "$n" = "9" ] || { fail "SECTIONS 解析出 $n 条页名（应为 9）——逐页扫描会漏页或重页"; return; }
+  line=$(sections 2>/dev/null | tr '\n' '|')
+  case "$line" in
+    *Git\ 洞察*) ok "九页页名完整（含带空格的「Git 洞察」）" ;;
+    *) fail "页名里没有完整的「Git 洞察」（拿到 $line）——空格又被当成分隔符了" ;;
+  esac
 }

@@ -223,10 +223,16 @@ def summary_time_profile_rows(loaded):
         hot = str(tp.get("hotspot_top1", ""))
         # §1 那 64.3% 写的是 "_updateViewGraph / AG::Graph::UpdateStack::update()" 两个符号，
         # 它们是同一条视图图更新链；判定必须都认，否则换个入口符号就误报"已换位"。
-        still = any(tok in hot for tok in ("updateViewGraph", "UpdateStack::update"))
+        # 【地址不是符号】release 内联/未符号化的帧会解析成 `0x1004faa5b` 这种裸地址，
+        # 而"仍是它 / 已换位"是一句**关于是谁**的话——拿地址去判等于凭空断言。
+        # 实测 2026-09-21：交付内容三趟的热点是 `92.2% 0x1004faa5b`，旧写法直接报了"已换位"。
+        resolved = bool(hot) and not hot.startswith("0x")
+        still = resolved and any(tok in hot for tok in ("updateViewGraph", "UpdateStack::update"))
+        hot_verdict = ("仍是它" if still else "已换位") if resolved else "不可判（未解析出符号）"
         fmt_row("主线程热点第一名", base_hotspot_line(),
-                "%.1f%% %s" % (tp.get("hotspot_top1_pct", 0.0), hot[:26]),
-                "仍是它" if still else "已换位")
+                "%.1f%% %s" % (tp.get("hotspot_top1_pct", 0.0),
+                               hot[:26] if resolved else hot[:18] + "（未符号化）"),
+                hot_verdict)
     else:
         fmt_row("主线程 CPU 样本占比", base_main_thread_line(), "未覆盖（缺 time-profile.json）", "—")
         fmt_row("主线程热点第一名", base_hotspot_line(), "未覆盖（缺 time-profile.json）", "—")

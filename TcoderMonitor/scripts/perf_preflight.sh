@@ -24,8 +24,10 @@
 sections() {
   local line
   line=$(grep -m1 '^SECTIONS=(' scripts/capture_pages_isolated.sh) || return 1
-  echo "$line" | sed -e 's/^SECTIONS=(//' -e 's/)[^)]*$//' | tr -d '"' | tr ' ' '\n' \
-    | sed '/^$/d'
+  # 【按引号取，不许按空格拆】旧写法 `tr ' \n'` 会把**引号内部的空格**也当分隔符，
+  # 于是 `Git 洞察` 变成 "Git" 与 "洞察" 两页：九页扫描实际只覆盖 8 页，
+  # 还有一页是用错名字起的 App。实测抓到于 2026-09-21 14:57（DRY_RUN 里出现 10 行）。
+  printf '%s\n' "$line" | grep -o '"[^"]*"' | sed -e 's/^"//' -e 's/"$//'
 }
 
 instance_pids() { pgrep -x TcoderMonitor 2>/dev/null || true; }
