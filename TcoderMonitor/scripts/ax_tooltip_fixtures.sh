@@ -244,4 +244,6 @@ for page in 总览 性能监控; do
 done
 
 echo "== 覆盖率"
-./scripts/ax_tooltip_coverage.py "$BOX"/* 2>/dev/null | head -6
+# 不传参数：让它走自己的默认发现（会排掉 `sandbox-*` 那批 App 支持目录）。
+# 上一版把 "$BOX"/* 显式传进去，绕过了那道过滤，于是"批次数"从 14 被报成 27。
+./scripts/ax_tooltip_coverage.py 2>/dev/null | head -6
