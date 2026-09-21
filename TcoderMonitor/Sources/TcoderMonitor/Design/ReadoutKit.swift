@@ -340,7 +340,7 @@ func localizedCopy(_ text: String) -> String {
 /// 开关是环境变量：不设时 `record` 第一次判断就返回，渲染路径零成本；
 /// 设了就往 `<path>.misses` / `<path>.hits` 写两份清单（退出时落盘）。
 /// 记的是**去重后的键**，不是每次渲染的流水 —— 一屏 60fps 会把文件写爆。
-enum LocalizationLedger {
+final class LocalizationLedger {
     static let shared = LocalizationLedger()
 
     private let lock = NSLock()
