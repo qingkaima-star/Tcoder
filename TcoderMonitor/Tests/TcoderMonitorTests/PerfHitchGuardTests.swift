@@ -96,7 +96,7 @@ final class PerfHitchGuardTests: XCTestCase {
     ///   → 归 **M1 / WS-W**（spec §5 点名"LogsView.attachedItems 的 body 内 stat() 移出"），终点 0。
     static let knownBaseline: [String: Int] = [
         "directFormatters": 1,
-        "dynamicNSColor": 64,   // 56→**64 是扩面，不是新增债**：判据写的是"body/Mark 内"，
+        "dynamicNSColor": 62,   // 56→**64 是扩面，不是新增债**：判据写的是"body/Mark 内"，
         // 而 `Design/**`（`GlassComponents`/`ChartTokens`/`HealthAdviceCards` 等）本身就是视图构造器，
         // 旧扫描面只看 `Views/`。多看见的 8 处全部落在 Design/（台账现在带 `Design/` 前缀可逐条复核）。
         // 从 64 起仍只许减不许增；终点 0。历史上这条是 107→86→59→58→56（三次还债）→64（一次扩面）。
