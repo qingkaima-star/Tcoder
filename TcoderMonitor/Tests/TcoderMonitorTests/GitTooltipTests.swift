@@ -9,8 +9,11 @@ import XCTest
 /// 2. **画法全站唯一**：`Views/Git/**` 里不许再有人自己画一枚问号图标。
 ///
 /// 判据形状与总工那把尺子同源（逐行、剥整行注释、按承载位分类），
-/// 但把 `help:` 也算成 ⓘ 承载位 —— `NoteLine` / `DataFieldRow` 的 `help:` 参数
-/// 最终就是走 `Design/CopyHelp.swift` 那一份画法上屏的。
+/// 但把 `help:` 也算成 ⓘ 承载位 —— 它确实不再常驻上屏。
+/// ⚠ 两类 `help:` 的**可见性不同**：`NoteLine.help:` 走 `Design/CopyHelp.swift`
+/// 真上屏一枚问号；`DataFieldRow.help:` 走 `Design/DataRows.swift` 的
+/// `DataOptionalHelp` → 只挂 `.help()`，问号看不见（悬停目标就是它解释的那一行）。
+/// 本文件只判「有没有第二个落点」，不判问号可见性 —— 后者记进汇报的契约缺口。
 final class GitTooltipTests: XCTestCase {
 
     // MARK: - 尺子
