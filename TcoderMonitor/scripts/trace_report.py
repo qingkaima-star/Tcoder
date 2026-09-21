@@ -244,66 +244,93 @@ WEIGHT_SOURCE = "Tests/TcoderMonitorTests/PerfInvalidationRatchetTests+CoarseWei
 MONITOR_SOURCE = "Sources/TcoderMonitor/Services/Performance/MachSystemMonitor.swift"
 WEIGHT_SETS = ("ungatedCoarseSymbols", "gatedCoarseSymbols",
                "unobservedCoarseSymbols", "aliasCoarseSymbols")
+LOAD_BUCKETS = ("ungatedCoarseSymbols", "aliasCoarseSymbols")
+MINIMUM_PUBLISH_BODY_LINES = 12
 
 
-def read_weight_ruler(root):
-    """把"哪几处粗读点每 tick 必然换值"这件事**从源码现读**出来，不复制第二份名单。
-
-    两处真相源都读：守卫里登记的四个集合（Swift 测试断言它），以及 `publish()` 的实际写法
-    （本函数自己分类）。两边不一致就大声报——那说明有人改了闸门写法却没回来改口径
-    （Swift 侧同一条测试也会红），绝不允许 python 悄悄用一份过期名单。
-    """
+def read_declared_weights(root):
+    """守卫里登记的四个集合。**读不到就抛**——退回手抄名单就是造第二把尺子。"""
     path = os.path.join(root, WEIGHT_SOURCE)
-    sets = {}
     try:
         src = open(path, encoding="utf-8").read()
     except OSError as exc:
         raise RuntimeError("读不到收益分级的来源 %s：%s" % (path, exc))
+    sets = {}
     for name in WEIGHT_SETS:
-        m = re.search(r"static let %s[^=]*= \[(.*?)\]" % name, src, re.S)
-        if m is None:
-            raise RuntimeError("读不到守卫里的 %s——被改名或搬走了；本命令宁可报错，"
-                               "也不退回手抄的承重名单（那会变成第二把尺子）" % name)
-        sets[name] = set(re.findall(r'"([^"]+)"', m.group(1)))
+        found = re.search(r"static let %s[^=]*= \[(.*?)\]" % name, src, re.S)
+        if found is None:
+            raise RuntimeError("读不到守卫里的 %s——被改名或搬走了，宁可报错也不许用旧名单" % name)
+        sets[name] = set(re.findall(r'"([^"]+)"', found.group(1)))
+    return sets
 
+
+def publish_body_lines(root):
+    """只取 `publish(_:)` 的函数体（每 tick 的写法只由它决定）＋全文件非注释行。
+    边界用"下一行正好四个空格 + }"，不做括号计数——在字符串里数括号越界过一次。"""
     mon = open(os.path.join(root, MONITOR_SOURCE), encoding="utf-8").read()
     lines = [l for l in mon.split("\n") if not l.strip().startswith("//")]
     body, started = [], False
     for line in lines:
-        if not started and "func publish(" in line:
-            started = True
+        if not started:
+            started = "func publish(" in line
             continue
-        if started and line == "    }":
-            break
-        if started:
-            body.append(line)
-    if len(body) < 12:
-        raise RuntimeError("只从 publish() 抽到 %d 行，边界判定坏了 → 分级不可信" % len(body))
+        if line == "    }":
+            return body, lines
+        body.append(line)
+    return body, lines
 
+
+def classify_symbol(sym, symbols, lines, body):
+    """单个粗属性归哪一格。顺序有意：不在观察图 > 别名 > 裸写 / 闸门写。
+    同一 tick 内既裸写又闸门写 = "冲突"，那是"闸门只加了一半"的形状，宁可问人。"""
+    others = [o for o in symbols if o != sym]
+    if any("@ObservationIgnored" in l and ("var %s" % sym) in l for l in lines):
+        return "unobservedCoarseSymbols"
+    if any(re.match(r"\s*var %s\b[^={]*\{\s*\S" % sym, l)
+           and any(re.search(r"\b%s\b" % o, l) for o in others) for l in lines):
+        return "aliasCoarseSymbols"
+    bare = re.compile(r"^\s*(?:self\.)?%s\s*=[^=]" % sym)
+    ungated = any(bare.match(l) for l in body)
+    gated = any(re.search(r"write\(\s*\\\.%s\b" % sym, l) for l in body)
+    if ungated and gated:
+        return "冲突"
+    if ungated:
+        return "ungatedCoarseSymbols"
+    if gated:
+        return "gatedCoarseSymbols"
+    return "未归类"
+
+
+def read_weight_ruler(root):
+    """现读分类，并**与守卫登记的名单对表**：不一致就交出来，两边各说各话会被 cmd_migration 报 ⚠。"""
+    sets = read_declared_weights(root)
+    body, lines = publish_body_lines(root)
+    if len(body) < MINIMUM_PUBLISH_BODY_LINES:
+        raise RuntimeError("只从 publish() 抽到 %d 行，边界判定坏了 → 分级不可信" % len(body))
     symbols = sorted(set().union(*sets.values()))
-    derived = {}
-    for sym in symbols:
-        unobserved = any("@ObservationIgnored" in l and ("var %s" % sym) in l for l in lines)
-        alias = any(re.match(r"\s*var %s\b[^={]*\{\s*\S" % sym, l)
-                    and any(re.search(r"\b%s\b" % o, l) for o in symbols if o != sym)
-                    for l in lines)
-        ungated = any(re.match(r"^\s*(?:self\.)?%s\s*=[^=]" % sym, l) for l in body)
-        gated = any(re.search(r"write\(\s*\\\.%s\b" % sym, l) for l in body)
-        if unobserved:
-            derived[sym] = "unobservedCoarseSymbols"
-        elif alias:
-            derived[sym] = "aliasCoarseSymbols"
-        elif ungated and gated:
-            derived[sym] = "冲突"
-        elif ungated:
-            derived[sym] = "ungatedCoarseSymbols"
-        elif gated:
-            derived[sym] = "gatedCoarseSymbols"
-        else:
-            derived[sym] = "未归类"
+    derived = dict((sym, classify_symbol(sym, symbols, lines, body)) for sym in symbols)
     declared = dict((sym, name) for name in WEIGHT_SETS for sym in sets[name])
     disagree = sorted(sym for sym in symbols if derived[sym] != declared[sym])
     return symbols, derived, disagree, len(body)
+
+
+def weighting_readout(root, hits):
+    """返回（一行分级说明, 每条读点的标签）。分级读不到时**明说不可用**，不许悄悄少打一维。"""
+    try:
+        _symbols, derived, disagree, body_lines = read_weight_ruler(root)
+    except (OSError, RuntimeError) as exc:
+        return "   收益分级**不可用**：%s" % exc, {}
+    tags = dict((sy, "承重" if derived[sy] in LOAD_BUCKETS
+                 else "顺手" if derived[sy] == "gatedCoarseSymbols" else "出图") for sy in derived)
+    load = sum(1 for h in hits if tags.get(h[2]) == "承重")
+    note = ("   收益分级（从 publish() 现读 %d 行）：承重 %d 处 / 顺手 %d 处；"
+            "顺手那几处的宿主属性走等值闸门，单独迁它们在帧率上测不出差异"
+            % (body_lines, load, len(hits) - load))
+    if disagree:
+        note += ("\n   ⚠ 与守卫登记的名单不一致（有人改了闸门写法却没回来改口径）：%s"
+                 % ", ".join("%s=%s" % (d, derived[d]) for d in disagree))
+    return note, tags
+
 
 
 def cmd_migration(args):
@@ -325,23 +352,7 @@ def cmd_migration(args):
                     hits.append((os.path.relpath(path, root), number, m.group(1),
                                  MIGRATION_HINTS.get(m.group(1), "读对应的细粒度格")))
                 fine_count += len(fine_re.findall(line))
-    # 收益分级：读不到就明说读不到，**不许悄悄不打**（那等于把这条命令退回只报总数）。
-    weight_note, tag_of = "", {}
-    try:
-        _sym, derived, disagree, body_lines = read_weight_ruler(root)
-        tag_of = dict((sy, "承重" if derived[sy] in ("ungatedCoarseSymbols", "aliasCoarseSymbols")
-                       else "顺手" if derived[sy] == "gatedCoarseSymbols" else "出图")
-                      for sy in derived)
-        load = sum(1 for h in hits if tag_of.get(h[2]) == "承重")
-        weight_note = ("   收益分级（从 publish() 现读 %d 行）：承重 %d 处 / 顺手 %d 处；"
-                       "顺手那几处的宿主属性走等值闸门，单独迁它们在帧率上测不出差异"
-                       % (body_lines, load, len(hits) - load))
-        if disagree:
-            weight_note += ("\n   ⚠ 与守卫登记的名单不一致（有人改了闸门写法却没回来改口径）：%s"
-                            % ", ".join("%s=%s" % (d, derived[d]) for d in disagree))
-    except (OSError, RuntimeError) as exc:
-        weight_note = "   收益分级**不可用**：%s" % exc
-
+    weight_note, tag_of = weighting_readout(root, hits)
     print("== 细粒度契约迁移进度（口径直接取自 %s）==" % RATCHET_SOURCE)
     print("   扫描 %d 个文件（%s），粗粒度读点 %d 处 / 登记上限 %d 处 / 目标 0，细粒度读点 %d 处"
           % (scanned, " + ".join(dirs), len(hits), ceiling, fine_count))

@@ -43,10 +43,8 @@ cmd_selfcheck() {
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
 }
 
-selfcheck_weight_ruler() {  # selfcheck_weight_ruler <outdir>
-  # 11) `migration` 现在多打一行"承重 / 顺手"。它自己也是扫描型判据，
-  #     所以照本仓规矩要双向钉：**正例证明它算得对，两条反例证明它不会静默装好**。
-  local fake="$out/fake-weight"
+weight_fixture() {  # weight_fixture <fake根> —— 造一棵最小假树：两处裸写 + 一处闸门写
+  local fake="$1"
   mkdir -p "$fake/Tests/TcoderMonitorTests" "$fake/Sources/TcoderMonitor/Views" \
            "$fake/Sources/TcoderMonitor/Services/Performance"
   cat > "$fake/Tests/TcoderMonitorTests/PerfInvalidationRatchetTests.swift" <<'SWIFT'
@@ -55,12 +53,7 @@ selfcheck_weight_ruler() {  # selfcheck_weight_ruler <outdir>
     static let coarseCallSiteCeiling = 7
     static let consumerDirectories = ["Sources/TcoderMonitor/Views"]
 SWIFT
-  cat > "$fake/Tests/TcoderMonitorTests/PerfInvalidationRatchetTests+CoarseWeighting.swift" <<'SWIFT'
-    static let ungatedCoarseSymbols: Set<String> = ["latestSnapshot", "history"]
-    static let gatedCoarseSymbols: Set<String> = ["topProcesses"]
-    static let unobservedCoarseSymbols: Set<String> = []
-    static let aliasCoarseSymbols: Set<String> = []
-SWIFT
+  weight_declare "$fake" '["latestSnapshot", "history"]' '["topProcesses"]'
   cat > "$fake/Sources/TcoderMonitor/Services/Performance/MachSystemMonitor.swift" <<'SWIFT'
     private func publish(_ batch: SampleBatch) {
         var stats = PublishStats()
@@ -75,43 +68,62 @@ SWIFT
         var a5 = 0
         var a6 = 0
         var a7 = 0
-        var a8 = 0
         stats.ticks += 1
         lastPublishStats = stats
     }
 SWIFT
-  printf 'struct Row { var monitor: M }\nextension Row { var a: Any { monitor.latestSnapshot } }\n' > "$fake/Sources/TcoderMonitor/Views/Fake.swift"
-  printf 'extension Row { var b: Any { monitor.history } }\nextension Row { var c: Any { monitor.topProcesses } }\n' >> "$fake/Sources/TcoderMonitor/Views/Fake.swift"
+  printf 'extension Row { var a: Any { monitor.latestSnapshot } }\n' > "$fake/Sources/TcoderMonitor/Views/Fake.swift"
+  printf 'extension Row { var b: Any { monitor.history } }\n' >> "$fake/Sources/TcoderMonitor/Views/Fake.swift"
+  printf 'extension Row { var c: Any { monitor.topProcesses } }\n' >> "$fake/Sources/TcoderMonitor/Views/Fake.swift"
+}
 
+weight_declare() {  # weight_declare <fake根> <ungated 名单> <gated 名单>
+  cat > "$1/Tests/TcoderMonitorTests/PerfInvalidationRatchetTests+CoarseWeighting.swift" <<SWIFT
+    static let ungatedCoarseSymbols: Set<String> = $2
+    static let gatedCoarseSymbols: Set<String> = $3
+    static let unobservedCoarseSymbols: Set<String> = []
+    static let aliasCoarseSymbols: Set<String> = []
+SWIFT
+}
+
+selfcheck_weight_ruler() {  # selfcheck_weight_ruler <outdir>
+  # 11) `migration` 新打的"承重 / 顺手"这一维也是扫描型判据，照本仓规矩双向钉：
+  #     正例证明算得对，两条反例证明它**不会静默装好**。三步各自成函数（本仓对尺子的
+  #     ≤50 行 / CC<16 棘轮会管这里，第一次跑就被它点名了）。
+  local fake="$1/fake-weight"
+  weight_fixture "$fake"
+  selfcheck_weight_positive "$fake"
+  selfcheck_weight_missing_source "$fake"
+  selfcheck_weight_divergence "$fake"
+}
+
+
+selfcheck_weight_positive() {  # <fake根>：正例——两类都算出来
   local wout
-  wout=$(python3 "$TRACE_REPORT" migration --module-root "$fake" 2>&1)
+  wout=$(python3 "$TRACE_REPORT" migration --module-root "$1" 2>&1)
   if printf '%s' "$wout" | grep -q '收益分级（从 publish() 现读' \
      && printf '%s' "$wout" | grep -q '\[承重\]' \
      && printf '%s' "$wout" | grep -q '\[顺手\]'; then
     ok "收益分级：合成夹具里算出承重与顺手两类"
   else
-    fail "收益分级在合成夹具上没算对（它应当既认出裸写、也认出闸门写）：$(printf '%s' "$wout" | head -3)"
+    fail "收益分级在合成夹具上没算对（应当既认出裸写、也认出闸门写）：$(printf '%s' "$wout" | head -3)"
   fi
+}
 
-  # 反例一：分级来源不见了 —— 必须**明说不可用**，不许悄悄退回"只报总数"。
-  rm -f "$fake/Tests/TcoderMonitorTests/PerfInvalidationRatchetTests+CoarseWeighting.swift"
-  if python3 "$TRACE_REPORT" migration --module-root "$fake" 2>&1 | grep -q '收益分级\*\*不可用\*\*'; then
+selfcheck_weight_missing_source() {  # <fake根>：反例一——分级来源没了要喊，不许少打一维
+  rm -f "$1/Tests/TcoderMonitorTests/PerfInvalidationRatchetTests+CoarseWeighting.swift"
+  if python3 "$TRACE_REPORT" migration --module-root "$1" 2>&1 | grep -q '收益分级\*\*不可用\*\*'; then
     ok "分级来源缺失时报「不可用」，不静默少打一维"
   else
-    fail "分级文件被删掉后它没喊——那读的人会以为这一维本来就是空的"
+    fail "分级文件被删掉后它没喊——读的人会以为这一维本来就是空的"
   fi
+}
 
-  # 反例二：源码把 latestSnapshot 改成闸门写了，守卫名单还留着"承重"——必须报 ⚠。
-  cat > "$fake/Tests/TcoderMonitorTests/PerfInvalidationRatchetTests+CoarseWeighting.swift" <<'SWIFT'
-    static let ungatedCoarseSymbols: Set<String> = ["history"]
-    static let gatedCoarseSymbols: Set<String> = ["topProcesses", "latestSnapshot"]
-    static let unobservedCoarseSymbols: Set<String> = []
-    static let aliasCoarseSymbols: Set<String> = []
-SWIFT
-  # 只动**声明**这一侧、不动源码那一侧。第一版我把两侧一起改了，
-  # 两边自然一致、⚠ 永远出不来——那是条看起来有反例其实是废的反例；
-  # 要测的恰恰是两侧分叉：源码还在裸写，名单却说"已经走闸门了"。
-  if python3 "$TRACE_REPORT" migration --module-root "$fake" 2>&1 | grep -q '与守卫登记的名单不一致'; then
+selfcheck_weight_divergence() {  # <fake根>：反例二——两侧分叉必须报 ⚠
+  # 第一版我把"声明"和"源码"两侧一起改了，两边自然一致、⚠ 永远出不来，
+  # 是 selfcheck 自己判红才揭出这条废反例。要测的恰恰是**只动声明这一侧**。
+  weight_declare "$1" '["history"]' '["topProcesses", "latestSnapshot"]'
+  if python3 "$TRACE_REPORT" migration --module-root "$1" 2>&1 | grep -q '与守卫登记的名单不一致'; then
     ok "改了闸门写法却没回来改口径时，它报 ⚠ 而不是各说各话"
   else
     fail "两份口径已经分叉却没报出来——这条分级会静默腐烂"
