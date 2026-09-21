@@ -42,6 +42,12 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     /// Denominator behind `averageCyclomaticComplexity`. Zero means the analyzer
     /// recognized no functions at all, which is "unknown", not "simple".
     var analyzedFunctionCount: Int = 0
+    /// 没能编译的识别规则（批次 P7-B 2-6/2-7）。`nil` = 所有规则都跑起来了。
+    ///
+    /// 存在理由：正则坏掉时函数数会算成 0，而 0 在界面上读起来就是"这个仓库没有函数"。
+    /// 这条台账把"我们的规则没跑起来"与"这个仓库真的没有"分开。
+    /// **Optional 是落盘兼容要求**：非 Optional 带默认值会让旧报告整份解码失败。
+    var analyzerRuleFailures: [String]? = nil
 
     /// 0...1 — share of code lines that fall inside a duplicated block.
     var duplicationRatio: Double = 0

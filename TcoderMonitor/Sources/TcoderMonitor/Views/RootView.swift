@@ -46,7 +46,8 @@ struct RootView: View {
 
                 if state.isScanning {
                     ProgressOverlay(phase: state.phase,
-                                    projectName: state.selectedProject?.name ?? "当前项目")
+                                    projectName: state.selectedProject?.name ?? "当前项目",
+                                    completedSections: state.completedSections)
                 }
             }
         }

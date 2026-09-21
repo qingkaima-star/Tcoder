@@ -88,16 +88,24 @@ extension ProjectStoreRoundTripTests {
         XCTAssertNotNil(try? isoDecoder.decode(Registry.self, from: optionalOnly),
                         "只缺 Optional 键不该失败——两组的差别就是这条规则存在的全部理由")
 
-        // 模型侧最后一道：MonitoredProject 的 isDemo 也是非 Optional。
-        let projectData = try JSONEncoder.withISO8601SortedKeys().encode(project)
-        let withoutDemo = try byRemoving(keys: ["isDemo"], from: projectData)
-        XCTAssertThrowsError(
-            try isoDecoder.decode(MonitoredProject.self, from: withoutDemo),
-            "MonitoredProject 加一个非 Optional 字段，会让所有旧注册表读不回来")
-
-        print("【WS-V #33】非 Optional 护栏：缺 failedSections / generatedAt / project / projects / "
-            + "isDemo 全部整份 keyNotFound，且 try? 一律吞成 nil —— "
+        print("【WS-V #33】非 Optional 护栏：缺 failedSections / generatedAt / project / projects "
+            + "全部整份 keyNotFound，且 try? 一律吞成 nil —— "
             + "落盘契约新增字段必须 Optional（#26 的规矩，现在它会长牙了）")
+    }
+
+    /// 模型侧同一道护栏。**原本这一格测的是 `isDemo`**：批次 P7-A 把示例数据整条退役、
+    /// 字段删除，判据**不能跟着删** —— 它是"落盘契约新增字段必须 Optional"那条规矩的牙，
+    /// 所以换成一个仍然存在且必须必填的字段（`name`），判据本体一字未改。
+    /// 顺带留下反证：删字段是安全的 —— 上面 `未知键→忽略` 那条已经证明
+    /// 带着 `isDemo` 的旧 `projects.json` 在新模型上照样解得开。
+    func testMissingNonOptionalModelFieldFailsDecode() throws {
+        let (store, _) = try makeIsolatedStore()
+        let project = store.add(path: "/tmp/wsv-model-break", name: "断裂")
+        let projectData = try JSONEncoder.withISO8601SortedKeys().encode(project)
+        let withoutName = try byRemoving(keys: ["name"], from: projectData)
+        XCTAssertThrowsError(
+            try isoDecoder.decode(MonitoredProject.self, from: withoutName),
+            "MonitoredProject 加一个非 Optional 字段，会让所有旧注册表读不回来")
     }
 
     func testScoreHistoryDedupesSameRecentScoreAndCapsAt240Points() throws {

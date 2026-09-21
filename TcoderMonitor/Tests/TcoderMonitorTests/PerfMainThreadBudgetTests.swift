@@ -205,7 +205,7 @@ final class PerfMainThreadBudgetTests: XCTestCase {
             let store = ProjectStore()
             store.storageDirectory = dir.appendingPathComponent("store-\(round)", isDirectory: true)
             try FileManager.default.createDirectory(at: store.storageDirectory, withIntermediateDirectories: true)
-            let project = store.add(path: "/tmp/perf-budget-\(round)", name: "持久化量级", isDemo: false)
+            let project = store.add(path: "/tmp/perf-budget-\(round)", name: "持久化量级")
             var fresh = report
             fresh.project = project
             upsertFull.append(timed({ store.upsertReport(fresh) }))
@@ -219,7 +219,7 @@ final class PerfMainThreadBudgetTests: XCTestCase {
         var four: [URL] = []
         for i in 0..<4 {
             var one = report
-            one.project = MonitoredProject(name: "启动第\(i)个", path: "/tmp/boot-\(i)", isDemo: false)
+            one.project = MonitoredProject(name: "启动第\(i)个", path: "/tmp/boot-\(i)")
             let url = bootDir.appendingPathComponent("reports/\(one.project.id.uuidString).json")
             try isoEncoder.encode(one).write(to: url, options: .atomic)
             four.append(url)

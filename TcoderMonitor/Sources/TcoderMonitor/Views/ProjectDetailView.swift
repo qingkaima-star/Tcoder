@@ -39,7 +39,7 @@ struct ProjectDetailView: View {
     /// section instead would re-scan forever whenever one analyzer legitimately
     /// cannot produce data (a folder that simply isn't a git repo).
     private func maybeAutoScan() {
-        guard let project = state.selectedProject, !project.isDemo else { return }
+        guard let project = state.selectedProject else { return }
         guard state.store.report(for: project)?.hasBeenScanned == false else { return }
         state.scan(project: project)
     }
@@ -106,7 +106,7 @@ struct ProjectDetailView: View {
             EmptyStateView(
                 icon: IconName.emptyUnknown.rawValue,
                 title: "还没有项目",
-                message: "在左侧选择本地仓库目录，或加载内置的 Tcoder 示例项目体验完整指标。"
+                message: "在左侧「选择目录…」指一个本地仓库目录，九页读数全部由它真实算出来。"
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {

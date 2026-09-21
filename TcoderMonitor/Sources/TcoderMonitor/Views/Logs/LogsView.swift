@@ -43,7 +43,6 @@ struct LogsView: View {
             Theme.Page.Header(title: "错误日志",
                               icon: .logs,
                               subtitle: subtitle,
-                              isDemo: report?.project.isDemo == true,
                               actions: { actions(window: window) })
             if let note = pendingRescanNote {
                 NoteLine(note, role: Theme.Semantic.warning, icon: .riskWarning)
@@ -59,7 +58,7 @@ struct LogsView: View {
             if state.isScanning {
                 HStack(spacing: Theme.Spacing.xxs) {
                     ProgressView().controlSize(.small)
-                    Text(state.phase.label)
+                    Text(localizedCopy(state.phase.label))
                         .font(Theme.Typo.label.font)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -77,7 +76,7 @@ struct LogsView: View {
                                 selection: window.wrappedValue,
                                 onSelect: { window.wrappedValue = $0 })
                 .accessibilityLabel("时间窗口")
-                .help("切换后自动重新分析（示例项目与扫描进行中除外）")
+                .help("切换后自动重新分析（扫描进行中除外）")
             controls
         }
     }
@@ -153,12 +152,10 @@ struct LogsView: View {
         }
     }
 
-    /// 换窗口后尽量立刻重算；做不到（正在扫描 / 示例项目）时才提示手动重算。
+    /// 换窗口后尽量立刻重算；做不到（正在扫描）时才提示手动重算。
     private func rescanForNewWindow() {
         guard let project = state.selectedProject else { return }
-        if project.isDemo {
-            pendingRescanNote = "示例项目使用内置固定数据，时间窗口不影响结果。"
-        } else if state.isScanning {
+        if state.isScanning {
             pendingRescanNote = "改窗口后需重新分析。"
         } else {
             pendingRescanNote = nil

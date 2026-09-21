@@ -255,6 +255,10 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         metrics.averageCyclomaticComplexity = allFunctions.isEmpty
             ? nil
             : Double(allFunctions.map(\.complexity).reduce(0, +)) / Double(allFunctions.count)
+        // 识别规则降级台账随报告一起落盘：它解释的是"这一份数字为什么可能偏低"。
+        // 没有它，一个坏掉的正则会在界面上长成"这个仓库 0 个函数"。
+        let degraded = ComplexityEngine.RuleDegradeLedger.all
+        metrics.analyzerRuleFailures = degraded.isEmpty ? nil : degraded
     }
 
     private func languageShares(files: [ScannedSourceFile], codeLineTotal: Int) -> [LanguageShare] {

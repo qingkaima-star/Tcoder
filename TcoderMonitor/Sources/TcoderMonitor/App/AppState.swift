@@ -22,6 +22,8 @@ final class AppState {
         didSet { store.setSelectedProject(selectedProjectID) }
     }
     var phase: AnalysisPhase = .idle
+    /// 已返回的分析路数（并行执行，所以它是"回来几路"，不是"做到第几步"）。
+    var completedSections = ProgressOverlay.sectionTotal
     var isScanning = false
     var lastError: String?
     var allowNetworkLookups = false
@@ -29,8 +31,6 @@ final class AppState {
 
     /// Per-project extra log files chosen by the user (Logs/error.log, crash.log …).
     var extraLogURLs: [UUID: [URL]] = [:]
-
-    static let demoProjectPath = "demo://tcoder-sample"
 
     // MARK: T3 交互期暂停（滚动 / 拖窗 / resize 期间冻结实时写入）
     //
@@ -117,12 +117,15 @@ final class AppState {
         }
     }
 
-    /// 选中项目的**唯一**判定处：落盘选中（仍存在于列表里）> 第一个非示例项目 > 第一个。
-    /// 示例项目的数字是编的，真实项目在场时它不许抢到展示位——今天连着两次把假读数
-    /// 当成实测呈现给用户，用户因此问"为什么有 Java"。
+    /// 选中项目的**唯一**判定处：落盘选中（仍存在于列表里）> 第一个。
+    ///
+    /// 这里原本是「> 第一个**非示例**项目」。批次 P7-A 把内置示例数据整条退役之后，
+    /// "真实项目在场时假读数不许抢到展示位"这条判据就失去了对象 —— 但**函数本身要留**：
+    /// 它是"选中项只有一个判定处"这个结构的落点，散到各视图里读 `projects.first`
+    /// 会立刻退回"两处口径不一致"的老坑（见 [[判死代码前先查 stash 与重复实现]]）。
     nonisolated static func preferredProjectID(in projects: [MonitoredProject], stored: UUID?) -> UUID? {
         if let stored, projects.contains(where: { $0.id == stored }) { return stored }
-        return (projects.first(where: { $0.isDemo == false }) ?? projects.first)?.id
+        return projects.first?.id
     }
 
     var selectedProject: MonitoredProject? {
@@ -139,12 +142,12 @@ final class AppState {
     // MARK: - Lifecycle
 
     private func bootstrapIfNeeded() {
-        if store.projects.isEmpty {
-            // First run: seed the built-in sample so the dashboard is immediately
-            // legible before the user points at a real repository.
-            loadDemoProject()
-            return
-        }
+        // 首启**不再种任何内置项目**（批次 P7-A，用户口径「不能有假数据」）。
+        // 原来这里 `loadDemoProject()`，于是第一次打开 App 看到的九页
+        // 全是写死的编造读数（224 900 行、张三李四、lodash CVE…），
+        // 而且那份假分数还会被写进 `score-history.json` 当真历史。
+        // 现在的空态由 `ProjectDetailView.content` 与侧栏引导卡负责，
+        // 两者都指向同一个真动作：选择一个本地仓库目录。
         guard selectedProjectID == nil else { return }
         selectedProjectID = Self.preferredProjectID(in: store.projects, stored: store.selectedProjectIDValue())
     }
@@ -155,12 +158,6 @@ final class AppState {
         let project = store.add(path: url.path)
         selectedProjectID = project.id
         scan(project: project)
-    }
-
-    func loadDemoProject() {
-        let project = DemoData.makeProject(in: store)
-        selectedProjectID = project.id
-        DemoData.install(into: store, project: project)
     }
 
     func removeProject(_ project: MonitoredProject) {
@@ -185,18 +182,15 @@ final class AppState {
     /// one bad repository (no git, no logs) still yields a usable dashboard.
     func scan(project: MonitoredProject) {
         guard !isScanning else { return }
-        guard !project.isDemo else {
-            lastError = "示例项目已内置数据，无需扫描。"
-            return
-        }
 
         isScanning = true
-        phase = .code
+        phase = .scanning
+        completedSections = 0
         lastError = nil
 
         let root = project.url
         let report = store.report(for: project) ?? ProjectReport(project: project)
-        let previousScore = report.health?.overall
+        let previousScore = report.health?.verdict
         let logURLs = extraLogURLs[project.id] ?? []
         let windowDays = logWindowDays
         let network = allowNetworkLookups
@@ -214,11 +208,26 @@ final class AppState {
             async let deps = Self.attempt("依赖分析") { try await dependencyAnalyzer.analyze(projectRoot: root, allowNetwork: network) }
             async let coverage = Self.attempt("覆盖率读取") { try await coverageAnalyzer.analyze(projectRoot: root, options: .default) }
 
+            // 五路并行，所以能如实报的只有"回来几路"。每回来一路跳一次主线程，
+            // 一轮扫描总共 5 次跳转 —— 不在渲染路径上，与逐 tick 写入是两回事。
+            func markReturned() async {
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.completedSections = min(self.completedSections + 1,
+                                                 ProgressOverlay.sectionTotal)
+                }
+            }
+
             let codeResult = await code
+            await markReturned()
             let gitResult = await git
+            await markReturned()
             let logResult = await logs
+            await markReturned()
             let depsResult = await deps
+            await markReturned()
             let coverageResult = await coverage
+            await markReturned()
 
             let inputs = HealthInputs(
                 code: codeResult.value,
@@ -251,10 +260,11 @@ final class AppState {
                 merged.failedSections = failures.sections
 
                 self.store.upsertReport(merged)
-                if let score = merged.health?.overall {
+                if let score = merged.health?.verdict {
                     self.store.recordScore(score, for: project.id, projectName: project.name)
                 }
-                self.phase = .finished
+                self.phase = failures.sections.count == ProgressOverlay.sectionTotal ? .failed : .finished
+                self.completedSections = ProgressOverlay.sectionTotal
                 self.isScanning = false
                 self.lastError = failures.problems.isEmpty ? nil : failures.problems.joined(separator: " · ")
             }
@@ -263,10 +273,6 @@ final class AppState {
 
     func scanSelected() {
         guard let selectedProject else { return }
-        if selectedProject.isDemo {
-            loadDemoProject()
-            return
-        }
         scan(project: selectedProject)
     }
 

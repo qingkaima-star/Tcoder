@@ -35,7 +35,6 @@ struct HealthView: View {
     private var header: some View {
         Theme.Page.Header(title: "健康评分",
                           icon: .health,
-                          isDemo: report?.project.isDemo == true,
                           actions: { ScanControls() })
     }
 
@@ -75,7 +74,10 @@ struct ScanControls: View {
             if state.isScanning {
                 HStack(spacing: Theme.Spacing.xxs) {
                     ProgressView().controlSize(.small)
-                    Text(state.phase.label).font(Theme.Typo.label.font).foregroundStyle(.secondary)
+                    // `Text(String)` 不查表：`label` 是变量，直接进 Text 就是 verbatim，
+                    // 英文态会一片中文（批次 P7-C 走查抓到）。
+                    Text(localizedCopy(state.phase.label))
+                        .font(Theme.Typo.label.font).foregroundStyle(.secondary)
                 }
             }
         }
@@ -96,8 +98,8 @@ struct HealthHero: View {
     var body: some View {
         GlassSection("综合评分", subtitle: subtitle, icon: .health) {
             HStack(alignment: .top, spacing: Theme.Spacing.lg) {
-                HealthRing(score: health.overall,
-                                grade: health.grade,
+                HealthRing(score: health.verdict,
+                                grade: health.verdictGrade,
                                 trend: health.trendDelta)
                     .frame(width: DashboardLayout.heroRingWidth, height: DashboardLayout.heroRingHeight)
                 narrativeColumn

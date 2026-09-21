@@ -432,11 +432,24 @@ struct TextSegmentedPicker<Value: Hashable>: View {
 struct ProgressOverlay: View {
     var phase: AnalysisPhase
     var projectName: String
+    /// 已回来的分析路数（0…`ProgressOverlay.sectionTotal`）。
+    /// **只有"几路回来了"是真可报的进度**：五路是 `async let` 并行跑的，
+    /// 不存在"现在在做哪一路"这件事（批次 P7-C 删掉的就是那五档假顺序）。
+    var completedSections: Int = ProgressOverlay.sectionTotal
+
+    static let sectionTotal = 5
+
+    /// 整句键 + 位置参数。`Text(String)` 与插值串都不查表，所以**必须**先本地化再拼。
+    private var progressCopy: String {
+        localizedFormat("已完成 %1$@/%2$@ 路",
+                        String(max(0, min(completedSections, Self.sectionTotal))),
+                        String(Self.sectionTotal))
+    }
 
     var body: some View {
         HStack(spacing: Theme.Spacing.xs) {
             ProgressView().controlSize(.small)
-            Text("\(projectName) · \(phase.label)")
+            Text("\(projectName) · \(localizedCopy(phase.label))")
                 .font(Theme.Typo.label.font)
                 .foregroundStyle(.secondary)
                 // 它挂在顶栏里，而项目名是用户自选目录名（可以 40 个字符）。
@@ -444,7 +457,14 @@ struct ProgressOverlay: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: 260, alignment: .leading)
-                .help("\(projectName) · \(phase.label)")
+                .help("\(projectName) · \(localizedCopy(phase.label))")
+            if phase == .scanning {
+                Text(localizedCopy(progressCopy))
+                    .font(Theme.Typo.microLabel.font)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .help("五路分析并行执行，这个数字是已经返回的路数，不是顺序进度")
+            }
         }
         .padding(.horizontal, Theme.Spacing.sm)
         .padding(.vertical, Theme.Spacing.xs)
@@ -453,16 +473,16 @@ struct ProgressOverlay: View {
 }
 
 extension AnalysisPhase {
+    /// **返回的是键，不是成品句**：三个渲染点各自 `localizedCopy(...)` 之后再进 `Text`。
+    /// 这里不能预先查表 —— `label` 在 `body` 之外求值时机会变（`help(_:)` 的参数是
+    /// `String`，`Text(String)` 又不查表），一旦哪天有人在 init 里取一次存下来，
+    /// 切换系统语言就不会再刷新这一行。
     var label: String {
         switch self {
         case .idle: return "空闲"
-        case .code: return "正在扫描代码规模…"
-        case .git: return "正在分析 Git 历史…"
-        case .logs: return "正在解析错误日志…"
-        case .dependencies: return "正在检查依赖…"
-        case .health: return "正在计算健康评分…"
+        case .scanning: return "正在并行分析五路指标…"
         case .finished: return "分析完成"
-        case .failed: return "分析失败"
+        case .failed: return "五路分析全部失败"
         }
     }
 }

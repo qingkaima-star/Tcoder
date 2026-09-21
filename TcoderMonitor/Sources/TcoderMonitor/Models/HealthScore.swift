@@ -19,9 +19,26 @@ struct HealthScore: Codable, Equatable, Sendable {
 
     var grade: HealthGrade { HealthGrade(score: overall) }
     var trendDelta: Int? {
-        guard let previous = previousOverall else { return nil }
+        // 没有结论就没有趋势：`overall` 是占位 0 时，`0 - 上次分` 会画出一个
+        // 看起来很确定的"暴跌"箭头。它与 `verdict` 必须同进同退。
+        guard !components.isEmpty, let previous = previousOverall else { return nil }
         return overall - previous
     }
+
+    /// 综合分的**唯一合法读口**。`nil` = 本次没有任何维度拿到可计分的证据。
+    ///
+    /// 为什么要有它：`WeightedHealthScorer.noEvidenceScore` 在全部维度缺席时仍然要返回
+    /// 一份 `HealthScore`（缺证据的原因必须写在 `narrative` 里交给用户看），
+    /// 而它的 `overall` 只能是 `0` —— 那个 0 是**占位**，不是测量结果。
+    /// 直接读 `overall` 的消费端会把"没测到"渲染成"0 分 E 级"：
+    /// 实拍口径下这两句是完全相反的结论。批次 P7-B 起，视图与落盘只许走 `verdict`，
+    /// `HealthScoreVerdictGuardTests` 机器守住这条。
+    ///
+    /// 与 `codeScope` 同源：那个字段的注释早就写明"nil = 没有代码维度参与计分，
+    /// 界面上不许出现一个 0 分冒充代码很差"。这一版把同一条规矩还给综合分。
+    var verdict: Int? { components.isEmpty ? nil : overall }
+    /// 与 `verdict` 同进同退的等级。分开两个口子是为了让"0 分 + E 级"这对照没法各走各的。
+    var verdictGrade: HealthGrade? { components.isEmpty ? nil : grade }
 
     static let empty = HealthScore()
 }

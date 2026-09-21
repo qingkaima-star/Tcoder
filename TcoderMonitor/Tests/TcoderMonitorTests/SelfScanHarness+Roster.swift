@@ -63,7 +63,7 @@ extension SelfScanHarnessCase {
 
     private static let frozenFileNames: Set<String> = [
         "Package.swift", "AppState.swift", "TcoderMonitorApp.swift", "ServiceContracts.swift",
-        "ProjectStore.swift", "SharedUtilities.swift", "DemoData.swift",
+        "ProjectStore.swift", "SharedUtilities.swift",
     ]
     private static let shellViewFileNames: Set<String> = [
         "RootView.swift", "ProjectDetailView.swift", "DashboardView.swift",
