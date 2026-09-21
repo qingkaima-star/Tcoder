@@ -39,10 +39,10 @@ extension Theme {
     /// 直接当文字放在浅色白卡上实测只有 **2.22 / 2.06 : 1**——连它自己 §10 的非文本
     /// 3:1 线都过不了。所以图形层保留系统色相，文字层另配加深的取值。
     ///
-    /// **对 §5.2 的三处偏离（已备案）**：浅色模式的 success / warning / healthy 图形色
-    /// 从 `#34C759` / `#FF9F0A` / `#2FB8A5` 压暗到 `#2CA94C` / `#D18208` / `#2AA694`
-    /// （同色相、factor 0.82~0.90），压到刚好跨过 §10 的 3:1 线（实测 3.05 / 3.04 / 3.02）。
-    /// 深色模式仍用规范原值。要还原：把这三个 `graphicLight` 改回 §5.2 的原始值即可，
+    /// **对 §5.2 的两处偏离（已备案）**：浅色模式的 success / warning 图形色
+    /// 从 `#34C759` / `#FF9F0A` 压暗到 `#2CA94C` / `#D18208`
+    /// （同色相、factor 0.82~0.90），压到刚好跨过 §10 的 3:1 线（实测 3.05 / 3.04）。
+    /// 深色模式仍用规范原值。要还原：把这两个 `graphicLight` 改回 §5.2 的原始值即可，
     /// 代价是浅色下进度条/曲线低于验收线。
     struct SemanticRole: Hashable {
         let name: String
@@ -60,6 +60,8 @@ extension Theme {
         /// **结果与改前逐字节相同**（同一个 `ColorToken.color` 乘同一个透明度）。
         let badgeFillLight: Color
         let badgeFillDark: Color
+        /// 渲染点用的那一份：**随外观自动换档**。`badgeFill(in:)` 只服务断言与自检。
+        let adaptiveBadgeFill: Color
 
         init(name: String, textLight: UInt32, textDark: UInt32,
              graphicLight: UInt32, graphicDark: UInt32,
@@ -70,6 +72,22 @@ extension Theme {
             self.onFill = onFill
             self.badgeFillLight = Self.makeBadgeFill(of: self.graphic.light)
             self.badgeFillDark = Self.makeBadgeFill(of: self.graphic.dark)
+            self.adaptiveBadgeFill = Self.makeAdaptiveBadgeFill(of: self.graphic)
+        }
+
+        /// badge 底色：**按当次外观选档**的动态色。
+        ///
+        /// 为什么需要它：渲染点（`SemanticBadge`）拿不到"当前是浅色还是深色"，
+        /// 只能调 `badgeFill(in:)`，于是那个 `= .light` 默认值等于**在深色态铺浅色档的底色**
+        /// —— 浅色档来自压暗过的 `graphicLight`，铺在黑地上比深色档更闷，
+        /// 两批实拍里"胶囊像描边"就是这么来的（批次 P5）。
+        /// 闭包只在这里进 `NSColor(name:)`，构造发生在角色 init，不在渲染路径上。
+        private static func makeAdaptiveBadgeFill(of graphic: DualColor) -> Color {
+            Color(nsColor: NSColor(name: nil) { appearance in
+                let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                return (isDark ? graphic.dark : graphic.light).nsColor
+                    .withAlphaComponent(Theme.Palette.Opacity.badgeFill)
+            })
         }
 
         /// badge 底色的构造点。**写成静态函数而不是计算属性**，理由同
@@ -85,7 +103,11 @@ extension Theme {
 
         /// badge 底色：图形色低透明度铺在表面上（WS-H §9 统一 0.15）。
         /// 值已在 init 里算好，这里只做选择，不再 new `Color`。
-        func badgeFill(in appearance: DesignAppearance = .light) -> Color {
+        ///
+        /// **参数没有默认值**（批次 P5）：以前写 `= .light`，于是渲染点一句
+        /// `role.badgeFill()` 就在深色态铺了浅色档。渲染点本来也不知道当前外观，
+        /// 所以它该用 `adaptiveBadgeFill`；这个口子只留给"明确知道自己在算哪一态"的断言。
+        func badgeFill(in appearance: DesignAppearance) -> Color {
             switch appearance {
             case .light: return badgeFillLight
             case .dark: return badgeFillDark
@@ -145,11 +167,13 @@ extension Theme {
             name: "success", textLight: 0x157A32, textDark: 0x5BE28A,
             graphicLight: 0x2CA94C, graphicDark: 0x30D158)
 
-        /// 70–84 档的"偏绿/teal"，补上健康色阶的单调中间档（WS-H §5.2 去蓝档）。
-        static let healthy = SemanticRole(
-            name: "healthy", textLight: 0x0E7A63, textDark: 0x5AD8C0,
-            graphicLight: 0x2AA694, graphicDark: 0x4ED8C0)
+        // **70–84 的 teal 档已于 2026-09-21 退役**（批次 P5）。实拍反查证明它是全仓
+        // 第二套强调色相：浅色 `#2AA694`（色相 171°）与 `success` 的 `#2CA94C`（124°）
+        // 在总览/健康评分两页各占 0.33%~0.38% 像素，用户看到的是"两种绿"，
+        // 而同一列里 84 和 89 一个青一个绿。分数色阶因此收成一族绿：色相只承担
+        // "好 / 需注意 / 差"的语义，程度由旁边的数字承担（见 `role(forScore:)`）。
 
+        /// 需注意（55–69 分 / 中风险）：橙。
         static let warning = SemanticRole(
             name: "warning", textLight: 0x8A5000, textDark: 0xFF9F0A,
             graphicLight: 0xD18208, graphicDark: 0xFF9F0A)
@@ -173,12 +197,12 @@ extension Theme {
             name: "neutral", textLight: 0x5F5F64, textDark: 0xA9A9AE,
             graphicLight: 0x8E8E93, graphicDark: 0x98989D)
 
-        /// 参与对比度断言的角色。**从 accent 钉死之日起，八个角色全进这条线**——
+        /// 参与对比度断言的角色。**从 accent 钉死之日起，全部角色都进这条线**——
         /// 以前 accent 因为跟随系统强调色而"数值不可断言"，只能单列；现在它是钉死的
         /// 绿色，没有理由豁免。谁再把某个角色改回系统动态色，就必须同时把它从这里摘出去，
         /// 那等于承认"这个数我不负责"，`DesignTokenTests` 的注册表断言会拦住这种操作。
         static let measurable: [SemanticRole] =
-            [accent, success, healthy, warning, danger, critical, info, neutral]
+            [accent, success, warning, danger, critical, info, neutral]
 
         static let all: [SemanticRole] = measurable
 
@@ -205,13 +229,14 @@ extension Theme {
             }
         }
 
-        /// 健康分 → 角色。**单调色阶，去掉旧的蓝档**（WS-H §1.4#2：蓝是交互/链接色，
-        /// 一色一义）。`nil` = 未评分，落 neutral，不进着色（呼应 WS-D #6）。
+        /// 健康分 → 角色。**一族绿**（批次 P5）：色相只表达"好 / 需注意 / 差"三档语义，
+        /// 程度交给数字本身。旧的 70–84 teal 中间档已退役 —— 它让同一列里 84 与 89
+        /// 出现两个色相，用户读成"两套强调色"（WS-H §5.2 去蓝档的同一类错误）。
+        /// `nil` = 未评分，落 neutral，不进着色（呼应 WS-D #6）。
         static func role(forScore score: Int?) -> SemanticRole {
             guard let score else { return neutral }
             switch score {
-            case 85...: return success
-            case 70..<85: return healthy
+            case 70...: return success
             case 55..<70: return warning
             case 1..<55: return danger
             default: return critical   // 0 分，且仅在确有数据时才会走到这里

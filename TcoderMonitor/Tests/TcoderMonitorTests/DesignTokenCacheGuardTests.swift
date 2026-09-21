@@ -201,8 +201,9 @@ final class DesignTokenCacheGuardTests: XCTestCase {
             _ = role.textColor
             _ = role.graphicColor
             _ = role.onFillColor
-            _ = role.badgeFill()
+            _ = role.badgeFill(in: .light)
             _ = role.badgeFill(in: .dark)
+            _ = role.adaptiveBadgeFill
         }
         for tier in Theme.Typo.all { _ = tier.font }
         for index in 0..<Theme.Chart.count {

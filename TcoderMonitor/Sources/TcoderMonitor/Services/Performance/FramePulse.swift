@@ -305,7 +305,7 @@ public final class FramePulse: @unchecked Sendable {
 
     private func writeHeaderLocked() {
         writeLineLocked("# FramePulse 启动 \(Self.stamp(startedAt)) pid=\(getpid()) "
-                        + "开关=TCODER_PERF_PROBE=1 探针线程=CVDisplayLink(非主线程)")
+                        + "开关=TCODER_PERF_PROBE=1 探针线程=CVDisplayLink（非主线程）")
         writeLineLocked("# 期望间隔来自运行时读到的真实 Hz，不硬编码 120")
         // 【语义边界必须写在读数旁边】`心跳最大间隔` 是主线程 runloop 两次「结束等待」之间的
         // **唤醒间隔**，不是"主线程被占住了多久"：那段时间没有任何事件，间隔同样会很大。

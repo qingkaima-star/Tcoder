@@ -40,7 +40,7 @@ extension WeightedHealthScorer {
 
     private func stabilityIssues(_ logs: LogSummary) -> [String] {
         guard let worst = logs.topErrors.first, worst.count >= 10 else { return [] }
-        return ["\(worst.displayMessage) 出现 \(worst.count) 次（最近 \(worst.lastSeenDescription)）"]
+        return ["\(worst.displayMessage)出现 \(worst.count) 次（最近 \(worst.lastSeenDescription)）"]
     }
 
     private func stabilityAdvice(_ logs: LogSummary) -> [String] {

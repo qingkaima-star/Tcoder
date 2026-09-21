@@ -28,7 +28,7 @@ struct HealthAdviceGrid: View {
                        emptyNote: "已完成计算，未识别到风险项。")
             AdviceCard(title: "建议",
                        items: health.recommendations,
-                       role: Theme.Semantic.info,
+                       role: Theme.Semantic.neutral,
                        icon: .disclose,
                        subtitle: "由上面的数字按规则派生",
                        emptyNote: "没有可派生的建议：上面没有待改项。")

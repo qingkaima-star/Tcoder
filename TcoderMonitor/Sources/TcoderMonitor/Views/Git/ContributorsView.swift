@@ -50,13 +50,12 @@ struct ContributorBusFactorSection: View {
                    icon: Self.icon(for: git), iconLabel: "贡献集中度结论")
     }
 
+    /// 风险 → 角色一律走 `Theme.Semantic.role(for:)` 这**唯一一处**判定。
+    /// 这里原来自己写了一份 switch，且 `.low` 涂 `healthy`（青绿）—— 与全局
+    /// `role(for risk: RiskLevel)` 的 `.low → success` 不一致，是全仓第二套强调色相
+    /// 的实际来源之一（批次 P5，两批实拍独立点名"两种绿"）。
     static func role(for git: GitInsights) -> Theme.SemanticRole {
-        switch ContributorAnalysis.busFactorRisk(git) {
-        case .critical, .high: return Theme.Semantic.danger
-        case .medium: return Theme.Semantic.warning
-        case .low: return Theme.Semantic.healthy
-        case .none: return Theme.Semantic.neutral
-        }
+        Theme.Semantic.role(for: ContributorAnalysis.busFactorRisk(git))
     }
 
     static func icon(for git: GitInsights) -> IconName {
@@ -122,7 +121,7 @@ struct ContributorsMetricGrid: View {
                                 // 同一个数字）。但 `authorBasis == 0` 那一支必须自己说：
                                 // 那时 headline 给不出分母，"没有分母"这件事就是结论本身。
                                 note: (git.topAuthor.map {
-                                    "\(ContributorAnalysis.displayName($0)) 一人完成 · "
+                                    "\(ContributorAnalysis.displayName($0)) · 一人完成 · "
                                         + "\(NumberFormat.grouped($0.commits)) 次"
                                 } ?? "无作者数据")
                                     + (scope.authorBasis > 0
@@ -140,8 +139,12 @@ struct ContributorsMetricGrid: View {
                     DataBandSeparator()
                     MetricTile(
                         label: "累计变更",
+                        // 同一格里不许两套记法：原来 value 走 compact（"147k"）、
+                        // caption 走千分位（"+105,340"），是同一个量的两种写法（批次 P5）。
+                        // 侧栏那格留 compact 是因为窄列 + 实时跳动（9k→182k 会推走邻居），
+                        // 这里是 KPI 格，没有那个约束 ⇒ 与全站其余读数同一把尺子。
                         value: scope.authorBasis > 0
-                            ? NumberFormat.compact(git.totalAdditions + git.totalDeletions) : nil,
+                            ? NumberFormat.grouped(git.totalAdditions + git.totalDeletions) : nil,
                         unit: "行",
                         caption: "\(NumberFormat.signed(git.totalAdditions)) / "
                             + "\(NumberFormat.signed(-git.totalDeletions)) · 按非合并提交统计"
@@ -194,8 +197,9 @@ struct ContributorRankingSection: View {
             // 原来把 `commitScope.headline` 整句再嵌一遍 —— 而 headline 正是上一节
             // 「贡献集中度读数」的副标题，于是同一屏出现两次逐字相同的口径句
             // （用户判词「太乱了」在密度这一维的落点：一屏 5 处「非合并提交」）。
-            subtitle: "按提交数降序 · 展示 \(NumberFormat.grouped(shown.count)) / "
-                + "\(NumberFormat.grouped(authors.count)) 人",
+            subtitle: localizedFormat("按提交数降序 · 展示 %1$@ / %2$@ 人",
+                                       NumberFormat.grouped(shown.count),
+                                       NumberFormat.grouped(authors.count)),
             icon: .people
         ) {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
@@ -247,9 +251,10 @@ struct ContributorConcentrationSection: View {
         let topCommits = top.reduce(0) { $0 + $1.commits }
         GlassSection(
             "贡献集中度",
-            subtitle: "Bus Factor \(NumberFormat.grouped(max(1, top.count))) · 前 3 名合计 "
-                + "\(NumberFormat.percent(Double(topCommits) / Double(base), precision: 0))"
-                + scope.windowSuffix,
+            subtitle: localizedFormat("Bus Factor %1$@ · 前 3 名合计 %2$@%3$@",
+                                       NumberFormat.grouped(max(1, top.count)),
+                                       NumberFormat.percent(Double(topCommits) / Double(base), precision: 0),
+                                       scope.windowSuffix),
             icon: .chartLine
         ) {
             DataTableWell {
@@ -282,9 +287,9 @@ struct ContributorConcentrationSection: View {
                            iconLabel: "单人风险")
             } else if ContributorAnalysis.busFactorRisk(git).rank >= RiskLevel.high.rank {
                 DataNotice(
-                    text: "其余 \(NumberFormat.grouped(git.activeAuthorCount - 1)) 位作者合计不足 "
-                        + "\(NumberFormat.percent(1 - Double(top.first?.commits ?? 0) / Double(base), precision: 0))，"
-                        + "缺少可接手的第二人。",
+                    text: localizedFormat("其余 %1$@ 位作者合计不足 %2$@，缺少可接手的第二人。",
+                                          NumberFormat.grouped(git.activeAuthorCount - 1),
+                                          NumberFormat.percent(1 - Double(top.first?.commits ?? 0) / Double(base), precision: 0)),
                     role: Theme.Semantic.warning, icon: .riskWarning, iconLabel: "交接风险")
             }
         }

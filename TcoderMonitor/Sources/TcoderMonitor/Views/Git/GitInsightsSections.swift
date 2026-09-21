@@ -49,7 +49,7 @@ struct GitRepositorySourceSection: View {
         if isRelocated {
             DataNotice(text: "分析的是另一个仓库：\(root)\n\(Self.discoveryCaption(git))",
                        role: git.discoveryMode == .nestedSubdirectory
-                           ? Theme.Semantic.warning : Theme.Semantic.info,
+                           ? Theme.Semantic.warning : Theme.Semantic.neutral,
                        icon: .riskWarning, iconLabel: "仓库定位偏离")
         } else {
             GlassSection("仓库来源", subtitle: Self.discoveryCaption(git), icon: .git) {
@@ -103,7 +103,7 @@ struct GitCommitScopeSection: View {
     var body: some View {
         let scope = git.commitScope
         DataNotice(text: Self.message(for: scope),
-                   role: scope.isWindowTruncated ? Theme.Semantic.warning : Theme.Semantic.info,
+                   role: scope.isWindowTruncated ? Theme.Semantic.warning : Theme.Semantic.neutral,
                    icon: scope.isWindowTruncated ? .riskWarning : .info,
                    iconLabel: "提交统计口径")
     }
@@ -124,8 +124,10 @@ struct GitCommitTrendSection: View {
         if let granularity = git.commitsPerPeriod.first?.granularity {
             GlassSection(
                 "提交趋势",
-                subtitle: "按 \(gitBucketLabel(granularity)) 分桶 · 共 "
-                    + "\(NumberFormat.grouped(git.commitsPerPeriod.count)) 桶\(git.commitScope.windowSuffix)",
+                subtitle: localizedFormat("按 %1$@ 分桶 · 共 %2$@ 桶%3$@",
+                                           gitBucketLabel(granularity),
+                                           NumberFormat.grouped(git.commitsPerPeriod.count),
+                                           git.commitScope.windowSuffix),
                 icon: .chartLine
             ) {
                 GitTrendReadoutBar(buckets: git.commitsPerPeriod)
@@ -162,7 +164,7 @@ struct GitTrendReadoutBar: View {
                         caption: summary.unitLabel)
             DataBandSeparator()
             DataReadout(label: "最冷清桶", value: NumberFormat.grouped(summary.lowest),
-                        caption: "\(NumberFormat.grouped(summary.emptyBuckets)) 个空桶")
+                        caption: localizedFormat("%@ 个空桶", NumberFormat.grouped(summary.emptyBuckets)))
             DataBandSeparator()
             DataReadout(label: "桶数", value: NumberFormat.grouped(summary.count),
                         caption: summary.spanCaption)
@@ -249,7 +251,9 @@ struct GitRepositoryInfoSection: View {
     let git: GitInsights
 
     var body: some View {
-        GlassSection("仓库信息", subtitle: "分析于 \(LogRecency.describe(git.analyzedAt))", icon: .git) {
+        GlassSection("仓库信息",
+                     subtitle: localizedFormat("分析于 %@", LogRecency.describe(git.analyzedAt)),
+                     icon: .git) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 VStack(spacing: DataRowMetrics.rowGap) {
                     // 分支名不再涂蓝：它是一段文本，不是一个可点对象。

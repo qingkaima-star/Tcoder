@@ -130,7 +130,7 @@ enum DependencySafetyVerdict: Equatable {
 
     var badgeText: String {
         switch self {
-        case .findings(_, let risk): return "风险 \(risk.rawValue)"
+        case .findings(_, let risk): return "风险：\(risk.rawValue)"
         case .unchecked: return "未核对"
         case .clean: return "已核对"
         }
@@ -297,7 +297,7 @@ struct VulnerabilityRow: View {
                 .fill(role.graphicColor)
                 .frame(width: Theme.Stroke.emphasis)
                 .frame(maxHeight: .infinity)
-                .accessibilityLabel("严重度 \(item.severity.rawValue)")
+                .accessibilityLabel("严重度：\(item.severity.rawValue)")
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
                     SemanticBadge(item.severity.rawValue, role: role, icon: severityIcon)
@@ -340,9 +340,11 @@ struct VulnerabilityRow: View {
 
     private var severityIcon: IconName { item.severity == .none ? .clean : .vulnerable }
 
-    /// 「建议升级至 X」是修复路径，不是"已安全"的结论，所以走 info 而不是 success。
+    /// 「建议升级至 X」是**修复路径的说明文字**，既不是状态也不是结论 ⇒ 结构去色（批次 P5）。
+    /// 原来非 nil 时涂 info 蓝：与同页"联网核对说明"的蓝竖条一起，被两批实拍点名成
+    /// "四页四种颜色的提示条"。漏洞本身的严重度色已经在那儿了，不需要第二种颜色再喊一次。
     static func adviceRole(_ item: VulnerabilityItem) -> Theme.SemanticRole {
-        item.advice == nil ? Theme.Semantic.neutral : Theme.Semantic.info
+        Theme.Semantic.neutral
     }
 
     static func targetsLine(_ item: VulnerabilityItem) -> String {

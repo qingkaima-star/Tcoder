@@ -206,7 +206,7 @@ final class ShellDesignTests: XCTestCase {
     }
 
     func testBannerIconsResolveOnThisMachine() {
-        for style in [BannerStyle.warning, .info, .error] {
+        for style in [BannerStyle.warning, .neutral, .error] {
             XCTAssertTrue(IconAvailability.isAvailable(style.icon.rawValue),
                           "横幅符号 \(style.icon.rawValue) 本机不存在")
             XCTAssertFalse(style.role.name.isEmpty)
@@ -300,4 +300,57 @@ final class ShellDesignTests: XCTestCase {
     private func read(_ url: URL) throws -> String {
         try String(contentsOf: url, encoding: .utf8)
     }
+
+    // MARK: - 页名一字不差（批次 P5 实拍点名）
+
+    /// 侧栏项的名字**就是**页名（`DetailSection.rawValue` 是唯一权威），页面标题必须等于它。
+    /// 实拍复核抓到"错误日志"（侧栏）配"错误日志分析"（页头）：同一页两个名字，
+    /// 用户无法确认自己点进去的是不是要找的那一页。
+    ///
+    /// 判据是**双向**的：页头标题必须能在侧栏名集合里找到（防"页头自造名字"），
+    /// 侧栏九个名字也必须各自有页头（防"某页改名后侧栏还挂着旧名"）。
+    func test_pageHeaderTitlesEqualSidebarNames() throws {
+        let files = try SurfaceScanKit.sourceFiles(under: "Views")
+        let titles = Self.headerTitles(in: files)
+        XCTAssertGreaterThanOrEqual(titles.count, 9,
+                                    "只扫到 \(titles.count) 个页头标题 —— 扫描器坏了，不是页面干净")
+        let sidebar = Set(DetailSection.allCases.map(\.rawValue))
+        XCTAssertEqual(sidebar.count, DetailSection.allCases.count, "侧栏名有重复")
+        let invented = titles.filter { !sidebar.contains($0.title) }
+            .map { "\($0.path) → \"\($0.title)\"" }
+        XCTAssertTrue(invented.isEmpty, "这些页头标题不在侧栏名集合里：\n\(invented.joined(separator: "\n"))")
+        let missing = sidebar.filter { name in !titles.contains { $0.title == name } }
+        XCTAssertTrue(missing.isEmpty, "侧栏有这些名字却没有对应页头：\(missing)")
+    }
+
+    /// `Theme.Page.Header(` 之后的**第一个**字符串字面量即标题。
+    /// `[^"]{0,80}` 保证不跨过别的引号（`PerformanceView` 的标题在下一行，
+    /// 中间只有 `title:` 与空白），也保证不会误抓到 `subtitle:` 那一条。
+    static func headerTitles(in files: [(path: String, content: String)])
+        -> [(path: String, title: String)] {
+        let re = try! NSRegularExpression(pattern: #"Theme\.Page\.Header\([^"]{0,80}"([^"]+)""#,
+                                          options: [])
+        var out: [(String, String)] = []
+        for file in files {
+            let range = NSRange(file.content.startIndex..., in: file.content)
+            for m in re.matches(in: file.content, options: [], range: range) {
+                guard let r = Range(m.range(at: 1), in: file.content) else { continue }
+                out.append((file.path, String(file.content[r])))
+            }
+        }
+        return out
+    }
+
+    /// 元测试：合成坏样例必须抓到、合法写法不得误判（扫描型断言不配元测试等于没修）。
+    func test_headerTitleScannerCatchesDriftButSparesLegal() {
+        let dirty = [(path: "Views/Fake.swift",
+                      content: #"Theme.Page.Header(title: "错误日志分析", icon: .logs)"#)]
+        XCTAssertEqual(Self.headerTitles(in: dirty).map(\.title), ["错误日志分析"],
+                       "页头标题扫描器失灵")
+        let multiline = [(path: "Views/Fake2.swift",
+                          content: "Theme.Page.Header(\n    title: \"性能监控\",\n    subtitle: \"副标题\"\n)")]
+        XCTAssertEqual(Self.headerTitles(in: multiline).map(\.title), ["性能监控"],
+                       "跨行写法没抓到，或把 subtitle 当成了标题")
+    }
+
 }

@@ -48,13 +48,17 @@ extension CodeGitRestyleTests {
                       DependencySummaryGrid.outdatedCaption(report))
     }
 
-    func testAdviceLineIsInfoNotSuccess() {
+    /// 批次 P5 把这一档从 `info` 收成 `neutral`：**判据的意图一字未改** ——
+    /// "建议升级"既不许读成"已安全"（success），也不该借蓝当"第三种状态"
+    /// （两批实拍点名提示条四色，蓝不在成功/警告/危险之内）。
+    /// 红线：不许把它改回 success 来"让这条测试通过"。
+    func testAdviceLineIsNeutralNotSuccess() {
         let item = VulnerabilityItem(id: "off-1", severity: .high, aliases: ["CVE-1"],
                                      targets: ["a", "b", "c", "d", "e"], range: "pkg <1.0",
                                      summary: "越界读取", advice: "建议升级至 1.0.1", score: 7.5,
                                      source: "npm")
-        XCTAssertEqual(VulnerabilityRow.adviceRole(item).name, "info",
-                       "「建议升级」是修复路径，不是已安全的结论")
+        XCTAssertEqual(VulnerabilityRow.adviceRole(item).name, "neutral",
+                       "「建议升级」是修复路径，不是已安全的结论，也不是第三种语义色")
         let line = VulnerabilityRow.targetsLine(item)
         XCTAssertTrue(line.hasPrefix("pkg <1.0 → "), line)
         XCTAssertTrue(line.contains("等 5 项"), line)

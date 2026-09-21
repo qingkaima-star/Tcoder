@@ -103,16 +103,18 @@ struct CodeMetricsSummaryGrid: View {
                     label: "代码行数",
                     value: NumberFormat.grouped(code.codeLines),
                     unit: "行",
-                    caption: "总行数 \(NumberFormat.grouped(code.totalLines)) · 代码占 "
-                        + Self.shareOf(code.codeLines, code)
+                    caption: localizedFormat("总行数 %1$@ · 代码占 %2$@",
+                                             NumberFormat.grouped(code.totalLines),
+                                             Self.shareOf(code.codeLines, code))
                 )
                 DataBandSeparator()
                 MetricTile(
                     label: "注释行数",
                     value: NumberFormat.grouped(code.commentLines),
                     unit: "行",
-                    caption: "注释率 " + NumberFormat.percent(code.commentRatio)
-                        + "（分母为总行数 \(NumberFormat.grouped(code.totalLines)) 行）"
+                    caption: localizedFormat("注释率 %1$@（分母为总行数 %2$@ 行）",
+                                             NumberFormat.percent(code.commentRatio),
+                                             NumberFormat.grouped(code.totalLines))
                 )
                 DataBandSeparator()
                 MetricTile(
@@ -145,8 +147,9 @@ struct CodeScaleSection: View {
         GroupStack {
             GlassSection(
                 "代码规模",
-                subtitle: "主语言 \(code.primaryLanguage) · 共 "
-                    + "\(NumberFormat.grouped(code.totalFiles)) 个文件",
+                subtitle: localizedFormat("主语言 %1$@ · 共 %2$@ 个文件",
+                                          code.primaryLanguage,
+                                          NumberFormat.grouped(code.totalFiles)),
                 icon: .code
             ) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.md) {
@@ -170,8 +173,8 @@ struct CodeScaleSection: View {
             EmptyStateView(
                 icon: .chartLine,
                 title: "无语言占比数据",
-                message: "扫描到 \(NumberFormat.grouped(code.totalFiles)) 个文件，"
-                    + "但没有任何语言的有效代码行占比大于 0。"
+                message: localizedFormat("扫描到 %1$@ 个文件，但没有任何语言的有效代码行占比大于 0。",
+                                         NumberFormat.grouped(code.totalFiles))
             )
         } else {
             DataTableWell {
@@ -228,8 +231,9 @@ struct CodeInvariantRow: View {
             }
             if sum != code.totalLines {
                 DataNotice(
-                    text: "分项之和 \(NumberFormat.grouped(sum)) 与总行数相差 "
-                        + "\(NumberFormat.grouped(abs(sum - code.totalLines))) 行，以扫描器输出为准。",
+                    text: localizedFormat("分项之和 %1$@ 与总行数相差 %2$@ 行，以扫描器输出为准。",
+                                          NumberFormat.grouped(sum),
+                                          NumberFormat.grouped(abs(sum - code.totalLines))),
                     role: Theme.Semantic.warning, icon: .riskWarning, iconLabel: "行数不变式不成立")
             }
         }

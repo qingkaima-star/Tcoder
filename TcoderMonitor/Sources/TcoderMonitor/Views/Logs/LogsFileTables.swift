@@ -82,7 +82,8 @@ struct LogsScannedFilesCard: View {
         let shown = Array(files.prefix(Self.rowLimit))
         return AnyView(
             GlassSection("已扫描文件",
-                         subtitle: "共 \(NumberFormat.grouped(files.count)) 个 · 按大小降序",
+                         subtitle: localizedFormat("共 %1$@ 个 · 按大小降序",
+                                                    NumberFormat.grouped(files.count)),
                          icon: .processes) {
                 // 行距走风格契约 8 的「列表行 8」：这张表每行 5 列数字，
                 // 4pt 会让上下两行的数字读成同一行。

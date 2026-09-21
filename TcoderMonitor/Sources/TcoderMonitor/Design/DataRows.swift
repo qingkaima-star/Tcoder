@@ -221,9 +221,15 @@ enum DataGaugeHeight {
 /// （它自带 `.system(size: 12)` 图标、`cornerRadius: 8`、`opacity(0.10)/(0.30)` 描边，
 /// 三处都是 WS-I §2.2/§2.5 点名的漂移值）。这里全部走令牌，并且**不加描边**：
 /// 分层靠色底 + 间距，不靠 1pt 线（WS-H §3.3）。
+///
+/// **默认档是 `neutral` 而不是 `info`（批次 P5）**：默认值决定"没人表态时长什么样"，
+/// 原来默认蓝 ⇒ 六页里不表态的口径条全是蓝竖条，两批实拍都点名"结构被染色"。
+/// 蓝在这里既不表示成功/警告/危险，也不表示可点，只是"我随手选的色"。
+/// `Theme.Semantic.info` 的合法用途只剩一处：**日志等级这个数据本身**
+/// （`Theme.Semantic.role(for severity:)` 与 `LogRoleStyle`）。
 struct DataNotice: View {
     let text: String
-    var role: Theme.SemanticRole = Theme.Semantic.info
+    var role: Theme.SemanticRole = Theme.Semantic.neutral
     var icon: IconName = .info
     /// 登记表尚未收录的符号走这个口子（取值一律来自 `CodeGitSymbol` 的命名常量）。
     var symbol: String?

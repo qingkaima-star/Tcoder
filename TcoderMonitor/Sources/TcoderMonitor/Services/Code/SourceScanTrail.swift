@@ -211,7 +211,7 @@ extension SourceTreeScanner {
     /// 台账的行数归因键：后缀类规则用后缀本身，「无后缀」「超体积上限」这类没有名字可指的给一个稳定标签。
     private func skipAnchor(reason: SourceSkipReason, rule: String?) -> String? {
         switch reason {
-        case .missingExtension: return "(无后缀)"
+        case .missingExtension: return "（无后缀）"
         case .oversize: return "体积超单文件上限"
         case .unsupportedExtension, .binaryExtension: return rule
         default: return rule

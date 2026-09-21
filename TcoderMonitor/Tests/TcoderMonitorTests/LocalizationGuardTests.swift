@@ -72,21 +72,44 @@ final class LocalizationGuardTests: XCTestCase {
         return entries
     }
 
-    /// 含 CJK 的界面串字面量（`Text("…")` / `Text(verbatim:"…")` 之外的都算），
-    /// 返回「文件: 串」。**剥掉整行注释**。
+    /// 含 CJK 的界面串字面量，返回「文件: 串」。**剥掉整行注释**。
+    ///
+    /// 三类入口都算，少扫一类就会出现"守卫绿了、界面还是中文"的假完成：
+    /// ① **视图入口**（`Text` / `Button` / `GlassButton` / `Label` / `Menu` /
+    ///    `Toggle` / `TextField` / `Picker` / `NavigationLink` / `LabeledContent`）
+    ///    —— 它们的 `LocalizedStringKey` 会自动查表，缺译文就退回显示中文；
+    /// ② **修饰符**（`.help` / `.accessibilityLabel` / `.navigationTitle`）——
+    ///    tooltip 与 VoiceOver 也是界面；
+    /// ③ **字符串型文案参数与本仓三个查表口子**（`label:` / `caption:` / …
+    ///    与 `localizedCopy` / `localizedFormat` / `localizedCount`）——
+    ///    这些是 `String`，**只有登记成键才会被翻译**，漏一条英文态就原样吐中文。
+    ///
+    /// ICU 正则**不认** Swift 的 `\u{4E00}` 写法，只认 `\u4E00`；写成前者时
+    /// `try?` 会把编译失败吞成 nil、函数返回 [:]，于是"没有未迁移的串"是假的。
+    /// 所以这里一律 `try!`：正则坏了就该炸，不许静默通过。
     static func uiLiteralsNeedingKeys(in files: [(path: String, content: String)]) -> [String: Set<String>] {
-        // ICU 正则**不认** Swift 的 `\u{4E00}` 写法，只认 `\u4E00`。
-        // 写成前者时 `try?` 把编译失败吞成 nil，函数直接返回 [:] ——
-        // 于是"没有任何未迁移的中文串"这个结论是假的。元测试抓的就是这个。
-        // 三类入口都算：`Text` / `Button` / 本仓自己的 `GlassButton`。
-        // 少扫一类，就会出现"守卫绿了、按钮还是中文"的假完成。
-        let pattern = #"(?:Text|Button|GlassButton)\(\s*(?:verbatim:\s*)?"((?:[^"\\]|\\.)*[\u4E00-\u9FFF](?:[^"\\]|\\.)*)""#
+        // 三段入口前缀 + 一个公共的"含汉字的双引号字面量"尾巴。
+        // 拼字符串而不是写多行字面量：`"""` 里的行尾 `\` 续行会在行尾空格上翻车，
+        // 而正则里多出来的一个空格会让整条模式静默不匹配（= 永真绿）。
+        let entryPoints = "(?:Text|Button|GlassButton|Label|Menu|Toggle|TextField|Picker"
+            + "|NavigationLink|LabeledContent)\\(\\s*(?:verbatim:\\s*)?"
+        let modifiers = "\\.(?:help|accessibilityLabel|navigationTitle)\\(\\s*"
+        let lookups = "(?:localizedCopy|localizedFormat|localizedCount)\\(\\s*"
+        let stringParams = "(?:label|caption|text|title|subtitle|unit|message|note|placeholder"
+            + "|emptyNote|iconLabel)\\s*:\\s*"
+        let pattern = "(?:" + entryPoints + "|" + modifiers + "|" + lookups + "|" + stringParams + ")"
+            + "\"((?:[^\"\\\\]|\\\\.)*[\\u4E00-\\u9FFF](?:[^\"\\\\]|\\\\.)*)\""
         let re = try! NSRegularExpression(pattern: pattern, options: [])
         var out: [String: Set<String>] = [:]
         for file in files {
             for line in file.content.split(separator: "\n", omittingEmptySubsequences: false) {
                 let l = String(line)
                 if l.trimmingCharacters(in: .whitespaces).hasPrefix("//") { continue }
+                // `@available(*, deprecated, message: "改用 …")` 是**讲给维护者听的话**，
+                // 不进界面也不该翻译。`message:` 这个参数标签两边同名，
+                // 只能按"整行是不是 @available"来分 —— 否则 15 条编译器提示
+                // 会被算成双语债（守卫扫到"讲代码的话"是本项目吃过六次的老坑）。
+                if l.contains("@available(") { continue }
                 let range = NSRange(l.startIndex..., in: l)
                 for m in re.matches(in: l, options: [], range: range) {
                     guard let r = Range(m.range(at: 1), in: l) else { continue }
@@ -140,6 +163,41 @@ final class LocalizationGuardTests: XCTestCase {
         }
         XCTAssertTrue(offenders.isEmpty,
                       "这些文件在已迁移清单里，却出现没登记的界面中文串：\n\(offenders.sorted().joined(separator: "\n"))")
+    }
+
+    // MARK: - 守卫 1b：全量存量棘轮（报告 + 只减不增）
+
+    /// 已登记文件清单是"点"闸门，这条是"面"闸门：把 Views/Design/App 全扫一遍，
+    /// 报出还没登记的界面串总数。
+    ///
+    /// **每次跑都打印现量/上限** —— 只减不增的棘轮通过时若不报现量，
+    /// 已还的债就变成隐形余量（新增 N 处照样绿）。上限的取值必须是**某次实扫的现量**，
+    /// 不许拍脑袋；调低它 = 还了债，调高它 = 新增债，两者都要在 diff 里显形。
+    /// 2026-09-21 实扫登记：**264 条**（扫到 369 条界面串 / 目录已登记 112 条键）。
+    /// 这个数字是"面"闸门第一次跑出来的存量，不是估的 ——
+    /// 只按 `Text("中文")` 扫会得到 43 条，漏掉的 221 条住在 tooltip、
+    /// `label:` / `caption:` 这类字符串型参数与 `localizedCopy` 口子里。
+    private static let unregisteredLiteralCeiling = 248
+
+    func test_unregisteredLiteralInventoryPrintsAndShrinks() throws {
+        let registered = Set(try Self.catalog().map(\.key))
+        let literals = Self.uiLiteralsNeedingKeys(in: try Self.sourceFiles())
+        XCTAssertFalse(literals.isEmpty, "一条界面串都没扫到 —— 扫描器或分母坏了")
+        let offenders = literals.flatMap { path, strings in
+            strings.filter { !registered.contains($0) }.map { "\(path) → \"\($0)\"" }
+        }
+        print("双语存量棘轮：现量 \(offenders.count) / 上限 \(Self.unregisteredLiteralCeiling)"
+              + "（扫到串 \(literals.values.reduce(0) { $0 + $1.count }) 条 / 已登记键 \(registered.count) 条）")
+        // 清单落盘（报告器，不是闸门）：闸门无条件跑，这份文件只给"下一步该翻谁"用。
+        // 没有它，264 这个数字只是一句无法核对的口号。
+        if let target = ProcessInfo.processInfo.environment["TCODER_I18N_LEDGER"], !target.isEmpty {
+            try? offenders.sorted().joined(separator: "\n").write(toFile: target,
+                                                                  atomically: true, encoding: .utf8)
+            print("  清单已落盘 \(target)（\(offenders.count) 行）")
+        }
+        XCTAssertLessThanOrEqual(offenders.count, Self.unregisteredLiteralCeiling,
+                                 "未登记界面串比上限还多 —— 新增双语债，见下面清单\n"
+                                 + offenders.sorted().prefix(40).joined(separator: "\n"))
     }
 
     // MARK: - 守卫 2：登记了就必须翻（值不等于键）
@@ -229,6 +287,21 @@ final class LocalizationGuardTests: XCTestCase {
                             + ##"  Button("移除", role: .destructive) {}"## + "\n")]
         XCTAssertEqual(Self.uiLiteralsNeedingKeys(in: buttons)["Views/Fake.swift"]?.count, 2,
                        "按钮标题没被算进界面串")
+        // ② 修饰符与 ③ 字符串型参数/查表口子：漏一类就是"守卫绿了、界面还是中文"
+        let broad = [(path: "Views/Fake.swift", content:
+                        #"    .help("切换排序口径；两种都是全系统范围")"# + "\n"
+                      + #"    MetricTile(label: "累计变更", caption: "按非合并提交统计")"# + "\n"
+                      + #"    Text(localizedCopy("尚未分析Git 历史"))"# + "\n"
+                      + #"    TextField("分组名称，例如「后端服务」", text: $title)"# + "\n")]
+        let found = Self.uiLiteralsNeedingKeys(in: broad)["Views/Fake.swift"] ?? []
+        XCTAssertEqual(Set(found), ["切换排序口径；两种都是全系统范围", "累计变更",
+                                    "按非合并提交统计", "尚未分析Git 历史", "分组名称，例如「后端服务」"],
+                       "tooltip / label / caption / localizedCopy / TextField 里有没被算进来的：\(found.sorted())")
+        // 反向：纯代码括号与英文串不得被算进来（误判会逼人写绕路代码）
+        let legal = [(path: "Views/Fake.swift", content:
+                         #"    Text(verbatim: name)"# + "\n" + #"    let width = Text("ok")"# + "\n")]
+        XCTAssertTrue(Self.uiLiteralsNeedingKeys(in: legal).isEmpty,
+                      "无汉字的写法被误判：\(Self.uiLiteralsNeedingKeys(in: legal))")
 
         // 守卫 2/3 的目录解析器：能读键值、能剥块注释与行注释。
         let parsed = Self.parseCatalog("""
@@ -319,4 +392,28 @@ final class LocalizationGuardTests: XCTestCase {
         XCTAssertEqual(LogRecency.describe(nil), "未知")
         XCTAssertEqual(ago(-30), "即将")
     }
+
+    /// `LogRecency.split` 是**语言无关**的：它切的是"已经本地化完的那一句"，
+    /// 所以中文与英文都必须切成「数字 / 其余」。
+    /// 英文侧尤其要紧 —— 词序反过来（"49 seconds ago"），任何按中文词表写的
+    /// 拆分逻辑都会在这里失效。
+    func test_recencySplitKeepsNumberAndUnitApartInBothLanguages() {
+        XCTAssertEqual(LogRecency.split("49 秒前").value, "49")
+        XCTAssertEqual(LogRecency.split("49 秒前").unit, "秒前")
+        XCTAssertEqual(LogRecency.split("2 小时前").unit, "小时前")
+        XCTAssertEqual(LogRecency.split("1,234 天前").value, "1,234")
+        // 英文：整句回来的是 "49 seconds ago"，单位段必须连着吃下 "seconds ago"
+        XCTAssertEqual(LogRecency.split("49 seconds ago").value, "49")
+        XCTAssertEqual(LogRecency.split("49 seconds ago").unit, "seconds ago")
+        XCTAssertEqual(LogRecency.split("2 hours ago").unit, "hours ago")
+        // 三态没有数字，就不该硬造单位（否则 value 会变成空串）
+        for phrase in ["昨天", "未知", "即将", "Yesterday"] {
+            XCTAssertEqual(LogRecency.split(phrase).value, phrase, "\(phrase) 被拆坏了")
+            XCTAssertNil(LogRecency.split(phrase).unit, "\(phrase) 凭空多出一段单位")
+        }
+    }
+
+
 }
+
+

@@ -158,7 +158,7 @@ enum HealthBreakdown {
     /// 上一轮这里写死了「缺失维度的权重已摊到在场维度」——列头是整列静态文案，
     /// 而偏移原因逐行不同（九维全在场时真实原因是表合计 110% 的整体折算，与缺席无关），
     /// 所以那种写法必然在某些场景下说谎。原因交给每行自己的 `weightTooltip`。
-    static let weightColumnHelp = "本次实际乘数：在场维度的乘数合计恒为 100%，故 Σ(得分 × 乘数) 可复现综合分。与内置表原始值不一致的原因见各行提示。"
+    static let weightColumnHelp = "本次实际乘数：在场维度的乘数合计恒为 100%，故 Σ（得分 × 乘数）可复现综合分。与内置表原始值不一致的原因见各行提示。"
 }
 
 /// `weightTooltip` 的分支依据。每种原因一句不同的话，避免「无条件宣称」。
@@ -279,7 +279,7 @@ struct HealthComponentTable: View {
 
     var body: some View {
         GlassSection("维度分量",
-                     subtitle: "综合分 = Σ(得分 × 归一化权重) · 按拖累程度排序，贡献最低者在前",
+                     subtitle: "综合分 = Σ（得分 × 归一化权重） · 按拖累程度排序，贡献最低者在前",
                      icon: .health,
                      // 卡头 trailing 位只有一行，没有"第二行的值要竖向对齐"这回事，
                      // 所以标签不占 160pt 列宽 —— 占了就变成「合计 ………… 60.1」
@@ -323,8 +323,11 @@ struct HealthComponentTable: View {
                              tint: role.graphicColor,
                              height: Theme.Layout.gaugeInline)
                     .frame(width: DataColumns.healthScoreGauge)
-                LiveNumber(String(row.score), tier: Theme.Typo.monoSmall,
-                           tint: role.textColor)
+                // 分数不再跟着涂语义色（批次 P5）：同一行里"这一维度好不好"
+                // 已经由左边那根量条说了一遍，数字再涂一次就是三重上色 ——
+                // 浅色态实拍里这一屏同时出现红/橙/两绿/灰共 6 种彩色，
+                // 是全站最"脏"的一屏。一个语义一处着色：色流量条，数字吃墨。
+                LiveNumber(String(row.score), tier: Theme.Typo.monoSmall)
                     .numberCell(DataColumns.healthScoreNumber)
             }
             .tableCell(DataColumns.column(DataColumns.healthComponents, 1))
@@ -334,8 +337,7 @@ struct HealthComponentTable: View {
                 .tableCell(DataColumns.column(DataColumns.healthComponents, 2))
                 .help(weightHelp(row))
 
-            LiveNumber(Live.fixed(row.contribution, digits: 1), tier: Theme.Typo.monoSmall,
-                       tint: role.textColor)
+            LiveNumber(Live.fixed(row.contribution, digits: 1), tier: Theme.Typo.monoSmall)
                 .tableCell(DataColumns.column(DataColumns.healthComponents, 3))
                 .help("满分可得 \(Live.fixed(row.fullMarks, digits: 1))，这一维度拖了 \(Live.fixed(row.lostPoints, digits: 1)) 分")
 
@@ -363,7 +365,7 @@ struct HealthComponentTable: View {
                      + "测试覆盖只在项目真的产出了覆盖率报告时参与计分。")
         } else {
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                Text("缺失维度 \(NumberFormat.grouped(missing.count)) 项")
+                Text(localizedFormat("缺失维度 %1$@ 项", NumberFormat.grouped(missing.count)))
                     // 组内小标题全站一档：`groupLabel`（10pt medium + 0.6 字距）。
                     // 这里原来是 `cardTitle`(13 semibold)，与它上面那行节标题只差一档字重，
                     // 而日志页同一角色又用 `microLabel + .tertiary` —— 三种画法（清单 3.9）。
