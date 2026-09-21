@@ -196,6 +196,13 @@ struct EmptyStateView: View {
     /// 而不是让调用方在外面再套一个 VStack（套在外面会被下面的
     /// `minHeight: emptyMinHeight` 顶开，实拍里按钮落在文字下方 140pt 处）。
     var action: AnyView? = nil
+    /// 空态自带的 ⓘ 说明槽（《碎文案收进 ⓘ》一轮补的）。
+    ///
+    /// **为什么必须做在组件里**：调用方若在 `EmptyStateView` 外面再套一层 `VStack`
+    /// 去挂 `CopyHelpBadge`，会被下面的 `minHeight: emptyMinHeight` 顶开 ——
+    /// 实拍里那枚问号会落在说明文字下方一大段空白处，等于没挂。
+    /// 与 `action` 完全同一个理由。默认 `nil` 时产出 `EmptyView`，现有调用点一字不改。
+    var help: String? = nil
 
     var body: some View {
         // **左对齐**。全站九页都是左基线，只有空态居中 —— 实拍里它是全 App 唯一的
@@ -213,6 +220,10 @@ struct EmptyStateView: View {
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.leading)
                 .lineSpacing(Theme.Typo.label.lineSpacing)
+            if let help {
+                // 走全站唯一的 ⓘ 画法（`Design/CopyHelp.swift`），不在这里自己拼问号。
+                CopyHelpBadge(help)
+            }
             if let action {
                 // 与说明之间给一档组内间距，别贴着；它是这一块的收尾动作。
                 action.padding(.top, Theme.Spacing.xs)
