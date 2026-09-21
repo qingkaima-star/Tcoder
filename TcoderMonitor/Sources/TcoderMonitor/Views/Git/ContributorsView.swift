@@ -123,12 +123,14 @@ struct ContributorsMetricGrid: View {
                                 // 同一个数字）。但 `authorBasis == 0` 那一支必须自己说：
                                 // 那时 headline 给不出分母，"没有分母"这件事就是结论本身。
                                 note: (git.topAuthor.map {
-                                    "\(ContributorAnalysis.displayName($0)) · 一人完成 · "
-                                        + "\(NumberFormat.grouped($0.commits)) 次"
-                                } ?? "无作者数据")
+                                    localizedFormat("%1$@ · 一人完成 · %2$@ 次",
+                                                      ContributorAnalysis.displayName($0),
+                                                      NumberFormat.grouped($0.commits))
+                                } ?? localizedCopy("无作者数据"))
                                     + (scope.authorBasis > 0
                                        ? ""
-                                       : "（\(DataAbsence.indeterminate.textDisplay)）"))
+                                       : localizedFormat("（%@）",
+                                                         DataAbsence.indeterminate.textDisplay)))
 
                 ReadoutStrip {
                     MetricTile(

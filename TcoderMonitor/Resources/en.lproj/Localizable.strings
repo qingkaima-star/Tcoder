@@ -584,3 +584,6 @@
 "%1$@ 文件 %2$@ 行、含 %3$@ 个超过 %4$@ 行的函数（最长 %5$@ 行，如 %6$@）：先把这些函数按职责抽成独立类型或同类型的 extension，再把跨函数共享的状态收进构造注入的依赖，目标单文件 400 行以内。" = "%1$@ file has %2$@ lines with %3$@ functions longer than %4$@ lines (longest %5$@, e.g. %6$@): first extract those functions into separate types or extensions by responsibility, then move state they share into constructor-injected dependencies; target under 400 lines per file.";
 "%1$@ 文件 %2$@ 行但函数都不长（%3$@ 个，最长 %4$@ 行）：按能力域横向切分成多个文件或子类型（例如解析/渲染/IO 分开），%5$@ 所在的这段职责适合第一个搬出去。" = "%1$@ file has %2$@ lines but no long functions (%3$@ of them, longest %4$@): split it horizontally by capability (parsing / rendering / IO apart); the responsibility around %5$@ is the first candidate to move out.";
 "未知函数" = "unknown function";
+"%1$@ · 一人完成 · %2$@ 次" = "%1$@ alone made %2$@ commits";
+"无作者数据" = "No author data";
+"（%@）" = " (%@)";
