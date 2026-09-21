@@ -129,15 +129,14 @@ def cmd_fps(args):
     return 0
 
 
-def cmd_lifecycle(args):
-    """App Launch 的 life-cycle-period 表：逐周期时长 + 哪个周期最长。
+def lifecycle_periods(doc):
+    """life-cycle-period 表 → (逐行摘要, (起始,时长) 序列, 合计, 最长周期)。
 
-    表结构随 Xcode 版本变（列名不保证），所以这里**按标签通用地**打出来，
-    并且在 --json 里只存两个跨版本稳的量：total_ms 与 max_period_ms。
+    单独一个函数有两个理由：① `cmd_lifecycle` 因此只管"怎么印"，CC 掉回阈值下
+    （本仓 `PerfRulerHotspotRatchetTests` 量过 CC20 之后是这么修的：拆，不抬数）；
+    ② 解析与呈现分开之后，`launch_ready_ms` 能直接吃 `(起始, 时长)` 序列做单元测试。
     """
-    doc = Doc(args.xml)
-    rows = []
-    spans = []
+    rows, spans = [], []
     total = 0.0
     longest = (0.0, "")
     for row in doc.rows():
@@ -148,13 +147,23 @@ def cmd_lifecycle(args):
         if d is None:
             continue
         start = find_tag(row, "start-time") or find_tag(row, "event-time")
-        s_ms = (start.ms() if start else None)
+        s_ms = start.ms() if start else None
         spans.append((s_ms if s_ms is not None else 0.0, d))
         total += d
         label = name.fmt if name and name.fmt else "?"
         if d > longest[0]:
             longest = (d, label)
         rows.append((label, d, [c.fmt for c in row if c.fmt][:4]))
+    return rows, spans, total, longest
+
+
+def cmd_lifecycle(args):
+    """App Launch 的 life-cycle-period 表：逐周期时长 + 哪个周期最长。
+
+    表结构随 Xcode 版本变（列名不保证），所以这里**按标签通用地**打出来，
+    并且在 --json 里只存两个跨版本稳的量：total_ms 与 max_period_ms。
+    """
+    rows, spans, total, longest = lifecycle_periods(Doc(args.xml))
     print("== life-cycle-period（首帧与冷构建成本）==")
     for label, d, extra in rows[:24]:
         print("  %8.2f ms  %-26s %s" % (d, label[:26], " ".join(extra)[:60]))

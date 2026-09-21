@@ -407,20 +407,9 @@ selfcheck_binary_provenance() {  # selfcheck_binary_provenance <outdir>
   if provenance_ok "" "$H" true; then fail "读不到 manifest 却放行"; bad=1; fi
   if provenance_ok "$H" "$H" false; then fail "构建时工作树是脏的却放行——那时连 rev 本身都不可信"; bad=1; fi
   if provenance_ok "$H" "" true; then fail "取不到 HEAD 却放行——无法比对就等于没验"; bad=1; fi
-  # 【同一件事只许有一把手尺子】我补这一维时先是**又写了一份**，才发现
-  # `verify_provenance.sh` 早就在做同一件事。现在判定住在 `perf_provenance.sh`，
-  # 两边都 source 它。下面三条把这个结构钉住：定义处唯一、交付档确实走它、
-  # 测量档不许留本地副本（漏一天就会分叉，而分叉之后错的那份常在喂结论）。
-  local defs
-  # 模式必须锚行首：不锚的话它会把我**写在自检里的这串模式本身**当成一处定义
-  # （第一版就是这么红的——报错报到自己头上，说明它真的在看内容）。
-  defs=$(grep -lr '^provenance_ok() {' scripts/ 2>/dev/null | tr '\n' ' ')
-  [ "$defs" = "scripts/perf_provenance.sh " ] \
-    || { fail "provenance_ok 的定义不止一处（$defs）——同一判定又长出第二份了"; bad=1; }
-  grep -q 'provenance_ok' scripts/verify_provenance.sh \
-    || { fail "verify_provenance.sh 不再经过共享判定（大概又手抄了一遍 [ a = b ]）"; bad=1; }
-  grep -q 'preflight_manifest_value\|^provenance_ok() {' scripts/perf_preflight.sh \
-    && { fail "perf_preflight.sh 里还留着本地副本，删掉、只 source"; bad=1; }
+  # 【同一件事只许有一把手尺子】这三条结构钉拆到 `provenance_single_ruler_cases`：
+  # 本仓 50 行线（`PerfRulerHotspotRatchetTests`）——拆函数才是修复，抬数字不是。
+  provenance_single_ruler_cases
   # tree 放行这一支必须单独钉：它是"假拒"的唯一解药，也是最容易被写歪的一支
   #（写歪的方向是"永远认为相同"或"永远认为不同"，两边都不报错）。
   local T1=1111111111111111111111111111111111111111111111111111111111111111
@@ -586,4 +575,21 @@ print("%s|%s|%s|%s" % (a, b, c, d))')
   echo "$r" | grep -q "|620" || { fail "没有尾巴的表应当取末端 620 ms（拿到 $r）"; return; }
   echo "$r" | grep -q "|None" || { fail "空表必须返回 None（按未覆盖处理，不许算 0 ms 达标）"; return; }
   ok "launch_ready_ms 三向都对（剔尾巴 / 无尾巴取末端 / 空表为 None）"
+}
+
+provenance_single_ruler_cases() {  # 【同一件事只许有一把手尺子】结构钉，由 selfcheck_binary_provenance 调用
+  # 我补 provenance 这一维时先是**又写了一份**，才发现 `verify_provenance.sh` 早就在做同一件事。
+  # 现在判定住在 `perf_provenance.sh`，两边都 source 它。下面三条把这个结构钉住：
+  # 定义处唯一、交付档确实走它、测量档不许留本地副本
+  # （漏一天就会分叉，而分叉之后错的那份常在喂结论）。
+  local defs
+  # 模式必须锚行首：不锚的话它会把我**写在自检里的这串模式本身**当成一处定义
+  # （第一版就是这么红的——报错报到自己头上，说明它真的在看内容）。
+  defs=$(grep -lr '^provenance_ok() {' scripts/ 2>/dev/null | tr '\n' ' ')
+  [ "$defs" = "scripts/perf_provenance.sh " ] \
+    || { fail "provenance_ok 的定义不止一处（$defs）——同一判定又长出第二份了"; bad=1; }
+  grep -q 'provenance_ok' scripts/verify_provenance.sh \
+    || { fail "verify_provenance.sh 不再经过共享判定（大概又手抄了一遍 [ a = b ]）"; bad=1; }
+  grep -q 'preflight_manifest_value\|^provenance_ok() {' scripts/perf_preflight.sh \
+    && { fail "perf_preflight.sh 里还留着本地副本，删掉、只 source"; bad=1; }
 }
