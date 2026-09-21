@@ -304,3 +304,18 @@
 "项目目录与 ~/Library/Logs 里都没有找到可解析的日志文件。用「附加日志」手动选择 error.log、crash.log 后重新分析。" = "No parseable log files were found in the project directory or in ~/Library/Logs. Use Attach Logs to pick error.log or crash.log manually, then click Re-analyse.";
 "在左侧选择本地仓库目录，或加载内置的 Tcoder 示例项目体验完整指标。" = "Choose a local repository directory on the left, or load the built-in Tcoder sample project to see all metrics.";
 "还没有项目" = "No projects yet";
+
+/* ===== P5-c 第四批：tooltip 与无障碍标签（hover 与 VoiceOver 也是界面） ===== */
+"用默认应用打开 %@" = "Open %@ with the default app";
+"代码变更量 %1$@ 行 · 触达 %2$@ 个文件" = "Churn %1$@ lines · touched %2$@ files";
+"第 %1$@ 位 · %2$@，%3$@ 次提交，新增 %4$@ 行，删除 %5$@ 行" = "Rank %1$@ · %2$@ — %3$@ commits, %4$@ lines added, %5$@ removed";
+"各小时提交分布，峰值 %@ 次" = "Hourly commit distribution, peak %@";
+"各小时提交分布：峰值 %1$@ 次，最忙 %2$@:00" = "Hourly commit distribution: peak %1$@ commits, busiest hour %2$@:00";
+"提交趋势，按%1$@分桶，共 %2$@ 桶" = "Commit trend, bucketed by %1$@, %2$@ buckets in total";
+"本次提交触达 %@ 个文件" = "This commit touched %@ files";
+"该仓库含合并共 %@ 次提交" = "This repository has %@ commits including merges";
+"评分趋势，%@ 个历史点" = "Score trend, %@ history points";
+"错误趋势，%@ 天" = "Error trend, %@ days";
+"移除分组规则「%@」，只删规则，不干预任何进程" = "Remove group rule “%@” — removes the rule only; never touches a process";
+"严重度：%@" = "Severity: %@";
+"满分可得 %1$@，这一维度拖了 %2$@ 分" = "Full marks %1$@; this dimension cost %2$@ points";

@@ -57,7 +57,9 @@ struct GitCommitTrendChart: View {
                 AxisValueLabel().font(CodeGitType.number(Theme.Typo.microLabel))
             }
         }
-        .accessibilityLabel("提交趋势，按\(gitBucketLabel(granularity))分桶，共 \(NumberFormat.grouped(buckets.count)) 桶")
+        .accessibilityLabel(Text(localizedFormat("提交趋势，按%1$@分桶，共 %2$@ 桶",
+                                                  gitBucketLabel(granularity),
+                                                  NumberFormat.grouped(buckets.count))))
     }
 
     private var calendarUnit: Calendar.Component {
@@ -245,7 +247,7 @@ struct GitCommitRow: View {
                 .font(CodeGitType.number(Theme.Typo.monoSmall))
                 .foregroundStyle(.secondary)
                 .tableCell(DataColumns.column(columns, 2))
-                .help("本次提交触达 \(NumberFormat.grouped(commit.filesChanged)) 个文件")
+                .help(Text(localizedFormat("本次提交触达 %@ 个文件", NumberFormat.grouped(commit.filesChanged))))
 
             Text(NumberFormat.signed(commit.additions))
                 .font(CodeGitType.number(Theme.Typo.monoSmall))
@@ -299,7 +301,7 @@ struct GitNestedCandidateRow: View {
                 .font(CodeGitType.number(Theme.Typo.monoSmall))
                 .foregroundStyle(isAnalyzed ? Color.primary : Color.secondary)
                 .tableCell(DataColumns.column(columns, 1))
-                .help("该仓库含合并共 \(NumberFormat.grouped(candidate.commitCount)) 次提交")
+                .help(Text(localizedFormat("该仓库含合并共 %@ 次提交", NumberFormat.grouped(candidate.commitCount))))
 
             Text(candidate.branch.isEmpty ? "无分支" : candidate.branch)
                 .font(CodeGitType.path)

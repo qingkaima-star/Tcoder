@@ -214,10 +214,10 @@ struct CodeOpenFileButton: View {
         } label: {
             CodeGitSymbol.decorated(CodeGitSymbol.openExternal, role: .badge)
                 .foregroundStyle(Theme.Semantic.accent.textColor)
-                .accessibilityLabel("用默认应用打开 \(CodeViewFormat.fileName(path))")
+                .accessibilityLabel(Text(localizedFormat("用默认应用打开 %@", CodeViewFormat.fileName(path))))
         }
         .buttonStyle(.plain)
         .frame(minWidth: Theme.Layout.minHitTarget, minHeight: Theme.Layout.minHitTarget)
-        .help("用默认应用打开 \(CodeViewFormat.fileName(path))")
+        .help(Text(localizedFormat("用默认应用打开 %@", CodeViewFormat.fileName(path))))
     }
 }

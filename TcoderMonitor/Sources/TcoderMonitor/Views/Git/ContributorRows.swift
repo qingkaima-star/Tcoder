@@ -121,8 +121,9 @@ struct ContributorRow: View {
                     Text("\(NumberFormat.signed(author.additions)) / \(NumberFormat.signed(-author.deletions))")
                         .font(CodeGitType.number(Theme.Typo.monoSmall))
                         .foregroundStyle(.secondary)
-                        .help("代码变更量 \(NumberFormat.grouped(author.totalChurn)) 行 · "
-                            + "触达 \(NumberFormat.grouped(author.filesTouched)) 个文件")
+                        .help(Text(localizedFormat("代码变更量 %1$@ 行 · 触达 %2$@ 个文件",
+                                                   NumberFormat.grouped(author.totalChurn),
+                                                   NumberFormat.grouped(author.filesTouched))))
                     Text(author.lastActiveDescription)
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
@@ -144,8 +145,12 @@ struct ContributorRow: View {
         }
         .dataTableRow()
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("第 \(rank) 位 · \(ContributorAnalysis.displayName(author))，"
-            + "\(author.commits) 次提交，新增 \(author.additions) 行，删除 \(author.deletions) 行")
+        .accessibilityLabel(Text(localizedFormat("第 %1$@ 位 · %2$@，%3$@ 次提交，新增 %4$@ 行，删除 %5$@ 行",
+                                                 NumberFormat.grouped(rank),
+                                                 ContributorAnalysis.displayName(author),
+                                                 NumberFormat.grouped(author.commits),
+                                                 NumberFormat.grouped(author.additions),
+                                                 NumberFormat.grouped(author.deletions))))
     }
 }
 
@@ -329,7 +334,7 @@ struct ContributorHourRow: View {
         }
         .frame(height: Self.height + Self.tooltipReserve)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("各小时提交分布，峰值 \(peak) 次")
+        .accessibilityLabel(Text(localizedFormat("各小时提交分布，峰值 %@ 次", NumberFormat.grouped(peak))))
         .help(hoverHelp)
     }
 
@@ -337,6 +342,7 @@ struct ContributorHourRow: View {
 
     private var hoverHelp: String {
         let peakHour = counts.enumerated().max(by: { $0.element < $1.element })?.offset ?? 0
-        return "各小时提交分布：峰值 \(peak) 次，最忙 \(String(format: "%02d", peakHour)):00"
+        return localizedFormat("各小时提交分布：峰值 %1$@ 次，最忙 %2$@:00",
+                           NumberFormat.grouped(peak), String(format: "%02d", peakHour))
     }
 }

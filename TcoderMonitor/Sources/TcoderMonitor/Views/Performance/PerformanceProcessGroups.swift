@@ -119,7 +119,7 @@ struct PerformanceGroupCard: View {
             }
             .buttonStyle(.plain)
             .frame(minWidth: Theme.Layout.minHitTarget, minHeight: Theme.Layout.minHitTarget)
-            .help("移除分组规则「\(group.group.title)」，只删规则，不干预任何进程")
+            .help(Text(localizedFormat("移除分组规则「%@」，只删规则，不干预任何进程", group.group.title)))
         }
     }
 
