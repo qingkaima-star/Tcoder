@@ -316,6 +316,14 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
   任一不合格脚本直接拒跑（那不是脚本坏，是它在拦第三次"未受控基线"）。
 - **改前对照**只能走 xctrace：`/tmp/tcoder-before.app`（rev `415f0f0`、sha `54005bc4…`）里
   没有 `FramePulse`。`probe` 档只对改后产物有意义，不许左右互比。
+- **测"哪一颗头"必须写在读数旁边。** 我这颗头（`ws/perf-base`）相对 main 的**非文档差异只有
+  3 个测试文件 + `FramePulse` 里两行产物头注释**——都不参与运行时视图行为。
+  所以**用它 build 出来的 release 产物量到的 T2，就是 main 当前行为的 T2**，
+  不必为了"等合完再测"再排一次队；但读数落盘时要照实写"被测头 = ws/perf-base@<sha>，
+  与 main 的行为差异：无"，别让下一位以为量的是迁移之后的状态。
+- 一条已核过的前提：`idle` 档 **attach 已存在的实例**且要求"实例数恰为 1"，
+  所以顺序是 `build_app.sh release` → 启动那一个实例 → `idle`×3 → `report`；
+  跑完**只打印 pid**（按 bundle id 广播退出的老写法已作废，见 §0.0.1）。
 - 合格判据：HTR <5 ms/s（目标 0）、app-update ≤8.33 ms、`potential-hangs` 归 0、
   热点第一名不再是 `_updateViewGraph`。**每次都要 3 个样本，单样本不进结论。**
 
