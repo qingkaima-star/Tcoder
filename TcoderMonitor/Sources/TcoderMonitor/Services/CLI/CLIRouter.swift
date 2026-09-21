@@ -38,6 +38,20 @@ enum CLIRouter {
             case "--compact": req.compact = true
             case _ where token.hasPrefix("--out="):
                 req.outPath = String(token.dropFirst("--out=".count))
+            case _ where token.hasPrefix("--log="):
+                let logPath = String(token.dropFirst("--log=".count))
+                // 不存在就直接拒绝：悄悄收下会让读数的"运行稳定性缺席"看起来像项目真没日志，
+                // 而实情是命令行打错了一个字母。
+                guard FileManager.default.fileExists(atPath: logPath) else {
+                    return .usage("--log 指向的文件不存在：\(logPath)")
+                }
+                req.logPaths.append(logPath)
+            case _ where token.hasPrefix("--window-days="):
+                let raw = String(token.dropFirst("--window-days=".count))
+                guard let days = Int(raw), days > 0 else {
+                    return .usage("--window-days 要是一个正整数：\(raw)")
+                }
+                req.windowDays = days
             case _ where token.hasPrefix("-"):
                 return .usage("未知参数：\(token)")
             case _ where req.path == nil:
@@ -92,7 +106,8 @@ enum CLIRouter {
         var outcome = CLIScanOutcome(report: nil, exit: .allFailed, problem: "未开跑")
         let gate = DispatchSemaphore(value: 0)
         Task.detached(priority: .userInitiated) {
-            outcome = await scan.outcome(path: req.path ?? "", allowNetwork: req.allowNetwork)
+            outcome = await scan.outcome(path: req.path ?? "", allowNetwork: req.allowNetwork,
+                                         extraLogPaths: req.logPaths, windowDays: req.windowDays)
             gate.signal()
         }
         if gate.wait(timeout: .now() + CLIConfig.hardTimeout) == .timedOut {
@@ -132,12 +147,13 @@ enum CLIRouter {
     static var usageText: String {
         """
         用法：
-          tcoder scan  <path> [--out=<file>] [--compact] [--allow-network]   输出 ProjectReport JSON
-          tcoder score <path> [--allow-network]                              只打读数（失败路在前）
+          tcoder scan  <path> [--out=<file>] [--compact] [--allow-network]      输出 ProjectReport JSON
+          tcoder score <path> [--allow-network] [--log=<file>…] [--window-days=<n>]   只打读数（失败路在前）
           tcoder doctor [<path>]                                             自检：我在用哪个二进制、目标是否可读
 
         退出码：0 五路全成 / 2 报告可用但有路失败 / 3 路径不可用 / 4 五路全失败或超时 / 64 用法错
-        入参与 GUI 逐字对齐：ScanOptions.default、extraLogURLs=[]、withinDays=7、allowNetwork=false（除非 --allow-network）
+        入参与 GUI 逐字对齐：ScanOptions.default、allowNetwork=false（除非 --allow-network）、
+          withinDays=7（除非 --window-days）、extraLogURLs=[]（除非 --log=，可重复 = 界面的「附加日志文件」）
         无头模式不写盘：不碰 TCODER_SUPPORT_DIR、projects.json、reports/、score-history.json
         """
     }
@@ -153,6 +169,11 @@ struct CLIRequest: Equatable {
     var outPath: String?
     var compact = false
     var allowNetwork = false
+    /// 对应界面的「附加日志文件」：界面能手动指，CLI 少这个入口就会把"没找到约定位置的日志"
+    /// 报成"这项目没有日志"。可重复。
+    var logPaths: [String] = []
+    /// 对应 `AppState.logWindowDays`，不传就用 GUI 的默认值，免得两条路各一套窗口口径。
+    var windowDays = CLIScan.logWindowDays
 }
 
 enum CLIParseResult: Equatable {

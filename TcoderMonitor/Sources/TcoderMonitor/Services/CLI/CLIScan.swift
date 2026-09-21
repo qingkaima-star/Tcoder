@@ -40,7 +40,11 @@ final class CLIScan {
         self.scorer = scorer
     }
 
-    func outcome(path raw: String, allowNetwork: Bool) async -> CLIScanOutcome {
+    /// `extraLogPaths` / `windowDays` 对应界面上的「附加日志文件」与日志窗口天数：
+    /// 界面能手动指日志，CLI 少这两个入口，扫出来的"运行稳定性缺席"就分不清是
+    /// "这项目真没日志"还是"日志放在约定位置之外而没人告诉 CLI"。
+    func outcome(path raw: String, allowNetwork: Bool,
+                 extraLogPaths: [String] = [], windowDays: Int = logWindowDays) async -> CLIScanOutcome {
         guard let root = Self.validatedURL(for: raw) else {
             return CLIScanOutcome(report: nil, exit: .badPath,
                                   problem: "路径不可用：\(raw)（不存在、不是目录或不可读）")
@@ -49,11 +53,12 @@ final class CLIScan {
 
         let codeAnalyzer = code, gitAnalyzer = git, logAnalyzer = logs
         let depAnalyzer = deps, coverageAnalyzer = coverage
+        let extraLogURLs = extraLogPaths.map { URL(fileURLWithPath: $0) }
 
         async let codeResult = Self.attempt { try await codeAnalyzer.analyze(root: root, options: .default) }
         async let gitResult = Self.attempt { try await gitAnalyzer.analyze(repositoryURL: root) }
         async let logResult = Self.attempt {
-            try await logAnalyzer.analyze(projectRoot: root, extraLogURLs: [], withinDays: Self.logWindowDays)
+            try await logAnalyzer.analyze(projectRoot: root, extraLogURLs: extraLogURLs, withinDays: windowDays)
         }
         async let depResult = Self.attempt { try await depAnalyzer.analyze(projectRoot: root, allowNetwork: allowNetwork) }
         async let coverageResult = Self.attempt { try await coverageAnalyzer.analyze(projectRoot: root, options: .default) }

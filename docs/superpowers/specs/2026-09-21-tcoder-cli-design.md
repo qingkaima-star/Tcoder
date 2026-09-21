@@ -65,6 +65,12 @@
 - `--compact`：JSON 压成单行，便于 `| jq -c` 与管道。
 - `--allow-network`：显式打开依赖分析的在线查（OSV / npm registry）。默认 **false**，
   与 GUI 的 `AppState.allowNetworkLookups = false` 对齐。
+- `--log=<file>`（**可重复**）与 `--window-days=<n>`（默认 7）：对应界面的「附加日志文件」与
+  日志窗口天数。**为什么这两个是必需而不加会留坑**：CLI 少了 `--log`，一个日志不放在
+  `Logs/error.log`、`crash.log`、`~/Library/Logs` 约定位置的项目就永远扫出"运行稳定性缺席"，
+  而读的人分不清是"这项目真没日志"还是"入口没给"。实测：同一棵树不带 `--log` 是
+  综合 75 / 缺席 3 维，带一个真日志文件变综合 80 / 缺席 2 维，运行稳定性进入场。
+  `--log` 指向不存在的文件时**直接判用法错（64）**，不悄悄收下。
 - `--help` / `-h` / `help` / `--version`：用法与版本，**退出码 0**（不是 64）。
 
 没有 `--json`：`scan` 的存在意义就是吐 JSON，再加一个同名开关等于给自己造两种口径。

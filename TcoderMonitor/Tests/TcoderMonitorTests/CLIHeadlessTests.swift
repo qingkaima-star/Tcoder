@@ -37,8 +37,12 @@ final class CLIHeadlessTests: XCTestCase {
 
     private final class StubLogs: LogAnalysisProviding {
         let error: Error?
+        private(set) var seenExtraURLs: [URL] = []
+        private(set) var seenWindowDays: Int?
         init(error: Error? = nil) { self.error = error }
         func analyze(projectRoot: URL, extraLogURLs: [URL], withinDays: Int) async throws -> LogSummary {
+            seenExtraURLs = extraLogURLs
+            seenWindowDays = withinDays
             if let error { throw error }
             return LogSummary()
         }
@@ -153,6 +157,48 @@ final class CLIHeadlessTests: XCTestCase {
     }
 
     // MARK: - 退出码：没有"静默成功"这一档
+
+    // MARK: - 日志入参：界面能手动附加，CLI 不能就是假无
+
+    func test_parseCarriesRepeatableLogPathsAndWindow() throws {
+        let file = fixtureDir + "/CLIHeadlessTests.swift"      // 一个真存在的文件才该被认下
+        guard case let .request(req) = CLIRouter.parse(
+            argv: ["x", "score", "/tmp/r", "--log=\(file)", "--window-days=14"]) else {
+            return XCTFail("--log / --window-days 应当被认下")
+        }
+        XCTAssertEqual(req.logPaths, [file])
+        XCTAssertEqual(req.windowDays, 14)
+        guard case let .request(multi) = CLIRouter.parse(
+            argv: ["x", "scan", "/tmp/r", "--log=\(file)", "--log=\(file)"]) else {
+            return XCTFail("--log 要可重复（界面上的附加日志就是一个数组）")
+        }
+        XCTAssertEqual(multi.logPaths.count, 2)
+        if case let .request(bare) = CLIRouter.parse(argv: ["x", "scan", "/tmp/r"]) {
+            XCTAssertEqual(bare.windowDays, CLIScan.logWindowDays,
+                           "不传时必须落回 GUI 的默认窗口，否则与界面对不上表")
+        } else {
+            XCTFail("scan 带路径应当解析成 request")
+        }
+    }
+
+    func test_rejectsUnparseableLogInputs() {
+        for bad in [["x", "score", "/tmp", "--window-days=abc"],
+                    ["x", "score", "/tmp", "--window-days=0"],
+                    ["x", "score", "/tmp", "--log=/definitely/not/here-\(UUID().uuidString).log"]] {
+            guard case .usage = CLIRouter.parse(argv: bad) else { return XCTFail("这些必须判用法错：\(bad)") }
+        }
+    }
+
+    func test_logInputsReachTheAnalyzer() async throws {
+        let file = fixtureDir + "/CLIHeadlessTests.swift"
+        let logs = StubLogs()
+        let sut = CLIScan(code: StubCode(result: Self.healthyCode()), git: StubGit(result: Self.healthyGit()),
+                          logs: logs, deps: StubDeps(), coverage: StubCoverage(), scorer: WeightedHealthScorer())
+        _ = await sut.outcome(path: fixtureDir, allowNetwork: false,
+                              extraLogPaths: [file], windowDays: 21)
+        XCTAssertEqual(logs.seenExtraURLs.map(\.path), [file], "附加日志没传到分析器 = 界面有而 CLI 没有的第二份实现")
+        XCTAssertEqual(logs.seenWindowDays, 21)
+    }
 
     func test_exitCodeFollowsFailedSectionCount() {
         XCTAssertEqual(CLIExit.failedSections(0), .ok)
