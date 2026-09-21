@@ -48,7 +48,6 @@ provenance_ok() {  # provenance_ok <产物 rev> <当前 HEAD> <构建时 clean> 
   # "永远不可能通过的闸门"（本仓实测踩过：前台名比错那次，三趟全被拒，
   # 而它拒得很响，看起来比放行更像尽职）。
   local built="$1" head="$2" clean="$3"
-  PROVENANCE_NOTE=""
   if [ -z "$built" ] || [ "$built" = "unknown" ]; then
     echo "读不到产物的构建 rev（不是本仓 build_app.sh 建出来的，或 manifest 被删了）"; return 1
   fi
@@ -63,7 +62,10 @@ provenance_ok() {  # provenance_ok <产物 rev> <当前 HEAD> <构建时 clean> 
   fi
   local btree="${4:-}" htree="${5:-}"
   if [ -n "$btree" ] && [ -n "$htree" ] && [ "$btree" = "$htree" ]; then
-    PROVENANCE_NOTE="rev 不同（产物 ${built:0:7} / 当前 ${head:0:7}）但产物码 tree 相同 ${btree:0:7}"\
+    # 必须走 stdout：调用方普遍写成 `WHY=$(provenance_ok …)`，那里面对变量的赋值
+    # 发生在**子 shell** 里，父进程永远读不到——实测 2026-09-21 15:31，
+    # 于是"按 tree 放行必须留痕"变成了一句没有效果的注释（悄悄放行，正是我禁止的那种）。
+    echo "rev 不同（产物 ${built:0:7} / 当前 ${head:0:7}）但产物码 tree 相同 ${btree:0:7}"\
 " —— 差的只是 docs/scripts/测试，可归属"
     return 0
   fi

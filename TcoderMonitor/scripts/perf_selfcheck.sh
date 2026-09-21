@@ -425,8 +425,12 @@ selfcheck_binary_provenance() {  # selfcheck_binary_provenance <outdir>
   #（写歪的方向是"永远认为相同"或"永远认为不同"，两边都不报错）。
   local T1=1111111111111111111111111111111111111111111111111111111111111111
   local T2=2222222222222222222222222222222222222222222222222222222222222222
-  if provenance_ok "$B" "$H" true "$T1" "$T1"; then
-    [ -n "${PROVENANCE_NOTE:-}" ] || { fail "靠 tree 放行了却没写 PROVENANCE_NOTE —— 悄悄放行比拒错更糟"; bad=1; }
+  # 用**调用方的形状**验：真实调用一律 `WHY=$(provenance_ok …)`，所以留痕必须在 stdout 里——
+  # 对变量的赋值出不了子 shell，上一版就是这样把"必须留痕"变成一句空话的。
+  local treenote
+  if treenote=$(provenance_ok "$B" "$H" true "$T1" "$T1"); then
+    [ -n "$treenote" ] \
+      || { fail "靠 tree 放行了却没把理由写到 stdout —— 悄悄放行比拒错更糟"; bad=1; }
   else
     fail "rev 不同但产物码 tree 相同却仍被拒（落地后同步头会被假拒，实测踩过一次）"; bad=1
   fi
