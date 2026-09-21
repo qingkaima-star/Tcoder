@@ -42,6 +42,7 @@ cmd_selfcheck() {
   selfcheck_render_regime "$out"    # 13) render 比率只在同一种出帧机制下互比
   selfcheck_binary_provenance "$out" # 14) 被量的二进制必须就是这份代码（rev 对齐）
   selfcheck_baseline_text_is_derived "$out"  # 15) 对照列文字不许是字典的第二份手抄
+  selfcheck_heavy_jobs_probe "$out"  # 16) 并发重活：三个名字都要认，输出必须是 pid 清单
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
@@ -469,4 +470,28 @@ PYCASE
   else
     fail "对照列与字典脱钩：$(printf '%s' "$r" | tail -2)"
   fi
+}
+
+selfcheck_heavy_jobs_probe() {  # selfcheck_heavy_jobs_probe <outdir>
+  # 16) "机器空不空"这一维自己也要能跑、能解析、清单不能被偷偷削短。
+  #     （§1.3 那两批作废基线的坏因之一就是"有东西在跑而闸门看不见"：
+  #      第一版只认 swiftc，全量门禁在跑时它读成"空"。）
+  if ! declare -f concurrent_heavy_jobs >/dev/null; then
+    fail "concurrent_heavy_jobs 不在作用域里——这一维等于没人守"
+    return
+  fi
+  local out
+  out=$(concurrent_heavy_jobs)
+  case "$out" in
+    *[!0-9\ ]*) fail "并发重活探针输出不是 pid 列表（拿到「$out」）——话术会跟着一起胡说" ;;
+    *) ok "并发重活探针可跑可解析（现在：${out:-机器空}）" ;;
+  esac
+  # 清单被削回只认 swiftc 的话，本仓全量门禁期间就会假装机器空着——钉住三个名字。
+  local n missing=""
+  for n in swiftc swift-test xctest; do
+    grep -q "\b$n\b" <(declare -f concurrent_heavy_jobs) || missing="$missing $n"
+  done
+  [ -z "$missing" ] \
+    && ok "探针覆盖 swiftc / swift-test / xctest 三种重活" \
+    || fail "探针不再认识这些重活：${missing# }——全量门禁在跑时会被读成机器空"
 }

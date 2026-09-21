@@ -110,7 +110,7 @@ preflight_context() {  # preflight_context <outdir> <pid>
   f="$out/measurement-context.txt"
   front=$(preflight_front_app)
   visible=$(preflight_window_state "$pid")
-  others=$(pgrep -x swiftc 2>/dev/null | tr '\n' ' ')
+  others=$(concurrent_heavy_jobs)
   # 人手静默：整机 load 与并发编译挡得住"机器在忙"，挡不住"有人在点这个窗口"。
   local qline quiet
   qline=$(quiescence_probe)
@@ -134,6 +134,19 @@ preflight_context() {  # preflight_context <outdir> <pid>
   fi
   [ "$hard" = "1" ] && echo "    ⚠ IGNORE_CONTEXT_GATE=1：条件不合格，这批读数不得进任何对比表。" >&2
   echo "    上下文已落 $f"
+}
+
+concurrent_heavy_jobs() {  # → 空格分隔的 pid；空 = 机器上没有本仓的重活
+  # 【为什么不止 swiftc】第一版只 `pgrep -x swiftc`，于是**跑全量门禁的那段时间**
+  # （进程叫 swift-test / xctest，编译早已结束）在它眼里是"机器空着"——
+  # 而那恰恰是 load 与调度最不干净的时候，量出来的样本会五闸全过。
+  # 实测 2026-09-21 11:46：门禁在测时 `swiftc 在场数=0`、load1=4.23，全部门槛放行。
+  local names=(swiftc swift-test xctest) out="" n p
+  for n in "${names[@]}"; do
+    p=$(pgrep -x "$n" 2>/dev/null | tr '\n' ' ')
+    [ -n "$p" ] && out="$out$p "
+  done
+  printf '%s\n' "${out% }"
 }
 
 front_is_target() {  # front_is_target <前台App名> → 0=就是被测 App
@@ -199,7 +212,8 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
     hard=1
   fi
   if [ -n "$others" ]; then
-    echo "!! 有 swiftc 在跑（$others）——它会抢满全部核，app-update 相位会被显著抬高。等它跑完再来。" >&2
+    echo "!! 有本仓的重活在跑（pid $others：swiftc / swift-test / xctest）——" \
+         "它会抢满全部核，app-update 相位会被显著抬高。等它跑完再来。" >&2
     hard=1
   fi
   # 负载阈值：默认 1 分钟 load 不超过核数的 1.5 倍（LOAD_MAX=<数> 可覆盖，但覆盖了就要在报告里写）
