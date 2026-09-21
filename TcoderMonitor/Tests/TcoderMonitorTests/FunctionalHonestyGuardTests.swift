@@ -291,6 +291,23 @@ final class FunctionalHonestyGuardTests: XCTestCase {
                       "注释里交代退役历史就被判红 → 一年后没人记得它为什么错")
     }
 
+    /// G8：覆盖率那一维的「没数据」必须说清是**哪一种**没数据。
+    /// 三档合成一句「该项目没有产出覆盖率报告」= 拿「没读到」冒充「没有」（§S2）。
+    func test_coverageAbsenceNamesTheActualInputState() {
+        XCTAssertEqual(MissingDimensionReason.testingAbsence(coverage: nil), "尚未分析覆盖率报告，不参与计分。",
+                       "没跑过分析 = 状态未知，不能替项目下「没有产出报告」的结论")
+
+        let foundButUnreadable = CoverageMetrics(reports: [], scannedFileCount: 2)
+        let unreadable = MissingDimensionReason.testingAbsence(coverage: foundButUnreadable) ?? ""
+        XCTAssertTrue(unreadable.contains("扫到 2 个"), "扫到了报告文件这件事必须上屏：\(unreadable)")
+        XCTAssertFalse(unreadable.contains("没有产出覆盖率报告"),
+                       "读不出数字被说成没有报告：\(unreadable)")
+
+        let nothingFound = CoverageMetrics(reports: [], scannedFileCount: 0)
+        let note = MissingDimensionReason.testingAbsence(coverage: nothingFound) ?? ""
+        XCTAssertTrue(note.contains("没有产出覆盖率报告"), "真的没有报告时这句必须还在：\(note)")
+    }
+
     /// G6 的两向元测试：老写法必须被抓到，`AnalysisSectionRow` 那种
     /// "只有一个 style" 的合法写法不许误伤（它本来就该是 plain 的导航行）。
     func test_buttonStyleScannerCatchesTheShadowingShape() {

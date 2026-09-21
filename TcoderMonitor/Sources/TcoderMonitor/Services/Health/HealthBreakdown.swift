@@ -267,8 +267,20 @@ enum MissingDimensionReason {
         dependencies == nil ? "未识别到依赖清单。" : nil
     }
 
-    private static func testingAbsence(coverage: CoverageMetrics?) -> String? {
-        coverage?.hasData == true ? nil : "该项目没有产出覆盖率报告，不参与计分。"
+    /// 覆盖率这一维要分**三档**，合成一句就把输入状态弄丢了：
+    /// `nil` = 这一趟根本没跑过覆盖率分析；跑过了但 `scannedFileCount == 0` = 真的没有报告文件；
+    /// 跑过了、也扫到了报告文件、`hasData` 却是 false = **报告读不出可用数字**
+    /// （格式不认识 / 空文件 / 超过 20 MiB 上限 / 不是 UTF-8）。
+    /// 原来三档共用一句「该项目没有产出覆盖率报告」，等于拿"没读到"冒充"没有"
+    /// （功能真实性清单 §S2：缺证据不得冒充结论）。
+    static func testingAbsence(coverage: CoverageMetrics?) -> String? {
+        guard let coverage else { return "尚未分析覆盖率报告，不参与计分。" }
+        if coverage.hasData { return nil }
+        if coverage.scannedFileCount > 0 {
+            return "扫到 \(NumberFormat.grouped(coverage.scannedFileCount)) 个覆盖率报告文件，"
+                + "但里面没有可用的行覆盖数字，不参与计分。"
+        }
+        return "该项目没有产出覆盖率报告，不参与计分。"
     }
 
 }
