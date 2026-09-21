@@ -118,7 +118,8 @@ struct PerformanceView: View {
             BannerRow(text: "采样已暂停：下方为最后一次采集结果，点「继续」恢复实时刷新。", style: .warning)
         }
         if let reason = SystemReadings.memoryGapReason(context) {
-            BannerRow(text: "内存读数不可信：\(reason)。本页按 -- 显示，未把它画成占满。", style: .error)
+            BannerRow(text: localizedFormat("内存读数不可信：%@。本页按 -- 显示，未把它画成占满。", reason),
+                      style: .error)
         }
     }
 }

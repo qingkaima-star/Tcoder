@@ -102,7 +102,7 @@ struct PerformanceSystemTiles: View {
             label: "磁盘吞吐",
             value: total == nil ? nil : Live.rate(total),
             caption: total == nil
-                    ? "首个差分帧到达前不给速率"
+                    ? "首个差分帧到达前，不给速率"
                     : "读 \(Live.rate(SystemReadings.diskReadBytesPerSecond(context))) / 写 \(Live.rate(SystemReadings.diskWriteBytesPerSecond(context)))",
             systemImage: IconName.disk.rawValue,
             gauge: .empty   // 没有可信分母：留等高占位，不画假条
@@ -115,7 +115,7 @@ struct PerformanceSystemTiles: View {
             label: "网络吞吐",
             value: total == nil ? nil : Live.bitRate(total),
             caption: total == nil
-                    ? "首个差分帧到达前不给速率"
+                    ? "首个差分帧到达前，不给速率"
                     : "↓ \(Live.bitRate(SystemReadings.networkInBytesPerSecond(context))) / ↑ \(Live.bitRate(SystemReadings.networkOutBytesPerSecond(context)))",
             systemImage: IconName.network.rawValue,
             gauge: .empty
@@ -151,9 +151,10 @@ struct PerformanceSystemTiles: View {
             // **一个** Text，而不是"五段 + 两个间隔点"抢一行：
             // 后者在窄窗口下按弹性比例压缩每段，`·` 会单独留在行尾（清单 2.14）。
             // 同页 `sampleStats` 本来就是拼成单串的写法 —— 两种写法并存就是"不规整"本身。
-            Text("机身 \(context.snapshot?.thermalState.rawValue ?? Live.missing)"
-                 + " · 已运行 \(Self.uptimeText(context.snapshot?.uptimeSeconds))"
-                 + " · 全系统 \(Live.grouped(context.snapshot?.processCount)) 个进程")
+            Text(localizedFormat("机身 %1$@ · 已运行 %2$@ · 全系统 %3$@ 个进程",
+                                 context.snapshot?.thermalState.rawValue ?? Live.missing,
+                                 Self.uptimeText(context.snapshot?.uptimeSeconds),
+                                 Live.grouped(context.snapshot?.processCount)))
             Spacer(minLength: 0)
         }
         .font(Theme.Typo.label.font)

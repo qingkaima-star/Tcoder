@@ -84,7 +84,7 @@ struct PerformanceGroupCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             header
-            Text("匹配模式 \(pattern) · 对进程名与命令行做包含匹配")
+            Text(localizedFormat("匹配模式 %1$@ · 对进程名与命令行做包含匹配", pattern))
                 .font(Theme.Typo.monoSmall.font)
                 .foregroundStyle(deEmphasized ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
                 .lineLimit(1)

@@ -169,5 +169,37 @@
 			<string>%lld years ago</string>
 		</dict>
 	</dict>
+	<key>%lld 处</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@hits@</string>
+		<key>hits</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld occurrence</string>
+			<key>other</key>
+			<string>%lld occurrences</string>
+		</dict>
+	</dict>
+	<key>另有 %lld 处</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@rest@</string>
+		<key>rest</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>1 more occurrence</string>
+			<key>other</key>
+			<string>%lld more occurrences</string>
+		</dict>
+	</dict>
 </dict>
 </plist>

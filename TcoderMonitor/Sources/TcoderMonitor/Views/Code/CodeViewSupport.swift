@@ -177,7 +177,7 @@ struct CodeHotspotRow: View {
                         .frame(maxWidth: .infinity)
                         .tableCell(DataColumns.column(columns, 1))
 
-                    Text("\(NumberFormat.grouped(hotspot.lineCount)) 行")
+                    Text(localizedCount("%lld 行", hotspot.lineCount))
                         .font(CodeGitType.number(Theme.Typo.monoSmall))
                         .foregroundStyle(.secondary)
                         .tableCell(DataColumns.column(columns, 2))

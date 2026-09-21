@@ -116,7 +116,7 @@ struct ContributorRow: View {
                 }
                 Spacer(minLength: Theme.Spacing.sm)
                 VStack(alignment: .trailing, spacing: Theme.Spacing.xxs) {
-                    Text("\(NumberFormat.grouped(author.commits)) 次")
+                    Text(localizedCount("%lld 次", author.commits))
                         .font(CodeGitType.number(Theme.Typo.metricMid))
                     Text("\(NumberFormat.signed(author.additions)) / \(NumberFormat.signed(-author.deletions))")
                         .font(CodeGitType.number(Theme.Typo.monoSmall))
