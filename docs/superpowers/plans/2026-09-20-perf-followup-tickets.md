@@ -318,7 +318,13 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 
 ```bash
 ./scripts/perf_harness.sh selfcheck          # 11 项，红了所有读数作废——先量尺子再量代码
-./scripts/perf_harness.sh idle   /tmp/tcoder-perf-after-<rev>     # 2a：不需要人，只要机器安静
+./scripts/perf_harness.sh idle   /tmp/tcoder-perf-after-<rev>     # 2a：不需要人**操作**，但需要人**离开**
+#   （02:51 实测更正：原先写"不需要人"是错的。三趟全被拒：
+#    ① 前台是「微信」——不在前的窗口被 macOS 节流绘制，同一二进制后台 app-update 只有 1.9~3.0 ms，
+#       前台 10.8~24.8 ms，拿后台数交 T2 就是**假性好看**；
+#    ② 人手 0.05~0.19 秒前还在动（要求静默 ≥5 s）。
+#   ⇒ 闸门拒得对：它替我挡下一批会骗人的 T2 读数。T2 的窗口条件是
+#      "Tcoder 停在最前面 + 这 5 分钟没人碰这台 Mac"，不是"无人参与"。）
 ./scripts/perf_harness.sh interact /tmp/tcoder-perf-interact-<rev> # 2b：**这 20 s 要有人持续滚动**
 ./scripts/perf_harness.sh report <目录>       # 表头会写测量期间，idle 那批明说不得交 T1
 ```
