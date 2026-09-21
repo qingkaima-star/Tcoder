@@ -210,6 +210,17 @@ final class FunctionalHonestyGuardTests: XCTestCase {
         XCTAssertEqual(CaptureWindow.dimension(from: "4000", fallback: 820), 4000, "上界必须可达")
     }
 
+    /// 取证滚动开关：不设 = 完全不生效；只有字面量 `bottom` 生效。
+    /// 拼错的值必须按"没设"处理 —— 取证宁可少拍一趟，也不要按猜出来的语义滚动，
+    /// 那会让"拍到的到底是哪一屏"无法复述。
+    func test_captureScrollOnlyHonoursTheExactValue() {
+        XCTAssertFalse(CaptureScroll.isBottom(nil), "没设环境变量时不该滚动")
+        XCTAssertFalse(CaptureScroll.isBottom(""), "空串不等于 bottom")
+        XCTAssertFalse(CaptureScroll.isBottom("Bottom"), "大小写不敏感等于给拼写错误开门")
+        XCTAssertFalse(CaptureScroll.isBottom("top"), "未定义的值不该被当成有效档位")
+        XCTAssertTrue(CaptureScroll.isBottom("bottom"))
+    }
+
     // MARK: - 元测试：每条尺子都必须抓得住合成违规，且不误伤合法写法
 
     // MARK: - G6 三档按钮必须真的不一样（同链两个 buttonStyle，内层赢）
