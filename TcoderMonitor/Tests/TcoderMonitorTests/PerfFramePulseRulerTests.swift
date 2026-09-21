@@ -176,7 +176,7 @@ final class PerfFramePulseRulerTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(files, 3, "扫描面只有 \(files) 个文件——目录被动过，这条已经看不清现场")
         XCTAssertTrue(text.contains("writeHeaderLocked"), "脉冲产物的表头函数不见了")
         XCTAssertEqual(missingPulseCaveats(text), [],
-                       "读数旁边少了语义边界说明：产物文件头会重新让人把\u201c唤醒间隔\u201d读成\u201c占用时长\u201d")
+                       "读数旁边少了语义边界说明：产物文件头会重新让人把「唤醒间隔」读成「占用时长」")
     }
 
     func testPulseCaveatScannerCatchesBadAndSparesGood() {
