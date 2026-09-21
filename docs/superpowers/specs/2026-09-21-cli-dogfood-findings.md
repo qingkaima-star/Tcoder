@@ -253,6 +253,50 @@ stderr 含「不可读」，0.1 秒内返回。
 > 测试各造一个 0o000 目录，本机实测是**通过**、不是 skip。
 > 仍然开着的下一档：`skipLedger` 的行数审计默认不开，所以"排除了多少**行**"还是未知。
 
+## F13（新发现，**未落地，已开方案等拍板**）：Service 层拼出来的整句直接上屏，却在双语尺子之外
+
+**怎么被发现的**：不是看代码看出的，是把 F12 合进 main 之后做一次"渲染面差量"复核时撞出来的 ——
+我要用「`Views/` `Design/` `Resources/` 差量为空」把九页取证的覆盖面扩到最终头，
+而 `git diff baee37c..64b8828 -- TcoderMonitor/Sources` 里 `Services/Health/HealthBreakdown.swift`
+那几行**新增了会印到屏幕上的中文整句**，渲染面差量看不见它。
+
+**证据（全部可复查）**：
+
+| 判据 | 实测 |
+|---|---|
+| 这些句子真的上屏 | `MissingDimensionReason.testingAbsence(coverage:)`（`Services/Health/HealthBreakdown.swift`）由同文件 `:247` 取用，产出健康评分页「缺席维度」那行解释；CLI `score` 打的是同一句 |
+| 尺子看不见 | 守卫的入口模式（`LocalizationGuardTests.uiLiteralsNeedingKeys`）四个分支都要求**前缀**：视图入口 `Text(` / 修饰符 `.help(` / 查表口 `localizedCopy(` / 参数标签 `captionHelp:`。而这里是 `base = "该项目没有产出覆盖率报告，不参与计分。"` —— 没有任何前缀，一个分支都不命中 |
+| 扫描面其实是覆盖到的 | 同文件 `:128` 起早就动态枚举整个 `Sources/TcoderMonitor`，注释里明写着「Services/ 与 Models/ 会产出喂给界面的整句」。**面到了、模式没接住** —— 这是老坑「只盯调用点，看不见生产者」的第三种形状 |
+| 未登记 | 三句在 `Resources/en.lproj/Localizable.strings` 里 `grep -c` **全部 0 命中**；`HealthBreakdown.swift` 里 `String(localized:` / `localizedCopy` **零出现** |
+| 不是新引入的族 | `git show baee37c:…HealthBreakdown.swift` 里这个函数已有 **4** 条裸中文字面量；`e6bcbac`+`dc4c53f` 那一路把它改成三档并加了不可读目录后缀，同函数现在是 **6** 条。债一直在，只是这一轮更长 |
+
+**为什么先记账不自己动手**：修它要动 `Services/Health/`（别人的名下文件），
+并且把尺子扩到"生产者"必然让 `unregisteredLiteralCeiling` 当场跳升 ——
+**那是真债现形，不是工具坏了**，得由拍板的人决定是先登记键还是先扩尺子。
+
+**方案（接谁、怎么接）**：
+① 把 `testingAbsence` 的三句各自包进 `localizedCopy(...)`（本仓查表口子，`String` 型，
+不会因为 `Text(变量)` 不查表而漏）；② 键按中文原句逐字进目录，内插数字的部分换
+`localizedFormat` —— 内插串不能当键，这条台账里已记过；
+③ 守卫扩面**放在 ①② 之后**，且要先量"扩面会现形多少条"再决定上限落在哪，
+现量必须由守卫自己打印，不许由我用 python 复刻一把尺子去数（那条规矩的编号是"对齐口径"第 20 次教训）。
+
+**规模摸底（明确标注：这是 python 粗筛，不是尺子读数，不进台账）**：
+"含汉字、又不落在任何 UI 入口前缀上"的字面量，`Services/` 下 **32 个文件 / 327 处**。
+但这个数**不能直接当债的规模**，因为它混着三类不同的东西，要不要上双语是产品判断不是修 bug：
+
+| 类 | 例 | 判断 |
+|---|---|---|
+| 真的会上屏的整句 | `HealthBreakdown.testingAbsence`、`ScoreCurves*` 的 detail 句、`SourceSkipLedger` 的 limitationSummary | **是债**，就是 F13 要治的那一类 |
+| 静态数据文案 | `VulnerabilitySource.swift` 58 处（内置快照里的 advisory 描述，如「lodash 存在命令注入 / ReDoS …」） | 它是**数据**不是文案。翻译它等于改快照内容，多半应当保持原文并标注来源 |
+| 终端出口 | `CLIScoreText.swift` 22 处、`CLIRouter.swift` 17 处 | 读的人是 AI 调用方。要不要跟系统语言走，是一个**待拍板的产品问题**（本轮我按"中文即可"实现，未登记键） |
+
+所以 F13 交给下一手的第一件事不是改代码，是**把这三类切开** —— 否则扩面会把 58 条快照描述
+算成双语债，逼出一个既虚高又没人愿意维护的上限。
+
+同类形状还有没有：`ScoreCurves.swift` 那句「综合 76 分（B 级）…」也住在 Services，
+守卫的注释里已经点过名 —— 所以 F13 不是 `HealthBreakdown` 一个文件的事故。
+
 ## 一句话结论
 
 CLI 这一轮真正的收益不是"省了 300 秒"，而是**把界面里那些只画给人看的诚实性说明
