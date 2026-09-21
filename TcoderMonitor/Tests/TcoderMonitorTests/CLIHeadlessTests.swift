@@ -239,6 +239,31 @@ final class CLIHeadlessTests: XCTestCase {
         XCTAssertFalse(text.contains("综合健康分 0"), "全失败时不许把 overall 的默认 0 当成读数打出来")
     }
 
+    // MARK: - 缺席维度与核对口径（复用界面那一份，不另写）
+
+    func test_absentDimensionsPointBackToThisRunsFailures() async {
+        let outcome = await scan(codeError: Self.boom).outcome(path: fixtureDir, allowNetwork: false)
+        let text = CLIScoreText.render(outcome.report!, exit: outcome.exit)
+        XCTAssertTrue(text.contains("缺席维度"), text)
+        XCTAssertTrue(text.contains("原因见上面「失败路」那一行"), text)
+        XCTAssertFalse(text.contains("上次扫描"),
+                       "原因表里那句「上次扫描」讲的是界面上的历史报告；CLI 一次性的读数里失败就是本次，照抄会把本次读成历史账")
+    }
+
+    func test_offlineVulnerabilityNoteRidesAlongWithTheReadout() async {
+        let clean = await scan().outcome(path: fixtureDir, allowNetwork: false)
+        XCTAssertFalse(CLIScoreText.render(clean.report!, exit: clean.exit).contains("漏洞核对"),
+                       "分析器没说没查，CLI 不许凭空造一句")
+
+        var report = clean.report!
+        var deps = DependencyReport()
+        deps.networkLookupNote = "未联网核对，仅内置快照。"
+        report.dependencies = deps
+        XCTAssertTrue(CLIScoreText.render(report, exit: .ok)
+                        .contains("漏洞核对：未联网核对，仅内置快照。"),
+                      "界面上常驻的那句「没查 ≠ 没有病」，CLI 读数里也必须出现")
+    }
+
     // MARK: - 一路名只许有一份真值
 
     private static let appStateURL = URL(fileURLWithPath: #filePath)   // …/Tests/TcoderMonitorTests/本文件.swift

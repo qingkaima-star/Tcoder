@@ -30,8 +30,10 @@ enum CLIScoreText {
         }
 
         lines.append("综合健康分 = " + (health.verdict.map(String.init) ?? "无（没有任何维度拿到可计分的证据）"))
+        lines.append(contentsOf: absentDimensionLines(health, report: report))
         lines.append(contentsOf: codeScopeLines(health.codeScope))
         lines.append("结论：\(health.narrative)")
+        lines.append(contentsOf: networkCaveat(report))
         lines.append("  分  权重  维度        依据")
         for component in health.components.sorted(by: { $0.score < $1.score }) {
             lines.append("  " + pad(String(component.score), width: 3) + "  "
@@ -52,6 +54,39 @@ enum CLIScoreText {
             + " · 文件 " + (code.map { "\($0.totalFiles)" } ?? "未量到")
             + " · 码行 " + (code.map { "\($0.codeLines)" } ?? "未量到")
             + " · HEAD " + ((head?.isEmpty == false) ? String(head!.prefix(8)) : "无")
+    }
+
+    // MARK: - 缺席维度与核对口径
+
+    /// 缺席维度**复用界面的那两个函数**（`HealthBreakdown.missingDimensions` +
+    /// `MissingDimensionReason.text`）：界面向用户解释"这一维为什么没有分"的那份口径，
+    /// CLI 不许另写一遍（那会是第二把尺子）。
+    /// 唯一不照抄的是措辞归属 —— 原因表里那句「上次扫描「X」失败」讲的是"上一次扫描"，
+    /// 而 CLI 一次性的报告里失败就是**本次**，所以这一类改成指回上面的「失败路」那一行。
+    private static func absentDimensionLines(_ health: HealthScore, report: ProjectReport) -> [String] {
+        let missing = HealthBreakdown.missingDimensions(of: health)
+        guard !missing.isEmpty else { return [] }
+        let failed = missing.filter { dimension in
+            guard let analyzer = MissingDimensionReason.analyzerLabel[dimension] else { return false }
+            return report.failedSections.contains(analyzer)
+        }
+        let explained = missing.filter { !failed.contains($0) }
+        var parts = explained.map {
+            DimensionDisplay.name($0) + " — " + MissingDimensionReason.text(for: $0, report: report)
+        }
+        if !failed.isEmpty {
+            parts.append(failed.map(DimensionDisplay.name).joined(separator: "、")
+                         + " — 所属分析路本次失败，原因见上面「失败路」那一行")
+        }
+        return ["缺席维度 \(missing.count) 项（不参与计分、也不按 0 计入）：" + parts.joined(separator: " · ")]
+    }
+
+    /// "没查 ≠ 没有病"这句在界面上是常驻提示，CLI 里以前只把
+    /// `networkLookupPerformed=false` 埋在 JSON 里 —— AI 不翻那个键就会把"0 条漏洞"当结论。
+    /// 文案沿用分析器自己产出的那句，不在这里另写一份。
+    private static func networkCaveat(_ report: ProjectReport) -> [String] {
+        guard let note = report.dependencies?.networkLookupNote, !note.isEmpty else { return [] }
+        return ["漏洞核对：\(note)"]
     }
 
     private static func codeScopeLines(_ scope: HealthSubScore?) -> [String] {

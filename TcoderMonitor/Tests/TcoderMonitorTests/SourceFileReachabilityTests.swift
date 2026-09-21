@@ -85,7 +85,15 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// stdout/stderr 分流）各由 `CLIRouter` 调用。四枚都是"入口"而不是"第二把尺子"：
     /// 评分与 schema 一律沿用 `Models/ProjectReport.swift` 本体。守卫实报「实现文件 141 ·
     /// 零调用清单：无」（`unused.isEmpty` 通过 = 四枚都有产品侧引用，不是被单测喂活的）。
-    static let censusBaseline = 141
+    /// 141 → 142（同一条流紧随其后的一笔：`Services/Health/HealthBreakdown.swift` ——
+    /// 把 `ScoreRow` / `HealthBreakdown` / `WeightShiftCause` / `DimensionDisplay` /
+    /// `MissingDimensionReason` 从 `Views/Health/HealthComponentTable.swift` **整块下移**，
+    /// 让无头 CLI 与界面共用同一份"哪些维度缺席、为什么缺席"。引用点：
+    /// `Views/Health/HealthComponentTable.swift`（原调用方，一字未改）、
+    /// `Design/DataTable.swift`（此前一直在反向引用 `HealthBreakdown.weightColumnHelp`，
+    /// 这次连方向一起摆正）、`Services/CLI/CLIScoreText.swift`（新增的第二位读者）。
+    static let censusBaseline = 142
+
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
