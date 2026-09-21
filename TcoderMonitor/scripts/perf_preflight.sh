@@ -111,6 +111,9 @@ preflight_context() {  # preflight_context <outdir> <pid>
   front=$(preflight_front_app)
   visible=$(preflight_window_state "$pid")
   others=$(concurrent_heavy_jobs)
+  # 运行时漏翻台账（i18n 报告器）会在渲染路径上记键、按 200 次节流写盘。
+  # 设了它再量帧率，量的就是台账自己的开销——所以这一维写进上下文，并且直接拒跑。
+  i18n_ledger="${TCODER_I18N_RUNTIME_LEDGER:-}"
   # 人手静默：整机 load 与并发编译挡得住"机器在忙"，挡不住"有人在点这个窗口"。
   local qline quiet
   qline=$(quiescence_probe)
@@ -197,11 +200,18 @@ preflight_write_context() {  # preflight_write_context <outdir> <context 文件�
     echo "load1=$load1  核数=$cores  并发swiftc=${others:-无}"
     echo "人输入静默=${quiet:-取不到}s  明细=${qline:-（探针没跑起来）}"
     echo "hitches_seconds=$SECONDS_HITCHES  tp_seconds=$SECONDS_TP"
+    echo "诊断开关 TCODER_I18N_RUNTIME_LEDGER=${i18n_ledger:-未设（渲染路径零成本）}"
   } > "$f" 2>/dev/null || die "写不出 $f"
   echo "    上下文：前台=$front  visible=$visible  load1=$load1/$cores  并发swiftc=${others:-无}  静默=${quiet:-取不到}s"
 }
 
-preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GATE 决定炸还是通报）
+preflight_gates() {  # 不合格就置 `hard=1`
+  if [ -n "${i18n_ledger:-}" ]; then
+    echo "!! 设了 TCODER_I18N_RUNTIME_LEDGER（=$i18n_ledger）——渲染路径在记漏翻台账并节流写盘；
+   这批读数量的是台账的开销，不是 App 的心跳。取消该变量再测。" >&2
+    hard=1
+  fi
+（调用方按 IGNORE_CONTEXT_GATE 决定炸还是通报）
   # 【第六维：被量的到底是不是这份代码】2026-09-21 实测踩到：`measurement-context.txt`
   # 里的 `HEAD=` 是**工作树**的头，而我 attach 的那个 `dist/Tcoder.app` 是两小时前
   # `build_app.sh` 从 `41add9e` 建的，中间隔了 39 个产物文件（整批 i18n + 我自己的
