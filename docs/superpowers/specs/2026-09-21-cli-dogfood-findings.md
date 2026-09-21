@@ -61,7 +61,7 @@ CLI 首行「码行 50 542」与注释维度的依据句「…源码 69,199 行�
 `Services/Health/**` 的文案，且 `HealthScoreTests` 一类守卫钉着措辞，改它应当与评分流一起做、
 一次改到位（同时把两处"行数"统一成"总行（含空行与注释）/ 有效码行"两个明确名字）。
 
-## F3 守卫的扫描面靠"按名字点名的目录清单" —— 可修待排（有撞车风险）
+## F3 守卫的扫描面靠"按名字点名的目录清单" —— 已落地（`846fe84`）
 
 `LocalizationGuardTests.sourceFiles()` 写死 `["Views", "Design", "App", "Services", "Models"]`。
 本轮我把 CLI 放进 `Services/CLI/` 而不是新建顶层 `CLI/`，**正是因为**新建顶层目录会被这把尺子
@@ -72,6 +72,22 @@ CLI 首行「码行 50 542」与注释维度的依据句「…源码 69,199 行�
 （造一个"新目录下有未登记中文串"的坏样例，必须被扫到）。
 **排队要求**：这条改的是 `LocalizationGuardTests.swift`，双语流 P6-F/G/H 连着三轮都在动它名下，
 必须等那条流交回再动，否则两边互相覆盖。
+
+**实际落地的形状（与上面预案的两处偏离，都记下来）**：
+① 没有另起一份"枚举直接子目录"的代码，而是改用全站同一把读盘尺子
+   `SurfaceScanKit.sourceFiles(under: "")`（它本来就扫整个 `Sources/TcoderMonitor`）——
+   少一份实现就少一处会漂的口径；`LocalizationGuardTests+ChineseTypography.swift` 名下那份
+   抄来的五目录清单同时删掉，两处并成一处。
+② 元测试**没有**用"新造一个带中文串的目录"那种坏样例（那要往仓库里落夹具，
+   下一轮扫描会把它当成真存量 —— 本仓在 `/tmp` 夹具上吃过假绿）。改成钉住
+   `test_meta_scanSurfaceCoversEveryTopLevelDirectory`：**从守卫自己看见的路径**里取一级目录集合，
+   断言六个已知目录一个都不许少。新增目录自动进来（枚举是动态的），
+   而目录被改名或整片消失会让存量"假短" —— 那条断言正是钉这个方向的。
+
+**扩口的代价已经结清**：入口族同期补进 `CopyHelpBadge(` 与 `help:` / `subtitleHelp:` /
+`captionHelp:` 之后双语现量 17 → 30（多看见 12 条一直在盲区的 ⓘ 键），同日登记 11 条落到 **19**，
+棘轮按实扫现量从 28 收到 19。剩下 19 条的构成（17 内插串 + 2 处 `Text(变量)`）记在
+`docs/superpowers/plans/2026-09-21-copy-into-tooltips.md` §6，不当已还。
 
 ## F4 CLI 复现不了 GUI 的「手动附加日志」—— 已落地
 

@@ -167,6 +167,13 @@ fi
 if [ -n "${CAPTURE_WINDOW_WIDTH:-}" ]; then
   SIZE_ENV+=(TCODER_CAPTURE_WINDOW_WIDTH="$CAPTURE_WINDOW_WIDTH")
 fi
+# `CAPTURE_SCROLL=bottom` 让页骨架滚到底再拍 —— 窗口高度被 AppKit 钳在屏幕可见高
+# （实测请求 1600pt 只拿到 1050pt），所以最长几页的尾部只能靠滚动进证据。
+# 与顶部那一趟是**互补的两张**，不是一张全图。
+if [ -n "${CAPTURE_SCROLL:-}" ]; then
+  SIZE_ENV+=(TCODER_CAPTURE_SCROLL="$CAPTURE_SCROLL")
+  echo "    取证滚动 = $CAPTURE_SCROLL（拍页尾；顶部那一趟另拍）"
+fi
 
 launch_instance() {  # launch_instance [页名]；echo pid
   local name="$1"

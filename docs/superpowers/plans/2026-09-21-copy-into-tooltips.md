@@ -75,3 +75,68 @@
 **不做**：为了少字删掉任何口径说明；把 C 名单里的句子移进 tooltip；
 给 tooltip 加投影/材质去"提示可悬停"（全仓投影唯一性与无材质红线不许动）；
 在本轮引第三方 popover 库。
+
+## 6. 集成台账（总工逐片记，数字全部来自守卫自己打印的现量）
+
+尺子播种自 main `14a1f29` 实扫：**A 上界 88 / B 下界 101 / 双语未登记上界 28**。
+
+| 片 | 落 main 的 head | 独立门禁（真实尾行） | 落完之后 A 现量 |
+|---|---|---|---|
+| 底座 + 三条守卫 | `5b107a6` `fa782da` | 负责人自跑双绿 | 88（播种值） |
+| S2 代码两页 | `e161eae` | 970 / 0 | 76 |
+| S3 Git 与贡献者 | `c1365ac` | 971 / 0 | 74 |
+| S6 健康评分 | 键登记 `2b44d8f` | 随 S3 那趟 | 74 |
+| S4 依赖 | `8de2d17` | 987 / 0（本树 84→84，基数早于 S2/S3） | 待合后实扫 |
+| 尺子修复 + 扫描面动态化 | `ws/i18n-ruler`（在跑） | — | — |
+| S5 性能与日志 | 被拒一次，见下 | **1 失败**（尺子误报） | — |
+| S1 总览与外壳 | 在跑（已 2 个提交，本树报 86→83） | — | — |
+
+**合完 main `2b44d8f` 的兜底全量**：detached 验证树 `976` 例、`12` skipped、`0` 失败（`VERIFY_EXIT=0`）。
+
+### 被拒的那一趟（必须留名，否则空目录会被读成"量过了"）
+
+`ws/s5-perflogs` 合入 main 之后门禁红在 `PerfLogsTooltipTests.swift:118`
+「合法样例被误报」。**归因不在 S5**：共享尺子的 `sight()` 按**整行**判 hover，
+而本轮标准形状 `NoteLine("常驻短句", help: "另一句长口径")` 同一行既有可见槽位又有 hover 槽位 ——
+按行判会朝两个方向同时错（常驻那份被记成已藏 → A 虚降；整行记成 hover → B 看不见有人删了常驻句）。
+修法在 `ws/i18n-ruler`：`literalSlots(in:)` 逐字面量判槽位、判不出来才退回整行线索，
+并补 `test_meta_mixedLineCountsEachLiteralOnItsOwnSlot`。原始失败行留在
+`.scratch/s5-gate-refused-2026-09-21.txt`。
+
+### 同一批里顺手补掉的两个共享盲区
+
+1. **双语扫描面写死五个目录**（`Views/Design/App/Services/Models`），而 `Utilities/` 是第六个 ——
+   改成 `SurfaceScanKit.sourceFiles(under: "")` 动态枚举，另钉一条元测试
+   「六个一级目录一个都不许少」（新增目录自动进来，改名或消失会红）。
+2. **ⓘ 的落点躲着双语棘轮**：`CopyHelpBadge(整句)` 与 `help:` / `subtitleHelp:` / `captionHelp:`
+   这几个标签都不在入口族里，而这些组件内部替调用方过了 `localizedCopy` ——
+   也就是说调用点那句中文**就是键**，扫不到它等于本轮搬进 ⓘ 的字全部隐形。
+   入口族补上之后现量要重测：**涨了不是新增债，是多看见的债**（同 `22 → 28` 那次）。
+
+### 建议删除（各片报上来、由总工判；一句未删，B 下界因此仍是 101）
+
+| 片段 | 出处 | 判定 |
+|---|---|---|
+| 「默认不联网时漏洞判定恒为 0 条…」两处逐字重复 | S4 | **收成一处常量**（去重不是删口径，不进豁免口） |
+| `DependencySafetyVerdict.summaryCaption` 的 `.unchecked` 三段 | S4 | 暂不删：与常驻的 `deps.networkLookupNote` 并非逐字同义（截至日/未覆盖生态只在其中一份里） |
+| 「内置快照与安全公告均未命中」与安全公告卡空态句同屏两遍 | S4 新发现 | 待复核，删时须同步改 `CodeGitRestyleTests+DependencyAndAbsence` 的等值断言 |
+
+### 双语现量 19 条的构成（守卫自己打印，`TCODER_I18N_LEDGER` 落 `.scratch/`）
+
+- **17 条内插串**：`"…\(x)…"` 形状进不了目录，要逐句改写成 `localizedFormat` 整句键 ——
+  集中在 `CodeRiskAdvice`（4~6 个占位符的多段建议）、`CodeRiskView`、`ShellLayout` 三句组合式空态、
+  `ContributorRows`、`GitInsightsSections`。
+- **2 条 `Text(变量)` 形状**：`Models/Performance.swift` 的内置分组标题「Java 服务」「Node 服务」。
+  渲染点在 `PerformanceProcessGroups.swift` 的 `Text(group.group.title)` ——
+  **登记键没用**（键存在≠查得中），要先把那一处改成 `Text(localizedCopy(group.group.title))` 再登记两条键。
+  该文件归 S5 写，所以这条排在 S5 合流之后由总工做，做完现量应落到 **17**。
+
+### 两处自伤的疤（写下来，不等别人发现）
+
+1. 尺子那片合进 main 的分支提交 `d8e9ba8` 的说明是 `/tmp/m3.txt` —— 我把 `git commit -F` 写成了
+   `-qam <文件>`，参数位被当成消息。合并提交（`846fe84`）用的是 `-F`，内容没丢，
+   但分支提交这条疤改不回来（它已是 main 的祖先）。规矩已进记忆：**从文件取消息只写 `-F`，
+   提交后回读 `%s`**。
+2. S5 那一趟被拒的门禁**只在 `/tmp` 留过日志**，已补 `.scratch/s5-gate-refused-2026-09-21.txt`。
+
+

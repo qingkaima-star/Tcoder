@@ -66,6 +66,11 @@ struct MetricTile: View {
     var value: String?
     var unit: String?
     var caption: String?
+    /// 脚注的「留短藏长」槽：屏上留 `caption` 那一句短的，长口径进 ⓘ。
+    /// 有了它就不必把 44 字的口径整句塞进 `caption` —— 那个槽被 `reserveLines = 2`
+    /// 钉着，长句撑开会歪掉同排四格的基线（`GitInsightsMetricGrid` 就为此单独设过
+    /// `captionLineLimit: 2`）。画法仍复用全站唯一的 `CopyHelpBadge`。
+    var captionHelp: String? = nil
     var tint: Color
     var systemImage: String?
     /// 量条槽。**位置是规则，不是选择**：量条属于数字，必须钉在值下面那一行，
@@ -143,7 +148,8 @@ struct MetricTile: View {
                              height: Theme.Layout.gaugeInline)
             }
             if let caption {
-                Text(localizedCopy(caption))
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+                    Text(localizedCopy(caption))
 
                     .font(Theme.Typo.label.font)
                     // 原来是 `.tertiary`：测得值不得用 tertiary。全仓 42 处 `.tertiary`
@@ -156,6 +162,10 @@ struct MetricTile: View {
                     // 唯一的例外是 `captionLineLimit`：数据摘要不是口径。
                     .lineLimit(captionLineLimit)
                     .fixedSize(horizontal: false, vertical: true)
+                    if let captionHelp {
+                        CopyHelpBadge(captionHelp)
+                    }
+                }
             }
             // 没有脚注的格子也要把那块行位留出来，否则同排底边必然差一截。
             if caption == nil {
