@@ -47,12 +47,18 @@ HEAD_SHA=$(git rev-parse HEAD)
 # rev / 构建时是否干净：判定与测量档共用同一把手尺子（`perf_provenance.sh`），
 # 本文件只负责把它的结论翻成 ✅/❌ 那一行；不许在这里再写一遍 `[ "$a" = "$b" ]`。
 source "$(dirname "$0")/perf_provenance.sh"
-PROV_WHY=$(provenance_ok "$MF_REVISION" "$HEAD_SHA" "$MF_CLEAN") && prov_ok=1 || prov_ok=0
+MF_TREE=$(mf_get PRODUCT_TREE)
+HEAD_TREE=$(provenance_product_tree HEAD)
+PROV_WHY=$(provenance_ok "$MF_REVISION" "$HEAD_SHA" "$MF_CLEAN" "$MF_TREE" "$HEAD_TREE") && prov_ok=1 || prov_ok=0
 
 echo "=== provenance 校验 ==="
 chk "交付二进制哈希 == manifest 记录" "$MF_SHA" "$ACTUAL_SHA"
 if [ "$prov_ok" = "1" ]; then
-  echo "  ✅ 产物 rev == HEAD，且构建时工作树干净（判定来自 perf_provenance.sh）"
+  if [ -n "${PROVENANCE_NOTE:-}" ]; then
+    echo "  ✅ 产物与代码同源（按产物码 tree）：${PROVENANCE_NOTE}"
+  else
+    echo "  ✅ 产物 rev == HEAD，且构建时工作树干净（判定来自 perf_provenance.sh）"
+  fi
 else
   echo "  ❌ 产物与代码不是同一份：$PROV_WHY"; fail=1
 fi

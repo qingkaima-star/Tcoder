@@ -419,7 +419,22 @@ selfcheck_binary_provenance() {  # selfcheck_binary_provenance <outdir>
     || { fail "verify_provenance.sh 不再经过共享判定（大概又手抄了一遍 [ a = b ]）"; bad=1; }
   grep -q 'preflight_manifest_value\|^provenance_ok() {' scripts/perf_preflight.sh \
     && { fail "perf_preflight.sh 里还留着本地副本，删掉、只 source"; bad=1; }
-  [ "$bad" = "0" ] && ok "二进制出身判定五向都对，且定义唯一（verify 与 preflight 共用 perf_provenance.sh）"
+  # tree 放行这一支必须单独钉：它是"假拒"的唯一解药，也是最容易被写歪的一支
+  #（写歪的方向是"永远认为相同"或"永远认为不同"，两边都不报错）。
+  local T1=1111111111111111111111111111111111111111111111111111111111111111
+  local T2=2222222222222222222222222222222222222222222222222222222222222222
+  if provenance_ok "$B" "$H" true "$T1" "$T1"; then
+    [ -n "${PROVENANCE_NOTE:-}" ] || { fail "靠 tree 放行了却没写 PROVENANCE_NOTE —— 悄悄放行比拒错更糟"; bad=1; }
+  else
+    fail "rev 不同但产物码 tree 相同却仍被拒（落地后同步头会被假拒，实测踩过一次）"; bad=1
+  fi
+  if provenance_ok "$B" "$H" true "$T1" "$T2"; then
+    fail "产物码 tree 不同却放行 —— 那就是把身份判据废了"; bad=1
+  fi
+  if provenance_ok "$B" "$H" true "" "$T1"; then
+    fail "缺 tree 信息还走 tree 放行（老 manifest 必须退回严格比 sha）"; bad=1
+  fi
+  [ "$bad" = "0" ] && ok "二进制出身判定双向都对（sha 相同 / tree 相同可放行且留痕 / 逐维破坏各判拒）"
 }
 
 selfcheck_baseline_text_is_derived() {  # selfcheck_baseline_text_is_derived <outdir>
@@ -512,7 +527,8 @@ selfcheck_gate_matrix() {  # selfcheck_gate_matrix <outdir>
   gate_feed() {
     others=""; BUILD_REV="$head_sha"; BUILD_CLEAN="true"; front="Tcoder"
     visible="有在屏窗口（Tcoder）"; load1=3; cores=15; quiet=30; qline="静默=30s"
-    COEXIST=1; SECONDS_HITCHES=20; SECONDS_TP=25; i18n_ledger=""; hard=0
+    COEXIST=1; SECONDS_HITCHES=20; SECONDS_TP=25; i18n_ledger=""
+    BUILD_TREE=""; HEAD_TREE=""; hard=0
   }
   gate_feed; preflight_gates >/dev/null 2>&1
   [ "$hard" = "0" ] || { fail "六维全合格却被拒 ⇒ 又造出一条永远不可能通过的闸门"; hard_all=1; }

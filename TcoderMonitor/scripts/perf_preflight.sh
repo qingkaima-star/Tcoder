@@ -122,6 +122,8 @@ preflight_context() {  # preflight_context <outdir> <pid>
   # 取二进制的出身（**不是**工作树 HEAD）：闸门第六维与上下文都要用
   BUILD_REV=$(provenance_manifest_value TCODER_GIT_REVISION)
   BUILD_CLEAN=$(provenance_manifest_value TCODER_GIT_CLEAN)
+  BUILD_TREE=$(provenance_manifest_value TCODER_PRODUCT_TREE)
+  HEAD_TREE=$(provenance_product_tree HEAD)
 
   preflight_write_context "$out" "$f"
   # 六条硬闸各自读上面那几个量（bash 是动态作用域：本函数的 `local` 在被调函数里照样可见，
@@ -195,7 +197,9 @@ preflight_write_context() {  # preflight_write_context <outdir> <context 文件�
   { echo "# 测量上下文（读数只有在这一组条件下才可互比）"
     echo "时间=$(date '+%F %T')  HEAD=$(git rev-parse --short HEAD 2>/dev/null)  工作树改动数=$DIRTY"
     echo "被采pid=$pid  二进制=$TARGET_BINARY  口径=$TARGET_FLAVOR"
+    echo "   产物码 tree=${BUILD_TREE:-未记录}  当前=${HEAD_TREE:-未记录}"
     echo "产物构建rev=${BUILD_REV:-未记录}  构建时树clean=${BUILD_CLEAN:-未记录}  ← 必须与上面 HEAD= 同一份代码，否则读数归错对象"
+    [ -n "${PROVENANCE_NOTE:-}" ] && echo "   ※ 归属判定走的是产物码 tree：${PROVENANCE_NOTE}"
     echo "实例数=${COEXIST:-1}  前台App=$front  被测进程visible=$visible"
     echo "load1=$load1  核数=$cores  并发swiftc=${others:-无}"
     echo "人输入静默=${quiet:-取不到}s  明细=${qline:-（探针没跑起来）}"
@@ -213,7 +217,7 @@ preflight_gates_identity() {
   # 而我 attach 的那个 `dist/Tcoder.app` 是两小时前 `build_app.sh` 从 `41add9e` 建的，
   # 中间隔了 39 个产物文件（整批 i18n + 我自己的 `PerfReadoutCells` 修复）。
   # 于是"e991c6d 的 T2 读数"这句话从头到尾是假的——量的是旧二进制，只是恰好在新树上按了回车。
-  if ! PROVENANCE_WHY=$(provenance_ok "$BUILD_REV" "$(git rev-parse HEAD 2>/dev/null)" "$BUILD_CLEAN"); then
+  if ! PROVENANCE_WHY=$(provenance_ok "$BUILD_REV" "$(git rev-parse HEAD 2>/dev/null)" "$BUILD_CLEAN" "${BUILD_TREE:-}" "${HEAD_TREE:-}"); then
     echo "!! 二进制与代码不是同一份：${PROVENANCE_WHY} —— 先跑 scripts/build_app.sh release 再量。" >&2
     hard=1
   fi
