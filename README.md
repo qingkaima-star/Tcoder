@@ -32,7 +32,7 @@ Apple Silicon 原生 macOS App（Swift + SwiftUI），对本地开发项目做�
 | 依赖分析 | `package.json` / `pom.xml` / `build.gradle(.kts)` / `settings.gradle(.kts)` / `Package.swift` / `requirements.txt`（含 `requirements-*.txt`、`dev-requirements.txt` 派生名）/ `pyproject.toml` / `setup.py` / `Pipfile` / `go.mod` / `Cargo.toml` / `Podfile` / `Gemfile` / `packages.config` —— 共 16 个精确文件名外加派生规则，以 `ManifestParsers.swift` 的
 `ManifestFileName.table`（清单名 → 生态）与 `ManifestFileName.ecosystem(for:)`（派生名判定）为准；
 版本过旧与已知漏洞，可选在线查 OSV.dev 与 npm registry |
-| 健康评分 | 9 维加权评分与优点/问题/建议。**启发式本地计算，未调用任何外部模型**，界面已如实标注 |
+| 健康评分 | 9 维加权评分与优点/问题/建议，另并列**工程质量（代码口径）**副读数。**启发式本地计算，未调用任何外部模型**，界面已如实标注 |
 
 > 上表是开发向速览。逐页「给我看什么 / 数字怎么算的 / 什么时候会不准」见
 > [`docs/使用说明.md`](docs/使用说明.md) 第 3 节；页面名称以侧栏为准
@@ -46,19 +46,22 @@ Apple Silicon 原生 macOS App（Swift + SwiftUI），对本地开发项目做�
 
 | 规则 | 落地 | 怎么被守住 |
 |---|---|---|
-| 全页只有一层地面色 | `Theme.Palette.Surface.ground`（浅 `#F1F1F3` / 深 `#1C1C1E`），内容卡**不画面** | 《BorderlessSurfaceGuardTests》的内容层无材质用例 + 九页像素读数地面占比 55–98% |
-| 井是唯一允许的填充 | `Theme.Palette.Surface.well`，只给表格/日志/代码块 | 同文件的「全仓无材质」用例 |
+| 地面是纯白/纯黑，内容卡**不画面** | `Theme.Palette.Surface.ground`（浅 `#FFFFFF` / 深 `#000000`）。**2026-09-21 更正**：上一版定成灰 `#F1F1F3`，实拍 87–95% 像素落在同一条灰带 = 用户判词「灰色底显脏」；且 `referenceSurface` 一直是白/`#1E1E1E`，灰地面等于让像素比 3:1 断言低 12% | 九页像素读数分带：白占比从 0–13% → **89–98%**（`scripts/pixel_audit.swift`） |
+| 井是唯一允许的填充 | `Theme.Palette.Surface.well`（浅 `#F5F5F7`），只给表格/日志/代码块；**行底不铺色**，行与行之间只留发丝线 | 同文件的「全仓无材质」用例 + `test_noBoxedSegmentedPickersRemain` 同族的画法唯一性用例 |
 | 投影只给浮层 | `View.surface` 的 `.floating` 分支，全仓 1 处 | 同文件的「投影全仓唯一且只落在浮层分支」用例 |
 | 最重的墨给最大的数 | 主读数一律 `Theme.Palette.Surface.ink`（`.primary` 不够黑：`labelColor` 只有 85% 黑） | 九页像素读数最暗像素亮度 0.000–0.004 且落在最大数字所在带 |
-| 结构去色、语义留色 | 颜色只承载状态（健康分档/风险/日志等级/增删）与交互；**序列色属于图与图例，不属于数字**，规则收在 `ChartSeries` | 同文件的「取色规则只有一份」用例 + 数据涂倾向色实测 0 处 |
+| 结构去色、语义留色 | 颜色只承载状态（健康分档/风险/日志等级/增删）与交互；**序列色属于图与图例，不属于数字**，规则收在 `ChartSeries`。**2026-09-21 再收两步**：提示条从"整幅 15% 色底"改成**左侧 2pt 语义色竖标**（彩色面积降 99.9%）；占比条与作者份额条不再按名字/邮箱取序列色，一律纯墨 | 同文件的「取色规则只有一份」用例 + 数据涂倾向色实测 0 处 |
+| 强调色钉死为绿，不跟随系统 | `Theme.Semantic.accent` 从"跟随用户系统强调色"改成定值（`graphic #15803D` 双向过线：画在白底 5.02:1、白字压在其上 5.02:1）。accent 从此进 `measurable`，八个角色全部参与对比度断言，无一豁免 | `testAccentGraphicClearsBothGraphicAndOnFillLines` + `testSemanticRegistryIsCompleteAndUniquelyNamed`（收紧成"一个都不能少"） |
+| 一屏只有一个大标题 | 项目名降成 11pt 面包屑，节名升成唯一 H1；标题行收在基座 `Theme.Page.Header`，九页各声明一处 | `test_everyPageDeclaresExactlyOnePageHeader`（数调用点：缺一页或一页两份都红）+ 元测试 |
 | 分组靠小标题 + 留白 | `Theme.Typo.groupLabel`（10pt medium + 0.6pt 字距），组间 `Theme.Spacing.group`(32) / 页级段落 `Theme.Spacing.section`(40) / 页边距 `Theme.Spacing.pageMargin`(24) | 同文件的「呼吸档必须有人引用」用例 |
 | 一套骨架、一套取色 | `Theme.Page.Scaffold` 与 `ChartSeries` 全仓各只有一份，都在 `Design/` | 同文件的「页骨架只许一份」用例 + 上一条 |
 
 排版令牌**唯一消费入口是 `View.typed`** —— `Font` 没有任何字距 API，
 写 `.font(Theme.Typo.groupLabel.font)` 会静默丢掉字距，所以有守卫专门抓这种写法。
 
-已知未解决：**深色下健康分 55–70 档是 Apple 系统纯黄 `#FFD60A`，比浅色的 `#D18208` 琥珀响得多**，
-深浅两态响度不对等。它在 `Theme.Semantic.warning` 里、被对比度断言钉着，改动需连带重估色阶单调性。
+已解决（2026-09-21）：深色 `warning` 从纯黄 `#FFD60A` 降到 `#FF9F0A`。
+旧值相对亮度 0.694，比 `danger` 的 0.258 **亮 2.7 倍** —— 一个 61 分的中间档
+在深色下成了整块色板里最响的东西；新值 0.461 回到色带内。
 
 设计规格与实施计划见 `docs/superpowers/specs/2026-09-20-borderless-minimal-ui-redesign-design.md`
 与 `docs/superpowers/plans/2026-09-20-borderless-minimal-ui-redesign.md`；
@@ -150,6 +153,11 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
 - **健康评分是启发式本地计算，未调用任何外部模型**，界面已如实标注。
   缺少证据的维度**不参与计分也不得分**，其权重按比例摊到场维度，
   页面底部会列出缺失维度与重归一化明细。
+- **本仓库自己被自己扫的读数是公开的**：`./scripts/self_score.sh` 出综合分与
+  「工程质量（代码口径）」两个数，逐维依据见 `docs/口径与已知限制.md` §4.4.2。
+  两个数必须一起读：代码口径只统计"靠改代码抬得起来"的维度，
+  综合分里那 21% 权重（提交活跃度 + 协作分布）量的是 Git 历史的既成事实，
+  新仓库与署名口径都会压低它，与代码好坏无关。
 - 覆盖率只读取仓库已生成的报告，不会代为执行测试；**没有报告时整块不画**（连分隔线都不出现），
   既不是空态卡也不是 0%——实现是 `DashboardView.coverageStrip` 外面那层 `coverage.hasData` 判断，
   与 `docs/使用说明.md` 第 4.6 节同一条口径。

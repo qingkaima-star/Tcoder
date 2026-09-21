@@ -25,7 +25,7 @@ struct DashboardView: View {
     private var report: ProjectReport? { state.selectedReport }
 
     var body: some View {
-        Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthOverview) {
+        Theme.Page.Scaffold {
             Theme.Page.Header(title: "总览", icon: .dashboard)
             HealthHeroCard(health: report?.health)
             // 紧跟 hero 的是**本机读数带**（CPU / 内存 / 今日错误 / 最近提交），
@@ -95,7 +95,7 @@ struct DashboardView: View {
     /// `fileCompositionGroup` / `coverageStrip` 三组。
     private var codeScaleGroup: some View {
         GlassSection("代码规模",
-                     subtitle: report?.code.map { "最近扫描 \(DateFormat.sinceDescription($0.scannedAt))" },
+                     subtitle: report?.code.map { localizedFormat("最近扫描 %@", DateFormat.sinceDescription($0.scannedAt)) },
                      icon: .code) {
             if let code = report?.code {
                 VStack(alignment: .leading, spacing: Theme.Spacing.group) {
@@ -124,7 +124,7 @@ struct DashboardView: View {
                 }
             } else {
                 EmptyStateView(icon: IconName.code.rawValue,
-                               title: ShellCopy.notAnalyzed("代码规模"),
+                               title: ShellCopy.notAnalyzed(.codeSize),
                                message: "选择项目目录后自动统计。")
             }
         }
@@ -140,14 +140,14 @@ struct DashboardView: View {
                     StatLine(label: "空行", value: NumberFormat.grouped(code.blankLines))
                 }
             } else {
-                Text(ShellCopy.notAnalyzed("代码规模"))
+                Text(ShellCopy.notAnalyzed(.codeSize))
                     .font(Theme.Typo.label.font)
                     .foregroundStyle(.secondary)
             }
         }
     }
 
-    // 「实时性能」分组已搬到 `DashboardLiveReadout`（见本文件下方）—— 它读 `monitor`，
+    // 「实时性能」分组已搬到 `DashboardLiveReadout`（见 `Views/Shell/DashboardReadouts.swift`）—— 它读 `monitor`，
     // 必须从 `DashboardView.body` 的失效域里挪出去，静态分组才不随心跳重算。
 
     private var recentCommitsGroup: some View {
@@ -157,16 +157,16 @@ struct DashboardView: View {
                     ForEach(git.recentCommits.prefix(6)) { commit in
                         CommitRow(commit: commit)
                         if commit.id != git.recentCommits.prefix(6).last?.id {
-                            Divider()
+                            DataRowSeparator()
                         }
                     }
                 }
             } else {
                 EmptyStateView(
                     icon: IconName.git.rawValue,
-                    title: report?.git == nil ? ShellCopy.notAnalyzed("Git 历史")
-                                             : ShellCopy.scannedButFoundNone("提交记录"),
-                    message: ShellCopy.cannotAnalyze("该目录不是 Git 仓库，或提交记录为空")
+                    title: report?.git == nil ? ShellCopy.notAnalyzed(.gitHistory)
+                                             : ShellCopy.scannedButFoundNone(.commits),
+                    message: ShellCopy.cannotAnalyze(.notAGitRepo)
                 )
             }
         }
@@ -177,7 +177,8 @@ struct DashboardView: View {
     private var topErrorsCard: some View {
         GlassSection("高频错误",
                      subtitle: report?.logs.map {
-                         "共 \(NumberFormat.grouped($0.errorCount + $0.exceptionCount)) 条错误"
+                         localizedFormat("共 %1$@ 条错误",
+                                           NumberFormat.grouped($0.errorCount + $0.exceptionCount))
                      },
                      icon: .logs) {
             if let logs = report?.logs, logs.hasData, !logs.topErrors.isEmpty {
@@ -191,10 +192,11 @@ struct DashboardView: View {
                     icon: (report?.logs?.hasData == true) ? IconName.noRisk.rawValue
                         : IconName.emptyTray.rawValue,
                     title: (report?.logs?.hasData == true)
-                        ? ShellCopy.scannedButFoundNone("错误")
-                        : ShellCopy.notAnalyzed("错误日志"),
+                        ? ShellCopy.scannedButFoundNone(.errors)
+                        : ShellCopy.notAnalyzed(.errorLogs),
                     message: (report?.logs?.hasData == true)
-                        ? "已扫描 \(NumberFormat.grouped(report?.logs?.scannedFiles.count ?? 0)) 个日志文件，没有命中错误行。"
+                        ? localizedFormat("已扫描 %1$@ 个日志文件，没有命中错误行。",
+                                              NumberFormat.grouped(report?.logs?.scannedFiles.count ?? 0))
                         : "在项目内放置 Logs/error.log 或 crash.log，或用「附加日志文件」手动选择。"
                 )
             }
@@ -205,7 +207,7 @@ struct DashboardView: View {
 
     private var branchSubtitle: String? {
         guard let branch = report?.git?.branch, !branch.isEmpty else { return nil }
-        return "分支 \(branch)"
+        return localizedFormat("分支 %@", branch)
     }
 
     /// 测试覆盖率只在仓库真出了报告时才出现，没报告就不画，避免读成一个假的 0%。
@@ -250,8 +252,10 @@ struct DashboardView: View {
                             .foregroundStyle(.secondary)
                     }
                     if let branch = coverage.overallBranchPercent {
-                        Text("分支覆盖 \(Self.percentOf100(branch, precision: 1)) · 来源 "
-                             + coverage.reports.map { $0.toolName }.joined(separator: " / "))
+                        Text(localizedFormat("分支覆盖 %1$@ · 来源 %2$@",
+                                                 Self.percentOf100(branch, precision: 1),
+                                                 coverage.reports.map { $0.toolName }
+                                                     .joined(separator: " / ")))
                             .font(Theme.Typo.microLabel.font.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -263,16 +267,21 @@ struct DashboardView: View {
     /// 口径说明一行字：报告没有源文件粒度时必须明说「等同全量」，
     /// 不能让一个没区分过的数字顶着「生产码」的标签。
     private func coverageCaliberLine(_ coverage: CoverageMetrics) -> String {
+        let sources = coverage.reports.map { $0.toolName }.joined(separator: " / ")
         guard coverage.scopeIsSeparated, let full = coverage.allSourcesLinePercent,
               let production = coverage.overallLinePercent else {
-            return "口径：报告只有汇总粒度，未区分测试代码 · 来源 "
-                + coverage.reports.map { $0.toolName }.joined(separator: " / ")
+            return localizedFormat("口径：报告只有汇总粒度，未区分测试代码 · 来源 %1$@", sources)
         }
         let gap = full - production
-        let gapText = gap >= 0.05 ? "，含测试代码 \(Self.percentOf100(full, precision: 1))（不用于评分）"
-                                  : "，与含测试代码的口径一致"
-        return "口径：仅生产码（已排除 Tests/、PackageTests、.build、*Tests.swift）"
-            + gapText + " · 差 \(Self.percentOf100(gap, precision: 1)) 来自测试代码"
+        // 三种情况 = 三条**整句键**。原来这里是「前缀键 + 碎片键 + 后缀碎片」拼出来的，
+        // 英文里三段的位置和中文不一样（`差 X 来自测试代码` 要挪到句中），
+        // 碎片各翻一次必然拼出坏英文 —— 整句成键是唯一不撒谎的做法。
+        if gap < 0.05 {
+            return localizedCopy("口径：仅生产码（已排除 Tests/、PackageTests、.build、*Tests.swift），与含测试代码的口径一致")
+        }
+        return localizedFormat("口径：仅生产码（已排除 Tests/、PackageTests、.build、*Tests.swift），含测试代码 %1$@（不用于评分） · 差 %2$@ 来自测试代码",
+                               Self.percentOf100(full, precision: 1),
+                               Self.percentOf100(gap, precision: 1))
     }
 
     /// `CoverageMetrics.linePercent` 已经是 0...100，而 `NumberFormat.percent` 收的是
@@ -290,7 +299,7 @@ struct DashboardView: View {
                 .foregroundStyle(Theme.Semantic.warning.textColor)
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 if !failed.isEmpty {
-                    Text("未能完成：\(failed.joined(separator: "、"))")
+                    Text(localizedFormat("未能完成：%1$@", failed.joined(separator: "、")))
                         .font(Theme.Typo.cardTitle.font)
                         .foregroundStyle(Theme.Semantic.warning.textColor)
                     Text(message)
@@ -310,187 +319,6 @@ struct DashboardView: View {
         }
         .padding(Theme.Spacing.sm)
         .bannerRuleSurface(Theme.Semantic.warning)
-    }
-}
-
-// MARK: - 实时读数区（隔离出 DashboardView 的心跳失效域）
-
-/// 总览页的实时部分：**独立成 struct**，整体从 `DashboardView.body` 的失效域里挪出。
-///
-/// 它读 `state.monitor.latestSnapshot` 与 `state.monitor.history`（每 1.5s 变一次）。
-/// 旧写法这些读发生在 `DashboardView.body` 求值过程中，于是一次心跳就把整页
-/// （四枚 tile + 三张静态卡 + 90 点×2 mark）全量重算，主线程热点第一名是
-/// `_updateViewGraph`（性能规格 §1 实测 64.3%）。隔离后，心跳只让本 body 失效，
-/// 静态分组（代码规模 / 文件构成 / 覆盖率 / 最近提交 / 高频错误）原地不动（O-2）。
-///
-/// 当前仍订阅整份 `latestSnapshot` / `history`，未用 M0 的细粒度读模型
-///（M0 尚未进 main，且 `Services/**` 不在本流可写范围）；隔离已使失效域退出静态区，
-/// M0 落地后可进一步只订阅所需字段。
-struct DashboardLiveReadout: View {
-    @Environment(AppState.self) private var state
-
-    private var report: ProjectReport? { state.selectedReport }
-    private var snapshot: SystemSnapshot? { state.monitor.latestSnapshot }
-
-    /// 顺序是**实时性能在前、读数带在后**（设计复核第 2 条的结构解）。
-    ///
-    /// 原来的顺序是「读数带 → 实时性能 → 代码规模」：曲线自带一段坐标轴留白，
-    /// 于是「读数带→实时性能」这一处 32pt 看起来明显大于「实时性能→代码规模」那处 32pt。
-    /// **不改间距数值**去迁就观感（那是"为了好看改令牌"，三家会改得不一致），
-    /// 改的是**谁挨着谁**：把带留白的曲线块挪到 hero 之后（hero 本身就 airy，两段呼吸同性质），
-    /// 让两个紧凑块（读数带 / 代码规模）相邻，视觉不等就没了。
-    /// 另一半理由是阅读优先级：这一组全是「本机此刻」的实时数据，比仓库静态的代码规模更该先看。
-    ///
-    /// ⚠️ 曾考虑的另一种解法——把「实时性能」与「代码规模」配成同列宽双栏——**被棘轮拦下**：
-    /// 那要把本视图拆成两个叶子（曲线一个、读数带一个），每个都得自己读一次
-    /// `state.monitor.latestSnapshot`，粗粒度读点就从 16 涨到 17，而
-    /// `PerfInvalidationRatchetTests.coarseCallSiteCeiling` 当前正好是 16（顶格）。
-    /// 双栏要等性能轮把这两处迁到细粒度读模型（`monitor.cpu.value` / `.curve.value`，
-    /// 现量 0 处）之后才做得起。
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.group) {
-            livePerformanceGroup
-            readoutStrip
-        }
-    }
-
-    // MARK: 读数带（旧「四枚 tile」）
-
-    /// 四枚 tile 的三态口径：
-    /// 「没有测到」一律传 `value: nil`，由 `MetricTile` 渲染成 `--` + 中性色；
-    /// 真 0 是结论，照实传 `"0"`。原来 CPU 缺值传 `"--"` 而今日错误缺值传 `0`，
-    /// 同一块屏上两种自相矛盾的说法并存（WS-I §3.4）。
-    ///
-    /// 排法换成 `ReadoutStrip` + 列间发丝线：tile 已经不是一块面了，
-    /// 四块无边框文字并排会糊成一整段，发丝线替掉原来的盒体边界。
-    private var readoutStrip: some View {
-        ReadoutStrip {
-            cpuTile
-            Divider()
-            memoryTile
-            Divider()
-            errorTile
-            Divider()
-            commitTile
-        }
-    }
-
-    private var cpuTile: some View {
-        MetricTile(
-            label: "CPU",
-            value: snapshot.map { String(Int(($0.cpuUsage * 100).rounded())) },
-            unit: "%",
-            caption: snapshot.map {
-                "\(NumberFormat.grouped($0.cpuCoreCount)) 核 · 负载 \(String(format: "%.2f", $0.loadAverage1))"
-            },
-            systemImage: IconName.cpu.rawValue
-        )
-    }
-
-    private var memoryTile: some View {
-        MetricTile(
-            // 「Memory」→「内存」：WS-H §7.1 点名的必修项
-            label: "内存",
-            value: snapshot.map { ByteFormat.string($0.memoryUsedBytes, precision: 1) },
-            caption: snapshot.map {
-                "共 \(ByteFormat.string($0.memoryTotalBytes, precision: 0)) · "
-                    + NumberFormat.percent($0.memoryFraction, precision: 0)
-            },
-            systemImage: IconName.memory.rawValue
-        )
-    }
-
-    private var errorTile: some View {
-        let logs = report?.logs
-        let caption: String?
-        if logs?.hasData == true {
-            caption = "崩溃 \(NumberFormat.grouped(logs?.crashCount ?? 0)) · "
-                + "异常 \(NumberFormat.grouped(logs?.exceptionCount ?? 0))"
-        } else {
-            caption = logs == nil ? ShellCopy.notAnalyzed("错误日志")
-                : ShellCopy.cannotAnalyze("未接入任何日志文件")
-        }
-        let count = logs?.hasData == true ? logs?.todayErrorCount : nil
-        return MetricTile(
-            label: "今日错误",
-            value: count.map { NumberFormat.grouped($0) },
-            caption: caption,
-            tint: DashboardView.hasTodayErrors(count) ? Theme.Semantic.danger.textColor
-                                                      : Theme.Palette.Surface.ink,
-            systemImage: IconName.riskWarning.rawValue
-        )
-    }
-
-    private var commitTile: some View {
-        MetricTile(
-            label: "最近提交",
-            value: report?.git.map {
-                DateFormat.sinceDescription($0.lastCommitAt).replacingOccurrences(of: " 前", with: "")
-            },
-            caption: report?.git.map {
-                "\(NumberFormat.grouped($0.totalCommits)) 次提交 · "
-                    + "\(NumberFormat.grouped($0.activeAuthorCount)) 位贡献者"
-            } ?? ShellCopy.notAnalyzed("Git 历史"),
-            systemImage: IconName.git.rawValue
-        )
-    }
-
-    // MARK: 实时性能分组
-
-    /// 节奏文案。**页面不再自己写死间隔数字**——节拍唯一真值是
-    /// `MachSystemMonitor.defaultSampleIntervalMilliseconds`，展示串走
-    /// `sampleIntervalText`（性能 spec §5.1，`PerfCadenceSingleSourceTests` 钉着）。
-    /// 另一半是诚实性：交互暂停期间屏幕上的数不再按那个节奏更新，继续宣称固定节奏
-    /// 就是说谎（读数仍是真的，说谎的是「节奏」这两个字），所以暂停时改口。
-    /// 与 WS-W 的 `PerformanceView.cadenceText` 同一条口径。
-    /// （注：这段说明原先写过带秒数的字面量 —— 那条守卫**不剥注释**，
-    /// 说明文字会被当成真命中计数，实测把 5 的基线白占了一格。）
-    private var cadenceSubtitle: String {
-        state.monitor.isInteractionPaused
-            ? "本机 · 采样已暂停"
-            : "本机 · 每 \(state.monitor.sampleIntervalText)采样"
-    }
-
-    private var livePerformanceGroup: some View {
-        GlassSection("实时性能",
-                     subtitle: cadenceSubtitle,
-                     icon: .performance) {
-            if state.monitor.history.count > 2 {
-                CPUHistoryChart(snapshots: Array(state.monitor.history.suffix(90)))
-                    .frame(minHeight: Theme.Layout.chartMinHeight)
-                HStack(spacing: Theme.Spacing.md) {
-                    StatLine(label: "磁盘", value: snapshotRate(snapshot?.diskReadBytesPerSecond,
-                                                                snapshot?.diskWriteBytesPerSecond,
-                                                                rate: ByteFormat.rate))
-                    StatLine(label: "网络", value: snapshotRate(snapshot?.networkInBytesPerSecond,
-                                                                snapshot?.networkOutBytesPerSecond,
-                                                                rate: ByteFormat.bitRate))
-                    StatLine(label: "进程",
-                             value: DataAbsence.optional(
-                                snapshot.map { NumberFormat.grouped($0.processCount) }).display)
-                    // 「立即采样」原挂在 `GlassSection.trailing`（需 `AnyView`，O-3 清零），
-                    // 移回内容区时**并进这一行**：单独占一行会成一个游离控件，
-                    // 眼睛读它是「曲线的一部分」还是「读数的一部分」都说不清。
-                    Spacer(minLength: Theme.Spacing.sm)
-                    GlassButton("立即采样", icon: .refresh, style: .bordered) {
-                        state.monitor.sampleNow()
-                    }
-                }
-            } else {
-                EmptyStateView(icon: IconName.performance.rawValue,
-                               title: "正在采集…",
-                               message: "首个采样点到达后显示曲线。")
-            }
-        }
-    }
-
-    /// 读写两个方向求和。快照缺席时给 `DataAbsence.notAnalysed` 的字面（`--`）——
-    /// 旧写法 `(snapshot?.diskRead ?? 0) + (… ?? 0)` 会把「没采到」报成 `0 B/s`，
-    /// 在监控 App 里这是一句假的好消息（WS-I §3.4）。
-    private func snapshotRate(_ read: UInt64?, _ write: UInt64?,
-                              rate: (UInt64) -> String) -> String {
-        guard let read, let write else { return DataAbsence.notAnalysed.display }
-        return rate(read + write)
     }
 }
 
@@ -541,7 +369,9 @@ private struct ErrorClusterRow: View {
                 Text(cluster.displayMessage)
                     .font(Theme.Typo.monoSmall.font)
                     .lineLimit(1)
-                Text("首次 \(cluster.firstSeenDescription) · 最近 \(cluster.lastSeenDescription)")
+                Text(localizedFormat("首次 %1$@ · 最近 %2$@",
+                                      cluster.firstSeenDescription,
+                                      cluster.lastSeenDescription))
                     .font(Theme.Typo.microLabel.font)
                     .foregroundStyle(.secondary)
             }

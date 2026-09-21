@@ -103,25 +103,29 @@ enum LogDiscovery {
         "pyc", "map",
     ]
 
-    private static func projectLogCandidates(root: URL) -> [URL] {
-        var result: [URL] = []
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory),
-              isDirectory.boolValue else { return result }
-
+    /// 一次项目目录深度优先遍历的可变预算与栈。
+    /// 三个量原先都是 `projectLogCandidates` 的局部变量，抽出来只为让「逐条目分类」
+    /// 那段能独立成一个短函数；**预算初值、递减顺序、`break` 的位置一字未改**。
+    private struct LogDirectoryWalk {
         struct Frame { var url: URL; var depth: Int }
-        var stack: [Frame] = [Frame(url: root, depth: 0)]
+
+        let root: URL
+        var stack: [Frame]
+        var directoriesLeft: Int
+        var entriesLeft: Int
         let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .nameKey]
-        var directoriesLeft = directoryBudget
-        var entriesLeft = entryBudget
 
-        while let frame = stack.popLast() {
-            guard directoriesLeft > 0, entriesLeft > 0 else { break }
-            directoriesLeft -= 1
-            guard let entries = try? FileManager.default.contentsOfDirectory(
-                at: frame.url, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]
-            ) else { continue }
+        init(root: URL, directoryBudget: Int, entryBudget: Int, maxDepth: Int) {
+            self.root = root
+            self.stack = [Frame(url: root, depth: 0)]
+            self.directoriesLeft = directoryBudget
+            self.entriesLeft = entryBudget
+        }
 
+        /// 一个目录里的全部条目 -> 追加日志文件、追加待下潜的子目录。
+        /// 四条跳过规则（符号链接、深度上限、跳过名单、非普通文件）与 `isLogFile`
+        /// 这条纳入判据，全部照抄拆分前。
+        mutating func consume(_ entries: [URL], frame: Frame, maxDepth: Int, into result: inout [URL]) {
             for entry in entries {
                 entriesLeft -= 1
                 if entriesLeft <= 0 { break }
@@ -131,13 +135,32 @@ enum LogDiscovery {
 
                 if values?.isDirectory == true {
                     if frame.depth >= maxDepth { continue }
-                    if isSkippedDirectory(entry, root: root) { continue }
+                    if LogDiscovery.isSkippedDirectory(entry, root: root) { continue }
                     stack.append(Frame(url: entry, depth: frame.depth + 1))
                     continue
                 }
                 if values?.isRegularFile == false { continue }
-                if isLogFile(entry) { result.append(entry) }
+                if LogDiscovery.isLogFile(entry) { result.append(entry) }
             }
+        }
+    }
+
+    private static func projectLogCandidates(root: URL) -> [URL] {
+        var result: [URL] = []
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else { return result }
+
+        var walk = LogDirectoryWalk(root: root, directoryBudget: directoryBudget,
+                                    entryBudget: entryBudget, maxDepth: maxDepth)
+        while let frame = walk.stack.popLast() {
+            guard walk.directoriesLeft > 0, walk.entriesLeft > 0 else { break }
+            walk.directoriesLeft -= 1
+            guard let entries = try? FileManager.default.contentsOfDirectory(
+                at: frame.url, includingPropertiesForKeys: walk.keys, options: [.skipsHiddenFiles]
+            ) else { continue }
+
+            walk.consume(entries, frame: frame, maxDepth: maxDepth, into: &result)
         }
         return result
     }

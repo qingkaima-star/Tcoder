@@ -17,13 +17,13 @@ final class GitTimeSemanticsTests: XCTestCase {
     // 两处共享常量时，常量被改坏会两边一起瞎）
 
     /// 2026-09-14 是周一，其 UTC 零点。
-    private static let mondayUTC: TimeInterval = 1_789_344_000
-    private static let eastEight = 28_800
-    private static let westFive = -18_000
+    static let mondayUTC: TimeInterval = 1_789_344_000
+    static let eastEight = 28_800
+    static let westFive = -18_000
 
     /// 造一条「作者**当地** 第 `localDays` 天（0 = 2026-09-14 周一）凌晨 `localHour` 点」的提交。
     /// 绝对时刻 = 当地瞬间 - 作者偏移，与 `GitLogParser.parseAuthorTimestamp` 同一套算法。
-    private func commit(_ sha: String, localDays: Int, localHour: Int, offset: Int) -> ParsedCommit {
+    func commit(_ sha: String, localDays: Int, localHour: Int, offset: Int) -> ParsedCommit {
         let localInstant = Self.mondayUTC + Double(localDays * 86_400 + localHour * 3_600)
         return ParsedCommit(sha: sha, authorName: "ws-t", authorEmail: "ws-t@tcoder.local",
                             date: Date(timeIntervalSince1970: localInstant - Double(offset)),
@@ -31,11 +31,11 @@ final class GitTimeSemanticsTests: XCTestCase {
     }
 
     /// 独立算「作者当地的日零点」对应的绝对瞬间：平移到当地 → 向下取整到整天 → 平移回去。
-    private func localDayStart(_ date: Date, offset: Int) -> TimeInterval {
+    func localDayStart(_ date: Date, offset: Int) -> TimeInterval {
         (floor((date.timeIntervalSince1970 + Double(offset)) / 86_400) * 86_400) - Double(offset)
     }
 
-    private func counts(_ buckets: [CommitBucket]) -> [Int] { buckets.map(\.commits) }
+    func counts(_ buckets: [CommitBucket]) -> [Int] { buckets.map(\.commits) }
 
     // MARK: - ① 同一 UTC 日、不同当地日：必须拆成两个桶
 
@@ -81,163 +81,18 @@ final class GitTimeSemanticsTests: XCTestCase {
 
     // MARK: - ② 生产接线：分析器自己必须走当地口径
 
-    /// 只测 `GitAggregation` 不够——缺陷长在 `ShellGitAnalyzer` 递进去的那把日历上。
-    /// 这条钉住「makeInsights 的 commitsPerPeriod 用作者当地切」，回退成 UTC 立刻变红。
-    func testMakeInsightsBucketsByAuthorLocalTimezone() {
-        let pair = [commit("c1", localDays: 5, localHour: 23, offset: Self.eastEight),
-                    commit("c2", localDays: 6, localHour: 2, offset: Self.eastEight)]
-        let insights = ShellGitAnalyzer.makeInsights(commits: pair, branch: "main",
-                                                     headSHA: "abc1234", remoteURL: "")
-        XCTAssertEqual(insights.commitsPerPeriod.count, 2,
-                       "分析器产出的日桶数：期望 2（当地），实得 \(counts(insights.commitsPerPeriod))")
-        XCTAssertEqual(counts(insights.commitsPerPeriod), [1, 1])
-        XCTAssertEqual(insights.commitsPerPeriod.map(\.granularity), [.day, .day], "14 小时跨度按日分桶")
-        // 同一批输入在 UTC 日历下只有 1 桶，所以"两个桶"这件事只可能来自修好的接线。
-        XCTAssertEqual(GitAggregation.buckets(from: pair, granularity: .day,
-                                              calendar: GitAggregation.utcCalendar()).count, 1,
-                       "对照口径失效，本条断言将失去意义")
-    }
-
     // MARK: - ③ 周桶 / 月桶同一条尺子
-
-    func testWeekBucketFollowsAuthorLocalMonday() {
-        // 当地 2026-09-21（周一）03:00 +08:00 = 2026-09-20 19:00Z：UTC 口径会把它算进**上一周**。
-        let one = [commit("w1", localDays: 7, localHour: 3, offset: Self.eastEight)]
-        let local = GitAggregation.buckets(from: one, granularity: .week,
-                                           calendar: GitAggregation.authorCalendar(for: one))
-        let utc = GitAggregation.buckets(from: one, granularity: .week,
-                                         calendar: GitAggregation.utcCalendar())
-        XCTAssertEqual(local.count, 1, "分母为 0 就是假零")
-        // 手算：ISO 周起点 = 2026-09-21T00:00+08:00 = 周一锚点 + 7 天 - 8 小时。
-        XCTAssertEqual(local[0].date.timeIntervalSince1970,
-                       Self.mondayUTC + 7 * 86_400 - Double(Self.eastEight), accuracy: 0.5,
-                       "周桶起点必须是当地的周一零点")
-        // 旧口径落在上一周（2026-09-14T00:00Z 那一格），差整整 7 天。
-        XCTAssertEqual(utc[0].date.timeIntervalSince1970, Self.mondayUTC, accuracy: 0.5,
-                       "UTC 口径把周一凌晨归到上一周，这才是原来的错样子")
-    }
-
-    func testMonthBucketFollowsAuthorLocalCalendarMonth() {
-        // 当地 2026-10-01 00:00 +08:00 = 2026-09-30 16:00Z：UTC 口径会把它归进 9 月。
-        let one = [commit("m1", localDays: 17, localHour: 0, offset: Self.eastEight)]
-        let local = GitAggregation.buckets(from: one, granularity: .month,
-                                           calendar: GitAggregation.authorCalendar(for: one))
-        let utc = GitAggregation.buckets(from: one, granularity: .month,
-                                         calendar: GitAggregation.utcCalendar())
-        XCTAssertEqual(local.count, 1, "分母为 0 就是假零")
-        // 手算：当地月首 = 2026-10-01T00:00+08:00 = 周一锚点 + 17 天 - 8 小时。
-        XCTAssertEqual(local[0].date.timeIntervalSince1970,
-                       Self.mondayUTC + 17 * 86_400 - Double(Self.eastEight), accuracy: 0.5,
-                       "月桶起点必须是当地的月初零点")
-        // 旧口径给的是 2026-09-01T00:00Z = 周一锚点 - 13 天。
-        XCTAssertEqual(utc[0].date.timeIntervalSince1970, Self.mondayUTC - 13 * 86_400, accuracy: 0.5,
-                       "UTC 口径把 10 月的头一天算进 9 月")
-        XCTAssertGreaterThan(local[0].date, utc[0].date)
-    }
 
     // MARK: - ④ 补空桶 / 去重 / 120 上限这些既有语义一个都不许变
 
-    func testInteriorGapStillZeroFilledOnAuthorLocalGrid() {
-        let trio = [commit("g1", localDays: 0, localHour: 23, offset: Self.eastEight),
-                    commit("g2", localDays: 1, localHour: 23, offset: Self.eastEight),
-                    commit("g3", localDays: 3, localHour: 1, offset: Self.eastEight)]
-        let buckets = GitAggregation.buckets(from: trio, granularity: .day,
-                                             calendar: GitAggregation.authorCalendar(for: trio))
-        XCTAssertEqual(counts(buckets), [1, 1, 0, 1], "空那天必须补 0 桶，实得 \(counts(buckets))")
-        XCTAssertEqual(buckets.reduce(0) { $0 + $1.commits }, trio.count, "补桶不许造出提交")
-        XCTAssertTrue(buckets.enumerated().dropFirst().allSatisfy { index, bucket in
-            bucket.date > buckets[index - 1].date
-        }, "桶按时间严格升序")
-    }
-
-    /// `fillLimit = 120` 的语义原样：跨度 120 桶照补、121 桶只出不空桶。
-    func testFillLimitSemanticsUnchanged() {
-        let exactlyLimit = [commit("f1", localDays: 0, localHour: 9, offset: Self.eastEight),
-                            commit("f2", localDays: 119, localHour: 9, offset: Self.eastEight)]
-        let filled = GitAggregation.buckets(from: exactlyLimit, granularity: .day,
-                                            calendar: GitAggregation.authorCalendar(for: exactlyLimit))
-        XCTAssertEqual(filled.count, 120, "120 桶以内照旧补空，实得 \(filled.count)")
-        XCTAssertEqual(filled.filter { $0.commits == 0 }.count, 118, "补出来的必须全是 0 提交桶")
-
-        let overLimit = [commit("f1", localDays: 0, localHour: 9, offset: Self.eastEight),
-                         commit("f2", localDays: 120, localHour: 9, offset: Self.eastEight)]
-        let sparse = GitAggregation.buckets(from: overLimit, granularity: .day,
-                                            calendar: GitAggregation.authorCalendar(for: overLimit))
-        XCTAssertEqual(sparse.count, 2, "超出 fillLimit 后只出非空桶，实得 \(sparse.count)")
-        XCTAssertEqual(counts(sparse), [1, 1])
-    }
-
     // MARK: - ⑤ 主导作者偏移的选取：可复现、且不许有人从趋势里掉出去
 
-    func testDominantOffsetUsesMajorityAndStaysDeterministic() {
-        let mixed = [commit("a1", localDays: 0, localHour: 9, offset: Self.eastEight),
-                     commit("a2", localDays: 1, localHour: 9, offset: Self.eastEight),
-                     commit("a3", localDays: 2, localHour: 9, offset: Self.eastEight),
-                     commit("b1", localDays: 3, localHour: 9, offset: Self.westFive)]
-        XCTAssertEqual(GitAggregation.dominantAuthorOffset(of: mixed), Self.eastEight,
-                       "多数人的时区就是这批提交的『当地』")
-        XCTAssertEqual(GitAggregation.dominantAuthorOffset(of: mixed.reversed()), Self.eastEight,
-                       "输入顺序不得改变结论")
-        XCTAssertEqual(GitAggregation.authorCalendar(for: mixed).timeZone.secondsFromGMT(),
-                       Self.eastEight, "日历必须真的带上了这个偏移")
-        XCTAssertNil(GitAggregation.dominantAuthorOffset(of: []), "没有提交就没有作者时区")
-        XCTAssertEqual(GitAggregation.authorCalendar(for: []).timeZone.secondsFromGMT(), 0,
-                       "空输入退回 UTC 中立格点（此时也不会有桶）")
-    }
-
-    /// 并列时靠"更接近 UTC、再取更小的有符号值"打破，且**永远同一个结果**。
-    func testDominantOffsetTieBreakIsATotalOrder() {
-        let tie = [commit("e1", localDays: 0, localHour: 5, offset: 3_600),
-                   commit("w1", localDays: 0, localHour: 5, offset: -3_600)]
-        XCTAssertEqual(GitAggregation.dominantAuthorOffset(of: tie), -3_600,
-                       "计数并列、距 UTC 等距时取有符号值更小的那个")
-        let threeWay = [commit("z1", localDays: 0, localHour: 5, offset: 7_200),
-                        commit("z2", localDays: 1, localHour: 5, offset: -7_200),
-                        commit("z3", localDays: 2, localHour: 5, offset: 0)]
-        XCTAssertEqual(GitAggregation.dominantAuthorOffset(of: threeWay), 0,
-                       "三方并列时取最接近 UTC 的 0")
-    }
-
-    /// 跨时区仓库：桶键必须仍落在同一把格子上，**一条提交都不许从趋势里消失**。
-    /// 这是"每条提交各按自己偏移切"那个方案被否掉的直接原因。
-    func testMixedOffsetRepositoryKeepsEveryCommit() {
-        var commits: [ParsedCommit] = []
-        for day in 0..<6 {
-            commits.append(commit("e\(day)", localDays: day, localHour: 23, offset: Self.eastEight))
-        }
-        // 少数派的 -05:00 本地第 4 天凌晨，落进主导（+08:00）格子的第 4 天。
-        commits.append(commit("w9", localDays: 4, localHour: 2, offset: Self.westFive))
-        let buckets = GitAggregation.buckets(from: commits, granularity: .day,
-                                             calendar: GitAggregation.authorCalendar(for: commits))
-        XCTAssertFalse(buckets.isEmpty, "分母为 0 就是假零")
-        XCTAssertEqual(buckets.reduce(0) { $0 + $1.commits }, commits.count,
-                       "分桶之和必须等于提交数，实得 \(counts(buckets))（有人掉出趋势了）")
-        XCTAssertEqual(counts(buckets), [1, 1, 1, 1, 2, 1],
-                       "6 个当地日全在格子上，少数派并进同号格，不许冒出 0 提交空桶")
-        XCTAssertEqual(buckets.map { $0.date.timeIntervalSince1970 }.sorted(),
-                       buckets.map { $0.date.timeIntervalSince1970 }, "输出必须已按时间排序")
-    }
-
-    /// 畸形偏移不许崩、也不许丢提交（`dominantAuthorOffset` 照实上报，日历侧自行兜底）。
-    func testAbsurdAuthorOffsetDegradesSafely() {
-        let weird = [commit("x1", localDays: 0, localHour: 3, offset: 90_000),
-                     commit("x2", localDays: 1, localHour: 3, offset: 90_000)]
-        XCTAssertEqual(GitAggregation.dominantAuthorOffset(of: weird), 90_000,
-                       "偏移选取必须照实上报，兜底发生在日历那一层")
-        let buckets = GitAggregation.buckets(from: weird, granularity: .day,
-                                             calendar: GitAggregation.authorCalendar(for: weird))
-        XCTAssertEqual(buckets.reduce(0) { $0 + $1.commits }, weird.count, "畸形偏移也不许丢提交")
-        XCTAssertEqual(counts(buckets), [1, 1], "两条相隔整天的提交仍各占一格")
-        XCTAssertEqual(GitAggregation.buckets(from: [], granularity: .day,
-                                              calendar: GitAggregation.authorCalendar(for: [])), [],
-                       "空输入返回空数组")
-    }
     // MARK: - ⑥ 真实仓库对照（env 门控）与其元测试
 
     /// 把工具桶与 git 真值逐日对账：两边都是 `[YYYY-MM-DD -> 条数]`。
     /// 返回 nil = 完全一致；**任何一边为空都返回差异说明**，因为"谁都没数到"不是"数得一样"。
     /// 门控测试与下面的元测试**共用这一个函数**，所以门控被跳过时这把尺子仍在被无条件检验。
-    private func diffAgainstTruth(tool: [String: Int], truth: [String: Int]) -> String? {
+    func diffAgainstTruth(tool: [String: Int], truth: [String: Int]) -> String? {
         guard !truth.isEmpty else { return "git 真值为空，取数失败（不得当成一致）" }
         guard !tool.isEmpty else { return "工具分桶为空，一天都没切出来" }
         var diffs: [String] = []
@@ -354,7 +209,7 @@ final class GitTimeSemanticsTests: XCTestCase {
     // MARK: - 独立取数（自己起 git 进程，不复用 WS-J 的取证管道）
 
     /// 本工作树根（= git 仓库根）：测试文件往上四层。用 `#filePath` 推导，主树与各 worktree 都能跑。
-    private static let repoRoot: URL = {
+    static let repoRoot: URL = {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // TcoderMonitorTests
             .deletingLastPathComponent()   // Tests
@@ -366,7 +221,7 @@ final class GitTimeSemanticsTests: XCTestCase {
     /// `%ad --date=short` 用的是**该提交作者的时区**（实测：强制 `TZ=UTC` 结果一字不变），
     /// 所以它是与本机时区无关的独立真值，比 `--date=format-local` 更干净。
     /// 偏移取 `%aI` 尾部的 ±hh:mm（pretty 里没有 `%z` 这个占位符，实测会原样吐出 "%z"）。
-    private func authorDaySamples(in root: URL) throws -> [(day: String, offset: Int)] {
+    func authorDaySamples(in root: URL) throws -> [(day: String, offset: Int)] {
         let lines = try runGit(["log", "--no-merges", "--pretty=format:%ad%x1f%aI", "--date=short"], in: root)
             .split(separator: "\n", omittingEmptySubsequences: true)
         return try lines.map { line in
@@ -384,7 +239,7 @@ final class GitTimeSemanticsTests: XCTestCase {
     /// 从 `%aI`（如 `2026-09-19T17:07:54+08:00`）尾部取偏移秒数。
     /// 手写，不走 DateFormatter：不依赖本机 locale 与 TZ 表。
     /// `%aI` 恒为 `±hh:mm`（6 字符），但按解析器同样的宽容也吃 `±hhmm`（5 字符）。
-    private func offsetSeconds(fromAuthorISO text: String) throws -> Int {
+    func offsetSeconds(fromAuthorISO text: String) throws -> Int {
         if text.hasSuffix("Z") || text.hasSuffix("z") { return 0 }
         guard let signIndex = text.lastIndex(of: "+") ?? text.lastIndex(of: "-"),
               (5...6).contains(text.distance(from: signIndex, to: text.endIndex)) else {
@@ -394,7 +249,7 @@ final class GitTimeSemanticsTests: XCTestCase {
     }
 
     /// `+08:00` / `+0800` / `-0530` -> 秒。
-    private func parseOffset(_ text: String) throws -> Int {
+    func parseOffset(_ text: String) throws -> Int {
         let characters = Array(text.filter { $0 != ":" })
         guard characters.count == 5, characters[0] == "+" || characters[0] == "-",
               let hour = Int(String(characters[1...2])), let minute = Int(String(characters[3...4])) else {
@@ -406,7 +261,7 @@ final class GitTimeSemanticsTests: XCTestCase {
     /// 独立实现「绝对瞬间 + 固定偏移 -> YYYY-MM-DD」：Howard Hinnant 的 civil_from_days，
     /// 与解析器 `GitLogParser.daysFromCivil` 互为反函数。**故意不借用产品代码**，
     /// 否则两边共享同一个盲区，比对就成了自证。
-    private func civilDay(_ date: Date, offsetSeconds: Int) -> String {
+    func civilDay(_ date: Date, offsetSeconds: Int) -> String {
         let days = Int(floor((date.timeIntervalSince1970 + Double(offsetSeconds)) / 86_400))
         let z = days + 719_468
         let era = (z >= 0 ? z : z - 146_096) / 146_097
@@ -421,7 +276,7 @@ final class GitTimeSemanticsTests: XCTestCase {
         return String(format: "%04d-%02d-%02d", year, month, day)
     }
 
-    private func runGit(_ arguments: [String], in root: URL) throws -> String {
+    func runGit(_ arguments: [String], in root: URL) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git", "-C", root.path] + arguments

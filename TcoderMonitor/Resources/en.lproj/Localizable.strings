@@ -22,7 +22,6 @@
 "重新分析" = "Re-analyse";
 "重新采样" = "Re-sample";
 "暂停" = "Pause";
-"已暂停" = "Paused";
 "重试" = "Retry";
 
 /* ===== 九页页名（Theme.Page.Header）===== */
@@ -32,6 +31,7 @@
 "Git 洞察" = "Git Insights";
 "贡献者" = "Contributors";
 "性能监控" = "Performance";
+"错误日志" = "Error Logs";   // 侧栏导航用短词；页头是下面那条长名
 "错误日志分析" = "Error Logs";
 "依赖分析" = "Dependencies";
 "健康评分" = "Health Score";
@@ -42,3 +42,105 @@
 "人" = "people";
 "天" = "days";
 "个" = "items";
+
+/* ===== 批次 P2：外壳与导航（由 LocalizationGuardTests 的完工清单点名后登记）===== */
+"加载示例项目 (Tcoder 示例项目)" = "Load Sample Project (Tcoder Sample)";
+"添加项目…" = "Add Project…";
+"工程健康评分" = "Engineering Health";
+"在 Finder 中显示" = "Show in Finder";
+"移除" = "Remove";
+"还没有监控项目" = "No projects yet";
+
+/* ===== P3-2 总览页与外壳（非插值串，逐条人工译，术语按 §3） ===== */
+"有效代码行" = "lines of code";
+"选择项目目录后自动统计。" = "Counted automatically once you choose a project directory.";
+"文件构成" = "File Composition";
+"文件" = "Files";
+"注释行" = "Comment Lines";
+"空行" = "Blank Lines";
+"最近提交" = "Latest Commit";
+"Git 历史" = "Git History";
+"提交记录" = "Commits";
+"该目录不是 Git 仓库，或提交记录为空" = "This folder isn't a Git repository, or it has no commits.";
+"高频错误" = "Top Errors";
+"错误" = "Errors";
+"在项目内放置 Logs/error.log 或 crash.log，或用「附加日志文件」手动选择。" = "Put Logs/error.log or crash.log in the project, or attach log files manually.";
+"测试覆盖率" = "Test Coverage";
+"生产码行覆盖" = "Production Line Coverage";
+"单元测试" = "Unit Tests";
+"无报告" = "No Report";
+"集成测试" = "Integration Tests";
+"点击右上角「重新分析」，扫描代码规模、Git 历史、日志与依赖之后这里会出现评分与结论。" = "Click Re-analyse in the top-right. Once code size, Git history, logs and dependencies have been scanned, the score and findings appear here.";
+"优点与风险项" = "Strengths and Risks";
+"时间" = "Time";
+"CPU 占用历史曲线" = "CPU usage history curve";
+"内存" = "Memory";
+"未接入任何日志文件" = "No log files attached";
+"今日错误" = "Today's Errors";
+"本机 · 采样已暂停" = "This machine · sampling paused";
+"实时性能" = "Live Performance";
+"磁盘" = "Disk";
+"网络" = "Network";
+"进程" = "Processes";
+"立即采样" = "Sample Now";
+"正在采集…" = "Collecting…";
+"首个采样点到达后显示曲线。" = "The curve appears once the first sample arrives.";
+"开始使用" = "Get Started";
+"选择目录" = "Choose Directory";
+"添加第一个项目" = "Add Your First Project";
+"添加更多项目" = "Add More Projects";
+"本机实时 CPU / 已用内存" = "Live CPU / memory in use on this machine";
+
+/* ===== P3-3 缺数据句式（整句成键，碎片不翻：方案 §7.3） ===== */
+"尚未分析该项目" = "This project isn't analysed yet";
+"尚未分析全部指标" = "No metrics analysed yet";
+"尚未分析Git 历史" = "Git history not analysed yet";
+"尚未分析代码规模" = "Code size not analysed yet";
+"尚未分析错误日志" = "Error logs not analysed yet";
+"已完成扫描，未发现提交记录" = "Scan complete — no commits found";
+"已完成扫描，未发现错误" = "Scan complete — no errors found";
+"已完成扫描，未发现错误级别日志" = "Scan complete — no error-level logs found";
+"已完成扫描，未发现优点与风险项" = "Scan complete — no strengths or risks found";
+"无法分析：未接入任何日志文件" = "Cannot analyse: no log files attached";
+"无法分析：该目录不是 Git 仓库，或提交记录为空" = "Cannot analyse: this folder isn't a Git repository, or it has no commits";
+
+/* ===== P3-4 总览实时读数带（整句 + 位置占位符；字面百分号必须写 %%） ===== */
+"%1$@ 核 · 负载 %2$@" = "%1$@ cores · load %2$@";
+"共 %1$@ · %2$@" = "%1$@ total · %2$@";
+"崩溃 %1$@ · 异常 %2$@" = "%1$@ crashes · %2$@ exceptions";
+"%1$@ 次提交 · %2$@ 位贡献者" = "%1$@ commits · %2$@ contributors";
+"本机 · 每 %@采样" = "This machine · sampling every %@";
+
+/* ===== P3-4 总览页其余整句（含数字的句式一律整句成键） ===== */
+"最近扫描 %@" = "Last scanned %@";
+"共 %1$@ 条错误" = "%1$@ errors in total";
+"已扫描 %1$@ 个日志文件，没有命中错误行。" = "Scanned %1$@ log files and found no error lines.";
+"分支 %@" = "Branch %@";
+"分支覆盖 %1$@ · 来源 %2$@" = "Branch coverage %1$@ · Source %2$@";
+"口径：报告只有汇总粒度，未区分测试代码 · 来源 %1$@" = "Basis: the report is aggregate-only and doesn't separate test code · Source %1$@";
+"口径：仅生产码（已排除 Tests/、PackageTests、.build、*Tests.swift），与含测试代码的口径一致" = "Basis: production code only (excludes Tests/, PackageTests, .build, *Tests.swift) — same as the all-sources basis";
+"口径：仅生产码（已排除 Tests/、PackageTests、.build、*Tests.swift），含测试代码 %1$@（不用于评分） · 差 %2$@ 来自测试代码" = "Basis: production code only (excludes Tests/, PackageTests, .build, *Tests.swift); all sources including test code %1$@ (not scored) · %2$@ of it comes from test code";
+"未能完成：%1$@" = "Not completed: %1$@";
+"首次 %1$@ · 最近 %2$@" = "First %1$@ · last %2$@";
+"%1$@ 分" = "%1$@ points";
+"%1$@ 级" = "Grade %1$@";
+"较上次 %@" = "%@ vs last run";
+"%1$@ 行" = "%1$@ lines";
+"健康 %@" = "Health %@";
+/* ===== P3-5 采样节奏的单位（中文单位嵌在实参里，英文要跟着数字走） ===== */
+"%@ 秒" = "%@ s";
+
+/* ===== P4-1 性能监控：图注与口径（注意 %% —— 这些串走 String(format:)） ===== */
+"分母：全部核心" = "Denominator: all cores";
+"分子/分母：正在使用的核数 / %@ 核，100%% = 全部核心跑满" = "Numerator/denominator: cores in use / %@ cores, 100%% = every core flat out";
+"分子/分母：已用 %1$@ / 总量 %2$@" = "In use %1$@ / total %2$@";
+"本窗口没有足够的可信内存读数可画曲线（%1$@/%2$@ 点可用）。" = "Not enough trusted memory samples to draw the curve (%1$@ of %2$@ points available).";
+"CPU 曲线，等待可信读数" = "CPU curve, waiting for a trusted reading";
+"CPU 曲线，%1$@ 个点，当前 %2$@，纵轴 %3$@" = "CPU curve, %1$@ points, now %2$@, y-axis %3$@";
+
+/* ===== P4-1b 采样节奏（sampleIntervalText 的消费者必须一起迁移，
+   否则英文单位 "1.5 s" 会掉进还没翻的中文句子里，变成半中半英） ===== */
+"每 %@" = "every %@";
+"采样已暂停" = "Sampling paused";
+"上次采样 %1$@ · 采样点 %2$@ · 间隔 %3$@" = "Last sample %1$@ · %2$@ points · every %3$@";
+"最近 %1$@ 点 · %2$@ · 窗口约 %3$@ 秒" = "Last %1$@ points · %2$@ · ~%3$@ s window";

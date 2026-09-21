@@ -30,12 +30,12 @@ final class ShellDesignTests: XCTestCase {
     }
 
     func testThreeStateCopyNeverFakesAZOrGreenCheck() {
-        let pending = ShellCopy.notAnalyzed("错误日志")
+        let pending = ShellCopy.notAnalyzed(.errorLogs)
         XCTAssertTrue(pending.contains("尚未"), "③ 态句式：\(pending)")
         XCTAssertFalse(pending.contains("0"), "缺数据的说明里不得出现数字 0：\(pending)")
         XCTAssertFalse(pending.contains("无风险"), "③ 态不得给出安全结论：\(pending)")
 
-        let emptyScan = ShellCopy.scannedButFoundNone("提交记录")
+        let emptyScan = ShellCopy.scannedButFoundNone(.commits)
         XCTAssertTrue(emptyScan.contains("已完成扫描"), "② 态必须交代「查过」：\(emptyScan)")
 
         XCTAssertEqual(Theme.Placeholder.missingValue, "--",
@@ -120,7 +120,9 @@ final class ShellDesignTests: XCTestCase {
     /// 扫描集不能是空的：空集会让上面两条源码守卫同时假绿。
     func testShellSourceScanActuallySeesTheFiles() throws {
         let sources = try shellLayerSources()
-        XCTAssertEqual(sources.count, 8, "外壳应是 3 个页面文件 + Shell/ 下 5 个分件")
+        // 8 → 9（收官轮 WS-X7）：Shell/ 分件 5 → 6，新增 SidebarRows.swift（ProjectSidebar 486 行拆分）；
+        // 与 ShellBorderlessTests 钉的是同一个数，改一处必须两处一起改。
+        XCTAssertEqual(sources.count, 9, "外壳应是 3 个页面文件 + Shell/ 下 6 个分件")
         for (name, text) in sources {
             XCTAssertFalse(text.isEmpty, "\(name) 读出来是空的，扫描等于没扫")
             XCTAssertGreaterThan(text.count, 200, "\(name) 内容异常短")

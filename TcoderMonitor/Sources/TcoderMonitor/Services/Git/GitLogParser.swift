@@ -84,7 +84,6 @@ enum GitLogParser {
     /// 字段分隔符（`\x1f`）。
     private static let fieldSeparator: Character = "\u{1f}"
 
-    private static let secondsInDay = 86_400.0
     private static let arrowBytes: [UInt8] = [0x20, 0x3D, 0x3E, 0x20]   // " => "
 
     // MARK: 主入口
@@ -282,166 +281,59 @@ enum GitLogParser {
             }
             index += 1
             guard index < closingQuote else { return nil }  // 悬空反斜杠
-            switch bytes[index] {
-            case 0x22: out.append(0x22); index += 1         // \"
-            case 0x5C: out.append(0x5C); index += 1         // \\
-            case 0x61: out.append(0x07); index += 1         // \a
-            case 0x62: out.append(0x08); index += 1         // \b
-            case 0x66: out.append(0x0C); index += 1         // \f
-            case 0x6E: out.append(0x0A); index += 1         // \n
-            case 0x72: out.append(0x0D); index += 1         // \r
-            case 0x74: out.append(0x09); index += 1         // \t
-            case 0x76: out.append(0x0B); index += 1         // \v
-            case 0x30...0x37:                               // 八进制 \0 ~ \377
-                var value = 0
-                var digits = 0
-                while digits < 3, index < closingQuote, (0x30...0x37).contains(bytes[index]) {
-                    value = value * 8 + (Int(bytes[index]) - 0x30)
-                    index += 1
-                    digits += 1
-                }
-                guard value <= 0xFF else { return nil }
-                out.append(UInt8(value))
-            default: return nil                             // 未知转义
+            let step = unquoteEscape(bytes[index], bytes: bytes, index: index, closingQuote: closingQuote)
+            switch step {
+            case .byte(let value, let next), .octal(let value, let next):
+                out.append(value)
+                index = next
+            case .malformed:
+                return nil                                  // 未知转义
             }
         }
         return String(decoding: out, as: UTF8.self)
     }
 
-    // MARK: 时间戳
-
-    /// 解析 git 的严格 ISO 8601 带偏移时间串：
-    /// `2026-09-19T08:12:33+08:00`、`2026-09-19T08:12:33-05:30`、`2026-09-19T08:12:33Z`。
-    /// 全程纯算术，不使用本机时区；`offsetSeconds` 是尾部偏移（`+08:00` -> 28800）。
-    static func parseAuthorTimestamp(_ text: String) -> (date: Date, offsetSeconds: Int)? {
-        let bytes = Array(trimWhitespace(text).utf8)
-        guard bytes.count >= 19 else { return nil }
-        var index = bytes.startIndex
-
-        func digits(_ count: Int) -> Int? {
-            var value = 0
-            for _ in 0..<count {
-                guard index < bytes.endIndex, (0x30...0x39).contains(bytes[index]) else { return nil }
-                value = value * 10 + (Int(bytes[index]) - 0x30)
-                index += 1
-            }
-            return value
-        }
-        func peek() -> UInt8? { index < bytes.endIndex ? bytes[index] : nil }
-        func eat(_ character: UInt8) -> Bool {
-            guard peek() == character else { return false }
-            index += 1
-            return true
-        }
-
-        guard let year = digits(4) else { return nil }
-        guard eat(0x2D), let month = digits(2) else { return nil }        // '-'
-        guard eat(0x2D), let day = digits(2) else { return nil }
-        guard eat(0x54) || eat(0x74) || eat(0x20) else { return nil }     // 'T' / 't' / ' '
-        guard let hour = digits(2), eat(0x3A), let minute = digits(2), eat(0x3A),
-              let second = digits(2) else { return nil }
-
-        // 闰秒/亚秒：git 只发整秒，但容忍一下小数部分（不参与绝对时刻以外的计算）。
-        var fraction = 0.0
-        if peek() == 0x2E || peek() == 0x2C {                            // '.' / ','
-            index += 1
-            var value = 0
-            var scale = 1.0
-            var any = false
-            while let byte = peek(), (0x30...0x39).contains(byte) {
-                value = value * 10 + (Int(byte) - 0x30)
-                scale *= 10
-                index += 1
-                any = true
-            }
-            guard any else { return nil }
-            fraction = Double(value) / scale
-        }
-
-        var offsetSeconds = 0
-        switch peek() {
-        case 0x5A, 0x7A:                                                  // 'Z' / 'z'
-            index += 1
-        case 0x2B, 0x2D:                                                  // '+' / '-'
-            let sign: Int = peek() == 0x2D ? -1 : 1
-            index += 1
-            guard let offsetHour = digits(2) else { return nil }
-            _ = eat(0x3A)                                                 // 冒号可选：+0800 也吃
-            let offsetMinute: Int
-            if peek().map({ (0x30...0x39).contains($0) }) == true {
-                guard let m = digits(2) else { return nil }
-                offsetMinute = m
-            } else {
-                offsetMinute = 0
-            }
-            guard offsetHour <= 23, offsetMinute < 60 else { return nil }
-            offsetSeconds = sign * (offsetHour * 3_600 + offsetMinute * 60)
-        default:
-            offsetSeconds = 0                                             // 无偏移按 UTC
-        }
-
-        // 尾部只允许空白，否则视为不是 ISO 串。
-        guard trimWhitespace(String(decoding: bytes[index...], as: UTF8.self)).isEmpty else { return nil }
-
-        guard month >= 1, month <= 12, day >= 1, day <= daysInMonth(year: year, month: month),
-              hour <= 23, minute <= 59, second <= 60 else { return nil }
-
-        let days = daysFromCivil(year: year, month: month, day: day)
-        let localSeconds = days * secondsInDay
-            + Double(hour * 3_600 + minute * 60 + second) + fraction
-        return (Date(timeIntervalSince1970: localSeconds - Double(offsetSeconds)), offsetSeconds)
+    /// 反斜杠之后那一个转义序列的展开。表与边界逐字照抄拆分前那 12 个 `case`：
+    /// `\"` `\\` `\a` `\b` `\f` `\n` `\r` `\t` `\v` 各自映射到的字节没动，
+    /// 八进制仍是最多 3 位、值超过 0xFF 与未知转义同样判非法（`.malformed`）。
+    enum UnquoteStep {
+        case byte(UInt8, Int)
+        case octal(UInt8, Int)
+        case malformed
     }
 
-    /// 该年该月的天数（proleptic 公历；闰年规则 4/100/400）。
-    private static func daysInMonth(year: Int, month: Int) -> Int {
-        switch month {
-        case 1, 3, 5, 7, 8, 10, 12: return 31
-        case 4, 6, 9, 11: return 30
-        case 2: return isLeapYear(year) ? 29 : 28
-        default: return 0
+    static func unquoteEscape(_ escaped: UInt8, bytes: [UInt8], index: Int,
+                              closingQuote: Int) -> UnquoteStep {
+        switch escaped {
+        case 0x22: return .byte(0x22, index + 1)            // \"
+        case 0x5C: return .byte(0x5C, index + 1)            // \\
+        case 0x61: return .byte(0x07, index + 1)            // \a
+        case 0x62: return .byte(0x08, index + 1)            // \b
+        case 0x66: return .byte(0x0C, index + 1)            // \f
+        case 0x6E: return .byte(0x0A, index + 1)            // \n
+        case 0x72: return .byte(0x0D, index + 1)            // \r
+        case 0x74: return .byte(0x09, index + 1)            // \t
+        case 0x76: return .byte(0x0B, index + 1)            // \v
+        case 0x30...0x37:                                   // 八进制 \0 ~ \377
+            return unquoteOctal(bytes: bytes, index: index, closingQuote: closingQuote)
+        default: return .malformed                          // 未知转义
         }
     }
 
-    private static func isLeapYear(_ year: Int) -> Bool {
-        (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+    /// 八进制转义：从 `index` 起最多取 3 位八进制数字，值超过 0xFF 判非法。
+    static func unquoteOctal(bytes: [UInt8], index: Int, closingQuote: Int) -> UnquoteStep {
+        var value = 0
+        var cursor = index
+        var digits = 0
+        while digits < 3, cursor < closingQuote, (0x30...0x37).contains(bytes[cursor]) {
+            value = value * 8 + (Int(bytes[cursor]) - 0x30)
+            cursor += 1
+            digits += 1
+        }
+        guard value <= 0xFF else { return .malformed }
+        return .octal(UInt8(value), cursor)
     }
 
-    /// 公历 -> 1970-01-01 起的天数（Howard Hinnant 算法，避开任何 Calendar）。
-    private static func daysFromCivil(year: Int, month: Int, day: Int) -> Double {
-        var shiftedYear = year
-        if month <= 2 { shiftedYear -= 1 }
-        let era = (shiftedYear >= 0 ? shiftedYear : shiftedYear - 399) / 400
-        let yearOfEra = shiftedYear - era * 400                                   // [0, 399]
-        let monthIndex = month > 2 ? month - 3 : month + 9
-        let dayOfYear = (153 * monthIndex + 2) / 5 + day - 1                      // [0, 365]
-        let dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100          // [0, 146096]
-        return Double(era * 146_097 + dayOfEra + dayOfYear - 719_468)
-    }
-
-    // MARK: 时区工具（一律按作者自己的偏移，不用本机时区）
-
-    /// 按作者自己的 UTC 偏移把绝对时刻换算成当地 0..<24 小时。
-    static func localHour(of date: Date, offsetSeconds: Int) -> Int {
-        let localized = localizedSeconds(of: date, offsetSeconds: offsetSeconds)
-        guard localized.isFinite else { return 0 }
-        let hour = Int(floor(modD(localized, secondsInDay) / 3_600))
-        return clamp(hour, 0, 23)
-    }
-
-    /// 同上，返回周一为 0 的 0..<6 星期索引（1970-01-01 是星期四 -> +3）。
-    static func localWeekdayMondayFirst(of date: Date, offsetSeconds: Int) -> Int {
-        let localized = localizedSeconds(of: date, offsetSeconds: offsetSeconds)
-        guard localized.isFinite else { return 0 }
-        let dayNumber = Int(floor(localized / secondsInDay))
-        return mod(dayNumber + 3, 7)
-    }
-
-    /// 当地（作者时区）的 epoch 秒。
-    private static func localizedSeconds(of date: Date, offsetSeconds: Int) -> Double {
-        let absolute = date.timeIntervalSince1970
-        guard absolute.isFinite, abs(absolute) < 1e15 else { return 0 }
-        return absolute + Double(offsetSeconds)
-    }
 
     // MARK: 邮箱归一化
 
@@ -468,7 +360,7 @@ enum GitLogParser {
 
     // MARK: 小工具
 
-    private static func trimWhitespace(_ text: String) -> String {
+    static func trimWhitespace(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -496,21 +388,4 @@ enum GitLogParser {
         return trimmed
     }
 
-    private static func clamp(_ value: Int, _ lower: Int, _ upper: Int) -> Int {
-        if value < lower { return lower }
-        if value > upper { return upper }
-        return value
-    }
-
-    /// 结果恒在 `[0, modulus)`，负数安全。
-    private static func mod(_ value: Int, _ modulus: Int) -> Int {
-        guard modulus > 0 else { return 0 }
-        let remainder = value % modulus
-        return remainder < 0 ? remainder + modulus : remainder
-    }
-
-    private static func modD(_ value: Double, _ modulus: Double) -> Double {
-        let remainder = value.truncatingRemainder(dividingBy: modulus)
-        return remainder < 0 ? remainder + modulus : remainder
-    }
 }

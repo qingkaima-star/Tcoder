@@ -243,16 +243,16 @@ public final class FramePulse: @unchecked Sendable {
 
     /// 调用方必须已持有 `lock`（属性 `summaryLine` 与内部落盘共用这一份实现）。
     private func makeSummaryLineLocked() -> String {
-        let p50 = percentile(frameIntervals, 0.50)
-        let p95 = percentile(frameIntervals, 0.95)
-        let p99 = percentile(frameIntervals, 0.99)
+        let p50 = Self.percentile(frameIntervals, 0.50)
+        let p95 = Self.percentile(frameIntervals, 0.95)
+        let p99 = Self.percentile(frameIntervals, 0.99)
         let run = max(0.001, Date().timeIntervalSince(startedAt))
         return "hz=\(f1(measuredRefreshHz))(\(refreshRateSource)) "
             + "期望间隔=\(f2(expectedIntervalMs))ms "
             + "帧数=\(totalFrameCount) 帧间隔p50=\(f2(p50)) p95=\(f2(p95)) p99=\(f2(p99)) max=\(f2(largestIntervalMs))ms "
             + "hitch(>1.5x)=\(totalHitchCount) hitch/s=\(f2(Double(totalHitchCount) / run)) "
             + "心跳拍数=\(heartbeatTickCount) 心跳最大间隔=\(f1(largestHeartbeatGapMs))ms "
-            + "心跳p50=\(f1(percentile(heartbeatGaps, 0.50))) p95=\(f1(percentile(heartbeatGaps, 0.95))) "
+            + "心跳p50=\(f1(Self.percentile(heartbeatGaps, 0.50))) p95=\(f1(Self.percentile(heartbeatGaps, 0.95))) "
             + "带hitch的拍=\(ticksWithHitch)/\(heartbeatTickCount)"
     }
 
@@ -277,9 +277,9 @@ public final class FramePulse: @unchecked Sendable {
         defer { lock.unlock() }
         return Readout(refreshHz: measuredRefreshHz, refreshRateSource: refreshRateSource,
                        expectedIntervalMs: expectedIntervalMs, frameCount: totalFrameCount,
-                       frameP50Ms: percentile(frameIntervals, 0.50),
-                       frameP95Ms: percentile(frameIntervals, 0.95),
-                       frameP99Ms: percentile(frameIntervals, 0.99),
+                       frameP50Ms: Self.percentile(frameIntervals, 0.50),
+                       frameP95Ms: Self.percentile(frameIntervals, 0.95),
+                       frameP99Ms: Self.percentile(frameIntervals, 0.99),
                        frameMaxMs: largestIntervalMs, hitchCount: totalHitchCount,
                        heartbeatTicks: heartbeatTickCount,
                        heartbeatMaxGapMs: largestHeartbeatGapMs, ticksWithHitch: ticksWithHitch)
@@ -365,54 +365,4 @@ private func displayLinkCallback(_ displayLink: CVDisplayLink, _ now: UnsafePoin
         Unmanaged<FramePulse>.fromOpaque(context).takeUnretainedValue().recordFrameOutput(at: uptime)
     }
     return kCVReturnSuccess
-}
-
-// MARK: - 分位数（与 trace_report.py 同一定义）
-
-/// 分位取法与 `scripts/trace_report.py` 的 `percentile()` 一字对齐：`values[min(n-1, Int(n*p))]`。
-/// 两把尺子若各用一套分位定义，"内部 p95 好了、外部 p95 没好"这种争论就没法判。
-func percentile(_ values: [Double], _ p: Double) -> Double {
-    guard !values.isEmpty else { return 0 }
-    let ordered = values.sorted()
-    let index = min(ordered.count - 1, Int(Double(ordered.count) * p))
-    return ordered[max(0, index)]
-}
-
-/// 帧间隔分布（纯函数，测试可脱离 `CVDisplayLink` 直接喂数）。
-struct FrameIntervalDistribution {
-    var values: [Double] = []
-    var capacity = FramePulse.ringCapacity
-
-    mutating func record(_ ms: Double) {
-        guard ms > 0 else { return }
-        values.append(ms)
-        if values.count > capacity { values.removeFirst(values.count - capacity) }
-    }
-
-    func hitchCount(expectedIntervalMs: Double, factor: Double = 1.5) -> Int {
-        values.filter { $0 > expectedIntervalMs * factor }.count
-    }
-
-    var p50: Double { percentile(values, 0.50) }
-    var p95: Double { percentile(values, 0.95) }
-    var p99: Double { percentile(values, 0.99) }
-    var maximum: Double { values.max() ?? 0 }
-}
-
-/// 心跳看门狗的间隔统计（纯函数）。
-struct HeartbeatGapDistribution {
-    var values: [Double] = []
-    var capacity = FramePulse.heartbeatCapacity
-
-    mutating func record(gapMs: Double) {
-        guard gapMs >= 0 else { return }
-        values.append(gapMs)
-        if values.count > capacity { values.removeFirst(values.count - capacity) }
-    }
-
-    var p50: Double { percentile(values, 0.50) }
-    var p95: Double { percentile(values, 0.95) }
-    var p99: Double { percentile(values, 0.99) }
-    var maximum: Double { values.max() ?? 0 }
-    var isEmpty: Bool { values.isEmpty }
 }

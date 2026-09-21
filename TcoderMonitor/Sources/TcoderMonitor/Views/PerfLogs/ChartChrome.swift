@@ -217,11 +217,15 @@ struct LiveSeriesChart<Point: Identifiable>: View {
         .chartYAxis {
             AxisMarks(position: .leading, values: axis.ticks) { value in
                 AxisGridLine().foregroundStyle(Theme.Palette.Surface.separator)
+                // **绝对色 `Color.secondary`，不是层级 `.secondary`**：层级样式会与宿主
+                // 环境里的层级连乘（0.55×0.55≈0.30）。深色态实测这条轴的刻度只剩
+                // `#464646`（对纯黑约 2.2:1），五档全部读不出，而总览页同类刻度没被连乘 ——
+                // 同一个 App 两页的轴一深一浅。守卫 `test_chartAxisLabelsNeverUseHierarchicalStyle`。
                 AxisValueLabel {
                     if let number = value.as(Double.self) {
                         Text(yLabel(number))
                             .font(Theme.Typo.monoSmall.font)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.secondary)
                     }
                 }
             }
@@ -234,7 +238,7 @@ struct LiveSeriesChart<Point: Identifiable>: View {
                         if let date = value.as(Date.self) {
                             Text(xLabel(for: date))
                                 .font(Theme.Typo.monoSmall.font)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color.secondary)
                         }
                     }
                 }
@@ -245,10 +249,14 @@ struct LiveSeriesChart<Point: Identifiable>: View {
                     AxisValueLabel(format: .dateTime.locale(Self.axisLocale).month(.defaultDigits).day(),
                                    centered: false)
                         .font(Theme.Typo.monoSmall.font)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.secondary)
                 }
             }
         }
+        // 顶格 y 轴刻度（"100%"）是**垂直居中钉在第一个刻度上**的，
+        // 于是它会探出绘图区上沿，压住上面那行「分子/分母…」说明
+        // （英文态实拍量到两者只差 3px、字脚相压）。留一档 `xs` 的头寸。
+        .padding(.top, Theme.Spacing.xs)
         .accessibilityLabel(summary)
     }
 

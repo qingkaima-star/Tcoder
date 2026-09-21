@@ -241,14 +241,14 @@ final class AppState {
                 merged.generatedAt = Date()
                 merged.attemptedAt = Date()
 
-                var problems: [String] = []
-                var failed: [String] = []
-                if let error = codeResult.error { problems.append(error); failed.append("代码扫描") }
-                if let error = gitResult.error { problems.append(error); failed.append("Git 分析") }
-                if let error = logResult.error { problems.append(error); failed.append("错误日志") }
-                if let error = depsResult.error { problems.append(error); failed.append("依赖分析") }
-                if let error = coverageResult.error { problems.append(error); failed.append("测试覆盖率") }
-                merged.failedSections = failed
+                let failures = Self.sectionFailures([
+                    (codeResult.error, "代码扫描"),
+                    (gitResult.error, "Git 分析"),
+                    (logResult.error, "错误日志"),
+                    (depsResult.error, "依赖分析"),
+                    (coverageResult.error, "测试覆盖率"),
+                ])
+                merged.failedSections = failures.sections
 
                 self.store.upsertReport(merged)
                 if let score = merged.health?.overall {
@@ -256,7 +256,7 @@ final class AppState {
                 }
                 self.phase = .finished
                 self.isScanning = false
-                self.lastError = problems.isEmpty ? nil : problems.joined(separator: " · ")
+                self.lastError = failures.problems.isEmpty ? nil : failures.problems.joined(separator: " · ")
             }
         }
     }
@@ -268,6 +268,19 @@ final class AppState {
             return
         }
         scan(project: selectedProject)
+    }
+
+    /// 五路分析各自的失败 → 「一条问题清单 + 一份缺席名单」。
+    ///
+    /// 搬出来的理由是机械的：这五段 `if let` 让 `scan` 被本 App 自扫点名 CC 17。
+    /// 顺序、文案、`failedSections` 的取值全部保持原样（顺序由调用方传入的数组决定）。
+    private static func sectionFailures(_ items: [(error: String?, section: String)])
+        -> (problems: [String], sections: [String]) {
+        items.reduce(into: ([String](), [String]())) { acc, item in
+            guard let error = item.error else { return }
+            acc.0.append(error)
+            acc.1.append(item.section)
+        }
     }
 
     private static func attempt<T: Sendable>(

@@ -42,64 +42,94 @@ enum ComplexityEngine {
         guard !raw.isEmpty else { return [] }
 
         let src = sanitize(raw, profile)
-        var scriptMask: [Bool]?
-        if profile.scriptRegionOnly {
-            scriptMask = computeScriptMask(src.cleaned)
-        }
+        var scan = Scan(src: src,
+                        profile: profile,
+                        scriptMask: profile.scriptRegionOnly ? computeScriptMask(src.cleaned) : nil)
+        return scan.run()
+    }
 
+    /// 逐行「找签名 → 定边界 → 产出候选」的扫描。原先这 66 行 / CC 20 就是 `functions(in:)` 的整个函数体。
+    ///
+    /// `line` 的两条推进路经刻意保住：命中签名（哪怕最后因为太短/太长没成候选）就跳到闭合行的
+    /// 下一行，其余一切情况只前进一行；命中数达到 `maxCandidatesPerFile` 就地收工。
+    struct Scan {
+        let src: SanitizedSource
+        let profile: LangProfile
+        let scriptMask: [Bool]?
         var result: [FunctionCandidate] = []
         var line = 0
-        while line < src.cleaned.count {
-            if result.count >= maxCandidatesPerFile { break }
-            if line > 0, !src.balancedBefore[line - 1] { line += 1; continue }
-            if let mask = scriptMask, !mask[line] { line += 1; continue }
-            let cleanedLine = src.cleaned[line]
-            // utf8.count 对原生 Swift String 是 O(1)，utf16.count 会触发转码；这里只是长度门槛
-            guard !cleanedLine.isEmpty, cleanedLine.utf8.count <= maxLineLengthForMatch else {
-                line += 1
-                continue
-            }
-            // 廉价预筛：绝大多数语言的签名都必须带 `(`，先挡掉就不必为每行进 NSString/正则循环
-            if profile.parenOnEveryPattern, cleanedLine.contains("(") == false { line += 1; continue }
-            guard let name = matchSignature(cleanedLine, profile) else { line += 1; continue }
 
-            var closing: Int?
-            var signatureEnd = line
-            switch profile.family {
-            case .curly, .shell:
-                if let span = curlyEnd(start: line, src, profile) {
-                    closing = span.closing
-                    signatureEnd = span.brace
+        mutating func run() -> [FunctionCandidate] {
+            while line < src.cleaned.count {
+                if result.count >= ComplexityEngine.maxCandidatesPerFile { break }
+                if let matched = functionStartingHere() {
+                    if let candidate = matched.candidate { result.append(candidate) }
+                    line = matched.endLine + 1
+                } else {
+                    line += 1
                 }
-            case .indentation:
-                signatureEnd = multiLineSignatureEnd(start: line, src.cleaned, closingChars: [":"])
-                closing = indentedEnd(start: line, signatureEnd: signatureEnd, cleaned: src.cleaned)
-            case .rubyEnd:
-                // Ruby 的边界靠同级 `end` 判定，不受跨行签名影响；这里只把签名行对齐，
-                // 好让 `def foo(\n a,\n b\n)` 这种跨行参数表也数得出参数。
-                signatureEnd = multiLineSignatureEnd(start: line, src.cleaned, closingChars: [")"])
-                closing = rubyEnd(start: line, src.cleaned)
-            case .none:
-                break
             }
-            guard let endLine = closing else { line += 1; continue }
+            return result
+        }
+
+        /// 本行是不是一个函数签名的开头；是的话给出闭合行与（可能不合格的）候选。
+        mutating func functionStartingHere() -> (endLine: Int, candidate: FunctionCandidate?)? {
+            guard let name = signatureNameHere() else { return nil }
+            let boundary = bodyBoundary()
+            guard let endLine = boundary.closing else { return nil }
             // 防御：签名行绝不能越过闭合行，否则下面的 line...signatureEnd 区间会当场 trap
+            var signatureEnd = boundary.signatureEnd
             if signatureEnd > endLine { signatureEnd = endLine }
 
             let count = endLine - line + 1
-            if count >= minFunctionLines, count <= maxFunctionLines {
-                let signature = src.cleaned[line...signatureEnd].joined(separator: " ")
-                result.append(FunctionCandidate(
-                    name: name,
-                    startLine: line + 1,
-                    lineCount: count,
-                    parameterCount: parameterCount(from: signature),
-                    complexity: complexity(ofCleanedLines: Array(src.cleaned[line...endLine]), profile: profile)
-                ))
-            }
-            line = endLine + 1
+            guard count >= ComplexityEngine.minFunctionLines, count <= ComplexityEngine.maxFunctionLines
+            else { return (endLine, nil) }
+            let signature = src.cleaned[line...signatureEnd].joined(separator: " ")
+            return (endLine, FunctionCandidate(
+                name: name,
+                startLine: line + 1,
+                lineCount: count,
+                parameterCount: ComplexityEngine.parameterCount(from: signature),
+                complexity: ComplexityEngine.complexity(ofCleanedLines: Array(src.cleaned[line...endLine]),
+                                                        profile: profile)
+            ))
         }
-        return result
+
+        /// 四道廉价闸门 + 签名正则，先便宜后贵，顺序与原实现一致。
+        func signatureNameHere() -> String? {
+            if line > 0, !src.balancedBefore[line - 1] { return nil }
+            if let mask = scriptMask, !mask[line] { return nil }
+            let cleanedLine = src.cleaned[line]
+            // utf8.count 对原生 Swift String 是 O(1)，utf16.count 会触发转码；这里只是长度门槛
+            guard !cleanedLine.isEmpty, cleanedLine.utf8.count <= ComplexityEngine.maxLineLengthForMatch else {
+                return nil
+            }
+            // 廉价预筛：绝大多数语言的签名都必须带 `(`，先挡掉就不必为每行进 NSString/正则循环
+            if profile.parenOnEveryPattern, cleanedLine.contains("(") == false { return nil }
+            return ComplexityEngine.matchSignature(cleanedLine, profile)
+        }
+
+        /// 签名命中之后定函数边界：花括号族 / 缩进族 / Ruby `end` 族各走各的。
+        func bodyBoundary() -> (closing: Int?, signatureEnd: Int) {
+            switch profile.family {
+            case .curly, .shell:
+                guard let span = ComplexityEngine.curlyEnd(start: line, src, profile) else { return (nil, line) }
+                return (span.closing, span.brace)
+            case .indentation:
+                let signatureEnd = ComplexityEngine.multiLineSignatureEnd(start: line, src.cleaned,
+                                                                         closingChars: [":"])
+                return (ComplexityEngine.indentedEnd(start: line, signatureEnd: signatureEnd,
+                                                     cleaned: src.cleaned), signatureEnd)
+            case .rubyEnd:
+                // Ruby 的边界靠同级 `end` 判定，不受跨行签名影响；这里只把签名行对齐，
+                // 好让 `def foo(\n a,\n b\n)` 这种跨行参数表也数得出参数。
+                let signatureEnd = ComplexityEngine.multiLineSignatureEnd(start: line, src.cleaned,
+                                                                          closingChars: [")"])
+                return (ComplexityEngine.rubyEnd(start: line, src.cleaned), signatureEnd)
+            case .none:
+                return (nil, line)
+            }
+        }
     }
 
     /// 对给定文本行序列计算圈复杂度（>=1）。
@@ -120,44 +150,100 @@ enum ComplexityEngine {
         if isGoReceiverParen(chars, open: open), let next = nextParenOpen(chars, after: open) {
             open = next
         }
+        var scan = ParameterListScan(chars: chars, open: open)
+        return scan.run()
+    }
+
+    /// 三类括号字符的归组。原先这里是 7 个 `case`（每个 `case` 在工具的 CC 口径里都算一次分支），
+    /// 换成集合成员判定之后**字符集合一字未改**，只是分支从 21 降到 8。
+    static let parameterQuoteStarters: Set<Character> = ["\"", "'"]
+    static let parameterOpeners: Set<Character> = ["(", "[", "{"]
+    static let parameterClosers: Set<Character> = [")", "]", "}"]
+
+    /// 参数表逐字符扫描：顶层逗号计数，括号 / 尖括号 / 字符串各自配平。
+    struct ParameterListScan {
+        let chars: [Character]
+        let open: Int
+        var index: Int
         var depth = 0
         var angle = 0
         var commas = 0
         var hasContent = false
         var quote: Character?
-        var index = open
-        while index < chars.count {
-            let c = chars[index]
-            if let q = quote {
-                if c == "\\" { index += 2; continue }
-                if c == q { quote = nil }
-                index += 1
-                continue
+
+        init(chars: [Character], open: Int) {
+            self.chars = chars
+            self.open = open
+            index = open
+        }
+
+        mutating func run() -> Int {
+            while index < chars.count {
+                if let closed = step() { return closed }
             }
-            switch c {
-            case "\"", "'":
+            return ComplexityEngine.parameterSegmentCount(commas: commas, hasContent: hasContent)
+        }
+
+        /// 返回非 nil 表示参数表在这个字符上闭合（原实现就地 `return parameterSegmentCount`）。
+        mutating func step() -> Int? {
+            let c = chars[index]
+            if let q = quote { return insideQuote(c, q) }
+            index += 1
+            if ComplexityEngine.parameterQuoteStarters.contains(c) {
                 quote = c
                 hasContent = true
-            case "(", "[", "{":
-                depth += 1
-                if depth > 1 { hasContent = true }
-            case ")", "]", "}":
-                depth -= 1
-                if depth <= 0 { return parameterSegmentCount(commas: commas, hasContent: hasContent) }
-            case "<":
-                if depth <= 1, angle == 0, index > open { angle += 1 }
+            } else if ComplexityEngine.parameterOpeners.contains(c) {
+                return openBracket()
+            } else if ComplexityEngine.parameterClosers.contains(c) {
+                return closeBracket()
+            } else if c == "<" {
+                return openAngle()
+            } else if c == ">" {
+                return closeAngle()
+            } else if c == "," {
+                countTopLevelComma()
+            } else if !c.isWhitespace {
                 hasContent = true
-            case ">":
-                if angle > 0 { angle -= 1 }
-                hasContent = true
-            case ",":
-                if depth == 1 && angle == 0 { commas += 1 }
-            default:
-                if !c.isWhitespace { hasContent = true }
             }
-            index += 1
+            return nil
         }
-        return parameterSegmentCount(commas: commas, hasContent: hasContent)
+
+        /// 字符串字面量内部：转义一次跳两格。
+        mutating func insideQuote(_ c: Character, _ q: Character) -> Int? {
+            if c == "\\" { index += 2; return nil }
+            if c == q { quote = nil }
+            index += 1
+            return nil
+        }
+
+        mutating func openBracket() -> Int? {
+            depth += 1
+            if depth > 1 { hasContent = true }
+            return nil
+        }
+
+        mutating func closeBracket() -> Int? {
+            depth -= 1
+            guard depth <= 0 else { return nil }
+            return ComplexityEngine.parameterSegmentCount(commas: commas, hasContent: hasContent)
+        }
+
+        mutating func openAngle() -> Int? {
+            if depth <= 1, angle == 0, index > open { angle += 1 }
+            hasContent = true
+            return nil
+        }
+
+        mutating func closeAngle() -> Int? {
+            if angle > 0 { angle -= 1 }
+            hasContent = true
+            return nil
+        }
+
+        mutating func countTopLevelComma() {
+            guard depth == 1 && angle == 0 else { return }
+            commas += 1
+        }
     }
 
     static func parameterSegmentCount(commas: Int, hasContent: Bool) -> Int {
@@ -228,6 +314,12 @@ enum ComplexityEngine {
     /// 第一个括号是**返回类型**，参数个数等于关键字选择器里顶层 `:` 的个数。
     /// 只对 `-`/`+` 开头、紧跟返回类型括号、再跟标识符的形状生效，其余返回 nil 走通用逻辑。
     static func objectiveCSelectorParameterCount(_ chars: [Character]) -> Int? {
+        guard let start = objectiveCSelectorStart(chars) else { return nil }
+        return countSelectorColons(chars, from: start)
+    }
+
+    /// 形状判定：`-`/`+` 开头、紧跟返回类型括号、再跟标识符。不是这个形状返回 nil 走通用逻辑。
+    static func objectiveCSelectorStart(_ chars: [Character]) -> Int? {
         var index = skipSpaces(chars, from: 0)
         guard index < chars.count, chars[index] == "-" || chars[index] == "+" else { return nil }
         index = skipSpaces(chars, from: index + 1)
@@ -236,13 +328,19 @@ enum ComplexityEngine {
         index = skipSpaces(chars, from: close + 1)
         // 选择器必须以标识符开头（`- (void)foo:`）；`- (int)a - (int)b` 这类表达式不是签名
         guard index < chars.count, chars[index].isLetter || chars[index] == "_" else { return nil }
+        return index
+    }
+
+    /// 顶层 `:` 的个数就是关键字选择器的参数个数（嵌套括号里的冒号不算）。
+    static func countSelectorColons(_ chars: [Character], from start: Int) -> Int {
         var depth = 0
         var colons = 0
+        var index = start
         while index < chars.count {
             let c = chars[index]
-            if c == "(" || c == "[" || c == "{" {
+            if parameterOpeners.contains(c) {
                 depth += 1
-            } else if c == ")" || c == "]" || c == "}" {
+            } else if parameterClosers.contains(c) {
                 if depth > 0 { depth -= 1 }
             } else if c == ":", depth == 0 {
                 colons += 1

@@ -136,6 +136,20 @@ enum DependencySafetyVerdict: Equatable {
         }
     }
 
+    /// 读数带格子里的脚注：**只报核对状态 + 全口径在哪儿**。
+    ///
+    /// `summaryCaption` 那份全文在上方「风险总览」的口径条里已经逐字说过一遍，
+    /// 同一屏再贴一遍就是清单 3.16 的"一屏说四遍"（实拍那条脚注占了 4 行，
+    /// 把四格读数带撑成高低不齐）。**压缩重复 ≠ 删诚实性信息**：状态词一个不删，
+    /// 覆盖范围、快照日期、未覆盖生态全部留在权威落点那一处。
+    var tileCaption: String {
+        switch self {
+        case .findings: return "命中详情见下方「安全公告」"
+        case .unchecked: return "未联网核对，全口径见上方「风险总览」"
+        case .clean: return "已联网核对，覆盖范围见上方「风险总览」"
+        }
+    }
+
     /// 「漏洞数」磁贴的副标题：绿色 all-clear 只在真的核对过时才允许出现。
     var summaryCaption: String {
         switch self {

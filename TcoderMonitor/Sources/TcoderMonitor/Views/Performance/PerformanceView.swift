@@ -26,12 +26,13 @@ struct PerformanceView: View {
     /// 节奏文案。**暂停时不许继续宣称"每 X 秒"**——那时屏幕上的数不再按那个节奏更新。
     /// 读数本身仍是真的（末值有效），说谎的是"节奏"这两个字（性能 spec §5.1 第 4 条）。
     private var cadenceText: String {
-        context.isPaused ? "采样已暂停" : "每 \(monitor.sampleIntervalText)"
+        context.isPaused ? localizedCopy("采样已暂停")
+            : localizedFormat("每 %@", monitor.sampleIntervalText)
     }
 
     var body: some View {
         // 版框走基座那一份页骨架（组间 32 / 页边距 24 / 顶部段落 40，全仓只许一份）。
-        Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthDense) {
+        Theme.Page.Scaffold {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 header
                 sampleStats
@@ -91,9 +92,10 @@ struct PerformanceView: View {
     /// 是「不规整拥挤」的直接来源）。三态与口径文案一字未改。
     private var sampleStats: some View {
         HStack(spacing: Theme.Spacing.xs) {
-            Text("上次采样 \(DateFormat.sinceDescription(monitor.lastSampleAt))"
-                 + " · 采样点 \(NumberFormat.grouped(monitor.history.count))"
-                 + " · 间隔 \(monitor.sampleIntervalText)")
+            Text(localizedFormat("上次采样 %1$@ · 采样点 %2$@ · 间隔 %3$@",
+                                 DateFormat.sinceDescription(monitor.lastSampleAt),
+                                 NumberFormat.grouped(monitor.history.count),
+                                 monitor.sampleIntervalText))
                 .typed(Theme.Typo.label)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)

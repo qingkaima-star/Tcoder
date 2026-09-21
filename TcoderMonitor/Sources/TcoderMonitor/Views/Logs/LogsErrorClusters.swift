@@ -13,7 +13,7 @@ struct LogsErrorClustersCard: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                     ForEach(Array(clusters.enumerated()), id: \.element.id) { index, cluster in
                         LogErrorClusterRow(cluster: cluster)
-                        if index < clusters.count - 1 { Divider() }
+                        if index < clusters.count - 1 { DataRowSeparator() }
                     }
                 }
             } else {
@@ -42,7 +42,7 @@ struct LogsErrorClustersCard: View {
             // ② 查了但空的句式：给出扫过的行数，让「0」成为一个结论而不是空白。
             EmptyStateView(icon: IconName.noRisk.rawValue,
                            // 三态句式全站只有一个出处：WS-K 在 Views/Shell 里定的 ShellCopy。
-                           title: ShellCopy.scannedButFoundNone("错误级别日志"),
+                           title: ShellCopy.scannedButFoundNone(.errorLevelLogs),
                            message: "本次扫了 \(NumberFormat.grouped(logs.totalLinesScanned)) 行，"
                                + "没有命中错误、异常或崩溃级别的行。")
         }
@@ -158,6 +158,8 @@ struct LogErrorClusterRow: View {
     }
 
     private func detailTitle(_ text: String) -> some View {
-        Text(text).font(Theme.Typo.microLabel.font).foregroundStyle(.tertiary)
+        // 同 3.9：组内小标题一律 `groupLabel`。原来这档是 `microLabel` + `.tertiary`，
+        // 10pt 中灰压在一堆 10pt 元数据里，读不出"这是一个小标题"。
+        Text(text).typed(Theme.Typo.groupLabel).foregroundStyle(.secondary)
     }
 }

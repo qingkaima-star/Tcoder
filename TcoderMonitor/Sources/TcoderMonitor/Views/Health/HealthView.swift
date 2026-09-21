@@ -13,7 +13,7 @@ struct HealthView: View {
     @Environment(AppState.self) private var state
 
     var body: some View {
-        Theme.Page.Scaffold(maxWidth: Theme.Layout.maxWidthDense) {
+        Theme.Page.Scaffold {
             header
             if let health = report?.health {
                 if health.components.isEmpty {
@@ -147,6 +147,10 @@ struct HealthHero: View {
             //   ② 「本次 X」删掉，因为 56pt 的环心里就是同一个 X（连同 /100 与等级），
             //      同一张卡里第三个副本只会挤掉版面的呼吸。「上次」与「计算于」环里没有，
             //      一律保留。
+            if let codeScope = health.codeScope {
+                HealthCodeScopeReadout(scope: codeScope)
+            }
+
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 Theme.Readout.Field("上次", health.previousOverall.map(String.init) ?? "无记录")
                 Theme.Readout.Field("计算于", DateFormat.sinceDescription(health.computedAt))
@@ -206,5 +210,32 @@ struct HealthNoInputCard: View {
                 HeuristicClaimLine()
             }
         }
+    }
+}
+
+// MARK: - 工程质量（代码口径）副读数
+
+/// 与综合分**同源、同批分量、同权重**的第二个数：只把「改本仓库代码就能抬起来」的维度算进来。
+///
+/// 为什么必须把成员名单与排除项一起画出来：只多报一个更好看的数，读者无从判断它是不是
+/// 「挑对自己有利的口径」。这里连「不含提交活跃度、协作分布」一起写明，理由交给 `scope.note`。
+/// 缺 `codeScope`（本次没有任何代码维度参与计分）时整块不出现 —— 不画一个 0 分冒充"代码很差"。
+struct HealthCodeScopeReadout: View {
+    let scope: HealthSubScore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+            Theme.Readout.Field(scope.label, "\(scope.overall) · \(scope.grade.rawValue) 级", help: scope.note)
+            Text(membershipLine)
+                .typed(Theme.Typo.narrative)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var membershipLine: String {
+        let included = "计入 \(scope.includedDimensions.joined(separator: "、"))"
+        guard !scope.excludedDimensions.isEmpty else { return included + "（与综合分同一批分量）" }
+        return included + "；不含 \(scope.excludedDimensions.joined(separator: "、"))"
     }
 }

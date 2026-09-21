@@ -56,9 +56,9 @@ struct HealthRing: View {
     /// 只改这边的措辞，`DesignAbsenceStateTests` 那条「两个出口同串」就红。
     static func accessibilityText(score: Int?, grade: HealthGrade?, trend: Int?) -> String {
         guard let score else { return scoreText(for: nil) }
-        var parts = ["\(scoreText(for: score)) 分"]
-        if let grade { parts.append("\(grade.rawValue) 级") }
-        if let trend, trend != 0 { parts.append("较上次 \(NumberFormat.signed(trend))") }
+        var parts = [localizedFormat("%1$@ 分", scoreText(for: score))]
+        if let grade { parts.append(localizedFormat("%1$@ 级", grade.rawValue)) }
+        if let trend, trend != 0 { parts.append(localizedFormat("较上次 %@", NumberFormat.signed(trend))) }
         return parts.joined(separator: "，")
     }
 
@@ -149,7 +149,7 @@ struct HealthHeroCard: View {
         } else {
             EmptyStateView(
                 icon: IconName.emptyUnknown.rawValue,
-                title: ShellCopy.notAnalyzed("该项目"),
+                title: ShellCopy.notAnalyzed(.thisProject),
                 message: "点击右上角「重新分析」，扫描代码规模、Git 历史、日志与依赖之后这里会出现评分与结论。"
             )
         }
@@ -161,7 +161,7 @@ struct HealthHeroCard: View {
         let strengths = Array(health.strengths.prefix(3))
         let issues = Array(health.issues.prefix(3))
         if strengths.isEmpty && issues.isEmpty {
-            Text(ShellCopy.scannedButFoundNone("优点与风险项"))
+            Text(ShellCopy.scannedButFoundNone(.strengthsAndRisks))
                 .font(Theme.Typo.narrative.font)
                 .foregroundStyle(.secondary)
         } else {

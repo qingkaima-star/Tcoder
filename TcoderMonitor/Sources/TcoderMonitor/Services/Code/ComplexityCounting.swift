@@ -58,48 +58,104 @@ extension ComplexityEngine {
     static func branchSymbols(in rawLine: String, profile: LangProfile) -> Int {
         // 绝大多数代码行既没有 && / || 也没有 ?，先零成本过一遍再决定要不要转 [Character]
         guard rawLine.contains(where: { $0 == "?" || $0 == "&" || $0 == "|" }) else { return 0 }
-        let chars = Array(rawLine)
-        guard !chars.isEmpty else { return 0 }
+        var scan = BranchSymbolScan(chars: Array(rawLine), profile: profile)
+        return scan.run()
+    }
+
+    /// `branchSymbols` 的逐字符扫描。原先是一个 46 行、CC 23 的 while，
+    /// 现在按职责拆成 `step` / `eatLogicalOperatorPair` / `questionMarkGain` / `noteReturnKeyword`。
+    ///
+    /// **顺序敏感的语义全部保留**，逐条对着原实现核过：
+    /// - `&&` / `||` 的短路 `index += 2` 之后不再走后面的分支（原 `continue`）；
+    /// - `?` 命中 `??` / `?.` 时也是 `index += 2`，其余 `?` 形态只前进 1；
+    /// - `hasAssignment` / `hasParen` / `lastColon` 是**整行前缀无关**的量（原实现在主循环之前
+    ///   先整行扫一遍算出来的），放进 `init` 保持同一口径；
+    /// - `hasReturn` 则**相反**，是前缀量：原实现在主循环里就地置位，所以 `return` 写在 `?`
+    ///   后面时撑不起三元判定。这里仍然由 `step` 每走一格更新一次，行为一字不差。
+    struct BranchSymbolScan {
+        let chars: [Character]
+        let profile: LangProfile
+        var index = 0
+        var count = 0
         var lastColon = -1
-        for (offset, c) in chars.enumerated() where c == ":" { lastColon = offset }
         var hasAssignment = false
         var hasParen = false
         var hasReturn = false
-        for c in chars {
-            if c == "=" { hasAssignment = true }
-            else if c == "(" { hasParen = true }
+
+        init(chars: [Character], profile: LangProfile) {
+            self.chars = chars
+            self.profile = profile
+            for (offset, c) in chars.enumerated() where c == ":" { lastColon = offset }
+            for c in chars {
+                if c == "=" { hasAssignment = true }
+                else if c == "(" { hasParen = true }
+            }
         }
-        let n = chars.count
-        var index = 0
-        var count = 0
-        while index < n {
+
+        /// 行内还有下一个字符吗（`??` / `?.` / `&&` 这类都要看后面一格）。
+        func hasSecondCharacter(after offset: Int) -> Bool { offset + 1 < chars.count }
+
+        /// 逐字符扫完整行，返回判定符号总数。
+        mutating func run() -> Int {
+            while index < chars.count {
+                step()
+            }
+            return count
+        }
+
+        /// 原来 while 的循环体：三件事按原顺序各成一格，谁命中谁负责推进 index。
+        mutating func step() {
             let c = chars[index]
-            if c == "&", profile.countsLogicalSymbols, index + 1 < n, chars[index + 1] == "&" {
-                count += 1; index += 2; continue
-            }
-            if c == "|", profile.countsLogicalSymbols, index + 1 < n, chars[index + 1] == "|" {
-                count += 1; index += 2; continue
-            }
+            if eatLogicalOperatorPair(c) { return }
             if c == "?" {
-                if profile.countsNullCoalescing, index + 1 < n, chars[index + 1] == "?" { count += 1; index += 2; continue }
-                // `?.` 可选链本身就是一次判定分支
-                if profile.countsOptionalChaining, index + 1 < n, chars[index + 1] == "." { count += 1; index += 2; continue }
-                if index + 1 < n, chars[index + 1] == "." { index += 1; continue }
-                if index > 0, chars[index - 1] == "?" { index += 1; continue }
-                let followedByWhitespace = index + 1 < n && (chars[index + 1] == " " || chars[index + 1] == "\t")
-                if profile.countsTernary, followedByWhitespace, lastColon > index,
-                   hasAssignment || hasReturn || hasParen {
-                    count += 1
-                }
-                index += 1
-                continue
+                index += questionMarkAdvance()
+                return
             }
-            if c == "r", hasReturn == false, isKeywordAt(chars, index, "return") {
-                hasReturn = true
-            }
+            noteReturnKeyword(c)
             index += 1
         }
-        return count
+
+        /// `&&` / `||`：命中记 1 分并吃掉两个字符。返回 false 表示这里不是逻辑运算符。
+        mutating func eatLogicalOperatorPair(_ c: Character) -> Bool {
+            guard profile.countsLogicalSymbols, c == "&" || c == "|",
+                  hasSecondCharacter(after: index), chars[index + 1] == c else { return false }
+            count += 1
+            index += 2
+            return true
+        }
+
+        /// `?` 的四种形态（`??` / `?.` / 被前一个 `?` 吃掉 / 三元），返回本次推进的字符数。
+        mutating func questionMarkAdvance() -> Int {
+            if profile.countsNullCoalescing, hasSecondCharacter(after: index),
+               chars[index + 1] == "?" {
+                count += 1
+                return 2
+            }
+            // `?.` 可选链本身就是一次判定分支
+            if profile.countsOptionalChaining, hasSecondCharacter(after: index),
+               chars[index + 1] == "." {
+                count += 1
+                return 2
+            }
+            if hasSecondCharacter(after: index), chars[index + 1] == "." { return 1 }
+            if index > 0, chars[index - 1] == "?" { return 1 }
+            if countsAsTernary() { count += 1 }
+            return 1
+        }
+
+        /// 三元判定：`?` 后要有空白、该行后面还有冒号、且行里出现过赋值 / 括号 / return。
+        func countsAsTernary() -> Bool {
+            guard hasSecondCharacter(after: index),
+                  chars[index + 1] == " " || chars[index + 1] == "\t" else { return false }
+            guard profile.countsTernary, lastColon > index else { return false }
+            return hasAssignment || hasReturn || hasParen
+        }
+
+        /// 只在还没见过 return 时探测一次，避免每格都跑一遍标识符边界检查（原实现同一条短路）。
+        mutating func noteReturnKeyword(_ c: Character) {
+            guard c == "r", hasReturn == false, isKeywordAt(chars, index, "return") else { return }
+            hasReturn = true
+        }
     }
 
     /// chars[at...] 是否以 keyword 开头且前后不是标识符字符（避免 returnValue 触发 return）。

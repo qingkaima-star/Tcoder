@@ -103,14 +103,15 @@ enum HealthBreakdown {
     /// 权重格 hover 的唯一文案出口。每句只陈述这一行能证实的部分。
     static func weightTooltip(for row: ScoreRow, rows: [ScoreRow], missingCount: Int) -> String {
         let published = NumberFormat.percent(row.effectiveWeight, precision: 1)
-        guard let base = row.baseWeight else {
-            return "该维度不在内置权重表里，直接采用评分器给出的权重 \(published)。"
-        }
+        // 「表里没有这一档」在两个分支里是同一句话（无 `baseWeight` / 有 `baseWeight`
+        // 但判据归因到 scorerOnly），写两遍就有两份改漏的机会。
+        let notInTable = "该维度不在内置权重表里，直接采用评分器给出的权重 \(published)。"
+        guard let base = row.baseWeight else { return notInTable }
         let raw = NumberFormat.percent(base, precision: 1)
         let tableSumText = NumberFormat.percent(Self.tableWeightSum, precision: 0)
         switch shiftCause(for: row, rows: rows, missingCount: missingCount) {
         case .scorerOnly:
-            return "该维度不在内置权重表里，直接采用评分器给出的权重 \(published)。"
+            return notInTable
         case .asIntended:
             return "本次乘数 \(published)，与内置表原始权重 \(raw) 一致。"
         case .tableNormalization:
@@ -193,29 +194,75 @@ enum MissingDimensionReason {
     ]
 
     /// 未评分**不参与也不得按 0 显示**，所以这里给的是原因，不是一个分数（验收点 6）。
+    ///
+    /// 拆成三段不是为了凑复杂度数（本 App 自扫点名本函数 CC 21）：
+    /// 「扫描失败」「还没扫」「扫了但这一维没产出」本来就是三类原因，
+    /// 混在一个函数里读，谁也看不出界面为什么是这句话。
     static func text(for dimension: HealthDimension, report: ProjectReport?) -> String {
-        guard let analyzer = analyzerLabel[dimension] else { return "该维度不在内置口径里，本次未参与计分。" }
+        guard let analyzer = analyzerLabel[dimension] else {
+            return "该维度不在内置口径里，本次未参与计分。"
+        }
+        if let absent = scanAbsenceReason(analyzer: analyzer, report: report) { return absent }
+        return dimensionAbsenceReason(dimension, analyzer: analyzer, report: report)
+            ?? "「\(analyzer)」完成但该分量未产出。"
+    }
+
+    /// 整体缺席：整次扫描没跑、或这一维所属的分析器报过失败。
+    private static func scanAbsenceReason(analyzer: String, report: ProjectReport?) -> String? {
         if let report, report.failedSections.contains(analyzer) {
             return "上次扫描「\(analyzer)」失败，本维度没有输入。"
         }
-        if report == nil {
-            return "还没有扫描结果，「\(analyzer)」未运行。"
-        }
+        if report == nil { return "还没有扫描结果，「\(analyzer)」未运行。" }
+        return nil
+    }
+
+    /// 逐维判据：扫过了，但这一维缺哪样输入。返回 nil = 输入齐了却没算出分量（走兜底句）。
+    /// 逐维判据：扫过了，但这一维缺哪样输入。返回 nil = 输入齐了却没算出分量（走兜底句）。
+    ///
+    /// 拆的理由是机械的：原来一个 switch 里塞五段三元加一个 guard，被本 App 自扫点名 CC 16
+    /// ——它自己正是「缺证据不给分」那条判据的守门人，本身不该是热点。
+    /// 每维的措辞搬进各自的小函数，**文案与判据一字未动**。
+    private static func dimensionAbsenceReason(_ dimension: HealthDimension, analyzer: String,
+                                               report: ProjectReport?) -> String? {
         switch dimension {
         case .codeQuality, .complexity, .duplication, .documentation:
-            return report?.code == nil ? "「\(analyzer)」没有产出代码指标。" : "「\(analyzer)」完成但该分量未产出。"
+            return codeAbsence(analyzer: analyzer, code: report?.code)
         case .activity, .busFactor:
-            return report?.git == nil ? "该目录不是 Git 仓库，或未取到提交历史。" : "「\(analyzer)」完成但该分量未产出。"
+            return gitAbsence(git: report?.git)
         case .stability:
-            guard let logs = report?.logs else { return "尚未分析日志。" }
-            return logs.hasData ? "「\(analyzer)」完成但该分量未产出。" : "未发现可读的日志文件。"
+            return stabilityAbsence(logs: report?.logs)
         case .dependencies:
-            return report?.dependencies == nil ? "未识别到依赖清单。" : "「\(analyzer)」完成但该分量未产出。"
+            return dependencyAbsence(dependencies: report?.dependencies)
         case .testing:
-            return report?.coverage?.hasData == true
-                ? "「\(analyzer)」完成但该分量未产出。"
-                : "该项目没有产出覆盖率报告，不参与计分。"
+            return testingAbsence(coverage: report?.coverage)
         }
+    }
+
+    private static func codeAbsence(analyzer: String, code: CodeMetrics?) -> String? {
+        code == nil ? "「\(analyzer)」没有产出代码指标。" : nil
+    }
+
+    private static func gitAbsence(git: GitInsights?) -> String? {
+        git == nil ? "该目录不是 Git 仓库，或未取到提交历史。" : nil
+    }
+
+    /// 唯一要分两档的一维：`logs == nil`（没分析过）与「分析了但一行没读到」是两件事，
+    /// 合成一句就把输入状态弄丢了。
+    private static func stabilityAbsence(logs: LogSummary?) -> String? {
+        guard let logs else { return "尚未分析日志。" }
+        return logs.hasData ? nil : "未发现可读的日志文件。"
+    }
+
+    private static func dependencyAbsence(dependencies: DependencyReport?) -> String? {
+        dependencies == nil ? "未识别到依赖清单。" : nil
+    }
+
+    private static func testingAbsence(coverage: CoverageMetrics?) -> String? {
+        coverage?.hasData == true ? nil : "该项目没有产出覆盖率报告，不参与计分。"
+    }
+
+    private static func coverageHasData(_ report: ProjectReport?) -> Bool {
+        report?.coverage?.hasData == true
     }
 }
 
@@ -234,10 +281,14 @@ struct HealthComponentTable: View {
         GlassSection("维度分量",
                      subtitle: "综合分 = Σ(得分 × 归一化权重) · 按拖累程度排序，贡献最低者在前",
                      icon: .health,
-                     trailing: AnyView(Theme.Readout.Field("合计", Live.fixed(sum, digits: 1)))) {
+                     // 卡头 trailing 位只有一行，没有"第二行的值要竖向对齐"这回事，
+                     // 所以标签不占 160pt 列宽 —— 占了就变成「合计 ………… 60.1」
+                     // 中间一段空版心（1240 版框实拍）。
+                     trailing: AnyView(Theme.Readout.Field("合计", Live.fixed(sum, digits: 1),
+                                                           labelWidth: nil))) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 table
-                Divider()
+                DataRowSeparator()
                 missingBlock
                 if !HealthBreakdown.isSumConsistent(sum, with: health.overall) {
                     NoteLine("分量合计 \(Live.fixed(sum, digits: 1)) 与综合分 \(health.overall) 有出入，通常是评分器的归一化或取整口径不同。",
@@ -313,7 +364,12 @@ struct HealthComponentTable: View {
         } else {
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 Text("缺失维度 \(NumberFormat.grouped(missing.count)) 项")
-                    .font(Theme.Typo.cardTitle.font)
+                    // 组内小标题全站一档：`groupLabel`（10pt medium + 0.6 字距）。
+                    // 这里原来是 `cardTitle`(13 semibold)，与它上面那行节标题只差一档字重，
+                    // 而日志页同一角色又用 `microLabel + .tertiary` —— 三种画法（清单 3.9）。
+                    // 必须走 `.typed`：`Font` 没有字距 API，直接 `.font(...)` 会静默丢字距。
+                    .typed(Theme.Typo.groupLabel)
+                    .foregroundStyle(.secondary)
                 ForEach(missing, id: \.rawValue) { dimension in
                     HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
                         ThemedIcon(.unverified, role: .badge)

@@ -192,14 +192,40 @@ struct ContributorDirectoryChips: View {
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
         } else {
-            HStack(spacing: Theme.Spacing.xs) {
-                ForEach(Array(directories.enumerated()), id: \.offset) { _, entry in
-                    SemanticBadge("\(Self.tail(entry.0)) · \(NumberFormat.grouped(entry.1))",
-                                  role: Theme.Semantic.neutral)
-                        .help("\(entry.0) · \(entry.1) 次改动")
-                }
+            // 胶囊是这一行的**第三级**信息，不许反过来决定行宽：三位长目录名 + 四位数
+            // 提交数 ≈ 380pt 的固有宽度，会把姓名与邮箱挤到中间截断（实拍可见）。
+            // `ViewThatFits` 从"全展开"逐档退到"只报个数"，装不下的收进 `+N` 并把
+            // 完整清单挂在 tooltip —— 退档只丢视觉，不丢信息。
+            ViewThatFits(in: .horizontal) {
+                Self.row(directories, folded: [])
+                Self.row(Array(directories.prefix(2)),
+                         folded: Array(directories.dropFirst(2)))
+                Self.row(Array(directories.prefix(1)),
+                         folded: Array(directories.dropFirst()))
+                Self.row([], folded: directories)
             }
         }
+    }
+
+    @ViewBuilder
+    static func row(_ shown: [(String, Int)], folded: [(String, Int)]) -> some View {
+        HStack(spacing: Theme.Spacing.xs) {
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, entry in
+                chip(entry)
+            }
+            if !folded.isEmpty {
+                SemanticBadge("+\(NumberFormat.grouped(folded.count))",
+                              role: Theme.Semantic.neutral)
+                    .help(folded.map { "\($0.0) · \($0.1) 次改动" }
+                        .joined(separator: "\n"))
+            }
+        }
+    }
+
+    static func chip(_ entry: (String, Int)) -> some View {
+        SemanticBadge("\(tail(entry.0)) · \(NumberFormat.grouped(entry.1))",
+                      role: Theme.Semantic.neutral)
+            .help("\(entry.0) · \(entry.1) 次改动")
     }
 
     static func tail(_ path: String) -> String {

@@ -86,14 +86,22 @@ struct DependencySummaryGrid: View {
 
     var body: some View {
         let verdict = DependencySafetyVerdict(deps)
-        GlassSection("依赖规模", subtitle: "清单直接声明数 · 不含锁文件里的传递依赖", icon: .package) {
+        GlassSection("依赖规模", subtitle: "按清单文件统计", icon: .package) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 DataHeroReadout(value: NumberFormat.grouped(deps.totalDependencies),
                                 unit: "项",
-                                note: "\(NumberFormat.grouped(deps.ecosystems.count)) 个生态的清单直接声明，"
-                                    + "不含锁文件解析出的传递依赖")
+                                // 「N 个生态」这个数已经站在下面读数带的第一格里了，
+                                // 主角的 note 只留口径本身（"不含传递依赖"是必须读到的那句）。
+                                note: "清单直接声明，不含锁文件解析出的传递依赖")
 
                 ReadoutStrip {
+                    MetricTile(
+                        label: "生态",
+                        value: NumberFormat.grouped(deps.ecosystems.count),
+                        unit: "个",
+                        caption: "清单来源，名单在上方「风险总览」"
+                    )
+                    DataBandSeparator()
                     MetricTile(
                         label: "运行时 / 开发",
                         value: "\(NumberFormat.grouped(deps.productionCount)) / \(NumberFormat.grouped(deps.devCount))",
@@ -117,8 +125,13 @@ struct DependencySummaryGrid: View {
                         role: verdict.role,
                         icon: .vulnerable,
                         unit: "条",
-                        caption: verdict.summaryCaption
+                        caption: verdict.tileCaption
                     )
+                    // 全口径（覆盖哪些生态、快照截至何时、几项有版本数据）**上屏一次**
+                    // 就够了 —— 它已经在上方「风险总览」的口径条里逐字写着。
+                    // 这里挂成 tooltip 而不是删掉：`summaryCaption` 那份全文仍然一 hover 就在，
+                    // #25 那组诚实线断言盯的也是它（见 HonestyP1SnapshotDateTests）。
+                        .help(verdict.summaryCaption)
                 }
             }
         }
@@ -150,22 +163,10 @@ struct DependencyOverviewSection: View {
             trailing: AnyView(SafetyVerdictBadge(verdict: verdict))
         ) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                ReadoutStrip {
-                    DataReadout(label: "生态", value: NumberFormat.grouped(deps.ecosystems.count),
-                                caption: "个清单来源")
-                    DataBandSeparator()
-                    DataReadout(label: "依赖", value: NumberFormat.grouped(deps.totalDependencies),
-                                caption: "项直接声明")
-                    DataBandSeparator()
-                    DataReadout(label: "过旧", value: NumberFormat.grouped(deps.outdatedCount),
-                                caption: "项",
-                                role: deps.outdatedCount > 0 ? Theme.Semantic.warning : nil)
-                    DataBandSeparator()
-                    DataReadout(label: "漏洞", value: NumberFormat.grouped(deps.vulnerableCount),
-                                caption: verdict.mayClaimSafe ? "条已核对" : "条（未核对）",
-                                role: verdict.role)
-                }
-
+                // 这一节**不再摆一条读数带**：原来这里的「生态/依赖/过旧/漏洞」四格
+                // 与上一节「依赖规模」的 hero + 读数带是同一批数（隔 32pt 说两遍，
+                // 且两带格数不同、分隔线错位）。数只在上一次，这一节只留**它独有的东西**：
+                // 结论徽标 + 三行来源核对。
                 VStack(spacing: DataRowMetrics.rowGap) {
                     DataFieldRow(label: "联网查询",
                                  value: deps.networkLookupPerformed ? "是" : "否", style: .text,

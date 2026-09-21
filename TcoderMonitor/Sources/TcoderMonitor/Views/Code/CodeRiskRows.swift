@@ -90,142 +90,7 @@ enum CodeRiskAnalysis {
     }
 
     static func suggestions(for code: CodeMetrics) -> [Item] {
-        var items: [Item] = []
-
-        // 1) 重复代码：分档措辞，数字取自 ratio / blocks。
-        let duplicatedLines = Int((code.duplicationRatio * Double(code.codeLines)).rounded())
-        let longestBlock = code.duplicatedBlocks.map(\.lineCount).max() ?? 0
-        if code.duplicationRatio >= duplicationHighRatio, let block = longestBlockReference(code) {
-            items.append(Item(
-                id: "duplication-high", label: "重复代码", icon: .duplicate, role: Theme.Semantic.danger,
-                text: "重复率 \(NumberFormat.percent(code.duplicationRatio, precision: 1))"
-                    + "（约 \(NumberFormat.grouped(duplicatedLines)) / "
-                    + "\(NumberFormat.grouped(code.codeLines)) 行）已达高风险档：最长一处 "
-                    + "\(NumberFormat.grouped(block.lineCount)) 行，出现在 "
-                    + occurrenceFileSummary(block) + "（共 "
-                    + "\(NumberFormat.grouped(block.occurrences.count)) 处）。"
-                    + "把这类块抽成公共工具函数或模板方法，差异部分用参数/闭包传入，只保留一份实现。"
-            ))
-        } else if code.duplicationRatio >= duplicationNotableRatio, let block = longestBlockReference(code) {
-            items.append(Item(
-                id: "duplication-notable", label: "重复代码", icon: .duplicate, role: Theme.Semantic.warning,
-                text: "重复率 \(NumberFormat.percent(code.duplicationRatio, precision: 1))"
-                    + "（约 \(NumberFormat.grouped(duplicatedLines)) / "
-                    + "\(NumberFormat.grouped(code.codeLines)) 行）：最长重复块 "
-                    + "\(NumberFormat.grouped(block.lineCount)) 行、出现在 "
-                    + occurrenceFileSummary(block) + "。改动这些文件时顺手合并成一处实现，"
-                    + "可把重复率压到 \(NumberFormat.percent(duplicationNotableRatio, precision: 0)) 以下。"
-            ))
-        } else if code.duplicationRatio > 0 {
-            items.append(Item(
-                id: "duplication-low", label: "重复代码", icon: .duplicate, role: Theme.Semantic.neutral,
-                text: "重复率 \(NumberFormat.percent(code.duplicationRatio, precision: 1))"
-                    + "（约 \(NumberFormat.grouped(duplicatedLines)) / "
-                    + "\(NumberFormat.grouped(code.codeLines)) 行）仍在低档："
-                    + "\(NumberFormat.grouped(code.duplicatedBlocks.count)) 个重复块中最长 "
-                    + "\(NumberFormat.grouped(longestBlock)) 行，暂不需要专门重构，"
-                    + "改到相关代码时顺带去重即可。"
-            ))
-        }
-
-        // 2) 圈复杂度严重档：CC 数字与函数名逐条点名。
-        let critical = code.topComplexFunctions.filter { $0.risk == .critical }
-        if !critical.isEmpty {
-            let named = critical.prefix(3).map {
-                "\($0.name)（CC \(NumberFormat.grouped($0.cyclomaticComplexity)) · "
-                    + "\(NumberFormat.grouped($0.lineCount)) 行 · "
-                    + "\(CodeViewFormat.fileName($0.filePath)):\(NumberFormat.grouped($0.startLine))）"
-            }
-            let highest = critical.map(\.cyclomaticComplexity).max() ?? 0
-            let lowestOnBoard = code.topComplexFunctions.map(\.cyclomaticComplexity).min() ?? 0
-            items.append(Item(
-                id: "complexity-critical", label: "严重复杂度", icon: .riskSevere, role: Theme.Semantic.critical,
-                text: "\(NumberFormat.grouped(critical.count)) 个函数被判为严重复杂度，"
-                    + "最高圈复杂度 \(NumberFormat.grouped(highest))：" + named.joined(separator: "、")
-                    + "。先去掉嵌套：校验与异常分支改成提前返回，再把成组的分支换成策略表/多态；"
-                    + "先把分支数压到上榜函数的最低水位 CC \(NumberFormat.grouped(lowestOnBoard)) 以下。"
-            ))
-        }
-
-        // 3) 高档复杂度聚集。
-        let high = code.topComplexFunctions.filter { $0.risk == .high }
-        if high.count >= 3 {
-            items.append(Item(
-                id: "complexity-high-cluster", label: "高复杂度聚集", icon: .complexity, role: Theme.Semantic.warning,
-                text: "同时有 \(NumberFormat.grouped(high.count)) 个函数处于高复杂度档（CC "
-                    + "\(NumberFormat.grouped(high.map(\.cyclomaticComplexity).min() ?? 0))~"
-                    + "\(NumberFormat.grouped(high.map(\.cyclomaticComplexity).max() ?? 0))）："
-                    + "先给它们补单元测试，再把分支下沉成命名清晰的小函数。"
-            ))
-        }
-
-        // 4) 参数过多的函数（真实计数）。
-        let manyParams = code.topComplexFunctions.filter { $0.parameterCount >= manyParameterCount }
-        if let worst = manyParams.max(by: { $0.parameterCount < $1.parameterCount }) {
-            items.append(Item(
-                id: "parameters", label: "参数过多", symbol: CodeGitSymbol.parameters,
-                role: Theme.Semantic.warning,
-                text: "\(NumberFormat.grouped(manyParams.count)) 个上榜函数的参数达到或超过 "
-                    + "\(NumberFormat.grouped(manyParameterCount)) 个，最多的是 \(worst.name)"
-                    + "（\(NumberFormat.grouped(worst.parameterCount)) 个参数 · "
-                    + "\(CodeViewFormat.fileName(worst.filePath)):\(NumberFormat.grouped(worst.startLine))）："
-                    + "把成组参数收进一个配置或值类型，调用点会同步变短。"
-            ))
-        }
-
-        // 5) 函数整体长度。
-        if code.longFunctions > 0 {
-            items.append(Item(
-                id: "long-functions", label: "函数长度", symbol: CodeGitSymbol.longFunction,
-                role: code.averageFunctionLength > longAverageFunctionLines
-                    ? Theme.Semantic.warning : Theme.Semantic.neutral,
-                text: "识别到 \(NumberFormat.grouped(code.longFunctions)) 个超长函数，"
-                    + "平均函数长度 \(NumberFormat.grouped(code.averageFunctionLength)) 行："
-                    + "按段落把函数拆成职责单一的私有方法，一个函数只做一件事。"
-            ))
-        }
-
-        // 6) 全仓均值与热点榜均值背离——平均值被少数巨型函数拉高时，建议按函数处理而不是整体重构。
-        if let divergence = relativeComplexitySuggestion(code) {
-            items.append(Item(id: "complexity-divergence", label: "复杂度分布", icon: .chartLine,
-                              role: Theme.Semantic.neutral, text: divergence))
-        }
-
-        // 7) 巨大文件：给出真实行数与扫描器自己的建议原文。
-        if let largest = code.hugeFiles.max(by: { $0.lineCount < $1.lineCount }) {
-            items.append(Item(
-                id: "huge-file", label: "巨大文件", icon: .duplicate,
-                role: Theme.Semantic.role(for: largest.risk),
-                text: "最大文件 \(CodeViewFormat.fileName(largest.path)) 共 "
-                    + "\(NumberFormat.grouped(largest.lineCount)) 行（项目行数峰值 "
-                    + "\(NumberFormat.grouped(code.largestFileLineCount)) 行）：\(largest.suggestion)"
-            ))
-        }
-
-        // 8) FIXME / TODO：按真实条数提示。
-        if code.fixmeCount > 0 {
-            let perKilo = Double(code.fixmeCount + code.todoCount) * 1_000 / Double(max(1, code.codeLines))
-            items.append(Item(
-                id: "markers", label: "待办标记", symbol: CodeGitSymbol.marker, role: Theme.Semantic.warning,
-                text: "源码里留着 \(NumberFormat.grouped(code.fixmeCount)) 处 FIXME（另有 "
-                    + "\(NumberFormat.grouped(code.todoCount)) 处 TODO），平均每千行有效代码 "
-                    + String(format: "%.2f", perKilo) + " 条：逐条确认是修掉还是删注释，避免长期失真。"
-            ))
-        }
-
-        // 9) 注释率：只在确实偏低时提，数字来自 commentLines / totalLines。
-        if code.totalLines > 0, code.commentRatio < lowCommentRatio {
-            items.append(Item(
-                id: "comments", label: "注释率", symbol: CodeGitSymbol.comments, role: Theme.Semantic.neutral,
-                text: "注释率 \(NumberFormat.percent(code.commentRatio))"
-                    + "（\(NumberFormat.grouped(code.commentLines)) / "
-                    + "\(NumberFormat.grouped(code.totalLines)) 行）低于本页 "
-                    + "\(NumberFormat.percent(lowCommentRatio, precision: 0)) 的提示线："
-                    + "优先给对外接口和圈复杂度最高的那批函数写意图说明，直白代码不必加注释。"
-            ))
-        }
-
-        return items
+        duplicationAdvice(code) + complexityAdvice(code) + scaleAdvice(code)
     }
 
     static func longestBlockReference(_ code: CodeMetrics) -> DuplicatedBlock? {
@@ -269,12 +134,32 @@ struct CodeDuplicationBlockRow: View {
             } label: {
                 HStack(alignment: .center, spacing: DataRowMetrics.cellGap) {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                        Text(Self.occurrenceTitles(block, root: root))
-                            .font(CodeGitType.tableIdentifier)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        // **每个 occurrence 一行、每行单段中间省略**，不再把 4 条路径
+                        // 用三个空格粘成一个长串去自动换行。原来的后果（实拍可见）：
+                        // 两条长路径在单元格里挤成一团、第二行直接顶到「行数」列跟前，
+                        // 列与列之间只剩"空格"当分隔 —— 表就没有表了。
+                        ForEach(Array(Self.occurrenceLines(block, root: root).enumerated()),
+                                id: \.offset) { _, line in
+                            Text(line.text)
+                                .font(CodeGitType.tableIdentifier)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                // 中间截断必须可回读全路径，否则"看得见一半"比看不见更难查
+                                .themeHelp(line.help)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        let rest = Self.occurrenceRestCount(block)
+                        if rest > 0 {
+                            // 汇总行写成 `Text(字面量)`：拼成 String 再交给 Text(variable)
+                            // 就永远不查表（双语方案 §7），这里没有理由留新债。
+                            Text("另有 \(NumberFormat.grouped(rest)) 处")
+                                .font(CodeGitType.tableIdentifier)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .themeHelp(Self.occurrenceTitles(block, root: root))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                     .tableCell(DataColumns.column(columns, 0))
 
@@ -316,7 +201,34 @@ struct CodeDuplicationBlockRow: View {
         NSWorkspace.shared.activateFileViewerSelecting([CodeViewFormat.resolvedURL(path, root: root)])
     }
 
-    /// 最多列 4 个 occurrence，其余如实汇总为「另有 N 处」。
+    /// 一格里最多摊开两条路径，第三条起收成「另有 N 处」。
+    /// 上限取 2 是因为整行高度由「行数/出现/相似度」三个单行数字决定，
+    /// 路径格超过两行就会把这一行拉高、五列基线断开。
+    static let occurrenceLineLimit = 2
+
+    struct OccurrenceLine {
+        let text: String
+        /// 中间截断后的回读出口：完整路径。
+        let help: String?
+    }
+
+    static func occurrenceLines(_ block: DuplicatedBlock, root: String,
+                                limit: Int = occurrenceLineLimit) -> [OccurrenceLine] {
+        block.occurrences.prefix(limit).map { occurrence in
+            OccurrenceLine(
+                text: "\(CodeViewFormat.pathTail(occurrence.path, root: root)):"
+                    + "\(NumberFormat.grouped(occurrence.startLine))",
+                help: occurrence.path)
+        }
+    }
+
+    /// 被折进「另有 N 处」的条数；算术只在这一处，视图与测试共用。
+    static func occurrenceRestCount(_ block: DuplicatedBlock,
+                                    limit: Int = occurrenceLineLimit) -> Int {
+        max(0, block.occurrences.count - limit)
+    }
+
+    /// 保留：完整拼接串。只给 tooltip（`.help` / 「另有 N 处」悬浮）与旧断言用。
     static func occurrenceTitles(_ block: DuplicatedBlock, root: String, limit: Int = 4) -> String {
         let shown = block.occurrences.prefix(limit)
             .map { "\(CodeViewFormat.pathTail($0.path, root: root)):\(NumberFormat.grouped($0.startLine))" }

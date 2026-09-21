@@ -55,14 +55,14 @@ struct LogsMetricGrid: View {
             ReadoutStrip {
                 tile("今日错误", count: LogReading.count(logs) { $0.todayErrorCount },
                      caption: todayCaption, icon: .riskWarning)
-                Divider()
+                DataBandSeparator()
                 tile("异常", count: LogReading.count(logs) { $0.exceptionCount },
                      caption: LogReading.caption(logs) { _ in "窗口内累计" }, icon: .riskSevere)
-                Divider()
+                DataBandSeparator()
                 tile("崩溃", count: LogReading.count(logs) { $0.crashCount },
                      caption: LogReading.caption(logs) { "其中 FATAL \(NumberFormat.grouped($0.fatalCount)) 条" },
                      icon: .crash)
-                Divider()
+                DataBandSeparator()
                 tile("警告", count: LogReading.count(logs) { $0.warningCount },
                      caption: warningCaption, icon: .info)
             }

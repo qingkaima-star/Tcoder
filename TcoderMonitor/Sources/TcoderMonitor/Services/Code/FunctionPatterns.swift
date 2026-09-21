@@ -11,43 +11,37 @@ import Foundation
 extension ComplexityEngine {
     // MARK: Patterns
 
+    /// 语言 → 签名正则表。**未收录的语言给空数组**，与原先 `switch` 的 `default: return []` 一致。
+    ///
+    /// 为什么从 switch 改成查表：`patterns(of:)` 原来是 16 个 `case` 的分支（自扫报告点名
+    /// CC=17），而里面**一条逻辑都没有**，全是「这个名字配这批正则」的静态数据。
+    /// 换成字典之后同一批数据一字未动（顺序、成员、语言名都按原表逐行搬过来），
+    /// 只把分支从 17 降到 2。附带好处：原来每个文件都要重造 25 个 `SignaturePattern` 结构体，
+    /// 现在进程内构造一次（正则本身早有 `LanguageProfiles` 的 `cache(_:)` 兜着，
+    /// 所以**编译次数没有变化**，变的只是数组与结构体的重复构造）。
+    static let patternsByLanguage: [String: [SignaturePattern]] = [
+        "Swift": [swiftFunction, swiftInitSubscript],
+        "Kotlin": [kotlinFunction, cStyleFunction],
+        "Java": [cStyleFunction],
+        "Scala": [scalaFunction, cStyleFunction],
+        "TypeScript": [jsFunction, jsVariableArrow, jsMethod, jsObjectMethod],
+        "JavaScript": [jsFunction, jsVariableArrow, jsMethod, jsObjectMethod],
+        "Vue": [jsFunction, jsVariableArrow, jsMethod, jsObjectMethod],
+        "C": [cStyleFunction],
+        "C++": [cStyleFunction],
+        "Objective-C": [objectiveCMethod, cStyleFunction],
+        "Go": [goFunction],
+        "Rust": [rustFunction],
+        "Python": [pythonFunction],
+        "Ruby": [rubyFunction],
+        "PHP": [phpFunction],
+        "Dart": [cStyleFunction],
+        "Gradle": [jsFunction, cStyleFunction],
+        "Shell": [shellBrace, shellNameParen],
+    ]
+
     static func patterns(of language: String) -> [SignaturePattern] {
-        switch language {
-        case "Swift":
-            return [swiftFunction, swiftInitSubscript]
-        case "Kotlin":
-            return [kotlinFunction, cStyleFunction]
-        case "Java":
-            return [cStyleFunction]
-        case "Scala":
-            return [scalaFunction, cStyleFunction]
-        case "TypeScript", "JavaScript":
-            return [jsFunction, jsVariableArrow, jsMethod, jsObjectMethod]
-        case "Vue":
-            return [jsFunction, jsVariableArrow, jsMethod, jsObjectMethod]
-        case "C", "C++":
-            return [cStyleFunction]
-        case "Objective-C":
-            return [objectiveCMethod, cStyleFunction]
-        case "Go":
-            return [goFunction]
-        case "Rust":
-            return [rustFunction]
-        case "Python":
-            return [pythonFunction]
-        case "Ruby":
-            return [rubyFunction]
-        case "PHP":
-            return [phpFunction]
-        case "Dart":
-            return [cStyleFunction]
-        case "Gradle":
-            return [jsFunction, cStyleFunction]
-        case "Shell":
-            return [shellBrace, shellNameParen]
-        default:
-            return []
-        }
+        patternsByLanguage[language] ?? []
     }
 
     // 以下全部正则一律用 Swift 原始字符串 #"…"#：

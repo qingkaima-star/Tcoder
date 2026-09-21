@@ -72,5 +72,102 @@
 			<string>%lld days</string>
 		</dict>
 	</dict>
+<!-- 相对时间（LogRecency.describe）：整句 + 单复数。中文侧原样回填。 -->
+	<key>%lld 秒前</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@secs@</string>
+		<key>secs</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>1 second ago</string>
+			<key>other</key>
+			<string>%lld seconds ago</string>
+		</dict>
+	</dict>
+	<key>%lld 分钟前</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@mins@</string>
+		<key>mins</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>1 minute ago</string>
+			<key>other</key>
+			<string>%lld minutes ago</string>
+		</dict>
+	</dict>
+	<key>%lld 小时前</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@hrs@</string>
+		<key>hrs</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>1 hour ago</string>
+			<key>other</key>
+			<string>%lld hours ago</string>
+		</dict>
+	</dict>
+	<key>%lld 天前</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@days@</string>
+		<key>days</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>1 day ago</string>
+			<key>other</key>
+			<string>%lld days ago</string>
+		</dict>
+	</dict>
+	<key>%lld 个月前</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@months@</string>
+		<key>months</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>1 month ago</string>
+			<key>other</key>
+			<string>%lld months ago</string>
+		</dict>
+	</dict>
+	<key>%lld 年前</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@years@</string>
+		<key>years</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>1 year ago</string>
+			<key>other</key>
+			<string>%lld years ago</string>
+		</dict>
+	</dict>
 </dict>
 </plist>

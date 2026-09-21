@@ -37,7 +37,10 @@ struct PerformanceLiveCharts: View {
     }
 
     private var subtitle: String {
-        "最近 \(NumberFormat.grouped(points.count)) 点 · \(cadenceText) · 窗口约 \(Int(windowSeconds)) 秒"
+        localizedFormat("最近 %1$@ 点 · %2$@ · 窗口约 %3$@ 秒",
+                        NumberFormat.grouped(points.count),
+                        cadenceText,
+                        "\(Int(windowSeconds))")
     }
 
     private var trustedMemory: [SystemSnapshot] { SystemReadings.trustedMemoryPoints(points) }
@@ -106,7 +109,9 @@ struct PerformanceLiveCharts: View {
                     .frame(height: Theme.Layout.chartMinHeight)
             } else {
                 // 可信点不够时说明为什么没有线，而不是画一条 0 线冒充平稳。
-                NoteLine("本窗口没有足够的可信内存读数可画曲线（\(NumberFormat.grouped(trusted.count))/\(NumberFormat.grouped(points.count)) 点可用）。",
+                NoteLine(localizedFormat("本窗口没有足够的可信内存读数可画曲线（%1$@/%2$@ 点可用）。",
+                                           NumberFormat.grouped(trusted.count),
+                                           NumberFormat.grouped(points.count)),
                          role: Theme.Semantic.warning, icon: .riskWarning)
                     .frame(height: Theme.Layout.chartMinHeight, alignment: .center)
             }
@@ -134,19 +139,26 @@ struct PerformanceLiveCharts: View {
     static func percentLabel(_ value: Double) -> String { "\(ChartAxis.plain(value))%" }
 
     static func cpuBasis(context: SampleContext) -> String {
-        guard let cores = SystemReadings.coreCount(context) else { return "分母：全部核心" }
-        return "分子/分母：正在使用的核数 / \(cores) 核，100% = 全部核心跑满"
+        guard let cores = SystemReadings.coreCount(context) else { return localizedCopy("分母：全部核心") }
+        // 键里写 `100%%`：这条走 `localizedFormat` → `String(format:)`，
+        // 裸 `%` 会被**静默吃掉尾巴**（方案 §9，实测「95% 的提交…」→「95 的提交…」）。
+        // `%%` 经 format 回填成 "100%"，中文侧一字不变；英文值同理也要写 `%%`。
+        return localizedFormat("分子/分母：正在使用的核数 / %@ 核，100%% = 全部核心跑满",
+                               NumberFormat.grouped(cores))
     }
 
     static func memoryBasis(context: SampleContext) -> String {
         let used = Live.bytes(SystemReadings.memoryUsedBytes(context))
         let total = Live.bytes(SystemReadings.memoryTotalBytes(context))
-        return "分子/分母：已用 \(used) / 总量 \(total)"
+        return localizedFormat("分子/分母：已用 %1$@ / 总量 %2$@", used, total)
     }
 
     private func cpuSummary(_ axis: ChartAxis) -> String {
-        guard let fraction = SystemReadings.cpuFraction(context) else { return "CPU 曲线，等待可信读数" }
-        return "CPU 曲线，\(NumberFormat.grouped(points.count)) 个点，当前 \(Live.percent(fraction, precision: 0))，纵轴 \(axis.domainText)"
+        guard let fraction = SystemReadings.cpuFraction(context) else { return localizedCopy("CPU 曲线，等待可信读数") }
+        return localizedFormat("CPU 曲线，%1$@ 个点，当前 %2$@，纵轴 %3$@",
+                               NumberFormat.grouped(points.count),
+                               Live.percent(fraction, precision: 0),
+                               axis.domainText)
     }
 
     private func memorySummary(_ count: Int, _ axis: ChartAxis) -> String {

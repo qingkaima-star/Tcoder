@@ -81,42 +81,60 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
         var directoryRelativePath: String
     }
 
+    /// 广度优先队列里的一项。
+    private struct ScanEntry {
+        var directory: URL
+        var relative: String
+        var depth: Int
+    }
+
     /// 广度优先扫描：目录深度上限 `maxDepth`，符号链接不跟随，隐藏目录按 `includeHidden` 决定。
+    /// 单个目录项的判定抽在 `discoverQueueEntry` 里，那里的每一条 guard/continue
+    /// 都原样映射成 return，行为与抽取前逐字一致。
     private func discoverManifests(root: URL) -> [ManifestHit] {
         var hits: [ManifestHit] = []
         var seenPaths = Set<String>()
-        var queue: [(directory: URL, relative: String, depth: Int)] = [(root, "", 0)]
+        var queue: [ScanEntry] = [ScanEntry(directory: root, relative: "", depth: 0)]
         var cursor = 0
 
         while cursor < queue.count {
             let entry = queue[cursor]
             cursor += 1
             guard let names = try? fileManager.contentsOfDirectory(atPath: entry.directory.path) else { continue }
-
             for name in names.sorted() {
-                let url = entry.directory.appendingPathComponent(name)
-                let relative = entry.relative.isEmpty ? name : "\(entry.relative)/\(name)"
-                let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey])
-                if values?.isSymbolicLink == true { continue }
-
-                if values?.isDirectory == true {
-                    if options.skipDirectories.contains(name) { continue }
-                    if !options.includeHidden && name.hasPrefix(".") { continue }
-                    if entry.depth + 1 <= maxDepth {
-                        queue.append((url, relative, entry.depth + 1))
-                    }
-                    continue
-                }
-                guard ManifestFileName.ecosystem(for: name) != nil else { continue }
-                if seenPaths.insert(relative).inserted {
-                    hits.append(ManifestHit(url: url,
-                                            relativePath: relative,
-                                            directoryRelativePath: entry.relative))
-                }
+                discoverQueueEntry(name: name, in: entry,
+                                   hits: &hits, queue: &queue, seenPaths: &seenPaths)
             }
         }
 
         return expandMavenModules(hits, root: root, seenPaths: &seenPaths)
+    }
+
+    /// 处理队列某一项目录下的一个名字：要么下潜（追加队列）、要么收成一次清单命中。
+    private func discoverQueueEntry(name: String,
+                                    in entry: ScanEntry,
+                                    hits: inout [ManifestHit],
+                                    queue: inout [ScanEntry],
+                                    seenPaths: inout Set<String>) {
+        let url = entry.directory.appendingPathComponent(name)
+        let relative = entry.relative.isEmpty ? name : "\(entry.relative)/\(name)"
+        let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey])
+        if values?.isSymbolicLink == true { return }
+
+        if values?.isDirectory == true {
+            if options.skipDirectories.contains(name) { return }
+            if !options.includeHidden && name.hasPrefix(".") { return }
+            if entry.depth + 1 <= maxDepth {
+                queue.append(ScanEntry(directory: url, relative: relative, depth: entry.depth + 1))
+            }
+            return
+        }
+        guard ManifestFileName.ecosystem(for: name) != nil else { return }
+        if seenPaths.insert(relative).inserted {
+            hits.append(ManifestHit(url: url,
+                                    relativePath: relative,
+                                    directoryRelativePath: entry.relative))
+        }
     }
 
     /// 多模块 Maven：父 pom 的 `<module>` 目录常常深过扫描上限，这里显式补一层。

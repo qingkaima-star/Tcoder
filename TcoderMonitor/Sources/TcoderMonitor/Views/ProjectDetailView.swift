@@ -38,14 +38,6 @@ struct ProjectDetailView: View {
     /// Scan only when this project has never been attempted. Keying off a missing
     /// section instead would re-scan forever whenever one analyzer legitimately
     /// cannot produce data (a folder that simply isn't a git repo).
-    /// 面包屑里的分隔点。`·` 是**版式符号**不是内容，走 `.tertiary`。
-    private var breadcrumbDot: some View {
-        Text("·")
-            .font(Theme.Typo.label.font)
-            .foregroundStyle(.tertiary)
-            .accessibilityHidden(true)
-    }
-
     private func maybeAutoScan() {
         guard let project = state.selectedProject, !project.isDemo else { return }
         guard state.store.report(for: project)?.hasBeenScanned == false else { return }
@@ -68,7 +60,9 @@ struct ProjectDetailView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .help(project.name)
-                breadcrumbDot
+                Text(" · ")
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
                 Text(project.path)
                     .font(Theme.Typo.label.font.monospacedDigit())
                     // 红线允许路径/时间戳用 `.tertiary`，但 17:25 深色实拍实测：
@@ -78,7 +72,9 @@ struct ProjectDetailView: View {
                     .truncationMode(.middle)
                     .help(project.path)
                 if let scanned = project.lastScanAt {
-                    breadcrumbDot
+                    Text(" · ")
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
                     Text("分析于 \(DateFormat.sinceDescription(scanned))")
                         .font(Theme.Typo.label.font.monospacedDigit())
                         .foregroundStyle(.secondary)
@@ -94,7 +90,7 @@ struct ProjectDetailView: View {
             // 表头三态：一次都没扫过就明说「尚未分析」，用 `unverified`（问号）而不是
             // `noRisk`（对勾）—— 对勾会把「没查」渲染成「查过、安全」。
             if state.selectedProject != nil && state.selectedReport == nil && !state.isScanning {
-                SemanticBadge(ShellCopy.notAnalyzed("全部指标"),
+                SemanticBadge(ShellCopy.notAnalyzed(.allMetrics),
                               role: Theme.Semantic.neutral,
                               icon: .unverified)
             }

@@ -113,16 +113,8 @@ struct DataHeroReadout: View {
 // （同一个 `HStack(alignment: .top, spacing: lg)` + 同一条 `frame(maxWidth:.infinity,.leading)`），
 // 是"同一件事两种画法"里最纯粹的一种。三处调用点全部改走 `ReadoutStrip`。
 
-/// 读数带列间分隔。**只能出现在 `DataReadoutBand` 里**。
-struct DataBandSeparator: View {
-    var body: some View {
-        Rectangle()
-            .fill(Theme.Palette.Surface.separator)
-            .frame(width: Theme.Stroke.hairline)
-            .padding(.vertical, Theme.Spacing.xxs)
-            .accessibilityHidden(true)
-    }
-}
+// `DataBandSeparator` 已上提到 `Design/SharedComponents.swift`：
+// 它是全站**唯一**的竖线画法，留在某个页面目录里就会被再抄一份。
 
 // MARK: - 表格井（风格契约 3 里内容层唯一允许的实心底）
 
@@ -259,10 +251,12 @@ extension MetricTile {
         icon: IconName?,
         unit: String? = nil,
         caption: String? = nil,
-        tint: Color = Theme.Palette.Surface.ink
+        tint: Color = Theme.Palette.Surface.ink,
+        captionLineLimit: Int? = nil
     ) {
         self.init(label: label, value: value, unit: unit, caption: caption, tint: tint,
-                  systemImage: icon.map(CodeGitSymbol.resolve))
+                  systemImage: icon.map(CodeGitSymbol.resolve),
+                  captionLineLimit: captionLineLimit)
     }
 
     /// 登记表还没收录、但在 `CodeGitSymbol` 里集中命名过的符号走这个入口。
@@ -273,10 +267,11 @@ extension MetricTile {
         symbol: String?,
         unit: String? = nil,
         caption: String? = nil,
-        tint: Color = Theme.Palette.Surface.ink
+        tint: Color = Theme.Palette.Surface.ink,
+        captionLineLimit: Int? = nil
     ) {
         self.init(label: label, value: value, unit: unit, caption: caption, tint: tint,
-                  systemImage: symbol)
+                  systemImage: symbol, captionLineLimit: captionLineLimit)
     }
 
     /// 带**语义**结论的 tile（风险等级、CVE 严重度、增/删）。
@@ -289,11 +284,13 @@ extension MetricTile {
         icon: IconName? = nil,
         symbol: String? = nil,
         unit: String? = nil,
-        caption: String? = nil
+        caption: String? = nil,
+        captionLineLimit: Int? = nil
     ) {
         self.init(label: label, value: value, unit: unit, caption: caption,
                   tint: role?.textColor ?? Theme.Palette.Surface.ink,
-                  systemImage: icon.map(CodeGitSymbol.resolve) ?? symbol)
+                  systemImage: icon.map(CodeGitSymbol.resolve) ?? symbol,
+                  captionLineLimit: captionLineLimit)
     }
 
 // 无值时基座强制中性色（`MetricTile.forcesNeutralTint`），有值时用调用方给的**语义**角色，

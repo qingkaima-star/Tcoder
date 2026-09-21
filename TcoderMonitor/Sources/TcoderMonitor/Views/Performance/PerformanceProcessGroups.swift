@@ -46,7 +46,7 @@ struct PerformanceProcessGroupsCard: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.group) {
             ForEach(Array(groups.enumerated()), id: \.element.id) { index, item in
                 if index > 0 {
-                    Divider()
+                    DataRowSeparator()
                 }
                 PerformanceGroupCard(group: item,
                                      context: context,
@@ -214,7 +214,7 @@ struct PerformanceGroupCard: View {
                 .foregroundStyle(.tertiary)
                 .lineSpacing(Theme.Typo.label.lineSpacing)
                 .fixedSize(horizontal: false, vertical: true)
-            Divider()
+            DataRowSeparator()
             HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
                 // 「下一步」是引导文字而不是链接：蓝在这套体系里只代表交互 / 选中
                 // （风格契约 5），给它涂 accent 等于把交互语义稀释掉。

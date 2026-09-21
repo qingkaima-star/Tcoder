@@ -68,6 +68,23 @@ struct MetricTile: View {
     var caption: String?
     var tint: Color
     var systemImage: String?
+    /// 量条槽。**位置是规则，不是选择**：量条属于数字，必须钉在值下面那一行，
+    /// 同排四格才在同一条基线上。原来它由调用方叠在整枚 tile **之后**，
+    /// 于是本格脚注一换行（两行口径）就把量条推下去约 20pt ——
+    /// 实拍性能页：CPU 的条比内存低半格，磁盘/网络根本没有条，四格基线全断。
+    var gauge: MetricGauge = .none
+    /// 脚注行数上限。`nil` = **不截断**（默认，口径脚注丢掉一半等于丢掉可核对性）。
+    /// 只有**数据摘要**才传数字：提交标题、路径这类长度由用户内容决定的串不是口径，
+    /// 它撑成三行会把整条读数带的基线弄歪，截断 + tooltip 才是对的处理。
+    var captionLineLimit: Int? = nil
+
+    /// 量条槽的三种状态。`.empty` 是**占位等高**：同排有别的格子画条时，
+    /// 没有可信分母的格子也要把那一行留出来（画一条假的满格线比不画更误导）。
+    enum MetricGauge {
+        case none
+        case empty
+        case value(Double, Color)
+    }
 
     init(
         label: String,
@@ -75,7 +92,9 @@ struct MetricTile: View {
         unit: String? = nil,
         caption: String? = nil,
         tint: Color = Theme.Palette.Surface.ink,
-        systemImage: String? = nil
+        systemImage: String? = nil,
+        gauge: MetricGauge = .none,
+        captionLineLimit: Int? = nil
     ) {
         self.label = label
         self.value = value
@@ -83,6 +102,8 @@ struct MetricTile: View {
         self.caption = caption
         self.tint = tint
         self.systemImage = systemImage
+        self.gauge = gauge
+        self.captionLineLimit = captionLineLimit
     }
 
     var body: some View {
@@ -94,7 +115,7 @@ struct MetricTile: View {
                         // 图标不再吃倾向色：标签是结构，结构一律灰阶（风格契约 5）。
                         .foregroundStyle(Color.secondary)
                 }
-                Text(label)
+                Text(localizedCopy(label))
                     .typed(Theme.Typo.groupLabel)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -105,18 +126,34 @@ struct MetricTile: View {
                     .foregroundStyle(Self.tint(value: value, fallback: tint))
                     .contentTransition(.numericText())
                 if let unit {
-                    Text(unit)
+                    Text(localizedCopy(unit))
                         .font(Theme.Typo.label.font)
                         .foregroundStyle(.secondary)
                 }
             }
+            // 量条钉在**值与脚注之间**，四格才共一条基线（见 `MetricGauge` 那段注释）。
+            switch gauge {
+            case .none:
+                EmptyView()
+            case .empty:
+                Color.clear.frame(height: Theme.Layout.gaugeInline)
+            case let .value(fraction, graphic):
+                MiniBarGauge(fraction: fraction, tint: graphic,
+                             height: Theme.Layout.gaugeInline)
+            }
             if let caption {
-                Text(caption)
+                Text(localizedCopy(caption))
                     .font(Theme.Typo.label.font)
                     // 原来是 `.tertiary`：测得值不得用 tertiary。全仓 42 处 `.tertiary`
                     // 里落在数字上的那些，是「没有主次」在文字侧的另一半成因。
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    // **口径脚注不许截断**：`lineLimit(2)` + 定高 72 让超两行的口径整段消失，
+                    // 而 caption 装的正是"这个数字怎么量出来的"——丢掉它等于把可核对性丢掉。
+                    // 与定宽表格格相反：格子里宁可截不可撑（撑了五列基线全断），
+                    // 脚注宁可撑不可截（行高由条带里最高的那格决定，顶部对齐后数字仍同高）。
+                    // 唯一的例外是 `captionLineLimit`：数据摘要不是口径。
+                    .lineLimit(captionLineLimit)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, minHeight: Theme.Layout.tileHeightCompact,
@@ -149,6 +186,24 @@ struct MetricTile: View {
 ///
 /// 分隔线由**调用方**在 tile 之间插 `Divider()`（SwiftUI 的 `Divider` 在 `HStack`
 /// 里画竖线）。不在这里自动插：各页 tile 数不同，自动插会让守卫数不出真实线数。
+/// 读数带 / 列之间的**唯一竖线**画法（发丝宽 + 上下留一小截，不顶满格高）。
+///
+/// 原来全站有三种竖线：这一条、SwiftUI 的 `Divider()`、以及 `DataRowSeparator()`
+/// 的横版 —— 同一件事三种画法，粗细与颜色各不相同，同屏两张表就能看出不一致。
+/// 现在分工写死：**竖线用它，横线用 `DataRowSeparator()`，`Divider()` 只许留在
+/// 系统菜单里**（守卫 `BorderlessSurfaceGuardTests.test_dividerIsConfinedToSystemMenus`）。
+/// 从 `Views/CodeGit/` 上提到这里，是因为它服务的对象（`ReadoutStrip`）就在本文件。
+/// 读数带列间分隔。**只能出现在 `DataReadoutBand` 里**。
+struct DataBandSeparator: View {
+    var body: some View {
+        Rectangle()
+            .fill(Theme.Palette.Surface.separator)
+            .frame(width: Theme.Stroke.hairline)
+            .padding(.vertical, Theme.Spacing.xxs)
+            .accessibilityHidden(true)
+    }
+}
+
 struct ReadoutStrip<Content: View>: View {
     @ViewBuilder var content: Content
 
@@ -251,7 +306,7 @@ struct SectionEmptyNote: View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
             ThemedIcon(icon, role: .badge)
                 .foregroundStyle(.tertiary)
-            Text(text)
+            Text(localizedCopy(text))
                 .font(Theme.Typo.label.font)
                 // `.secondary` 而不是 `.tertiary`：这是一句要读的说明，
                 // 实拍里 tertiary 的 11pt 灰字几乎读不出（清单 3.11 的伴生问题）。
@@ -275,10 +330,10 @@ struct EmptyStateView: View {
             Image(systemName: icon)
                 .themeIcon(.cardHeader)
                 .foregroundStyle(.tertiary)
-            Text(title)
+            Text(localizedCopy(title))
                 .font(Theme.Typo.cardTitle.font)
                 .foregroundStyle(.secondary)
-            Text(message)
+            Text(localizedCopy(message))
                 .font(Theme.Typo.label.font)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.leading)

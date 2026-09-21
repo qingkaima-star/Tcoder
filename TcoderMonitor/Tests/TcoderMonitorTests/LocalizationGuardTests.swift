@@ -1,5 +1,6 @@
 import XCTest
 import Foundation
+@testable import TcoderMonitor
 
 /// 双语守卫（方案见 `docs/中英双语方案.md`）。
 ///
@@ -77,7 +78,9 @@ final class LocalizationGuardTests: XCTestCase {
         // ICU 正则**不认** Swift 的 `\u{4E00}` 写法，只认 `\u4E00`。
         // 写成前者时 `try?` 把编译失败吞成 nil，函数直接返回 [:] ——
         // 于是"没有任何未迁移的中文串"这个结论是假的。元测试抓的就是这个。
-        let pattern = #"Text\(\s*(?:verbatim:\s*)?"((?:[^"\\]|\\.)*[\u4E00-\u9FFF](?:[^"\\]|\\.)*)""#
+        // 三类入口都算：`Text` / `Button` / 本仓自己的 `GlassButton`。
+        // 少扫一类，就会出现"守卫绿了、按钮还是中文"的假完成。
+        let pattern = #"(?:Text|Button|GlassButton)\(\s*(?:verbatim:\s*)?"((?:[^"\\]|\\.)*[\u4E00-\u9FFF](?:[^"\\]|\\.)*)""#
         let re = try! NSRegularExpression(pattern: pattern, options: [])
         var out: [String: Set<String>] = [:]
         for file in files {
@@ -97,7 +100,7 @@ final class LocalizationGuardTests: XCTestCase {
     private static func sourceFiles() throws -> [(path: String, content: String)] {
         let root = packageRoot.appendingPathComponent("Sources/TcoderMonitor").path
         var out: [(String, String)] = []
-        for sub in ["Views", "Design"] {
+        for sub in ["Views", "Design", "App"] {
             for url in walkFiles(in: "\(root)/\(sub)") where url.hasSuffix(".swift") {
                 out.append((String(url.dropFirst(root.count + 1)),
                             (try? String(contentsOfFile: url, encoding: .utf8)) ?? ""))
@@ -122,7 +125,9 @@ final class LocalizationGuardTests: XCTestCase {
     /// 任何人加一句中文而涨，涨了就"合法"，等于没有闸门；而"某个文件已经干净"
     /// 是一个可复核的事实，退回去就会立刻红。
     private static let migratedFiles: Set<String> = [
-        // P1 尚未开始逐页迁移；P2 起每迁完一页把它的相对路径加进来。
+        "Views/Shell/ProjectSidebar.swift",
+        "App/TcoderMonitorApp.swift",
+        "Views/Shell/DashboardHero.swift",
     ]
 
     func test_migratedFilesHaveNoUnregisteredUILiterals() throws {
@@ -154,13 +159,60 @@ final class LocalizationGuardTests: XCTestCase {
 
     // MARK: - 守卫 3：译文不许烂尾（键必须在代码里真实出现）
 
+    /// 键必须作为**完整的字符串字面量**出现在源码里。
+    ///
+    /// 原来用 `allSource.contains(key)`，于是**长键的前缀**会被当成"还活着"：
+    /// P3-4 把 `"口径：报告只有汇总粒度，未区分测试代码 · 来源 "` 这个碎片键换成整句键
+    /// `"口径：报告只有汇总粒度，未区分测试代码 · 来源 %1$@"` 之后，碎片键其实已经没人用了，
+    ///  substring 判据却照样放行 —— 正是守卫 3 要抓的"改了原文没同步目录"。
+    static func staleKeys(keys: [String], source: String) -> [String] {
+        keys.filter { !source.contains("\"" + $0 + "\"") }
+    }
+
     func test_noStaleKeysInCatalog() throws {
         let entries = try Self.catalog()
         let allSource = try Self.walkFiles(in: Self.packageRoot.appendingPathComponent("Sources/TcoderMonitor").path)
             .reduce("") { $0 + ((try? String(contentsOfFile: $1, encoding: .utf8)) ?? "") }
-        let stale = entries.map(\.key).filter { !allSource.contains($0) }
+        let stale = Self.staleKeys(keys: entries.map(\.key), source: allSource)
         XCTAssertTrue(stale.isEmpty,
                       "目录里有 \(stale.count) 条代码中已不存在的键（改了原文没同步目录）：\(stale)")
+    }
+
+    func test_staleKeyScannerRejectsPrefixOnlyMatches() {
+        let source = ##"Text(localizedFormat("口径 · 来源 %1$@", x))"## 
+        // 碎片键只作为长键的前缀出现 → 必须判成烂尾
+        XCTAssertEqual(Self.staleKeys(keys: ["口径 · 来源"], source: source), ["口径 · 来源"])
+        // 完整字面量在场 → 放行
+        XCTAssertTrue(Self.staleKeys(keys: ["口径 · 来源 %1$@"], source: source).isEmpty)
+    }
+
+    // MARK: - 守卫 4：键值两端的格式占位符必须一致
+
+    /// 抽出串里的**格式占位符**（`%@` / `%d` / `%lld` / `%f` / `%%` …）。
+    /// 裸 `%`（后面不跟转换字符）**不算占位符** —— 这样「95% 的提交…」这类中文键
+    /// 今天就能过，而翻译时把 `%@` 翻丢、写错顺序、多写一个都会被抓到。
+    static func formatSpecs(in text: String) -> [String] {
+        let re = try! NSRegularExpression(pattern: #"%%|%[0-9]*[$]?[@a-zA-Z]{1,3}"#, options: [])
+        let range = NSRange(text.startIndex..., in: text)
+        return re.matches(in: text, options: [], range: range).compactMap {
+            Range($0.range, in: text).map { String(text[$0]) }
+        }
+    }
+
+    func test_catalogPlaceholdersMatch() throws {
+        let offenders = try Self.catalog().compactMap { entry -> String? in
+            let k = Self.formatSpecs(in: entry.key), v = Self.formatSpecs(in: entry.value)
+            return k == v ? nil : "\(entry.key) → 键 \(k) / 值 \(v)"
+        }
+        XCTAssertTrue(offenders.isEmpty,
+                      "译文里的格式占位符与原文不一致（会静默改义或崩）：\(offenders)")
+    }
+
+    /// 元测试：占位符比对必须真能抓错，且**不把裸百分号当占位符误伤**。
+    func test_placeholderScannerDetectsMismatchButIgnoresBarePercent() {
+        XCTAssertEqual(Self.formatSpecs(in: "共 %@ 次，占 %lld%%"), ["%@", "%lld", "%%"])
+        XCTAssertTrue(Self.formatSpecs(in: "95% 的提交由一人完成").isEmpty,
+                      "裸 % 被当成占位符 —— 会把所有含百分号的中文键误判")
     }
 
     // MARK: - 元测试：三条守卫各自的扫描器必须真能抓到坏样例
@@ -171,6 +223,12 @@ final class LocalizationGuardTests: XCTestCase {
                       content: "  Text(\"尚未翻译的句子\")\n// Text(\"注释里的\")\n")]
         XCTAssertEqual(Self.uiLiteralsNeedingKeys(in: dirty)["Views/Fake.swift"],
                        ["尚未翻译的句子"], "界面串扫描器失灵或没剥注释")
+        // 只扫 Text、不扫按钮 = "守卫绿了、按钮还是中文"的假完成
+        let buttons = [(path: "Views/Fake.swift",
+                        content: ##"  GlassButton("添加项目", icon: .add)"## + "\n"
+                            + ##"  Button("移除", role: .destructive) {}"## + "\n")]
+        XCTAssertEqual(Self.uiLiteralsNeedingKeys(in: buttons)["Views/Fake.swift"]?.count, 2,
+                       "按钮标题没被算进界面串")
 
         // 守卫 2/3 的目录解析器：能读键值、能剥块注释与行注释。
         let parsed = Self.parseCatalog("""
@@ -184,5 +242,81 @@ final class LocalizationGuardTests: XCTestCase {
         XCTAssertEqual(parsed.map(\.value), ["Real", "Second"])
         // 空值必须能被数出来（守卫 2 依赖它）
         XCTAssertEqual(Self.parseCatalog("\"k\" = \"\";").first?.value, "")
+    }
+
+    // MARK: - 守卫 5：组件渲染点必须真的查表
+
+    /// 双语最容易的空转不是"没翻"，而是**翻了但界面不查表**：
+    /// `Text(变量)` 走 verbatim 初始化，目录里翻了也一个字不动（《中英双语方案》§7.1）。
+    /// 2026-09-21 用 `-AppleLanguages "(en)"` 实跑抓到这个空转：页头出英文，
+    /// 侧栏九条页名仍是中文，因为 `SidebarRows` 写的是 `Text(section.title)`。
+    ///
+    /// 判据：`Design/` 里承载组件文案的 `Text(<已知参数名>)` 必须过 `localizedCopy`。
+    /// 只认白名单里的参数名，避免把 `Text("\(x)")`、`Text(item.name)` 这类
+    /// 由调用方自己负责语言形态的写法一起卷进来。
+    private static let copyParameterNames: Set<String> = [
+        "label", "value", "caption", "unit", "title", "subtitle", "text", "message",
+        "section.title", "column.title",
+    ]
+
+    static func unlocalizedRenderPoints(in files: [(path: String, content: String)]) -> [String] {
+        files.flatMap { file -> [String] in
+            file.content.split(separator: "\n", omittingEmptySubsequences: false)
+                .enumerated()
+                .compactMap { index, raw -> String? in
+                    let line = String(raw)
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    guard !trimmed.hasPrefix("//"), trimmed.contains("Text(") else { return nil }
+                    guard let open = line.range(of: "Text(") else { return nil }
+                    let rest = line[open.upperBound...]
+                    let name = rest.prefix { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." }
+                    guard copyParameterNames.contains(String(name)),
+                          rest.hasPrefix(String(name) + ")") else { return nil }
+                    return "\(file.path):\(index + 1)"
+                }
+        }
+    }
+
+    func test_designRenderPointsActuallyLookUpTheCatalog() throws {
+        let offenders = Self.unlocalizedRenderPoints(in: try Self.sourceFiles()
+            .filter { $0.path.hasPrefix("Design/") })
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些组件渲染点还在走 Text(变量)（不查表），请包 localizedCopy：\(offenders)")
+    }
+
+    func test_renderPointScannerCatchesBareTextButSparesWrapped() {
+        let bare = [(path: "Design/Fake.swift", content: "    Text(label)\n")]
+        XCTAssertEqual(Self.unlocalizedRenderPoints(in: bare), ["Design/Fake.swift:1"],
+                       "没查表的渲染点没被抓到")
+        let wrapped = [(path: "Design/Fake.swift",
+                        content: "    Text(localizedCopy(label))\n")]
+        XCTAssertTrue(Self.unlocalizedRenderPoints(in: wrapped).isEmpty, "查了表的被误判")
+        let interpolated = [(path: "Design/Fake.swift",
+                             content: "    Text(\(name)) 拼出来的串由调用方负责\n")]
+        XCTAssertTrue(Self.unlocalizedRenderPoints(in: interpolated).isEmpty, "插值写法被误判")
+    }
+
+    // MARK: - 守卫 6：整句键不许改坏中文侧
+
+    /// 相对时间改成「整句键 + `%lld`」之后，**中文侧必须逐字不变**：
+    /// 多一个空格、少一个「前」字，九页上几十处「分析于 X 前」就全变了样，
+    /// 而这类改动不会让任何一条既有测试变红。
+    /// 英文侧的单复数走 `stringsdict`，测试进程里没有语言目录、查不到值，
+    /// 只能靠 `-AppleLanguages "(en)"` 的实拍取证（方案 §10.6）。
+    func testRelativeTimeChineseSideIsUnchanged() {
+        let now = Date()
+        func ago(_ seconds: Int) -> String {
+            LogRecency.describe(now.addingTimeInterval(-Double(seconds)))
+        }
+        XCTAssertEqual(ago(5), "5 秒前")
+        XCTAssertEqual(ago(55), "55 秒前")
+        XCTAssertEqual(ago(120), "2 分钟前")
+        XCTAssertEqual(ago(7_200), "2 小时前")
+        XCTAssertEqual(ago(86_400 + 600), "昨天")
+        XCTAssertEqual(ago(3 * 86_400 + 600), "3 天前")
+        XCTAssertEqual(ago(61 * 86_400 + 600), "2 个月前")
+        XCTAssertEqual(ago(400 * 86_400 + 600), "1 年前")
+        XCTAssertEqual(LogRecency.describe(nil), "未知")
+        XCTAssertEqual(ago(-30), "即将")
     }
 }

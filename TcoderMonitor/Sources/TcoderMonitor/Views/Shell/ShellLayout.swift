@@ -70,13 +70,58 @@ enum ShellLayout {
 // 「查了但是空的」这两句话讲开。把「没查」渲染成 `0` 或绿色结论，
 // 等于把「我们没有证据」伪装成「我们查过、是安全的」。
 
+/// 缺数据句式的**主语 / 原因**。做成枚举而不是让调用方随手传一句中文，是双语逼出来的：
+/// 「尚未分析X」翻成英文时词序会反过来（`Code size not analysed yet`），
+/// 把 X 当碎片各翻一次，拼出来就是坏英文（`Not analysed yet this project`）。
+/// 所以**碎片不进目录，整句成键**，键的字面量就写在下面 switch 里 ——
+/// 守卫 3 要求每个键在 `Sources/**` 真实出现，运行时拼出来的键不算，
+/// 那正是「改了原文没同步目录」该被抓到的情形。
+enum CopySubject: String {
+    case thisProject = "该项目"
+    case allMetrics = "全部指标"
+    case codeSize = "代码规模"
+    case gitHistory = "Git 历史"
+    case errorLogs = "错误日志"
+    case errorLevelLogs = "错误级别日志"
+    case errors = "错误"
+    case commits = "提交记录"
+    case strengthsAndRisks = "优点与风险项"
+    case noLogFiles = "未接入任何日志文件"
+    case notAGitRepo = "该目录不是 Git 仓库，或提交记录为空"
+}
+
 enum ShellCopy {
     /// ③ 尚未跑过分析器。
-    static func notAnalyzed(_ subject: String) -> String { "尚未分析\(subject)" }
+    static func notAnalyzed(_ subject: CopySubject) -> String {
+        switch subject {
+        case .thisProject: return localizedCopy("尚未分析该项目")
+        case .allMetrics: return localizedCopy("尚未分析全部指标")
+        // 键与今天界面上的串**一字不差**（"尚未分析" 与 "Git 历史" 之间没有空格），
+        // 双语不许顺手改排版：改了就是另一张图，P1 的"中文零变化"回归判据会失真。
+        case .gitHistory: return localizedCopy("尚未分析Git 历史")
+        case .codeSize: return localizedCopy("尚未分析代码规模")
+        case .errorLogs: return localizedCopy("尚未分析错误日志")
+        default: return localizedCopy("尚未分析\(subject.rawValue)")
+        }
+    }
 
     /// ② 分析器跑完了、没有命中项 —— 这是结论，可以给定心丸语气，但要带「已完成扫描」。
-    static func scannedButFoundNone(_ subject: String) -> String { "已完成扫描，未发现\(subject)" }
+    static func scannedButFoundNone(_ subject: CopySubject) -> String {
+        switch subject {
+        case .commits: return localizedCopy("已完成扫描，未发现提交记录")
+        case .errors: return localizedCopy("已完成扫描，未发现错误")
+        case .errorLevelLogs: return localizedCopy("已完成扫描，未发现错误级别日志")
+        case .strengthsAndRisks: return localizedCopy("已完成扫描，未发现优点与风险项")
+        default: return localizedCopy("已完成扫描，未发现\(subject.rawValue)")
+        }
+    }
 
     /// ③ 测不了，且必须给原因。空态三段式的第三段（下一步怎么做）由调用方补。
-    static func cannotAnalyze(_ reason: String) -> String { "无法分析：\(reason)" }
+    static func cannotAnalyze(_ reason: CopySubject) -> String {
+        switch reason {
+        case .noLogFiles: return localizedCopy("无法分析：未接入任何日志文件")
+        case .notAGitRepo: return localizedCopy("无法分析：该目录不是 Git 仓库，或提交记录为空")
+        default: return localizedCopy("无法分析：\(reason.rawValue)")
+        }
+    }
 }

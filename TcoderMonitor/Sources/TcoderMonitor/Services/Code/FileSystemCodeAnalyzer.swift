@@ -169,6 +169,41 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         duplication: DuplicationResult,
         to metrics: inout CodeMetrics
     ) {
+        let totals = Self.lineTotals(files)
+        metrics.totalFiles = files.count
+        // totalLines 取真实行计数之和；不变式由单测在真实目录上把关。
+        metrics.totalLines = totals.total
+        metrics.blankLines = totals.blank
+        metrics.commentLines = totals.comment
+        metrics.codeLines = totals.code
+        metrics.todoCount = totals.todo
+        metrics.fixmeCount = totals.fixme
+        metrics.languages = languageShares(files: files, codeLineTotal: totals.code)
+
+        let largest = files.map(\.totalLineCount).max() ?? 0
+        metrics.largestFileLineCount = largest
+        // 榜单封顶 20 个是给界面用的；**占比的分子必须用真个数**，否则仓库越大越显干净
+        // （本 App 扫自己：榜内 20 / 实际 38，占比会从 20% 被报成 10.5%）。
+        let huge = hugeFiles(files: files, functionsPerFile: functionsPerFile)
+        metrics.hugeFileCount = huge.count
+        metrics.hugeFiles = Array(huge.prefix(20))
+
+        let hotspots = hotspots(files: files, functionsPerFile: functionsPerFile)
+        metrics.topComplexFunctions = Self.rankedHotspots(hotspots)
+        applyFunctionMetrics(functionsPerFile.flatMap { $0 }, to: &metrics)
+
+        metrics.duplicationRatio = duplication.ratio
+        metrics.duplicatedBlocks = duplication.blocks
+        metrics.overallRisk = overallRisk(
+            metrics: metrics,
+            hotspotCount: hotspots.count,
+            longestFileLines: largest
+        )
+    }
+
+    /// 六项行计数的逐文件累加。抽出来只为了让 `apply` 只剩「摆字段」这一件事。
+    private static func lineTotals(_ files: [ScannedSourceFile])
+        -> (blank: Int, comment: Int, code: Int, total: Int, todo: Int, fixme: Int) {
         var blank = 0
         var comment = 0
         var code = 0
@@ -183,30 +218,31 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             todo += file.todoCount
             fixme += file.fixmeCount
         }
+        return (blank, comment, code, total, todo, fixme)
+    }
 
-        metrics.totalFiles = files.count
-        // totalLines 取真实行计数之和；不变式由单测在真实目录上把关。
-        metrics.totalLines = total
-        metrics.blankLines = blank
-        metrics.commentLines = comment
-        metrics.codeLines = code
-        metrics.todoCount = todo
-        metrics.fixmeCount = fixme
-        metrics.languages = languageShares(files: files, codeLineTotal: code)
+    // MARK: - Risk model 阈值（冻结区：数值不得为了任何指标变动，见 AGENTS.md §3）
 
-        let largest = files.map(\.totalLineCount).max() ?? 0
-        metrics.largestFileLineCount = largest
-        metrics.hugeFiles = hugeFiles(files: files, functionsPerFile: functionsPerFile)
+    static let criticalFunctionComplexity = 31
+    static let highFunctionComplexity = 21
+    static let mediumFunctionComplexity = 11
+    static let longFunctionThreshold = 50
+    static let criticalFileLines = 1_500
+    static let highFileLines = 800
+    static let mediumFileLines = 400
 
-        let hotspots = hotspots(files: files, functionsPerFile: functionsPerFile)
-        metrics.topComplexFunctions = Array(hotspots.sorted {
+    /// 热点榜：按 CC 降序、同 CC 再按行数降序，截断到 20 条（截断本身的行为由自扫守卫钉着）。
+    private static func rankedHotspots(_ hotspots: [FunctionHotspot]) -> [FunctionHotspot] {
+        Array(hotspots.sorted {
             if $0.cyclomaticComplexity != $1.cyclomaticComplexity {
                 return $0.cyclomaticComplexity > $1.cyclomaticComplexity
             }
             return $0.lineCount > $1.lineCount
         }.prefix(20))
+    }
 
-        let allFunctions = functionsPerFile.flatMap { $0 }
+    /// 函数维度的四个派生量。
+    private func applyFunctionMetrics(_ allFunctions: [FunctionCandidate], to metrics: inout CodeMetrics) {
         metrics.longFunctions = allFunctions.filter { $0.lineCount > Self.longFunctionThreshold }.count
         metrics.averageFunctionLength = allFunctions.isEmpty
             ? 0
@@ -219,14 +255,6 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         metrics.averageCyclomaticComplexity = allFunctions.isEmpty
             ? nil
             : Double(allFunctions.map(\.complexity).reduce(0, +)) / Double(allFunctions.count)
-
-        metrics.duplicationRatio = duplication.ratio
-        metrics.duplicatedBlocks = duplication.blocks
-        metrics.overallRisk = overallRisk(
-            metrics: metrics,
-            hotspotCount: hotspots.count,
-            longestFileLines: largest
-        )
     }
 
     private func languageShares(files: [ScannedSourceFile], codeLineTotal: Int) -> [LanguageShare] {
@@ -269,7 +297,7 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
                 )
             )
         }
-        return Array(result.sorted { $0.lineCount > $1.lineCount }.prefix(20))
+        return result.sorted { $0.lineCount > $1.lineCount }
     }
 
     private func hotspots(
@@ -294,111 +322,5 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             }
         }
         return result
-    }
-
-    // MARK: - Risk model
-
-    static let criticalFunctionComplexity = 31
-    static let highFunctionComplexity = 21
-    static let mediumFunctionComplexity = 11
-    static let longFunctionThreshold = 50
-    static let criticalFileLines = 1_500
-    static let highFileLines = 800
-    static let mediumFileLines = 400
-
-    private func functionRisk(complexity: Int, lineCount: Int) -> RiskLevel {
-        var risk: RiskLevel = complexity >= Self.criticalFunctionComplexity ? .critical
-            : complexity >= Self.highFunctionComplexity ? .high
-            : complexity >= Self.mediumFunctionComplexity ? .medium
-            : .low
-        if lineCount > 100 {
-            risk = max(risk, RiskLevel.high)
-        } else if lineCount > Self.longFunctionThreshold {
-            risk = max(risk, RiskLevel.medium)
-        }
-        return risk
-    }
-
-    private func fileRisk(forLines lines: Int) -> RiskLevel {
-        lines > Self.criticalFileLines ? .high : lines > Self.highFileLines ? .medium : .low
-    }
-
-    private func overallRisk(
-        metrics: CodeMetrics,
-        hotspotCount: Int,
-        longestFileLines: Int
-    ) -> RiskLevel {
-        var score = 0
-
-        let complexityBuckets = metrics.topComplexFunctions.map(\.risk)
-        if complexityBuckets.contains(.critical) {
-            score = max(score, 4)
-        }
-        if complexityBuckets.filter { $0 == .high }.count >= 3 {
-            score = max(score, 3)
-        } else if complexityBuckets.contains(.high) {
-            score = max(score, 2)
-        } else if complexityBuckets.contains(.medium) {
-            score = max(score, 1)
-        }
-
-        let ratio = metrics.duplicationRatio
-        if ratio >= 0.25 {
-            score = max(score, 4)
-        } else if ratio >= 0.15 {
-            score = max(score, 3)
-        } else if ratio >= 0.08 {
-            score = max(score, 2)
-        } else if ratio > 0 {
-            score = max(score, 1)
-        }
-
-        if longestFileLines > Self.criticalFileLines {
-            score = max(score, 3)
-        } else if longestFileLines > Self.highFileLines {
-            score = max(score, 2)
-        } else if longestFileLines > Self.mediumFileLines {
-            score = max(score, 1)
-        }
-
-        if hotspotCount > 10 {
-            score = max(score, 2)
-        }
-
-        switch score {
-        case 4: return .critical
-        case 3: return .high
-        case 2: return .medium
-        case 1: return .low
-        default: return .none
-        }
-    }
-
-    // MARK: - Suggestions
-
-    private func splitSuggestion(for file: ScannedSourceFile, functions: [FunctionCandidate]) -> String {
-        let lines = file.totalLineCount
-        let longOnes = functions.filter { $0.lineCount > Self.longFunctionThreshold }
-        let longest = functions.map(\.lineCount).max() ?? 0
-        let longestName = longestFunctionNameSample(functions)
-
-        if functions.isEmpty {
-            if file.codeLineCount * 4 < lines {
-                return "\(file.language) 文件 \(NumberFormat.grouped(lines)) 行，几乎全是注释或文档：精简历史说明、把示例迁出源码目录，只保留必要的接口注释。"
-            }
-            return "\(file.language) 文件 \(NumberFormat.grouped(lines)) 行且未被识别出函数（多为配置、模板或数据表）：按领域或路由拆成多个文件，或改为外部数据资源加载。"
-        }
-        if !longOnes.isEmpty {
-            return "\(file.language) 文件 \(NumberFormat.grouped(lines)) 行、含 \(longOnes.count) 个超过 \(Self.longFunctionThreshold) 行的函数（最长 \(longest) 行，如 \(longestName)）：先把这些函数按职责抽成独立类型或同类型的 extension，再把跨函数共享的状态收进构造注入的依赖，目标单文件 400 行以内。"
-        }
-        let topName = functions.sorted { $0.lineCount > $1.lineCount }.first?.name ?? "未知函数"
-        return "\(file.language) 文件 \(NumberFormat.grouped(lines)) 行但函数都不长（\(functions.count) 个，最长 \(longest) 行）：按能力域横向切分成多个文件或子类型（例如解析/渲染/IO 分开），\(topName) 所在的这段职责适合第一个搬出去。"
-    }
-
-    private func longestFunctionNameSample(_ functions: [FunctionCandidate]) -> String {
-        functions
-            .sorted { $0.lineCount > $1.lineCount }
-            .first?
-            .name ?? "未知函数"
     }
 }
