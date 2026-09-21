@@ -169,8 +169,7 @@ enum GitDataAbsence: Equatable {
             return GitAbsenceCopy(
                 icon: .emptyUnknown,
                 title: "该目录不是 Git 仓库",
-                message: "分析器在所选目录及其上下若干层里都没有找到仓库根。\n"
-                    + "这是「不适用」，不是「没有提交」——仓库在别处时请把它单独添加为项目。")
+                message: "分析器在所选目录及其上下若干层里都没有找到仓库根。\n这是「不适用」，不是「没有提交」——仓库在别处时请把它单独添加为项目。")
         case .repositoryWithoutCommits:
             return GitAbsenceCopy(
                 icon: .noRisk,
@@ -186,8 +185,7 @@ enum GitDataAbsence: Equatable {
             return GitAbsenceCopy(
                 icon: .unverified,
                 title: localizedFormat("有 %1$@ 次提交，但一条都没解析出来", NumberFormat.grouped(total)),
-                message: "通常是历史里全部为合并提交，或提交的作者与时间戳字段读不出来。\n"
-                    + "因此作者、提交趋势与时段分布都不成立，这里不给任何结论。")
+                message: "通常是历史里全部为合并提交，或提交的作者与时间戳字段读不出来。\n因此作者、提交趋势与时段分布都不成立，这里不给任何结论。")
         case .available:
             return nil
         }

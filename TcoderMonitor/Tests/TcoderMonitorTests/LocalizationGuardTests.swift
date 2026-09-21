@@ -18,7 +18,7 @@ final class LocalizationGuardTests: XCTestCase {
 
     // MARK: - 读盘
 
-    private static var packageRoot: URL {
+    static var packageRoot: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // Tests/TcoderMonitorTests
             .deletingLastPathComponent()   // Tests
@@ -64,7 +64,7 @@ final class LocalizationGuardTests: XCTestCase {
         return out
     }
 
-    private static func catalog() throws -> [(key: String, value: String)] {
+    static func catalog() throws -> [(key: String, value: String)] {
         let text = try String(contentsOfFile: englishCatalogPath, encoding: .utf8)
         let entries = parseCatalog(text)
         // 反向自证：目录读不出任何键 = 解析器坏了，而不是"这个包不需要翻译"。
@@ -72,36 +72,6 @@ final class LocalizationGuardTests: XCTestCase {
         return entries
     }
 
-    /// stringsdict 里的**顶层键**也算"已登记"。
-    ///
-    /// 复数串（`%lld 次`、`另有 %lld 处`）住在 `Localizable.stringsdict`，
-    /// 不在 `.strings` 里。守卫原来只认 `.strings`，于是"已经翻了复数形态"的键
-    /// 会被算成双语债 —— 逼人把复数串退回单数键，那正是"乱翻译"的成因。
-    static func stringsDictKeys(in text: String) -> Set<String> {
-        // 顶层键 = 第一个 `<dict>` 之后、缩进只有一层 tab 的 `<key>`。
-        // 用缩进判层级，比数尖括号稳（`one`/`other` 那些是三层）。
-        let re = try! NSRegularExpression(pattern: "^\t<key>(.+)</key>$", options: [.anchorsMatchLines])
-        let range = NSRange(text.startIndex..., in: text)
-        return Set(re.matches(in: text, options: [], range: range).compactMap {
-            Range($0.range(at: 1), in: text).map { String(text[$0]) }
-        })
-    }
-
-/// 读 stringsdict 的顶层键；文件不存在时返回空集（源语言侧不需要目录）。
-    static func registeredStringsDictKeys() -> Set<String> {
-        let path = packageRoot.appendingPathComponent("Resources/en.lproj/Localizable.stringsdict").path
-        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
-        return stringsDictKeys(in: text)
-    }
-
-    func test_stringsDictTopLevelKeysAreParsed() throws {
-        let path = Self.packageRoot.appendingPathComponent("Resources/en.lproj/Localizable.stringsdict").path
-        let keys = Self.stringsDictKeys(in: try String(contentsOfFile: path, encoding: .utf8))
-        XCTAssertFalse(keys.isEmpty, "stringsdict 解析出 0 个顶层键 —— 解析器坏了")
-        XCTAssertTrue(keys.contains("%lld 次"), "复数键没被认成已登记：\(keys.sorted())")
-        XCTAssertFalse(keys.contains("one"), "把子层的 one/other 当成了顶层键")
-        XCTAssertFalse(keys.contains("NSStringLocalizedFormatKey"), "把元数据键当成了文案键")
-    }
 
     /// 含 CJK 的界面串字面量，返回「文件: 串」。**剥掉整行注释**。
     ///
@@ -151,7 +121,7 @@ final class LocalizationGuardTests: XCTestCase {
         return out
     }
 
-    private static func sourceFiles() throws -> [(path: String, content: String)] {
+    static func sourceFiles() throws -> [(path: String, content: String)] {
         let root = packageRoot.appendingPathComponent("Sources/TcoderMonitor").path
         var out: [(String, String)] = []
         for sub in ["Views", "Design", "App"] {
@@ -164,7 +134,7 @@ final class LocalizationGuardTests: XCTestCase {
         return out
     }
 
-    private static func walkFiles(in dir: String) -> [String] {
+    static func walkFiles(in dir: String) -> [String] {
         let fm = FileManager.default
         guard let en = fm.enumerator(atPath: dir) else { return [] }
         return en.compactMap { $0 as? String }.filter { $0.hasSuffix(".swift") }
@@ -204,11 +174,14 @@ final class LocalizationGuardTests: XCTestCase {
     /// **每次跑都打印现量/上限** —— 只减不增的棘轮通过时若不报现量，
     /// 已还的债就变成隐形余量（新增 N 处照样绿）。上限的取值必须是**某次实扫的现量**，
     /// 不许拍脑袋；调低它 = 还了债，调高它 = 新增债，两者都要在 diff 里显形。
-    /// 2026-09-21 实扫登记：**264 条**（扫到 369 条界面串 / 目录已登记 112 条键）。
+    /// 2026-09-21 实扫登记：首测 **264 条**（扫到 369 条界面串 / 目录 112 条键），
+    /// 同日五批迁移后收到 **22 条**（已登记键 341）。剩下的 22 条集中在
+    /// `CodeRiskAdvice` 的多段建议长句（4~6 个占位符，改成整句键要逐句重写）
+    /// 与 `ShellLayout` 的三句组合式空态 —— 它们是**已知账**，不是"没扫到"。
     /// 这个数字是"面"闸门第一次跑出来的存量，不是估的 ——
     /// 只按 `Text("中文")` 扫会得到 43 条，漏掉的 221 条住在 tooltip、
     /// `label:` / `caption:` 这类字符串型参数与 `localizedCopy` 口子里。
-    private static let unregisteredLiteralCeiling = 248
+    private static let unregisteredLiteralCeiling = 22
 
     func test_unregisteredLiteralInventoryPrintsAndShrinks() throws {
         let registered = Set(try Self.catalog().map(\.key)).union(Self.registeredStringsDictKeys())
@@ -229,63 +202,6 @@ final class LocalizationGuardTests: XCTestCase {
         XCTAssertLessThanOrEqual(offenders.count, Self.unregisteredLiteralCeiling,
                                  "未登记界面串比上限还多 —— 新增双语债，见下面清单\n"
                                  + offenders.sorted().prefix(40).joined(separator: "\n"))
-    }
-
-    // MARK: - 守卫 1c：拼接出来的串**永远查不中**（翻了也白翻）
-
-    /// 键必须是**运行时真正送进查表函数的那一串**。
-    ///
-    /// 2026-09-21 双语批量登记时，翻译同事抓到这个机制洞：源码里写
-    /// `"历史里有提交…\n" + "另一段说明"`，于是**目录里那条以 `\n` 结尾的键**
-    /// 在运行时永远等不到 —— `Text("…")` 生成的键是拼接后的整串，
-    /// 半句键查不中 ⇒ 英文态退回中文，而守卫 1/2/3 全是绿的：
-    /// 守卫 3 只要求"键作为完整字面量出现在源码里"，半句恰好满足它。
-    /// ⇒ 这是"翻了但白翻"，比没翻更危险（它看起来有账）。
-    static func keysBuiltByConcatenation(keys: [String], source: String) -> [String] {
-        var out: [String] = []
-        for key in keys {
-            let escaped = key.replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "\"", with: "\\\"")
-                // 字面量后面紧跟 `+ "`（同一行或换行后）= 它只是半句
-                let pattern = "\"" + escaped + "\"\\s*(?:\\n\\s*)?\\+\\s*(?:\\n\\s*)*\""
-                let re = try! NSRegularExpression(pattern: pattern, options: [])
-                if re.firstMatch(in: source, options: [], range: NSRange(source.startIndex..., in: source)) != nil {
-                    out.append(key)
-                }
-            }
-        return out
-    }
-
-    func test_noRegisteredKeyIsOnlyAHalfSentence() throws {
-        let source = try Self.walkFiles(in: Self.packageRoot.appendingPathComponent("Sources/TcoderMonitor").path)
-            .reduce("") { $0 + ((try? String(contentsOfFile: $1, encoding: .utf8)) ?? "") }
-        let offenders = Self.keysBuiltByConcatenation(
-            keys: Self.catalogKeysForConcatenationCheck(try Self.catalog()), source: source)
-        XCTAssertTrue(offenders.isEmpty,
-                      "这些键在源码里是被 `+` 拼出去的半句，运行时永远查不中（英文态仍显示中文）：\n"
-                      + offenders.joined(separator: "\n"))
-    }
-
-    /// 只查"值里带句末标点或以 `\n` 结尾"的可疑键：短标签不会与下一段拼接，
-    /// 全量扫会让报错淹没在噪声里（也拖慢守卫）。
-    static func catalogKeysForConcatenationCheck(_ entries: [(key: String, value: String)]) -> [String] {
-        entries.map(\.key).filter { $0.hasSuffix("\\n") || $0.hasSuffix("。") || $0.hasSuffix("，") }
-    }
-
-    /// 元测试：半句必须抓到、整句不得误判。
-    func test_concatenationGuardCatchesHalfSentencesAndSparesWholeOnes() {
-        let source = """
-        let a = DataNotice(text: "历史里有提交，\\n" + "但没有作者字段。")
-        let b = DataNotice(text: "这是一句完整的话，没有拼接。")
-        """
-        XCTAssertEqual(Self.keysBuiltByConcatenation(keys: ["历史里有提交，\\n"], source: source),
-                       ["历史里有提交，\\n"], "半句键没被抓到")
-        XCTAssertTrue(Self.keysBuiltByConcatenation(keys: ["这是一句完整的话，没有拼接。"], source: source).isEmpty,
-                      "整句键被误判")
-        // 分母自证：可疑键筛选器确实会挑出以 \n / 。 结尾的键
-        XCTAssertEqual(Self.catalogKeysForConcatenationCheck([
-            (key: "甲\\n", value: "A"), (key: "乙。", value: "B"), (key: "丙", value: "C")
-        ].map { (key: $0.key, value: $0.value) }), ["甲\\n", "乙。"])
     }
 
     // MARK: - 守卫 2：登记了就必须翻（值不等于键）
@@ -403,58 +319,6 @@ final class LocalizationGuardTests: XCTestCase {
         XCTAssertEqual(parsed.map(\.value), ["Real", "Second"])
         // 空值必须能被数出来（守卫 2 依赖它）
         XCTAssertEqual(Self.parseCatalog("\"k\" = \"\";").first?.value, "")
-    }
-
-    // MARK: - 守卫 5：组件渲染点必须真的查表
-
-    /// 双语最容易的空转不是"没翻"，而是**翻了但界面不查表**：
-    /// `Text(变量)` 走 verbatim 初始化，目录里翻了也一个字不动（《中英双语方案》§7.1）。
-    /// 2026-09-21 用 `-AppleLanguages "(en)"` 实跑抓到这个空转：页头出英文，
-    /// 侧栏九条页名仍是中文，因为 `SidebarRows` 写的是 `Text(section.title)`。
-    ///
-    /// 判据：`Design/` 里承载组件文案的 `Text(<已知参数名>)` 必须过 `localizedCopy`。
-    /// 只认白名单里的参数名，避免把 `Text("\(x)")`、`Text(item.name)` 这类
-    /// 由调用方自己负责语言形态的写法一起卷进来。
-    private static let copyParameterNames: Set<String> = [
-        "label", "value", "caption", "unit", "title", "subtitle", "text", "message",
-        "section.title", "column.title",
-    ]
-
-    static func unlocalizedRenderPoints(in files: [(path: String, content: String)]) -> [String] {
-        files.flatMap { file -> [String] in
-            file.content.split(separator: "\n", omittingEmptySubsequences: false)
-                .enumerated()
-                .compactMap { index, raw -> String? in
-                    let line = String(raw)
-                    let trimmed = line.trimmingCharacters(in: .whitespaces)
-                    guard !trimmed.hasPrefix("//"), trimmed.contains("Text(") else { return nil }
-                    guard let open = line.range(of: "Text(") else { return nil }
-                    let rest = line[open.upperBound...]
-                    let name = rest.prefix { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." }
-                    guard copyParameterNames.contains(String(name)),
-                          rest.hasPrefix(String(name) + ")") else { return nil }
-                    return "\(file.path):\(index + 1)"
-                }
-        }
-    }
-
-    func test_designRenderPointsActuallyLookUpTheCatalog() throws {
-        let offenders = Self.unlocalizedRenderPoints(in: try Self.sourceFiles()
-            .filter { $0.path.hasPrefix("Design/") })
-        XCTAssertTrue(offenders.isEmpty,
-                      "这些组件渲染点还在走 Text(变量)（不查表），请包 localizedCopy：\(offenders)")
-    }
-
-    func test_renderPointScannerCatchesBareTextButSparesWrapped() {
-        let bare = [(path: "Design/Fake.swift", content: "    Text(label)\n")]
-        XCTAssertEqual(Self.unlocalizedRenderPoints(in: bare), ["Design/Fake.swift:1"],
-                       "没查表的渲染点没被抓到")
-        let wrapped = [(path: "Design/Fake.swift",
-                        content: "    Text(localizedCopy(label))\n")]
-        XCTAssertTrue(Self.unlocalizedRenderPoints(in: wrapped).isEmpty, "查了表的被误判")
-        let interpolated = [(path: "Design/Fake.swift",
-                             content: "    Text(\(name)) 拼出来的串由调用方负责\n")]
-        XCTAssertTrue(Self.unlocalizedRenderPoints(in: interpolated).isEmpty, "插值写法被误判")
     }
 
     // MARK: - 守卫 6：整句键不许改坏中文侧
