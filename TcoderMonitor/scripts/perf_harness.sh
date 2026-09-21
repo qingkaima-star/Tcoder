@@ -119,6 +119,10 @@ cmd_idle() {
     "hitches_seconds=$SECONDS_HITCHES" "tp_seconds=$SECONDS_TP" "coexisting_instances=${COEXIST:-1}" \
     "templates=$TEMPLATE_HITCH + $TEMPLATE_TP" "build_flavor=$TARGET_FLAVOR"
   preflight_context "$out" "$PID"
+  # 走到这里说明闸门放行、马上就要真录：清掉**上一次尝试**留下的 REFUSED。
+  # 标记描述的是"最近一次尝试"，不是目录的永久属性；不清的话同名目录复用时，
+  # 一份合法读数会被过期标记挡在对照表外（report 会退 1）。
+  rm -f "$out/REFUSED"
   # 四个步骤各自成函数：录哪张表、导哪张表、什么时候问人手探针，顺序就是口径，
   # 拆完仍是 1/4 → 2/4 → 3/4 → 4/4 这一条直线，一步没重排。
   idle_record_hitches "$out" "$period"

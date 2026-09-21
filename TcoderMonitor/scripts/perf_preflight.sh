@@ -128,6 +128,19 @@ preflight_context() {  # preflight_context <outdir> <pid>
   echo "    上下文已落 $f"
 }
 
+front_is_target() {  # front_is_target <前台App名> → 0=就是被测 App
+  # 【今天修掉一个让所有测量永远跑不通的闸门 bug】
+  # 旧写法 `[ "$front" != "TcoderMonitor" ]`，而 `lsappinfo` 给的是**显示名 "Tcoder"**；
+  # 只有 System Events 那条路给进程名 TcoderMonitor，而本机它被权限拒。
+  # 于是三趟全部以「被测窗口不在前台（前台是「Tcoder」）」被拒——**自相矛盾**：
+  # 它一边报出前台是 Tcoder，一边说 Tcoder 不算前台。
+  # 两种名字都认（显示名 / 进程名），但只认这两个：微信、Chrome 照样必须拒。
+  case "$1" in
+    Tcoder|TcoderMonitor) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 preflight_front_app() {  # → 一行前台 App 名；取不到就是「未知」
   # 前台 App：**先走 `lsappinfo`（零权限）**。原来只用 `osascript` + System Events，
   # 而本机那条路被权限拒（实测 `-10004 发生权限违例`），于是永远得到「未知」、
@@ -177,7 +190,7 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
     echo "   等负载降下来，或显式 LOAD_MAX=<阈值> 重跑（那必须在报告里注明是降级条件）。" >&2
     hard=1
   fi
-  if [ "$front" != "TcoderMonitor" ] && [ "${ALLOW_UNFRONTMOST:-0}" != "1" ]; then
+  if ! front_is_target "$front" && [ "${ALLOW_UNFRONTMOST:-0}" != "1" ]; then
     echo "!! 被测窗口不在前台（前台是「$front」）。macOS 会节流不在前的窗口绘制，" >&2
     echo "   app-update 会**假性地好看**（实测：同二进制前台 10.8~24.8ms、后台 1.9~3.0ms）。" >&2
     echo "   请把 Tcoder 窗口点到最前面并保持不动，再跑一次；" >&2

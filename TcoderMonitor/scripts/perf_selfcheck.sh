@@ -38,6 +38,7 @@ cmd_selfcheck() {
   selfcheck_migration "$out"        # 8) migration 的口径必须从守卫源码里读
   selfcheck_quiescence "$out"       # 10) 人手静默探针（第五维）
   selfcheck_weight_ruler "$out"     # 11) 收益分级：现读、缺料要喊、名单对不上要报⚠
+  selfcheck_front_name "$out"        # 12) 前台名判定：显示名/进程名都认，别家一律拒
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
@@ -128,6 +129,29 @@ selfcheck_weight_divergence() {  # <fake根>：反例二——两侧分叉必须
   else
     fail "两份口径已经分叉却没报出来——这条分级会静默腐烂"
   fi
+}
+
+selfcheck_front_name() {  # selfcheck_front_name <outdir>
+  # 12) 这条是 02:43 那次"三趟全被拒"的直接产物：闸门一边报「前台是 Tcoder」一边说不在前台。
+  #     判据抽成纯函数 `front_is_target`，所以这里能双向钉，不需要真去抢前台。
+  # `front_is_target` 由 perf_harness.sh 顶部 source 进来，这里直接调；
+  # 但先断言它真的在——不然"函数不存在"会被 for 循环当成"全都拒了"而一路绿灯。
+  if ! declare -f front_is_target >/dev/null; then
+    fail "front_is_target 不在当前作用域里（preflight 没被 source），这条自检等于没跑"
+    return
+  fi
+  local ok=1
+  for name in Tcoder TcoderMonitor; do
+    if ! front_is_target "$name"; then
+      fail "前台是「$name」应当判合格（显示名与进程名都要认）"; ok=0
+    fi
+  done
+  for name in 微信 "Google Chrome" "" Finder; do
+    if front_is_target "$name"; then
+      fail "前台是「${name:-空}」必须被拒——否则这条闸门等于没在守"; ok=0
+    fi
+  done
+  [ "$ok" = "1" ] && ok "前台名判定双向都对（显示名/进程名认，其余一律拒）"
 }
 
 selfcheck_ruler_files() {  # selfcheck_ruler_files <outdir>
