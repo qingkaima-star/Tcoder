@@ -63,7 +63,7 @@ final class PerfHitchGuardTests: XCTestCase {
     ///   → 归 **M1 / WS-W**（spec §5 点名"LogsView.attachedItems 的 body 内 stat() 移出"），终点 0。
     static let knownBaseline: [String: Int] = [
         "directFormatters": 1,
-        "dynamicNSColor": 58,   // 2026-09-21 02:41 由 59 拧到本次门禁实测 58（上一笔 86→59 是同日 00:2x）。
+        "dynamicNSColor": 56,   // 02:26 由 58 拧到本树实测 56（今天第三次：107→86→59→58→56）。
         // 为什么又拧：台账"现量/上限"一上线就自己报出 `58/59（可拧到 58）`——
         // 留 1 处余量等于"新增 1 处照样绿"。**只减不增要成立，降下来必须有人拧**。
         // 没点名是哪一笔还掉的：这条不需要知道，扫描器每次跑都会重算。

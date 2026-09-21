@@ -60,8 +60,7 @@ final class PerfInvalidationRatchetTests: XCTestCase {
     /// 判据是「**非 Optional 且 0 表示没读到**」，所以现在只管内存这两格；
     /// 以后谁给某个 lead 加了同形状的字段，要往这条里加名字，而不是新造一条。
     /// **基线 0，一处都不许有。**
-    static let rawMemoryEvidencePattern = #"monitor\s*\.\s*memory\s*\.\s*value\s*\.\s*(usedBytes|totalBytes)\b"#
-
+    static let rawMemoryEvidencePattern = #"monitor\s*\.\s*(?:memory|cpu)\s*\.\s*value\s*\.\s*(usedBytes|totalBytes|coreCount|load1|load5|load15|uptimeSeconds)\b"#
     /// 回归守卫：采集侧不许再把这些退回去。
     /// 1) `processesByMemory` 不许再是计算属性（每次访问全量排序）；
     /// 2) `allProcesses` 必须留在观察图外；
