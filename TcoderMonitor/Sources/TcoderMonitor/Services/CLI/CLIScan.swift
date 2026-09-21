@@ -95,6 +95,11 @@ final class CLIScan {
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             return nil
         }
+        // `fileExists` 对 **chmod 000 的目录返回 true** —— 只查存在性会把"根本读不了"
+        // 放过去，于是五路里只有 Git 那路喊失败，其余四路各自交出**全零的成功读数**
+        // （实测：`文件 0 · 码行 0 · scannedAt 有值`）。那是"空仓库"的样子，不是"没读到"的样子。
+        // 判"可读"必须单独问一次：不可读就地判第 3 档，别让零去冒充结论。
+        guard FileManager.default.isReadableFile(atPath: url.path) else { return nil }
         return url
     }
 
