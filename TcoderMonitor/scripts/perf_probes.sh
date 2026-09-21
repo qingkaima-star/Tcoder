@@ -93,13 +93,27 @@ concurrent_heavy_jobs() {  # → 空格分隔的 pid；空 = 机器上没有本�
   # Hitches --time-limit 12s` 连排，而我的闸门写着"机器空"。
   # 自己的不算：本档在**录制开始之前**问这一维，那时自己还没有 xctrace 在场；
   # 真到了要并跑两档的时候，宁可拒跑等窗口，也不出"两边都不准"的数。
-  local names n out="" p
-  names=$(heavy_job_names)
-  for n in $names; do
-    p=$(pgrep -x "$n" 2>/dev/null | tr '\n' ' ')
-    [ -n "$p" ] && out="$out$p "
-  done
-  printf '%s\n' "${out% }"
+  local hits; hits=$(concurrent_heavy_jobs_detail)
+  printf '%s\n' "$(printf '%s' "$hits" | sed -n 's/pid=\([0-9]*\).*/\1/p' | tr '\n' ' ')"
+}
+
+process_cpu_seconds() {  # `ps -o time=` 的 `MM:SS.ss` / `HH:MM:SS` → 秒（取不到给 0）
+  ps -o time= -p "$1" 2>/dev/null | tr -d ' ' \
+    | awk -F: 'NF==3{print $1*3600+$2*60+$3} NF==2{print $1*60+$2} NF<2{print 0}' | head -1
+}
+
+heavy_job_is_live() {  # heavy_job_is_live <pid> <进程名> → 0=真在干活，算重活
+  # 只有 xctrace 需要这一层。实证就在补这条的当下：机器上挂着一个**另一个工程 21 小时前**
+  # 留下的 `xctrace record`，%cpu=0.0、cputime 5 秒只走 0.01 秒、`--attach` 的目标进程早没了。
+  # 按"在场即重活"处理，这条闸门就**永远不可能满足**——
+  # 恒拒的闸门看起来最像尽职，实际是把 T1 唯一一次举证机会无限期押住。
+  # 编译类（swiftc / swift-test / xctest）不适用：它们在场本身就是在吃 CPU，不必再看增量。
+  [ "$2" != "xctrace" ] && return 0
+  local a b
+  a=$(process_cpu_seconds "$1")
+  sleep "${XCTRACE_LIVENESS_WINDOW:-2}"
+  b=$(process_cpu_seconds "$1")
+  awk -v a="$a" -v b="$b" 'BEGIN{ exit !(b - a > 0.2) }'
 }
 
 heavy_job_names() {  # 名单**只在这儿列一次**：闸门取 pid、话术取名字，两边不许各抄一份
@@ -113,7 +127,9 @@ concurrent_heavy_jobs_detail() {  # → `pid=42493 name=xctrace` 一串，只给
   local names n p
   names=$(heavy_job_names)
   for n in $names; do
-    for p in $(pgrep -x "$n" 2>/dev/null); do printf 'pid=%s name=%s ' "$p" "$n"; done
+    for p in $(pgrep -x "$n" 2>/dev/null); do
+      heavy_job_is_live "$p" "$n" && printf 'pid=%s name=%s ' "$p" "$n"
+    done
   done
   printf '\n'
 }

@@ -507,6 +507,19 @@ selfcheck_heavy_jobs_probe() {  # selfcheck_heavy_jobs_probe <outdir>
   for n in swiftc swift-test xctest xctrace; do
     grep -q "\b$n\b" <(declare -f heavy_job_names) || missing="$missing $n"
   done
+  # xctrace 那一维必须认"真在采"，不能认"在场"：机器上此刻就挂着一个别的工程
+  # 21 小时前留下的停着的 xctrace（%cpu=0），按在场即拒会让这条闸门永远不可满足。
+  # 两个方向都用**合成进程**钉：空转一个烧 CPU 的 bash、一个睡觉的 bash，
+  # 名字都由调用方指给函数看 —— 验的是分支逻辑，不依赖现场有没有真 xctrace。
+  local busy idle liveness=1
+  bash -c 'while :; do :; done' & busy=$!
+  sleep 1 & idle=$!
+  heavy_job_is_live "$busy" xctrace || liveness=0     # 在吃 CPU ⇒ 必须算重活
+  heavy_job_is_live "$idle" xctrace && liveness=0     # 停着 ⇒ 不许算重活
+  heavy_job_is_live "$idle" swiftc || liveness=0      # 编译类不看增量，在场即重活
+  kill -TERM "$busy" "$idle" 2>/dev/null
+  [ "$liveness" = "1" ] \
+    || fail "xctrace 活性判定不对（烧 CPU 的没算重活 / 停着的算了重活 / 编译类看了增量）"
   # 话术不许再硬编码名单：那正是"加了 xctrace 却把它说成本仓编译"的来源
   declare -f concurrent_heavy_jobs_detail >/dev/null \
     && grep -q 'concurrent_heavy_jobs_detail' <(declare -f preflight_context) \
