@@ -139,6 +139,20 @@ wait_for "前台是被测 App" cond_front_is_ours || exit 1
 fails=0
 for i in $(seq 1 "$SAMPLES"); do
   echo "==> 第 $i/$SAMPLES 趟（档=$MODE）"
+  # 【每一趟之前都重等一次，而不是开头等一次再连撞三次】
+  # 实测 12:20：第 1 趟条件极好（人手已静默 478 s）并成功出数；第 2、3 趟
+  # 因为人回来把 ChatGPT 调到最前面而被拒——当时的排程器只会立刻硬撞下一趟，
+  # 于是"三趟一致"变成"一次成功两次自撞"。等条件回来才是正确动作。
+  # 起 App 只在没有实例时做一次；后面几趟复用同一个实例（重启会让节拍重新预热）。
+  if [ "$(instance_count)" = "0" ] && [ "$LAUNCH_APP" = "1" ]; then
+    open "$START_BIN" && sleep 4
+    started_pid=$(my_instance_pid)
+    echo "    已起自己的实例 pid=${started_pid:-?}（收尾只 TERM 这一个）"
+  fi
+  wait_for "本仓没有重活在跑" cond_no_heavy_jobs || break
+  wait_for "实例数恰为 1" cond_one_instance || break
+  wait_for "前台是被测 App" cond_front_is_ours || break
+  wait_for "人手静默 ≥${QUIET_WANT}s" cond_quiet || break
   if [ "$MODE" = "interact" ]; then
     # T1 的判据是"交互期 hitch=0"，而合成滚动两条撤因都在 spec §4（进程内滚动不发 NSEvent，
     # T3 暂停根本不会生效）。所以这一档**只有人手能举证**：闸门会反过来要求
