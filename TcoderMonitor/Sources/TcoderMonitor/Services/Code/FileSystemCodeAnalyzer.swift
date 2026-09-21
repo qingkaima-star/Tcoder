@@ -236,12 +236,23 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
     static let mediumFileLines = 400
 
     /// 热点榜：按 CC 降序、同 CC 再按行数降序，截断到 20 条（截断本身的行为由自扫守卫钉着）。
+    /// 榜单**尾部必须可复现**。原来只有「复杂度、行数」两把键：CC 相同的一大群函数在
+    /// 20 名的截断线上谁进榜，取决于合并进来的文件顺序 —— 而 Swift 的 `sorted`
+    /// **不是稳定排序**，五路并发扫完再拼的顺序也不固定。
+    /// 实测（同一条 CLI 扫同一个仓库）第 20 名会在
+    /// `parseTarget`(31 行 · 3 参) 与 `gradleDependencies`(60 行 · 2 参) 之间换人，
+    /// 于是"新老两条路逐项一致"这条验收永远差一项。
+    /// 补三把全序键（路径 → 起始行 → 函数名）：截断线与顺序此后只由**内容**决定。
+    /// **没有动任何阈值或上限**（前 20、CC 判级一字未改）。
     private static func rankedHotspots(_ hotspots: [FunctionHotspot]) -> [FunctionHotspot] {
         Array(hotspots.sorted {
             if $0.cyclomaticComplexity != $1.cyclomaticComplexity {
                 return $0.cyclomaticComplexity > $1.cyclomaticComplexity
             }
-            return $0.lineCount > $1.lineCount
+            if $0.lineCount != $1.lineCount { return $0.lineCount > $1.lineCount }
+            if $0.filePath != $1.filePath { return $0.filePath < $1.filePath }
+            if $0.startLine != $1.startLine { return $0.startLine < $1.startLine }
+            return $0.name < $1.name
         }.prefix(20))
     }
 
