@@ -500,13 +500,15 @@ selfcheck_heavy_jobs_probe() {  # selfcheck_heavy_jobs_probe <outdir>
     *[!0-9\ ]*) fail "并发重活探针输出不是 pid 列表（拿到「$out」）——话术会跟着一起胡说" ;;
     *) ok "并发重活探针可跑可解析（现在：${out:-机器空}）" ;;
   esac
-  # 清单被削回只认 swiftc 的话，本仓全量门禁期间就会假装机器空着——钉住三个名字。
+  # 清单被削回只认 swiftc 的话，本仓全量门禁期间就会假装机器空着——钉住四个名字。
+  # `xctrace` 是 2026-09-21 补的：另一个工程同时在录 Animation Hitches，
+  # 而这一维当时读成"机器空"。两档 xctrace 互踩，量出来的两边都不准。
   local n missing=""
-  for n in swiftc swift-test xctest; do
+  for n in swiftc swift-test xctest xctrace; do
     grep -q "\b$n\b" <(declare -f concurrent_heavy_jobs) || missing="$missing $n"
   done
   [ -z "$missing" ] \
-    && ok "探针覆盖 swiftc / swift-test / xctest 三种重活" \
+    && ok "探针覆盖 swiftc / swift-test / xctest / xctrace 四种重活" \
     || fail "探针不再认识这些重活：${missing# }——全量门禁在跑时会被读成机器空"
 }
 

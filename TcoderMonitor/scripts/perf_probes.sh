@@ -87,7 +87,13 @@ concurrent_heavy_jobs() {  # → 空格分隔的 pid；空 = 机器上没有本�
   # （进程叫 swift-test / xctest，编译早已结束）在它眼里是"机器空着"——
   # 而那恰恰是 load 与调度最不干净的时候，量出来的样本会五闸全过。
   # 实测 2026-09-21 11:46：门禁在测时 `swiftc 在场数=0`、load1=4.23，全部门槛放行。
-  local names=(swiftc swift-test xctest) out="" n p
+  # 【第四个名字是今天补的】`xctrace` 与上面三个一样是"正在采别人"的重活：
+  # 它靠 Task/Drift 反复暂停-恢复被测进程，与被测档的读数**互相污染**（两边都不准）。
+  # 实证就在补这条的当下：另一个工程（AiX）正在 `xctrace record --template Animation
+  # Hitches --time-limit 12s` 连排，而我的闸门写着"机器空"。
+  # 自己的不算：本档在**录制开始之前**问这一维，那时自己还没有 xctrace 在场；
+  # 真到了要并跑两档的时候，宁可拒跑等窗口，也不出"两边都不准"的数。
+  local names=(swiftc swift-test xctest xctrace) out="" n p
   for n in "${names[@]}"; do
     p=$(pgrep -x "$n" 2>/dev/null | tr '\n' ' ')
     [ -n "$p" ] && out="$out$p "
