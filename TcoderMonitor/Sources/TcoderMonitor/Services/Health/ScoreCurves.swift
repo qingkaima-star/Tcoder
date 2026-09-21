@@ -104,27 +104,34 @@ enum HealthCurves {
         }
         // 四条分支各是**一条整句键**（不是碎片拼接）：英文词序与中文相反、
         // 且 "Start by …" 这类尾巴要能自己就位。碎片键是双语方案 §7.3 明令禁止的形态。
-        var candidate = localizedFormat("综合 %1$@ 分（%2$@ 级）。", String(score), grade)
+        // **每条分支是一整句键，不做二次拼接。**
+        // 上一版把"综合 75 分（B 级）。"与分支句相加：中文里不空格是对的，
+        // 英文里就成了 `(grade B).The main drag…` —— 句号后少一个空格，
+        // 属于"机制都对、读起来是机翻"的形态（批次 P5 英文实拍抓到）。
+        var candidate: String
         switch ranked.count {
         case 0:
-            candidate += localizedCopy("当前没有任何维度可供评估，评分依据缺失，建议先完成代码分析与 Git 采集，再来查看总分。")
+            candidate = localizedFormat("综合 %1$@ 分（%2$@ 级）。当前没有任何维度可供评估，评分依据缺失，建议先完成代码分析与 Git 采集，再来查看总分。",
+                                        String(score), grade)
         case 1:
             let only = ranked[0]
-            candidate += localizedFormat("目前只有%1$@（%2$@ 分）这一个维度有可用数据，它同时也是当前最低项，建议优先%3$@。",
-                                         localizedCopy(only.name), String(only.score), advice(for: only.name))
+            candidate = localizedFormat("综合 %1$@ 分（%2$@ 级）。目前只有%3$@（%4$@ 分）这一个维度有可用数据，它同时也是当前最低项，建议优先%5$@。",
+                                        String(score), grade, localizedCopy(only.name),
+                                        String(only.score), advice(for: only.name))
         case 2:
             let low = ranked[0]
             let high = ranked[1]
-            candidate += localizedFormat("主要拖累来自%1$@（%2$@ 分），%3$@（%4$@ 分）是目前相对最好的一项；建议优先%5$@。",
-                                         localizedCopy(low.name), String(low.score), localizedCopy(high.name), String(high.score),
-                                         advice(for: low.name))
+            candidate = localizedFormat("综合 %1$@ 分（%2$@ 级）。主要拖累来自%3$@（%4$@ 分），%5$@（%6$@ 分）是目前相对最好的一项；建议优先%7$@。",
+                                        String(score), grade, localizedCopy(low.name), String(low.score),
+                                        localizedCopy(high.name), String(high.score), advice(for: low.name))
         default:
             let first = ranked[0]
             let second = ranked[1]
             let best = ranked[ranked.count - 1]
-            candidate += localizedFormat("主要拖累来自%1$@（%2$@ 分）与%3$@（%4$@ 分）；%5$@（%6$@ 分）是当前最稳的一项。建议优先%7$@。",
-                                         localizedCopy(first.name), String(first.score), localizedCopy(second.name), String(second.score),
-                                         localizedCopy(best.name), String(best.score), advice(for: first.name))
+            candidate = localizedFormat("综合 %1$@ 分（%2$@ 级）。主要拖累来自%3$@（%4$@ 分）与%5$@（%6$@ 分）；%7$@（%8$@ 分）是当前最稳的一项。建议优先%9$@。",
+                                        String(score), grade, localizedCopy(first.name), String(first.score),
+                                        localizedCopy(second.name), String(second.score),
+                                        localizedCopy(best.name), String(best.score), advice(for: first.name))
         }
         return fittedNarrative(candidate)
     }
