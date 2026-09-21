@@ -29,8 +29,13 @@ final class TooltipMigrationGuardTests: XCTestCase {
         + "|(?:GlassSection|NoteLine|DataFootnote|DataCaption|Text|BannerRow|StatLine"
         + "|SectionEmptyNote|EmptyStateView)\\s*\\("
 
-    /// tooltip 承载位：`.help(...)` 与共用的 `CopyHelpBadge(...)`。
-    private static let tooltipCarrierPattern = "\\.help\\s*\\(|CopyHelpBadge\\s*\\("
+    /// tooltip 承载位：`.help(...)`、共用的 `CopyHelpBadge(...)`，以及**带 `help:` 标签的槽位**
+    /// （`NoteLine(_, help:)`、`DataFieldRow(help:)`、`EmptyStateView(help:)` 都是官方推荐形状）。
+    ///
+    /// 少了最后这一支就是**尺子在惩罚用对 API 的人**：S2 交回时报"搬了字现量不减"，
+    /// 因为它把长句放进 `help:` 后，那一行仍被 `NoteLine(` 认成可见槽位 —— 于是它只好绕开
+    /// 推荐形状去直接写 `CopyHelpBadge`。画法仍然唯一，但那是被坏尺子逼出来的。
+    private static let tooltipCarrierPattern = "\\.help\\s*\\(|CopyHelpBadge\\s*\\(|\\bhelp\\s*:\\s*\""
 
     private static let literalPattern = "\"((?:[^\"\\\\]|\\\\.)*?)\""
     private static let hanPattern = "[\\u4E00-\\u9FFF]"
@@ -193,6 +198,22 @@ final class TooltipMigrationGuardTests: XCTestCase {
     }
 
     // MARK: - 元测试：三条尺子各自都必须能抓到坏样例
+
+    /// 元测试：`help:` 标签形状必须被认成"已藏"，同时**不能反过来**把同行的短句也算进 tooltip。
+    func test_meta_labeledHelpSlotIsCountedAsHidden() {
+        let moved = [(path: "Views/Fake.swift", content: """
+        NoteLine("屏上留的短半句", role: .neutral, help: "这一长句已经进了 hover，它绝不能再被算进常驻量里面去")
+        """)]
+        let (visible, tooltip) = Self.scan(moved)
+        XCTAssertTrue(visible.isEmpty, "help: 里的长句仍被判成常驻 —— 尺子在惩罚用对 API 的人")
+        XCTAssertEqual(tooltip.count, 1)
+        // 反向：只有 `help:` 标签、没有承载组件的一行，不该凭空多出 tooltip 落点。
+        let plain = [(path: "Views/Fake.swift", content: """
+        NoteLine("只有正文的一行长句，它没有任何 help 参数，因此必须继续算进常驻量里面去")
+        """)]
+        XCTAssertEqual(Self.scan(plain).visible.count, 1, "无 help 的常驻句被漏计，A 棘轮就成了摆设")
+        XCTAssertTrue(Self.scan(plain).tooltip.isEmpty)
+    }
 
     /// A 的扫描器：可见槽位里的长句要算进去；tooltip 里的不算；注释里的不算；短句不算。
     func test_meta_visibleScannerCatchesBadSampleAndSparesTheRest() {
