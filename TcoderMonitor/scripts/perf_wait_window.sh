@@ -187,7 +187,7 @@ cond_front_is_ours() {
   return 1
 }
 
-echo "==> 等窗口：$SAMPLES 趟 idle（release 口径，rev=$TAG），最长 ${DEADLINE_SECS}s"
+echo "==> 等窗口：$SAMPLES 趟 ${MODE}（release 口径，rev=$TAG），最长 ${DEADLINE_SECS}s"
 [ -x "$START_BIN/Contents/MacOS/TcoderMonitor" ] || { echo "!! 没有 release 产物 $START_BIN；先跑 scripts/build_app.sh release"; exit 2; }
 
 # 1) 起手先等静默：两档都要——interact 档要的是"录起来之后有人滚"，
