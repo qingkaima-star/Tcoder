@@ -18,9 +18,9 @@ AGENTS.md 第四轮红线 5（诚实性语义与阈值不许为任何指标放�
 import os
 import statistics
 
-from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, dedupe_pairs, disp_values,
-                                fmt_row, fps_counts, load_measure, over_budget, percentile,
-                                read_json)
+from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, as_int, dedupe_pairs,
+                                disp_values, fmt_row, fps_counts, load_measure, over_budget,
+                                percentile, read_json, regime_note)
 from perf_trace_xml import cross_check_durations, find_tag
 
 
@@ -33,11 +33,14 @@ def cmd_summary(args):
     loaded = summary_load(d)
 
     meta = read_json(os.path.join(d, "meta.json")) or {}
-    seconds = args.seconds or meta.get("hitches_seconds") or meta.get("seconds") or 0
+    # 三个来源都可能是**字符串**（meta 里是 shell 变量、CLI 上 argparse 已经收过 int），
+    # 所以要过 `as_int`；少了这一步，绕开 harness 自己跑 summary 会 TypeError 崩表。
+    seconds = (as_int(args.seconds) or as_int(meta.get("hitches_seconds"))
+               or as_int(meta.get("seconds")))
     summary_header(meta)
     # 预算由第 1 节实测刷新率算出，后面四节都吃它——顺序就是口径，不许重排。
     budget = summary_refresh_row(loaded, args)
-    summary_render_rows(loaded, budget)
+    summary_render_rows(loaded, budget, seconds)
     summary_app_update_row(loaded, budget)
     summary_hitch_rows(loaded, seconds, budget)
     summary_hang_rows(loaded, budget)
@@ -73,6 +76,15 @@ def summary_header(meta):
     print("== Tcoder 性能读数（对照 spec §1 基线 rev %s，release 口径）==" % BASELINE["rev"])
     print("   测量期间：%s —— %s" % (period, "有资格答 T1（交互期 hitch = 0）" if is_interaction
                                 else "只答心跳期；**不许**拿去交 T1，要判 T1 用 interact 档重录"))
+    # 【对照列的身份必须自己说清楚】§1.3 已判该样本未受控，规则原先只写在
+    # `perf_trace_metrics.py` 的注释里——写在注释里的规则等于没有规则：
+    # 表一打出来，"§1 基线 | 本次 | 改善" 就是一份从 X 到 Y 的结论。
+    # 所以未受控期间，判定列只按**绝对预算**判，对照列降级为"形状参考"。
+    # （必须打在表头**之前**：夹在表头和分隔行之间会把 markdown 表格截断。）
+    if not BASELINE.get("controlled", True):
+        print("   ⚠ 对照列**未受控**（%s）：按 §1.3 只作同形状参考，"
+              "**不作任何\u201c从 X 降到 Y\u201d的 X**；判定列因此只判绝对预算。"
+              % BASELINE.get("uncontrolled_reason", "原因未登记"))
     print("| %-30s | %-28s | %-34s | %s |" % ("指标", "§1 基线", "本次", "判定"))
     print("|" + "-" * 32 + "|" + "-" * 30 + "|" + "-" * 36 + "|" + "-" * 10 + "|")
 
@@ -103,9 +115,12 @@ def summary_display_rates(loaded):
     return rates
 
 
-def summary_render_rows(loaded, budget):
+def summary_render_rows(loaded, budget, seconds):
     # 2) render 相位
     render = disp_values(loaded["hitches-renders"])
+    base_over = ("%d 帧 (%.2f%%, n=%d)" % (BASELINE["render_over_budget_frames"],
+                                          BASELINE["render_over_budget_pct"],
+                                          BASELINE["render_total_frames"]))
     if render:
         bad, pct = over_budget(render, budget)
         cur = ("p50 %.2f / p95 %.2f / p99 %.2f / max %.2f（n=%d）"
@@ -119,13 +134,25 @@ def summary_render_rows(loaded, budget):
         fmt_row("render 相位 (ms)", "p50 2.73 / p95 4.06 / p99 4.77 / max 25.12", cur,
                 ("健康" if percentile(render, .95) <= budget else "超")
                 + ("" if agree else "；解析自检不一致→本行仅参考"))
-        fmt_row("render 超预算帧", "10 帧 (0.42%)",
-                ("%d 帧 (%.2f%%)" % (bad, pct)) if agree else "未报（两把解析不一致）",
-                ("达标" if pct < 0.1 else "超") if agree else why)
+        # 【比率不许裸比】两边分母差一个数量级时，"0.42% → 4.97%" 会被读成恶化 12 倍，
+        # 而帧数是 10 → 9。所以：判定只看**本次对绝对预算**，跨趟的话交给 regime_note，
+        # 它说不可比就把这句原样贴在判定里，而不是把两列比率抹成一个词。
+        _, note = regime_note(BASELINE["render_total_frames"], BASELINE["hitch_seconds"],
+                              len(render), seconds)
+        verdict = "达标" if pct < 0.1 else "超"
+        if not agree:
+            verdict = why
+        elif note:
+            # 只写在判定列里，**不另起一行**：夹进 markdown 表格会把表截断成两张。
+            verdict += "；" + note
+        fmt_row("render 超预算帧", base_over,
+                ("%d 帧 (%.2f%%, n=%d)" % (bad, pct, len(render))) if agree
+                else "未报（两把解析不一致）",
+                verdict)
     else:
         why = "未覆盖" if not loaded["hitches-renders"]["present"] else "0 帧（未采到）"
         fmt_row("render 相位 (ms)", "p50 2.73 / p95 4.06 / p99 4.77 / max 25.12", why, "—")
-        fmt_row("render 超预算帧", "10 帧 (0.42%)", why, "—")
+        fmt_row("render 超预算帧", base_over, why, "—")
 
 
 def summary_app_update_row(loaded, budget):
@@ -183,10 +210,18 @@ def summary_time_profile_rows(loaded):
     # 6) 主线程样本占比 + 热点第一名（这两列只能来自 time-profile）
     tp = (loaded["time-profile"]["json"] or {})
     if tp:
-        fmt_row("主线程 CPU 样本占比", "684/807 = 84.8%",
-                "%d / %d (%.1f%%)" % (tp.get("samples", 0), tp.get("process_samples", 0),
-                                       tp.get("share_pct", 0.0)),
-                "改善" if tp.get("share_pct", 0) < BASELINE["main_thread_share_pct"] else "回退")
+        share = tp.get("share_pct", 0)
+        # 「改善 / 回退」是**两个数之间的话**，而 §1.3 已判基线那趟未受控
+        # （采在几十个 swiftc 抢满 15 核期间）——它当时 84.8% 不代表"健康态就该 84.8%"。
+        # 这里也不换成绝对阈值：84.8%/23.3% 是"主线程占**本进程**样本"的份额，
+        # 而 spec 的"空闲 ≤2%"是"主线程占**墙钟**时间"，两个分母不同名，拿一个判另一个
+        # 就是换个口径冒充判据。未受控期间只报现量、明写不判趋势。
+        trend = ("改善" if share < BASELINE["main_thread_share_pct"] else "回退") \
+            if BASELINE.get("controlled", True) else "对照列未受控→不判趋势"
+        fmt_row("主线程 CPU 样本占比", "684/807 = 84.8%"
+                + ("" if BASELINE.get("controlled", True) else "（未受控）"),
+                "%d / %d (%.1f%%)" % (tp.get("samples", 0), tp.get("process_samples", 0), share),
+                trend)
         hot = str(tp.get("hotspot_top1", ""))
         # §1 那 64.3% 写的是 "_updateViewGraph / AG::Graph::UpdateStack::update()" 两个符号，
         # 它们是同一条视图图更新链；判定必须都认，否则换个入口符号就误报"已换位"。

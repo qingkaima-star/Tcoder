@@ -38,7 +38,8 @@ cmd_selfcheck() {
   selfcheck_migration "$out"        # 8) migration 的口径必须从守卫源码里读
   selfcheck_quiescence "$out"       # 10) 人手静默探针（第五维）
   selfcheck_weight_ruler "$out"     # 11) 收益分级：现读、缺料要喊、名单对不上要报⚠
-  selfcheck_front_name "$out"        # 12) 前台名判定：显示名/进程名都认，别家一律拒
+  selfcheck_front_name "$out"       # 12) 前台名判定：显示名/进程名都认，别家一律拒
+  selfcheck_render_regime "$out"    # 13) render 比率只在同一种出帧机制下互比
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
@@ -265,12 +266,30 @@ selfcheck_framepulse() {  # selfcheck_framepulse <outdir>
 selfcheck_period_wording() {  # selfcheck_period_wording <outdir>
   # 7) 测量期间必须**印在汇总表上**，且 idle 那一档要明说"不许拿去交 T1"
   #    （§1 基线是心跳期量的、T1 要的是交互期，两批数同形状不同含义——不写出来一定会被人混用）
+  #
+  #    夹具的 meta.json **照生产侧的形状写**：`perf_harness.sh` 是用 shell 变量塞的
+  #    （`"hitches_seconds=$SECONDS_HITCHES"`），落盘就是字符串 `"20"`。
+  #    原先这里写的是数字 20，于是尺子在"整数秒"下自测全绿、真产物一跑就 TypeError——
+  #    夹具与生产者不同形，等于自测在量另一个程序（2026-09-21 实测）。
+  #    同理不再 `|| true`：吞掉退出码就把"崩表"降级成了"看不见"。
   local out="$1"
   mkdir -p "$out/period-idle" "$out/period-live"
-  printf '{"rev":"合成","hitches_seconds":20,"period":"idle"}' > "$out/period-idle/meta.json"
-  printf '{"rev":"合成","hitches_seconds":20,"period":"interaction"}' > "$out/period-live/meta.json"
-  python3 "$TRACE_REPORT" summary "$out/period-idle" > "$out/period-idle.txt" 2>&1 || true
+  printf '{"rev":"合成","hitches_seconds":"20","period":"idle"}' > "$out/period-idle/meta.json"
+  printf '{"rev":"合成","hitches_seconds":"20","period":"interaction"}' > "$out/period-live/meta.json"
+  # 光有 meta 不够：没有 hitches 表时那条除法根本走不到，夹具会"因为没数据而绿"。
+  # 2 个 hitch / 20 s ⇒ 速率必为 0.10 /s——这个数同时钉住"秒数真的被当分母用了"
+  # （秒数被认成 0 会印 0.00 /s，认成字符串会 TypeError）。
+  cat > "$out/period-idle/hitches.xml" <<'XML'
+<table><schema name="hitches"/>
+<row><start-time id="1" fmt="00:00.000.000">0</start-time><duration id="2" fmt="10.00 ms">10000000</duration></row>
+<row><start-time id="3" fmt="00:01.000.000">1000000000</start-time><duration id="4" fmt="20.00 ms">20000000</duration></row>
+</table>
+XML
+  python3 "$TRACE_REPORT" summary "$out/period-idle" > "$out/period-idle.txt" 2>&1 \
+    || { fail "字符串秒的 meta 让汇总表崩了（生产侧就是字符串）：$(tail -2 "$out/period-idle.txt")"; return; }
   python3 "$TRACE_REPORT" summary "$out/period-live" > "$out/period-live.txt" 2>&1 || true
+  grep -q '0\.10 /s' "$out/period-idle.txt" \
+    || { fail "hitch 速率不是 0.10 /s（2 次 / 20 s）——秒数没被当分母用：$(grep -n 'hitch 次数' "$out/period-idle.txt" | head -1)"; return; }
   # 断言钉的是**那句拒绝**（`不许…交 T1`），不是"测量期间"四个字：
   # 第一版只 grep「只答心跳期」，把拒绝的后半句删掉它照样绿——反向验才抓出来。
   grep -q '不许.*交 T1' "$out/period-idle.txt" \
@@ -334,4 +353,30 @@ selfcheck_quiescence() {  # selfcheck_quiescence <outdir>
   [ "$(human_input_in_window 60 20)" = "窗口内没人" ] \
     || fail "判定反了：静默 60s / 窗口 20s 应当是「窗口内没人」（interact 档要据此判「没人在滚」）"
   ok "窗口判定双向都对（idle 防污染 / interact 防空滚 两种失效各管一头）"
+}
+
+selfcheck_render_regime() {  # selfcheck_render_regime <outdir>
+  # 13) render 的"比率只有同一种出帧机制才许互比"——纯函数，正反两头都钉。
+  #     为什么要有这条：报表把 §1 的 `0.42%` 和本次的 `4.97%` 并排打出来，读的人
+  #     得出"恶化 12 倍"，而两边帧数其实是 10 对 9——差的是分母（基线 20 s 连出
+  #     2394 帧≈120fps，本次同窗口只出 181 帧≈9fps）。比率的分母一旦被机制换掉，
+  #     减法就不许尺子替人做。缺分母一律按"不可比"，不猜。
+  local out="$1" r
+  cat > "$out/regime_case.py" <<'PY'
+from perf_trace_metrics import as_int, regime_note
+same, n1 = regime_note(2394, 20, 2400, 20)   # 同机制（120fps 对 120fps）→ 可比、不解释
+diff, n2 = regime_note(2394, 20, 181, 20)    # 真产物那一对：120fps 对 9fps → 不可比
+miss, n3 = regime_note(2394, 20, 181, 0)     # 窗口秒数缺失 → 不可比
+assert same and not n1, "同机制被判成不可比（会白白废掉对照列）：%s" % n1
+assert (not diff) and "倍" in n2, "跨机制没拦住、或话里没给倍数：%s" % n2
+assert not miss, "分母不全却当成可比——正是要防的那类裸比"
+assert as_int("20") == 20 and as_int(20) == 20 and as_int("abc") == 0, "as_int 没收敛"
+print("ok")
+PY
+  r=$(PYTHONPATH="$(dirname "$TRACE_REPORT")" python3 "$out/regime_case.py" 2>&1)
+  if [ "$r" = "ok" ]; then
+    ok "render 机制判定双向都对（同机制放行 / 跨机制拦住并报倍数 / 缺分母不可比）"
+  else
+    fail "render 机制判定坏了：$(printf '%s' "$r" | tail -2)"
+  fi
 }

@@ -40,6 +40,14 @@ BASELINE = {
     "render_max_ms": 25.12,
     "render_over_budget_frames": 10,   # 原记 5：漏计的 54 行 ref 里正好有 5 帧
     "render_over_budget_pct": 0.42,    # 原记 0.21
+    # 分母：spec §1 明写这一行是 **2394 帧**（20 s 窗口 ≈ 120 fps 连出帧）。
+    # 缺了它，"0.42% vs 4.97%" 就看着像恶化 12 倍，而两边帧数其实是 10 vs 9。
+    "render_total_frames": 2394,
+    # §1.3 的结论写在这里而不是只写在注释里：这一整块**取自未受控样本**
+    # （当时并发几十个 `swiftc -typecheck` 抢满 15 核），按 §4.1 重测前
+    # 只许当"同形状对照列"。判定列因此不许输出"改善/回退"这类从 X 到 Y 的话。
+    "controlled": False,
+    "uncontrolled_reason": "spec §1.3：run1 采在总工并发几十个 swiftc 抢满 15 核期间",
     "main_thread_samples": 684,
     "main_thread_total_samples": 807,
     "main_thread_share_pct": 84.8,
@@ -70,6 +78,44 @@ def dist_line(values):
 def over_budget(values, budget_ms):
     bad = [v for v in values if v > budget_ms]
     return len(bad), (100.0 * len(bad) / len(values) if values else 0.0)
+
+
+def as_int(value, default=0):
+    """把 `meta.json` 里的窗口秒数收成 int。
+
+    生产侧是 shell 变量（`perf_harness.sh` 用 `"hitches_seconds=$SECONDS_HITCHES"`
+    塞进 meta 的 JSON），所以落盘就是**字符串** `"20"`。平时看不见这个类型差，
+    是因为 `perf_harness.sh report` 会补 `--seconds`（argparse 收成 int）；
+    一旦按 `trace_report.py` 文件头那种方式自己跑，就退回 meta 的字符串，
+    `len(hitch) / "20"` 当场 TypeError。
+    认不下来就退回 default，让"窗口未知"那一支如实报未知，而不是把整张表崩掉。
+    """
+    try:
+        return int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return default
+
+
+def regime_note(baseline_frames, baseline_seconds, cur_frames, cur_seconds, ratio_max=2.0):
+    """两趟 render 分布是不是**同一种出帧机制**——不同就不许互比比率。
+
+    为什么要有这条：render 的"超预算帧占多少比例"是**分母敏感**的。基线那趟 20 s 出了
+    2394 帧（≈120 fps 连出帧，每帧只有 8.3 ms 的呼吸），本次 idle 那趟 20 s 只出 181 帧
+    （≈9 fps，每帧之间有的是时间）。同一份代码在两种机制下算出来的百分比不可互比——
+    拿 0.42% 对 4.97% 读成"恶化 12 倍"是错的，两边帧数是 10 对 9。
+
+    纯函数、只吃四个数，所以能被 selfcheck 正反两头钉（见 `selfcheck_regime_note`）。
+    返回 (可比?, 说明)。窗口/帧数缺任意一个一律按"不可比"处理，不猜。
+    """
+    if not baseline_frames or not baseline_seconds or not cur_frames or not cur_seconds:
+        return False, "分母不全→比率不互比"
+    base_fps = float(baseline_frames) / float(baseline_seconds)
+    cur_fps = float(cur_frames) / float(cur_seconds)
+    lo, hi = sorted([base_fps, cur_fps])
+    if hi <= lo * ratio_max:
+        return True, ""
+    return False, ("出帧机制不同（基线 %.1f fps / 本次 %.1f fps，相差 %.0f 倍）→ 只各判绝对预算"
+                   % (base_fps, cur_fps, hi / lo if lo else 0.0))
 
 
 # ----------------------------------------------------------------------------
