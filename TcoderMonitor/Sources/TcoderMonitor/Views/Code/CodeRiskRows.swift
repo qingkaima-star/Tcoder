@@ -153,7 +153,7 @@ struct CodeDuplicationBlockRow: View {
                         if rest > 0 {
                             // 汇总行写成 `Text(字面量)`：拼成 String 再交给 Text(variable)
                             // 就永远不查表（双语方案 §7），这里没有理由留新债。
-                            Text("另有 \(NumberFormat.grouped(rest)) 处")
+                            Text(localizedCount("另有 %lld 处", rest))
                                 .font(CodeGitType.tableIdentifier)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)

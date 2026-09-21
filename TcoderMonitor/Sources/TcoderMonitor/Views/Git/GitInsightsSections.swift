@@ -365,8 +365,7 @@ struct GitRecentCommitsSection: View {
                     EmptyStateView(
                         icon: .unverified,
                         title: "本次没有取回最近提交明细",
-                        message: "历史里有提交，但提交记录本身没有带回任何一行（旧报告或分析中断都会这样）。\n"
-                            + "趋势与作者统计仍按已解析的部分给出，这里只说明明细缺失。"
+                        message: "历史里有提交，但提交记录本身没有带回任何一行（旧报告或分析中断都会这样）。\n趋势与作者统计仍按已解析的部分给出，这里只说明明细缺失。"
                     )
                 }
             } else {

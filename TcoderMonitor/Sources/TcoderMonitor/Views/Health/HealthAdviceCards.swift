@@ -193,7 +193,7 @@ struct HealthTrendChart: View {
                     .foregroundStyle(Color.secondary)
             }
         }
-        .accessibilityLabel("评分趋势，\(NumberFormat.grouped(points.count)) 个历史点")
+        .accessibilityLabel(Text(localizedFormat("评分趋势，%@ 个历史点", NumberFormat.grouped(points.count))))
     }
 
     private var stride: Int {

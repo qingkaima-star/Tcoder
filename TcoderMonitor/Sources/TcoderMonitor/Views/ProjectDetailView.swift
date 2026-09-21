@@ -75,7 +75,7 @@ struct ProjectDetailView: View {
                     Text(" · ")
                         .foregroundStyle(.tertiary)
                         .accessibilityHidden(true)
-                    Text("分析于 \(DateFormat.sinceDescription(scanned))")
+                    Text(localizedFormat("分析于 %@", DateFormat.sinceDescription(scanned)))
                         .font(Theme.Typo.label.font.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }

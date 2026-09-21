@@ -339,7 +339,9 @@ struct HealthComponentTable: View {
 
             LiveNumber(Live.fixed(row.contribution, digits: 1), tier: Theme.Typo.monoSmall)
                 .tableCell(DataColumns.column(DataColumns.healthComponents, 3))
-                .help("满分可得 \(Live.fixed(row.fullMarks, digits: 1))，这一维度拖了 \(Live.fixed(row.lostPoints, digits: 1)) 分")
+                .help(Text(localizedFormat("满分可得 %1$@，这一维度拖了 %2$@ 分",
+                            Live.fixed(row.fullMarks, digits: 1),
+                            Live.fixed(row.lostPoints, digits: 1))))
 
             Text(row.component.detail)
                 .font(Theme.Typo.narrative.font)

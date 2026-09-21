@@ -50,8 +50,9 @@ enum CodeDataGate {
             return EmptyCopy(
                 icon: .emptyTray,
                 title: "扫描结果为空",
-                message: "扫描已完成，但没有识别到任何源码文件（构建产物、依赖目录与不受支持的后缀会被跳过）。\n"
-                    + "这是测得的结果，不是没有扫描，因此不给任何风险结论。"
+                // 一整句 = 一个键：拆成 `"…\n" + "…"` 时运行时查表的是拼接后的整串，
+                // 半句键永远等不到（守卫 1c 抓到，批次 P5）。
+                message: "扫描已完成，但没有识别到任何源码文件（构建产物、依赖目录与不受支持的后缀会被跳过）。\n这是测得的结果，不是没有扫描，因此不给任何风险结论。"
             )
         }
     }
@@ -177,7 +178,7 @@ struct CodeHotspotRow: View {
                         .frame(maxWidth: .infinity)
                         .tableCell(DataColumns.column(columns, 1))
 
-                    Text("\(NumberFormat.grouped(hotspot.lineCount)) 行")
+                    Text(localizedCount("%lld 行", hotspot.lineCount))
                         .font(CodeGitType.number(Theme.Typo.monoSmall))
                         .foregroundStyle(.secondary)
                         .tableCell(DataColumns.column(columns, 2))
@@ -214,10 +215,10 @@ struct CodeOpenFileButton: View {
         } label: {
             CodeGitSymbol.decorated(CodeGitSymbol.openExternal, role: .badge)
                 .foregroundStyle(Theme.Semantic.accent.textColor)
-                .accessibilityLabel("用默认应用打开 \(CodeViewFormat.fileName(path))")
+                .accessibilityLabel(Text(localizedFormat("用默认应用打开 %@", CodeViewFormat.fileName(path))))
         }
         .buttonStyle(.plain)
         .frame(minWidth: Theme.Layout.minHitTarget, minHeight: Theme.Layout.minHitTarget)
-        .help("用默认应用打开 \(CodeViewFormat.fileName(path))")
+        .help(Text(localizedFormat("用默认应用打开 %@", CodeViewFormat.fileName(path))))
     }
 }

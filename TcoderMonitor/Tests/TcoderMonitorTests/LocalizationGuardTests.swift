@@ -18,7 +18,7 @@ final class LocalizationGuardTests: XCTestCase {
 
     // MARK: - 读盘
 
-    private static var packageRoot: URL {
+    static var packageRoot: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // Tests/TcoderMonitorTests
             .deletingLastPathComponent()   // Tests
@@ -64,13 +64,14 @@ final class LocalizationGuardTests: XCTestCase {
         return out
     }
 
-    private static func catalog() throws -> [(key: String, value: String)] {
+    static func catalog() throws -> [(key: String, value: String)] {
         let text = try String(contentsOfFile: englishCatalogPath, encoding: .utf8)
         let entries = parseCatalog(text)
         // 反向自证：目录读不出任何键 = 解析器坏了，而不是"这个包不需要翻译"。
         XCTAssertFalse(entries.isEmpty, "英文目录解析出 0 条 —— 解析器或路径坏了")
         return entries
     }
+
 
     /// 含 CJK 的界面串字面量，返回「文件: 串」。**剥掉整行注释**。
     ///
@@ -120,7 +121,7 @@ final class LocalizationGuardTests: XCTestCase {
         return out
     }
 
-    private static func sourceFiles() throws -> [(path: String, content: String)] {
+    static func sourceFiles() throws -> [(path: String, content: String)] {
         let root = packageRoot.appendingPathComponent("Sources/TcoderMonitor").path
         var out: [(String, String)] = []
         for sub in ["Views", "Design", "App"] {
@@ -133,7 +134,7 @@ final class LocalizationGuardTests: XCTestCase {
         return out
     }
 
-    private static func walkFiles(in dir: String) -> [String] {
+    static func walkFiles(in dir: String) -> [String] {
         let fm = FileManager.default
         guard let en = fm.enumerator(atPath: dir) else { return [] }
         return en.compactMap { $0 as? String }.filter { $0.hasSuffix(".swift") }
@@ -173,14 +174,17 @@ final class LocalizationGuardTests: XCTestCase {
     /// **每次跑都打印现量/上限** —— 只减不增的棘轮通过时若不报现量，
     /// 已还的债就变成隐形余量（新增 N 处照样绿）。上限的取值必须是**某次实扫的现量**，
     /// 不许拍脑袋；调低它 = 还了债，调高它 = 新增债，两者都要在 diff 里显形。
-    /// 2026-09-21 实扫登记：**264 条**（扫到 369 条界面串 / 目录已登记 112 条键）。
+    /// 2026-09-21 实扫登记：首测 **264 条**（扫到 369 条界面串 / 目录 112 条键），
+    /// 同日五批迁移后收到 **22 条**（已登记键 341）。剩下的 22 条集中在
+    /// `CodeRiskAdvice` 的多段建议长句（4~6 个占位符，改成整句键要逐句重写）
+    /// 与 `ShellLayout` 的三句组合式空态 —— 它们是**已知账**，不是"没扫到"。
     /// 这个数字是"面"闸门第一次跑出来的存量，不是估的 ——
     /// 只按 `Text("中文")` 扫会得到 43 条，漏掉的 221 条住在 tooltip、
     /// `label:` / `caption:` 这类字符串型参数与 `localizedCopy` 口子里。
-    private static let unregisteredLiteralCeiling = 248
+    private static let unregisteredLiteralCeiling = 22
 
     func test_unregisteredLiteralInventoryPrintsAndShrinks() throws {
-        let registered = Set(try Self.catalog().map(\.key))
+        let registered = Set(try Self.catalog().map(\.key)).union(Self.registeredStringsDictKeys())
         let literals = Self.uiLiteralsNeedingKeys(in: try Self.sourceFiles())
         XCTAssertFalse(literals.isEmpty, "一条界面串都没扫到 —— 扫描器或分母坏了")
         let offenders = literals.flatMap { path, strings in
@@ -315,58 +319,6 @@ final class LocalizationGuardTests: XCTestCase {
         XCTAssertEqual(parsed.map(\.value), ["Real", "Second"])
         // 空值必须能被数出来（守卫 2 依赖它）
         XCTAssertEqual(Self.parseCatalog("\"k\" = \"\";").first?.value, "")
-    }
-
-    // MARK: - 守卫 5：组件渲染点必须真的查表
-
-    /// 双语最容易的空转不是"没翻"，而是**翻了但界面不查表**：
-    /// `Text(变量)` 走 verbatim 初始化，目录里翻了也一个字不动（《中英双语方案》§7.1）。
-    /// 2026-09-21 用 `-AppleLanguages "(en)"` 实跑抓到这个空转：页头出英文，
-    /// 侧栏九条页名仍是中文，因为 `SidebarRows` 写的是 `Text(section.title)`。
-    ///
-    /// 判据：`Design/` 里承载组件文案的 `Text(<已知参数名>)` 必须过 `localizedCopy`。
-    /// 只认白名单里的参数名，避免把 `Text("\(x)")`、`Text(item.name)` 这类
-    /// 由调用方自己负责语言形态的写法一起卷进来。
-    private static let copyParameterNames: Set<String> = [
-        "label", "value", "caption", "unit", "title", "subtitle", "text", "message",
-        "section.title", "column.title",
-    ]
-
-    static func unlocalizedRenderPoints(in files: [(path: String, content: String)]) -> [String] {
-        files.flatMap { file -> [String] in
-            file.content.split(separator: "\n", omittingEmptySubsequences: false)
-                .enumerated()
-                .compactMap { index, raw -> String? in
-                    let line = String(raw)
-                    let trimmed = line.trimmingCharacters(in: .whitespaces)
-                    guard !trimmed.hasPrefix("//"), trimmed.contains("Text(") else { return nil }
-                    guard let open = line.range(of: "Text(") else { return nil }
-                    let rest = line[open.upperBound...]
-                    let name = rest.prefix { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." }
-                    guard copyParameterNames.contains(String(name)),
-                          rest.hasPrefix(String(name) + ")") else { return nil }
-                    return "\(file.path):\(index + 1)"
-                }
-        }
-    }
-
-    func test_designRenderPointsActuallyLookUpTheCatalog() throws {
-        let offenders = Self.unlocalizedRenderPoints(in: try Self.sourceFiles()
-            .filter { $0.path.hasPrefix("Design/") })
-        XCTAssertTrue(offenders.isEmpty,
-                      "这些组件渲染点还在走 Text(变量)（不查表），请包 localizedCopy：\(offenders)")
-    }
-
-    func test_renderPointScannerCatchesBareTextButSparesWrapped() {
-        let bare = [(path: "Design/Fake.swift", content: "    Text(label)\n")]
-        XCTAssertEqual(Self.unlocalizedRenderPoints(in: bare), ["Design/Fake.swift:1"],
-                       "没查表的渲染点没被抓到")
-        let wrapped = [(path: "Design/Fake.swift",
-                        content: "    Text(localizedCopy(label))\n")]
-        XCTAssertTrue(Self.unlocalizedRenderPoints(in: wrapped).isEmpty, "查了表的被误判")
-        let interpolated = [(path: "Design/Fake.swift",
-                             content: "    Text(\(name)) 拼出来的串由调用方负责\n")]
-        XCTAssertTrue(Self.unlocalizedRenderPoints(in: interpolated).isEmpty, "插值写法被误判")
     }
 
     // MARK: - 守卫 6：整句键不许改坏中文侧

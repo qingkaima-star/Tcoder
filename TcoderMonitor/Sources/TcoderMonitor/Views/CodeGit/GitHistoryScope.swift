@@ -169,8 +169,7 @@ enum GitDataAbsence: Equatable {
             return GitAbsenceCopy(
                 icon: .emptyUnknown,
                 title: "该目录不是 Git 仓库",
-                message: "分析器在所选目录及其上下若干层里都没有找到仓库根。\n"
-                    + "这是「不适用」，不是「没有提交」——仓库在别处时请把它单独添加为项目。")
+                message: "分析器在所选目录及其上下若干层里都没有找到仓库根。\n这是「不适用」，不是「没有提交」——仓库在别处时请把它单独添加为项目。")
         case .repositoryWithoutCommits:
             return GitAbsenceCopy(
                 icon: .noRisk,
@@ -180,14 +179,13 @@ enum GitDataAbsence: Equatable {
             return GitAbsenceCopy(
                 icon: .unverified,
                 title: "解析到了提交，但没有作者信息",
-                message: "本次解析到 \(NumberFormat.grouped(total)) 次非合并提交，却没有一条带得出作者字段。\n"
-                    + "这是作者数据缺失，不是「零贡献者」，因此排行与占比都不成立。")
+                message: localizedFormat("本次解析到 %1$@ 次非合并提交，却没有一条带得出作者字段。\n这是作者数据缺失，不是「零贡献者」，因此排行与占比都不成立。",
+                                         NumberFormat.grouped(total)))
         case .commitsUnparsed(let total):
             return GitAbsenceCopy(
                 icon: .unverified,
-                title: "有 \(NumberFormat.grouped(total)) 次提交，但一条都没解析出来",
-                message: "通常是历史里全部为合并提交，或提交的作者与时间戳字段读不出来。\n"
-                    + "因此作者、提交趋势与时段分布都不成立，这里不给任何结论。")
+                title: localizedFormat("有 %1$@ 次提交，但一条都没解析出来", NumberFormat.grouped(total)),
+                message: "通常是历史里全部为合并提交，或提交的作者与时间戳字段读不出来。\n因此作者、提交趋势与时段分布都不成立，这里不给任何结论。")
         case .available:
             return nil
         }
