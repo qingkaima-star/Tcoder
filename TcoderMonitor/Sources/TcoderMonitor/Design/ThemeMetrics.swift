@@ -100,8 +100,17 @@ extension Theme {
         /// 当前语言该用哪一档。判定方式刻意**不读 `Locale`**：
         /// 取证跑的是 `-AppleLanguages "(en)"`，而 `Locale.current` 会跟着系统区域走，
         /// 两者不一致时量出来的宽度就对不上真正上屏的那一版。查表最可靠。
+        /// 探针键**必须是目录里一定存在的键**。
+        /// 第一版用 `"口径"` 探语言，而它压根没登记过 ⇒ 查表永远回中文 ⇒
+        /// 英文档宽度从来没生效过，而守卫按 194pt 预算量当然"0 越界"——
+        /// 假绿是自己造的。现在换 `"总览"`（九页页名，目录里在），
+        /// 并由 `LocalizationGuardTests.test_languageProbeKeyIsAlwaysRegistered` 钉住它不许消失。
+        static let languageProbeKey = "总览"
+
+        static var isChineseUI: Bool { localizedCopy(languageProbeKey) == languageProbeKey }
+
         static var fieldLabelWidthForLanguage: CGFloat {
-            localizedCopy("口径") == "口径" ? fieldLabelWidth : fieldLabelWidthEnglish
+            isChineseUI ? fieldLabelWidth : fieldLabelWidthEnglish
         }
         /// 指标 tile 自适应最小宽度（一行四 → 自动折两列/单列）
         static let tileMinWidth: CGFloat = 220
