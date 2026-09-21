@@ -56,7 +56,8 @@ def live_help_dirs(argv):
         return [Path(a) for a in argv]
     root = Path(os.environ.get("TCODER_SCRATCH") or repo_root() / ".scratch")
     base = root / "tcoder-ax-tooltip"
-    return sorted(p for p in base.glob("*") if p.is_dir())
+    # `sandbox-*` 是 App 自己的支持目录（reports/ 在那儿），不是读数批次。
+    return sorted(p for p in base.glob("*") if p.is_dir() and not p.name.startswith("sandbox-"))
 
 
 def main(argv):

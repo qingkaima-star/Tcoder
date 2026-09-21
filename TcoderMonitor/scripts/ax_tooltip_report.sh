@@ -14,6 +14,7 @@
 #                       想拍「空态那几张卡的 ⓘ」，指一个空目录再跑一趟。
 #   AX_SET=<名字>       同一轮取证的子目录名（默认 `full`；空态那趟用 `empty`），
 #                       免得两批读数互相覆盖。
+#   AX_EMPTY_REGISTRY=1 注册表置空，拍**首启空态**那一档的 ⓘ（那一档不产报告，故不等分析）
 #   WAIT_BUDGET=<秒>    等第一轮分析落盘的预算（默认 420）
 # 产物: $SCRATCH/tcoder-ax-tooltip/<AX_SET>/<页>--<top|bottom>.txt
 set -uo pipefail
@@ -51,6 +52,18 @@ fi
 
 mkdir -p "$SANDBOX/reports" "$OUT" || exit 1
 rm -f "$OUT"/*.txt
+if [ "${AX_EMPTY_REGISTRY:-0}" = "1" ]; then
+  # 首启空态那一档：注册表里一个项目都没有。P7-A 之后这是产品第一条路，
+  # 而它那些 ⓘ（「九页读数全部由它真实算出来」「完成一次采样后会列出占用最高的进程」…）
+  # 在任何"有项目"的沙箱里都上不了屏 —— 不单独造这一档，就等于没测过。
+  echo "== 注册表置空（AX_EMPTY_REGISTRY=1）：这一批拍的是首启空态那一档"
+  python3 - "$SANDBOX" <<'PY' || { echo "!! 写空 projects.json 失败"; exit 1; }
+import json, sys
+support = sys.argv[1]
+with open(f"{support}/projects.json", "w") as fh:
+    json.dump({"projects": [], "selectedProjectID": None}, fh, indent=2)
+PY
+else
 python3 - "$SANDBOX" "$UUID" "$TARGET" <<'PY' || { echo "!! 写 projects.json 失败"; exit 1; }
 import json, sys, datetime
 support, uuid, path = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -60,6 +73,7 @@ with open(f"{support}/projects.json", "w") as fh:
                              "addedAt": now, "isDemo": False}],
                "selectedProjectID": uuid}, fh, indent=2)
 PY
+fi
 
 wait_for_reports() {  # 等到 reports/ 的文件数与体积连续两轮不变（不是拍脑袋 sleep）
   local pid="$1" waited=0 prev="" cur bytes sig
@@ -96,19 +110,23 @@ dump_one() {  # dump_one <页名> <top|bottom> ；条数写进全局 LAST_COUNT�
       > "$OUT/$name--$scroll.instance.log" 2>&1 &
   pid=$!
   sleep 6
-  if ! wait_for_reports "$pid"; then
+  # 空注册表那一档没有"第一轮分析"可等（也不该等满预算），界面是立刻画出来的。
+  if [ "${AX_EMPTY_REGISTRY:-0}" = "1" ]; then
+    sleep 4
+  elif ! wait_for_reports "$pid"; then
     echo "   !! $name/$scroll 没等到数据 —— 读数作废，不算通过"
+    retire_own_instance "$pid"
+    return 0
+  fi
+  sleep 3   # 再给界面一次渲染完的时间
+  "$AXBIN" "$pid" > "$file" 2>&1
+  code=$?
+  if [ $code -ne 0 ]; then
+    echo "   !! $name/$scroll 读数失败 exit=$code：$(tail -2 "$file" | tr '\n' ' ')"
   else
-    sleep 3   # 再给界面一次渲染完的时间
-    "$AXBIN" "$pid" > "$file" 2>&1
-    code=$?
-    if [ $code -ne 0 ]; then
-      echo "   !! $name/$scroll 读数失败 exit=$code：$(tail -2 "$file" | tr '\n' ' ')"
-    else
-      LAST_COUNT=$(grep -c '^HELP' "$file" || true)
-      echo "   $name/$scroll → $(tail -1 "$file")"
-      [ "$LAST_COUNT" -gt 0 ] || echo "   ⚠ $name/$scroll 一个 help 都没有（visited 非 0 时这才是产品问题）"
-    fi
+    LAST_COUNT=$(grep -c '^HELP' "$file" || true)
+    echo "   $name/$scroll → $(tail -1 "$file")"
+    [ "$LAST_COUNT" -gt 0 ] || echo "   ⚠ $name/$scroll 一个 help 都没有（visited 非 0 时这才是产品问题）"
   fi
   retire_own_instance "$pid"
 }
