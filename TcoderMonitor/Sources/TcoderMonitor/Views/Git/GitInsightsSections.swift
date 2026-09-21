@@ -52,7 +52,12 @@ struct GitRepositorySourceSection: View {
                            ? Theme.Semantic.warning : Theme.Semantic.neutral,
                        icon: .riskWarning, iconLabel: "仓库定位偏离")
         } else {
-            GlassSection("仓库来源", subtitle: Self.discoveryCaption(git), icon: .git) {
+            GlassSection("仓库来源", subtitle: Self.discoveryCaption(git), icon: .git,
+                         // 盘点表 D6「藏」：这一句回答的是「为什么定位到了这里」，
+                         // 是不改变任何数字读法的次级解释 ⇒ 屏上只留一枚 ⓘ，字面一字未改。
+                         // 挂在卡头 trailing 而不是卡片最后一行：独立成行的 ⓘ 会读成
+                         // 一枚掉进卡片左下角的灰点（守卫 `CaliberBadgePlacementGuardTests`）。
+                         trailing: AnyView(CopyHelpBadge(Self.discoveryDetail(git)))) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     DataFieldRow(label: "路径",
                                  value: root.isEmpty ? "来源未记录" : root,
@@ -65,9 +70,6 @@ struct GitRepositorySourceSection: View {
                                  // 整句与 `help:` 写在同一行：ⓘ 落点判定按行扫，
                                  // 换行会让这一串被读成「仍然常驻屏上」而不是「已收进 ⓘ」。
                                  help: root.isEmpty ? "来源未记录（旧数据，重新分析后可见）" : nil)
-                    // 盘点表 D6「藏」：这一句回答的是「为什么定位到了这里」，
-                    // 是不改变任何数字读法的次级解释 ⇒ 屏上只留一枚 ⓘ，字面一字未改。
-                    CopyHelpBadge(Self.discoveryDetail(git))
                 }
             }
         }

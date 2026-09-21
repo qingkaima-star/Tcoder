@@ -93,7 +93,14 @@ struct HealthTrendCard: View {
                      subtitle: points.count >= 2
                          ? "共 \(NumberFormat.grouped(points.count)) 个历史点 · 全部来自本机落盘的评分记录"
                          : "只有 \(NumberFormat.grouped(points.count)) 个历史点",
-                     icon: .chartLine) {
+                     icon: .chartLine,
+                     // 「怎么让趋势出现」是这条空态里唯一可操作的部分，不能因为版面就丢掉：
+                     // 屏上留判定（少于两个点不画线），完整动线进 ⓘ。少一句就是 B 守恒线要红的。
+                     // 挂载点从"空态下面独立一行"改成**卡头 trailing**：
+                     // 独立成行的 ⓘ 会在这张高卡片左下角长出一枚没邻居的灰点
+                     // （页尾实拍 .scratch/evidence-8de2d17/light-tail/健康评分.png）。
+                     trailing: points.count >= 2 ? nil
+                         : AnyView(CopyHelpBadge("至少完成两次分析后可以看到趋势。"))) {
             if points.count >= 2 {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     HealthTrendChart(points: points, gradeBLine: Self.gradeBLine)
@@ -109,9 +116,6 @@ struct HealthTrendCard: View {
                 EmptyStateView(icon: IconName.chartLine.rawValue,
                                title: "历史点不足",
                                message: "少于两个点时这里不画线。")
-                // 「怎么让它出现」是这条空态里唯一可操作的部分，不能因为版面就丢掉：
-                // 屏上留判定（少于两个点不画线），完整动线进 ⓘ。少一句就是 B 守恒线要红的。
-                CopyHelpBadge("至少完成两次分析后可以看到趋势。")
             }
         }
     }

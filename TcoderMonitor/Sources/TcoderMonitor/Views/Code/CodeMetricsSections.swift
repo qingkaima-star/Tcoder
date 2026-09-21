@@ -201,20 +201,25 @@ struct CodeDuplicationSummarySection: View {
                                 unit: "行")
                 }
 
-                MiniBarGauge(fraction: code.duplicationRatio,
-                             // 这根条的**长度**是重复率，而卡上那三个彩色（读数 2.4%、条、
-                             // 卡头「风险：中」）原本全取 `overallRisk`：条于是同时说两件事
-                             // ——长度说重复率、颜色说整档风险。一个语义一处着色：判档留在
-                             // 读数与徽标上，条退回数据块蓝（与巨大文件榜同一处理）。
-                             tint: ChartSeries.dataMarkColor,
-                             height: DataGaugeHeight.metric)
-                // 盘点表 B17（判「删」：重复块本卡读数带已占一格，复杂度上榜在
-                // 「复杂度风险」页的读数带占一格）。本轮 B 守恒线不许删，整条进 ⓘ。
-                // 顺带把原来两段 `+` 拼的串改成一条带位置参数的整句键 ——
-                // 拼串在运行时永远查不中（双语方案 §7.1），整句模板才有一条真键可登记。
-                CopyHelpBadge(localizedFormat("重复块 %1$@ 个 · 复杂度上榜 %2$@ 个函数",
-                                              NumberFormat.grouped(code.duplicatedBlocks.count),
-                                              NumberFormat.grouped(code.topComplexFunctions.count)))
+                // 条 + 它自己的口径说明走同一行：独立成行的 ⓘ 会在卡片左下角
+                // 长出一枚没有邻居的灰点（页尾实拍 `.scratch/evidence-8de2d17/light-tail/代码规模.png`）。
+                HStack(alignment: .center, spacing: Theme.Spacing.xxs) {
+                    MiniBarGauge(fraction: code.duplicationRatio,
+                                 // 这根条的**长度**是重复率，而卡上那三个彩色（读数 2.4%、条、
+                                 // 卡头「风险：中」）原本全取 `overallRisk`：条于是同时说两件事
+                                 // ——长度说重复率、颜色说整档风险。一个语义一处着色：判档留在
+                                 // 读数与徽标上，条退回数据块蓝（与巨大文件榜同一处理）。
+                                 tint: ChartSeries.dataMarkColor,
+                                 height: DataGaugeHeight.metric)
+                        .frame(maxWidth: .infinity)
+                    // 盘点表 B17（判「删」：重复块本卡读数带已占一格，复杂度上榜在
+                    // 「复杂度风险」页的读数带占一格）。本轮 B 守恒线不许删，整条进 ⓘ。
+                    // 顺带把原来两段 `+` 拼的串改成一条带位置参数的整句键 ——
+                    // 拼串在运行时永远查不中（双语方案 §7.1），整句模板才有一条真键可登记。
+                    CopyHelpBadge(localizedFormat("重复块 %1$@ 个 · 复杂度上榜 %2$@ 个函数",
+                                                  NumberFormat.grouped(code.duplicatedBlocks.count),
+                                                  NumberFormat.grouped(code.topComplexFunctions.count)))
+                }
             }
         }
     }

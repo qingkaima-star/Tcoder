@@ -172,15 +172,16 @@ struct HealthHero: View {
 
 struct HealthNotScoredCard: View {
     var body: some View {
-        GlassSection("综合评分", subtitle: "尚未计算，不给分也不着色", icon: .health) {
+        GlassSection("综合评分", subtitle: "尚未计算，不给分也不着色", icon: .health,
+                     // 九维名单与分数区间从常驻句里搬进来：屏上只留"该点哪个按钮"，
+                     // 「综合了什么」进 ⓘ。这句不属于诚实性承诺（缺的是"还没算"，界面已用
+                     // `EmptyStateView` 明说，没被伪装成分数），所以整句藏进 tooltip 不丢信息。
+                     // 挂载点是**卡头 trailing**：独立成行的 ⓘ 会在空态下面长成一枚没邻居的灰点。
+                     trailing: AnyView(CopyHelpBadge("评分综合代码规模、复杂度、重复代码率、Git 活跃度、运行日志与依赖状况，给出 0~100 分。"))) {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 EmptyStateView(icon: IconName.health.rawValue,
                                title: "尚未计算健康评分",
                                message: "选择项目目录后点「重新分析」。")
-                // 九维名单与分数区间从常驻句里搬进来：屏上只留"该点哪个按钮"，
-                // 「综合了什么」进 ⓘ。这句不属于诚实性承诺（缺的是"还没算"，界面已用
-                // `EmptyStateView` 明说，没被伪装成分数），所以整句藏进 tooltip 不丢信息。
-                CopyHelpBadge("评分综合代码规模、复杂度、重复代码率、Git 活跃度、运行日志与依赖状况，给出 0~100 分。")
                 HeuristicClaimLine()
             }
         }

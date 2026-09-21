@@ -133,12 +133,16 @@ struct CodeDuplicationSection: View {
             trailing: AnyView(CopyHelpBadge("分母是有效代码行数（不含空行与注释）· 分子是落在重复块内的代码行"))
         ) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                MiniBarGauge(fraction: code.duplicationRatio, tint: ratio.graphicColor,
-                             height: DataGaugeHeight.metric)
-
-                // 盘点表 C4（判「删」：这条 caption 与上一行的读数带同屏两遍）。
-                // 本轮 B 守恒线不许删，整条进 ⓘ；串仍由 `duplicationCaption` 单点产出。
-                CopyHelpBadge(CodeRiskAnalysis.duplicationCaption(code))
+                // 条 + 它自己的口径说明同一行（守卫 `CaliberBadgePlacementGuardTests`）：
+                // 独立成行的 ⓘ 会在卡片左下角长出一枚没邻居的灰点。
+                HStack(alignment: .center, spacing: Theme.Spacing.xxs) {
+                    MiniBarGauge(fraction: code.duplicationRatio, tint: ratio.graphicColor,
+                                 height: DataGaugeHeight.metric)
+                        .frame(maxWidth: .infinity)
+                    // 盘点表 C4（判「删」：这条 caption 与上一行的读数带同屏两遍）。
+                    // 本轮 B 守恒线不许删，整条进 ⓘ；串仍由 `duplicationCaption` 单点产出。
+                    CopyHelpBadge(CodeRiskAnalysis.duplicationCaption(code))
+                }
 
                 if code.duplicatedBlocks.isEmpty {
                     EmptyStateView(
@@ -248,16 +252,23 @@ struct CodeComplexitySection: View {
                             }
                         }
                     }
-                    if code.topComplexFunctions.count > Self.rowLimit {
-                        DataDisclosureButton(expanded: expanded,
-                                             hiddenCount: code.topComplexFunctions.count - Self.rowLimit,
-                                             noun: "个函数") {
-                            expanded.toggle()
+                    // 独立成行的 ⓘ 会在卡片左下角长出一枚没有邻居的灰点
+                    // （页尾实拍 `.scratch/evidence-8de2d17/light-tail/复杂度风险.png`）。
+                    // 规则：说明句必须挂在**它解释的那一行的行尾** —— 这里挂在展开按钮同一行，
+                    // 没有按钮时靠 `Spacer` 退到行尾，仍然是一行的尾部而不是独占一行。
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
+                        if code.topComplexFunctions.count > Self.rowLimit {
+                            DataDisclosureButton(expanded: expanded,
+                                                 hiddenCount: code.topComplexFunctions.count - Self.rowLimit,
+                                                 noun: "个函数") {
+                                expanded.toggle()
+                            }
                         }
+                        Spacer(minLength: Theme.Spacing.xs)
+                        // 盘点表 C8（判「藏」的操作提示）：整句进 ⓘ，屏上只多一枚问号。
+                        // 两个动作本身在各自行里已经各带一份 `.help`，这句只是"怎么用这张表"。
+                        CopyHelpBadge("点击行在 Finder 中定位源文件，行尾图标用默认应用打开。")
                     }
-                    // 盘点表 C8（判「藏」的操作提示）：整句进 ⓘ，屏上只多一枚问号。
-                    // 两个动作本身在各自行里已经各带一份 `.help`，这句只是"怎么用这张表"。
-                    CopyHelpBadge("点击行在 Finder 中定位源文件，行尾图标用默认应用打开。")
                 }
             }
         }
