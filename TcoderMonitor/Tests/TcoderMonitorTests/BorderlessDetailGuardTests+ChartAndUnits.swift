@@ -316,12 +316,23 @@ extension BorderlessDetailGuardTests {
         XCTAssertEqual(TileCaptionLayout.minHeight(reserve: nil), 0,
                        "带外使用也必须预留会让独立格子凭空多一块空白")
 
-        let strip = try SurfaceScanKit.sourceFiles(under: "Design")
-            .first { $0.path.hasSuffix("SharedComponents.swift") }!
+        // 钉的是**谁注入、谁消费**，不是"住在哪个文件"。
+        // 原来这里取 `hasSuffix("SharedComponents.swift")` 那一份文件要求两条串都在里面，
+        // 而 `ReadoutStrip` 已被 WS-X8 按产品自己的 400 行口径搬进
+        // `Design/ReadoutStripKit.swift` —— 钉文件名的守卫在拆分之后会读成"没注入"，
+        // 反过来也可能把"两块都跑没了"读成通过。改成按**声明所在**定位，拆到哪都还钉得住。
+        let design = try SurfaceScanKit.sourceFiles(under: "Design")
+        func owner(ofDeclaration declaration: String) throws -> (path: String, content: String) {
+            try XCTUnwrap(design.first { $0.content.contains(declaration) },
+                          "Design/ 里找不到声明 \(declaration) —— 类型被删了还是改名了？")
+        }
+
+        let strip = try owner(ofDeclaration: "struct ReadoutStrip<Content: View>")
         XCTAssertTrue(strip.content.contains(".environment(\\.tileCaptionReserve, TileCaptionLayout.reserveLines)"),
-                      "ReadoutStrip 不再注入预留 ⇒ 底边又会各走各的")
-        XCTAssertTrue(strip.content.contains("TileCaptionLayout.minHeight(reserve: tileCaptionReserve)"),
-                      "MetricTile 不再消费预留 ⇒ 注入成了空操作")
+                      "ReadoutStrip 不再注入预留 ⇒ 底边又会各走各的（现居 \(strip.path)）")
+        let tile = try owner(ofDeclaration: "struct MetricTile: View")
+        XCTAssertTrue(tile.content.contains("TileCaptionLayout.minHeight(reserve: tileCaptionReserve)"),
+                      "MetricTile 不再消费预留 ⇒ 注入成了空操作（现居 \(tile.path)）")
     }
 
 }

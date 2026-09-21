@@ -169,7 +169,12 @@ struct GlassButton: View {
             }
             .frame(minHeight: Theme.Layout.minHitTarget)
         }
-        .buttonStyle(.plain)
+        // **这里不能再写 `.buttonStyle(.plain)`**（2026-09-21 实拍抓到）：
+        // 同一条链上离 `Button` 最近的那个 style 赢，所以原先这行把
+        // 后面 `glassButtonStyle(style)` 的三档全部压成 plain ——
+        // 「主行动 = 墨填充胶囊」在界面上从来没出现过，
+        // 用户判词「没有主次」「按钮跟参考图不一样」在控件层的真正落点就是这一行。
+        // 三档各自的 style 由 `glassButtonStyle` 决定，其中 `.plain` 分支仍然给 plain。
         .glassButtonStyle(style)
         .controlSize(style == .prominent ? .large : .regular)
         .disabled(!isEnabled)

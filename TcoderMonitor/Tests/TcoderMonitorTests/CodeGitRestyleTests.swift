@@ -99,7 +99,10 @@ final class CodeGitRestyleTests: XCTestCase {
         // 它响了，改的是**记录**而不是把断言删掉。
         // 14 → 15（收官轮 WS-X7）：自扫点名 `CodeMetricsView.swift` 427 行 >400，
         // 页面私有三分组搬进同目录新文件 `Code/CodeMetricsSections.swift`；归属没动，仍是 Code 目录。
-        XCTAssertEqual(out.count, 15, "WS-L/WS-P 名下应有 15 个视图文件（Code 6 / Git 5 / Dependencies 2 / CodeGit 2），数量变了说明归属被动过；列系统已上提进 Design/，见 Design/DataTable.swift")
+        XCTAssertEqual(out.count, PageScanDenominators.codeGitPageFiles,
+                       "\(PageScanDenominators.codeGitRosterText)，数量变了说明归属被动过；"
+                          + "列系统已上提进 Design/，见 Design/DataTable.swift；"
+                          + "分母单源在 `PageScanDenominators`，改这里之前先去那儿改一处")
         return out
     }
 

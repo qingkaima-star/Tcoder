@@ -314,6 +314,12 @@ Tests/TcoderMonitorTests/Health*Tests.swift
    所以 WS-H/WS-I/WS-J 一律**不启动 App**，用测试驱动分析器取数。
 3. **阈值不许为了刷分而动**。巨大文件行数、复杂度榜长度这类定义属冻结区；
    把阈值放宽让自己变好看，等于把工具废掉。
+4. **实现文件越过 400 行会让全仓测试变红**（`SourcesSizeAuditTests`，2026-09-21 补）。
+   这条口径（`FileSystemCodeAnalyzer.mediumFileLines`）本来只出现在自扫报告里、没有断言守着，
+   于是收官轮打到 0 之后又悄悄长回 4 个超限文件。红了的正确反应是**按类型整块搬去新文件**
+   （逐字节搬动、多重集对冲自证），不是往 `hugeFileWorkList` 里塞条目；
+   确实要挂账（例如归别的流的尺子），必须在清单里写清归属与拆法并向总工说明。
+   同一条 400 行在 `Tests/**` 侧由 `X3TestSizeAuditTests` 守，两侧口径同源。
 
 ### 21:05 第二轮：页面重样流（承接 WS-G 基座）
 

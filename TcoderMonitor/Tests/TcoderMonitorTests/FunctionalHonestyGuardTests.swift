@@ -193,6 +193,48 @@ final class FunctionalHonestyGuardTests: XCTestCase {
 
     // MARK: - 元测试：每条尺子都必须抓得住合成违规，且不误伤合法写法
 
+    // MARK: - G6 三档按钮必须真的不一样（同链两个 buttonStyle，内层赢）
+
+    /// `GlassButton` 里不得再出现裸 `.buttonStyle(`：样式一律经 `glassButtonStyle(_:)` 给。
+    ///
+    /// 起因（2026-09-21 实拍）：`GlassButton.body` 原先写
+    /// `Button { … }.buttonStyle(.plain).glassButtonStyle(style)`。
+    /// SwiftUI 解析环境值时**离 `Button` 最近的那个 style 赢**，于是 `.plain` 把
+    /// 外面三档全压掉 —— 主行动（墨填充胶囊）、次级（玻璃）、文字按钮在界面上
+    /// 长成同一个灰字。九张实拍里没有一个按钮有底色，用户判词「没有主次」
+    /// 「按钮跟参考图不一样」在控件层的根因就是这一行，而它躲过了全部既有守卫。
+    static func doubleButtonStyles(in files: [(path: String, content: String)]) -> [String] {
+        hits([".buttonStyle("], in: files)
+    }
+
+    /// 取 `struct <Name>` 到第一个顶格 `}` 之间的正文。
+    static func structBody(named name: String, in content: String) -> String {
+        var collecting = false
+        var out: [String] = []
+        for line in content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            if !collecting {
+                if line.hasPrefix("struct \(name)") { collecting = true }
+                continue
+            }
+            if line == "}" { break }
+            out.append(line)
+        }
+        return out.joined(separator: "\n")
+    }
+
+    func test_glassButtonDoesNotShadowItsOwnStyle() throws {
+        let glass = try XCTUnwrap(
+            try sources().first { $0.path.hasSuffix("Design/GlassComponents.swift") })
+        let body = Self.structBody(named: "GlassButton", in: glass.content)
+        XCTAssertFalse(body.isEmpty, "没读到 GlassButton 的 body，这条判据在空转")
+        XCTAssertTrue(Self.doubleButtonStyles(in: [(path: "Design/GlassComponents.swift",
+                                                   content: body)]).isEmpty,
+                      "GlassButton 在同一条链上又写了裸 `.buttonStyle(`，它会盖掉 "
+                      + "glassButtonStyle 的三档 —— 主行动与文字按钮长成同一个灰字。")
+        XCTAssertTrue(body.contains(".glassButtonStyle(style)"),
+                      "GlassButton 不再经 glassButtonStyle 分档 —— 三档样式成了死代码")
+    }
+
     func test_scannersCatchSyntheticViolationsAndSpareLegalOnes() {
         let dirty = [(path: "Services/Demo/Fake.swift",
                       content: "let p = MonitoredProject(path: \"demo://x\", isDemo: true)\n")]
@@ -219,8 +261,26 @@ final class FunctionalHonestyGuardTests: XCTestCase {
                       "注释里交代退役历史就被判红 → 一年后没人记得它为什么错")
     }
 
-    func test_enumCaseScannerHandlesBothShapes() {
-        let withValues = "enum E: String {\n    case idle\n    case scanning = \"s\"\n    case done(x: Int)\n}\n"
+    /// G6 的两向元测试：老写法必须被抓到，`AnalysisSectionRow` 那种
+    /// "只有一个 style" 的合法写法不许误伤（它本来就该是 plain 的导航行）。
+    func test_buttonStyleScannerCatchesTheShadowingShape() {
+        let shadowing = [(path: "Design/GlassComponents.swift", content: """
+        Button(action: action) { Text(t) }
+        .buttonStyle(.plain)
+        .glassButtonStyle(style)
+        """)]
+        XCTAssertEqual(Self.doubleButtonStyles(in: shadowing).count, 1,
+                       "同链两个 style 没抓到 → 三档按钮又会全部退成 plain 而没人知道")
+
+        let legal = [(path: "Design/GlassComponents.swift", content: """
+        Button(action: action) { Text(t) }
+        .glassButtonStyle(style)
+        """)]
+        XCTAssertTrue(Self.doubleButtonStyles(in: legal).isEmpty,
+                      "只经 glassButtonStyle 分档的合法写法被误伤")
+    }
+
+    func test_enumCaseScannerHandlesBothShapes() {        let withValues = "enum E: String {\n    case idle\n    case scanning = \"s\"\n    case done(x: Int)\n}\n"
         XCTAssertEqual(Self.enumCaseNames(enum: "E", in: withValues), ["idle", "scanning", "done"])
         XCTAssertTrue(Self.enumCaseNames(enum: "Missing", in: "struct S {}").isEmpty)
     }
