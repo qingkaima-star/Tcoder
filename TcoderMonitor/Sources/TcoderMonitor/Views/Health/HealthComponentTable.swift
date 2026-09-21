@@ -14,17 +14,16 @@ struct HealthComponentTable: View {
     var body: some View {
         GlassSection("维度分量",
                      subtitle: "按拖累程度排序，贡献最低者在前",
+                     // 公式那半句搬进 ⓘ：它与 `HeuristicClaimLine` 的 help 本来就重复
+                     // （盘点表 I 节点名"前半重复"）。基座补了 `subtitleHelp:` 之后，
+                     // 不必再把它挤进 `trailing:` 与合计读数抢一行。
+                     subtitleHelp: "综合分 = Σ（得分 × 归一化权重）。",
                      icon: .health,
                      // 卡头 trailing 位只有一行，没有"第二行的值要竖向对齐"这回事，
                      // 所以标签不占 160pt 列宽 —— 占了就变成「合计 ………… 60.1」
-                     // 中间一段空版心（1240 版框实拍）。ⓘ 是一枚图标，不占定宽列。
-                     trailing: AnyView(HStack(spacing: Theme.Spacing.xs) {
-                         // 公式那半句搬进 ⓘ：它与 `HeuristicClaimLine` 的 help 本来就重复
-                         // （盘点表 I 节点名"前半重复"），屏上留"怎么排"这个可操作信息。
-                         CopyHelpBadge("综合分 = Σ（得分 × 归一化权重）。")
-                         Theme.Readout.Field("合计", Live.fixed(sum, digits: 1),
-                                             labelWidth: nil)
-                     })) {
+                     // 中间一段空版心（1240 版框实拍）。
+                     trailing: AnyView(Theme.Readout.Field("合计", Live.fixed(sum, digits: 1),
+                                                           labelWidth: nil))) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 table
                 DataRowSeparator()
