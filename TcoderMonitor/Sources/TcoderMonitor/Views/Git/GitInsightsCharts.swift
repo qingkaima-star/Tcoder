@@ -14,9 +14,11 @@ import Charts
 
 func gitBucketLabel(_ granularity: BucketGranularity) -> String {
     switch granularity {
-    case .day: return "日"
-    case .week: return "周"
-    case .month: return "月"
+    // 桶粒度名会被**嵌进整句**（"按 日 分桶 · 共 N 桶" / "Bucketed by …"），
+    // 不查表就是英文句子里掉一个中文词（批次 P5 英文实拍抓到）。
+    case .day: return localizedCopy("日")
+    case .week: return localizedCopy("周")
+    case .month: return localizedCopy("月")
     }
 }
 

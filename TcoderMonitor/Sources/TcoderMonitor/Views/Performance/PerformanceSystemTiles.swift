@@ -169,8 +169,8 @@ struct PerformanceSystemTiles: View {
         let days = totalMinutes / (60 * 24)
         let hours = (totalMinutes / 60) % 24
         let minutes = totalMinutes % 60
-        if days > 0 { return "\(days) 天 \(hours) 小时" }
-        if hours > 0 { return "\(hours) 小时 \(minutes) 分" }
-        return "\(minutes) 分"
+        if days > 0 { return localizedFormat("%1$@ 天 %2$@ 小时", String(days), String(hours)) }
+        if hours > 0 { return localizedFormat("%1$@ 小时 %2$@ 分", String(hours), String(minutes)) }
+        return localizedFormat("%@ 分", String(minutes))
     }
 }

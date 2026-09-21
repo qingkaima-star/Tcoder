@@ -124,7 +124,11 @@ final class LocalizationGuardTests: XCTestCase {
     static func sourceFiles() throws -> [(path: String, content: String)] {
         let root = packageRoot.appendingPathComponent("Sources/TcoderMonitor").path
         var out: [(String, String)] = []
-        for sub in ["Views", "Design", "App"] {
+        // 五个目录：**Services/ 与 Models/ 会产出喂给界面的整句**
+        /// （健康页那句"综合 76 分（B 级）…"就住在 `Services/Health/ScoreCurves.swift`）。
+        /// 只扫界面目录会得到一份**系统性低估**的存量 —— 英文实拍当场证伪：
+        /// 页头出英文、同页的评分叙述仍是中文。
+        for sub in ["Views", "Design", "App", "Services", "Models"] {
             for url in walkFiles(in: "\(root)/\(sub)") where url.hasSuffix(".swift") {
                 out.append((String(url.dropFirst(root.count + 1)),
                             (try? String(contentsOfFile: url, encoding: .utf8)) ?? ""))
@@ -175,13 +179,16 @@ final class LocalizationGuardTests: XCTestCase {
     /// 已还的债就变成隐形余量（新增 N 处照样绿）。上限的取值必须是**某次实扫的现量**，
     /// 不许拍脑袋；调低它 = 还了债，调高它 = 新增债，两者都要在 diff 里显形。
     /// 2026-09-21 实扫登记：首测 **264 条**（扫到 369 条界面串 / 目录 112 条键），
-    /// 同日五批迁移后收到 **22 条**（已登记键 341）。剩下的 22 条集中在
+    /// 同日七批迁移后收到 **28 条**（已登记键 388）。
+    /// 数字从 22 涨回 28 **不是新增债**，是把扫描面从 Views/Design/App 扩到
+    /// Services/Models（英文实拍证伪：页头出英文、同页叙述仍中文）后**多看见的 6 条**。
+    /// 剩下的集中在
     /// `CodeRiskAdvice` 的多段建议长句（4~6 个占位符，改成整句键要逐句重写）
     /// 与 `ShellLayout` 的三句组合式空态 —— 它们是**已知账**，不是"没扫到"。
     /// 这个数字是"面"闸门第一次跑出来的存量，不是估的 ——
     /// 只按 `Text("中文")` 扫会得到 43 条，漏掉的 221 条住在 tooltip、
     /// `label:` / `caption:` 这类字符串型参数与 `localizedCopy` 口子里。
-    private static let unregisteredLiteralCeiling = 22
+    private static let unregisteredLiteralCeiling = 28
 
     func test_unregisteredLiteralInventoryPrintsAndShrinks() throws {
         let registered = Set(try Self.catalog().map(\.key)).union(Self.registeredStringsDictKeys())
