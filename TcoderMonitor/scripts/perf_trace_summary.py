@@ -18,7 +18,7 @@ AGENTS.md 第四轮红线 5（诚实性语义与阈值不许为任何指标放�
 import os
 import statistics
 
-from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, as_int, base_app_update_line, base_hang_line, base_hitch_frame_line, base_hitches_line, base_hotspot_line, base_main_thread_line, base_render_line, dedupe_pairs, disp_values, fmt_row, fps_counts, load_measure, over_budget, percentile, read_json, regime_note, in_display_regime)
+from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, as_int, base_app_update_line, base_hang_line, base_hitch_frame_line, base_hitches_line, base_hotspot_line, base_main_thread_line, base_render_line, dedupe_pairs, disp_values, fmt_row, fps_counts, load_measure, over_budget, percentile, read_json, regime_note, in_display_regime, phase_blame)
 from perf_trace_xml import cross_check_durations, find_tag
 
 
@@ -41,6 +41,7 @@ def cmd_summary(args):
     summary_render_rows(loaded, budget, seconds)
     summary_app_update_row(loaded, budget)
     summary_hitch_rows(loaded, seconds, budget)
+    summary_phase_blame_row(loaded, budget)
     summary_hang_rows(loaded, budget)
     summary_time_profile_rows(loaded)
     summary_fps_row(loaded)
@@ -262,6 +263,14 @@ def summary_hitch_rows(loaded, seconds, budget):
         fmt_row("hitch 帧时长", base_hitch_frame_line(), "未覆盖", "—")
         fmt_row("Hitch Time Ratio (ms/s)", "%.2f（危急档）" % BASELINE.get("hitch_time_ratio_ms_per_s", 12.9),
                 "未覆盖", "—")
+
+
+def summary_phase_blame_row(loaded, budget):
+    # 4b) 迟到帧到底该怪谁：主线程 update 也超预算的，和"主线程没问题、渲染/合成侧慢了"的
+    upd = dedupe_pairs(loaded["hitches-updates"])
+    late = disp_values(loaded["hitches"])
+    line, verdict = phase_blame(upd, late, budget)
+    fmt_row("迟到帧归因（update vs render）", "—", line, verdict)
 
 
 def summary_hang_rows(loaded, budget):

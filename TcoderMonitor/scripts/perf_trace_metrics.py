@@ -127,6 +127,30 @@ def launch_ready_ms(rows):
     return horizon
 
 
+def phase_blame(updates, hitch_frames, budget_ms):
+    """把"迟到帧"按"主线程 update 是否同时超预算"分开数 —— 决定该去查谁。
+
+    只看 hitch 数会误诊：42 个迟到帧里只有 13 次 update 超预算，
+    那意味着**大多数迟到与主线程无关**（渲染/合成侧），
+    去优化 `_updateViewGraph` 的常数是白工；反之若几乎一比一，才该查视图更新。
+    两边都按"次数"报，**不假装是一次迟点对应一次 update**：
+    hitches-updates 一次迟点可能出多行（Brown/Red），602 与 42 就是这种关系。
+    """
+    ups = [v for v in (updates or []) if v is not None]
+    late = [v for v in (hitch_frames or []) if v is not None]
+    over = sum(1 for v in ups if v > budget_ms)
+    if not late:
+        return "本窗口无迟到帧", "—"
+    share = 100.0 * over / len(late)
+    line = "update 超预算 %d 次 vs 迟到 %d 帧（比 %.0f%%）" % (over, len(late), share)
+    if over == 0:
+        return line, "主线程一次都没超 ⇒ 迟到全在渲染/合成侧，别改视图更新常数"
+    if share >= 80:
+        return line, "几乎一比一 ⇒ 先查主线程 update（视图粗粒度失效那一族）"
+    return line, ("主线程只占 %d 次，其余 %d+ 次要去渲染/合成侧找 ⇒ 两件事分开修"
+                  % (over, max(0, len(late) - over)))
+
+
 def in_display_regime(achieved_fps, budget_ms, ratio=0.8):
     """实测出帧是否还落在 `budget_ms` 所假设的那个刷新率档内。
 

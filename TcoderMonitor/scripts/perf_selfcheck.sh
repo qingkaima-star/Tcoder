@@ -53,6 +53,7 @@ cmd_selfcheck() {
   selfcheck_disk_precondition "$out"    # 24) 前置必须**能失败**：判定要在、且全仓只有一份
   selfcheck_display_regime "$out"       # 25) 120Hz 预算只对 120Hz 档成立：降频档里不许印"危急"
   selfcheck_app_update_split "$out"         # 26) 一个 max 不许同时盖住"整体很快"和"有个孤例很慢"
+  selfcheck_phase_blame "$out"              # 27) 迟到帧要说清该怪主线程还是合成侧，三种形状各判一次
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
@@ -815,4 +816,20 @@ print("D|%s" % v(outl, 8.333)[0])')
   printf '%s\n' "$r" | grep -q 'p95 1.00' \
     || { fail "分布里没有 p95（拿到 $(printf '%s' "$r" | grep '^D|' | cut -c3-60)）"; return; }
   ok "app-update 判定分得清「整体快 + 一个孤例慢」与「普遍慢」"
+}
+
+selfcheck_phase_blame() {  # selfcheck_phase_blame <outdir>
+  # 27) 42 个迟到帧里有 13 次 update 超预算 ⇒ 大多数迟到与主线程无关。
+  #     这种"该去查谁"的判断必须有一条尺子替人做，否则下一个读表的人会直接去改 update 常数。
+  local r
+  r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_trace_metrics import phase_blame as p
+a = p([9.0] * 42, [10.0] * 42, 8.333)[1]        # 一比一 ⇒ 查主线程
+b = p([1.0] * 600 + [168.3], [10.0] * 42, 8.333)[1]   # 只占极少数 ⇒ 分开修
+c = p([1.0] * 100, [10.0] * 5, 8.333)[1]       # 一次都没超 ⇒ 全在合成侧
+d = p([1.0], [], 8.333)[1]                      # 无迟到帧 ⇒ 不给任何归因
+print("%s|%s|%s|%s" % ("先查主线程" in a, "分开修" in b, "全在渲染/合成侧" in c, d == "—"))')
+  [ "$r" = "True|True|True|True" ] \
+    || { fail "迟到帧归因四种形状没各判对（拿到 $r）"; return; }
+  ok "迟到帧归因分得清「查主线程 / 分开修 / 全在合成侧 / 无迟到」"
 }
