@@ -176,11 +176,16 @@ extension CodeAnalyzerTests {
         XCTAssertTrue(outcome.coverage.isPartial)
         XCTAssertTrue(outcome.coverage.limitationSummary.contains { $0.contains("上限") },
                       "\(outcome.coverage.limitationSummary)")
+        // 承接字段（P7-C 3-2）：光算出来不发出去等于没算 —— 视图读的是 `metrics`。
+        XCTAssertEqual(outcome.metrics.scanLimitations?.count, outcome.coverage.limitationSummary.count,
+                       "边界条数没随指标一起交出去，代码规模页就挂不出提示")
+        XCTAssertTrue(outcome.metrics.scanLimitations?.contains { $0.contains("上限") } == true)
         opts.maxFiles = 100
         let whole = try await FileSystemCodeAnalyzer().analyzeWithCoverage(root: root, options: opts)
         XCTAssertFalse(whole.coverage.truncatedByMaxFiles)
         XCTAssertFalse(whole.coverage.isPartial, "一个上限都没碰到时不得谎称部分测量")
         XCTAssertTrue(whole.coverage.limitationSummary.isEmpty, "\(whole.coverage.limitationSummary)")
+        XCTAssertNil(whole.metrics.scanLimitations, "没有被切过却带边界字段，提示条会常驻，等于把全量说成部分")
     }
 
 }

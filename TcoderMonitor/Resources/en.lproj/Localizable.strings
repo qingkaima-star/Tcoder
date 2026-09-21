@@ -300,6 +300,7 @@
 "重复块 %1$@ 个 · 复杂度上榜 %2$@ 个函数" = "%1$@ duplicate blocks · %2$@ functions on the complexity board";
 "「其他」合并了占比最低的 %1$@ 种语言" = "\"Other\" merges the %1$@ languages with the smallest share";
 "分析器降级" = "Analyzer Degraded";
+"扫描边界" = "Scan Limits";
 "按有效代码行计" = "Counted by effective code lines";
 "识别规则降级：%1$@ 条正则没能编译，函数数与圈复杂度会偏低。" = "Recognition degraded: %1$@ patterns failed to compile, so function counts and cyclomatic complexity read low.";
 "%1$@ 个文件 · %2$@ 行有效代码" = "%1$@ files · %2$@ effective code lines";
@@ -654,3 +655,4 @@
 "Java 服务" = "Java service";
 "Node 服务" = "Node service";
 "未检测到匹配进程" = "No matching process detected";
+"本次扫描有 %1$@ 条边界生效，这一页的数字是部分测量。" = "This scan hit %1$@ limit(s), so the numbers on this page are a partial measurement.";

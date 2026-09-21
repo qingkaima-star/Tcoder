@@ -308,6 +308,36 @@ final class FunctionalHonestyGuardTests: XCTestCase {
         XCTAssertTrue(note.contains("没有产出覆盖率报告"), "真的没有报告时这句必须还在：\(note)")
     }
 
+    /// G9（P7-C 3-2）：诚实字段必须**两头都在** —— 分析器写它、视图读它。
+    /// `CodeScanCoverage` 就是反面教材：上限算得清清楚楚，但契约里没有承接字段，
+    /// 于是"只读了前 3 个文件"的报告在屏上与全量报告长得一模一样。
+    static func deadHonestyFields(_ fields: [String],
+                                  written: [(path: String, content: String)],
+                                  read: [(path: String, content: String)]) -> [String] {
+        let writeText = written.map(\.content).joined(separator: "\n")
+        let readText = read.map(\.content).joined(separator: "\n")
+        return fields.filter { field in
+            !(writeText.contains("\(field) =") && readText.contains(field))
+        }
+    }
+
+    func test_honestyFieldsAreBothWrittenAndDisplayed() throws {
+        let services = try SurfaceScanKit.sourceFiles(under: "Services")
+        let views = try SurfaceScanKit.sourceFiles(under: "Views")
+        let dead = Self.deadHonestyFields(["analyzerRuleFailures", "scanLimitations"],
+                                          written: services, read: views)
+        XCTAssertTrue(dead.isEmpty, "这些诚实字段有写无读（或缺写入点）：\(dead)")
+    }
+
+    func test_deadFieldScannerCatchesSyntheticAndSparesWired() {
+        let writtenOnly = [(path: "Services/Code/Fake.swift", content: "metrics.scanLimitations = limits\n")]
+        XCTAssertEqual(Self.deadHonestyFields(["scanLimitations"], written: writtenOnly, read: []),
+                       ["scanLimitations"], "只写不读没抓到 → 守卫是摆设")
+        let wired = [(path: "Views/Code/Fake.swift", content: "code.scanLimitations\n")]
+        XCTAssertTrue(Self.deadHonestyFields(["scanLimitations"], written: writtenOnly, read: wired).isEmpty,
+                      "两头都在的合法写法被误伤")
+    }
+
     /// G6 的两向元测试：老写法必须被抓到，`AnalysisSectionRow` 那种
     /// "只有一个 style" 的合法写法不许误伤（它本来就该是 plain 的导航行）。
     func test_buttonStyleScannerCatchesTheShadowingShape() {

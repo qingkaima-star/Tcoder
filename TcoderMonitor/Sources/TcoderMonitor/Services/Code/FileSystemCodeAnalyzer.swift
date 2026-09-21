@@ -18,8 +18,8 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
     /// 四个字段连同「2MB 单文件上限、30 项 skipDirectories、扩展名白名单、20 万行/文件截断」
     /// 一起被丢掉，UI 于是把一份**部分测量**呈现成完整测量。这里一个都不再丢。
     ///
-    /// 契约缺口：`CodeMetrics` 没有承接字段（Models 是冻结区），所以视图现在还读不到它 ——
-    /// 已把中文化的 `limitationSummary` 备好后交给总工决定接入点。
+    /// 契约缺口**已闭合**（批次 P7-C 3-2）：`CodeMetrics.scanLimitations` 承接
+    /// `limitationSummary`，代码规模页据此挂一条"本次是部分测量"的提示。
     struct CodeScanCoverage: Sendable {
         var visitedEntryCount: Int
         var includedFileCount: Int
@@ -139,6 +139,10 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             duplicateLinesOutsideReportedBlocks: duplication.linesOutsideReportedBlocks,
             skipLedger: scan.skipLedger
         )
+        // 契约接入（P7-C 3-2）：判据用 `limitationSummary` 非空而不是 `isPartial` —— 前者还含
+        // 「按规则排除了多少条目」这类**范围**事实，读者要知道数字是在什么范围内测出来的。
+        let limits = coverage.limitationSummary
+        metrics.scanLimitations = limits.isEmpty ? nil : limits
         return AnalysisOutcome(metrics: metrics, coverage: coverage)
     }
 
