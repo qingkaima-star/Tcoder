@@ -44,11 +44,18 @@ chk() {
 
 ACTUAL_SHA=$(shasum -a 256 "$BIN" | cut -d' ' -f1)
 HEAD_SHA=$(git rev-parse HEAD)
+# rev / 构建时是否干净：判定与测量档共用同一把手尺子（`perf_provenance.sh`），
+# 本文件只负责把它的结论翻成 ✅/❌ 那一行；不许在这里再写一遍 `[ "$a" = "$b" ]`。
+source "$(dirname "$0")/perf_provenance.sh"
+PROV_WHY=$(provenance_ok "$MF_REVISION" "$HEAD_SHA" "$MF_CLEAN") && prov_ok=1 || prov_ok=0
 
 echo "=== provenance 校验 ==="
 chk "交付二进制哈希 == manifest 记录" "$MF_SHA" "$ACTUAL_SHA"
-chk "manifest revision == 当前 HEAD" "$MF_REVISION" "$HEAD_SHA"
-chk "构建时工作树干净" "$MF_CLEAN" "true"
+if [ "$prov_ok" = "1" ]; then
+  echo "  ✅ 产物 rev == HEAD，且构建时工作树干净（判定来自 perf_provenance.sh）"
+else
+  echo "  ❌ 产物与代码不是同一份：$PROV_WHY"; fail=1
+fi
 chk "Info.plist 内 revision == HEAD" \
     "$(plutil -extract TCODERGitRevision raw "${APP_DIR}/Contents/Info.plist" 2>/dev/null)" "$HEAD_SHA"
 

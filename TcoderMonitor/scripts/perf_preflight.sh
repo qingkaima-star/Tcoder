@@ -98,6 +98,10 @@ quietest_seconds() {  # 从探针那一行里抠出"静默=Xs"的 X
   printf '%s' "${1:-}" | sed -n 's/.*静默=\([0-9.-]*\)s.*/\1/p'
 }
 
+# "产物到底是不是这份代码"的判定**不在本文件里**——它归 scripts/perf_provenance.sh，
+# 与 `verify_provenance.sh` 共用同一把手尺子（见那个文件的头注）。
+source "$(dirname "${BASH_SOURCE[0]}")/perf_provenance.sh"
+
 preflight_context() {  # preflight_context <outdir> <pid>
   local out="$1" pid="$2" f="" cores load1 front visible others hard=0
   cores=$(sysctl -n hw.ncpu 2>/dev/null || echo 8)
@@ -106,15 +110,18 @@ preflight_context() {  # preflight_context <outdir> <pid>
   f="$out/measurement-context.txt"
   front=$(preflight_front_app)
   visible=$(preflight_window_state "$pid")
-  others=$(pgrep -x swiftc 2>/dev/null | tr '\n' ' ')
+  others=$(concurrent_heavy_jobs)
+  # 运行时漏翻台账（i18n 报告器）会在渲染路径上记键、按 200 次节流写盘。
+  # 设了它再量帧率，量的就是台账自己的开销——所以这一维写进上下文，并且直接拒跑。
+  i18n_ledger="${TCODER_I18N_RUNTIME_LEDGER:-}"
   # 人手静默：整机 load 与并发编译挡得住"机器在忙"，挡不住"有人在点这个窗口"。
   local qline quiet
   qline=$(quiescence_probe)
   quiet=$(quietest_seconds "$qline")
 
   # 取二进制的出身（**不是**工作树 HEAD）：闸门第六维与上下文都要用
-  BUILD_REV=$(preflight_manifest_value TCODER_GIT_REVISION)
-  BUILD_CLEAN=$(preflight_manifest_value TCODER_GIT_CLEAN)
+  BUILD_REV=$(provenance_manifest_value TCODER_GIT_REVISION)
+  BUILD_CLEAN=$(provenance_manifest_value TCODER_GIT_CLEAN)
 
   preflight_write_context "$out" "$f"
   # 六条硬闸各自读上面那几个量（bash 是动态作用域：本函数的 `local` 在被调函数里照样可见，
@@ -132,38 +139,17 @@ preflight_context() {  # preflight_context <outdir> <pid>
   echo "    上下文已落 $f"
 }
 
-preflight_manifest_value() {  # preflight_manifest_value <KEY> → manifest 里的值（取不到=空）
-  # `build_app.sh` 落的 provenance 是 `KEY="value"`；注释行以 # 开头，天然不匹配。
-  local key="$1" line
-  [ -f dist/RELEASE_MANIFEST.env ] || { echo ""; return; }
-  line=$(grep -m1 "^${key}=" dist/RELEASE_MANIFEST.env 2>/dev/null)
-  printf '%s' "${line#*=}" | tr -d '"'
-}
-
-provenance_ok() {  # provenance_ok <manifest 里的完整 sha> <当前 HEAD> <manifest 的 GIT_CLEAN>
-  # → 0=被量的二进制就是这份代码；非 0 时把原因 echo 到 stdout（调用方贴进闸门话术）。
-  #
-  # 为什么闸门要有这一维（2026-09-21 实测）：`measurement-context.txt` 的 `HEAD=`
-  # 记的是**工作树**的头，而我 attach 的 `dist/Tcoder.app` 是两小时前从 `41add9e`
-  # 建的，中间隔了 39 个产物文件（整批 i18n + 我自己的 `PerfReadoutCells` 修复）。
-  # 结果"e991c6d 的 T2 读数"这句话从头到尾是假的——量的是旧二进制，只是恰好在新树上按了回车。
-  # 三个方向都拒：读不到 manifest（手搓的产物）、构建时工作树就脏、rev 对不上。
-  local built head clean
-  built="$1" head="$2" clean="$3"
-  if [ -z "$built" ] || [ "$built" = "unknown" ]; then
-    echo "读不到 dist/RELEASE_MANIFEST.env 的 TCODER_GIT_REVISION（产物不是本仓脚本建出来的？）"; return 1
-  fi
-  if [ "$clean" != "true" ]; then
-    echo "那趟构建**当时工作树就是脏的**（TCODER_GIT_CLEAN=${clean:-未记录}），rev 本身不可信"; return 1
-  fi
-  if [ -z "$head" ]; then
-    echo "取不到当前 HEAD，无法与产物比对"; return 1
-  fi
-  # manifest 存完整 sha、`git rev-parse HEAD` 也是完整 sha；短号只做人读，不参与判定。
-  case "$built" in
-    "$head") return 0 ;;
-    *) echo "产物是 ${built:0:7} 建的，当前代码是 ${head:0:7} —— 不同一份代码"; return 1 ;;
-  esac
+concurrent_heavy_jobs() {  # → 空格分隔的 pid；空 = 机器上没有本仓的重活
+  # 【为什么不止 swiftc】第一版只 `pgrep -x swiftc`，于是**跑全量门禁的那段时间**
+  # （进程叫 swift-test / xctest，编译早已结束）在它眼里是"机器空着"——
+  # 而那恰恰是 load 与调度最不干净的时候，量出来的样本会五闸全过。
+  # 实测 2026-09-21 11:46：门禁在测时 `swiftc 在场数=0`、load1=4.23，全部门槛放行。
+  local names=(swiftc swift-test xctest) out="" n p
+  for n in "${names[@]}"; do
+    p=$(pgrep -x "$n" 2>/dev/null | tr '\n' ' ')
+    [ -n "$p" ] && out="$out$p "
+  done
+  printf '%s\n' "${out% }"
 }
 
 front_is_target() {  # front_is_target <前台App名> → 0=就是被测 App
@@ -214,22 +200,38 @@ preflight_write_context() {  # preflight_write_context <outdir> <context 文件�
     echo "load1=$load1  核数=$cores  并发swiftc=${others:-无}"
     echo "人输入静默=${quiet:-取不到}s  明细=${qline:-（探针没跑起来）}"
     echo "hitches_seconds=$SECONDS_HITCHES  tp_seconds=$SECONDS_TP"
+    echo "诊断开关 TCODER_I18N_RUNTIME_LEDGER=${i18n_ledger:-未设（渲染路径零成本）}"
   } > "$f" 2>/dev/null || die "写不出 $f"
   echo "    上下文：前台=$front  visible=$visible  load1=$load1/$cores  并发swiftc=${others:-无}  静默=${quiet:-取不到}s"
 }
 
-preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GATE 决定炸还是通报）
-  # 【第六维：被量的到底是不是这份代码】2026-09-21 实测踩到：`measurement-context.txt`
-  # 里的 `HEAD=` 是**工作树**的头，而我 attach 的那个 `dist/Tcoder.app` 是两小时前
-  # `build_app.sh` 从 `41add9e` 建的，中间隔了 39 个产物文件（整批 i18n + 我自己的
-  # `PerfReadoutCells` 修复）。于是"e991c6d 的 T2 读数"这句话从头到尾是假的——
-  # 量的是旧二进制，只是恰好在新树上按了回车。
+# 身份两维：被量的到底是不是这份代码、以及采样时有没有开着诊断报告器。
+# 拆出来一半是为了不撞 `PerfRulerHotspotRatchetTests` 的 50 行线（拆，不抬数），
+# 一半是因为这两条问的是同一个问题："这批读数能算在谁头上"。
+preflight_gates_identity() {
+  # 【第六维】2026-09-21 实测踩到：`measurement-context.txt` 里的 `HEAD=` 是**工作树**的头，
+  # 而我 attach 的那个 `dist/Tcoder.app` 是两小时前 `build_app.sh` 从 `41add9e` 建的，
+  # 中间隔了 39 个产物文件（整批 i18n + 我自己的 `PerfReadoutCells` 修复）。
+  # 于是"e991c6d 的 T2 读数"这句话从头到尾是假的——量的是旧二进制，只是恰好在新树上按了回车。
   if ! PROVENANCE_WHY=$(provenance_ok "$BUILD_REV" "$(git rev-parse HEAD 2>/dev/null)" "$BUILD_CLEAN"); then
     echo "!! 二进制与代码不是同一份：${PROVENANCE_WHY} —— 先跑 scripts/build_app.sh release 再量。" >&2
     hard=1
   fi
+  if [ -n "${i18n_ledger:-}" ]; then
+    echo "!! 设了 TCODER_I18N_RUNTIME_LEDGER（=$i18n_ledger）——渲染路径在记漏翻台账并节流写盘；
+   这批读数量的是台账的开销，不是 App 的心跳。取消该变量再测。" >&2
+    hard=1
+  fi
+}
+
+preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GATE 决定炸还是通报）
+  # 【bash 的坑】调用**不带括号**：写成 `preflight_gates_identity()` 会被解析成
+  # "在 preflight_gates 内部再定义一个函数"，于是这两维**一次都没执行**、也不报错——
+  # 一条静默失效的闸门。selfcheck 第 17 项（六维矩阵）抓的就是它。
+  preflight_gates_identity
   if [ -n "$others" ]; then
-    echo "!! 有 swiftc 在跑（$others）——它会抢满全部核，app-update 相位会被显著抬高。等它跑完再来。" >&2
+    echo "!! 有本仓的重活在跑（pid $others：swiftc / swift-test / xctest）——" \
+         "它会抢满全部核，app-update 相位会被显著抬高。等它跑完再来。" >&2
     hard=1
   fi
   # 负载阈值：默认 1 分钟 load 不超过核数的 1.5 倍（LOAD_MAX=<数> 可覆盖，但覆盖了就要在报告里写）
