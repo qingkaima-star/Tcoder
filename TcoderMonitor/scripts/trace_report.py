@@ -37,7 +37,7 @@ import re
 import statistics
 import sys
 
-from perf_trace_metrics import (FRAME_BUDGET_MS_DEFAULT, dist_line, over_budget, percentile,
+from perf_trace_metrics import (launch_ready_ms, FRAME_BUDGET_MS_DEFAULT, dist_line, over_budget, percentile,
                                 read_json, write_json)
 from perf_trace_summary import cmd_summary
 from perf_trace_threads import cmd_threads
@@ -129,14 +129,14 @@ def cmd_fps(args):
     return 0
 
 
-def cmd_lifecycle(args):
-    """App Launch 的 life-cycle-period 表：逐周期时长 + 哪个周期最长。
+def lifecycle_periods(doc):
+    """life-cycle-period 表 → (逐行摘要, (起始,时长) 序列, 合计, 最长周期)。
 
-    表结构随 Xcode 版本变（列名不保证），所以这里**按标签通用地**打出来，
-    并且在 --json 里只存两个跨版本稳的量：total_ms 与 max_period_ms。
+    单独一个函数有两个理由：① `cmd_lifecycle` 因此只管"怎么印"，CC 掉回阈值下
+    （本仓 `PerfRulerHotspotRatchetTests` 量过 CC20 之后是这么修的：拆，不抬数）；
+    ② 解析与呈现分开之后，`launch_ready_ms` 能直接吃 `(起始, 时长)` 序列做单元测试。
     """
-    doc = Doc(args.xml)
-    rows = []
+    rows, spans = [], []
     total = 0.0
     longest = (0.0, "")
     for row in doc.rows():
@@ -146,20 +146,38 @@ def cmd_lifecycle(args):
         d = dur.ms() if dur else None
         if d is None:
             continue
+        start = find_tag(row, "start-time") or find_tag(row, "event-time")
+        s_ms = start.ms() if start else None
+        spans.append((s_ms if s_ms is not None else 0.0, d))
         total += d
         label = name.fmt if name and name.fmt else "?"
         if d > longest[0]:
             longest = (d, label)
         rows.append((label, d, [c.fmt for c in row if c.fmt][:4]))
+    return rows, spans, total, longest
+
+
+def cmd_lifecycle(args):
+    """App Launch 的 life-cycle-period 表：逐周期时长 + 哪个周期最长。
+
+    表结构随 Xcode 版本变（列名不保证），所以这里**按标签通用地**打出来，
+    并且在 --json 里只存两个跨版本稳的量：total_ms 与 max_period_ms。
+    """
+    rows, spans, total, longest = lifecycle_periods(Doc(args.xml))
     print("== life-cycle-period（首帧与冷构建成本）==")
     for label, d, extra in rows[:24]:
         print("  %8.2f ms  %-26s %s" % (d, label[:26], " ".join(extra)[:60]))
     if not rows:
         print("  未解出任何周期——该表为空或列名与预期不符（按未覆盖处理，别拿 0 当达标）")
+    ready = launch_ready_ms(spans)
     print("  合计 %.1f ms / %d 行；最长周期 %.1f ms = %s"
           % (total, len(rows), longest[0], longest[1]))
+    # 合计里含"活到窗口结束"的运行期，**不能当首帧**；就绪点看下一行。
+    print("  启动到就绪 %.1f ms（尾巴段已剔除；合计只作跨度参考）" % ready if ready is not None
+          else "  启动到就绪：未解出（表里没有带时长的周期，按未覆盖处理）")
     if args.json:
         write_json(args.json, {"periods": len(rows), "total_ms": round(total, 2),
+                               "ready_ms": None if ready is None else round(ready, 2),
                                "max_period_ms": round(longest[0], 2), "max_period": longest[1]})
     return 0
 

@@ -164,13 +164,13 @@ extension Theme {
         /// 所以取**同色相、可过线的最近值** `#2A6FD3`：白字 4.92:1、白底图形 4.92:1。
         /// 深浅两版仍取同一个图形值（原理由见上一版注释：深底想更亮一档时白字会跌破 4.5）。
         static let accent = SemanticRole(
-            name: "accent", textLight: 0x1D63C6, textDark: 0x7FB4FF,
+            name: "accent", textLight: 0x1B5EBD, textDark: 0x7FB4FF,
             graphicLight: 0x2A6FD3, graphicDark: 0x2A6FD3,
             onFill: DualColor(lightHex: 0xFFFFFF, darkHex: 0xFFFFFF))
 
         static let success = SemanticRole(
-            name: "success", textLight: 0x157A32, textDark: 0x5BE28A,
-            graphicLight: 0x2CA94C, graphicDark: 0x30D158)
+            name: "success", textLight: 0x13702E, textDark: 0x5BE28A,
+            graphicLight: 0x29A048, graphicDark: 0x30D158)
 
         // **70–84 的 teal 档已于 2026-09-21 退役**（批次 P5）。实拍反查证明它是全仓
         // 第二套强调色相：浅色 `#2AA694`（色相 171°）与 `success` 的 `#2CA94C`（124°）
@@ -181,7 +181,7 @@ extension Theme {
         /// 需注意（55–69 分 / 中风险）：橙。
         static let warning = SemanticRole(
             name: "warning", textLight: 0x8A5000, textDark: 0xFF9F0A,
-            graphicLight: 0xD18208, graphicDark: 0xFF9F0A)
+            graphicLight: 0xC57A07, graphicDark: 0xFF9F0A)
 
         static let danger = SemanticRole(
             name: "danger", textLight: 0xC2251C, textDark: 0xFF6B63,
@@ -204,7 +204,7 @@ extension Theme {
         /// 门禁 `testOnFillForegroundClearsWCAG_AA_InBothAppearances` 第一次跑就抓到——
         /// "并入同一支"如果只改色值不改前景，等于把填充态留成一个不过线的组合。
         static let info = SemanticRole(
-            name: "info", textLight: 0x1D63C6, textDark: 0x7FB4FF,
+            name: "info", textLight: 0x1B5EBD, textDark: 0x7FB4FF,
             graphicLight: 0x2A6FD3, graphicDark: 0x2A6FD3,
             onFill: DualColor(lightHex: 0xFFFFFF, darkHex: 0xFFFFFF))
 

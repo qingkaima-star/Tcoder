@@ -35,10 +35,17 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
     /// `perf_preflight.sh` 自 `perf_harness.sh` 搬出。不点名它们，本门的分母会从 101 个函数
     /// 静默掉到 67 个——尺子照样"绿"，只是不再量那 34 个函数。
     /// **搬出去的文件必须继续被量着**，否则"按职责拆文件"就等价于"拆到守卫看不见的地方"。
+    ///
+    /// 又漏了一次、又是我自己造成的：`perf_provenance.sh`（今早自 preflight/verify 搬出）
+    /// 与 `perf_probes.sh`（2026-09-21 探针族自 preflight 搬出，为的是还 400 行口径）
+    /// 都没点进来。这两把尺子量的是"产物身份"和"有没有人在动"——正好是最不该看不见的那两维。
+    /// 第三次的同一个坑是今晚自己又踩的：`perf_switch.sh`（switch 档为还 400 行口径搬出）。
+    /// ⇒ 规矩写在这里没用，**清单不会自己长大**；搬文件那一笔必须同批改这个集合。
     static let rulerScripts: Set<String> = [
         "perf_harness.sh", "perf_selfcheck.sh", "perf_preflight.sh", "trace_report.py",
         "perf_trace_xml.py", "perf_trace_metrics.py", "perf_trace_threads.py",
         "perf_trace_summary.py", "perf_framepulse.py",
+        "perf_provenance.sh", "perf_probes.sh", "perf_switch.sh",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。
@@ -84,7 +91,7 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
     func testRulerFunctionsStayBelowTheComplexityBar() async throws {
         let functions = try await rulerFunctions()
         XCTAssertGreaterThan(functions.count, 60,
-                             "六把尺子只认出 \(functions.count) 个函数，分母异常，热点榜数不到东西不能算通过")
+                             "尺子文件只认出 \(functions.count) 个函数，分母异常，热点榜数不到东西不能算通过")
         let ranked = functions.sorted {
             if $0.complexity != $1.complexity { return $0.complexity > $1.complexity }
             return $0.key < $1.key
@@ -116,7 +123,7 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
             print("  \(name) \(lines) 行")
             if lines > Self.fileLineBar { over.append("\(name) \(lines) 行") }
         }
-        XCTAssertEqual(counted, Self.rulerScripts.count, "六把尺子必须都在，少一把这条门就是空的")
+        XCTAssertEqual(counted, Self.rulerScripts.count, "点名清单里的尺子必须每把都在，少一把这条门就是空的")
         XCTAssertTrue(over.isEmpty, "撞 ≤\(Self.fileLineBar) 行棘轮的尺子：\(over.sorted().joined(separator: ", "))——拆开它，别拧阈值")
     }
 
