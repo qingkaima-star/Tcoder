@@ -50,8 +50,15 @@ final class DocReferenceRatchetTests: XCTestCase {
     /// 现在只数**带行号**的那一类，正是 #48 要防的东西。
     static let fileLineReferenceCeiling = 1
 
+    /// 2026-09-21 加进两份界面验收文档：`docs/界面-乱的清单.md` 的"判据"列整列都是锚点
+    /// （哪条缺陷由哪把守卫管），此前**没有任何机器**替下一轮守着它；
+    /// `docs/界面语言-对齐AiX.md` 是视觉语言的权威文档，同样点名符号。
+    /// 接入前先按本文件的口径预检过：`NSView.toolTip` 这类**外部 API** 不合规约
+    /// （锚点是给我们自己的代码用的），已改写成 `NSView` 的 `toolTip`；
+    /// `*.py` 走 `exampleManifestExtensions` 豁免、`*.txt` 不是文件锚点，也一并改了措辞。
     static let docs: [String] = ["README.md", "docs/使用说明.md",
-                                       "docs/口径与已知限制.md", "docs/九页实拍读数.md"]
+                                       "docs/口径与已知限制.md", "docs/九页实拍读数.md",
+                                       "docs/界面-乱的清单.md", "docs/界面语言-对齐AiX.md"]
 
     /// 我们自己的文件类型：这类锚点必须能在仓库里找到实体文件。
     static let repoFileExtensions: Set<String> = ["swift", "md", "sh"]
