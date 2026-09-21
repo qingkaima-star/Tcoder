@@ -47,6 +47,7 @@ cmd_selfcheck() {
   selfcheck_page_list_shape "$out"    # 18) 九页页名逐条完整（带空格的那条不许被拆）
   selfcheck_launch_ready "$out"       # 19) 首帧要剔除运行期尾巴，不许拿求和冒充
   selfcheck_probe_sentinel "$out"     # 20) 探针取不到的哨兵不许骗过"有人在动"那条判定
+  selfcheck_period_eligibility "$out" # 21) 档位声明与收尾复核互相矛盾的样本不许拿到 T1 资格
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
@@ -614,4 +615,34 @@ selfcheck_probe_sentinel() {  # selfcheck_probe_sentinel <outdir>
   grep -Eq '^[[:space:]]*(xcrun )?swiftc' scripts/perf_wait_window.sh \
     && { fail "perf_wait_window.sh 里又自己编探针了——删掉，改成 source preflight"; bad=1; }
   ok "哨兵判定四类都对、且它防的失效真实存在；排程器只剩一把尺子"
+}
+
+selfcheck_period_eligibility() {  # selfcheck_period_eligibility <outdir>
+  # 21) 「声明了什么档」和「收尾复核是否同意」必须一起判。
+  #     这两个标记此前只有写的人没有读的人 ⇒ 整窗没人动的 interaction 样本
+  #     照样打印「有资格答 T1」。四种形状各钉一次，且**两个否定必须与肯定不同**
+  #     （否则这条断言会被一个恒真的实现糊过去）。
+  local r
+  r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_trace_summary import period_eligibility as pe
+cases = [("clean-idle", {"period": "idle"}),
+         ("dirty-idle", {"period": "idle", "contaminated_by_human_input": "1"}),
+         ("clean-inter", {"period": "interaction"}),
+         ("nobody-inter", {"period": "interaction", "no_human_input_during_window": "1"}),
+         ("no-meta", {})]
+print("|".join("%s=%s" % (k, "Y" if pe(v)[0] else "N") for k, v in cases))')
+  # 注意 `case` 里的 `|` 是**或**不是"与"：写成 `a=Y|b=N` 会被读成两个候选模式，
+  # 于是"全串等于预期"永远匹不上——第一版就是这么红的（红得有价值：它当场把实际值打给我看）。
+  [ "$r" = "clean-idle=Y|dirty-idle=N|clean-inter=Y|nobody-inter=N|no-meta=Y" ] \
+    || { fail "四种形状的资格判定不对（拿到 ${r:-解析失败}）——自我矛盾的样本又能蒙混了"; return; }
+  # 反向钉：结论话术要跟着翻转，不能只改退出码、表头还写着"有资格"
+  local yes no
+  yes=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c \
+    'from perf_trace_summary import period_eligibility as pe; print(pe({"period":"interaction"})[1])')
+  no=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c \
+    'from perf_trace_summary import period_eligibility as pe; print(pe({"period":"interaction","no_human_input_during_window":"1"})[1])')
+  case "$yes" in *有资格*) ;; *) fail "干净 interaction 样本的话术里不再有「有资格」：$yes" ;; esac
+  case "$no" in *"不可当交互期样本"*) ;; *) fail "没人滚的 interaction 样本话术没翻转（还是「$no」）——退出码判了、表头在骗人" ;; esac
+  [ "$yes" != "$no" ] || { fail "两种样本话术一模一样，等于没判"; return; }
+  ok "期间资格：四种形状各判一次，且表头话术跟着翻转"
 }
