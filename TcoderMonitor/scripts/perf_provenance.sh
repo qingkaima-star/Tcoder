@@ -24,8 +24,25 @@ provenance_manifest_value() {  # provenance_manifest_value <KEY> [manifest 路�
   printf '%s' "${line#*=}" | tr -d '"'
 }
 
-provenance_ok() {  # provenance_ok <manifest 里的完整 sha> <当前 HEAD> <manifest 的 GIT_CLEAN>
+provenance_product_tree() {  # provenance_product_tree [rev] → 该提交"产物码"的 tree 指纹
+  # 为什么比 tree 而不是 commit sha：落地/merge 加的**容器提交**会换 sha，
+  # 而 `Sources/` + `Resources/` 两棵子树逐字节没变。只比 sha 就会把
+  # "刚落的交付内容"判成"另一份代码"——2026-09-21 14:08 实测：
+  # 落地后同步出来的头与建物的头，Sources 树 hash 完全相同（e3f8980…），
+  # 闸门却因为 sha 不同，把一整轮交互期测量拒掉了（**假拒**）。
+  # 拿不到两棵子树就返回空：调用方按 fail-closed 处理，绝不"看不见就当通过"。
+  local rev="${1:-HEAD}" a b
+  a=$(git rev-parse "$rev:TcoderMonitor/Sources" 2>/dev/null) || a=""
+  b=$(git rev-parse "$rev:TcoderMonitor/Resources" 2>/dev/null) || b=""
+  [ -n "$a" ] && [ -n "$b" ] || { echo ""; return 1; }
+  printf '%s%s' "$a" "$b" | shasum -a 256 | cut -d' ' -f1
+}
+
+provenance_ok() {  # provenance_ok <产物 rev> <当前 HEAD> <构建时 clean> [产物 tree] [当前 tree]
   # → 0=被量的二进制就是这份代码；非 0 时把原因 echo 到 stdout（调用方拼自己的话术）。
+  # 第 4/5 参是"产物码 tree 指纹"：给了就认——rev 不同但 tree 相同 ⇒ 放行，
+  # 并把放行理由写进 `PROVENANCE_NOTE`，调用方**必须**把它印进上下文（不许悄悄放行）。
+  # 没给（老 manifest 里没这个字段）⇒ 退回严格比 sha，宁拒不错。
   #
   # 三个失效方向都拒，第四个方向（放行）也必须能过——否则就养出另一条
   # "永远不可能通过的闸门"（本仓实测踩过：前台名比错那次，三趟全被拒，
@@ -43,6 +60,16 @@ provenance_ok() {  # provenance_ok <manifest 里的完整 sha> <当前 HEAD> <ma
   if [ "$built" = "$head" ]; then
     return 0
   fi
-  echo "产物是 ${built:0:7} 建的，当前代码是 ${head:0:7} —— 不是同一份代码"
+  local btree="${4:-}" htree="${5:-}"
+  if [ -n "$btree" ] && [ -n "$htree" ] && [ "$btree" = "$htree" ]; then
+    # 必须走 stdout：调用方普遍写成 `WHY=$(provenance_ok …)`，那里面对变量的赋值
+    # 发生在**子 shell** 里，父进程永远读不到——实测 2026-09-21 15:31，
+    # 于是"按 tree 放行必须留痕"变成了一句没有效果的注释（悄悄放行，正是我禁止的那种）。
+    echo "rev 不同（产物 ${built:0:7} / 当前 ${head:0:7}）但产物码 tree 相同 ${btree:0:7}"\
+" —— 差的只是 docs/scripts/测试，可归属"
+    return 0
+  fi
+  echo "产物是 ${built:0:7} 建的，当前代码是 ${head:0:7} —— 不是同一份代码"\
+"${btree:+（产物码 tree 也不同：${btree:0:7} vs ${htree:-?}）}"
   return 1
 }

@@ -45,7 +45,9 @@ def cmd_summary(args):
     summary_time_profile_rows(loaded)
     summary_fps_row(loaded)
     print("\n（未覆盖 = 该表没导出或导出为空，按 spec §6.6 明写，不许拿相邻档的数冒充。）")
-    return 0
+    # 退出码也是判据的一部分：脚本化的比较（"这趟能不能进表"）只看 rc，
+    # 光在表头上多打一行 ⚠ 会被下一环当成绿灯放过。
+    return 0 if period_eligibility(meta)[0] else 3
 
 
 # 【拆分的形状】原先这七节从头到尾挤在 `cmd_summary` 一个函数里（131 行 / CC 63，
@@ -65,15 +67,43 @@ def summary_load(d):
     return loaded
 
 
+def period_eligibility(meta):
+    """档位**声明**与收尾**复核**是否一致 → (样本可用吗, 给表头看的一句话)。
+
+    `perf_preflight.sh` 在录制窗口结束后会**再问一次**人手探针，把结论写进 meta：
+      interaction 档 → `no_human_input_during_window=1`：整窗一次人手都没有 ⇒ 那批量的是心跳期；
+      idle 档        → `contaminated_by_human_input=1`：窗口里有人动手 ⇒ 样本被污染。
+    这两个标记此前**只有写的人、没有读的人**（全仓 grep 只有一个写点），
+    于是"没人配合"的那一趟照样能打印「有资格答 T1」。
+    ⇒ 写进 meta 不等于被看见；判资格必须把复核读回来。
+    """
+    period = str(meta.get("period") or "idle")
+    # 输入来源决定这句话能不能说"真人"：synthetic 的样本答的是
+    # "连续滚动下渲染路径有没有 hitch"，答不了主观手感 —— 混为一谈就是造假证据。
+    source = str(meta.get("input_source") or "human")
+    tag = "" if source == "human" else "【合成输入：CGEvent 投递，非真人手感】"
+    if period == "interaction":
+        if str(meta.get("no_human_input_during_window") or "") == "1":
+            return False, ("声明交互期，但收尾复核记着**整窗没一次人手事件** ⇒ 不可当交互期样本，"
+                           "要判 T1 得重录并真的持续滚动")
+        return True, tag + "有资格答 T1（交互期 hitch = 0）"
+    if str(meta.get("contaminated_by_human_input") or "") == "1":
+        return False, ("声明心跳期，但收尾复核记着**窗口内有人动手** ⇒ 样本已污染，"
+                       "不得进前后对比表")
+    return True, "只答心跳期；**不许**拿去交 T1，要判 T1 用 interact 档重录"
+
+
 def summary_header(meta):
     # 【期间必须出现在表头上】§1 基线是**心跳期**（不去碰它）量的，T1 要的是**交互期**。
     # 两者同形状、不同含义——不在表头写清楚，过两周就有人会拿心跳期的 HTR 去交交互期的结论。
     period = str(meta.get("period") or "idle")
-    is_interaction = period == "interaction"
+    eligible, verdict = period_eligibility(meta)
 
     print("== Tcoder 性能读数（对照 spec §1 基线 rev %s，release 口径）==" % BASELINE["rev"])
-    print("   测量期间：%s —— %s" % (period, "有资格答 T1（交互期 hitch = 0）" if is_interaction
-                                else "只答心跳期；**不许**拿去交 T1，要判 T1 用 interact 档重录"))
+    print("   测量期间：%s —— %s" % (period, verdict))
+    if not eligible:
+        # 自我矛盾的样本要**吵**：安静地少打一行说明，就等于让它在表里蒙混过去。
+        print("   ⚠ 本目录的档位声明与收尾复核**互相矛盾**，读数只当过程记录，不得作为结论提交。")
     # 【对照列的身份必须自己说清楚】§1.3 已判该样本未受控，规则原先只写在
     # `perf_trace_metrics.py` 的注释里——写在注释里的规则等于没有规则：
     # 表一打出来，"§1 基线 | 本次 | 改善" 就是一份从 X 到 Y 的结论。
@@ -223,10 +253,16 @@ def summary_time_profile_rows(loaded):
         hot = str(tp.get("hotspot_top1", ""))
         # §1 那 64.3% 写的是 "_updateViewGraph / AG::Graph::UpdateStack::update()" 两个符号，
         # 它们是同一条视图图更新链；判定必须都认，否则换个入口符号就误报"已换位"。
-        still = any(tok in hot for tok in ("updateViewGraph", "UpdateStack::update"))
+        # 【地址不是符号】release 内联/未符号化的帧会解析成 `0x1004faa5b` 这种裸地址，
+        # 而"仍是它 / 已换位"是一句**关于是谁**的话——拿地址去判等于凭空断言。
+        # 实测 2026-09-21：交付内容三趟的热点是 `92.2% 0x1004faa5b`，旧写法直接报了"已换位"。
+        resolved = bool(hot) and not hot.startswith("0x")
+        still = resolved and any(tok in hot for tok in ("updateViewGraph", "UpdateStack::update"))
+        hot_verdict = ("仍是它" if still else "已换位") if resolved else "不可判（未解析出符号）"
         fmt_row("主线程热点第一名", base_hotspot_line(),
-                "%.1f%% %s" % (tp.get("hotspot_top1_pct", 0.0), hot[:26]),
-                "仍是它" if still else "已换位")
+                "%.1f%% %s" % (tp.get("hotspot_top1_pct", 0.0),
+                               hot[:26] if resolved else hot[:18] + "（未符号化）"),
+                hot_verdict)
     else:
         fmt_row("主线程 CPU 样本占比", base_main_thread_line(), "未覆盖（缺 time-profile.json）", "—")
         fmt_row("主线程热点第一名", base_hotspot_line(), "未覆盖（缺 time-profile.json）", "—")

@@ -685,3 +685,111 @@ ls -d /tmp/tcoder-capture.lock 2>/dev/null     # 取证锁必须空闲
 > 复用价值：这是**第二次**同一文件撞同一条线（上次 507→371，`64b9c15`）。
 > 若还想省事，正解不是提高 400，而是把"给守卫测试加用例"的默认落点改成分片文件
 > （`LocalizationGuardTests+XXX.swift`），并在提交前跑一次 `wc -l Tests/**/*.swift | awk '$1>380'` 自查。
+
+---
+
+## 给 UI 总工的性能侧交接（12:40 更新，随包 2/3 落地）
+
+### A. 还欠着的迁移：一条都没动
+
+`python3 scripts/trace_report.py migration` 现扫现报，此刻：
+**粗粒度读点 16 处 / 上限 16 / 细粒度读点 0 处**，收益分级 **承重 10 / 顺手 6**。
+也就是说 M0 交付的细粒度契约（`monitor.pulse.value` / `curve.value` /
+`cpuRanking.value` / `ledger.value.*` …）**至今零消费**——基座的收益还没进任何一屏。
+
+- 入口都在 `Views/**`（我不写，按 21:15 裁定归你派发）；
+- 每处给什么符号，`migration` 报告逐行点名，不用再抄我手写的表；
+- 已核对：粗读点与细格挂在**同一个** `MachSystemMonitor`（`state.monitor`）上，
+  照抄路径能编译；
+- 迁移时两条禁令（都已有 baseline-0 守卫在守）：
+  ① 别在页面里对 `curve.value.suffix(...)` / `cpuRanking.value.sorted(...)` 再切一遍再排一遍
+     （`reslicePattern`，基线 0）；
+  ② 别把裸内存量直接渲染（`rawMemoryEvidencePattern`，基线 0）——
+     `Text(monitor.memory.value.usedBytes)` 会在没数据时显示成 "0 B"，那是伪装成健康值的假读数。
+
+### B. 渲染路径禁则：扫描面刚扩了一圈，基线跟着变
+
+判据写的是"**body/Mark 内**"，而 `Design/**`（`GlassComponents` / `ChartTokens` /
+`ReadoutKit` / `HealthAdviceCards` …）本身就是视图构造器，旧实现只扫 `Views/`。
+撞见实证才修：i18n 台账把 `misses.sorted()` 放在 `Design/ReadoutKit.swift`，老扫描面数不到。
+
+⇒ 现在 = **Views ∪ Design**，`dynamicNSColor` 基线 **56 → 64**：
+**这是扩面、不是新增债**，多看见的 8 处全在 `Design/`，台账逐条带 `Design/` 前缀可复核
+（`$TMPDIR/tcoder-perf-renderpath-debt.txt`，每条都是 `文件:行 + 原文`）。
+从 64 起仍只许减不许增，终点 0。现量：`directFormatters 1/1 dynamicNSColor 64/64 fullSort 10/10 syncFileIO 2/2`。
+
+### C. 一条会咬到 x6 的守卫 —— 已自己化解，留档说明它不是假警报
+
+`.worktrees/x6-scale`（当时待并）把 `FramePulse` 拆成 411→367 行，
+它的 `writeHeaderLocked()` 只写 **2 行**，而我这边是 **4 行**——含两条语义提醒：
+"心跳最大间隔 = runloop 唤醒间隔，**不是**主线程占用时长"、
+"要量占用请用 xctrace 的 `app-update` 相位；本文件的帧间隔 p95 才是 T1 的直接对象"。
+
+⇒ **2026-09-21 复查：这条已经不复存在。** x6 已并入 main，拆分后的表头把两条提醒带着走了：
+`FramePulse.swift` 368 行，两条 `writeLineLocked("# …")` 在 `:313` 与 `:315`。
+合并后重跑的门禁：`Executed 909 tests, with 11 tests skipped and 0 failures`（含那条守卫）。
+留这一条的意义：**守卫当时确实会在掉提醒的那一刻变红**，而红是对的——
+提醒真差一点就掉了。搬动代码的人把它接住了，这就够了。
+
+### D. 采样纪律（已进闸门，不靠自觉）
+
+`TCODER_I18N_RUNTIME_LEDGER` 设了再量帧率，量的是台账自己的开销
+（`record()` 在渲染路径上、按 200 次节流写盘）。⇒ `perf_preflight.sh` 现在直接**拒跑**，
+并把它的状态写进 `measurement-context.txt`。日常使用不受影响（不设即零成本）。
+
+**2026-09-21 追加**：交互档（T1）的开录时机换了，跑的人只需知道一件事——
+**你只管持续滚，脚本检测到你正在滚才开录**，不用猜时机、不用等发话。
+旧写法"先等 8 秒静默再倒计时"把前三轮全烧成了 `窗口内没人`。
+另：静默探针从此只有一把（`perf_preflight.sh` 的 `quiescence_probe`），
+排程器里再出现自己 `swiftc` 编探针会被 selfcheck 第 20 项当场抓住。
+
+### E. 一条通用红线：**落一个证据标记，同一笔里就必须有读者**
+
+今天抓到自己两次"记了但没人看"：
+- `no_human_input_during_window=1` / `contaminated_by_human_input=1` 写进 meta，
+  **全仓 grep 只有一个写点、零个读者** ⇒ "整窗没人滚"的样本照样打印「有资格答 T1」。
+  我三轮作废样本是靠**自己读终端**判掉的，工具一次都没拦。
+- `PROVENANCE_NOTE=…` 变量赋值出不了 `$(…)` 子 shell ⇒ "按 tree 放行必须留痕"这条
+  我自己定的规矩，在实际路径上一句不印，闸门照样放行。
+
+⇒ 凡是"把异常写进某个文件/变量以示诚实"的改动，落地那笔要顺手 `grep -c 键名`：
+   **写点数 + 读点数 ≥ 2 且分布在不同文件**，否则那条记录只是让我安心。
+   退出码比表头文字更可靠：脚本化的比较只看 rc，表头多一行 ⚠ 会被下一环当绿灯放过
+   （`perf_trace_summary.py` 现在对"声明与复核互相矛盾"的样本 **rc=3**）。
+
+### F. 反向复用同一把尺子之前，先问它的失败值落在数轴哪一端
+
+idle 档判"够静默"是 `q >= 8`；我照同一把尺子做交互档"有人在动"，顺手写成 `q < 3` ——
+但探针失败时打的是 `静默=-1.00s`，**-1 在数轴上最小**，
+于是"量不到"精确地变成"最有人在动"，一条**恒真**的开录闸门。
+现在有一道与数值无关的 `probe_usable()` 挡在前面，
+元测试还**反向承认**哨兵确实骗得过原判定（哪天骗不过了，是守卫的理由消失了，连守卫一起改）。
+
+### G. 你们每并一批 UI 改动之后，请自己重跑一次（10 分钟的事）
+
+```bash
+cd TcoderMonitor
+./scripts/build_app.sh release                                   # 必须：新闸门要求产物 rev == 树头
+./scripts/perf_wait_window.sh $(git rev-parse --short HEAD) 3    # T2 心跳期 ×3（只等窗口、不绕闸）
+MODE=interact ./scripts/perf_wait_window.sh $(git rev-parse --short HEAD) 3   # T1 交互期：需要真人滚
+./scripts/perf_harness.sh switch /tmp/tcoder-perf-$(git rev-parse --short HEAD)-switch  # T4 逐页冷启动
+./scripts/perf_harness.sh report <上面任一目录>                   # 表头会写明期间与产物 rev
+```
+
+**为什么必须重跑**：`measurement-context.txt` 与 `meta.json` 现在都记**产物自己的**
+`rev`（`dist/RELEASE_MANIFEST.env`），不匹配就直接拒采。
+今天实测过一次误标：12:20 我拿 `9e60fec` 的二进制量到"T2 三趟一致"，
+而当时的头已经并进了 10 个 i18n 提交（19 个 `Sources/` 文件）——
+**那三趟不属于新代码**。这条闸门就是为这件事加的。
+
+### F. 性能侧欠大家的（我在做，不用你动）
+
+1. **T1 仍未举证**：交互期 hitch=0 / p95≤8.4ms 需要真人滚动，已排好命令，等用户配合。
+2. **§1"改动前基线"仍未成立**：要按 §4.1 在旧 rev 的独立产物上受控重测，
+   而尺子现在还量不了"别人的构建"（`TARGET_BINARY` 固定指本树 `dist/`，
+   且新 provenance 闸门要求 rev 等于我的 HEAD）⇒ 需要先加
+   `MEASURE_TARGET=<路径>` + `MEASURE_REV=<完整 sha>` 的成对入口（只给一个就拒）。
+   在那之前，任何"从 X 降到 Y"的话都不许说（表头已经自己声明对照列未受控）。
+3. **外部争用看不见**：同 rev、同实例、五维全同的三趟里 hitch 是 43/3/1，
+   而 `app-update` 稳定 2.x ms ⇒ 差异在显示系统层面。已登记 spec §7 第 8 条；
+   要收这一维得给 preflight 再加一维（例如整机出帧基线），本轮没做。

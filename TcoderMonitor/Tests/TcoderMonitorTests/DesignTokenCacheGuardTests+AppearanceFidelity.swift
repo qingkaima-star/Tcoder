@@ -25,8 +25,11 @@ extension DesignTokenCacheGuardTests {
         // critical 是唯一 onFill 随外观翻转的角色
         XCTAssertEqual(Self.resolveHex(Theme.Semantic.critical.onFillColor, under: .aqua), "FFFFFF")
         XCTAssertEqual(Self.resolveHex(Theme.Semantic.critical.onFillColor, under: .darkAqua), "111111")
-        // 图表色板按号位取色
-        XCTAssertEqual(Self.resolveHex(Theme.Chart.color(at: 0), under: .aqua), "0A82FF")
+        // 图表色板按号位取色。0 号 `0A82FF` → `0A7AF8`：批次 P6 把色板收成
+        // "一系蓝 + 中性灰"（参考图普查：有饱和度的像素里蓝约 11,500 个、绿黄红各 130–180 个，
+        // 而那三个是状态圆点不是图表色）。本条断言的**目的没变** ——
+        // 动态色在 aqua 下解析到浅色档那一个具体值、在 darkAqua 下解析到深色档。
+        XCTAssertEqual(Self.resolveHex(Theme.Chart.color(at: 0), under: .aqua), "0A7AF8")
         XCTAssertEqual(Self.resolveHex(Theme.Chart.color(at: 0), under: .darkAqua), "0A84FF")
         // 越界回绕后仍是同一枚动态色
         XCTAssertEqual(Self.resolveHex(Theme.Chart.color(at: 8), under: .darkAqua), "0A84FF")

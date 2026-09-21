@@ -146,8 +146,11 @@ struct CodeScaleSection: View {
 
     var body: some View {
         GroupStack {
+            // 卡名不叫「代码规模」——那是**这一页的 H1**。同一屏两个一模一样的标题
+            // 读起来像页面渲染了两遍（参考图的卡名各自具体："24 小时活动""Agent 时长占比"）。
+            // 这张卡实际说的是"总行数 + 它由哪三项相加"，所以卡名就叫总行数。
             GlassSection(
-                "代码规模",
+                "总行数",
                 subtitle: localizedFormat("主语言 %1$@ · 共 %2$@ 个文件",
                                           code.primaryLanguage,
                                           NumberFormat.grouped(code.totalFiles)),

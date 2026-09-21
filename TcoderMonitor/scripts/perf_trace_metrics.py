@@ -103,6 +103,30 @@ def base_hotspot_line():
 FRAME_BUDGET_MS_DEFAULT = 8.333  # 120 Hz 下单帧预算，实测 Hz 不同时由 --budget-ms 覆盖
 
 
+def launch_ready_ms(rows):
+    """从 life-cycle-period 的 (起始 ms, 时长 ms) 推出"**启动到就绪**"。
+
+    为什么不能直接把全表求和：App 起来之后**一直活到录制窗口结束**，
+    表里最后一定有一段"运行期"占掉几乎整个窗口。
+    实测 2026-09-21：总览页全表求和 = 10338 ms（≈录制时长 10 s），
+    而真正的启动段在 837 ms 处就结束了——旧写法把每页都算成 ≈10 s，
+    T4（冷启动 ≤1.0 s）于是**永远不可能达标**。
+
+    规则（可复核、不挑好看的数）：
+      · 找出"尾巴段"= 时长超过整表跨度一半的那些段；有就取其中最早的**起点**当就绪点；
+      · 没有尾巴段（进程很快就退出）⇒ 取所有段的末端最大值，那本来就是全部启动成本。
+    空表返回 None（调用方按"未观测到"处理，不许拿 0 当达标）。
+    """
+    spans = [(s, d) for s, d in rows if d and d > 0]
+    if not spans:
+        return None
+    horizon = max(s + d for s, d in spans)
+    tails = [s for s, d in spans if d > horizon / 2.0]
+    if tails:
+        return min(tails)
+    return horizon
+
+
 def percentile(values, p):
     """int(n·p) 下标取法——与 §1 基线脚本同口径，换算法等于换门禁。"""
     if not values:

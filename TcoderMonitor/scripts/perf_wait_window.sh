@@ -22,16 +22,21 @@ source scripts/perf_preflight.sh
 # 于是"没有重活"**永远为真**——一条恒放行闸门比恒拒更危险，因为它连报错都没有。
 # 今天刚修过恒拒（前台名比错），这条断言防的是镜像方向。
 declare -f concurrent_heavy_jobs >/dev/null || {
-  echo "!! scripts/perf_preflight.sh 里没有 concurrent_heavy_jobs —— 这一维看不见东西，拒绝起跑" >&2
+  echo "!! source 链里没有 concurrent_heavy_jobs（现在住在 scripts/perf_probes.sh）—— 这一维看不见东西，拒绝起跑" >&2
   exit 3
 }
 
 TAG="${1:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
 SAMPLES="${2:-3}"
-MODE="${MODE:-idle}"                   # idle=答 T2；interact=答 T1（**必须真人滚**）
+MODE="${MODE:-idle}"                   # idle=答 T2；interact=答 T1
+INPUT="${INPUT:-human}"                  # human=等真人滚；synth=自己投 CGEvent 滚动
+# ⇒ 两种输入走**同一道**开录闸门与**同一道**收尾复核：闸门读的是
+#   `secondsSinceLastEventType`，它本来就不区分事件来自手还是来自 CGEvent 投递。
+#   为 synth 单开一条"跳过检查"的分支，就是给将来的自己留一个骗自己的地方。
 DEADLINE_SECS="${3:-1800}"          # 总共最多等多久（默认 30 分钟），超了就如实放弃
 LAUNCH_APP="${LAUNCH_APP:-1}"      # 0 = 只等你自己把 App 开到最前面
 QUIET_WANT=8                        # 比闸门的 5 s 留一点余量，免得刚过线就开始动
+INTERACT_WANT="${INTERACT_WANT:-3}" # interact 档：静默 <3 s 才算"人正在滚"（滚轮事件间隔通常 <1 s）
 POLL=5
 START_BIN="$PWD/dist/Tcoder.app"
 
@@ -45,13 +50,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-quiet_seconds() {  # 整机人手静默；探针取不到就返回 -1（调用方按"不合格"处理，与 preflight 同口径）
-  local bin="/tmp/tcoder-quiesce-wait-$$" out
-  if [ ! -x "$bin" ]; then
-    swiftc -O -target arm64-apple-macos14.0 scripts/input_quiescence.swift -o "$bin" 2>/dev/null || { echo "-1"; return; }
-  fi
-  out=$("$bin" 2>/dev/null | tail -1)
-  printf '%s' "$out" | sed -n 's/.*静默=\([0-9.]*\)s.*/\1/p' | head -1
+quiet_seconds() {  # 整机人手静默。**只转发**，不再自己编一份二进制、自己写一份正则
+  # 原来这里是第二把尺子：`swiftc` 单独编到 /tmp/tcoder-quiesce-wait-$$，
+  # 解析用 `[0-9.]*` 而 preflight 用 `[0-9.-]*` —— 后者能把哨兵 -1 抠出来，前者抠成空串。
+  # 两份迟早分叉，而这次分叉的下游是"要不要开录"。
+  quietest_seconds "$(quiescence_probe)"
 }
 
 front_app() {
@@ -68,7 +71,10 @@ my_instance_pid() { pgrep -fx "$MY_BIN" 2>/dev/null | head -1; }
 
 wait_for() {  # wait_for <人类可读的条件名> <判定函数>；不满足就一直等，超时按失败退出
   local what="$1" check="$2" waited=0 reason=""
-  while :; do
+  if [ "$MODE" = "interact" ] && [ "$INPUT" = "synth" ]; then
+  ensure_synth_scroller || { echo "!! 合成输入器准备失败 ⇒ 一趟都不跑（不拿 idle 数冒充 T1）" >&2; exit 4; }
+fi
+while :; do
     if reason=$($check); then
       echo "    ✓ $what"
       return 0
@@ -91,13 +97,54 @@ cond_one_instance() {  # 满足则回 0 且不打印；不满足则打印原因�
   return 1
 }
 
-cond_quiet() {
-  local raw q
-  raw=$(quiet_seconds); q=${raw:- -1}
-  if python3 -c "import sys; sys.exit(0 if float('$q'.strip() or -1) >= $QUIET_WANT else 1)"; then
-    return 0
-  fi
+cond_quiet() {  # idle 档：等"整段够久没人动"
+  local q; q=$(quiet_seconds)
+  probe_usable "$q" || { echo "静默探针取不到（拿到「${q:-空}」），不知道有没有人在动，不开录"; return 1; }
+  [ "$(human_input_in_window "$q" "$QUIET_WANT")" = "窗口内没人" ] && return 0
   echo "人手 ${q}s 前还在动（要 ≥${QUIET_WANT}s）"
+  return 1
+}
+
+SYNTH_PID=""
+SYNTH_BIN=""
+ensure_synth_scroller() {  # **进等待循环之前**把投事件器编好（内容哈希缓存，全机一次）
+  # 原来编译写在 start_synth_scroller 里，而它是"开录闸门之后"才调的
+  # ⇒ `swiftc` 派出的 `swift-frontend` 还在吃 94.8% CPU 的时候，录制窗口已经开始了。
+  # 自己刚起的编译绕过自己刚过的闸门，这种污染比别人的干扰更难发现。
+  local want
+  want=$(shasum -a 256 scripts/perf_synth_scroll.swift 2>/dev/null | cut -c1-12)
+  SYNTH_BIN="${SCRATCH:-$PWD/.scratch}/tcoder-synth-scroll-${want:-unknown}"
+  [ -d "$SYNTH_BIN" ] && SYNTH_BIN="$SYNTH_BIN.$$"     # 别人占了这个名字：换，不硬来
+  [ -x "$SYNTH_BIN" ] && return 0
+  local tmp="$SYNTH_BIN.build.$$"
+  xcrun swiftc -O -target arm64-apple-macos14.0 \
+      -module-cache-path "${SCRATCH:-$PWD/.scratch}/swiftmodulecache" \
+      scripts/perf_synth_scroll.swift -o "$tmp" 2>/dev/null \
+    || { rm -f "$tmp"; echo "!! 合成输入器编不出来（scripts/perf_synth_scroll.swift）" >&2; return 1; }
+  mv -f "$tmp" "$SYNTH_BIN"
+}
+
+start_synth_scroller() {  # 只管"跑起来"：编译不许出现在闸门与录制之间
+  local secs="${SYNTH_SECS:-95}"   # 覆盖一整趟（hitches 20s + time-profile 25s + 导出与换趟空档）
+  [ -x "$SYNTH_BIN" ] || { echo "!! 合成输入器没预备好（应先跑 ensure_synth_scroller）" >&2; return 1; }
+  # 被测 pid：优先用本档自己起的那个；attach 模式下用唯一在场的那个
+  local tp; tp="${TARGET_PID:-$(my_instance_pid 2>/dev/null | head -1)}"
+  [ -n "$tp" ] || { echo "!! 不知道往哪个 pid 投事件 ⇒ 不开录（空转样本比没有样本更坏）" >&2; return 1; }
+  "$SYNTH_BIN" "$secs" "$tp" 14 40 >&2 &
+  SYNTH_PID=$!
+  echo "    合成输入器 pid=$SYNTH_PID（投 ${secs}s；meta 记 input_source=synth）"
+  return 0
+}
+
+cond_someone_active() {  # interact 档：**必须检测到有人正在动**才开录
+  # 与 cond_quiet 是同一条尺子的两端（一个问"够久了吗"，一个问"还差得远吗"），
+  # 所以取数、哨兵、分类三步全部复用，只有阈值换成交互档的。
+  # 这里若写成 `q < INTERACT_WANT` 的裸数值比较，哨兵 -1 会让"量不到"变成"最快开录"——
+  # 那条恒真的闸门正是 selfcheck 第 20 项要当场咬住的东西。
+  local q; q=$(quiet_seconds)
+  probe_usable "$q" || { echo "静默探针取不到（拿到「${q:-空}」），不能凭『大概有人在滚』开录"; return 1; }
+  [ "$(human_input_in_window "$q" "$INTERACT_WANT")" = "窗口内有人" ] && return 0
+  echo "人手已静默 ${q}s（交互档要 <${INTERACT_WANT}s，也就是**正在滚**）"
   return 1
 }
 
@@ -107,7 +154,7 @@ cond_no_heavy_jobs() {  # 录制档自己会拒这一维，排程器就必须**�
   declare -f concurrent_heavy_jobs >/dev/null || { echo "探针函数不在场（宁可不量）"; return 1; }
   local pids; pids=$(concurrent_heavy_jobs)
   [ -z "$pids" ] && return 0
-  printf '有本仓重活在跑（pid %s：swiftc / swift-test / xctest）' "$pids"
+  printf '%s' "机器上有重活在跑（$(concurrent_heavy_jobs_detail)）——两档互踩，等它结束"
   return 1
 }
 
@@ -153,10 +200,16 @@ for i in $(seq 1 "$SAMPLES"); do
   wait_for "实例数恰为 1" cond_one_instance || break
   wait_for "前台是被测 App" cond_front_is_ours || break
   if [ "$MODE" = "interact" ]; then
-    # 交互期**不等静默**：那一维是 idle 的判据（要的是没人动）。这里改成明确倒计时，
-    # 让人知道"从这一刻起滚"，而不是没人动的瞬间开录、然后靠猜。
-    echo "    … 5 秒后开录：请从此刻起持续滚动被测窗口，一直滚到本趟结束（约 50 s）"
-    sleep 5
+    # 【开录时机：等"有人正在动"，不是等"没人动"】前三轮交互期全作废（`窗口内没人`），
+    # 根因不是人不配合，是我的时序自相矛盾：这一档要求窗口里有人滚，
+    # 我却**先等 8 秒静默再开录**——开录那一刻恰好最没人动，之后全靠人猜"现在该滚了"。
+    # 改成：你只管滚，我检测到你在滚才开录，整段窗口自然落在滚动过程中。
+    if [ "$INPUT" = "synth" ]; then
+      # 投事件器活着才谈开录：编译失败 / 投递 0 拍都会让它非零退出，
+      # 而闸门那边看不到任何"新的输入事件" ⇒ 自然走"等不到人在动"那条放弃路径。
+      start_synth_scroller || { echo "!! 合成输入器起不来，本趟不开录" >&2; break; }
+    fi
+    wait_for "有人正在滚动（静默 <${INTERACT_WANT}s）" cond_someone_active || break
   else
     wait_for "人手静默 ≥${QUIET_WANT}s" cond_quiet || break
   fi
@@ -164,10 +217,11 @@ for i in $(seq 1 "$SAMPLES"); do
     # T1 的判据是"交互期 hitch=0"，而合成滚动两条撤因都在 spec §4（进程内滚动不发 NSEvent，
     # T3 暂停根本不会生效）。所以这一档**只有人手能举证**：闸门会反过来要求
     # "这 20 秒里有人动过"，没人滚就被拒——不会伪装成一趟好数据。
-    echo "    ★ 接下来这 ~45 秒：请用鼠标滚轮**连续滚动被测窗口**（性能页或代码页都行），"
-    echo "      按 120Hz 的体感滚，别停——停在页面顶部空转会被判成「没人在滚」。"
+    echo "    ★ 请**从现在起持续滚动**被测窗口（性能页或代码页都行，按 120Hz 的体感滚，别停）。"
+    echo "      我一检测到你正在滚就开录（约 50 s），你不用猜时机、也不用等我发话。"
   fi
-  if ./scripts/perf_harness.sh "$MODE" "/tmp/tcoder-perf-$TAG-$MODE-run$i"; then
+  INPUT_SOURCE="$INPUT" export INPUT_SOURCE
+  if ./scripts/perf_harness.sh "$MODE" "$SCRATCH/tcoder-perf-$TAG-$MODE-run$i"; then
     echo "    ✓ 第 $i 趟完成"
   else
     echo "    ✗ 第 $i 趟被闸门拒绝或失败（不绕、不记）"
@@ -175,7 +229,7 @@ for i in $(seq 1 "$SAMPLES"); do
   fi
 done
 
-echo "==> 完成：$((SAMPLES - fails))/$SAMPLES 趟可用（档=$MODE）；产物 /tmp/tcoder-perf-$TAG-$MODE-run*/"
-echo "    重打读数：./scripts/perf_harness.sh report /tmp/tcoder-perf-$TAG-$MODE-run1"
+echo "==> 完成：$((SAMPLES - fails))/$SAMPLES 趟可用（档=$MODE）；产物 $SCRATCH/tcoder-perf-$TAG-$MODE-run*/"
+echo "    重打读数：./scripts/perf_harness.sh report $SCRATCH/tcoder-perf-$TAG-$MODE-run1"
 echo "    （表头会写明测量期间；interact 档才有资格答 T1，idle 档只答心跳期）"
 [ "$fails" -lt "$SAMPLES" ] || exit 1
