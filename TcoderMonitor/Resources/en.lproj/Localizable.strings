@@ -129,3 +129,11 @@
 "健康 %@" = "Health %@";
 /* ===== P3-5 采样节奏的单位（中文单位嵌在实参里，英文要跟着数字走） ===== */
 "%@ 秒" = "%@ s";
+
+/* ===== P4-1 性能监控：图注与口径（注意 %% —— 这些串走 String(format:)） ===== */
+"分母：全部核心" = "Denominator: all cores";
+"分子/分母：正在使用的核数 / %@ 核，100%% = 全部核心跑满" = "Numerator/denominator: cores in use / %@ cores, 100%% = every core flat out";
+"分子/分母：已用 %1$@ / 总量 %2$@" = "In use %1$@ / total %2$@";
+"本窗口没有足够的可信内存读数可画曲线（%1$@/%2$@ 点可用）。" = "Not enough trusted memory samples to draw the curve (%1$@ of %2$@ points available).";
+"CPU 曲线，等待可信读数" = "CPU curve, waiting for a trusted reading";
+"CPU 曲线，%1$@ 个点，当前 %2$@，纵轴 %3$@" = "CPU curve, %1$@ points, now %2$@, y-axis %3$@";

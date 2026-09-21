@@ -253,6 +253,10 @@ struct LiveSeriesChart<Point: Identifiable>: View {
                 }
             }
         }
+        // 顶格 y 轴刻度（"100%"）是**垂直居中钉在第一个刻度上**的，
+        // 于是它会探出绘图区上沿，压住上面那行「分子/分母…」说明
+        // （英文态实拍量到两者只差 3px、字脚相压）。留一档 `xs` 的头寸。
+        .padding(.top, Theme.Spacing.xs)
         .accessibilityLabel(summary)
     }
 

@@ -348,6 +348,20 @@ func localizedFormat(_ key: String, _ args: String...) -> String {
     String(format: localizedCopy(key), arguments: args)
 }
 
+/// 数量类文案的入口（要过 `stringsdict` 的单复数规则）。
+///
+/// 实参**只收 `Int`**，键里的占位符**只准 `%lld`**：
+/// - `stringsdict` 只有拿到数字才会选 `one` / `other` 分支（英文 1 month ago / 3 months ago），
+///   而中文原文里根本没有这个区分 —— 机翻最容易在这里翻错；
+/// - `Int` 传给 `%@` 会当场段错误（P3-4 那次启动即崩就是这么来的），
+///   所以这里既不收 `CVarArg...`，也不复用收 `String` 的 `localizedFormat`。
+///
+/// 中文侧不受影响：`String(format: "%lld 秒前", 5)` 就是「5 秒前」，
+/// 与原来的 `"\(seconds) 秒前"` 一字不差。
+func localizedCount(_ key: String, _ count: Int) -> String {
+    String(format: localizedCopy(key), count)
+}
+
 extension View {
     /// 有 help 才挂 tooltip，避免给整表每个单元格塞一个空 help。
     @ViewBuilder

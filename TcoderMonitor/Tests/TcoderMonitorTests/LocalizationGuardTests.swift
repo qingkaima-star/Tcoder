@@ -1,5 +1,6 @@
 import XCTest
 import Foundation
+@testable import TcoderMonitor
 
 /// 双语守卫（方案见 `docs/中英双语方案.md`）。
 ///
@@ -293,5 +294,29 @@ final class LocalizationGuardTests: XCTestCase {
         let interpolated = [(path: "Design/Fake.swift",
                              content: "    Text(\(name)) 拼出来的串由调用方负责\n")]
         XCTAssertTrue(Self.unlocalizedRenderPoints(in: interpolated).isEmpty, "插值写法被误判")
+    }
+
+    // MARK: - 守卫 6：整句键不许改坏中文侧
+
+    /// 相对时间改成「整句键 + `%lld`」之后，**中文侧必须逐字不变**：
+    /// 多一个空格、少一个「前」字，九页上几十处「分析于 X 前」就全变了样，
+    /// 而这类改动不会让任何一条既有测试变红。
+    /// 英文侧的单复数走 `stringsdict`，测试进程里没有语言目录、查不到值，
+    /// 只能靠 `-AppleLanguages "(en)"` 的实拍取证（方案 §10.6）。
+    func testRelativeTimeChineseSideIsUnchanged() {
+        let now = Date()
+        func ago(_ seconds: Int) -> String {
+            LogRecency.describe(now.addingTimeInterval(-Double(seconds)))
+        }
+        XCTAssertEqual(ago(5), "5 秒前")
+        XCTAssertEqual(ago(55), "55 秒前")
+        XCTAssertEqual(ago(120), "2 分钟前")
+        XCTAssertEqual(ago(7_200), "2 小时前")
+        XCTAssertEqual(ago(86_400 + 600), "昨天")
+        XCTAssertEqual(ago(3 * 86_400 + 600), "3 天前")
+        XCTAssertEqual(ago(61 * 86_400 + 600), "2 个月前")
+        XCTAssertEqual(ago(400 * 86_400 + 600), "1 年前")
+        XCTAssertEqual(LogRecency.describe(nil), "未知")
+        XCTAssertEqual(ago(-30), "即将")
     }
 }

@@ -125,16 +125,19 @@ struct LogBucket: Codable, Equatable, Hashable, Identifiable, Sendable {
 
 enum LogRecency {
     static func describe(_ date: Date?) -> String {
-        guard let date else { return "未知" }
+        // 每条都是**整句键**（方案 §7.3）：「5 秒前」在英文里是 "5 seconds ago"，
+        // 词序反过来、还要分单复数，碎片拼接做不到。
+        // 中文侧一字不变：`String(format: "%lld 秒前", 5)` 就是「5 秒前」。
+        guard let date else { return localizedCopy("未知") }
         let seconds = Int(Date().timeIntervalSince(date))
-        if seconds < 0 { return "即将" }
-        if seconds < 60 { return "\(seconds) 秒前" }
-        if seconds < 3600 { return "\(seconds / 60) 分钟前" }
-        if seconds < 86_400 { return "\(seconds / 3600) 小时前" }
+        if seconds < 0 { return localizedCopy("即将") }
+        if seconds < 60 { return localizedCount("%lld 秒前", seconds) }
+        if seconds < 3600 { return localizedCount("%lld 分钟前", seconds / 60) }
+        if seconds < 86_400 { return localizedCount("%lld 小时前", seconds / 3600) }
         let days = seconds / 86_400
-        if days == 1 { return "昨天" }
-        if days < 30 { return "\(days) 天前" }
-        if days < 365 { return "\(days / 30) 个月前" }
-        return "\(days / 365) 年前"
+        if days == 1 { return localizedCopy("昨天") }
+        if days < 30 { return localizedCount("%lld 天前", days) }
+        if days < 365 { return localizedCount("%lld 个月前", days / 30) }
+        return localizedCount("%lld 年前", days / 365)
     }
 }

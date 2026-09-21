@@ -16,6 +16,7 @@
 #   SWITCH_MODE=single      只起一个实例，靠 defaults write 实时切页（SwiftUI @AppStorage 会响应）
 #   SKIP_PROVENANCE=1       跳过"dist 二进制 == 当前源码"证明（默认不跳，跳了截图就不可信）
 #   CAPTURE_TERM=1          收尾对**本脚本自己起的、二进制路径核对一致的**那一个 pid 发 SIGTERM；
+#   CAPTURE_LANG=en         以英文取证（只给本脚本起的实例加 -AppleLanguages，不动系统语言）
 #                           默认只通报 pid 等人工 Cmd+Q。绝不按 bundle id 广播 quit（那会全机生效）
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
@@ -144,13 +145,21 @@ echo "==> 3/4 逐页取证（模式 $SWITCH_MODE）"
 FAILED=0
 HASHES=""
 
+# `CAPTURE_LANG=en` 强制以英文取证（双语 P5 的定宽复量要用）。
+# 默认不设 = 跟随系统语言，与历史上所有中文取证**完全同一条命令行**。
+LANG_ARGS=()
+if [ -n "${CAPTURE_LANG:-}" ]; then
+  LANG_ARGS=(-AppleLanguages "($CAPTURE_LANG)")
+  echo "    取证语言 = $CAPTURE_LANG（系统语言未改动；只影响本脚本起的实例）"
+fi
+
 launch_instance() {  # launch_instance [页名]；echo pid
   local name="$1"
   if [ "$SWITCH_MODE" = "argv" ]; then
-    TCODER_SUPPORT_DIR="$SANDBOX" "$BIN" -ApplePersistenceIgnoreState YES \
+    TCODER_SUPPORT_DIR="$SANDBOX" "$BIN" -ApplePersistenceIgnoreState YES "${LANG_ARGS[@]}" \
       -selectedDetailSection "$name" > "/tmp/tcoder-capture-$(date +%s)-$$.log" 2>&1 &
   else
-    TCODER_SUPPORT_DIR="$SANDBOX" "$BIN" -ApplePersistenceIgnoreState YES \
+    TCODER_SUPPORT_DIR="$SANDBOX" "$BIN" -ApplePersistenceIgnoreState YES "${LANG_ARGS[@]}" \
       > "/tmp/tcoder-capture-$(date +%s)-$$.log" 2>&1 &
   fi
   sleep 4
