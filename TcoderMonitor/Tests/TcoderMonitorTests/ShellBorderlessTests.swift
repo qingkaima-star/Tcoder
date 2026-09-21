@@ -45,7 +45,8 @@ final class ShellBorderlessTests: XCTestCase {
         let names = pages + shell
         // 8 → 9（收官轮 WS-X7）：自扫点名 `Shell/ProjectSidebar.swift` 486 行 >400，
         // 两枚侧栏行内构件搬进同目录新分件 `Shell/SidebarRows.swift`；归属没动，仍是外壳层。
-        XCTAssertEqual(names.count, 9, "外壳扫描集分母变了（应为 3 页面 + 6 分件）：\(names)")
+        XCTAssertEqual(names.count, PageScanDenominators.shellLayerFiles,
+                       "外壳扫描集分母变了（\(PageScanDenominators.shellRosterText)）：\(names)")
         return try names.map { name in
             let url = pages.contains(name)
                 ? viewsDir.appendingPathComponent(name)
