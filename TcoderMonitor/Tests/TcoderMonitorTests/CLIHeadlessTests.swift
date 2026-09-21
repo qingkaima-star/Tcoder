@@ -310,6 +310,20 @@ final class CLIHeadlessTests: XCTestCase {
                       "界面上常驻的那句「没查 ≠ 没有病」，CLI 读数里也必须出现")
     }
 
+    // MARK: - 两个行数分母必须各自点名（反扫自己抓出来的那条）
+
+    /// 一次 `score` 读数里同时出现两个行数：首行的「码行」是**有效代码行**，
+    /// 注释维度的分母是**总行（空行 + 注释 + 代码）**。差着一截却不点名，
+    /// 读的人（人或 AI）就会判成"同一个量的两次读数不一致"—— 本仓为这类事故记过账。
+    func test_theTwoLineDenominatorsNameThemselves() {
+        let curve = HealthCurves.documentation(commentRatio: 0.157, todoCount: 9, fixmeCount: 9,
+                                               totalLines: 69_199)
+        XCTAssertTrue(curve.detail.contains("总行 69,199"),
+                      "分母没点名：\(curve.detail)")
+        XCTAssertFalse(curve.detail.contains("源码"),
+                      "「源码 N 行」和首行的「码行 M」并排出现时会被读成同一个量：" + curve.detail)
+    }
+
     // MARK: - 一路名只许有一份真值
 
     private static let appStateURL = URL(fileURLWithPath: #filePath)   // …/Tests/TcoderMonitorTests/本文件.swift
