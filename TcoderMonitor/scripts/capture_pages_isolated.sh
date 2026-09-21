@@ -11,7 +11,7 @@
 #
 # 用法: scripts/capture_pages_isolated.sh [输出目录]
 #   CAPTURE_TARGET=<目录>   被扫描的项目（默认 = 本仓库根，dogfooding）
-#   CAPTURE_SANDBOX=<目录>  支持目录沙箱（默认 /tmp/tcoder-capture-sandbox-<时间戳>，每次新建）
+#   CAPTURE_SANDBOX=<目录>  支持目录沙箱（默认 $PERF_ROOT/capture-sandbox-<时间戳>，每次新建）
 #   SWITCH_MODE=argv        每页起一个新实例并用 -selectedDetailSection 传页名（默认 single）
 #   SWITCH_MODE=single      只起一个实例，靠 defaults write 实时切页（SwiftUI @AppStorage 会响应）
 #   SKIP_PROVENANCE=1       跳过"dist 二进制 == 当前源码"证明（默认不跳，跳了截图就不可信）
@@ -24,7 +24,11 @@ cd "$(dirname "$0")/.." || exit 1
 APP_DIR="$PWD/dist/Tcoder.app"
 BIN="$APP_DIR/Contents/MacOS/TcoderMonitor"
 WINLIST="$PWD/scripts/winlist.swift"
-OUT="${1:-/tmp/tcoder-pages-isolated}"
+# 产物落项目内被忽略的 tmp/perf/（2026-09-21 磁盘事故之后的规矩：
+# 取证的中间产物绝不留在 $TMPDIR —— 那里被 xctrace 的 .ktrace 孤儿吃过 103 GB，
+# 而全局 /tmp 也会被清盘误伤：上一批九页截图就是这么没了的。）
+PERF_OUT_ROOT="${PERF_ROOT:-$PWD/tmp/perf}"
+OUT="${1:-$PERF_OUT_ROOT/pages-isolated}"
 DOMAIN="com.tcoder.monitor"
 UUID="11111111-2222-3333-4444-555555555555"
 SWITCH_MODE="${SWITCH_MODE:-single}"
@@ -33,7 +37,7 @@ SECTIONS=("总览" "代码规模" "复杂度风险" "Git 洞察" "贡献者" "�
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 TARGET="${CAPTURE_TARGET:-$REPO_ROOT}"
-SANDBOX="${CAPTURE_SANDBOX:-/tmp/tcoder-capture-sandbox-$(date +%Y%m%d-%H%M%S)}"
+SANDBOX="${CAPTURE_SANDBOX:-$PERF_OUT_ROOT/capture-sandbox-$(date +%Y%m%d-%H%M%S)}"
 
 die() { echo "!! $1"; exit 1; }
 
@@ -83,6 +87,7 @@ fi
 #   ② 截图取的是屏幕上的真实窗口，两家同屏会互相遮挡。
 # 不用 kill/pkill 广播：仓库规约是不向任何进程发信号；要退出也只退**自己起的**那一个。
 # 用 `mkdir` 取锁，因为它是原子操作，且不依赖任何额外工具。
+# 锁**故意**留在全局 /tmp：拍图锁要跨工作树互斥（挪进项目内就变成各锁各的，等于没锁）
 CAPTURE_LOCK="${CAPTURE_LOCK:-/tmp/tcoder-capture.lock}"
 CAPTURE_LOCK_TIMEOUT="${CAPTURE_LOCK_TIMEOUT:-900}"
 _lock_waited=0
@@ -157,7 +162,7 @@ launch_instance() {  # launch_instance [页名]；echo pid
   local name="$1"
   if [ "$SWITCH_MODE" = "argv" ]; then
     TCODER_SUPPORT_DIR="$SANDBOX" "$BIN" -ApplePersistenceIgnoreState YES "${LANG_ARGS[@]+"${LANG_ARGS[@]}"}" \
-      -selectedDetailSection "$name" > "/tmp/tcoder-capture-$(date +%s)-$$.log" 2>&1 &
+      -selectedDetailSection "$name" > "$PERF_OUT_ROOT/capture-$(date +%s)-$$.log" 2>&1 &
   else
     TCODER_SUPPORT_DIR="$SANDBOX" "$BIN" -ApplePersistenceIgnoreState YES "${LANG_ARGS[@]+"${LANG_ARGS[@]}"}" \
       > "/tmp/tcoder-capture-$(date +%s)-$$.log" 2>&1 &
