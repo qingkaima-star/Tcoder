@@ -320,3 +320,35 @@ def disp_values(measure):
     if js and "values" in js:
         return [float(v) for v in js["values"]]
     return []
+
+
+def input_rate_qualification(source):
+    """合成输入的**投递节奏**决定这份读数能不能回答"到底能不能到 120Hz"。
+
+    为什么要有这一条（2026-09-21 实测）：滚动器最初每 40 ms 投一拍（25 Hz），
+    而 120 Hz 的帧预算是 8.333 ms —— **输入节奏本身比帧预算宽**，
+    于是"出帧只有 53/s"完全可能是仪器锁的，不是被测程序锁的。
+    那两批样本我差点当成"交互期 hitch 读数"直接引用。
+
+    ⇒ 标记要有人读：`meta.input_source` 从今晚起带节奏（`synth@8ms`），
+    本函数就是它的读者。答不了的那一档只许说"连续输入下有没有 hitch"。
+    返回 (能不能用来答"到不到 120Hz", 给表头看的一句话)。
+    """
+    s = str(source or "human").strip()
+    if s == "human":
+        return True, ""                       # 真人：既答 hitch 也答手感
+    if not s.startswith("synth@"):
+        return False, ("【合成输入：CGEvent 投递，非真人手感；**节奏未记录**（旧批次）"
+                       "⇒ 不许用它答「到不到 120Hz」】")
+    try:
+        gap = float(s.split("@", 1)[1].rstrip("ms "))
+    except ValueError:
+        gap = 0.0
+    if gap <= 0.0:
+        return False, "【合成输入但节奏读不出来（拿到 %r）⇒ 与「节奏未记录」同等处理】" % s
+    hz = 1000.0 / gap
+    note = "【合成输入：CGEvent 投递（非真人手感），节奏 %d Hz" % round(hz)
+    if hz < 60.0:
+        return False, note + "，投递间隔比 8.333 ms 帧预算还宽 ⇒ 出帧上限由仪器决定，" \
+                             "不许答「到不到 120Hz」，只答「连续输入下有没有 hitch」】"
+    return True, note + "，不低于 120Hz 帧间隔 ⇒ 仪器不是出帧上限】"

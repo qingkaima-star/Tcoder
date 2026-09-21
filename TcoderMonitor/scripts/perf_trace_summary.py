@@ -18,7 +18,7 @@ AGENTS.md 第四轮红线 5（诚实性语义与阈值不许为任何指标放�
 import os
 import statistics
 
-from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, as_int, base_app_update_line, base_hang_line, base_hitch_frame_line, base_hitches_line, base_hotspot_line, base_main_thread_line, base_render_line, dedupe_pairs, disp_values, fmt_row, fps_counts, load_measure, over_budget, percentile, read_json, regime_note, in_display_regime, phase_blame)
+from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, as_int, base_app_update_line, base_hang_line, base_hitch_frame_line, base_hitches_line, base_hotspot_line, base_main_thread_line, base_render_line, dedupe_pairs, disp_values, fmt_row, fps_counts, input_rate_qualification, load_measure, over_budget, percentile, read_json, regime_note, in_display_regime, phase_blame)
 from perf_trace_xml import cross_check_durations, find_tag
 
 
@@ -79,14 +79,18 @@ def period_eligibility(meta):
     ⇒ 写进 meta 不等于被看见；判资格必须把复核读回来。
     """
     period = str(meta.get("period") or "idle")
-    # 输入来源决定这句话能不能说"真人"：synthetic 的样本答的是
-    # "连续滚动下渲染路径有没有 hitch"，答不了主观手感 —— 混为一谈就是造假证据。
-    source = str(meta.get("input_source") or "human")
-    tag = "" if source == "human" else "【合成输入：CGEvent 投递，非真人手感】"
+    # 输入来源**与投递节奏**决定这句话能不能说"真人"、能不能答"到不到 120Hz"。
+    # 25 Hz 的合成滚动器（每 40 ms 一拍）比 8.333 ms 的帧预算还慢，出帧上限是仪器锁的
+    # —— 今晚实测过，那两批差点被当"交互期 hitch 读数"直接引用（现已移出充数）。
+    # 混为一谈就是造假证据：合成输入答不了主观手感，慢节奏连"到不到 120Hz"都答不了。
+    rate_ok, tag = input_rate_qualification(meta.get("input_source"))
     if period == "interaction":
         if str(meta.get("no_human_input_during_window") or "") == "1":
             return False, ("声明交互期，但收尾复核记着**整窗没一次人手事件** ⇒ 不可当交互期样本，"
                            "要判 T1 得重录并真的持续滚动")
+        if not rate_ok:
+            return False, (tag + " ⇒ 这一档不许交 T1：判据里的 p95 帧间隔，"
+                           "正好是被输入节奏锁死的那一维")
         return True, tag + "有资格答 T1（交互期 hitch = 0）"
     if str(meta.get("contaminated_by_human_input") or "") == "1":
         return False, ("声明心跳期，但收尾复核记着**窗口内有人动手** ⇒ 样本已污染，"

@@ -238,3 +238,30 @@ print("%s|%s|%s|%s" % ("先查主线程" in a, "分开修" in b, "全在渲染/�
     || { fail "迟到帧归因四种形状没各判对（拿到 $r）"; return; }
   ok "迟到帧归因分得清「查主线程 / 分开修 / 全在合成侧 / 无迟到」"
 }
+
+selfcheck_input_rate_qualification() {  # selfcheck_input_rate_qualification <outdir>
+  # 28) 【标记要有读者】`meta.input_source` 从今晚起带投递节奏（`synth@8ms`），
+  #     但"写了没人读"就是第二十三次要防的那个洞——我写完参数那一笔，
+  #     报表照旧对 25 Hz 批次印「有资格答 T1」。这一项就是这个读者的读者。
+  #     25 Hz 的滚动器每 40 ms 投一拍，比 8.333 ms 的帧预算还宽 ⇒ 出帧上限由仪器决定，
+  #     这种读数不许回答"到不到 120Hz"，只许回答"连续输入下有没有 hitch"。
+  local r
+  r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_trace_summary import period_eligibility as pe
+c = [("真人","human"),("125Hz","synth@8ms"),("25Hz","synth@40ms"),
+     ("旧批次无节奏","synth"),("节奏是垃圾","synth@abc")]
+print("|".join("%s=%s" % (k, "Y" if pe({"period":"interaction","input_source":v})[0] else "N")
+               for k, v in c))')
+  [ "$r" = "真人=Y|125Hz=Y|25Hz=N|旧批次无节奏=N|节奏是垃圾=N" ] \
+    || { fail "输入节奏的资格判定不对（拿到 ${r:-解析失败}）——慢节奏样本又能冒充 T1 证据"; return; }
+  # 反向钉：不许只改退出码，表头话术必须跟着翻转（第 21 项同一套道理）
+  local slow fast
+  slow=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c \
+    'from perf_trace_summary import period_eligibility as pe; print(pe({"period":"interaction","input_source":"synth@40ms"})[1])')
+  fast=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c \
+    'from perf_trace_summary import period_eligibility as pe; print(pe({"period":"interaction","input_source":"synth@8ms"})[1])')
+  case "$slow" in *"不许交 T1"*) ;; *) fail "25 Hz 样本的表头话术没翻转（还是「$slow」）" ;; esac
+  case "$fast" in *"有资格答 T1"*) ;; *) fail "125 Hz 样本被一起挡在门外（「$fast」）——恒拒的闸门只会量产假绿" ;; esac
+  [ "$slow" != "$fast" ] || { fail "两种节奏的话术一模一样，等于没判"; return; }
+  ok "输入节奏有读者：五种形状各判一次，慢节奏与无节奏都不许冒充 T1 证据"
+}
