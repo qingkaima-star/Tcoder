@@ -29,7 +29,7 @@ extension LocalizationGuardTests {
     /// 原来这条守卫只看 `Design/`，于是住在页面基座里的三个渲染点
     /// （`DataFootnote`、`DataCaption`、`NoteLine`）一直是漏网的：它们是 `Text(text)` 直出、
     /// 根本不调 `localizedCopy`，英文态原样吐中文（《九页解释性文案盘点表》Y 节缺口 1，
-    /// 实测分布 `DataFootnote` 8 处 / `DataCaption` 4 处 / `NoteLine` 15 处调用点）。
+    /// 实测分布 `DataFootnote` 9 处 / `DataCaption` 4 处 / `NoteLine` 16 处调用点）。
     /// 后果不是"少一句译文"，而是**往目录里加这些串的任何键都不生效** ——
     /// 看起来在还债，实际一个字节都没动。
     ///

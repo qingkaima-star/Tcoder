@@ -88,18 +88,26 @@ struct NoteLine: View {
     var text: String
     var role: Theme.SemanticRole
     var icon: IconName
+    /// **留短藏长**槽（盘点表 129 槽里 94 槽判这一类；`NoteLine` 覆盖其中 16 处）：
+    /// 屏上留 `text` 那一句短的，改变读法的长口径进 ⓘ 的 hover。
+    /// 画法复用 `Design/CopyHelp.swift` 那一份（全站唯一）。
+    /// 默认 `nil` 时这一支产出 `EmptyView`，渲染树与本轮之前逐字相同，零版面成本；
+    /// 16 处调用点的位置参数形状一字未动。
+    var help: String? = nil
 
-    init(_ text: String, role: Theme.SemanticRole = Theme.Semantic.neutral, icon: IconName = .info) {
+    init(_ text: String, role: Theme.SemanticRole = Theme.Semantic.neutral,
+         icon: IconName = .info, help: String? = nil) {
         self.text = text
         self.role = role
         self.icon = icon
+        self.help = help
     }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
             ThemedIcon(icon, role: .badge)
                 .foregroundStyle(role.textColor)
-            // 全仓 15 处 `NoteLine(…)` 调用点都从这一行上屏，此前它一个字都不查
+            // 全仓 16 处 `NoteLine(…)` 调用点都从这一行上屏，此前它一个字都不查
             // （盘点表 Y 节缺口 1）：`PerformanceMatcherEditor` 那句「匹配模式对进程名…」
             // 在英文目录里已有键，却因为这里不查而永远是中文。
             Text(localizedCopy(text))
@@ -107,6 +115,8 @@ struct NoteLine: View {
                 .foregroundStyle(.secondary)
                 .lineSpacing(Theme.Typo.label.lineSpacing)
                 .fixedSize(horizontal: false, vertical: true)
+            // 与左边的状态图标同一条基线；问号是「还能再看一句」的可见出口，不是第二枚状态图标。
+            if let help { CopyHelpBadge(help) }
             Spacer(minLength: 0)
         }
     }

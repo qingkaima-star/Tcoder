@@ -77,7 +77,13 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 136 → 137（紧随其后还掉本门挂的那笔新账：`DependenciesView.swift` 401 行越线，
     /// 把只被它自己使用的 `NetworkOptionsCard` 搬成同目录分片 `Dependencies/NetworkOptionsCard.swift`；
     /// 守卫实报「实现文件 137 · 零调用清单：无」，`hugeFileWorkList` 里那条已删）。
-    static let censusBaseline = 137
+    /// 137 → 138（WS-X8 ⓘ 前置：新增 `Design/CopyHelp.swift`，声明 `CopyHelpBadge`。
+    /// **凭什么被引用**：`Views/PerfLogs/NumberText.swift` 的 `NoteLine(_:role:icon:help:)`
+    /// 在 `help != nil` 那一支渲染它 —— 那是「留短藏长」类槽位（盘点表 129 槽里 94 槽判这一类）
+    /// 在性能 / 日志 / 健康三页的挂载点，ⓘ 的画法全站只许这一份
+    ///（新增的 `CopyHelpBadgeTests` 三条判据 + 注入坏样例的元测试钉住）。
+    /// 守卫实报「实现文件 138 · 在用 137 · 未用 0 · 零调用清单：无」）。
+    static let censusBaseline = 138
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
