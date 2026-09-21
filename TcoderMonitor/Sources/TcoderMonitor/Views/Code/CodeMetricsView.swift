@@ -186,12 +186,12 @@ struct CodeScaleSection: View {
             // 盘点表 B3（留短藏长 ●）：屏上留原句的头「按有效代码行计」——分母口径必须常驻；
             // 「共 N 种语言、展示前 M 种」那半句连同整句一起进 ⓘ（ⓘ 里必须是完整句，
             // 不能只放后半，否则英文态语序必坏）。
-            // 一支例外：一门语言占比都不大于 0 时，「尚无语言占比」本身就是那条诚实读数，
-            // 不藏 —— 它留在 subtitle 上，ⓘ 这一支直接不出现。
+            // 一支例外：一门语言占比都不大于 0 时（B4 那一支），「尚无语言占比」本身就是那条
+            // 诚实读数、完整判据句仍在下面的空态里上屏 —— 这一支不再挂 ⓘ，免得同一句两个落点。
             GlassSection("语言构成",
                          subtitle: Self.subtitleHead(code),
                          icon: .chartLine,
-                         trailing: code.languages.contains { $0.share > 0 }
+                         trailing: code.languages.contains(where: { $0.share > 0 })
                              ? AnyView(CopyHelpBadge(Self.subtitle(code))) : nil) {
                 languageBlock
             }
@@ -202,6 +202,9 @@ struct CodeScaleSection: View {
     private var languageBlock: some View {
         let rows = CodeMetricsView.visibleShares(code, head: CodeMetricsView.languageHeadCount)
         if rows.isEmpty {
+            // 盘点表 B4 这一支**保持原样未搬**（详见汇报「未做 + 原因」）：
+            // 整句 25 字就是"扫过了、但没有占比数据"的诚实凭据，与上面的「尚无语言占比」
+            // 拆成两半后哪一半都不再成立；而本片双语预算只剩 1 条余量，不为一个罕见空态花掉。
             EmptyStateView(
                 icon: .chartLine,
                 title: "无语言占比数据",
