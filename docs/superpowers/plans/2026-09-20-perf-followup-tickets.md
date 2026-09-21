@@ -348,6 +348,29 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 它的价值是**把候选排除了**：持久化不占主线程预算，所以剩下的怀疑对象只有视图图更新，
 也就是第 1 步那 **10 处承重读点**（不是 16 处——见上面的加权表）。
 
+### 第 4 个候选：已定位、**尚未排除**（02:40 读 `AppState` 时发现，记在这里免得重复找）
+
+`AppState.notePointerStreamActivity()` 是**每个滚动事件都跑一次**的入口，形状是：
+
+```swift
+monitor.beginInteractionPause(.pointerStream)   // 走等值闸门，第二次起 skip
+pointerSettleTask?.cancel()                     // 每事件取消上一个
+pointerSettleTask = Task { @MainActor in … }    // 每事件新建一个非结构化 Task
+```
+
+⇒ 120 Hz 滚动下约是**每秒 120 次 Task 分配 + 120 次取消**，全在主 actor 上。
+**我没有据此改代码**：单次 Task 只有微秒量级，"推测它贵"和"推测它不贵"同样没有证据，
+而这里唯一相关的证据是交互期 profile 里它到底占多少。
+**判据写成一条可查的动作**：跑完 `interact` 档后在 `time-profile` 表里搜
+`notePointerStreamActivity` / `swift_task_create`——
+**进热点前 20 名就回来改**（改成记 `lastEventAt` ＋ 复用同一个沉降 Task），
+不出现就把这条划进上面那张"已排除"表。**不许在没量的情况下先动它，
+也不许因为"看起来像问题"就永远挂着不结。**
+
+顺带钉一条反向的：**这里不许"顺手"改成每事件都 publish 一次。**
+暂停/恢复的写入必须继续走等值闸门，否则 T3 会把"交互期不刷新"变成"交互期疯狂失效"，
+那是比 Task churn 大两个数量级的成本。
+
 ## 0.5 交接状态（09-21 00:31）——写给"一个人接两条线"的那位，免考古
 
 **已进 main 的性能侧东西**（`main = f9841ae` 之前的 `3a3381c`）：
