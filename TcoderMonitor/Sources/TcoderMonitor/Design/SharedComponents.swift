@@ -226,8 +226,11 @@ struct RiskBadge: View {
     var showIcon: Bool = true
 
     var body: some View {
+        // 运行时漏翻台账抓到：`"风险：\(risk.rawValue)"` 是**拼接串**，
+        // 查表拿到的键是拼完的整串（`风险：高`），目录里对不上 ⇒ 英文态一片中文。
+        // 正解是两段各自查表：模板走整句键，档位名走自己的键。
         SemanticBadge(
-            "风险：\(risk.rawValue)",
+            localizedFormat("风险：%@", localizedCopy(risk.rawValue)),
             role: Theme.Semantic.role(for: risk),
             icon: showIcon ? RiskBadge.icon(for: risk) : nil)
     }

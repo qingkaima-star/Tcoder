@@ -101,10 +101,12 @@ struct LogsView: View {
 
     private var subtitle: String {
         guard let logs = report?.logs else {
-            return "时间窗口 \(state.logWindowDays) 天 · 当前项目尚未分析"
+            return localizedFormat("时间窗口 %1$@ 天 · 当前项目尚未分析", String(state.logWindowDays))
         }
-        return "分析于 \(DateFormat.sinceDescription(logs.analyzedAt)) · 时间窗口 \(state.logWindowDays) 天"
-            + " · 扫描 \(NumberFormat.grouped(logs.totalLinesScanned)) 行"
+        return localizedFormat("分析于 %1$@ · 时间窗口 %2$@ 天 · 扫描 %3$@ 行",
+                                DateFormat.sinceDescription(logs.analyzedAt),
+                                String(state.logWindowDays),
+                                NumberFormat.grouped(logs.totalLinesScanned))
     }
 
     @ViewBuilder

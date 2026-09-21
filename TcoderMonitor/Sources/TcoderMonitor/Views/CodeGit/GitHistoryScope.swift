@@ -79,20 +79,21 @@ struct GitHistoryScope: Equatable {
 
     /// 页面上那行必须让用户自己也能对上账的主口径句。
     var headline: String {
-        let total = "共 \(NumberFormat.grouped(totalCommits)) 次提交"
+        let total = localizedFormat("共 %1$@ 次提交", NumberFormat.grouped(totalCommits))
         switch basis {
         case .complete(let merges) where merges > 0:
-            return "\(total)（含 \(NumberFormat.grouped(merges)) 次合并）· 作者与代码行统计基于 "
-                + "\(NumberFormat.grouped(nonMergeCommitsAnalysed)) 次非合并提交"
+            return localizedFormat("%1$@（含 %2$@ 次合并）· 作者与代码行统计基于 %3$@ 次非合并提交",
+                                     String(total), NumberFormat.grouped(merges),
+                                     NumberFormat.grouped(nonMergeCommitsAnalysed))
         case .complete:
-            return "\(total) · 历史中没有合并提交，作者与代码行统计覆盖全部 "
-                + "\(NumberFormat.grouped(nonMergeCommitsAnalysed)) 次提交"
+            return localizedFormat("%1$@ · 历史中没有合并提交，作者与代码行统计覆盖全部 %2$@ 次提交",
+                                     String(total), NumberFormat.grouped(nonMergeCommitsAnalysed))
         case .windowCapped:
-            return "\(total)（含合并）· 作者与代码行统计只覆盖最近 "
-                + "\(NumberFormat.grouped(nonMergeCommitsAnalysed)) 次非合并提交，更早的历史未纳入"
+            return localizedFormat("%1$@（含合并）· 作者与代码行统计只覆盖最近 %2$@ 次非合并提交，更早的历史未纳入",
+                                     total, NumberFormat.grouped(nonMergeCommitsAnalysed))
         case .unknown:
-            return "\(total)（含合并）· 这份报告没有记录非合并提交数，作者与代码行仍按旧口径统计，"
-                + "重新分析后可拆分"
+            return localizedFormat("%1$@（含合并）· 这份报告没有记录非合并提交数，作者与代码行仍按旧口径统计，重新分析后可拆分",
+                                     total)
         }
     }
 
@@ -118,10 +119,14 @@ struct GitHistoryScope: Equatable {
             return "近 \(NumberFormat.grouped(nonMergeCommitsAnalysed)) 次提交窗口内 · "
                 + "\(NumberFormat.grouped(authorCount)) 人"
         case .unknown:
-            return "\(NumberFormat.grouped(authorCount)) 人 · 分母口径未记录"
+            return localizedFormat("%1$@ 人 · 分母口径未记录", NumberFormat.grouped(authorCount))
         case .complete(let merges):
-            return "\(NumberFormat.grouped(authorCount)) 人 · 基于非合并提交"
-                + (merges > 0 ? "（已排除 \(NumberFormat.grouped(merges)) 次合并）" : "")
+            return localizedFormat("%1$@ 人 · 基于非合并提交%2$@",
+                                     NumberFormat.grouped(authorCount),
+                                     merges > 0
+                                         ? localizedFormat("（已排除 %1$@ 次合并）",
+                                                           NumberFormat.grouped(merges))
+                                         : "")
         }
     }
 

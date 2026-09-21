@@ -156,9 +156,15 @@ enum DependencySafetyVerdict: Equatable {
         case .findings(let count, _):
             return "命中 \(NumberFormat.grouped(count)) 条内置快照与安全公告"
         case .unchecked(let covered, let total, let uncovered):
-            var text = "未联网核对，仅内置快照（覆盖 npm / Maven / Python），\(DependencySnapshot.asOfText)"
-            text += total == 0 ? "· 无依赖可核对" : "· \(NumberFormat.grouped(covered)) / \(NumberFormat.grouped(total)) 项有版本数据"
-            if !uncovered.isEmpty { text += "· 未覆盖生态：\(uncovered.joined(separator: "、"))" }
+            var text = localizedFormat("未联网核对，仅内置快照（覆盖 npm / Maven / Python），%@",
+                                         DependencySnapshot.asOfText)
+            text += total == 0
+                ? localizedCopy("· 无依赖可核对")
+                : localizedFormat("· %1$@ / %2$@ 项有版本数据",
+                                  NumberFormat.grouped(covered), NumberFormat.grouped(total))
+            if !uncovered.isEmpty {
+                text += localizedFormat("· 未覆盖生态：%@", uncovered.joined(separator: localizedCopy("、")))
+            }
             return text
         case .clean(let covered, let total):
             if covered == 0 { return "已联网核对，但无可比对版本数据的依赖" }

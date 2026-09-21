@@ -232,16 +232,21 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
     static func offlineCaveat(for report: DependencyReport) -> String {
         let records = report.ecosystems.flatMap(\.dependencies)
         let skipped = records.filter { KnownVulnerability.comparableCore($0.version) == nil }.count
-        var parts = ["未联网核对：漏洞判定只依据内置快照（覆盖 npm / Maven / Python），\(DependencySnapshot.asOfText)"]
+        // 四段各自是整句键、分隔符也查表：`parts.joined(separator: "；")`
+        // 拼出来的整串在英文态会一半中文一半英文（运行时漏翻台账点名的就是这条）。
+        var parts = [localizedFormat("未联网核对：漏洞判定只依据内置快照（覆盖 npm / Maven / Python），%@",
+                                      DependencySnapshot.asOfText)]
         let uncovered = ecosystemsWithoutOfflineRules(in: report)
         if !uncovered.isEmpty {
-            parts.append("本次未覆盖生态：\(uncovered.joined(separator: "、"))")
+            parts.append(localizedFormat("本次未覆盖生态：%@",
+                                          uncovered.joined(separator: localizedCopy("、"))))
         }
         if skipped > 0 {
-            parts.append("\(skipped) 项版本不可比较（\"*\"、workspace:*、分支/修订号等）已跳过比对")
+            parts.append(localizedFormat("%@ 项版本不可比较（「*」、workspace:*、分支/修订号等）已跳过比对",
+                                          NumberFormat.grouped(skipped)))
         }
-        if report.totalDependencies == 0 { parts.append("没有可核对的依赖") }
-        return parts.joined(separator: "；")
+        if report.totalDependencies == 0 { parts.append(localizedCopy("没有可核对的依赖")) }
+        return parts.joined(separator: localizedCopy("；"))
     }
 
     /// 该生态有没有内置离线漏洞规则。从规则表与坐标互通表**推导**，不另抄一份清单，

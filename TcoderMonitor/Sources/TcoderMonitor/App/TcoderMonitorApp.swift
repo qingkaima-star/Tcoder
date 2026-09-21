@@ -2,6 +2,11 @@ import SwiftUI
 
 @main
 struct TcoderMonitorApp: App {
+    init() {
+        // 运行时漏翻台账要在退出时落盘（只在设了 TCODER_I18N_RUNTIME_LEDGER 时才写）。
+        atexit { LocalizationLedger.shared.flush() }
+    }
+
     @State private var state = AppState()
 
     var body: some Scene {

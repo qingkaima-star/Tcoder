@@ -325,7 +325,56 @@ extension Theme {
 /// 双语方案 §9）。这里是纯查表，`%` 只是普通字符，与今天 `Text("95% …")` 的行为一致。
 /// 带实参的文案要翻时另开显式映射（`var uiLabel`），不要往这里塞占位符。
 func localizedCopy(_ text: String) -> String {
-    NSLocalizedString(text, bundle: .main, comment: "")
+    let resolved = NSLocalizedString(text, bundle: .main, comment: "")
+    LocalizationLedger.shared.record(key: text, translated: resolved != text)
+    return resolved
+}
+
+/// **运行时漏翻台账**（报告器，不是闸门）。
+///
+/// 为什么必须有它：静态扫描只能覆盖"入口白名单里的字面量"，而英文态实拍证明
+/// 三类串全在盲区 —— 拼接出来的整句、组件的**位置参数**、变量喂进组件的值。
+/// 静态棘轮报 28 条的那一趟，贡献者页面上仍有一整段中文。
+/// 只有**渲染的那一刻**才知道某个串有没有真的上屏、有没有查到译文。
+///
+/// 开关是环境变量：不设时 `record` 第一次判断就返回，渲染路径零成本；
+/// 设了就往 `<path>.misses` / `<path>.hits` 写两份清单（退出时落盘）。
+/// 记的是**去重后的键**，不是每次渲染的流水 —— 一屏 60fps 会把文件写爆。
+final class LocalizationLedger {
+    static let shared = LocalizationLedger()
+
+    private let lock = NSLock()
+    private var misses = Set<String>()
+    private var hits = 0
+    private let target: String? = ProcessInfo.processInfo
+        .environment["TCODER_I18N_RUNTIME_LEDGER"]
+
+    private var wrote = 0
+
+    func record(key: String, translated: Bool) {
+        guard target != nil else { return }
+        lock.lock()
+        if translated { hits += 1 } else { misses.insert(key) }
+        // **不能只在 `atexit` 落盘**：取证脚本发的是 SIGTERM，`atexit` 不跑，
+        // 第一版就是这么白跑一趟。改成"每 200 次查表、以及每次出现新漏翻键"时落盘。
+        let shouldWrite = !translated ? misses.count != wrote : (hits % 200 == 0 && hits > wrote)
+        if shouldWrite { wrote = hits + misses.count }
+        lock.unlock()
+        if shouldWrite { flush() }
+    }
+
+    func flush() {
+        guard let target, !target.isEmpty else { return }
+        lock.lock()
+        let missList = misses.sorted(), hitCount = hits
+        lock.unlock()
+        let url = URL(fileURLWithPath: target)
+        if (try? String(contentsOf: url, encoding: .utf8))?.hasPrefix("hits=\(hitCount)") == true,
+           missList.isEmpty { return }   // 内容没变就别重写（每 200 次一次）
+        try? "hits=\(hitCount)\nmisses=\(missList.count)\n"
+            .appending(missList.map { "\"\($0)\"" }.joined(separator: "\n")).appending("\n")
+            .write(to: url, atomically: true, encoding: .utf8)
+    }
 }
 
 /// 带实参的整句查表 + 格式化。

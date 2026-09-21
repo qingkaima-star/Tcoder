@@ -214,10 +214,15 @@ enum DateFormat {
         return formatter
     }()
 
+    /// 内容区日期范围（Git 页「9月19日 → 9月21日」）。
+    /// **跟着界面语言走**：英文态写 `9月19日` 就是半译（运行时漏翻台账抓到）。
+    /// 图表轴刻度不吃这个 —— 那些按 `ChartChrome` 的说明固定 POSIX locale，
+    /// 为的是刻度间距稳定，两件事不要混。
     static let dayMonth: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "M月d日"
+        let chinese = Theme.Layout.isChineseUI
+        formatter.locale = Locale(identifier: chinese ? "zh_CN" : "en_US")
+        formatter.dateFormat = chinese ? "M月d日" : "MMM d"
         return formatter
     }()
 

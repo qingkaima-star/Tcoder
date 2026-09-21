@@ -86,15 +86,23 @@ extension FileSystemCodeAnalyzer {
 
         if functions.isEmpty {
             if file.codeLineCount * 4 < lines {
-                return "\(file.language) 文件 \(NumberFormat.grouped(lines)) 行，几乎全是注释或文档：精简历史说明、把示例迁出源码目录，只保留必要的接口注释。"
+                return localizedFormat("%1$@ 文件 %2$@ 行，几乎全是注释或文档：精简历史说明、把示例迁出源码目录，只保留必要的接口注释。",
+                                       file.language, NumberFormat.grouped(lines))
             }
-            return "\(file.language) 文件 \(NumberFormat.grouped(lines)) 行且未被识别出函数（多为配置、模板或数据表）：按领域或路由拆成多个文件，或改为外部数据资源加载。"
+            return localizedFormat("%1$@ 文件 %2$@ 行且未被识别出函数（多为配置、模板或数据表）：按领域或路由拆成多个文件，或改为外部数据资源加载。",
+                                   file.language, NumberFormat.grouped(lines))
         }
         if !longOnes.isEmpty {
-            return "\(file.language) 文件 \(NumberFormat.grouped(lines)) 行、含 \(longOnes.count) 个超过 \(Self.longFunctionThreshold) 行的函数（最长 \(longest) 行，如 \(longestName)）：先把这些函数按职责抽成独立类型或同类型的 extension，再把跨函数共享的状态收进构造注入的依赖，目标单文件 400 行以内。"
+            return localizedFormat("%1$@ 文件 %2$@ 行、含 %3$@ 个超过 %4$@ 行的函数（最长 %5$@ 行，如 %6$@）：先把这些函数按职责抽成独立类型或同类型的 extension，再把跨函数共享的状态收进构造注入的依赖，目标单文件 400 行以内。",
+                                   file.language, NumberFormat.grouped(lines),
+                                   NumberFormat.grouped(longOnes.count),
+                                   String(Self.longFunctionThreshold),
+                                   NumberFormat.grouped(longest), longestName)
         }
         let topName = functions.sorted { $0.lineCount > $1.lineCount }.first?.name ?? "未知函数"
-        return "\(file.language) 文件 \(NumberFormat.grouped(lines)) 行但函数都不长（\(functions.count) 个，最长 \(longest) 行）：按能力域横向切分成多个文件或子类型（例如解析/渲染/IO 分开），\(topName) 所在的这段职责适合第一个搬出去。"
+        return localizedFormat("%1$@ 文件 %2$@ 行但函数都不长（%3$@ 个，最长 %4$@ 行）：按能力域横向切分成多个文件或子类型（例如解析/渲染/IO 分开），%5$@ 所在的这段职责适合第一个搬出去。",
+                               file.language, NumberFormat.grouped(lines),
+                               String(functions.count), NumberFormat.grouped(longest), topName)
     }
 
     func longestFunctionNameSample(_ functions: [FunctionCandidate]) -> String {

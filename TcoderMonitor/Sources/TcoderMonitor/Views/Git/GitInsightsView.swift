@@ -114,7 +114,7 @@ struct GitInsightsMetricGrid: View {
         switch scope.basis {
         case .complete(let merges):
             return merges > 0
-                ? "已排除 \(NumberFormat.grouped(merges)) 次合并提交"
+                ? localizedFormat("已排除 %1$@ 次合并提交", NumberFormat.grouped(merges))
                 : "历史中无合并提交"
         case .windowCapped:
             return "窗口内非合并提交"
@@ -137,7 +137,7 @@ struct GitInsightsMetricGrid: View {
         guard let latest = git.recentCommits.first else {
             return git.lastCommitAt.map { DateFormat.full.string(from: $0) } ?? "无提交记录"
         }
-        return "最新：\(latest.subject)"
+        return localizedFormat("最新：%@", latest.subject)
     }
 
 }

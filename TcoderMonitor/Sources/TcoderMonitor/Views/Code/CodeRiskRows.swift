@@ -50,15 +50,16 @@ enum CodeRiskAnalysis {
 
     static func averageComplexityCaption(_ code: CodeMetrics) -> String {
         guard code.averageCyclomaticComplexity != nil else { return "未识别到函数" }
-        return "\(NumberFormat.grouped(code.analyzedFunctionCount)) 个函数平均"
+        return localizedFormat("%1$@ 个函数平均", NumberFormat.grouped(code.analyzedFunctionCount))
     }
 
     static func complexitySubtitle(_ code: CodeMetrics) -> String {
         guard !code.topComplexFunctions.isEmpty else { return "按圈复杂度降序" }
         let complexities = code.topComplexFunctions.map(\.cyclomaticComplexity)
-        return "按圈复杂度降序 · 上榜 \(NumberFormat.grouped(code.topComplexFunctions.count)) 个 · CC 区间 "
-            + "\(NumberFormat.grouped(complexities.min() ?? 0))~\(NumberFormat.grouped(complexities.max() ?? 0))"
-            + " · 颜色取自引擎给出的风险分档"
+        return localizedFormat("按圈复杂度降序 · 上榜 %1$@ 个 · CC 区间 %2$@~%3$@ · 颜色取自引擎给出的风险分档",
+                                NumberFormat.grouped(code.topComplexFunctions.count),
+                                NumberFormat.grouped(complexities.min() ?? 0),
+                                NumberFormat.grouped(complexities.max() ?? 0))
     }
 
     static func noRiskNote(_ code: CodeMetrics) -> String {
@@ -112,10 +113,11 @@ enum CodeRiskAnalysis {
         guard hotspots.count >= 5 else { return nil }
         let hotspotAverage = Double(hotspots.reduce(0, +)) / Double(hotspots.count)
         guard hotspotAverage >= average * hotspotDivergenceFactor else { return nil }
-        return "全仓 \(String(format: "%.2f", average))，但热点榜平均 "
-            + "\(String(format: "%.2f", hotspotAverage))：平均值被少数巨型函数拉高（超长函数 "
-            + "\(NumberFormat.grouped(code.longFunctions)) 个），优先拆这几个而不是整体重构："
-            + hotspots.prefix(3).map(String.init).joined(separator: " / ") + "。"
+        return localizedFormat("全仓 %1$@，但热点榜平均 %2$@：平均值被少数巨型函数拉高（超长函数 %3$@ 个），优先拆这几个而不是整体重构：%4$@。",
+                                String(format: "%.2f", average),
+                                String(format: "%.2f", hotspotAverage),
+                                NumberFormat.grouped(code.longFunctions),
+                                hotspots.prefix(3).map(String.init).joined(separator: " / "))
     }
 }
 
