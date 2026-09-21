@@ -33,9 +33,12 @@ final class SourcesSizeAuditTests: SelfScanHarnessCase {
     /// 它们另有一整套 `perf_selfcheck.sh` 的 11 项反例要过，拆法不能只按行数切；
     /// 所以这里先**点名挂账**而不是悄悄排除。谁把它们拆回 400 以下就把条目划掉，
     /// 新增一个超限文件则当场变红。与 `SelfScanDogfoodTests` 的 `ceiling = 0` 同一种写法。
+    ///
+    /// 2026-09-21 划掉一条：`perf_selfcheck.sh` 从 835 行按主题拆成「宿主 68 + 三块反例
+    /// 347/242/218」，四份都在 400 以下。它撞的是 `SelfScanDogfoodTests` 的 ≤800 那条，
+    /// 当场把门禁判红过一次——挂账名单不是免检通道，账还上就把条目划掉。
     private static let hugeFileWorkList: Set<String> = [
         "TcoderMonitor/scripts/trace_report.py",
-        "TcoderMonitor/scripts/perf_selfcheck.sh",
     ]
 
     /// 实现文件 = 仓库里的 `.swift`（`Tests/**` 除外，那条面由 `X3TestSizeAuditTests` 守）
