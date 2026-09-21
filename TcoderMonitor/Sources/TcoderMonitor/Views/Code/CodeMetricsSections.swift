@@ -93,10 +93,16 @@ struct CodeHotspotSection: View {
     @State private var expanded = false
 
     var body: some View {
+        // 盘点表 B12（巨大文件榜的非空支，判「删」：后半「点击条目在 Finder 中显示」是操作提示，
+        // 行尾那枚图标自己就带 help）→ 整条进 ⓘ，挂在卡名右侧那一行。
+        // B11（空支，● 留短藏长）这次**不动**：那支屏上只剩卡名 + 一句空态，
+        // 再拆出「行数是单文件总行数」只是把同一句话念两遍，完整读法仍是常驻更稳。
         GlassSection(
             "巨大文件（按行数降序）",
-            subtitle: Self.subtitle(code),
-            icon: .duplicate
+            subtitle: code.hugeFiles.isEmpty ? Self.subtitle(code) : nil,
+            icon: .duplicate,
+            trailing: code.hugeFiles.isEmpty ? nil
+                : AnyView(CopyHelpBadge(Self.subtitle(code)))
         ) {
             if code.hugeFiles.isEmpty {
                 EmptyStateView(

@@ -79,6 +79,14 @@ struct CodeMetricsView: View {
         return "「其他」合并了占比最低的 \(NumberFormat.grouped(tail.count)) 种语言，合计 "
             + "\(NumberFormat.grouped(lines)) 行 · \(NumberFormat.percent(share, precision: 1))。"
     }
+
+    /// 盘点表 B5 的**屏上那一半**：`mergedNote` 整句的头，去掉「合计 X 行 · Y%」。
+    /// 只在真有「其他」这一行时调用（没超过展示上限就没有可说的）。
+    static func mergedNoteHead(_ code: CodeMetrics, head: Int) -> String {
+        let tail = code.languages.filter { $0.share > 0 }.count - head
+        return localizedFormat("「其他」合并了占比最低的 %1$@ 种语言",
+                               NumberFormat.grouped(max(0, tail)))
+    }
 }
 
 // MARK: - 指标条
@@ -208,7 +216,14 @@ struct CodeScaleSection: View {
                 }
             }
             if let note = CodeMetricsView.mergedNote(code, head: CodeMetricsView.languageHeadCount) {
-                DataFootnote(text: note)
+                // 盘点表 B5（留短藏长 ●）：屏上留「其他」这一行是怎么来的（占比最低的 N 种被合并），
+                // 「合计 X 行 · Y%」进 ⓘ —— 那两个数在表格里「其他」那一行本来就各占一格。
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+                    DataFootnote(text: CodeMetricsView.mergedNoteHead(code,
+                                                                     head: CodeMetricsView.languageHeadCount))
+                    CopyHelpBadge(note)
+                    Spacer(minLength: 0)
+                }
             }
         }
     }
