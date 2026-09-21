@@ -97,6 +97,7 @@ struct MetricTile: View {
         value: String?,
         unit: String? = nil,
         caption: String? = nil,
+        captionHelp: String? = nil,
         tint: Color = Theme.Palette.Surface.ink,
         systemImage: String? = nil,
         gauge: MetricGauge = .none,
@@ -106,6 +107,7 @@ struct MetricTile: View {
         self.value = value
         self.unit = unit
         self.caption = caption
+        self.captionHelp = captionHelp
         self.tint = tint
         self.systemImage = systemImage
         self.gauge = gauge

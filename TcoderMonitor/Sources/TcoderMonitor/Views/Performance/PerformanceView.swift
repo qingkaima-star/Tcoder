@@ -117,8 +117,8 @@ struct PerformanceView: View {
             // 屏上只留「采样已暂停：最后一次结果」——「点继续恢复实时刷新」是操作指引，
             // 进 ⓘ（标题栏本来就摆着「继续」按钮）。诚实性两态一个不许少：
             // 暂停 + 下方是末次结果，仍然逐字上屏。
-            BannerRow(text: "采样已暂停：最后一次结果", style: .warning)
-                .help("采样已暂停：下方为最后一次采集结果，点「继续」恢复实时刷新。")
+            BannerRow(text: "采样已暂停：最后一次结果", style: .warning,
+                      help: "采样已暂停：下方为最后一次采集结果，点「继续」恢复实时刷新。")
         }
         if let reason = SystemReadings.memoryGapReason(context) {
             // 这条整句都是诚实性告知（不可信 + 按 -- 显示 + 没画成占满），不搬字。

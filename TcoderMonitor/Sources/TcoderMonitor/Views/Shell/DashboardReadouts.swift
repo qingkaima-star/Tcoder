@@ -79,6 +79,10 @@ enum BannerStyle {
 struct BannerRow: View {
     var text: String
     var style: BannerStyle = .neutral
+    /// 「留短藏长」槽，形状照 `SectionEmptyNote.help:`：屏上留 `text`，长口径进 ⓘ。
+    /// 默认 `nil` ⇒ 现有调用点一字不改。有了它，横幅的长下文不再挂在整条横幅的裸 `.help` 上
+    /// （那是全站要收掉的「匿名 tooltip」形状，见 `Design/CopyHelp.swift` 头注）。
+    var help: String? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.xs) {
@@ -88,6 +92,7 @@ struct BannerRow: View {
                 .font(Theme.Typo.narrative.font)
                 .lineSpacing(Theme.Typo.narrative.lineSpacing)
                 .foregroundStyle(.secondary)
+            if let help { CopyHelpBadge(help) }
             Spacer(minLength: Theme.Spacing.xs)
         }
         .padding(Theme.Spacing.sm)
@@ -259,6 +264,8 @@ struct DashboardLiveReadout: View {
                                 NumberFormat.grouped($0.cpuCoreCount),
                                 String(format: "%.2f", $0.loadAverage1))
             },
+            // 大数是「占用率」，分子分母那句口径走性能页那一份唯一真值（整句不在这里重抄）。
+            captionHelp: PerformanceLiveCharts.cpuBasis(context: SampleContext.from(state.monitor)),
             systemImage: IconName.cpu.rawValue
         )
     }
@@ -273,6 +280,8 @@ struct DashboardLiveReadout: View {
                                 ByteFormat.string($0.memoryTotalBytes, precision: 1),
                                 NumberFormat.percent($0.memoryFraction, precision: 0))
             },
+            // 「在用」≠「剩余可用」是这一格唯一会被读反的地方，整句走 `SystemReadings` 那一份。
+            captionHelp: SystemReadings.memoryCaliber,
             systemImage: IconName.memory.rawValue
         )
     }
@@ -312,6 +321,8 @@ struct DashboardLiveReadout: View {
                                 NumberFormat.grouped($0.totalCommits),
                                 NumberFormat.grouped($0.activeAuthorCount))
             } ?? ShellCopy.notAnalyzed(.gitHistory),
+            // 屏上两枚是**含合并的总数**与**作者表行数**；差值口径走 Git 页那个生产者 `GitHistoryScope.headline`，不另写一份。
+            captionHelp: report?.git.map { GitHistoryScope($0).headline },
             systemImage: IconName.git.rawValue
         )
     }
@@ -332,9 +343,19 @@ struct DashboardLiveReadout: View {
             : localizedFormat("本机 · 每 %@采样", state.monitor.sampleIntervalText)
     }
 
+    /// 上面那半句节奏话的 ⓘ 长口径（「留短藏长」的下半截），只给**运行态**：暂停态屏上已写着
+    /// 「采样已暂停」，而目录里那句整句口径结尾是「点「继续」恢复实时刷新」，「继续」只住在性能页
+    /// （`PerformanceView.controls`）——在总览页指一颗本页没有的按钮等于写假指引，故留 `nil` 不画问号。
+    /// 运行态这句是性能页页头那条键的**第二落点**（本流不改 `Views/Performance/**`，故重复了字面量，已按「建议收成一处常量」报总工）。落点自检：`ShellReadoutTooltipTests`。
+    private var cadenceCaliber: String? { state.monitor.isInteractionPaused ? nil : Self.liveReadingsCaliber }
+
+    /// `cadenceCaliber` 的正文。写成 `static let` 是让这处与它的落点自检共用一份真值。
+    static let liveReadingsCaliber = "系统级实时读数只观测不干预。数值随采样刷新，取不到的一律显示 --，不会补成 0。"
+
     private var livePerformanceGroup: some View {
         GlassSection("实时性能",
                      subtitle: cadenceSubtitle,
+                     subtitleHelp: cadenceCaliber,
                      icon: .performance) {
             if state.monitor.history.count > 2 {
                 CPUHistoryChart(snapshots: Array(state.monitor.history.suffix(90)))
