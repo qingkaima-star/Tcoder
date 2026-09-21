@@ -87,9 +87,12 @@ struct HealthTrendCard: View {
 
     var body: some View {
         GlassSection("评分趋势",
+                     // 副标题与卡内空态标题原本逐字相同（都是「历史点不足」），隔三行念两遍。
+                     // 页尾实拍（.scratch/evidence-8de2d17/light-tail/健康评分.png）抓到后改成
+                     // "报数"：这一档真正知道的是**有几个点**，"不足"由下面的空态去说。
                      subtitle: points.count >= 2
                          ? "共 \(NumberFormat.grouped(points.count)) 个历史点 · 全部来自本机落盘的评分记录"
-                         : "历史点不足",
+                         : "只有 \(NumberFormat.grouped(points.count)) 个历史点",
                      icon: .chartLine) {
             if points.count >= 2 {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {

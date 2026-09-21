@@ -111,6 +111,92 @@ final class DataMarkColorGuardTests: XCTestCase {
                       "注释里交代旧写法就被判红 → 一年后没人记得它为什么错")
     }
 
+    // MARK: - 默认参数是"扫调用点"的盲区（批次 P6-Q：总览页黑条）
+
+    /// `inkShareBars` 只盯**调用点**上写出来的 `tint:`，而 `Theme.Share.Row` 的结构占比
+    /// 初始化器根本不要求调用方传色 —— 于是默认值偷偷涂墨时，总览页长出一根 1300pt 的
+    /// 实心黑条而守卫全绿（2026-09-21 页尾实拍抓到；同页同一份语言数据在代码规模页是蓝的）。
+    /// 判据抽成纯函数 —— 直接对字面量写断言是"自证"，不是元测试。
+    /// 空内容按"判据不成立"处理：文件被改名/搬走时这条必须红，不能变成永真绿。
+    struct ShareRowDefaultVerdict: Equatable { let blue: Bool; let stillInked: Bool }
+
+    static func shareRowDefault(_ readoutKitSource: String) -> ShareRowDefaultVerdict {
+        guard !readoutKitSource.isEmpty else { return .init(blue: false, stillInked: false) }
+        return .init(blue: readoutKitSource.contains("color: ChartSeries.dataMarkColor"),
+                     stillInked: readoutKitSource.contains("color: Theme.Palette.Surface.ink"))
+    }
+
+    func test_shareRowDefaultsDrawDataMarksInBlue() throws {
+        let kit = try SurfaceScanKit.sourceFiles(under: "Design")
+            .first { $0.path.hasSuffix("ReadoutKit.swift") }?.content ?? ""
+        let verdict = Self.shareRowDefault(kit)
+        XCTAssertTrue(verdict.blue,
+                      "`Theme.Share.Row` 的结构占比默认不再走数据块蓝：不显式传色的页面会长出黑条")
+        XCTAssertFalse(verdict.stillInked,
+                       "`Theme.Share.Row` 的默认还留着一份纯墨 —— 最重的墨是给最大的数用的，不给条用")
+    }
+
+    /// 两向元测试：退回墨色要红，文件读不到也要红（不许把"没扫到"读成"没问题"）。
+    func test_shareRowDefaultRulerSeesBothWays() {
+        let inked = "init(label: String) { self.init(color: Theme.Palette.Surface.ink) }"
+        XCTAssertEqual(Self.shareRowDefault(inked), .init(blue: false, stillInked: true),
+                       "判据看不见退回墨色的默认值")
+        let blue = "init(label: String) { self.init(color: ChartSeries.dataMarkColor) }"
+        XCTAssertEqual(Self.shareRowDefault(blue), .init(blue: true, stillInked: false), "合法写法被误伤")
+        XCTAssertEqual(Self.shareRowDefault(""), .init(blue: false, stillInked: false),
+                       "文件读不到时这条会成永真绿")
+    }
+
+    // MARK: - 零不是动作（批次 P6-Q：提交行那枚红 0）
+
+    /// `NumberFormat.signed(...)` 后面 3 行内**无条件**挂上语义色 = 0 也吃色。
+    /// 0 行新增/删除是"没做这件事"，涂绿/涂红会把它说成"做了、量是 0"。
+    static func zeroWearsSemanticColor(in files: [(path: String, content: String)]) -> [String] {
+        files.flatMap { file in
+            let lines = file.content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            var hits: [String] = []
+            for (index, raw) in lines.enumerated() {
+                let line = raw.trimmingCharacters(in: .whitespaces)
+                if line.hasPrefix("//") { continue }
+                guard line.contains("NumberFormat.signed(") else { continue }
+                let window = lines[index..<min(index + 4, lines.count)]
+                    .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+                guard window.contains(where: { $0.contains(".foregroundStyle(Theme.Semantic.") }) else { continue }
+                if window.contains(where: { $0.contains("== 0 ?") || $0.contains("!= 0 ?") }) { continue }
+                hits.append("\(file.path):\(index + 1)")
+            }
+            return hits
+        }
+    }
+
+    func test_zeroChurnDoesNotWearSemanticColor() throws {
+        let git = try SurfaceScanKit.sourceFiles(under: "Views/Git")
+        XCTAssertTrue(Self.zeroWearsSemanticColor(in: git).isEmpty,
+                      "这些带正负号的读数在 0 时也涂着语义色（零不是动作）")
+    }
+
+    func test_zeroColorRulerCatchesSyntheticAndSparesGuarded() {
+        let dirty = [(path: "Views/Git/Fake.swift", content: """
+        Text(NumberFormat.signed(-commit.deletions))
+            .font(CodeGitType.number(Theme.Typo.monoSmall))
+            .foregroundStyle(Theme.Semantic.danger.textColor)
+        """)]
+        XCTAssertEqual(Self.zeroWearsSemanticColor(in: dirty).count, 1, "红 0 没抓到 → 守卫是摆设")
+
+        let guarded = [(path: "Views/Git/Fake.swift", content: """
+        Text(NumberFormat.signed(-commit.deletions))
+            .foregroundStyle(commit.deletions == 0 ? Self.quietNumber : Theme.Semantic.danger.textColor)
+        """)]
+        XCTAssertTrue(Self.zeroWearsSemanticColor(in: guarded).isEmpty, "已经判 0 的合法写法被误伤")
+
+        let commented = [(path: "Views/Git/Fake.swift", content: """
+        // 原来是 .foregroundStyle(Theme.Semantic.danger.textColor)，0 也涂红
+        Text(NumberFormat.signed(-commit.deletions))
+            .foregroundStyle(commit.deletions == 0 ? Self.quietNumber : Theme.Semantic.danger.textColor)
+        """)]
+        XCTAssertTrue(Self.zeroWearsSemanticColor(in: commented).isEmpty, "注释里交代旧写法就被判红")
+    }
+
     // MARK: - 一根条只许编码一个量（批次 P6-Q：页尾实拍暴露）
 
     /// 判据形状：`MiniBarGauge(` 起 5 行内（**跳过注释行**）取 `fraction:` 表达式，

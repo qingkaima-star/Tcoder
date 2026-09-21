@@ -233,6 +233,16 @@ enum DateFormat {
         return formatter
     }()
 
+    /// 日期档（不带分钟）。给**读数格**用：`full` 那 16 个字符在 28pt 的读数格里放不下，
+    /// 页尾实拍里 Git 洞察「首次提交」被截成 `2026-09-19 17:…` —— 一个被截断的时间戳
+    /// 比一个精度低一格的时间更难读。仓库诞生日要读到分钟的场景没有，分钟留给 `full`。
+    static let day: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
     static func sinceDescription(_ date: Date?) -> String {
         guard let date else { return "从未" }
         return LogRecency.describe(date)
