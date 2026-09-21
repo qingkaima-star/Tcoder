@@ -52,7 +52,7 @@ struct HeuristicClaimLine: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
             ThemedIcon(.info, role: .badge).foregroundStyle(Theme.Semantic.neutral.textColor)
-            Text(Self.claim)
+            Text(localizedCopy(Self.claim))
                 .font(Theme.Typo.label.font)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
@@ -118,7 +118,10 @@ struct HealthHero: View {
     /// 位置都在交代它们最重要），这里只交代参与计分的维度数。信息总量一项未减。
     private var subtitle: String {
         let scorable = HealthDimension.allCases.filter { $0.defaultWeight > 0 }.count
-        return "\(health.components.count)/\(scorable) 个维度参与计分"
+        // `localizedFormat` 只收 `String...`（不是 `CVarArg...`）——
+        // 那是把 `%@` 拿到 Int 会启动即崩的那次血案钉住的签名，这里正好被它拦住。
+        return localizedFormat("%1$@/%2$@ 个维度参与计分",
+                               String(health.components.count), String(scorable))
     }
 
     private var narrativeColumn: some View {
@@ -225,7 +228,9 @@ struct HealthCodeScopeReadout: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-            Theme.Readout.Field(scope.label, "\(scope.overall) · \(scope.grade.rawValue) 级", help: scope.note)
+            Theme.Readout.Field(scope.label,
+                                localizedFormat("%1$@ · %2$@ 级", String(scope.overall), scope.grade.rawValue),
+                                help: scope.note)
             Text(membershipLine)
                 .typed(Theme.Typo.narrative)
                 .foregroundStyle(.secondary)
@@ -234,8 +239,13 @@ struct HealthCodeScopeReadout: View {
     }
 
     private var membershipLine: String {
-        let included = "计入 \(scope.includedDimensions.joined(separator: "、"))"
-        guard !scope.excludedDimensions.isEmpty else { return included + "（与综合分同一批分量）" }
-        return included + "；不含 \(scope.excludedDimensions.joined(separator: "、"))"
+        // 整句键 + 分隔符也查表：英文里顿号 `、` 不存在，硬留就成了 `a、b、c`。
+        let sep = localizedCopy("、")
+        let included = scope.includedDimensions.map(localizedCopy).joined(separator: sep)
+        guard !scope.excludedDimensions.isEmpty else {
+            return localizedFormat("计入 %@（与综合分同一批分量）", included)
+        }
+        let excluded = scope.excludedDimensions.map(localizedCopy).joined(separator: sep)
+        return localizedFormat("计入 %1$@；不含 %2$@", included, excluded)
     }
 }

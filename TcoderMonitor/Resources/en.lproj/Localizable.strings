@@ -406,11 +406,6 @@
 /* ===== P5-c 第七批：健康页整句模板 + 被嵌进句子里的**值**（维度名、建议动词短语）
    英文态实拍证明：模板翻了、嵌进去的值没翻 ⇒ "Bucketed by 日"、"Start by 拆解高复杂度函数"
    这种半译句，比整句中文更像"乱翻译"。所以 advice() 的九条返回与维度名一律过 localizedCopy。 ===== */
-"综合 %1$@ 分（%2$@ 级）。" = "Overall %1$@ out of 100 (grade %2$@).";
-"当前没有任何维度可供评估，评分依据缺失，建议先完成代码分析与 Git 采集，再来查看总分。" = "No dimension is evaluable right now, so the scoring basis is missing — finish the code analysis and the Git collection before reading a total score.";
-"目前只有%1$@（%2$@ 分）这一个维度有可用数据，它同时也是当前最低项，建议优先%3$@。" = "Only %1$@ (%2$@ pts) has usable data so far, and it is also the lowest item today. Priority: %3$@.";
-"主要拖累来自%1$@（%2$@ 分），%3$@（%4$@ 分）是目前相对最好的一项；建议优先%5$@。" = "The main drag is %1$@ (%2$@ pts), while %3$@ (%4$@ pts) is currently the strongest. Priority: %5$@.";
-"主要拖累来自%1$@（%2$@ 分）与%3$@（%4$@ 分）；%5$@（%6$@ 分）是当前最稳的一项。建议优先%7$@。" = "The main drag comes from %1$@ (%2$@ pts) and %3$@ (%4$@ pts); %5$@ (%6$@ pts) is the steadiest. Priority: %7$@.";
 "处理「%@」" = "addressing “%@”";
 "拆解高复杂度函数" = "breaking down high-complexity functions";
 "抽取重复代码块" = "extracting duplicate code blocks";
@@ -439,3 +434,16 @@
 "%@ 分" = "%@ min";
 "%@ 毫秒" = "%@ ms";
 "%@ 秒" = "%@ s";
+
+/* 四条分支各一条整句键（不再二次拼接）+ 健康页剩余标签 */
+"综合 %1$@ 分（%2$@ 级）。当前没有任何维度可供评估，评分依据缺失，建议先完成代码分析与 Git 采集，再来查看总分。" = "Overall %1$@ out of 100 (grade %2$@). No dimension is evaluable right now, so the scoring basis is missing — finish the code analysis and the Git collection before reading a total score.";
+"综合 %1$@ 分（%2$@ 级）。目前只有%3$@（%4$@ 分）这一个维度有可用数据，它同时也是当前最低项，建议优先%5$@。" = "Overall %1$@ out of 100 (grade %2$@). Only %3$@ (%4$@ pts) has usable data so far, and it is also the lowest item today. Priority: %5$@.";
+"综合 %1$@ 分（%2$@ 级）。主要拖累来自%3$@（%4$@ 分），%5$@（%6$@ 分）是目前相对最好的一项；建议优先%7$@。" = "Overall %1$@ out of 100 (grade %2$@). The main drag is %3$@ (%4$@ pts), while %5$@ (%6$@ pts) is currently the strongest. Priority: %7$@.";
+"综合 %1$@ 分（%2$@ 级）。主要拖累来自%3$@（%4$@ 分）与%5$@（%6$@ 分）；%7$@（%8$@ 分）是当前最稳的一项。建议优先%9$@。" = "Overall %1$@ out of 100 (grade %2$@). The main drag comes from %3$@ (%4$@ pts) and %5$@ (%6$@ pts); %7$@ (%8$@ pts) is the steadiest. Priority: %9$@.";
+"%1$@/%2$@ 个维度参与计分" = "%1$@ of %2$@ dimensions carry a score";
+"%1$@ · %2$@ 级" = "%1$@ · grade %2$@";
+"启发式加权计算，未调用外部模型" = "Heuristic weighted calculation, no external model called";
+"工程质量（代码口径）" = "Engineering Quality (code basis)";
+"计入 %@（与综合分同一批分量）" = "Counted: %@ (the same components behind the overall score)";
+"计入 %1$@；不含 %2$@" = "Counted: %1$@; excluded: %2$@";
+"、" = ", ";
