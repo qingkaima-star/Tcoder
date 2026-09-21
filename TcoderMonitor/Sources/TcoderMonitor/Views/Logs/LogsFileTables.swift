@@ -85,10 +85,12 @@ struct LogsScannedFilesCard: View {
 
     private static let rowLimit = 40
 
+    @State private var expanded = false
+
     var body: some View {
         let files = sorted
         guard !files.isEmpty else { return AnyView(EmptyView()) }
-        let shown = Array(files.prefix(Self.rowLimit))
+        let shown = expanded ? files : Array(files.prefix(Self.rowLimit))
         return AnyView(
             GlassSection("已扫描文件",
                          subtitle: localizedFormat("共 %1$@ 个 · 按大小降序",
@@ -102,8 +104,14 @@ struct LogsScannedFilesCard: View {
                         row(file)
                     }
                 }
-                if files.count > shown.count {
-                    NoteLine("另有 \(NumberFormat.grouped(files.count - shown.count)) 个文件未列出。")
+                // 与进程表同一处收口（守卫 G10）：原来这里是一句 `NoteLine`
+                // 「另有 N 个文件未列出」—— 报数不给入口，读者看完什么也做不了。
+                if files.count > Self.rowLimit {
+                    DataDisclosureButton(expanded: expanded,
+                                         hiddenCount: files.count - Self.rowLimit,
+                                         noun: "个文件") {
+                        expanded.toggle()
+                    }
                 }
             }
         )

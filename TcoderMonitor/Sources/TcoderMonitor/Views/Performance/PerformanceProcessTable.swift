@@ -21,7 +21,13 @@ struct PerformanceProcessTableCard: View {
     let totalCount: Int?
     let isTruncated: Bool
 
-    private static let rowLimit = 20
+    /// 默认 8 行，与全仓其他榜单同一口径（巨大文件 / 热点函数 / 重复块 / 贡献者 /
+    /// 最近提交都是 8）。原来是 20 行，而按 CPU 核当量排序时第 2 行往后几乎全是 0.00
+    /// —— 页尾实拍（`.scratch/evidence-8de2d17/light-tail/性能监控.png`）里
+    /// 20 行有 19 行的排序键相同，那 19 行对读者不再携带信息，只是把卡片拉长。
+    private static let rowLimit = 8
+
+    @State private var expanded = false
 
     var body: some View {
         GlassSection("进程占用排行",
@@ -38,15 +44,24 @@ struct PerformanceProcessTableCard: View {
                 CopyHelpBadge("完成一次采样后会列出占用最高的进程（PID、名称、CPU 核当量、内存、线程、打开文件）。")
             } else {
                 table
-                if rows.count > shown.count {
-                    NoteLine("已按当前排序列出前 \(NumberFormat.grouped(shown.count)) 项，另有 \(NumberFormat.grouped(rows.count - shown.count)) 个进程未列出。")
+                // 以前这里是一句 `NoteLine`「另有 N 个进程未列出」——**只报数、不给入口**，
+                // 读者看完什么也做不了（功能真实性清单 §S4：交互无消费）。
+                // 换成全站同一枚展开按钮：折叠这件事由控件自己交代，点得动。
+                if rows.count > Self.rowLimit {
+                    DataDisclosureButton(expanded: expanded,
+                                         hiddenCount: rows.count - Self.rowLimit,
+                                         noun: "个进程") {
+                        expanded.toggle()
+                    }
                 }
                 honestyLegend
             }
         }
     }
 
-    private var shown: [ProcessSnapshot] { Array(rows.prefix(Self.rowLimit)) }
+    private var shown: [ProcessSnapshot] {
+        expanded ? rows : Array(rows.prefix(Self.rowLimit))
+    }
 
     /// 排名只建立在「本用户可查询」的那部分进程上，全系统总数走 sysctl——
     /// 两个数都摊开写，不拿子集的排名冒充全系统的排名。
