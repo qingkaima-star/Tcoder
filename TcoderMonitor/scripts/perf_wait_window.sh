@@ -113,12 +113,12 @@ ensure_synth_scroller() {  # **进等待循环之前**把投事件器编好（�
   # 自己刚起的编译绕过自己刚过的闸门，这种污染比别人的干扰更难发现。
   local want
   want=$(shasum -a 256 scripts/perf_synth_scroll.swift 2>/dev/null | cut -c1-12)
-  SYNTH_BIN="/tmp/tcoder-synth-scroll-${want:-unknown}"
+  SYNTH_BIN="${SCRATCH:-$PWD/.scratch}/tcoder-synth-scroll-${want:-unknown}"
   [ -d "$SYNTH_BIN" ] && SYNTH_BIN="$SYNTH_BIN.$$"     # 别人占了这个名字：换，不硬来
   [ -x "$SYNTH_BIN" ] && return 0
   local tmp="$SYNTH_BIN.build.$$"
   xcrun swiftc -O -target arm64-apple-macos14.0 \
-      -module-cache-path /tmp/tcoder-swiftmodulecache \
+      -module-cache-path "${SCRATCH:-$PWD/.scratch}/swiftmodulecache" \
       scripts/perf_synth_scroll.swift -o "$tmp" 2>/dev/null \
     || { rm -f "$tmp"; echo "!! 合成输入器编不出来（scripts/perf_synth_scroll.swift）" >&2; return 1; }
   mv -f "$tmp" "$SYNTH_BIN"
@@ -221,7 +221,7 @@ for i in $(seq 1 "$SAMPLES"); do
     echo "      我一检测到你正在滚就开录（约 50 s），你不用猜时机、也不用等我发话。"
   fi
   INPUT_SOURCE="$INPUT" export INPUT_SOURCE
-  if ./scripts/perf_harness.sh "$MODE" "$PERF_ROOT/tcoder-perf-$TAG-$MODE-run$i"; then
+  if ./scripts/perf_harness.sh "$MODE" "$SCRATCH/tcoder-perf-$TAG-$MODE-run$i"; then
     echo "    ✓ 第 $i 趟完成"
   else
     echo "    ✗ 第 $i 趟被闸门拒绝或失败（不绕、不记）"
@@ -229,7 +229,7 @@ for i in $(seq 1 "$SAMPLES"); do
   fi
 done
 
-echo "==> 完成：$((SAMPLES - fails))/$SAMPLES 趟可用（档=$MODE）；产物 $PERF_ROOT/tcoder-perf-$TAG-$MODE-run*/"
-echo "    重打读数：./scripts/perf_harness.sh report $PERF_ROOT/tcoder-perf-$TAG-$MODE-run1"
+echo "==> 完成：$((SAMPLES - fails))/$SAMPLES 趟可用（档=$MODE）；产物 $SCRATCH/tcoder-perf-$TAG-$MODE-run*/"
+echo "    重打读数：./scripts/perf_harness.sh report $SCRATCH/tcoder-perf-$TAG-$MODE-run1"
 echo "    （表头会写明测量期间；interact 档才有资格答 T1，idle 档只答心跳期）"
 [ "$fails" -lt "$SAMPLES" ] || exit 1

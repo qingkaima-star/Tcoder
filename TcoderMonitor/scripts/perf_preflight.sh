@@ -26,10 +26,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/perf_probes.sh"  # 探针族搬出去了�
 # 根因不在我的样本目录，而在 **xctrace 的中间产物**：`instruments*.ktrace`
 # 默认落在 `$TMPDIR`，而采集进程被 kill、超时或崩溃时**不会自己清**。
 # 现场是 21 个孤儿共 103 GB。⇒ 三条硬规矩进代码，不靠我记得：
-#   ① 样本根目录进项目内被忽略的 `tmp/perf/`（不再用全局 /tmp，也不再靠 $TMPDIR）
+#   ① 样本根目录 = 仓库内 `.scratch/`（AGENTS §1.6 的一次性产物落点，已 gitignore；
+#      不再用全局 /tmp，也不再靠 $TMPDIR）
 #   ② 每轮收尾固定扫残留 + 确认自己起的采集进程真退了
 #   ③ 可用低于阈值就**拒跑**（与其余六维同形状、同一个 hard 标记）
-PERF_ROOT="${PERF_ROOT:-$PWD/tmp/perf}"
+SCRATCH="${SCRATCH:-$(git rev-parse --show-toplevel)/.scratch}"
 MIN_FREE_GIB="${MIN_FREE_GIB:-20}"
 QUIESCE_MIN="${QUIESCE_MIN:-5}"  # 静默合格线（与 perf_harness.sh 同值）。写在闸门这边，
 # 是因为**阈值**属于判定、不属于取数；排程器单独 source 本文件时也要有默认值可走。
@@ -63,7 +64,7 @@ preflight_context() {  # preflight_context <outdir> <pid>
   visible=$(preflight_window_state "$pid")
   others=$(concurrent_heavy_jobs)
   free_gib=$(disk_free_gib)
-  mkdir -p "$PERF_ROOT" 2>/dev/null || true   # 样本根目录：项目内、.gitignore 已忽略
+  mkdir -p "$SCRATCH" 2>/dev/null || true   # 样本根目录：项目内、.gitignore 已忽略
   other_detail=$(concurrent_heavy_jobs_detail)
   # 运行时漏翻台账（i18n 报告器）会在渲染路径上记键、按 200 次节流写盘。
   # 设了它再量帧率，量的就是台账自己的开销——所以这一维写进上下文，并且直接拒跑。
@@ -84,7 +85,7 @@ preflight_context() {  # preflight_context <outdir> <pid>
   # 拆函数没有改变任何取数顺序，也没有引入新的全局量）。
   preflight_gates
   if [ "$hard" = "1" ] && [ "${IGNORE_CONTEXT_GATE:-0}" != "1" ]; then
-    # 被拒的一趟**必须在目录上留下自认字样**：否则 `ls $PERF_ROOT/tcoder-perf-*` 会看见
+    # 被拒的一趟**必须在目录上留下自认字样**：否则 `ls $SCRATCH/tcoder-perf-*` 会看见
     # run1/run2/run3 三个"像样本"的空目录，后来的人很容易把"闸门拒了"读成"量过了"。
     # （今天就真出现了三个只有 context/meta 的目录。）
     printf 'REFUSED\n这一趟没有采数：测量上下文不合格，闸门拒跑。原因见同目录 %s。\n' "$(basename "$f")" \

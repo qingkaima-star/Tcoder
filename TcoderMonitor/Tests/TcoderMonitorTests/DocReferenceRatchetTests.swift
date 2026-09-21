@@ -64,10 +64,8 @@ final class DocReferenceRatchetTests: XCTestCase {
         "py", "js", "ts", "resolved",
     ]
 
-    static let prunedDirectories: Set<String> = [
-        ".git", ".build", ".swiftpm", ".worktrees", "node_modules", "DerivedData",
-        "dist", "build", "out",
-    ]
+    /// 同一条剪枝只有一个来源（见 `SelfScanHarnessCase.skipDirectoryNames` 的理由）。
+    static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
 
     /// 已知失效基线。**当前必须为空**：2026-09-20 按「文件名.类型.成员」口径重算后，
     /// 原先误登记的 33 条全部判活，真死引用为 0。

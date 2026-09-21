@@ -23,8 +23,10 @@ pid_binary() {  # pid_binary <pid>
 # ——今天 T1 采样断在这里（三轮作废之后第一次真的跑到开录，被我自己的脚本绊倒）。
 # 路径按 `BASH_SOURCE` 算而不是 `$PWD`：换个目录跑也不会指错探针源码。
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 一次性产物的落点：AGENTS §1.6 的仓库内 `.scratch/`（探针二进制也在这儿，不再 litter /tmp）。
+SCRATCH="${SCRATCH:-${TCODER_SCRATCH:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.scratch}}"
 WINLIST="${WINLIST:-$HERE/winlist.swift}"
-WINLIST_BIN="${WINLIST_BIN:-}"
+WINLIST_BIN="${WINLIST_BIN:-}"   # 编译产物落 $SCRATCH，见 winlist_probe
 QUIESCE_SRC="${QUIESCE_SRC:-$HERE/input_quiescence.swift}"
 QUIESCE_BIN="${QUIESCE_BIN:-}"
 
@@ -73,7 +75,7 @@ quiescence_probe() {  # → 一行 `… 静默=12.34s`；取不到时打印 静�
   # ③ 默认 module cache 在并发编译下也会偶发失败 ⇒ 显式指一个自己的缓存目录。
   local want bin tmp
   want=$(printf '%s' "$(shasum -a 256 "$QUIESCE_SRC" 2>/dev/null | cut -c1-12)")
-  bin="/tmp/tcoder-quiesce-${want:-srcunknown}"
+  bin="$SCRATCH/tcoder-quiesce-${want:-srcunknown}"
   [ -d "$bin" ] && bin="$bin.$$"          # 别人在那儿放了目录：换一个，绝不硬来
   if [ ! -x "$bin" ]; then
     tmp="$bin.build.$$"

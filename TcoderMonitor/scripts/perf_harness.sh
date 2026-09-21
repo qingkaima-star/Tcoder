@@ -31,7 +31,7 @@
 # 汇总表里的每一列都必须来自同一档产物，跨档拼表等于造假。
 #
 # ## 输出目录必须带短 HEAD 后缀
-# `$PERF_ROOT/tcoder-perf-<rev>/`：不带后缀时后一批会静默覆盖前一批，
+# `$SCRATCH/tcoder-perf-<rev>/`：不带后缀时后一批会静默覆盖前一批，
 # 于是"改前 vs 改后"最后只剩一列数，回归门禁当场失效。
 #
 # 用法:
@@ -50,6 +50,30 @@
 #   DRY_RUN=1            只打印将执行的命令，一条都不跑（用于自检命令拼得对不对）
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
+# 一次性产物的落点（AGENTS §1.6）：默认仓库内的 `.scratch/`（已 gitignore），
+# 不再往 $TMPDIR 倒 —— 2026-09-21 这台机被别的车道的 21 个孤儿 ktrace 吃掉 103 GB，
+# 我们的 xctrace bundle 同样是 GB 级，规矩必须写进工具而不是写进记忆。
+# 覆盖方式：`TCODER_SCRATCH=/some/dir ./scripts/perf_harness.sh …`。
+SCRATCH="${TCODER_SCRATCH:-$(git rev-parse --show-toplevel)/.scratch}"
+mkdir -p "$SCRATCH" 2>/dev/null || SCRATCH="${TMPDIR:-/tmp}"
+
+# 录一档 xctrace 是 GB 级的事。2026-09-21 这台机被一次没自清的取证吃掉 103 GB、
+# 可用只剩 4.4 GiB，那种情况下录到一半会**留下半份 trace 且报告读起来像真的**。
+# 所以磁盘余量是录制的前置条件，不是事后检查。覆盖：TCODER_MIN_FREE_GIB=60。
+require_disk_headroom() {
+  local min="${TCODER_MIN_FREE_GIB:-20}" free
+  # BSD df 没有 `-s`：写成 `df -s -k` 会报错、`free` 变空，
+  # 于是这条前置**永远静默放行**——正是本仓最恨的那类永真绿守卫。
+  # 读不到数一律判败（不是跳过）：拿不到余量就没资格开始一趟 GB 级的录制。
+  free=$(df -k -P /System/Volumes/Data 2>/dev/null | awk 'NR==2 {print int($4/1024/1024)}')
+  case "$free" in
+    ''|*[!0-9]*) die "读不到 /System/Volumes/Data 的可用空间（df 返回「$free」）：不录制。"
+                 ;;
+  esac
+  [ "$free" -ge "$min" ] || die "可用仅 ${free} GiB < ${min} GiB：不录制。先清 $SCRATCH 与孤儿 trace，别硬跑到一半"
+  echo "    磁盘余量前置：${free} GiB ≥ ${min} GiB ✔"
+}
+
 
 REV=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DIRTY=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
@@ -103,7 +127,7 @@ PREFLIGHT_SRC="$PWD/scripts/perf_preflight.sh"
 # idle —— 不碰它，量心跳（spec §1 / §3 T2 的那一档）
 # =============================================================================
 cmd_idle() {
-  local out="${1:-"$PERF_ROOT"/tcoder-perf-$REV}"
+  local out="${1:-$SCRATCH/tcoder-perf-$REV}"
   # period 决定这一批读数**有资格回答哪个问题**：idle 只能答"心跳期"，T1（交互期 hitch=0）
   # 只认 period=interaction 的样本。写进 meta 是为了让 report 阶段还能看见它——
   # 否则过两天没人记得当时到底碰没碰鼠标，就会拿心跳期的数去交交互期的结论。
@@ -283,7 +307,7 @@ switch_record_page() {  # switch_record_page <page> <dir> <sandbox>：一页的�
 }
 
 cmd_switch() {
-  local out="${1:-"$PERF_ROOT"/tcoder-perf-$REV}"
+  local out="${1:-$SCRATCH/tcoder-perf-$REV}"
   echo "==> switch 档：逐页冷启动（自带沙箱，不写用户的 defaults）"
   [ -x "$PERF_BIN" ] || die "找不到被采二进制 $PERF_BIN（先跑 ./scripts/build_app.sh release，或传 PERF_BIN=）"
   local pages
@@ -318,7 +342,7 @@ cmd_switch() {
 }
 
 cmd_report() {
-  local out="${1:-"$PERF_ROOT"/tcoder-perf-$REV}"
+  local out="${1:-$SCRATCH/tcoder-perf-$REV}"
   [ -d "$out" ] || die "没有这个输出目录：$out"
   # 被闸门拒掉的那趟**不许被 report 当成一趟数据重打**：
   # 它只有 context/meta，喂给汇总表会得到"没有 hitch"形状的漂亮空表。
@@ -369,16 +393,16 @@ cmd_probe() {
 cmd_interact() {
   # 不复制一份录制逻辑，只换 period 与提示语——两档共享同一实现，
   # 才不会哪天只修了 idle 那一半、两档的口径悄悄分叉。
-  PERIOD=interaction cmd_idle "${1:-"$PERF_ROOT"/tcoder-perf-interact-$REV}"
+  PERIOD=interaction cmd_idle "${1:-$SCRATCH/tcoder-perf-interact-$REV}"
 }
 
 main() {
   local cmd="${1:-}"
   shift || true
   case "$cmd" in
-    idle) cmd_idle "$@" ;;
-    interact) cmd_interact "$@" ;;
-    switch) cmd_switch "$@" ;;
+    idle) require_disk_headroom; cmd_idle "$@" ;;
+    interact) require_disk_headroom; cmd_interact "$@" ;;
+    switch) require_disk_headroom; cmd_switch "$@" ;;
     report) cmd_report "$@" ;;
     probe) cmd_probe "$@" ;;
     selfcheck)

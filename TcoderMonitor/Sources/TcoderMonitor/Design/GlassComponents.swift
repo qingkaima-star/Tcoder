@@ -5,11 +5,13 @@ import SwiftUI
 // 页面重样只需要这四个 + `Design/SharedComponents.swift` 里收编的既有组件。
 // 本文件不出现 `#available`，也不出现 `glassEffect`：分层与闸门全在 `Glass.swift`。
 //
-// 默认值即规范：内容卡 `layer = .content`（标准材质、无玻璃、无描边）。
-// 只有侧栏 / 工具条 / 按钮这类控件层才显式传 `.chrome`（WS-H §9）。
+// 默认值即规范：内容卡与分区默认落在 **`.card`**（白面 + 发丝边 + 一层软影，批次 P6 对齐 AiX）。
+// 嵌在卡里的平铺分组显式传 `.content`；只有侧栏 / 工具条 / 按钮这类控件层才传 `.chrome`（WS-H §9）。
 
-/// 内容卡基座。命名沿用任务要求的 `GlassCard`，但默认落在内容层——
-/// 真玻璃要显式 `layer: .chrome`，这道门槛是故意的，防止内容区被玻璃糊成一片。
+/// 内容卡基座。命名沿用任务要求的 `GlassCard`。
+/// **批次 P6 起默认就是 `.card`**（白面 + 发丝边 + 一层软影）——
+/// 参考图里"一块可独立读的信息 = 一张卡"，而 `GlassCard` 正是这个语义的载体。
+/// 控件层要显式传 `.chrome`，嵌在卡里的平铺分组要显式传 `.content`。
 struct GlassCard<Content: View>: View {
     var layer: GlassLayer
     var radius: CGFloat
@@ -18,7 +20,7 @@ struct GlassCard<Content: View>: View {
     @ViewBuilder var content: Content
 
     init(
-        layer: GlassLayer = .content,
+        layer: GlassLayer = .card,
         radius: CGFloat = Theme.Radius.card,
         padding: CGFloat = Theme.Spacing.cardPadding,
         spacing: CGFloat? = Theme.Spacing.sm,
@@ -43,15 +45,14 @@ struct GlassCard<Content: View>: View {
 
 /// 带标题行的分区——页面里绝大多数分区的默认形态（40 处在用）。
 ///
-/// **它不再是一块面板**（风格契约 1/2）：不画背景、不描边、不投影。它的全部职责是
-/// 「一个 `groupLabel` 小标题 + 内容 + 组间距」。
+/// **批次 P6 起它默认就是一张卡**（`layer: .card`）：地面换成 `#F7F7F7` 之后，
+/// 参考图的语言是"有标题的块 = 白卡"，而九页里绝大多数块都有标题。
+/// 默认值即规范 —— 40 处调用点一次到位，不需要逐页改。
+/// 嵌在卡里的小分组要显式传 `layer: .content`（卡中卡是上一版"叠三层灰"的复发形态）。
 ///
-/// 旧实现内部套 `GlassCard(layer: .content)` = 一层 `.regularMaterial` 灰 + 一份投影，
-/// 40 处调用点于是叠出「整个界面黑黢黢、很脏」的观感。
-///
-/// `padding` 默认值从 `Theme.Spacing.cardPadding` 改成 **0**：这 40 处里绝大多数
-/// 不显式传，改默认值即一次性去掉卡内 24pt 内边距（无界面里内边距是给盒体用的，
-/// 盒体没了它就没理由存在）。页面若确实要留内边距，显式传 `Theme.Spacing.cardPadding`。
+/// 标题档随之从 `groupLabel`(10pt 字距小标) 升到 `cardTitle`(13pt semibold 纯墨)：
+/// 无界面的时代它靠字距当唯一的分组手段；现在分组由卡面负责，
+/// 标题就该读起来像标题。**口径说明、三态句式一个字没删**，只降/升排版层级。
 struct GlassSection<Content: View>: View {
     var title: String
     var subtitle: String?
@@ -60,6 +61,7 @@ struct GlassSection<Content: View>: View {
     /// 与页面自 `SectionCard` 时代起就传 `AnyView` 的调用点保持兼容（该壳已在 #28 删除）。
     var trailing: AnyView?
     var padding: CGFloat
+    var layer: GlassLayer
     @ViewBuilder var content: Content
 
     init(
@@ -67,7 +69,8 @@ struct GlassSection<Content: View>: View {
         subtitle: String? = nil,
         icon: IconName? = nil,
         trailing: AnyView? = nil,
-        padding: CGFloat = 0,
+        padding: CGFloat = Theme.Spacing.cardPadding,
+        layer: GlassLayer = .card,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
@@ -75,6 +78,7 @@ struct GlassSection<Content: View>: View {
         self.icon = icon
         self.trailing = trailing
         self.padding = padding
+        self.layer = layer
         self.content = content()
     }
 
@@ -85,32 +89,47 @@ struct GlassSection<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(padding)
+        .surface(layer: layer, shape: .rounded(Theme.Radius.card))
     }
 
+    @ViewBuilder
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
-            VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                HStack(spacing: Theme.Spacing.xs) {
-                    if let icon {
-                        // 原来是 `Theme.Semantic.accent.textColor`：图标属结构，
-                        // 结构一律灰阶，蓝留给交互（风格契约 5）。
-                        ThemedIcon(icon, role: .cardHeader)
-                            .foregroundStyle(Color.secondary)
+        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                    HStack(spacing: Theme.Spacing.xs) {
+                        if let icon {
+                            // 图标属结构，结构一律灰阶，蓝留给交互（风格契约 5）。
+                            ThemedIcon(icon, role: .cardHeader)
+                                .foregroundStyle(Color.secondary)
+                        }
+                        Text(localizedCopy(title))
+                            .typed(Theme.Typo.cardTitle)
+                            .foregroundStyle(Theme.Palette.Surface.ink)
                     }
-                    Text(localizedCopy(title))
-                        .typed(Theme.Typo.groupLabel)
-                        .foregroundStyle(.secondary)
+                    if let subtitle {
+                        Text(localizedCopy(subtitle))
+                            .font(Theme.Typo.label.font)
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(Theme.Typo.label.lineSpacing)
+                    }
                 }
-                if let subtitle {
-                    Text(localizedCopy(subtitle))
-                        .font(Theme.Typo.label.font)
-                        .foregroundStyle(.secondary)
-                        .lineSpacing(Theme.Typo.label.lineSpacing)
-                }
+                Spacer(minLength: Theme.Spacing.xs)
+                trailing
             }
-            Spacer(minLength: Theme.Spacing.xs)
-            trailing
+            // 参考图每张卡的标题行下面都有一条发丝线把"说什么"与"说什么内容"分开。
+            // 无面版没有这条线（那时标题就是唯一的边界）；现在卡面已经负责边界，
+            // 这条线负责的是"标题行是一个整体、它不属于第一条数据"。
+            if layer == .card {
+                separator
+            }
         }
+    }
+
+    private var separator: some View {
+        Rectangle()
+            .fill(Theme.Palette.Surface.separator)
+            .frame(height: Theme.Stroke.hairline)
     }
 }
 

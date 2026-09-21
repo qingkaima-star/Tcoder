@@ -14,15 +14,16 @@ import Foundation
 /// 所以文案里的分母一律插值，不再手写第二遍。
 enum PageScanDenominators {
     /// WS-L / WS-P 名下 `Views/{Code,Git,Dependencies,CodeGit}` 的 `.swift` 文件数。
-    /// Code 6 / Git 5 / Dependencies 2 / CodeGit 2。
-    static let codeGitPageFiles = 15
+    /// Code 6 / Git 5 / Dependencies 3 / CodeGit 2（WS-X8 把 401 行的
+    /// `DependenciesView.swift` 里的 `NetworkOptionsCard` 搬成同目录分片，本处 +1）。
+    static let codeGitPageFiles = 16
 
     /// 外壳层扫描集：3 个页面文件（`RootView` / `ProjectDetailView` / `DashboardView`）
     /// 加 `Views/Shell/` 下的 6 个分件。
     static let shellLayerFiles = 9
 
     static var codeGitRosterText: String {
-        "WS-L/WS-P 名下应有 \(codeGitPageFiles) 个视图文件（Code 6 / Git 5 / Dependencies 2 / CodeGit 2）"
+        "WS-L/WS-P 名下应有 \(codeGitPageFiles) 个视图文件（Code 6 / Git 5 / Dependencies 3 / CodeGit 2）"
     }
 
     static var shellRosterText: String {

@@ -74,10 +74,13 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 或"删掉一份假数据"而下降，两者都是净收益。判据本体一条没动。）
     /// 合流两侧：135 + 2（WS-X8 两枚分片）− 1（P7-A 删掉 DemoData）= 136，
     /// 且这 136 是守卫**实报**的数（`testDenominatorMatchesCensusBaseline` 跑出来填的，不是算出来的）。
-    static let censusBaseline = 136
+    /// 136 → 137（紧随其后还掉本门挂的那笔新账：`DependenciesView.swift` 401 行越线，
+    /// 把只被它自己使用的 `NetworkOptionsCard` 搬成同目录分片 `Dependencies/NetworkOptionsCard.swift`；
+    /// 守卫实报「实现文件 137 · 零调用清单：无」，`hugeFileWorkList` 里那条已删）。
+    static let censusBaseline = 137
 
-    static let prunedDirectories: Set<String> = [".git", ".build", ".swiftpm", ".worktrees",
-                                                        "node_modules", "DerivedData", "dist", "build", "out"]
+    /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
+    static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
 
     /// 框架隐式调度的入口白名单。**只有 `@main` 一处**，且下面的门要求每个条目正文里真写着
     /// `@main`、并且它本身也拿得出证据——白名单不许变遮羞布。

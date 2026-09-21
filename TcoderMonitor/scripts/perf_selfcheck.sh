@@ -20,7 +20,7 @@
 # selfcheck —— 不起 App、不碰 xctrace，拿合成夹具验这把尺子自己还活着
 # =============================================================================
 cmd_selfcheck() {
-  local out="${1:-$PERF_ROOT/tcoder-perf-selfcheck-$REV}"
+  local out="${1:-${SCRATCH:-/tmp}/tcoder-perf-selfcheck-$REV}"
   echo "==> selfcheck 档：验尺子（合成夹具，零采样，秒级）"
   rm -rf "$out"; mkdir -p "$out"
   local fails=0
@@ -709,16 +709,16 @@ selfcheck_probe_self_sufficient() {  # selfcheck_probe_self_sufficient <outdir>
 selfcheck_perf_root_ignored() {  # selfcheck_perf_root_ignored <outdir>
   # 23) "样本落项目内被忽略的目录"这条规矩要有人守：改名、换路径、忘了加忽略，
   #     都会让 GB 级 .trace 静默出现在 `git status` 里（今天就把 tmp/ 暴露过一次）。
-  local probe="$PERF_ROOT/probe-only.trace/contents"
+  local probe="$SCRATCH/probe-only.trace/contents"
   git check-ignore -q "$probe" \
-    || { fail "$PERF_ROOT 没被 git 忽略（试 $probe）——下一轮取证就会把 trace 摊进版本库"; bad=1; }
-  # 反向钉：不许再有人把样本默认值写回全局 /tmp（单点定义在 preflight 的 PERF_ROOT）
+    || { fail "$SCRATCH 没被 git 忽略（试 $probe）——下一轮取证就会把 trace 摊进版本库"; bad=1; }
+  # 反向钉：不许再有人把样本默认值写回全局 /tmp（根名单点 = preflight 的 SCRATCH）
   local strays
   # 模式里那个 `[p]` 不是笔误：写成 `tcoder-perf` 会让这条 grep **先命中本文件里
   # 这串模式本身**（第 20 项的 `^provenance_ok() {` 今天已经为同样的事红过一次）。
   strays=$(grep -ln ':-/tmp/tcoder-[p]erf' scripts/*.sh 2>/dev/null | tr '\n' ' ')
   [ -z "$strays" ] \
-    || { fail "这些文件里又出现写死的 /tmp 样本默认值：$strays（只许走 \$PERF_ROOT）"; bad=1; }
+    || { fail "这些文件里又出现写死的 /tmp 样本默认值：$strays（只许走 \$SCRATCH）"; bad=1; }
   # `${bad:-0}`：我自己刚立的规矩——闸门与判据里的量一律兜底，
   # 否则 `set -u` 下"读一个还没被赋过值的全局"就是**静默中止**（今天已经栽过一次）。
   [ "${bad:-0}" = "0" ] && ok "样本根已被 git 忽略，且没有第二处写死默认值"

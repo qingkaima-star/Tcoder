@@ -26,8 +26,6 @@ Package.resolved
 # 不入库：它是生成物、每次跑测试都会变；入库会让"自扫"读到一份与当前代码无关的旧报告。
 TcoderMonitor/coverage/
 
-# 性能取证的样本目录（.trace 单个可到 GB 级，绝不进版本库、也不再放 $TMPDIR）。
-# 2026-09-21 事故：xctrace 的中间产物 instruments*.ktrace 落在 $TMPDIR，
-# 采集进程被 kill / 超时 / 崩掉时**不会自己清**，21 个孤儿吃了 103 GB。
-TcoderMonitor/tmp/
-*.trace/
+# 一次性取证/测量产物（xctrace bundle、截图沙箱、自检夹具）的落点。
+# 规矩见 AGENTS.md §1.6：重活产物不进 $TMPDIR，跑完自清。
+.scratch/
