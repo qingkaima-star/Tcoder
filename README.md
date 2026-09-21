@@ -177,11 +177,13 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
 
 ## 已知限制
 
-- **内置示例项目的样例数字在六个页面不带任何「示例」标记**。标记现共四处：
-  侧栏 `ProjectSidebar.ProjectRow.body`、性能监控 `PerformanceView.header`、
-  错误日志 `LogsView.header`、健康评分 `HealthView.header`；
-  **总览 / 代码规模 / 复杂度风险 / Git 洞察 / 贡献者 / 依赖分析** 六页 `isDemo` 零引用。
-  数值全来自 `Services/Demo/DemoData.swift` 的写死样例。
+- **内置示例项目已于批次 P7-A 退役**（用户口径：「所有功能都要正常使用，不能有假数据」）。
+  首启不再种示例、侧栏与菜单不再有「加载示例项目」、`MonitoredProject.isDemo` 字段删除。
+  现在界面上出现的每个数字，都必须来自你选择的那个真实仓库。
+  退役前它有一条已知缺陷：六个页面的样例数字**不带任何「示例」标记**
+  （当时只有侧栏行、性能、日志、评分四处带标）—— 全过程与接替守卫记在
+  `docs/功能真实性清单.md` 的 S1 条，机器断言是 `FunctionalHonestyGuardTests` 的
+  `test_noFabricatedProjectDataAnywhereInSources`。
 - `git log` 撞上 60 秒硬超时（`ShellGitAnalyzer.swift` 的 `ShellGitAnalyzer.init` 参数 `logTimeout`
   默认值）时本轮 Git 结果整块置空，
   **上一轮成功的 Git 数据不会被保留**（`AppState.scan` 每次新建报告），

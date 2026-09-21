@@ -71,13 +71,13 @@ final class ProjectStore {
     }
 
     @discardableResult
-    func add(path: String, name: String? = nil, isDemo: Bool = false) -> MonitoredProject {
+    func add(path: String, name: String? = nil) -> MonitoredProject {
         let standardizedName = name
             ?? URL(fileURLWithPath: path).lastPathComponent
-        if let existing = projects.first(where: { $0.path == path && $0.isDemo == isDemo }) {
+        if let existing = projects.first(where: { $0.path == path }) {
             return existing
         }
-        let project = MonitoredProject(name: standardizedName, path: path, isDemo: isDemo)
+        let project = MonitoredProject(name: standardizedName, path: path)
         projects.append(project)
         reports[project.id] = ProjectReport(project: project)
         persist()
@@ -110,12 +110,9 @@ final class ProjectStore {
         persist()
     }
 
-    func markPhase(_ phase: AnalysisPhase, for projectID: UUID) {
-        guard var report = reports[projectID] else { return }
-        report.generatedAt = Date()
-        if case .finished = phase { report.project.lastScanAt = Date() }
-        reports[projectID] = report
-    }
+    // `markPhase(_:for:)` 已于批次 P7-C 删除：它全仓零调用者，
+    // 存在的全部理由是给那五档"正在做哪一路"的假顺序进度落盘用的。
+    // 真正写 `lastScanAt` 的是 `upsertReport`，那条链路完好。
 
     /// Append-only history of overall scores, used by the trend chart.
     func scoreHistory(for projectID: UUID) -> [ScoreHistoryPoint] {

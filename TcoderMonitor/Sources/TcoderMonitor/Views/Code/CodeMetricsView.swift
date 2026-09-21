@@ -238,6 +238,18 @@ struct CodeInvariantRow: View {
                                           NumberFormat.grouped(abs(sum - code.totalLines))),
                     role: Theme.Semantic.warning, icon: .riskWarning, iconLabel: "行数不变式不成立")
             }
+            // 识别规则降级（批次 P7-B 2-6/2-7）：没有这句提示时，一个坏掉的正则
+            // 会在界面上长成"这个仓库 0 个函数"，而那是关于我们的事实、不是关于仓库的。
+            if let failures = code.analyzerRuleFailures, !failures.isEmpty {
+                DataNotice(
+                    text: localizedFormat("识别规则降级：%1$@ 条正则没能编译，函数数与圈复杂度会偏低。"
+                                          + "这一屏的 0 读作「我们的规则没跑起来」，不读作「这个仓库没有函数」。",
+                                          NumberFormat.grouped(failures.count)),
+                    role: Theme.Semantic.warning, icon: .riskWarning, iconLabel: "分析器降级")
+                    // 台账内容是"规则片段"，不是文案：不进查表，免得运行时漏翻台账
+                    // 记进一条永远不可能登记的键。
+                    .help(failures.joined(separator: "\n"))
+            }
         }
     }
 

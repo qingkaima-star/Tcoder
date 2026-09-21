@@ -105,8 +105,7 @@ struct ProjectSidebar: View {
         AddProjectGuideCard(
             mode: mode,
             isDropTargeted: isDropTargeted,
-            onChooseFolder: { showImporter = true },
-            onLoadDemo: { state.loadDemoProject() }
+            onChooseFolder: { showImporter = true }
         )
         .listRowSeparator(.hidden)
         .listRowBackground(Color.clear)
@@ -159,7 +158,6 @@ struct AddProjectGuideCard: View {
     var mode: Mode
     var isDropTargeted: Bool
     var onChooseFolder: () -> Void
-    var onLoadDemo: () -> Void
 
     var body: some View {
         Group {
@@ -173,7 +171,6 @@ struct AddProjectGuideCard: View {
                     hint
                     GlassButton("选择目录…", icon: .add, style: .prominent,
                                 action: onChooseFolder)
-                    GlassButton("加载示例项目", style: .plain, action: onLoadDemo)
                 }
                 .frame(maxWidth: .infinity, minHeight: ShellLayout.guideMinHeight)
             } else {
@@ -246,7 +243,7 @@ struct ProjectRow: View {
         // 第二行不参与竞争，于是名字拿回整行宽度，读数也不再互相推。
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             HStack(spacing: Theme.Spacing.xs) {
-                HealthDot(score: report?.health?.overall)
+                HealthDot(score: report?.health?.verdict)
                 Text(project.name)
                     .font(Theme.Typo.body.font)
                     // 侧栏 `List(.sidebar)` 会给行标签套上层级样式，选中行在非活动窗口
@@ -259,11 +256,7 @@ struct ProjectRow: View {
                     // 单行截断仍然可能存在（名字可以任意长），所以完整名字必须
                     // 悬停可得 —— 否则「看得见一半」比「看不见」更难查。
                     .help(project.name)
-                if project.isDemo {
-                    // 原来这里是一套就地自造的淡色胶囊（8pt + 0.15 底），
-                    // 与 PerformanceView 的 PerfTag 逐行重复（WS-I §3.1）→ 改用基座件。
-                    DemoBadge()
-                }
+                // 「示例」标记随内置示例数据一起退役（批次 P7-A，见 docs/功能真实性清单.md S1）。
             }
             metaLine
                 .padding(.leading, Self.metaIndent)
@@ -287,7 +280,7 @@ struct ProjectRow: View {
                     .font(Theme.Typo.microLabel.font)
                     .lineLimit(1)
             }
-            if let score = report?.health?.overall {
+            if let score = report?.health?.verdict {
                 metricCell(localizedFormat("健康 %@", NumberFormat.grouped(score)), width: ShellLayout.healthColumnWidth)
             }
         }

@@ -22,11 +22,20 @@ extension ComplexityEngine {
     ]
 
     /// 单一关键字正则：一次匹配 + 关键字集合过滤，比按语言现编译正则快得多。
-    static let branchKeywordExpression = try? NSRegularExpression(
-        pattern: "\\b(?:else[ \\t]+if|elseif|elif|foreach|for|while|until|case|when|catch|except"
-            + "|rescue|guard|loop|match|repeat|and|or|if)\\b",
-        options: []
-    )
+    ///
+    /// **编不出来必须留名**（批次 P7-B 2-7）：下面 `complexity(ofCleanedLines:)` 里的
+    /// `if let` 一旦走 else，全仓的分支关键字就一条都不计 —— 圈复杂度全线偏低、
+    /// 风险页变绿、复杂度分量趋满分，而界面上一句提示都没有。
+    /// 这条模式是编译期字面量，坏掉属于编程错误，不许伪装成"这个项目就是没分支"。
+    static let branchKeywordExpression: NSRegularExpression? = {
+        let pattern = "\\b(?:else[ \\t]+if|elseif|elif|foreach|for|while|until|case|when|catch|except"
+            + "|rescue|guard|loop|match|repeat|and|or|if)\\b"
+        guard let made = try? NSRegularExpression(pattern: pattern, options: []) else {
+            ComplexityEngine.RuleDegradeLedger.record("分支关键字规则未能编译")
+            return nil
+        }
+        return made
+    }()
 
     static func complexity(ofCleanedLines lines: [String], profile: LangProfile) -> Int {
         var total = 1

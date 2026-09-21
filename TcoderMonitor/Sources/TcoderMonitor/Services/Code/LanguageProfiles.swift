@@ -20,7 +20,7 @@ extension ComplexityEngine {
     }
 
     struct SignaturePattern {
-        var expression: NSRegularExpression
+        var expression: NSRegularExpression?
         var namePrefix: String? = nil
         var requiresTypeToken = false
         var requiresModifierWhenNoType = false
@@ -65,13 +65,48 @@ extension ComplexityEngine {
     /// 没有数据竞争；两个线程同时 miss 只会各编译一次、后写覆盖，结果等价。
     nonisolated(unsafe) private static let patternCache = NSCache<NSString, NSRegularExpression>()
 
-    static func cache(_ pattern: String) -> NSRegularExpression {
+    /// 识别规则没能编译的台账。
+    ///
+    /// 存在理由（批次 P7-B 2-6/2-7，用户口径「不能有假数据」）：正则坏了时，
+    /// 下面的 `cache` 原本退回一个"永不匹配"的表达式、`branchKeywordExpression` 退回 nil，
+    /// 于是函数数算成 0、分支一条不计。**0 在界面上读起来就是"这个仓库没有函数"**，
+    /// 而真话是"我们的规则没跑起来"。缺证据不得冒充结论，所以：
+    /// ① 那个"永不匹配"的字面量已从仓里绝迹（`cache` 现在返回 Optional）；
+    /// ② 每次降级都记进这本台账，由 `FileSystemCodeAnalyzer` 随报告落盘，
+    ///    代码规模页如实显示"哪几条规则没跑起来"。
+    enum RuleDegradeLedger {
+        private static let lock = NSLock()
+        nonisolated(unsafe) private static var failures: [String] = []
+
+        static func record(_ what: String) {
+            lock.lock()
+            if !failures.contains(what) { failures.append(what) }
+            lock.unlock()
+        }
+
+        static var all: [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            return failures
+        }
+    }
+
+    /// 编译并缓存一条模式。**返回 Optional 是判据不是妥协**：
+    /// 编不出来就没有"匹配结果"这回事，调用方必须显式跳过，
+    /// 而不是拿一个永不命中的替身去产出"0 个函数"这个假结论。
+    static func cache(_ pattern: String) -> NSRegularExpression? {
         if let hit = patternCache.object(forKey: pattern as NSString) { return hit }
-        // 编译失败就退回「永不匹配」的表达式：单个语言规则坏了不该让整条链路崩溃
-        let made = (try? NSRegularExpression(pattern: pattern, options: []))
-            ?? (try? NSRegularExpression(pattern: "(?!x)x", options: []))!
+        guard let made = try? NSRegularExpression(pattern: pattern, options: []) else {
+            RuleDegradeLedger.record("语言规则未能编译：\(Self.patternSummary(pattern))")
+            return nil
+        }
         patternCache.setObject(made, forKey: pattern as NSString)
         return made
+    }
+
+    /// 台账里要放**认得出来**的片段：整条正则最长能到几百字符，会把提示条撑爆。
+    static func patternSummary(_ pattern: String) -> String {
+        pattern.count <= 48 ? pattern : String(pattern.prefix(48)) + "…"
     }
 
     // swiftlint:disable:next function_body_length cyclomatic_complexity

@@ -16,7 +16,10 @@ extension ComplexityEngine {
         let range = NSRange(location: 0, length: text.length)
         for pattern in profile.patterns {
             guard patternApplies(pattern, to: line) else { continue }
-            guard let match = pattern.expression.firstMatch(in: line, options: [], range: range) else { continue }
+            // 模式没能编译时 `expression` 是 nil：跳过这一条，而不是拿"匹配不到"
+            // 当成"这行不是函数"（降级已记进 `RuleDegradeLedger`，批次 P7-B 2-6）。
+            guard let expression = pattern.expression,
+                  let match = expression.firstMatch(in: line, options: [], range: range) else { continue }
             if let name = signatureName(from: match, text: text, pattern: pattern) { return name }
         }
         return nil

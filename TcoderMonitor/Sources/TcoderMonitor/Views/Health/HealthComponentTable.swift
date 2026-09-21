@@ -290,8 +290,8 @@ struct HealthComponentTable: View {
                 table
                 DataRowSeparator()
                 missingBlock
-                if !HealthBreakdown.isSumConsistent(sum, with: health.overall) {
-                    NoteLine("分量合计 \(Live.fixed(sum, digits: 1)) 与综合分 \(health.overall) 有出入，通常是评分器的归一化或取整口径不同。",
+                if let score = health.verdict, !HealthBreakdown.isSumConsistent(sum, with: score) {
+                    NoteLine("分量合计 \(Live.fixed(sum, digits: 1)) 与综合分 \(score) 有出入，通常是评分器的归一化或取整口径不同。",
                              role: Theme.Semantic.warning, icon: .riskWarning)
                 }
             }

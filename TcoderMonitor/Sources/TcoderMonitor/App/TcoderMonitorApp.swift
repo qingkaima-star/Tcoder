@@ -23,10 +23,6 @@ struct TcoderMonitorApp: App {
                 }
                 .keyboardShortcut("o", modifiers: [.command])
 
-                Button("加载示例项目（Tcoder 示例项目）") {
-                    state.loadDemoProject()
-                }
-
                 Divider()
 
                 Button("重新分析") {

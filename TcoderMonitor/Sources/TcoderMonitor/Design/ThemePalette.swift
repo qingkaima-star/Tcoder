@@ -13,7 +13,10 @@ extension Theme {
     enum Palette {
         /// 卡片与窗口背景：跟随系统，自动适配深浅色与「增强对比」。
         enum Surface {
-            static let card = Color(nsColor: .controlBackgroundColor)
+            // `card` 原来走 `controlBackgroundColor`（跟随系统）。批次 P6 把它**钉死**：
+            // 新语言的层次关系是"画布 #F7F7F7 上压纯白卡"，差值只有 3%，
+            // 交给系统色就等于把这 3% 交给每个人的系统设置去决定——
+            // 与本仓把 `accent` 钉死的理由同族（可反查像素、可算断言）。
             static let window = Color(nsColor: .windowBackgroundColor)
             /// 表格/区块分隔线。内容卡不再用 1px 描边分层（WS-H §3.3），
             /// 只有确有分隔语义的地方用它。
@@ -40,7 +43,23 @@ extension Theme {
             /// `#FFFFFF / #1E1E1E`（编译产物实测），也就是**全部 3:1 图形色断言本来就按白底算**。
             /// 地面定成 `#F1F1F3` 等于让真实像素比断言低 12%（`#2CA94C` 断言 3.05、真实 2.70），
             /// 守卫绿着、屏幕不达标。地面回白之后，断言与像素第一次是同一把尺子。
-            static let ground = DualColor(lightHex: 0xFFFFFF, darkHex: 0x000000).color
+            /// **2026-09-21 批次 P6：地面从纯白改回"画布灰" `#F7F7F7`。**
+            /// 用户裁定全量对齐 AiX（规范 `docs/界面语言-对齐AiX.md`）。
+            /// 这次和上一版"桌面灰"的区别是**层次关系对了**：
+            /// 上一版是灰画布上**什么都不抬**（81.3% 像素挤在 235–249 那条灰带里）⇒ 显脏；
+            /// AiX 是灰画布上压**纯白卡片**（实测画布 `#F7F7F7`、卡内 `#FFFFFF`），
+            /// 3% 的亮度差就是"抬起来"的全部来源。所以判据也跟着改：
+            /// 不再要求"地面必须纯白"，改为要求**卡片与画布亮度差 ≥3%**。
+            /// 深色侧没有参考图，按同一层次关系推导（画布 < 卡片），已在规范里备案。
+            static let ground = DualColor(lightHex: 0xF7F7F7, darkHex: 0x0E0E10).color
+            /// 卡片面：新语言里**唯一被抬起来的那一层**（参考图实测纯白）。
+            static let card = DualColor(lightHex: 0xFFFFFF, darkHex: 0x1C1E22).color
+            /// 侧栏地面：参考图实测 `#F9F9F8`，比内容画布**亮一档**。
+            /// 侧栏与内容的分界靠这个色差，不靠分隔线（也不靠描边）。
+            static let sidebar = DualColor(lightHex: 0xF9F9F8, darkHex: 0x131315).color
+            /// 页标题墨：参考图 H1 实测 `#313131`（软黑）。
+            /// 只给页标题用；**最大的数字仍然吃 `ink`**——"最重的墨给最大的数"这条没变。
+            static let headingInk = DualColor(lightHex: 0x313131, darkHex: 0xEDEDF0).color
             /// 井：内容层唯一允许的实心底（风格契约 3），只给表格 / 日志列表 / 代码块。
             /// 浅色从 `#EAEAEC` 提到 `#F5F5F7`：地面已经变白，井只要"比白暗一档"就够，
             /// 再深就成了上一版那种"灰块压灰底"的脏源。
@@ -63,6 +82,18 @@ extension Theme {
             static let inkFill = DualColor(lightHex: 0x0A0A0A, darkHex: 0xF2F2F5).color
             /// 压在 `inkFill` 上的前景，必须与它反向。
             static let onInkFill = DualColor(lightHex: 0xFFFFFF, darkHex: 0x0A0A0A).color
+        }
+
+        /// 卡片层的三个常量（批次 P6）。**边与影同时存在才像参考图**：
+        /// 只有发丝边会显廉价，只有投影会在灰画布上糊成一团。
+        enum Card {
+            static let cornerRadius: CGFloat = 16
+            static let hairline = DualColor(lightHex: 0xEAEAEC, darkHex: 0x2A2A2E).color
+            static let hairlineWidth: CGFloat = 0.5
+            /// 8% 黑、12pt 模糊、y 偏移 2pt —— 一层，不许叠加第二层。
+            static let shadowOpacity = 0.08
+            static let shadowRadius: CGFloat = 12
+            static let shadowY: CGFloat = 2
         }
 
         /// 透明度只留三档，收编现仓散落的 0.04/0.08/0.12/0.14/0.15/0.25。

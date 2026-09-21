@@ -58,22 +58,19 @@ struct MonitoredProject: Identifiable, Codable, Hashable, Sendable {
     var path: String
     var addedAt: Date
     var lastScanAt: Date?
-    var isDemo: Bool
 
     init(
         id: UUID = UUID(),
         name: String,
         path: String,
         addedAt: Date = Date(),
-        lastScanAt: Date? = nil,
-        isDemo: Bool = false
+        lastScanAt: Date? = nil
     ) {
         self.id = id
         self.name = name
         self.path = path
         self.addedAt = addedAt
         self.lastScanAt = lastScanAt
-        self.isDemo = isDemo
     }
 
     var url: URL { URL(fileURLWithPath: path) }
@@ -82,13 +79,18 @@ struct MonitoredProject: Identifiable, Codable, Hashable, Sendable {
 
 // MARK: - Scan orchestration types
 
+/// 扫描阶段。**只有这四档是真的存在的状态**。
+///
+/// 原来这里并列着 `code/git/logs/dependencies/health` 五档"正在做哪一路"，
+/// 而 `scan` 是 `async let` **五路同时开跑**、全程只赋过 `.code` 与 `.finished`
+/// 两个值（批次 P7-C 走查实测）。后果不是难看，是**说假话**：
+/// 五路全失败时界面仍然显示"分析完成"，而并行扫描期间它一直说"正在扫描代码规模"。
+/// 五档假进度要么去实现串行编排（没有理由），要么删掉（选了这条）。
+/// 真实可报的进度只剩"几路回来了"，那个数走 `AppState.completedSectionCount`，
+/// 不塞进这个枚举里冒充顺序。
 enum AnalysisPhase: String, Codable, Sendable {
     case idle
-    case code
-    case git
-    case logs
-    case dependencies
-    case health
+    case scanning
     case finished
     case failed
 }

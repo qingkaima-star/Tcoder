@@ -178,19 +178,12 @@ struct GlassButton: View {
 
 /// 语义徽标（风险 / 严重度 / 状态）。WS-H §9：胶囊、`sm` 内边距、
 /// 10pt Medium 文字、同色 0.15 半透明底，并且**色 + 文字双通道**（不只靠颜色表意）。
-/// 「示例」标记 —— 全仓唯一定义点。
 ///
-/// 原来它在四处各写一遍，而且**两种颜色**：侧栏用 `accent`（绿）、三个页头用 `info`（蓝），
-/// 于是同一个项目的同一个标签在同一屏上出现两个颜色（用户实拍：侧栏绿胶囊、页头蓝胶囊）。
-/// 取 `neutral` 是判断不是省事：「这是示例数据」是关于数据来源的**事实**，
-/// 不是状态（success/warning/danger 都不对），也不是交互（accent 现在专指选中/焦点）。
-/// 语义留色、结构去色 —— 一个纯元数据标签就该是灰的。
-struct DemoBadge: View {
-    var body: some View {
-        SemanticBadge("示例", role: Theme.Semantic.neutral)
-    }
-}
-
+/// 它上面曾挂着全仓唯一的 `DemoBadge`（「示例」标记，`SemanticBadge("示例", .neutral)`）。
+/// 批次 P7-A 随内置示例数据一起删除 —— 原因记在 `docs/功能真实性清单.md` 的 S1 条：
+/// 那套标注只覆盖 3/9 页，另外六页把同一批编造数字当真读数渲染。
+/// 这里曾经出现过"同一个标签在同一屏两个颜色"（侧栏绿、页头蓝），取 `neutral`
+/// 的理由（语义留色、结构去色）仍然成立，只是这个特定的标签不再有存在的理由。
 struct SemanticBadge: View {
     var text: String
     var role: Theme.SemanticRole
