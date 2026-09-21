@@ -280,15 +280,19 @@ def publish_body_lines(root):
     return body, lines
 
 
-def classify_symbol(sym, symbols, lines, body):
-    """单个粗属性归哪一格。顺序有意：不在观察图 > 别名 > 裸写 / 闸门写。
-    同一 tick 内既裸写又闸门写 = "冲突"，那是"闸门只加了一半"的形状，宁可问人。"""
-    others = [o for o in symbols if o != sym]
+def bucket_from_declarations(sym, symbols, lines):
+    """声明层能定性的两种：压根不在观察图里 / 只是别的粗属性的别名。定不出来自 None。"""
     if any("@ObservationIgnored" in l and ("var %s" % sym) in l for l in lines):
         return "unobservedCoarseSymbols"
+    others = [o for o in symbols if o != sym]
     if any(re.match(r"\s*var %s\b[^={]*\{\s*\S" % sym, l)
            and any(re.search(r"\b%s\b" % o, l) for o in others) for l in lines):
         return "aliasCoarseSymbols"
+    return None
+
+
+def bucket_from_tick_body(sym, body):
+    """每 tick 那一写的形状：裸写 / 闸门写 / 两者都有（"闸门只加了一半"）/ 都没写。"""
     bare = re.compile(r"^\s*(?:self\.)?%s\s*=[^=]" % sym)
     ungated = any(bare.match(l) for l in body)
     gated = any(re.search(r"write\(\s*\\\.%s\b" % sym, l) for l in body)
@@ -299,6 +303,13 @@ def classify_symbol(sym, symbols, lines, body):
     if gated:
         return "gatedCoarseSymbols"
     return "未归类"
+
+
+def classify_symbol(sym, symbols, lines, body):
+    """单个粗属性归哪一格。顺序有意：**不在观察图 > 别名 > 每 tick 那一写**——
+    `allProcesses` 既被裸写又不在图里，而"不在图里"才是结论（裸写不参与观察的属性不产生失效面）。
+    （拆成两个 bucket_* 是因为本仓对尺子有 CC<16 的棘轮，第一段版本正好踩在 16 上。）"""
+    return bucket_from_declarations(sym, symbols, lines) or bucket_from_tick_body(sym, body)
 
 
 def read_weight_ruler(root):
