@@ -349,10 +349,18 @@ final class LocalizationLedger {
     private let target: String? = ProcessInfo.processInfo
         .environment["TCODER_I18N_RUNTIME_LEDGER"]
 
+    private var wrote = 0
+
     func record(key: String, translated: Bool) {
         guard target != nil else { return }
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
         if translated { hits += 1 } else { misses.insert(key) }
+        // **不能只在 `atexit` 落盘**：取证脚本发的是 SIGTERM，`atexit` 不跑，
+        // 第一版就是这么白跑一趟。改成"每 200 次查表、以及每次出现新漏翻键"时落盘。
+        let shouldWrite = !translated ? misses.count != wrote : (hits % 200 == 0 && hits > wrote)
+        if shouldWrite { wrote = hits + misses.count }
+        lock.unlock()
+        if shouldWrite { flush() }
     }
 
     func flush() {
@@ -361,6 +369,8 @@ final class LocalizationLedger {
         let missList = misses.sorted(), hitCount = hits
         lock.unlock()
         let url = URL(fileURLWithPath: target)
+        if (try? String(contentsOf: url, encoding: .utf8))?.hasPrefix("hits=\(hitCount)") == true,
+           missList.isEmpty { return }   // 内容没变就别重写（每 200 次一次）
         try? "hits=\(hitCount)\nmisses=\(missList.count)\n"
             .appending(missList.map { "\"\($0)\"" }.joined(separator: "\n")).appending("\n")
             .write(to: url, atomically: true, encoding: .utf8)
