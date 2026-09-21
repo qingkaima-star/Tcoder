@@ -183,7 +183,8 @@ python3 scripts/trace_report.py migration --strict   # 挂进自家收尾检查�
 python3 scripts/trace_report.py migration            # 还剩哪几处 + 该换成哪个格
 python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零退出
 ```
-- 位置：`PerformanceView` 10、`DashboardView` 3、`LiveReadings` 2、`ProjectSidebar` 1；
+- 位置（02:13 按 x7 拆分后重锚）：`PerformanceView` 10、`Shell/DashboardReadouts.swift` 3
+  （原 `DashboardView`，被 WS-X7 拆出来的）、`PerfLogs/LiveReadings.swift` 2、`Shell/ProjectSidebar.swift` 1；
 - 换成什么：`docs/superpowers/specs/2026-09-20-performance-120hz-design.md` §5.3 的实名契约
   （`monitor.cpu.value` / `.memory.value` / `.rates.value` / `.ledger.value` / `.pulse.value` /
   `.cpuRanking.value` / `.memoryRanking.value` / `.groupRanking.value` / `.curve.value`）；
@@ -221,7 +222,8 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 
 所以 16 处**不是 16 份等价收益**：
 
-- **承重的 10 处**（读上面那两个无闸门属性）：`DashboardView` 333 / 458 / 459、
+- **承重的 10 处**（读上面那两个无闸门属性）：`DashboardLiveReadout.snapshot` 别名 ＋
+  `DashboardLiveReadout.livePerformanceGroup` 两处 `history.suffix(90)`、
   `LiveReadings` 25 / 26、`ProjectSidebar` 443、`PerformanceView` 54 / 63 / 94 / 95。
   `PerformanceView:94` 的 `monitor.lastSampleAt` 其实是 `latestSnapshot?.timestamp`（`:280`），也算这一类。
 - **顺手的 6 处**（读已闸门属性）：`PerformanceView` 45 / 47 / 53 / 55 / 68 / 69。
@@ -232,13 +234,14 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
   `ledger.value.systemWideCount` 顶 `latestSnapshot?.processCount`；四 + 一 + 一 + 一 正好七处），
   剩下 **3 处是"把整份快照递给别人"**，性质和 `SampleContext` 一样，要改的是**接收方的入参**：
   1. `LiveReadings.swift:25` `SampleContext(snapshot:)` —— 喂着 `PerformanceView` 里五个子视图；
-  2. `DashboardView.swift:333` `private var snapshot: SystemSnapshot? { monitor.latestSnapshot }`
+  2. `DashboardLiveReadout.snapshot`（现居 `Views/Shell/DashboardReadouts.swift`）
+     `private var snapshot: SystemSnapshot? { monitor.latestSnapshot }`
      —— 页内 10 处读点共用这个别名，实际只碰 `disk*/network*` 四个速率字段（都在 `rates.value`）；
   3. `ProjectSidebar.swift:443` `LiveCPUBadge(snapshot: monitor.latestSnapshot)` —— 子视图收整份快照，
      它要的只是 `cpu.value.usage`（＋ `coreCount`）。
   这三处**不要**原地换成 `monitor.latestSnapshot` 的另一种写法：那还是同一棵 body 每 tick 重算。
 - 顺序建议：**先做那 7 处 1:1 的**（零判断、当场能让 `migration` 掉 7 个），
-  再按 `ProjectSidebar` → `DashboardView` → `PerformanceView`+`LiveReadings` 做那 3 处（由小到大，
+  再按 `SidebarLiveFooter` → `DashboardLiveReadout` → `PerformanceView`+`SampleContext` 做那 3 处（由小到大，
   `LiveCPUBadge` 只有一枚徽章、`SampleContext` 要动五个子视图的入参，放最后）。
 
 `SampleContext`（`LiveReadings.swift:15`）是唯一需要决策的一处，其余都是 1:1 换名。
@@ -280,7 +283,7 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 **为什么这 12 处不牵 T2（心跳 4 ms）**：这五页**一处都不读监控格**——01:50 逐个文件数过
 `grep -c 'monitor\.'`：`DependenciesView`/`LogsView`/`LogsFileTables`/`LogsTrendCard`/
 `LogsMetricGrid`/`CodeMetricsView`/`ContributorRows`/`ContributorsView`/`HealthComponentTable`
-**九个文件全是 0**（粗读点名册里也只有 `DashboardView`/`LiveReadings`/`ProjectSidebar`/`PerformanceView`）。
+**九个文件全是 0**（粗读点名册里也只有 `DashboardReadouts`/`LiveReadings`/`ProjectSidebar`/`PerformanceView`）。
 所以它们的 body 不随心跳失效，里面的排序/I-O 不会每 tick 跑。⇒ **它们是"切页与滚动期"的成本，归 T1 管，不归 T2 管**。
 派单时别把它们和那 10 处承重粗读点混成一句"清完渲染路径"，两批的验收证据不是同一个窗口。
 
@@ -398,30 +401,41 @@ WS-X3 把这两条守卫的**宿主文件按行数拆成了 extension**——
 不要把任何阈值调松来变绿（`ceiling = 0` 与 ≤800 行那条一样，"改这里的数字不是修复"）；
 不要拿 `probe` 去和改前对照物比（`/tmp/tcoder-before.app` 里没有 `FramePulse`，只能同走 xctrace）。
 
-## 0.6 【01:55~02:02 实测】那 10 处该**折进观感批次**做，不要另起一趟派单
+## 0.6 【02:02 提，02:13 按 x7 拆分后的现状重锚】那 10 处该**折进正在重写这些文件的批次**做
 
-数了主线上最近六笔碰过哪些文件，结论很直接：**迁移的四个目标文件正是观感批次反复重写的文件**。
+**先记一件刚发生的事**：这段 02:02 落 main 时写的是 `DashboardView.swift:458/459`，
+几分钟后 **WS-X7 的规模拆分进了 main**，同两处读点搬进 `Views/Shell/DashboardReadouts.swift`
+（行号变 335/336），`ProjectSidebar` 那处从 333 漂到 339。
+⇒ 本节坐标**一律改成「类型.成员」**（本仓既有约定：Views 层钉符号不钉行号）。
+`migration` 仍按当下位置报行号，**别拿它当稳定坐标**。
+读数没变：**还是 16 处**——拆分把债搬走了，既没清掉也没长回来（这条值得一提：
+**大规模搬文件的改动如果顺手"优化"了读法，16 会掉；没掉说明真没人动**）。
 
-| 目标文件 | 最近被谁碰 | 时间 |
+| 稳定坐标（类型.成员） | 现在在哪个文件 | 最近被谁重写 |
 |---|---|---|
-| `DashboardView.swift` | 批次 H1（分隔线收口） | 01:55 |
-| `PerformanceView.swift` | 批次 E、批次 ABC | 更早几笔 |
-| `ProjectSidebar.swift` | 批次 H1 之前的 4efcfee、批次 ABC | 同一批 |
-| `PerfLogs/LiveReadings.swift` | 近期**没有**观感批次碰它 | — |
+| `PerformanceView.body` 那 10 处 | `Views/Performance/PerformanceView.swift` | 批次 E、批次 ABC |
+| `DashboardLiveReadout.snapshot`（整份快照别名） | `Views/Shell/DashboardReadouts.swift` | **WS-X7 拆分 02:10** |
+| `DashboardLiveReadout.livePerformanceGroup`（两处 `history.suffix(90)`） | 同上 | **WS-X7 拆分**（557→376 那一路） |
+| `SidebarLiveFooter.body`（`LiveCPUBadge(snapshot:)`） | `Views/Shell/ProjectSidebar.swift` | **WS-X7 拆分**（486→384） |
+| `SampleContext.from(_:)`（整份快照造上下文） | `Views/PerfLogs/LiveReadings.swift` | 近期没有观感批次碰 |
 
-⇒ 另起一趟"性能迁移派单"必然和下一批观感改动撞在同一批行上：**两拨人改同一个 body 的同几行**，
-这就是 21:15 那条"性能侧不许写 `Views/**`"裁定要防的事，它到现在仍然是对的。
-更省的做法是**在同一批观感改动里顺手换掉读法**：那几行本来就要重写，
-换 `monitor.curve.value` / `monitor.pulse.value` 与换一种分隔线画法是同一次编辑，
+⇒ **迁移文件 == 别人此刻正在重写的文件**。另起一趟"性能迁移派单"必然和下一批撞在同一批行上：
+**两拨人改同一个 body 的同几行**，这就是 21:15 那条"性能侧不许写 `Views/**`"裁定要防的事，
+它到现在仍然是对的——而 x7 刚把这三个文件切开，**趁热把读法一起换是眼下最省的一次机会**。
+更省的道理很简单：那几行本来就要重写，换 `monitor.curve.value` 与"把 557 行拆成 376 行"是同一次编辑，
 **不多花一次合并、不多花一遍门禁、也不多占一次实机测量窗口**。
 
-给接管者的三句可执行版本（都是 1:1，零判断）：
-`Array(history.suffix(90))` → `curve.value`（四处：`DashboardView:458/459`、`PerformanceView:63/95`）；
-`history.count` → `pulse.value.historyCount`（`LiveReadings:26`）；
-`lastSampleAt` → `pulse.value.sampleAt`（`PerformanceView:94`）；
-`latestSnapshot?.processCount` → `ledger.value.systemWideCount`（`PerformanceView:54`）。
-剩下 3 处（`SampleContext`、`DashboardView.snapshot` 别名、`LiveCPUBadge(snapshot:)`）要改接收方入参，
-适合作为**单独一小批**，和"分隔线收口"这种纯视觉改动混在一起反而看不清是谁的效果。
+给接管者的可执行版本（都是 1:1、零判断，坐标写成员名不写行号）：
+`Array(monitor.history.suffix(90))` → `monitor.curve.value`
+（三处：`DashboardLiveReadout.livePerformanceGroup`×2、`PerformanceView.chartWindow`；
+ `PerformanceView.sampleStats` 里那处是 `monitor.history.count`，归下一条）；
+`monitor.history.count` → `monitor.pulse.value.historyCount`（`SampleContext.from`、`PerformanceView.sampleStats`）；
+`monitor.lastSampleAt` → `monitor.pulse.value.sampleAt`（`PerformanceView.sampleStats`）；
+`monitor.latestSnapshot?.processCount` → `monitor.ledger.value.systemWideCount`（`PerformanceView.body`）。
+剩下 3 处要改**接收方**，不是换名：`SampleContext.from`（喂五个子视图）、
+`DashboardLiveReadout.snapshot`（页内 10 处共用的别名）、`SidebarLiveFooter` 递给
+`LiveCPUBadge(snapshot:)` 的那个入参（徽章只要 `cpu.value.usage`）。
+这三处适合作为**单独一小批**，和纯视觉改动混在一起会看不清是谁的效果。
 
 **验收仍然不认口头**：`python3 scripts/trace_report.py migration` 报 0 → 我把
 `coarseCallSiteCeiling` 拧 0 → 再翻 `consumptionGateOpen`。**这批折进哪一轮做都行，
@@ -500,7 +514,7 @@ ls -d /tmp/tcoder-capture.lock 2>/dev/null     # 取证锁必须空闲
 | W-3 | 轴标签 formatter | `Views/PerfLogs/ChartChrome.swift` 里仍有 1 处 `DateFormatter()` 现造（在轴标签循环内） | 提 `static let`；`PerfHitchGuardTests` 的 `directFormatters` 该文件命中 0 |
 | W-4 | 进程榜 | 榜的行数与内容口径**不许变**；排序必须消费 `memoryRanking/cpuRanking`，视图内不得再 `sorted` | 交改前/改后"视图里 `sorted` 次数" |
 | W-5 | 迁移到细粒度格 | 三页仍在读粗表面：`latestSnapshot` 4、`monitor.history` 5、`topProcesses` 1、`trackedGroups` 1（全 Views 口径） | `PerfInvalidationRatchetTests` 的粗表面基线**按流下降到 0**；不许新增粗表面读 |
-| **W-6（性能轮自己引进的，优先做）** | 「重新采样 / 立即采样」**点击后没有任何"已受理"反馈** | `sampleNow()` 现在只 `scheduleCollection()` 并立即返回最近一帧（冷启动第一帧除外）；服务侧 `isCollectingForDisplay` 在 `MachSystemMonitor` 被写 **4 次**，但 **`Views/**` 里零读取**——两个入口是 `PerformanceView.controls` 的「重新采样」与 `DashboardView.livePerformanceCard` 的「立即采样」 | **性质要说准：这不是伪造读数**——屏上那些值本来就是 ≤1.5 s 前的真实一帧，与常态节拍同旧。缺的是 T7 的交互反馈：点击 → 视觉响应 ≤100 ms。做法：按钮消费 `monitor.isCollectingForDisplay`（进行中态 / 防重复点击），或把"已排队采下一帧"写成一行状态文字。<br>这条由性能轮引入：改前 `sampleNow` 同步扫全量（占主线程，正是 T7 要消掉的东西）但按钮"看起来立刻变了"；改后不卡了，反馈却归零。**两头都要，不是二选一。** |
+| **W-6（性能轮自己引进的，优先做）** | 「重新采样 / 立即采样」**点击后没有任何"已受理"反馈** | `sampleNow()` 现在只 `scheduleCollection()` 并立即返回最近一帧（冷启动第一帧除外）；服务侧 `isCollectingForDisplay` 在 `MachSystemMonitor` 被写 **4 次**，但 **`Views/**` 里零读取**——两个入口是 `PerformanceView.controls` 的「重新采样」与 `DashboardLiveReadout.livePerformanceGroup` 的「立即采样」 | **性质要说准：这不是伪造读数**——屏上那些值本来就是 ≤1.5 s 前的真实一帧，与常态节拍同旧。缺的是 T7 的交互反馈：点击 → 视觉响应 ≤100 ms。做法：按钮消费 `monitor.isCollectingForDisplay`（进行中态 / 防重复点击），或把"已排队采下一帧"写成一行状态文字。<br>这条由性能轮引入：改前 `sampleNow` 同步扫全量（占主线程，正是 T7 要消掉的东西）但按钮"看起来立刻变了"；改后不卡了，反馈却归零。**两头都要，不是二选一。** |
 
 
 已完成的一条（不必重做）：**节拍字面量 5 → 1**，`sampleIntervalText` 已接上真值。
