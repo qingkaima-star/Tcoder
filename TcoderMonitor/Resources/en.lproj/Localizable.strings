@@ -301,6 +301,9 @@
 "「其他」合并了占比最低的 %1$@ 种语言" = "\"Other\" merges the %1$@ languages with the smallest share";
 "分析器降级" = "Analyzer Degraded";
 "扫描边界" = "Scan Limits";
+// 侧栏紧凑引导位的短标签：`ProjectSidebar.swift` 在 `migratedFiles` 那张零余量名单里，
+// 屏上出现的每一个中文字面量都必须有键，否则守卫 1 当场红。
+"拖到这里添加项目" = "Drop here to add a project";
 // 进程表图例：这两句住在 `NoteLine(` 的三元分支里，按行判槽位的扫描器看不见它们
 // （前缀既不是 `text:` 也不在同一行），所以它们既不算存量、也一直没有译文。
 // 在这里补上键，是为了让英文态真的读得出这句话，而不是为了把数字做小。

@@ -184,8 +184,17 @@ struct AddProjectGuideCard: View {
                 .frame(maxWidth: .infinity, minHeight: ShellLayout.guideMinHeight)
             } else {
                 HStack(spacing: Theme.Spacing.xs) {
-                    // 紧凑态只有左端一枚 ⓘ 与行尾那枚可点的「选择目录」⊕：
-                    // 上一轮这里挤着两枚同义图标，把 17 个字的提示挤到截断（实拍）。
+                    // 紧凑态原本只剩两枚图标（ⓘ + ⊕），一个字都没有：
+                    // 截断是被"整句进 ⓘ"消掉的，代价是一块**可以继续添加项目**的区域
+                    // 全靠悬停才知道自己能干什么（页尾实拍
+                    // `.scratch/evidence-8de2d17/light-tail/总览.png`）。
+                    // 现在落回一句短标签（9 个汉字 ≈ 18 半角宽，仍在"长句"门槛之下，
+                    // 不动 A/B 两本账），完整动线仍然在那枚 ⓘ 里。
+                    Text("拖到这里添加项目")
+                        .font(Theme.Typo.label.font)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .layoutPriority(1)
                     hintBadge
                     Spacer(minLength: Theme.Spacing.xs)
                     Button(action: onChooseFolder) {
