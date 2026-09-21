@@ -113,32 +113,34 @@ final class PerfHitchGuardTests: XCTestCase {
         }
         // 防"假零"的第二道：基线本身不许被偷偷清零。
         XCTAssertTrue(Self.knownBaseline.values.reduce(0, +) > 0, "基线全 0 等于没有守卫")
-        // 【每次跑都报现量】"只减不增"有两个方向的失效：涨上去必须红（上面管），
-        // 而**降下来却没人拧基线**同样坏——余量 60 处的闸门等于没有闸门，
-        // 新债可以悄悄长回来还不红。这里不判红（清零是合法终态），
-        // 但把"现量/上限"打进输出，让余量在日志里透明。
-        let debt = Self.knownBaseline.keys.sorted().map { rule -> String in
-            let baseline = Self.knownBaseline[rule] ?? 0
+        Self.recordRenderPathReadout(counts: counts, scan: scan)
+        XCTAssertTrue(problems.isEmpty, problems.joined(separator: "\n"))
+    }
+
+    /// 【每次跑都报现量】"只减不增"有两个方向的失效：涨上去必须红（由调用方管），
+    /// 而**降下来却没人拧基线**同样坏——余量 60 处的闸门等于没有闸门，
+    /// 新债可以悄悄长回来还不红。这里不判红（清零是合法终态），
+    /// 但把"现量/上限"打进输出、并**再落一份文件**，让余量在日志里可被机器读：
+    /// `swift test` 会丢子进程 stdout 的后半段（本仓记过，2026-09-20 的 premerge 日志里
+    /// 就没有这行 print），只靠 print 的话，拧基线的人（包括下一次的我）拿不到余量。
+    /// 台账里要**点得到名字**：只有 `fullSort 10/10` 一行的话，还债的人还得自己
+    /// 把守卫触发成红才知道现场在哪，所以明细逐条带"文件:行 + 原文"。
+    static func recordRenderPathReadout(counts: [String: Int], scan: PerfHitchScan.ScanResult) {
+        let debt = knownBaseline.keys.sorted().map { rule -> String in
+            let baseline = knownBaseline[rule] ?? 0
             let now = counts[rule] ?? -1
             return now < baseline ? "\(rule) \(now)/\(baseline)（可拧到 \(now)）" : "\(rule) \(now)/\(baseline)"
         }.joined(separator: "  ")
         print("【渲染路径禁则】现量/上限 —— \(debt)")
-        // 同一条数**再落一份文件**：`swift test` 会丢子进程 stdout 的后半段
-        // （本仓记过），实测 2026-09-20 的 premerge 日志里就没有这行 print
-        // ——只靠 print 的"现量"没法被机器读，拧基线的人（包括下一次的我）就拿不到余量。
         let ledger = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("tcoder-perf-renderpath-debt.txt")
-        // 台账里要**点得到名字**：只有 `fullSort 10/10` 这一行的话，还债的人还得自己去
-        // 把守卫的报错触发出来才知道现场在哪。明细顺手带上归属目录，
-        // 免得"这 10 处到底归不归我写"要靠猜。
         var detail: [String] = ["HEAD=\(Date()) \(debt)"]
-        for rule in Self.knownBaseline.keys.sorted() {
+        for rule in knownBaseline.keys.sorted() {
             let hits = scan.hits[rule, default: []]
             detail.append("—— \(rule)：\(hits.count) 处")
             detail.append(contentsOf: hits.sorted().map { "   \($0)" })
         }
         try? (detail.joined(separator: "\n") + "\n").write(to: ledger, atomically: true, encoding: .utf8)
-        XCTAssertTrue(problems.isEmpty, problems.joined(separator: "\n"))
     }
 
     /// 存量必须**可点名**：守卫报出来的每一条都要有"文件:行 + 原文"，
