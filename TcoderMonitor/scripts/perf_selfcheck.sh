@@ -45,6 +45,7 @@ cmd_selfcheck() {
   selfcheck_heavy_jobs_probe "$out"  # 16) 并发重活：三个名字都要认，输出必须是 pid 清单
   selfcheck_gate_matrix "$out"      # 17) 六维闸门合成矩阵：能放行，也会逐维拒
   selfcheck_page_list_shape "$out"    # 18) 九页页名逐条完整（带空格的那条不许被拆）
+  selfcheck_launch_ready "$out"       # 19) 首帧要剔除运行期尾巴，不许拿求和冒充
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
@@ -559,4 +560,26 @@ selfcheck_page_list_shape() {  # selfcheck_page_list_shape <outdir>
     *Git\ 洞察*) ok "九页页名完整（含带空格的「Git 洞察」）" ;;
     *) fail "页名里没有完整的「Git 洞察」（拿到 $line）——空格又被当成分隔符了" ;;
   esac
+}
+
+selfcheck_launch_ready() {  # selfcheck_launch_ready <outdir>
+  # 19) "启动到就绪"必须剔除"活到窗口结束"的运行期尾巴。
+  #     旧写法直接求和 ⇒ 每页都算成 ≈录制时长（实测总览页 10338 ms / 真值 837 ms），
+  #     T4（冷启动 ≤1.0 s）于是**永远不可能达标**——一条不可能达标的判据比没有更坏。
+  local r
+  r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_trace_metrics import launch_ready_ms
+# 真产物形状：一堆小段 + 一段很长的运行期尾巴
+with_tail = [(0.0, 377.7), (377.7, 5.7), (383.4, 192.3), (837.4, 9550.2)]
+no_tail = [(0.0, 300.0), (300.0, 200.0), (500.0, 120.0)]
+a = launch_ready_ms(with_tail); b = launch_ready_ms(no_tail); c = launch_ready_ms([])
+d = launch_ready_ms([(0.0, 0.0), (5.0, 40.0)])
+print("%s|%s|%s|%s" % (a, b, c, d))')
+  case "$r" in
+    837.4|837.40|837.4*) ;;
+    *) fail "有尾巴的表没取到尾巴起点（拿到 $r，期望就绪点 837.4 ms）——又在拿求和冒充首帧"; return ;;
+  esac
+  echo "$r" | grep -q "|620" || { fail "没有尾巴的表应当取末端 620 ms（拿到 $r）"; return; }
+  echo "$r" | grep -q "|None" || { fail "空表必须返回 None（按未覆盖处理，不许算 0 ms 达标）"; return; }
+  ok "launch_ready_ms 三向都对（剔尾巴 / 无尾巴取末端 / 空表为 None）"
 }

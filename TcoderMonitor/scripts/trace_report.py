@@ -37,7 +37,7 @@ import re
 import statistics
 import sys
 
-from perf_trace_metrics import (FRAME_BUDGET_MS_DEFAULT, dist_line, over_budget, percentile,
+from perf_trace_metrics import (launch_ready_ms, FRAME_BUDGET_MS_DEFAULT, dist_line, over_budget, percentile,
                                 read_json, write_json)
 from perf_trace_summary import cmd_summary
 from perf_trace_threads import cmd_threads
@@ -137,6 +137,7 @@ def cmd_lifecycle(args):
     """
     doc = Doc(args.xml)
     rows = []
+    spans = []
     total = 0.0
     longest = (0.0, "")
     for row in doc.rows():
@@ -146,6 +147,9 @@ def cmd_lifecycle(args):
         d = dur.ms() if dur else None
         if d is None:
             continue
+        start = find_tag(row, "start-time") or find_tag(row, "event-time")
+        s_ms = (start.ms() if start else None)
+        spans.append((s_ms if s_ms is not None else 0.0, d))
         total += d
         label = name.fmt if name and name.fmt else "?"
         if d > longest[0]:
@@ -156,10 +160,15 @@ def cmd_lifecycle(args):
         print("  %8.2f ms  %-26s %s" % (d, label[:26], " ".join(extra)[:60]))
     if not rows:
         print("  未解出任何周期——该表为空或列名与预期不符（按未覆盖处理，别拿 0 当达标）")
+    ready = launch_ready_ms(spans)
     print("  合计 %.1f ms / %d 行；最长周期 %.1f ms = %s"
           % (total, len(rows), longest[0], longest[1]))
+    # 合计里含"活到窗口结束"的运行期，**不能当首帧**；就绪点看下一行。
+    print("  启动到就绪 %.1f ms（尾巴段已剔除；合计只作跨度参考）" % ready if ready is not None
+          else "  启动到就绪：未解出（表里没有带时长的周期，按未覆盖处理）")
     if args.json:
         write_json(args.json, {"periods": len(rows), "total_ms": round(total, 2),
+                               "ready_ms": None if ready is None else round(ready, 2),
                                "max_period_ms": round(longest[0], 2), "max_period": longest[1]})
     return 0
 

@@ -264,11 +264,13 @@ switch_record_page() {  # switch_record_page <page> <dir> <sandbox>：一页的�
     --json "$dir/life-cycle-period.json" 2>/dev/null | sed 's/^/    /'
   local launch_total="未观测到"
   if [ -s "$dir/life-cycle-period.json" ]; then
-    launch_total=$(python3 -c "import json;print(json.load(open('$dir/life-cycle-period.json')).get('total_ms','未观测到'))" 2>/dev/null \
+    # 取 ready_ms（剔除运行期尾巴之后的"启动到就绪"），**不是 total_ms**：
+    # total_ms 里含 App 活到窗口结束那一段，拿它当首帧会让 T4 永远不可能达标。
+    launch_total=$(python3 -c "import json;l=json.load(open('$dir/life-cycle-period.json'));print(l.get('ready_ms') if l.get('ready_ms') is not None else '未观测到')" 2>/dev/null \
                    || echo "未观测到")
   fi
   meta_write "$dir" "page=$page" "pid=$pid" \
-    "first_frame_ms=${launch_total}" "first_frame_source=life-cycle-period(trace 派生，非墙钟)" \
+    "first_frame_ms=${launch_total}" "first_frame_source=life-cycle-period ready_ms(已剔除运行期尾巴)" \
     "window_seen=$window_seen" \
     "record_wall_s=$(python3 -c "print('%.1f' % ($t1-$t0))")"
   echo "    启动到就绪(trace)=${launch_total} ms；$window_seen；细表见 $dir/life-cycle-period.xml"
