@@ -155,13 +155,26 @@ if [ -n "${CAPTURE_LANG:-}" ]; then
   echo "    取证语言 = $CAPTURE_LANG（系统语言未改动；只影响本脚本起的实例）"
 fi
 
+# `CAPTURE_WINDOW_HEIGHT=1000`（本机屏高 1080pt）把取证窗口开高，
+# 于是长页折叠线以下的图表/表格也进证据。不设 = 产品默认 1280×820，
+# 与历史上所有取证的命令行**完全一致**。App 侧的读取点与夹取规则见
+# `CaptureWindow`（越界一律退回默认，避免拍出一张"看起来通过"的废图）。
+SIZE_ENV=()
+if [ -n "${CAPTURE_WINDOW_HEIGHT:-}" ]; then
+  SIZE_ENV+=(TCODER_CAPTURE_WINDOW_HEIGHT="$CAPTURE_WINDOW_HEIGHT")
+  echo "    取证窗口高 = $CAPTURE_WINDOW_HEIGHT pt（产品默认 820；本机屏高 1080）"
+fi
+if [ -n "${CAPTURE_WINDOW_WIDTH:-}" ]; then
+  SIZE_ENV+=(TCODER_CAPTURE_WINDOW_WIDTH="$CAPTURE_WINDOW_WIDTH")
+fi
+
 launch_instance() {  # launch_instance [页名]；echo pid
   local name="$1"
   if [ "$SWITCH_MODE" = "argv" ]; then
-    TCODER_SUPPORT_DIR="$SANDBOX" "$BIN" -ApplePersistenceIgnoreState YES "${LANG_ARGS[@]+"${LANG_ARGS[@]}"}" \
+    env "${SIZE_ENV[@]+"${SIZE_ENV[@]}"}" TCODER_SUPPORT_DIR="$SANDBOX" "$BIN" -ApplePersistenceIgnoreState YES "${LANG_ARGS[@]+"${LANG_ARGS[@]}"}" \
       -selectedDetailSection "$name" > "/tmp/tcoder-capture-$(date +%s)-$$.log" 2>&1 &
   else
-    TCODER_SUPPORT_DIR="$SANDBOX" "$BIN" -ApplePersistenceIgnoreState YES "${LANG_ARGS[@]+"${LANG_ARGS[@]}"}" \
+    env "${SIZE_ENV[@]+"${SIZE_ENV[@]}"}" TCODER_SUPPORT_DIR="$SANDBOX" "$BIN" -ApplePersistenceIgnoreState YES "${LANG_ARGS[@]+"${LANG_ARGS[@]}"}" \
       > "/tmp/tcoder-capture-$(date +%s)-$$.log" 2>&1 &
   fi
   sleep 4
