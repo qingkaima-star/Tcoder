@@ -44,6 +44,14 @@ struct CoverageMetrics: Codable, Equatable, Sendable {
     var analyzedAt: Date = Date()
     var reports: [CoverageReport] = []
     var scannedFileCount: Int = 0
+    /// 本次遍历里**读不动的目录数**（权限、悬空软链接、竞态中消失的目录）。
+    ///
+    /// 存在理由：目录枚举失败以前被 `try?` 吞成空数组，于是一个根本没被看过的子树
+    /// 在界面上长成"这个项目没有覆盖率报告"——那是关于我们的事实，不是关于项目的。
+    /// 三态必须分开：`nil` = 那次的版本没统计过这件事；`0` = 每个目录都读得动（一句真话）；
+    /// `> 0` = 扫描面不完整，"没找到报告"这个结论不成立。
+    /// **Optional 是落盘兼容要求**：非 Optional 带默认值会让旧报告整份解码失败。
+    var unreadableDirectoryCount: Int? = nil
 
     /// 「有可用于评分的覆盖率数据」。
     /// 一份只统计到测试代码的报告**不算有数据**——否则全测试码的报告会以
