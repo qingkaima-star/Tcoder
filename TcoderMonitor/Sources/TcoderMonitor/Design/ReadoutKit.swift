@@ -325,7 +325,46 @@ extension Theme {
 /// 双语方案 §9）。这里是纯查表，`%` 只是普通字符，与今天 `Text("95% …")` 的行为一致。
 /// 带实参的文案要翻时另开显式映射（`var uiLabel`），不要往这里塞占位符。
 func localizedCopy(_ text: String) -> String {
-    NSLocalizedString(text, bundle: .main, comment: "")
+    let resolved = NSLocalizedString(text, bundle: .main, comment: "")
+    LocalizationLedger.shared.record(key: text, translated: resolved != text)
+    return resolved
+}
+
+/// **运行时漏翻台账**（报告器，不是闸门）。
+///
+/// 为什么必须有它：静态扫描只能覆盖"入口白名单里的字面量"，而英文态实拍证明
+/// 三类串全在盲区 —— 拼接出来的整句、组件的**位置参数**、变量喂进组件的值。
+/// 静态棘轮报 28 条的那一趟，贡献者页面上仍有一整段中文。
+/// 只有**渲染的那一刻**才知道某个串有没有真的上屏、有没有查到译文。
+///
+/// 开关是环境变量：不设时 `record` 第一次判断就返回，渲染路径零成本；
+/// 设了就往 `<path>.misses` / `<path>.hits` 写两份清单（退出时落盘）。
+/// 记的是**去重后的键**，不是每次渲染的流水 —— 一屏 60fps 会把文件写爆。
+enum LocalizationLedger {
+    static let shared = LocalizationLedger()
+
+    private let lock = NSLock()
+    private var misses = Set<String>()
+    private var hits = 0
+    private let target: String? = ProcessInfo.processInfo
+        .environment["TCODER_I18N_RUNTIME_LEDGER"]
+
+    func record(key: String, translated: Bool) {
+        guard target != nil else { return }
+        lock.lock(); defer { lock.unlock() }
+        if translated { hits += 1 } else { misses.insert(key) }
+    }
+
+    func flush() {
+        guard let target, !target.isEmpty else { return }
+        lock.lock()
+        let missList = misses.sorted(), hitCount = hits
+        lock.unlock()
+        let url = URL(fileURLWithPath: target)
+        try? "hits=\(hitCount)\nmisses=\(missList.count)\n"
+            .appending(missList.map { "\"\($0)\"" }.joined(separator: "\n")).appending("\n")
+            .write(to: url, atomically: true, encoding: .utf8)
+    }
 }
 
 /// 带实参的整句查表 + 格式化。
