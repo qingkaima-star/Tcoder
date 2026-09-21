@@ -102,29 +102,42 @@ enum HealthCurves {
             if $0.score != $1.score { return $0.score < $1.score }
             return $0.name < $1.name
         }
-        var candidate = "综合 \(score) 分（\(grade) 级）。"
+        // 四条分支各是**一条整句键**（不是碎片拼接）：英文词序与中文相反、
+        // 且 "Start by …" 这类尾巴要能自己就位。碎片键是双语方案 §7.3 明令禁止的形态。
+        var candidate = localizedFormat("综合 %1$@ 分（%2$@ 级）。", String(score), grade)
         switch ranked.count {
         case 0:
-            candidate += "当前没有任何维度可供评估，评分依据缺失，建议先完成代码分析与 Git 采集，再来查看总分。"
+            candidate += localizedCopy("当前没有任何维度可供评估，评分依据缺失，建议先完成代码分析与 Git 采集，再来查看总分。")
         case 1:
             let only = ranked[0]
-            candidate += "目前只有\(only.name)（\(only.score) 分）这一个维度有可用数据，它同时也是当前最低项，建议优先\(advice(for: only.name))。"
+            candidate += localizedFormat("目前只有%1$@（%2$@ 分）这一个维度有可用数据，它同时也是当前最低项，建议优先%3$@。",
+                                         localizedCopy(only.name), String(only.score), advice(for: only.name))
         case 2:
             let low = ranked[0]
             let high = ranked[1]
-            candidate += "主要拖累来自\(low.name)（\(low.score) 分），\(high.name)（\(high.score) 分）是目前相对最好的一项；建议优先\(advice(for: low.name))。"
+            candidate += localizedFormat("主要拖累来自%1$@（%2$@ 分），%3$@（%4$@ 分）是目前相对最好的一项；建议优先%5$@。",
+                                         localizedCopy(low.name), String(low.score), localizedCopy(high.name), String(high.score),
+                                         advice(for: low.name))
         default:
             let first = ranked[0]
             let second = ranked[1]
             let best = ranked[ranked.count - 1]
-            candidate += "主要拖累来自\(first.name)（\(first.score) 分）与\(second.name)（\(second.score) 分）；"
-            candidate += "\(best.name)（\(best.score) 分）是当前最稳的一项。建议优先\(advice(for: first.name))。"
+            candidate += localizedFormat("主要拖累来自%1$@（%2$@ 分）与%3$@（%4$@ 分）；%5$@（%6$@ 分）是当前最稳的一项。建议优先%7$@。",
+                                         localizedCopy(first.name), String(first.score), localizedCopy(second.name), String(second.score),
+                                         localizedCopy(best.name), String(best.score), advice(for: first.name))
         }
         return fittedNarrative(candidate)
     }
 
     /// 长度收敛：超 80 字按子句边界丢弃，不足 40 字补固定后缀，最后再兜底截断。
     private static func fittedNarrative(_ candidate: String) -> String {
+        // **只对中文文本做长度收敛。** 这个函数的全部常量都是中文假设：
+        // 子句边界是 `。；，`、上限是 80 **字**、不足 40 字要补的垫句也是中文。
+        // 直接喂英文的后果是实测出来的：英文整句里没有 `。`，于是 clauses 只有一段、
+        // 超 80 就 `break` ⇒ result 空 ⇒ 走 `prefix(79)` **从单词中间截断**，
+        // 再补一个中文句号 `。` 和两句中文垫句 —— 比不翻还糟。
+        // 英文侧的预算由模板本身保证（四条分支各 ≤ 240 字符），版面是散文区、会换行。
+        if !candidate.contains(where: { "\u{4E00}" <= $0 && $0 <= "\u{9FFF}" }) { return candidate }
         var clauses: [String] = []
         var current = ""
         for character in candidate {
@@ -162,16 +175,16 @@ enum HealthCurves {
 
     private static func advice(for dimensionName: String) -> String {
         switch dimensionName {
-        case HealthDimension.complexity.rawValue: return "拆解高复杂度函数"
-        case HealthDimension.duplication.rawValue: return "抽取重复代码块"
-        case HealthDimension.codeQuality.rawValue: return "拆分超大文件与超长函数"
-        case HealthDimension.documentation.rawValue: return "补齐关键注释并清理待办标记"
-        case HealthDimension.activity.rawValue: return "保持稳定提交节奏"
-        case HealthDimension.busFactor.rawValue: return "分摊单点作者的改动评审"
-        case HealthDimension.stability.rawValue: return "排查崩溃与高频错误"
-        case HealthDimension.dependencies.rawValue: return "升级有已知漏洞的依赖"
-        case HealthDimension.testing.rawValue: return "补充自动化测试"
-        default: return "处理「\(dimensionName)」"
+        case HealthDimension.complexity.rawValue: return localizedCopy("拆解高复杂度函数")
+        case HealthDimension.duplication.rawValue: return localizedCopy("抽取重复代码块")
+        case HealthDimension.codeQuality.rawValue: return localizedCopy("拆分超大文件与超长函数")
+        case HealthDimension.documentation.rawValue: return localizedCopy("补齐关键注释并清理待办标记")
+        case HealthDimension.activity.rawValue: return localizedCopy("保持稳定提交节奏")
+        case HealthDimension.busFactor.rawValue: return localizedCopy("分摊单点作者的改动评审")
+        case HealthDimension.stability.rawValue: return localizedCopy("排查崩溃与高频错误")
+        case HealthDimension.dependencies.rawValue: return localizedCopy("升级有已知漏洞的依赖")
+        case HealthDimension.testing.rawValue: return localizedCopy("补充自动化测试")
+        default: return localizedFormat("处理「%@」", dimensionName)
         }
     }
 

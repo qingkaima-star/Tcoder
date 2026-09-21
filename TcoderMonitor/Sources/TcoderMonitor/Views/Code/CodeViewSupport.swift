@@ -101,8 +101,10 @@ enum CodeViewFormat {
     }
 
     static func duration(_ durationMs: Int) -> String {
-        guard durationMs >= 1_000 else { return "\(NumberFormat.grouped(durationMs)) 毫秒" }
-        return String(format: "%.2f 秒", Double(durationMs) / 1_000)
+        guard durationMs >= 1_000 else {
+            return localizedFormat("%@ 毫秒", NumberFormat.grouped(durationMs))
+        }
+        return localizedFormat("%@ 秒", String(format: "%.2f", Double(durationMs) / 1_000))
     }
 }
 

@@ -375,3 +375,67 @@
 "解析到了提交，但没有作者信息" = "Commits parsed, but no author information";
 "该目录不是 Git 仓库" = "This folder isn't a Git repository";
 "通常是历史里全部为合并提交，或提交的作者与时间戳字段读不出来。\n因此作者、提交趋势与时段分布都不成立，这里不给任何结论。" = "Usually the history is all merge commits, or the author and timestamp fields of the commits can't be read.\n So authors, commit trends and time-of-day distributions do not hold; no conclusion is drawn here.";
+
+/* ===== P5-c 第六批：节标题（`GlassSection("中文")` 这类**位置参数**字面量）
+   守卫 1 的入口白名单看不到位置参数 ⇒ 它们既没进存量、也没被翻译，
+   英文实拍里表现为"页头是英文、每一节的标题是中文"——半译比全中文更像乱翻译。 ===== */
+"仓库信息" = "Repository Details";
+"仓库来源" = "Repository Source";
+"当前分析对象" = "Currently Analysed Target";
+"提交规模" = "Commit Scale";
+"提交趋势" = "Commit Trend";
+"贡献集中度读数" = "Bus Factor Reading";
+"依赖规模" = "Dependency Scale";
+"分析选项" = "Analysis Options";
+"综合评分" = "Overall Score";
+"维度分量" = "Dimension Breakdown";
+"评分趋势" = "Score Trend";
+"总量构成" = "Total Composition";
+"语言构成" = "Language Composition";
+"系统资源" = "System Resources";
+"实时曲线" = "Live Curves";
+"进程分组" = "Process Groups";
+"进程占用排行" = "Process Usage Ranking";
+"匹配模式" = "Match Pattern";
+"匹配模式对进程名与命令行做包含匹配，例如 java、nginx、mysqld。规则本身不改变任何进程。" = "The pattern does a substring match on process name and command line, e.g. java, nginx, mysqld. The rule itself never changes a process.";
+"错误概览" = "Error Overview";
+"错误趋势" = "Error Trend";
+"受影响源文件" = "Affected Source Files";
+"已扫描文件" = "Scanned Files";
+
+/* ===== P5-c 第七批：健康页整句模板 + 被嵌进句子里的**值**（维度名、建议动词短语）
+   英文态实拍证明：模板翻了、嵌进去的值没翻 ⇒ "Bucketed by 日"、"Start by 拆解高复杂度函数"
+   这种半译句，比整句中文更像"乱翻译"。所以 advice() 的九条返回与维度名一律过 localizedCopy。 ===== */
+"综合 %1$@ 分（%2$@ 级）。" = "Overall %1$@ out of 100 (grade %2$@).";
+"当前没有任何维度可供评估，评分依据缺失，建议先完成代码分析与 Git 采集，再来查看总分。" = "No dimension is evaluable right now, so the scoring basis is missing — finish the code analysis and the Git collection before reading a total score.";
+"目前只有%1$@（%2$@ 分）这一个维度有可用数据，它同时也是当前最低项，建议优先%3$@。" = "Only %1$@ (%2$@ pts) has usable data so far, and it is also the lowest item today. Priority: %3$@.";
+"主要拖累来自%1$@（%2$@ 分），%3$@（%4$@ 分）是目前相对最好的一项；建议优先%5$@。" = "The main drag is %1$@ (%2$@ pts), while %3$@ (%4$@ pts) is currently the strongest. Priority: %5$@.";
+"主要拖累来自%1$@（%2$@ 分）与%3$@（%4$@ 分）；%5$@（%6$@ 分）是当前最稳的一项。建议优先%7$@。" = "The main drag comes from %1$@ (%2$@ pts) and %3$@ (%4$@ pts); %5$@ (%6$@ pts) is the steadiest. Priority: %7$@.";
+"处理「%@」" = "addressing “%@”";
+"拆解高复杂度函数" = "breaking down high-complexity functions";
+"抽取重复代码块" = "extracting duplicate code blocks";
+"拆分超大文件与超长函数" = "splitting oversized files and over-long functions";
+"补齐关键注释并清理待办标记" = "completing key comments and clearing to-do markers";
+"保持稳定提交节奏" = "keeping a steady commit cadence";
+"分摊单点作者的改动评审" = "sharing review with a second author";
+"排查崩溃与高频错误" = "investigating crashes and high-frequency errors";
+"升级有已知漏洞的依赖" = "upgrading dependencies with known vulnerabilities";
+"补充自动化测试" = "adding automated tests";
+"复杂度" = "Complexity";
+"重复度" = "Duplication";
+"代码质量" = "Code Quality";
+"注释与可维护性" = "Comments and Maintainability";
+"提交活跃度" = "Commit Activity";
+"协作分布" = "Collaboration Spread";
+"运行稳定性" = "Runtime Stability";
+"依赖健康" = "Dependency Health";
+"测试覆盖" = "Test Coverage";
+
+"日" = "Day";
+"周" = "Week";
+"月" = "Month";
+"%1$@ 天 %2$@ 小时" = "%1$@ days %2$@ hours";
+"%1$@ 小时 %2$@ 分" = "%1$@ h %2$@ min";
+"%@ 分" = "%@ min";
+"%@ 毫秒" = "%@ ms";
+"%@ 秒" = "%@ s";
