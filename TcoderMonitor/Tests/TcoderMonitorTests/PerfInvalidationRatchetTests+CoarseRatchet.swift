@@ -7,8 +7,6 @@ import XCTest
 extension PerfInvalidationRatchetTests {
 
     func testCoarseReadoutCallSitesDoNotIncrease() throws {
-
-    func testCoarseReadoutCallSitesDoNotIncrease() throws {
         let docs = try scannedConsumerDocs()
         let lines = docs.reduce(0) { $0 + $1.lines.count }
         XCTAssertGreaterThanOrEqual(docs.count, Self.minimumConsumerFiles,
@@ -39,28 +37,6 @@ extension PerfInvalidationRatchetTests {
         let ledgerText = "coarse=\(hits.count) ceiling=\(Self.coarseCallSiteCeiling) "
             + "fine=\(fineCount) files=\(docs.count) lines=\(lines)\n"
         try? ledgerText.write(to: ledger, atomically: true, encoding: .utf8)
-        let docs = try scannedConsumerDocs()
-        let lines = docs.reduce(0) { $0 + $1.lines.count }
-        XCTAssertGreaterThanOrEqual(docs.count, Self.minimumConsumerFiles,
-                                    "只扫到 \(docs.count) 个消费方文件，路径口径坏了——下面那条上限断言就是永真绿")
-        XCTAssertGreaterThanOrEqual(lines, Self.minimumConsumerLines,
-                                    "只扫到 \(lines) 行，分母太小，0 命中不代表干净")
-
-        let hits = try Self.scanHits(pattern: Self.coarsePattern, in: docs)
-        XCTAssertLessThanOrEqual(hits.count, Self.coarseCallSiteCeiling,
-                                 """
-                                 粗粒度读点从基线 \(Self.coarseCallSiteCeiling) 处涨到 \(hits.count) 处。
-                                 每多一处，就多一棵 body 跟着 1.5 秒一次心跳整棵重算
-                                 （实测 app-update 10.8~24.8 ms / 预算 8.33 ms）。
-                                 改读细粒度格：`monitor.cpu.value` / `.memory.value` / `.rates.value` /
-                                 `.ledger.value` / `.pulse.value` / `.cpuRanking.value` /
-                                 `.memoryRanking.value` / `.groupRanking.value` / `.curve.value`。
-                                 清单：
-                                 \(hits.joined(separator: "\n"))
-                                 """)
-        print("【粗 API 棘轮】消费方文件 \(docs.count) 个 / \(lines) 行，粗粒度读点 \(hits.count) 处"
-            + "（上限 \(Self.coarseCallSiteCeiling)，目标 0），细粒度读点 "
-            + "\(try Self.scanHits(pattern: Self.finePattern, in: docs).count) 处")
     }
 
     /// 基线本身不许是"假零"：只要上限还大于 0，今天就必须真扫得到东西。
