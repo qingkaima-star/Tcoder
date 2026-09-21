@@ -41,7 +41,8 @@ final class CodeGitBorderlessTests: XCTestCase {
                      "Git/GitInsightsCharts.swift"],
         "贡献者": ["Git/ContributorsView.swift", "Git/ContributorRows.swift"],
         "依赖分析": ["Dependencies/DependenciesView.swift",
-                     "Dependencies/DependencyVerdictRows.swift"],
+                     "Dependencies/DependencyVerdictRows.swift",
+                     "Dependencies/NetworkOptionsCard.swift"],
     ]
 
     /// 本守卫的扫描目录。少扫一个就等于给那一页开后门。

@@ -25,3 +25,7 @@ Package.resolved
 # 本地 `swift test --enable-code-coverage` + llvm-cov 导出的真实覆盖率报告。
 # 不入库：它是生成物、每次跑测试都会变；入库会让"自扫"读到一份与当前代码无关的旧报告。
 TcoderMonitor/coverage/
+
+# 一次性取证/测量产物（xctrace bundle、截图沙箱、自检夹具）的落点。
+# 规矩见 AGENTS.md §1.6：重活产物不进 $TMPDIR，跑完自清。
+.scratch/

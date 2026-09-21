@@ -74,7 +74,10 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 或"删掉一份假数据"而下降，两者都是净收益。判据本体一条没动。）
     /// 合流两侧：135 + 2（WS-X8 两枚分片）− 1（P7-A 删掉 DemoData）= 136，
     /// 且这 136 是守卫**实报**的数（`testDenominatorMatchesCensusBaseline` 跑出来填的，不是算出来的）。
-    static let censusBaseline = 136
+    /// 136 → 137（紧随其后还掉本门挂的那笔新账：`DependenciesView.swift` 401 行越线，
+    /// 把只被它自己使用的 `NetworkOptionsCard` 搬成同目录分片 `Dependencies/NetworkOptionsCard.swift`；
+    /// 守卫实报「实现文件 137 · 零调用清单：无」，`hugeFileWorkList` 里那条已删）。
+    static let censusBaseline = 137
 
     /// `.inflight` = `.gitignore` 里的「过程遗留」目录，必须与 `SelfScanHarness.skipDirectoryNames`
     /// 一起剪；两把尺子量的树不一样时，一边绿一边红无法归因（2026-09-21 实测）。
