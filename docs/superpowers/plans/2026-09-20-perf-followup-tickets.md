@@ -383,13 +383,22 @@ WS-X3 把这两条守卫的**宿主文件按行数拆成了 extension**——
    ⇒ 我的 `+CoarseWeighting.swift` 对着他们的布局**不需要任何改动就能编译**，
    重新落位缩成两小步：`reslicePattern` 那两条测试挪进 `+CoarseRatchet.swift`、
    `knownBaseline` 与台账明细的改动留在 `PerfHitchGuardTests.swift` 主文件。
+0′. **还有一棵树正在搬我另一包的家**：`ws/x6-scale` 在拆 `Services/Performance/FramePulse.swift`
+   （`1f2696a` 411→367 行），而我那笔"把语义边界写进产物文件头"的改动
+   （`5f21eee`，给 `writeHeaderLocked()` 加两行 `#` 注释）**正是加在这个文件里**。
+   它一旦进 main，我那两行要么撞冲突、要么**在搬函数时静默丢掉**——而丢掉是看不见的：
+   产物文件照样生成，只是少了两行"这是唤醒间隔、不是主线程占用"的提醒，
+   下一个人就会继续把 `心跳最大间隔` 读成 T2 的占用时长（这笔债本来就是为此才写的）。
+   ⇒ 落位时**先核 `writeHeaderLocked` 搬去了哪个分片、那两行还在不在**，
+   用 `grep -c '唤醒间隔' <新文件>` 之类的存在性检查判，不要靠 diff 印象。
+   同理 `perf_harness.sh`（`21fab71` 643→356 行、selfcheck 外迁 `perf_selfcheck.sh`）
+   与我那批尺子改动是同一个文件的两次手术，合之前先跑一次 `selfcheck` 确认没被拆漏。
 1. **§0.4 第 1 步**：**10 处承重**粗读点迁完（`python3 scripts/trace_report.py migration` 报 0）
    → 我再把 `coarseCallSiteCeiling` 拧 0、翻 `consumptionGateOpen`；
 2. **§0.4 第 2 步**：约 5 分钟安静窗口（`idle`×3 不需要人；`interact`×3 需要你持续滚 20 秒）。
    被挡过两次的真实原因都写在 `measurement-context.txt` 里，脚本会自己拒，不用你判断。
 
-**这一轮还查到两件与派单有关的事实**（都影响"下一步做什么"）：
-- **`ws/x0-chief`、`x1`、`x2`、`x3` 四棵树里 16 处读点一处没动**（01:2x 逐树跑 `migration` 全是 `16/16/0`）。
+**这一轮还查到两件与派单有关的事实**（都影响"下一步做什么"）：- **`ws/x0-chief`、`x1`、`x2`、`x3` 四棵树里 16 处读点一处没动**（01:2x 逐树跑 `migration` 全是 `16/16/0`）。
   这批是**体量/圈复杂度拆分轮**，不是 120Hz 轮；`x2` 那位还在二次拆我的 `trace_report.py`、
   把 `selfcheck` 搬进 `perf_selfcheck.sh`（读数我核过没变）。⇒ **交互期 hitch 的收益仍然完全押在第 1 步上**，
   它一旦再排到下一批，这一轮的 T1 就没法结。
