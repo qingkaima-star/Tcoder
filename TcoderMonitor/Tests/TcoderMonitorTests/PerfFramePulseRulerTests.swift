@@ -175,16 +175,16 @@ final class PerfFramePulseRulerTests: XCTestCase {
         let (text, files) = try pulseSourceText()
         XCTAssertGreaterThanOrEqual(files, 3, "扫描面只有 \(files) 个文件——目录被动过，这条已经看不清现场")
         XCTAssertTrue(text.contains("writeHeaderLocked"), "脉冲产物的表头函数不见了")
-        XCTAssertEqual(missingPulseCaveats(text), [],
+        XCTAssertEqual(Self.missingPulseCaveats(text), [],
                        "读数旁边少了语义边界说明：产物文件头会重新让人把「唤醒间隔」读成「占用时长」")
     }
 
     func testPulseCaveatScannerCatchesBadAndSparesGood() {
         let good = "# 语义提醒：= runloop 唤醒之间的间隔，不是主线程占用时长\n"
             + "# 要量主线程占用，用 xctrace 的 app-update 相位\n"
-        XCTAssertEqual(missingPulseCaveats(good), [], "合规写法被误伤")
-        XCTAssertEqual(missingPulseCaveats("").count, 2, "全删了还不报——这条守卫是永真绿")
-        XCTAssertEqual(missingPulseCaveats(good.replacingOccurrences(of: "app-update 相位", with: "别的相位")),
+        XCTAssertEqual(Self.missingPulseCaveats(good), [], "合规写法被误伤")
+        XCTAssertEqual(Self.missingPulseCaveats("").count, 2, "全删了还不报——这条守卫是永真绿")
+        XCTAssertEqual(Self.missingPulseCaveats(good.replacingOccurrences(of: "app-update 相位", with: "别的相位")),
                        ["T2 只认 xctrace 的 app-update 相位"], "只删一条时没点名那一条")
     }
 }
