@@ -254,8 +254,11 @@ struct CodeInvariantRow: View {
         }
     }
 
+    // 两处都必须 `localizedCopy` 之后再进 `Text`：`Text(String)` 走的是 verbatim 初始化、
+    // **不查表**。英文态里「空行/注释/代码/总计」一直是中文，就是这两处漏的
+    // （2026-09-21 英文九页实拍抓到；同一族坑本仓已记过九次）。
     private func sign(_ text: String) -> some View {
-        Text(text)
+        Text(localizedCopy(text))
             .font(CodeGitType.number(Theme.Typo.label))
             .foregroundStyle(.secondary)
             .accessibilityHidden(true)
@@ -263,7 +266,7 @@ struct CodeInvariantRow: View {
 
     private func term(_ label: String, _ value: Int) -> some View {
         HStack(spacing: Theme.Spacing.xxs) {
-            Text(label)
+            Text(localizedCopy(label))
                 .font(CodeGitType.prose(Theme.Typo.label))
                 .foregroundStyle(.secondary)
             Text(NumberFormat.grouped(value))

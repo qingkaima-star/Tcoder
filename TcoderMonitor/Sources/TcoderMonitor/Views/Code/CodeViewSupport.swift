@@ -120,7 +120,10 @@ struct CodeLanguageShareRow: View {
     var body: some View {
         DataShareBarRow(
             label: share.language,
-            detail: "\(NumberFormat.grouped(share.lineCount)) 行",
+            // 单位必须走查表的整句键。原来是 `"\(NumberFormat.grouped(...)) 行"` ——
+            // 插值出来的串不是键，英文态永远命中不了（2026-09-21 英文九页实拍抓到，
+            // 同文件下面那行 `localizedCount("%lld 行", …)` 一直是对的写法）。
+            detail: localizedCount("%lld 行", share.lineCount),
             fraction: share.share,
             // 语言名就写在条的左边，颜色不携带信息 —— 与 `Theme.Share.Row`
             // 同一判断（用户实拍：代码规模页一个小区块里绿/棕/琥珀/红/蓝五色）。
