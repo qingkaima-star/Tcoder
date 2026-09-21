@@ -156,10 +156,10 @@ fi
 launch_instance() {  # launch_instance [页名]；echo pid
   local name="$1"
   if [ "$SWITCH_MODE" = "argv" ]; then
-    TCODER_SUPPORT_DIR="$SANDBOX" "$BIN" -ApplePersistenceIgnoreState YES "${LANG_ARGS[@]}" \
+    TCODER_SUPPORT_DIR="$SANDBOX" "$BIN" -ApplePersistenceIgnoreState YES "${LANG_ARGS[@]+"${LANG_ARGS[@]}"}" \
       -selectedDetailSection "$name" > "/tmp/tcoder-capture-$(date +%s)-$$.log" 2>&1 &
   else
-    TCODER_SUPPORT_DIR="$SANDBOX" "$BIN" -ApplePersistenceIgnoreState YES "${LANG_ARGS[@]}" \
+    TCODER_SUPPORT_DIR="$SANDBOX" "$BIN" -ApplePersistenceIgnoreState YES "${LANG_ARGS[@]+"${LANG_ARGS[@]}"}" \
       > "/tmp/tcoder-capture-$(date +%s)-$$.log" 2>&1 &
   fi
   sleep 4

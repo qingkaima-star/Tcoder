@@ -37,7 +37,10 @@ struct PerformanceLiveCharts: View {
     }
 
     private var subtitle: String {
-        "最近 \(NumberFormat.grouped(points.count)) 点 · \(cadenceText) · 窗口约 \(Int(windowSeconds)) 秒"
+        localizedFormat("最近 %1$@ 点 · %2$@ · 窗口约 %3$@ 秒",
+                        NumberFormat.grouped(points.count),
+                        cadenceText,
+                        "\(Int(windowSeconds))")
     }
 
     private var trustedMemory: [SystemSnapshot] { SystemReadings.trustedMemoryPoints(points) }

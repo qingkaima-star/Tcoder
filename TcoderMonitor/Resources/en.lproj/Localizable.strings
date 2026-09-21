@@ -137,3 +137,10 @@
 "本窗口没有足够的可信内存读数可画曲线（%1$@/%2$@ 点可用）。" = "Not enough trusted memory samples to draw the curve (%1$@ of %2$@ points available).";
 "CPU 曲线，等待可信读数" = "CPU curve, waiting for a trusted reading";
 "CPU 曲线，%1$@ 个点，当前 %2$@，纵轴 %3$@" = "CPU curve, %1$@ points, now %2$@, y-axis %3$@";
+
+/* ===== P4-1b 采样节奏（sampleIntervalText 的消费者必须一起迁移，
+   否则英文单位 "1.5 s" 会掉进还没翻的中文句子里，变成半中半英） ===== */
+"每 %@" = "every %@";
+"采样已暂停" = "Sampling paused";
+"上次采样 %1$@ · 采样点 %2$@ · 间隔 %3$@" = "Last sample %1$@ · %2$@ points · every %3$@";
+"最近 %1$@ 点 · %2$@ · 窗口约 %3$@ 秒" = "Last %1$@ points · %2$@ · ~%3$@ s window";
