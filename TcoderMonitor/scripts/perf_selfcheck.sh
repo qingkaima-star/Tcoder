@@ -505,10 +505,14 @@ selfcheck_heavy_jobs_probe() {  # selfcheck_heavy_jobs_probe <outdir>
   # 而这一维当时读成"机器空"。两档 xctrace 互踩，量出来的两边都不准。
   local n missing=""
   for n in swiftc swift-test xctest xctrace; do
-    grep -q "\b$n\b" <(declare -f concurrent_heavy_jobs) || missing="$missing $n"
+    grep -q "\b$n\b" <(declare -f heavy_job_names) || missing="$missing $n"
   done
+  # 话术不许再硬编码名单：那正是"加了 xctrace 却把它说成本仓编译"的来源
+  declare -f concurrent_heavy_jobs_detail >/dev/null \
+    && grep -q 'concurrent_heavy_jobs_detail' <(declare -f preflight_context) \
+    || missing="$missing 话术未走带名字的明细版"
   [ -z "$missing" ] \
-    && ok "探针覆盖 swiftc / swift-test / xctest / xctrace 四种重活" \
+    && ok "探针覆盖 swiftc / swift-test / xctest / xctrace 四种重活，话术带真名字" \
     || fail "探针不再认识这些重活：${missing# }——全量门禁在跑时会被读成机器空"
 }
 
@@ -527,6 +531,7 @@ selfcheck_gate_matrix() {  # selfcheck_gate_matrix <outdir>
   gate_feed() {
     others=""; BUILD_REV="$head_sha"; BUILD_CLEAN="true"; front="Tcoder"
     visible="有在屏窗口（Tcoder）"; load1=3; cores=15; quiet=30; qline="静默=30s"
+    other_detail=""
     COEXIST=1; SECONDS_HITCHES=20; SECONDS_TP=25; i18n_ledger=""
     BUILD_TREE=""; HEAD_TREE=""; hard=0
   }

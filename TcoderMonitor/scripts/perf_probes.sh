@@ -93,12 +93,29 @@ concurrent_heavy_jobs() {  # → 空格分隔的 pid；空 = 机器上没有本�
   # Hitches --time-limit 12s` 连排，而我的闸门写着"机器空"。
   # 自己的不算：本档在**录制开始之前**问这一维，那时自己还没有 xctrace 在场；
   # 真到了要并跑两档的时候，宁可拒跑等窗口，也不出"两边都不准"的数。
-  local names=(swiftc swift-test xctest xctrace) out="" n p
-  for n in "${names[@]}"; do
+  local names n out="" p
+  names=$(heavy_job_names)
+  for n in $names; do
     p=$(pgrep -x "$n" 2>/dev/null | tr '\n' ' ')
     [ -n "$p" ] && out="$out$p "
   done
   printf '%s\n' "${out% }"
+}
+
+heavy_job_names() {  # 名单**只在这儿列一次**：闸门取 pid、话术取名字，两边不许各抄一份
+  printf '%s\n' swiftc swift-test xctest xctrace
+}
+
+concurrent_heavy_jobs_detail() {  # → `pid=42493 name=xctrace` 一串，只给话术用
+  # 为什么单独一个函数：原来话术里硬写着"swiftc / swift-test / xctest"，
+  # 名单加了第四个名字之后，那句话就把 xctrace 说成了"本仓编译"——
+  # **归属说错比不说更坏**：会让人去找一个根本不存在于本仓的编译。
+  local names n p
+  names=$(heavy_job_names)
+  for n in $names; do
+    for p in $(pgrep -x "$n" 2>/dev/null); do printf 'pid=%s name=%s ' "$p" "$n"; done
+  done
+  printf '\n'
 }
 front_is_target() {  # front_is_target <前台App名> → 0=就是被测 App
   # 【今天修掉一个让所有测量永远跑不通的闸门 bug】

@@ -45,7 +45,7 @@ sections() {
 source "$(dirname "${BASH_SOURCE[0]}")/perf_provenance.sh"
 
 preflight_context() {  # preflight_context <outdir> <pid>
-  local out="$1" pid="$2" f="" cores load1 front visible others hard=0
+  local out="$1" pid="$2" f="" cores load1 front visible others other_detail hard=0
   cores=$(sysctl -n hw.ncpu 2>/dev/null || echo 8)
   load1=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | awk '{print $1}')
   [ -n "$load1" ] || load1=0
@@ -53,6 +53,7 @@ preflight_context() {  # preflight_context <outdir> <pid>
   front=$(preflight_front_app)
   visible=$(preflight_window_state "$pid")
   others=$(concurrent_heavy_jobs)
+  other_detail=$(concurrent_heavy_jobs_detail)
   # 运行时漏翻台账（i18n 报告器）会在渲染路径上记键、按 200 次节流写盘。
   # 设了它再量帧率，量的就是台账自己的开销——所以这一维写进上下文，并且直接拒跑。
   i18n_ledger="${TCODER_I18N_RUNTIME_LEDGER:-}"
@@ -97,12 +98,12 @@ preflight_write_context() {  # preflight_write_context <outdir> <context 文件�
     echo "产物构建rev=${BUILD_REV:-未记录}  构建时树clean=${BUILD_CLEAN:-未记录}  ← 必须与上面 HEAD= 同一份代码，否则读数归错对象"
     [ -n "${PROVENANCE_NOTE:-}" ] && echo "   ※ 归属靠产物码 tree 放行（rev 不同）：${PROVENANCE_NOTE}"
     echo "实例数=${COEXIST:-1}  前台App=$front  被测进程visible=$visible"
-    echo "load1=$load1  核数=$cores  并发swiftc=${others:-无}"
+    echo "load1=$load1  核数=$cores  并发重活=${other_detail:-无}"
     echo "人输入静默=${quiet:-取不到}s  明细=${qline:-（探针没跑起来）}"
     echo "hitches_seconds=$SECONDS_HITCHES  tp_seconds=$SECONDS_TP"
     echo "诊断开关 TCODER_I18N_RUNTIME_LEDGER=${i18n_ledger:-未设（渲染路径零成本）}"
   } > "$f" 2>/dev/null || die "写不出 $f"
-  echo "    上下文：前台=$front  visible=$visible  load1=$load1/$cores  并发swiftc=${others:-无}  静默=${quiet:-取不到}s"
+  echo "    上下文：前台=$front  visible=$visible  load1=$load1/$cores  并发重活=${other_detail:-无}  静默=${quiet:-取不到}s"
 }
 
 # 身份两维：被量的到底是不是这份代码、以及采样时有没有开着诊断报告器。
@@ -133,7 +134,10 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
   # 一条静默失效的闸门。selfcheck 第 17 项（六维矩阵）抓的就是它。
   preflight_gates_identity
   if [ -n "$others" ]; then
-    echo "!! 有本仓的重活在跑（pid $others：swiftc / swift-test / xctest）——" \
+    # ${…:-} 不是洁癖：这一维在合成夹具里被单维破坏时，别的量可能是空的，
+    # 而 `set -u` 下引用未声明变量会**静默中止整条闸门**（今天就是这样把 selfcheck 打断的，
+    # 现场看起来像"探针输出正常、后面凭空没了"）。
+    echo "!! 机器上有重活在跑（${other_detail:-只拿到 pid $others，没拿到名字}）——" \
          "它会抢满全部核，app-update 相位会被显著抬高。等它跑完再来。" >&2
     hard=1
   fi

@@ -116,7 +116,7 @@ cond_no_heavy_jobs() {  # 录制档自己会拒这一维，排程器就必须**�
   declare -f concurrent_heavy_jobs >/dev/null || { echo "探针函数不在场（宁可不量）"; return 1; }
   local pids; pids=$(concurrent_heavy_jobs)
   [ -z "$pids" ] && return 0
-  printf '有本仓重活在跑（pid %s：swiftc / swift-test / xctest）' "$pids"
+  printf '%s' "机器上有重活在跑（$(concurrent_heavy_jobs_detail)）——两档互踩，等它结束"
   return 1
 }
 
