@@ -77,14 +77,19 @@ struct ProjectSidebar: View {
     /// 没有报告时把需要报告的页禁掉，而不是让用户点进一张空卡。
     private var analysisSection: some View {
         Section("分析视图") {
+            // **没有任何项目时，九页一律"未选中 + 不可用"**（2026-09-21 实拍抓到）：
+            // 上一轮遗留的选中页会一直画着选中底，而内容区在说「还没有项目」——
+            // 同一屏两个互相矛盾的读数。「当前页保持可用」那条豁免只在有项目时成立。
+            let hasProject = state.selectedProject != nil
             ForEach(DetailSection.allCases) { section in
                 AnalysisSectionRow(
                     section: section,
-                    isSelected: section.rawValue == sectionRaw,
-                    isEnabled: section.isReachable(reportAvailable: state.selectedReport != nil)
-                        // 当前页永远保持可用态：把「正在看的一页」画成禁用灰，
-                        // 读屏会念出「已禁用」而屏幕上它明明是选中的。
-                        || section.rawValue == sectionRaw
+                    isSelected: hasProject && section.rawValue == sectionRaw,
+                    isEnabled: hasProject
+                        && (section.isReachable(reportAvailable: state.selectedReport != nil)
+                            // 当前页永远保持可用态：把「正在看的一页」画成禁用灰，
+                            // 读屏会念出「已禁用」而屏幕上它明明是选中的。
+                            || section.rawValue == sectionRaw)
                 ) {
                     sectionRaw = section.rawValue
                 }
@@ -162,7 +167,9 @@ struct AddProjectGuideCard: View {
     var body: some View {
         Group {
             if mode == .firstRun {
-                VStack(spacing: Theme.Spacing.xs) {
+                // 间距从 `xs`(8) 抬到 `sm`(12)：主行动按钮修好之后它真的有底色了，
+                // 8pt 撑不住一枚 40pt 高的墨胶囊，会压到上面那行提示（实拍）。
+                VStack(spacing: Theme.Spacing.sm) {
                     ThemedIcon(.add, role: .hero, label: "添加项目")
                         .foregroundStyle(iconTint)
                     Text("还没有监控项目")

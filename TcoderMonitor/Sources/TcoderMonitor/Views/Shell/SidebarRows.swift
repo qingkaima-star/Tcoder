@@ -64,12 +64,17 @@ struct AnalysisSectionRow: View {
         .padding(.vertical, Theme.Spacing.xxs)
         .frame(maxWidth: .infinity, minHeight: ShellLayout.rowMinHeight, alignment: .leading)
         .background {
-            if isSelected {
+            if isSelected && isEnabled {
                 // 与上面项目行的**原生**选中态同一种画法：圆角矩形 + 实心强调色 + 反色文字。
                 // 这里原来是一枚满宽 `Capsule`，而原生那款是带内缩的圆角行 ——
                 // 同一个侧栏里上下两段两种形状（满宽胶囊 vs 内缩圆角），
                 // 用户实拍里一眼能看出「不规整」。
                 // 窗口失焦时原生那款会退成灰，这里跟着退，否则又变成两种状态色。
+                //
+                // **`&& isEnabled` 是 2026-09-21 补的**：没有任何项目时九页全部禁用，
+                // 而上一轮留下的选中页仍会画一枚选中底 —— 屏幕上同时出现
+                // 「这一页被选中」与「这一页不可用」两个互相矛盾的读数，
+                // 中间的内容区却在说「还没有项目」。
                 RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous)
                     .fill(selectionFill)
                     .padding(.horizontal, Theme.Spacing.xxs)

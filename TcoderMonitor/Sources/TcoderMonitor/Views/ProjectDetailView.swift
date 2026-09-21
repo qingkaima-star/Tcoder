@@ -103,10 +103,18 @@ struct ProjectDetailView: View {
     @ViewBuilder
     private var content: some View {
         if state.selectedProject == nil {
+            // 空态自带主行动（`EmptyStateView.action`）。原先整个窗口里唯一的入口
+            // 藏在左侧引导卡里，而用户的视线落在中间这段说明上 ——
+            // "看得见说明、够不着按钮"就是用户口径里那种"假的死页面"。
+            // 点它走的是同一条通知，由侧栏 `onReceive` 打开同一个 NSOpenPanel，
+            // 不存在第二套添加流程。
             EmptyStateView(
                 icon: IconName.emptyUnknown.rawValue,
                 title: "还没有项目",
-                message: "在左侧「选择目录…」指一个本地仓库目录，九页读数全部由它真实算出来。"
+                message: "在左侧「选择目录…」指一个本地仓库目录，九页读数全部由它真实算出来。",
+                action: AnyView(GlassButton("选择目录…", icon: .add, style: .prominent) {
+                    NotificationCenter.default.post(name: .requestAddProject, object: nil)
+                })
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {

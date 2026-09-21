@@ -366,6 +366,12 @@ struct EmptyStateView: View {
     var icon: String = "tray"
     var title: String
     var message: String
+    /// 空态自带的动作槽。**为什么要有它**：首屏空态原先只有一句说明，
+    /// 唯一的入口在左侧引导卡里 —— 用户看得见说明、够不着按钮，
+    /// 这正是"假的死页面"的一种。动作必须由空态自己带出来，
+    /// 而不是让调用方在外面再套一个 VStack（套在外面会被下面的
+    /// `minHeight: emptyMinHeight` 顶开，实拍里按钮落在文字下方 140pt 处）。
+    var action: AnyView? = nil
 
     var body: some View {
         // **左对齐**。全站九页都是左基线，只有空态居中 —— 实拍里它是全 App 唯一的
@@ -383,6 +389,10 @@ struct EmptyStateView: View {
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.leading)
                 .lineSpacing(Theme.Typo.label.lineSpacing)
+            if let action {
+                // 与说明之间给一档组内间距，别贴着；它是这一块的收尾动作。
+                action.padding(.top, Theme.Spacing.xs)
+            }
         }
         .frame(maxWidth: .infinity, minHeight: Theme.Layout.emptyMinHeight, alignment: .topLeading)
         .padding(Theme.Spacing.xl)
