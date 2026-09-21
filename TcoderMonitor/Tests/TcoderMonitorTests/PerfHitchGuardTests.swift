@@ -31,6 +31,38 @@ final class PerfHitchGuardTests: XCTestCase {
         packageRoot.appendingPathComponent("Sources/TcoderMonitor/Views")
     }
 
+    /// 判据写的是"**body/Mark 内**零动态色/零排序/零同步 I/O"，而 `Design/**` 里的
+    /// `GlassSection` / `ReadoutKit` / `DataRows` 本身就是视图构造器——只扫 `Views/`
+    /// 等于把判据的适用范围偷偷缩小了。2026-09-21 实测到这个盲区真的在长东西：
+    /// 新并进来的运行时漏翻台账把 `misses.sorted()` 放在 `Design/ReadoutKit.swift`，
+    /// 老扫描面一条都数不到。
+    static var designRoot: URL {
+        packageRoot.appendingPathComponent("Sources/TcoderMonitor/Design")
+    }
+
+    /// 渲染路径 = Views ∪ Design。分母按**每一棵根**分别要求，
+    /// 否则哪天某棵根解析失效（路径改名、目录搬走），合并后的总数看着还是"够大"，
+    /// 守卫就悄悄退化成半瞎——这正是本文件第 3 条元测试要防的形状。
+    static func scanRenderSurface() throws -> PerfHitchScan.ScanResult {
+        var merged = try PerfHitchScan.scanDirectory(viewsRoot, helperHopDepth: helperHopDepth)
+        let design = try PerfHitchScan.scanDirectory(designRoot, helperHopDepth: helperHopDepth)
+        XCTAssertGreaterThanOrEqual(design.census.swiftFiles, 10,
+                                    "Design/ 只扫到 \(design.census.swiftFiles) 个文件：这棵根失效了，合并读数会假绿")
+        // 两棵根的命中路径都是**相对各自根**的，直接并起来会出现两个 `ChartTokens.swift:185`
+        // 分不清谁是谁——而"每条存量必须可点名"是这条守卫存在的理由之一。
+        for (rule, n) in design.counts {
+            merged.counts[rule, default: 0] += n
+            merged.hits[rule, default: []] += (design.hits[rule] ?? []).map { "Design/\($0)" }
+        }
+        for rule in merged.hits.keys where merged.hits[rule] != nil {
+            merged.hits[rule] = merged.hits[rule]?.map { $0.hasPrefix("Design/") ? $0 : "Views/\($0)" }
+        }
+        merged.census.swiftFiles += design.census.swiftFiles
+        merged.census.inScopeSpans += design.census.inScopeSpans
+        merged.census.totalLines += design.census.totalLines
+        return merged
+    }
+
     /// 渲染路径的跨度向下游展开几跳（见 `PerfHitchScan.helperHopDepth`）。
     static let helperHopDepth = 2
 
@@ -63,7 +95,10 @@ final class PerfHitchGuardTests: XCTestCase {
     ///   → 归 **M1 / WS-W**（spec §5 点名"LogsView.attachedItems 的 body 内 stat() 移出"），终点 0。
     static let knownBaseline: [String: Int] = [
         "directFormatters": 1,
-        "dynamicNSColor": 56,   // 02:26 由 58 拧到本树实测 56（今天第三次：107→86→59→58→56）。
+        "dynamicNSColor": 64,   // 56→**64 是扩面，不是新增债**：判据写的是"body/Mark 内"，
+        // 而 `Design/**`（`GlassComponents`/`ChartTokens`/`HealthAdviceCards` 等）本身就是视图构造器，
+        // 旧扫描面只看 `Views/`。多看见的 8 处全部落在 Design/（台账现在带 `Design/` 前缀可逐条复核）。
+        // 从 64 起仍只许减不许增；终点 0。历史上这条是 107→86→59→58→56（三次还债）→64（一次扩面）。
         // 为什么又拧：台账"现量/上限"一上线就自己报出 `58/59（可拧到 58）`——
         // 留 1 处余量等于"新增 1 处照样绿"。**只减不增要成立，降下来必须有人拧**。
         // 没点名是哪一笔还掉的：这条不需要知道，扫描器每次跑都会重算。
@@ -89,7 +124,7 @@ final class PerfHitchGuardTests: XCTestCase {
     // MARK: - 棘轮主体
 
     func testRenderPathViolationsDoNotGrowBeyondBaseline() throws {
-        let scan = try PerfHitchScan.scanDirectory(Self.viewsRoot, helperHopDepth: Self.helperHopDepth)
+        let scan = try Self.scanRenderSurface()
         let counts = scan.counts, census = scan.census
         // 防"假零"的第一道：分母。目录解析失效时 counts 全 0，看起来像"债还清了"。
         XCTAssertGreaterThan(census.swiftFiles, 30,
@@ -149,7 +184,7 @@ final class PerfHitchGuardTests: XCTestCase {
     /// 存量必须**可点名**：守卫报出来的每一条都要有"文件:行 + 原文"，
     /// 否则没人能修。这条同时兜住"计数对了但位置丢了"的半瞎实现。
     func testEveryRecordedHitCarriesFileLineAndSnippet() throws {
-        let scan = try PerfHitchScan.scanDirectory(Self.viewsRoot, helperHopDepth: Self.helperHopDepth)
+        let scan = try Self.scanRenderSurface()
         let total = scan.counts.values.reduce(0, +)
         XCTAssertGreaterThan(total, 0, "一条都没数到 = 扫描器空转（见元测试 testScannerFiresOnBadSamples）")
         XCTAssertEqual(total, scan.hits.values.map(\.count).reduce(0, +),
@@ -164,15 +199,21 @@ final class PerfHitchGuardTests: XCTestCase {
 
     /// 真实存量必须**被扫到**：钉住两条已知事实，防止"正则退化成永远不匹配"。
     func testScannerFindsTheKnownRealOccurrences() throws {
-        let scan = try PerfHitchScan.scanDirectory(Self.viewsRoot, helperHopDepth: Self.helperHopDepth)
+        let scan = try Self.scanRenderSurface()
         let io = scan.hits["syncFileIO"] ?? []
-        XCTAssertTrue(io.contains { $0.hasPrefix("Logs/LogsView.swift") && $0.contains("attributesOfItem(") },
+        XCTAssertTrue(io.contains { $0.hasPrefix("Views/Logs/LogsView.swift") && $0.contains("attributesOfItem(") },
                       "LogsView 的 attributesOfItem 是已知存量，扫不到就说明 I/O 正则或跨度展开坏了：\(io)")
+        // 命中一律带根前缀（`Views/…` / `Design/…`）：两棵根并起来之后，
+        // 没有前缀就会出现两个同名文件分不清谁是谁。
+        XCTAssertTrue(io.allSatisfy { $0.hasPrefix("Views/") || $0.hasPrefix("Design/") },
+                      "命中路径没带根前缀，两棵根的存量会互相顶名：\(io)")
         let sorts = scan.hits["fullSort"] ?? []
         XCTAssertTrue(sorts.contains { $0.contains(".sorted(") },
                       "Views 里已知有 body 内排序，扫不到说明 .sorted( 正则失效：\(sorts)")
         let colors = scan.hits["dynamicNSColor"] ?? []
         XCTAssertTrue(colors.count >= 50, ".textColor 存量应有几十处，只数到 \(colors.count) 处：跨度提取退化了")
+        XCTAssertTrue(colors.contains { $0.hasPrefix("Design/") },
+                      "Design/ 侧的令牌引用一条都没数到——扫描面又退回只看 Views/ 了")
     }
 
     // MARK: - 元测试：每条守卫都要能被坏样例打红

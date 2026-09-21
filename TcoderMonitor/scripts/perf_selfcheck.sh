@@ -42,6 +42,8 @@ cmd_selfcheck() {
   selfcheck_render_regime "$out"    # 13) render 比率只在同一种出帧机制下互比
   selfcheck_binary_provenance "$out" # 14) 被量的二进制必须就是这份代码（rev 对齐）
   selfcheck_baseline_text_is_derived "$out"  # 15) 对照列文字不许是字典的第二份手抄
+  selfcheck_heavy_jobs_probe "$out"  # 16) 并发重活：三个名字都要认，输出必须是 pid 清单
+  selfcheck_gate_matrix "$out"      # 17) 六维闸门合成矩阵：能放行，也会逐维拒
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
@@ -403,7 +405,21 @@ selfcheck_binary_provenance() {  # selfcheck_binary_provenance <outdir>
   if provenance_ok "" "$H" true; then fail "读不到 manifest 却放行"; bad=1; fi
   if provenance_ok "$H" "$H" false; then fail "构建时工作树是脏的却放行——那时连 rev 本身都不可信"; bad=1; fi
   if provenance_ok "$H" "" true; then fail "取不到 HEAD 却放行——无法比对就等于没验"; bad=1; fi
-  [ "$bad" = "0" ] && ok "二进制出身判定五向都对（同 rev 放行 / 异 rev、缺 manifest、构建时脏、无 HEAD 一律拒）"
+  # 【同一件事只许有一把手尺子】我补这一维时先是**又写了一份**，才发现
+  # `verify_provenance.sh` 早就在做同一件事。现在判定住在 `perf_provenance.sh`，
+  # 两边都 source 它。下面三条把这个结构钉住：定义处唯一、交付档确实走它、
+  # 测量档不许留本地副本（漏一天就会分叉，而分叉之后错的那份常在喂结论）。
+  local defs
+  # 模式必须锚行首：不锚的话它会把我**写在自检里的这串模式本身**当成一处定义
+  # （第一版就是这么红的——报错报到自己头上，说明它真的在看内容）。
+  defs=$(grep -lr '^provenance_ok() {' scripts/ 2>/dev/null | tr '\n' ' ')
+  [ "$defs" = "scripts/perf_provenance.sh " ] \
+    || { fail "provenance_ok 的定义不止一处（$defs）——同一判定又长出第二份了"; bad=1; }
+  grep -q 'provenance_ok' scripts/verify_provenance.sh \
+    || { fail "verify_provenance.sh 不再经过共享判定（大概又手抄了一遍 [ a = b ]）"; bad=1; }
+  grep -q 'preflight_manifest_value\|^provenance_ok() {' scripts/perf_preflight.sh \
+    && { fail "perf_preflight.sh 里还留着本地副本，删掉、只 source"; bad=1; }
+  [ "$bad" = "0" ] && ok "二进制出身判定五向都对，且定义唯一（verify 与 preflight 共用 perf_provenance.sh）"
 }
 
 selfcheck_baseline_text_is_derived() {  # selfcheck_baseline_text_is_derived <outdir>
@@ -455,4 +471,62 @@ PYCASE
   else
     fail "对照列与字典脱钩：$(printf '%s' "$r" | tail -2)"
   fi
+}
+
+selfcheck_heavy_jobs_probe() {  # selfcheck_heavy_jobs_probe <outdir>
+  # 16) "机器空不空"这一维自己也要能跑、能解析、清单不能被偷偷削短。
+  #     （§1.3 那两批作废基线的坏因之一就是"有东西在跑而闸门看不见"：
+  #      第一版只认 swiftc，全量门禁在跑时它读成"空"。）
+  if ! declare -f concurrent_heavy_jobs >/dev/null; then
+    fail "concurrent_heavy_jobs 不在作用域里——这一维等于没人守"
+    return
+  fi
+  local out
+  out=$(concurrent_heavy_jobs)
+  case "$out" in
+    *[!0-9\ ]*) fail "并发重活探针输出不是 pid 列表（拿到「$out」）——话术会跟着一起胡说" ;;
+    *) ok "并发重活探针可跑可解析（现在：${out:-机器空}）" ;;
+  esac
+  # 清单被削回只认 swiftc 的话，本仓全量门禁期间就会假装机器空着——钉住三个名字。
+  local n missing=""
+  for n in swiftc swift-test xctest; do
+    grep -q "\b$n\b" <(declare -f concurrent_heavy_jobs) || missing="$missing $n"
+  done
+  [ -z "$missing" ] \
+    && ok "探针覆盖 swiftc / swift-test / xctest 三种重活" \
+    || fail "探针不再认识这些重活：${missing# }——全量门禁在跑时会被读成机器空"
+}
+
+selfcheck_gate_matrix() {  # selfcheck_gate_matrix <outdir>
+  # 17) 六维闸门合成矩阵：喂一份"全合格"的假上下文，要求
+  #     ① 全合格 ⇒ 放行；② 每一维单独破坏 ⇒ 拒。
+  #     为什么必须有：前五维各自都修过一次 bug，但没有一个测试证明"闸门既能放行也会拒"。
+  #     恒拒（前台名比错）与恒放行（探针函数不在场）都不报错，只能靠这张矩阵抓。
+  if ! declare -f preflight_gates >/dev/null; then
+    fail "preflight_gates 不在作用域里——这张矩阵没跑"
+    return
+  fi
+  local head_sha hard_all=0
+  head_sha=$(git rev-parse HEAD 2>/dev/null)
+  # 一份"全合格"的上下文（六维取数都是本文件的 local，动态作用域里直接覆盖）
+  gate_feed() {
+    others=""; BUILD_REV="$head_sha"; BUILD_CLEAN="true"; front="Tcoder"
+    visible="有在屏窗口（Tcoder）"; load1=3; cores=15; quiet=30; qline="静默=30s"
+    COEXIST=1; SECONDS_HITCHES=20; SECONDS_TP=25; i18n_ledger=""; hard=0
+  }
+  gate_feed; preflight_gates >/dev/null 2>&1
+  [ "$hard" = "0" ] || { fail "六维全合格却被拒 ⇒ 又造出一条永远不可能通过的闸门"; hard_all=1; }
+  gate_feed; others="1234";   preflight_gates >/dev/null 2>&1
+  [ "$hard" = "1" ] || { fail "有并发重活却放行"; hard_all=1; }
+  gate_feed; BUILD_REV=$(printf 'f%.0s' $(seq 1 40)); preflight_gates >/dev/null 2>&1
+  [ "$hard" = "1" ] || { fail "产物 rev 与代码不符却放行（归错对象那一族的入口）"; hard_all=1; }
+  gate_feed; BUILD_CLEAN="false"; preflight_gates >/dev/null 2>&1
+  [ "$hard" = "1" ] || { fail "构建时工作树是脏的却放行"; hard_all=1; }
+  gate_feed; front="Finder";  preflight_gates >/dev/null 2>&1
+  [ "$hard" = "1" ] || { fail "前台不是被测 App 却放行"; hard_all=1; }
+  gate_feed; load1=99;        preflight_gates >/dev/null 2>&1
+  [ "$hard" = "1" ] || { fail "load1 超阈值却放行"; hard_all=1; }
+  gate_feed; i18n_ledger="/tmp/x.log"; preflight_gates >/dev/null 2>&1
+  [ "$hard" = "1" ] || { fail "设着漏翻台账还放行——那批量的是台账的开销"; hard_all=1; }
+  [ "$hard_all" = "0" ] && ok "六维闸门矩阵：全合格放行、逐维破坏各判一次拒"
 }

@@ -316,6 +316,21 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 要的话我先在服务端把有序版本准备好（不碰 `Views/**`），你那边只剩删调用。
 
 ### 第 2 步：帧率复测（分两小步，因为其中一步需要人手）
+> **12:08 复测现状**：rev `082f403` 上第 1 趟可用（`app-update` 0.6~1.3 ms、hitch 0、
+> render 超预算 0.43%/n=1644），第 2、3 趟**在录制中途**被闸门拒（有人起了 `swiftc`，
+> load 从 4.80 升到 8.53）⇒ **T2 仍差 2 趟一致样本**。
+> 排程器这一维已补：它现在会**先等"本仓无重活"**再开始，而不是连烧三次尝试。
+> 另有一处口径待总工裁定，见 spec §1.5c（`pct < 0.1%` 与基线自身 0.42% 互相矛盾）。
+>
+> **包 2 落地（11:38）后新增的两条工具能力**：
+> ① `MODE=interact ./scripts/perf_wait_window.sh <tag> 3` —— T1 也能"机器等窗口"了：
+>    它会先等人手静默再起 App（不抢正在被人用的焦点），起完之后**要求这 20 秒里有人滚**，
+>    没人滚就被 `human_input_in_window` 拒。产物目录带档名（`-idle-run*` / `-interact-run*`），
+>    两批数不会互相覆盖。
+> ② "被量的二进制是不是这份代码"现在有闸门了（`scripts/perf_provenance.sh` 是唯一判定处，
+>    `verify_provenance.sh` 与测量档都走它）。**后果**：现在 `dist/` 里那个 09:49 建的包
+>    会被两条流水线同时拒——复测与九页取证之前**必须先** `./scripts/build_app.sh release`。
+>
 
 > **进度（09-21 11:07 更新，接上面那条排程约束）**：闸门修好后**第一趟受控 idle 已经出数**
 > ——`app-update` 0.6~1.0 ms（T2 红线 ≤4.0）、hitch 0 次、HTR 0.00、`potential-hangs` 0 次，
@@ -660,3 +675,13 @@ ls -d /tmp/tcoder-capture.lock 2>/dev/null     # 取证锁必须空闲
   用 `TCODER_STREAM_NAME=perf`，**不绕过锁**；900 s 上限目前够用，若我要跑整轮九页 × 深浅再找你改可续租。
 - 深色外观固定用 `osascript ... set dark mode to true`，拍完恢复（`defaults write -g AppleInterfaceStyle`
   在本机不生效，这条我已记进记忆）。
+
+> **12:19 落地被别人的文件挡住（事实与处置）**
+> `./scripts/premerge_check.sh ws/perf-base` 在 `99097e1` 上 897 例 **1 failure**，
+> 唯一失败是 `X3TestSizeAuditTests`：`LocalizationGuardTests.swift 408 行`（>400 线）。
+> 归属：`dd523ed`(P5-d) 给该文件 +30 行推过线，`ad081dd`(P5-d2) 未回收；
+> **main 自身同样红**（我已独立 `wc -l` 复核 main 与我树都是 408）。
+> 处置：三条禁令——不改那个文件、不改阈值、不自家豁免；等拆完我对现头重跑一次门禁再落。
+> 复用价值：这是**第二次**同一文件撞同一条线（上次 507→371，`64b9c15`）。
+> 若还想省事，正解不是提高 400，而是把"给守卫测试加用例"的默认落点改成分片文件
+> （`LocalizationGuardTests+XXX.swift`），并在提交前跑一次 `wc -l Tests/**/*.swift | awk '$1>380'` 自查。
