@@ -251,10 +251,12 @@ extension MetricTile {
         icon: IconName?,
         unit: String? = nil,
         caption: String? = nil,
-        tint: Color = Theme.Palette.Surface.ink
+        tint: Color = Theme.Palette.Surface.ink,
+        captionLineLimit: Int? = nil
     ) {
         self.init(label: label, value: value, unit: unit, caption: caption, tint: tint,
-                  systemImage: icon.map(CodeGitSymbol.resolve))
+                  systemImage: icon.map(CodeGitSymbol.resolve),
+                  captionLineLimit: captionLineLimit)
     }
 
     /// 登记表还没收录、但在 `CodeGitSymbol` 里集中命名过的符号走这个入口。
@@ -265,10 +267,11 @@ extension MetricTile {
         symbol: String?,
         unit: String? = nil,
         caption: String? = nil,
-        tint: Color = Theme.Palette.Surface.ink
+        tint: Color = Theme.Palette.Surface.ink,
+        captionLineLimit: Int? = nil
     ) {
         self.init(label: label, value: value, unit: unit, caption: caption, tint: tint,
-                  systemImage: symbol)
+                  systemImage: symbol, captionLineLimit: captionLineLimit)
     }
 
     /// 带**语义**结论的 tile（风险等级、CVE 严重度、增/删）。
@@ -281,11 +284,13 @@ extension MetricTile {
         icon: IconName? = nil,
         symbol: String? = nil,
         unit: String? = nil,
-        caption: String? = nil
+        caption: String? = nil,
+        captionLineLimit: Int? = nil
     ) {
         self.init(label: label, value: value, unit: unit, caption: caption,
                   tint: role?.textColor ?? Theme.Palette.Surface.ink,
-                  systemImage: icon.map(CodeGitSymbol.resolve) ?? symbol)
+                  systemImage: icon.map(CodeGitSymbol.resolve) ?? symbol,
+                  captionLineLimit: captionLineLimit)
     }
 
 // 无值时基座强制中性色（`MetricTile.forcesNeutralTint`），有值时用调用方给的**语义**角色，

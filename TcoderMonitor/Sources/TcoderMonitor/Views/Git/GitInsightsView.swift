@@ -84,8 +84,13 @@ struct GitInsightsMetricGrid: View {
                         label: "最近修改",
                         value: git.lastCommitAt.map { LogRecency.describe($0) },
                         symbol: CodeGitSymbol.recency,
-                        caption: Self.latestCommitCaption(git)
+                        caption: Self.latestCommitCaption(git),
+                        // 提交标题是**用户内容**，长度不可控（实测一条 60+ 字的中文标题
+                        // 把这一格撑成三行、四格基线全歪）。它不是口径，截断可回读：
+                        // 完整标题挂在这格的 tooltip 上。
+                        captionLineLimit: 2
                     )
+                    .help(Self.latestCommitCaption(git))
                     DataBandSeparator()
                     MetricTile(
                         label: scope.isWindowTruncated ? "窗口内作者" : "活跃作者",

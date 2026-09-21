@@ -73,6 +73,10 @@ struct MetricTile: View {
     /// 于是本格脚注一换行（两行口径）就把量条推下去约 20pt ——
     /// 实拍性能页：CPU 的条比内存低半格，磁盘/网络根本没有条，四格基线全断。
     var gauge: MetricGauge = .none
+    /// 脚注行数上限。`nil` = **不截断**（默认，口径脚注丢掉一半等于丢掉可核对性）。
+    /// 只有**数据摘要**才传数字：提交标题、路径这类长度由用户内容决定的串不是口径，
+    /// 它撑成三行会把整条读数带的基线弄歪，截断 + tooltip 才是对的处理。
+    var captionLineLimit: Int? = nil
 
     /// 量条槽的三种状态。`.empty` 是**占位等高**：同排有别的格子画条时，
     /// 没有可信分母的格子也要把那一行留出来（画一条假的满格线比不画更误导）。
@@ -89,7 +93,8 @@ struct MetricTile: View {
         caption: String? = nil,
         tint: Color = Theme.Palette.Surface.ink,
         systemImage: String? = nil,
-        gauge: MetricGauge = .none
+        gauge: MetricGauge = .none,
+        captionLineLimit: Int? = nil
     ) {
         self.label = label
         self.value = value
@@ -98,6 +103,7 @@ struct MetricTile: View {
         self.tint = tint
         self.systemImage = systemImage
         self.gauge = gauge
+        self.captionLineLimit = captionLineLimit
     }
 
     var body: some View {
@@ -145,6 +151,8 @@ struct MetricTile: View {
                     // 而 caption 装的正是"这个数字怎么量出来的"——丢掉它等于把可核对性丢掉。
                     // 与定宽表格格相反：格子里宁可截不可撑（撑了五列基线全断），
                     // 脚注宁可撑不可截（行高由条带里最高的那格决定，顶部对齐后数字仍同高）。
+                    // 唯一的例外是 `captionLineLimit`：数据摘要不是口径。
+                    .lineLimit(captionLineLimit)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

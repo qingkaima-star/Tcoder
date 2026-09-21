@@ -102,6 +102,24 @@ final class CodeGitRestyleTests: XCTestCase {
         XCTAssertEqual(out.count, 15, "WS-L/WS-P 名下应有 15 个视图文件（Code 6 / Git 5 / Dependencies 2 / CodeGit 2），数量变了说明归属被动过；列系统已上提进 Design/，见 Design/DataTable.swift")
         return out
     }
+
+    /// `MetricTile` 有**四个**创建入口（基座 + CodeGit 的三个转发）。
+    /// 基座每加一个入参，四个都得同步 —— 少一个，页面就报 `extra argument in call`
+    /// （`captionLineLimit` 第一次就踩在这里）。这条测试把四条路径一次跑齐，
+    /// 顺带钉住"默认不截断"：口径脚注不许被截是 §10.3 的判据。
+    func testMetricTileCaptionLimitSurvivesEveryInitPath() {
+        XCTAssertEqual(MetricTile(label: "a", value: "1", caption: "c",
+                                  captionLineLimit: 2).captionLineLimit, 2)
+        XCTAssertEqual(MetricTile(label: "a", value: "1", icon: .people, caption: "c",
+                                  captionLineLimit: 3).captionLineLimit, 3)
+        XCTAssertEqual(MetricTile(label: "a", value: "1", symbol: "clock", caption: "c",
+                                  captionLineLimit: 4).captionLineLimit, 4)
+        XCTAssertEqual(MetricTile(label: "a", value: "1", role: Theme.Semantic.warning,
+                                  icon: .people, caption: "c",
+                                  captionLineLimit: 5).captionLineLimit, 5)
+        XCTAssertNil(MetricTile(label: "a", value: "1", caption: "口径说明").captionLineLimit,
+                     "默认必须不截断：截掉口径等于丢掉可核对性")
+    }
 }
 
 extension GitDataAbsence {
@@ -116,4 +134,3 @@ extension GitDataAbsence {
         return Set(titles).count != titles.count
     }
 }
-
