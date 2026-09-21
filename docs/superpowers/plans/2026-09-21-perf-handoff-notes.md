@@ -199,3 +199,23 @@ MODE=interact ./scripts/perf_wait_window.sh $(git rev-parse --short HEAD) 3   # 
 3. **外部争用看不见**：同 rev、同实例、五维全同的三趟里 hitch 是 43/3/1，
    而 `app-update` 稳定 2.x ms ⇒ 差异在显示系统层面。已登记 spec §7 第 8 条；
    要收这一维得给 preflight 再加一维（例如整机出帧基线），本轮没做。
+
+## H. 22:56 复扫：**"折进正在重写的批次"这条裁定的前提已经断了**（需要新的派单）
+
+01:09 的裁定原文是"那 10 处承重粗读迁移折进**正在重写这些文件的批次**，由总工顺手做"。
+并完 main（`e929a47`，58+25 个提交）之后按两边现量重算，**交集 = 0**：
+
+| 两边总体 | 现量 |
+|---|---|
+| 16 处粗读点所在文件（守卫自己的正则现扫） | `LiveReadings.swift` ×2、`PerformanceView.swift` ×10、`DashboardReadouts.swift` ×3、`ProjectSidebar.swift` ×1 |
+| 主树此刻在途的 11 个文件 | `CodeMetrics*`、`CodeRiskView`、`ContributorsView`、`FileSystemCodeAnalyzer`、`Localizable.strings`、`AGENTS.md` 等（**代码规模 / Git 贡献者两页 + 尺子**） |
+| 交集 | **0 个文件** |
+
+⇒ 含义很直白：**现在没有任何一个在途批次会碰到这四个文件**，
+"折进去顺手做"已经不可能顺手——这一批要么单独派，要么继续欠着。
+（上一轮"10 处排序债里有 5 处正被重写"是成立的，那批已落且**没有顺手清掉**，
+所以这条裁定不能靠"再等下一批"自动兑现。）
+
+同时报一条已经还上的：渲染路径台账现扫 `dynamicNSColor 62/64`，
+台账自己点名两格隐形余量 ⇒ 棘轮已拧到 **62**（`directFormatters 1/1`、`fullSort 9/9`、
+`syncFileIO 2/2` 本来就零余量）。**四条里留一条松，就是给下一次"没涨"留口子。**
