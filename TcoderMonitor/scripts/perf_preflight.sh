@@ -205,22 +205,30 @@ preflight_write_context() {  # preflight_write_context <outdir> <context 文件�
   echo "    上下文：前台=$front  visible=$visible  load1=$load1/$cores  并发swiftc=${others:-无}  静默=${quiet:-取不到}s"
 }
 
-preflight_gates() {  # 不合格就置 `hard=1`
+# 身份两维：被量的到底是不是这份代码、以及采样时有没有开着诊断报告器。
+# 拆出来一半是为了不撞 `PerfRulerHotspotRatchetTests` 的 50 行线（拆，不抬数），
+# 一半是因为这两条问的是同一个问题："这批读数能算在谁头上"。
+preflight_gates_identity() {
+  # 【第六维】2026-09-21 实测踩到：`measurement-context.txt` 里的 `HEAD=` 是**工作树**的头，
+  # 而我 attach 的那个 `dist/Tcoder.app` 是两小时前 `build_app.sh` 从 `41add9e` 建的，
+  # 中间隔了 39 个产物文件（整批 i18n + 我自己的 `PerfReadoutCells` 修复）。
+  # 于是"e991c6d 的 T2 读数"这句话从头到尾是假的——量的是旧二进制，只是恰好在新树上按了回车。
+  if ! PROVENANCE_WHY=$(provenance_ok "$BUILD_REV" "$(git rev-parse HEAD 2>/dev/null)" "$BUILD_CLEAN"); then
+    echo "!! 二进制与代码不是同一份：${PROVENANCE_WHY} —— 先跑 scripts/build_app.sh release 再量。" >&2
+    hard=1
+  fi
   if [ -n "${i18n_ledger:-}" ]; then
     echo "!! 设了 TCODER_I18N_RUNTIME_LEDGER（=$i18n_ledger）——渲染路径在记漏翻台账并节流写盘；
    这批读数量的是台账的开销，不是 App 的心跳。取消该变量再测。" >&2
     hard=1
   fi
-（调用方按 IGNORE_CONTEXT_GATE 决定炸还是通报）
-  # 【第六维：被量的到底是不是这份代码】2026-09-21 实测踩到：`measurement-context.txt`
-  # 里的 `HEAD=` 是**工作树**的头，而我 attach 的那个 `dist/Tcoder.app` 是两小时前
-  # `build_app.sh` 从 `41add9e` 建的，中间隔了 39 个产物文件（整批 i18n + 我自己的
-  # `PerfReadoutCells` 修复）。于是"e991c6d 的 T2 读数"这句话从头到尾是假的——
-  # 量的是旧二进制，只是恰好在新树上按了回车。
-  if ! PROVENANCE_WHY=$(provenance_ok "$BUILD_REV" "$(git rev-parse HEAD 2>/dev/null)" "$BUILD_CLEAN"); then
-    echo "!! 二进制与代码不是同一份：${PROVENANCE_WHY} —— 先跑 scripts/build_app.sh release 再量。" >&2
-    hard=1
-  fi
+}
+
+preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GATE 决定炸还是通报）
+  # 【bash 的坑】调用**不带括号**：写成 `preflight_gates_identity()` 会被解析成
+  # "在 preflight_gates 内部再定义一个函数"，于是这两维**一次都没执行**、也不报错——
+  # 一条静默失效的闸门。selfcheck 第 17 项（六维矩阵）抓的就是它。
+  preflight_gates_identity
   if [ -n "$others" ]; then
     echo "!! 有本仓的重活在跑（pid $others：swiftc / swift-test / xctest）——" \
          "它会抢满全部核，app-update 相位会被显著抬高。等它跑完再来。" >&2

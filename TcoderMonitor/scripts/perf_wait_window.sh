@@ -152,7 +152,14 @@ for i in $(seq 1 "$SAMPLES"); do
   wait_for "本仓没有重活在跑" cond_no_heavy_jobs || break
   wait_for "实例数恰为 1" cond_one_instance || break
   wait_for "前台是被测 App" cond_front_is_ours || break
-  wait_for "人手静默 ≥${QUIET_WANT}s" cond_quiet || break
+  if [ "$MODE" = "interact" ]; then
+    # 交互期**不等静默**：那一维是 idle 的判据（要的是没人动）。这里改成明确倒计时，
+    # 让人知道"从这一刻起滚"，而不是没人动的瞬间开录、然后靠猜。
+    echo "    … 5 秒后开录：请从此刻起持续滚动被测窗口，一直滚到本趟结束（约 50 s）"
+    sleep 5
+  else
+    wait_for "人手静默 ≥${QUIET_WANT}s" cond_quiet || break
+  fi
   if [ "$MODE" = "interact" ]; then
     # T1 的判据是"交互期 hitch=0"，而合成滚动两条撤因都在 spec §4（进程内滚动不发 NSEvent，
     # T3 暂停根本不会生效）。所以这一档**只有人手能举证**：闸门会反过来要求
