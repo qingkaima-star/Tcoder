@@ -121,3 +121,22 @@
 | `DependencySafetyVerdict.summaryCaption` 的 `.unchecked` 三段 | S4 | 暂不删：与常驻的 `deps.networkLookupNote` 并非逐字同义（截至日/未覆盖生态只在其中一份里） |
 | 「内置快照与安全公告均未命中」与安全公告卡空态句同屏两遍 | S4 新发现 | 待复核，删时须同步改 `CodeGitRestyleTests+DependencyAndAbsence` 的等值断言 |
 
+### 双语现量 19 条的构成（守卫自己打印，`TCODER_I18N_LEDGER` 落 `.scratch/`）
+
+- **17 条内插串**：`"…\(x)…"` 形状进不了目录，要逐句改写成 `localizedFormat` 整句键 ——
+  集中在 `CodeRiskAdvice`（4~6 个占位符的多段建议）、`CodeRiskView`、`ShellLayout` 三句组合式空态、
+  `ContributorRows`、`GitInsightsSections`。
+- **2 条 `Text(变量)` 形状**：`Models/Performance.swift` 的内置分组标题「Java 服务」「Node 服务」。
+  渲染点在 `PerformanceProcessGroups.swift` 的 `Text(group.group.title)` ——
+  **登记键没用**（键存在≠查得中），要先把那一处改成 `Text(localizedCopy(group.group.title))` 再登记两条键。
+  该文件归 S5 写，所以这条排在 S5 合流之后由总工做，做完现量应落到 **17**。
+
+### 两处自伤的疤（写下来，不等别人发现）
+
+1. 尺子那片合进 main 的分支提交 `d8e9ba8` 的说明是 `/tmp/m3.txt` —— 我把 `git commit -F` 写成了
+   `-qam <文件>`，参数位被当成消息。合并提交（`846fe84`）用的是 `-F`，内容没丢，
+   但分支提交这条疤改不回来（它已是 main 的祖先）。规矩已进记忆：**从文件取消息只写 `-F`，
+   提交后回读 `%s`**。
+2. S5 那一趟被拒的门禁**只在 `/tmp` 留过日志**，已补 `.scratch/s5-gate-refused-2026-09-21.txt`。
+
+
