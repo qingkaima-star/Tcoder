@@ -87,13 +87,17 @@ extension Theme {
         /// 卡片层的三个常量（批次 P6）。**边与影同时存在才像参考图**：
         /// 只有发丝边会显廉价，只有投影会在灰画布上糊成一团。
         enum Card {
-            static let cornerRadius: CGFloat = 16
+            /// 圆角**只有一个来源**：`Theme.Radius.card`。这里再写一个数就是两套口径，
+            /// 而卡片层同时用到"形状"与"边/影"两处，两处各取一个值时错的那处不会报错、只会不圆。
+            static let cornerRadius: CGFloat = Theme.Radius.card
             static let hairline = DualColor(lightHex: 0xEAEAEC, darkHex: 0x2A2A2E).color
             static let hairlineWidth: CGFloat = 0.5
             /// 8% 黑、12pt 模糊、y 偏移 2pt —— 一层，不许叠加第二层。
             static let shadowOpacity = 0.08
             static let shadowRadius: CGFloat = 12
             static let shadowY: CGFloat = 2
+            /// 影子颜色合成成一档给调用点用，避免每个渲染点自己 `Color.black.opacity(0.08)`。
+            static let shadowColor = Color.black.opacity(shadowOpacity)
         }
 
         /// 透明度只留三档，收编现仓散落的 0.04/0.08/0.12/0.14/0.15/0.25。

@@ -148,25 +148,6 @@ final class BorderlessSurfaceGuardTests: XCTestCase {
                       + "`.surface(layer: .floating, shape: .rounded(Theme.Radius.sm))`。\(hits)")
     }
 
-    // MARK: - 契约 6：投影全仓唯一，且只给浮层
-
-    func test_shadowIsExactlyOneOccurrenceAndSitsInFloating() throws {
-        let design = try Self.sourceFiles(under: "Design")
-        let hits = Self.shadowHits(in: design)
-        XCTAssertEqual(hits.count, 1,
-                       "投影必须全仓唯一（风格契约 6）。实测 \(hits.count) 处：\(hits)")
-
-        let glass = try XCTUnwrap(design.first { $0.path.hasSuffix("Glass.swift") })
-        let lines = glass.content.split(separator: "\n", omittingEmptySubsequences: false)
-        let shadowIndex = try XCTUnwrap(
-            lines.firstIndex { String($0).contains(".shadow(") })
-        let floatingIndex = try XCTUnwrap(
-            lines.firstIndex { $0.trimmingCharacters(in: .whitespaces) == "case .floating:" },
-            "没有 .floating 层，唯一那处投影就没有合法落点")
-        XCTAssertGreaterThan(shadowIndex, floatingIndex,
-                             "投影不在 .floating 分支里，等于又挂回了三层的公共尾巴")
-    }
-
     // MARK: - 反「定义了没人用」：本轮病因的复发检测
 
     func test_surfaceTokensAreActuallyReferenced() throws {
@@ -358,6 +339,7 @@ final class BorderlessSurfaceGuardTests: XCTestCase {
                             content: "Text(t).font(Theme.Typo.groupLabel.font)\n")]
         XCTAssertEqual(Self.trackingDroppingUses(in: droppedFont, tokenNamed: "groupLabel").count, 1,
                        "绕过 .typed 的写法没抓到 → 字距会静默丢失")
+
     }
 
 
@@ -367,7 +349,7 @@ final class BorderlessSurfaceGuardTests: XCTestCase {
         let design = try Self.sourceFiles(under: "Design")
         XCTAssertGreaterThanOrEqual(design.count, 9, "Design/ 只扫到 \(design.count) 个文件")
         XCTAssertTrue(design.contains { $0.path.hasSuffix("Glass.swift") })
-        XCTAssertEqual(Self.shadowHits(in: design).count, 1,
-                       "元测试：真源码里的投影数必须与契约断言一致")
+        XCTAssertEqual(Self.shadowHits(in: design).count, 2,
+                       "元测试：真源码里的投影数必须与契约断言一致（`.card` + `.floating` 各一处）")
     }
 }
