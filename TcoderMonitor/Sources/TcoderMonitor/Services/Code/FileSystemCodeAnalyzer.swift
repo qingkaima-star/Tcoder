@@ -36,6 +36,9 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         /// 榜单截断到 20 块时丢掉的块数与它们覆盖的行数
         var duplicateBlocksDroppedByCap: Int
         var duplicateLinesOutsideReportedBlocks: Int
+        /// 遍历中读不动的目录数（权限 / 竞态消失）。这些子树里的文件**一个都没看到**，
+        /// 与"看了、没有"是两件事 —— 见 `SourceScanResult.unreadableDirectoryCount`。
+        var unreadableDirectoryCount: Int = 0
         var skipLedger: SourceSkipLedger = SourceSkipLedger()
 
         /// 有任一**上限**真的生效过 ⇒ 这份数字是部分测量，UI 不得当成全量展示。
@@ -43,7 +46,7 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         var isPartial: Bool {
             truncatedByMaxFiles || lineTruncatedFileCount > 0 || skippedFileCount > 0
                 || filesHittingDuplicateLineCap > 0 || duplicateFragmentsDroppedByBudget > 0
-                || duplicateBlocksDroppedByCap > 0
+                || duplicateBlocksDroppedByCap > 0 || unreadableDirectoryCount > 0
         }
 
         /// 有多少条目是按规则排除的（范围问题），与「被上限切掉」分开报，两件事混在一起用户就没法判断偏差方向。
@@ -72,6 +75,10 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
                 let top = skipLedger.topLineRules(.excludedDirectoryContent)
                 lines.append("另有 \(NumberFormat.grouped(skipLedger.skippedFileTotal)) 个条目按规则未纳入统计"
                     + (top.isEmpty ? "。" : "，按行数排序：\(top)。"))
+            }
+            if unreadableDirectoryCount > 0 {
+                lines.append("\(NumberFormat.grouped(unreadableDirectoryCount)) 个目录读不动（权限不够或已消失），"
+                    + "这些子树里的文件一个都没看到 —— 少掉的不是数量，是**看过的范围**。")
             }
             if filesHittingDuplicateLineCap > 0 {
                 lines.append("\(NumberFormat.grouped(filesHittingDuplicateLineCap)) 个文件的重复检测只看前 2 万归一化行。")
@@ -137,6 +144,7 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             duplicateFragmentsDroppedByBudget: duplication.fragmentsDroppedByBudget,
             duplicateBlocksDroppedByCap: duplication.blocksDroppedByCap,
             duplicateLinesOutsideReportedBlocks: duplication.linesOutsideReportedBlocks,
+            unreadableDirectoryCount: scan.unreadableDirectoryCount,
             skipLedger: scan.skipLedger
         )
         // 契约接入（P7-C 3-2）：判据用 `limitationSummary` 非空而不是 `isPartial` —— 前者还含

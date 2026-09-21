@@ -188,4 +188,32 @@ extension CodeAnalyzerTests {
         XCTAssertNil(whole.metrics.scanLimitations, "没有被切过却带边界字段，提示条会常驻，等于把全量说成部分")
     }
 
+    /// 读不动的目录必须自己报名（F12 的另一半）。`enumerator` 的 `errorHandler`
+    /// 原本一律返回 `true`，于是"这个子树我们根本没看过"与"这个子树里没有源码"
+    /// 在结果里长得一模一样 —— 缺陷不在渲染层，在"谁替『读不到』说了句话"。
+    func testUnreadableDirectoryIsReportedAsIncompleteScanSurface() async throws {
+        let root = try makeFixtureRoot()
+        let locked = root.appendingPathComponent("locked")
+        defer {
+            // 权限不还回去，`removeItem` 就删不掉这棵夹具；残骸会喂下一轮扫描当真实数据。
+            try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+            try? fm.removeItem(at: root)
+        }
+        _ = try write("let a = 1\n", to: "Keep.swift", in: root)
+        _ = try write("let b = 2\n", to: "locked/Hidden.swift", in: root)
+        try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+
+        let outcome = try await FileSystemCodeAnalyzer().analyzeWithCoverage(root: root, options: options())
+        if outcome.coverage.unreadableDirectoryCount == 0 {
+            throw XCTSkip("本机允许枚举 0o000 目录（例如以 root 跑测试），此时计数为 0 是正确行为")
+        }
+        XCTAssertGreaterThanOrEqual(outcome.coverage.unreadableDirectoryCount, 1)
+        XCTAssertTrue(outcome.coverage.isPartial, "有子树压根没看过，这份数字不许当全量")
+        XCTAssertTrue(outcome.coverage.limitationSummary.contains { $0.contains("读不动") },
+                      "\(outcome.coverage.limitationSummary)")
+        XCTAssertEqual(outcome.metrics.totalFiles, 1, "被挡住的那份源码不该算成扫到过")
+        XCTAssertTrue(outcome.metrics.scanLimitations?.contains { $0.contains("读不动") } == true,
+                      "这一维必须一路带到界面上，不许停在 coverage 结构里")
+    }
+
 }

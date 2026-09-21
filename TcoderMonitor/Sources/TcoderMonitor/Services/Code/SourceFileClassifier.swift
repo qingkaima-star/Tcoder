@@ -194,6 +194,32 @@ struct SourceScanResult: Sendable {
     var lineTruncatedFileCount: Int = 0
     /// 「为什么丢了这个文件」的台账；见 `SourceSkipLedger`。
     var skipLedger: SourceSkipLedger = SourceSkipLedger()
+    /// 遍历中**读不动的目录数**（权限不够、竞态中消失、悬空软链接的目标目录）。
+    ///
+    /// 存在理由（F12 的另一半）：`enumerator` 的 `errorHandler` 原本 `{ _, _ in true }`
+    /// —— 一直"继续"，于是每个读不动的子树都等同于"那个子树里没有源码"。
+    /// 一个 0 文件的仓库和一个没被看过的仓库，在界面上必须是两句话。
+    var unreadableDirectoryCount: Int = 0
+}
+
+/// 一个只能"加一"的计数盒。`FileManager.enumerator` 的 `errorHandler` 是
+/// `@Sendable` 闭包，碰不到外层局部 `var`，所以错误计数必须住在一个引用类型里。
+/// 与 `ComplexityEngine.RuleDegradeLedger` 同一形状（NSLock，只加不减）。
+final class ScanErrorTally: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    func addOne() {
+        lock.lock()
+        value += 1
+        lock.unlock()
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
 }
 
 /// 目录树遍历 + 文件级并发分类。
@@ -240,12 +266,20 @@ final class SourceTreeScanner {
         guard FileManager.default.fileExists(atPath: scanRoot.path, isDirectory: &isDirectory),
               isDirectory.boolValue else { return SourceScanResult() }
 
+        // 计数盒是因为 `errorHandler` 是 `@Sendable` 闭包、碰不到局部 var：
+        // 与 `ComplexityEngine.RuleDegradeLedger` 同一形状（NSLock + 只加不减）。
+        let unreadable = ScanErrorTally()
         guard let enumerator = FileManager.default.enumerator(
             at: scanRoot,
             includingPropertiesForKeys: Self.resourceKeys,
             options: Self.enumerationOptions,
-            errorHandler: { _, _ in true }
-        ) else { return SourceScanResult() }
+            errorHandler: { _, _ in
+                unreadable.addOne()
+                return true        // 继续遍历：一个目录读不动不该让整次扫描中断
+            }
+        ) else {
+            return SourceScanResult(unreadableDirectoryCount: 1)
+        }
 
         var progress = SourceScanProgress(root: scanRoot, options: options)
         // 台账要先声明本轮到底数不数行数：审计模式之外一律是 false，
@@ -256,6 +290,7 @@ final class SourceTreeScanner {
             if await consume(url, enumerator: enumerator, into: &progress) == false { break }
         }
         await flush(&progress)
+        progress.result.unreadableDirectoryCount = unreadable.count
         return progress.result
     }
 

@@ -244,6 +244,15 @@ stderr 含「不可读」，0.1 秒内返回。
 **要连着界面与评分一起接，不是 CLI 一轮的账**。这里写清楚，是为了不让 F12 的
 "已修"被读成"零读数问题全解决了"。
 
+> **这一半已落地（`e6bcbac` 之后同批，UI/诚实性流）**：`SourceTreeScanner` 的
+> `enumerator(errorHandler:)` 原本 `{ _, _ in true }` —— 读不动的目录与"那里没有源码"
+> 在结果里同一个形状。现在它计数（`SourceScanResult.unreadableDirectoryCount`）、
+> 计入 `isPartial`、并作为一条 `limitationSummary` 走
+> `CodeMetrics.scanLimitations` 上到代码规模页那条「部分测量」提示里；
+> 覆盖率那一路同批接上（`CoverageMetrics.unreadableDirectoryCount`）。
+> 测试各造一个 0o000 目录，本机实测是**通过**、不是 skip。
+> 仍然开着的下一档：`skipLedger` 的行数审计默认不开，所以"排除了多少**行**"还是未知。
+
 ## 一句话结论
 
 CLI 这一轮真正的收益不是"省了 300 秒"，而是**把界面里那些只画给人看的诚实性说明
