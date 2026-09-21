@@ -47,7 +47,7 @@ extension Theme {
 
             init(_ label: String, _ value: String, style: Style = .number,
                  role: Theme.SemanticRole? = nil, help: String? = nil,
-                 labelWidth: CGFloat? = Theme.Layout.fieldLabelWidth) {
+                 labelWidth: CGFloat? = Theme.Layout.fieldLabelWidthForLanguage) {
                 self.label = label
                 self.value = value
                 self.style = style

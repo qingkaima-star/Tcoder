@@ -433,7 +433,6 @@
 "%1$@ 小时 %2$@ 分" = "%1$@ h %2$@ min";
 "%@ 分" = "%@ min";
 "%@ 毫秒" = "%@ ms";
-"%@ 秒" = "%@ s";
 
 /* 四条分支各一条整句键（不再二次拼接）+ 健康页剩余标签 */
 "综合 %1$@ 分（%2$@ 级）。当前没有任何维度可供评估，评分依据缺失，建议先完成代码分析与 Git 采集，再来查看总分。" = "Overall %1$@ out of 100 (grade %2$@). No dimension is evaluable right now, so the scoring basis is missing — finish the code analysis and the Git collection before reading a total score.";
@@ -447,3 +446,10 @@
 "计入 %@（与综合分同一批分量）" = "Counted: %@ (the same components behind the overall score)";
 "计入 %1$@；不含 %2$@" = "Counted: %1$@; excluded: %2$@";
 "、" = ", ";
+"上次" = "Last";
+"合计" = "Total";
+"均值" = "Average";
+"最低" = "Lowest";
+"最高" = "Highest";
+"计算于" = "Computed at";
+"跨度" = "Span";

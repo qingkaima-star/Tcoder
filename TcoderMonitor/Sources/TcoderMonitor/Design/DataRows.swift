@@ -36,7 +36,7 @@ struct DataFieldRow: View {
                 .font(CodeGitType.prose(Theme.Typo.label))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .frame(width: Theme.Layout.fieldLabelWidth, alignment: .leading)
+                .frame(width: Theme.Layout.fieldLabelWidthForLanguage, alignment: .leading)
             // 值**左对齐紧跟标签**，不再 `Spacer` 顶到行尾：
             // 一屏三行键值时，值们竖向成列才可比；拉到两端只剩一条条下划线。
             valueText

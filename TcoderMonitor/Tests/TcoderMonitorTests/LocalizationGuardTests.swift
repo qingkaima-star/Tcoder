@@ -211,6 +211,21 @@ final class LocalizationGuardTests: XCTestCase {
                                  + offenders.sorted().prefix(40).joined(separator: "\n"))
     }
 
+    // MARK: - 守卫 1d：目录键必须唯一
+
+    /// 同一个键写两条 = **后一条悄悄覆盖前一条**（`NSDictionary` 语义），
+    /// 而且两条译文可以互相矛盾。这条是新的英文宽度审计**当场撞出来的**：
+    /// `"%@ 秒"` 在 P3-5 与 P5-c8 各登记过一次，`Dictionary(uniqueKeysWithValues:)`
+    /// 直接 fatal error，才让人看见目录里有重复。
+    /// 判据按"解析出的键序列"数重复，不按文件行号 —— 换行/注释都不该影响结论。
+    func test_catalogHasNoDuplicateKeys() throws {
+        let keys = try Self.catalog().map(\.key)
+        var seen = Set<String>(), dupes = Set<String>()
+        for key in keys where !seen.insert(key).inserted { dupes.insert(key) }
+        XCTAssertTrue(dupes.isEmpty,
+                      "英文目录里这些键登记了不止一次（后一条会静默覆盖前一条）：\(dupes.sorted())")
+    }
+
     // MARK: - 守卫 2：登记了就必须翻（值不等于键）
 
     /// 允许"值 = 键"的例外。**每条都要写理由**，否则白名单就是遮羞布。
