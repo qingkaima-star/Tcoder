@@ -298,6 +298,10 @@ cmd_switch() {
 cmd_report() {
   local out="${1:-/tmp/tcoder-perf-$REV}"
   [ -d "$out" ] || die "没有这个输出目录：$out"
+  # 被闸门拒掉的那趟**不许被 report 当成一趟数据重打**：
+  # 它只有 context/meta，喂给汇总表会得到"没有 hitch"形状的漂亮空表。
+  [ -f "$out/REFUSED" ] && die "这一趟当时被闸门拒了、没有采数（$out/REFUSED）——
+    它不该出现在任何对照表里；要看当时的拒因就读 $out/measurement-context.txt。"
   echo "==> report 档：重打 $out 的汇总表（不重录）"
   local secs
   secs=$(python3 - "$out/meta.json" <<'PY' 2>/dev/null || echo 20

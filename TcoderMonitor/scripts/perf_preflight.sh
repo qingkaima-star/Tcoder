@@ -116,7 +116,14 @@ preflight_context() {  # preflight_context <outdir> <pid>
   # 四条硬闸各自读上面那几个量（bash 是动态作用域：本函数的 `local` 在被调函数里照样可见，
   # 拆函数没有改变任何取数顺序，也没有引入新的全局量）。
   preflight_gates
-  [ "$hard" = "1" ] && [ "${IGNORE_CONTEXT_GATE:-0}" != "1" ] && die "测量上下文不达标（详见 $f）。IGNORE_CONTEXT_GATE=1 可强行跳过，但那批读数必须标注为『条件不合格』。"
+  if [ "$hard" = "1" ] && [ "${IGNORE_CONTEXT_GATE:-0}" != "1" ]; then
+    # 被拒的一趟**必须在目录上留下自认字样**：否则 `ls /tmp/tcoder-perf-*` 会看见
+    # run1/run2/run3 三个"像样本"的空目录，后来的人很容易把"闸门拒了"读成"量过了"。
+    # （今天就真出现了三个只有 context/meta 的目录。）
+    printf 'REFUSED\n这一趟没有采数：测量上下文不合格，闸门拒跑。原因见同目录 %s。\n' "$(basename "$f")" \
+      > "$out/REFUSED"
+    die "测量上下文不达标（详见 $f）。IGNORE_CONTEXT_GATE=1 可强行跳过，但那批读数必须标注为『条件不合格』。"
+  fi
   [ "$hard" = "1" ] && echo "    ⚠ IGNORE_CONTEXT_GATE=1：条件不合格，这批读数不得进任何对比表。" >&2
   echo "    上下文已落 $f"
 }
