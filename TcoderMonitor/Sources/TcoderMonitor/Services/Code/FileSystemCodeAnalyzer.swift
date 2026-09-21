@@ -72,9 +72,12 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
                 lines.append("\(NumberFormat.grouped(skippedFileCount)) 个文件被跳过（超过 \(ByteFormat.string(UInt64(maxFileBytes))) 单文件上限、二进制或语言表未收录）。")
             }
             if skipLedger.skippedFileTotal > 0 {
-                let top = skipLedger.topLineRules(.excludedDirectoryContent)
-                lines.append("另有 \(NumberFormat.grouped(skipLedger.skippedFileTotal)) 个条目按规则未纳入统计"
-                    + (top.isEmpty ? "。" : "，按行数排序：\(top)。"))
+                // 逐条原因的清账（条数 + 体积 + 行数到底统没统计），顶掉以前那句
+                // 「另有 N 个条目按规则未纳入统计。」—— 那句只给一个总数，读者既不知道
+                // 少在哪一类，也无从知道"行数"是没数还是数了是 0。
+                // 审计模式（`countSkippedLines`）要额外读盘、预算 400 MB，产品默认不开：
+                // 这一页的性能预算留给杀手功能，但**没数过就得写没数过**。
+                lines.append(contentsOf: skipClearing())
             }
             if unreadableDirectoryCount > 0 {
                 lines.append("\(NumberFormat.grouped(unreadableDirectoryCount)) 个目录读不动（权限不够或已消失），"

@@ -95,10 +95,9 @@ extension CodeAnalyzerTests {
         XCTAssertEqual(Set(audited.files.map(\.relativePath)), Set(plain.files.map(\.relativePath)))
     }
 
-    /// 「比 `find` 少 22%」这类质疑的唯一正经答法：纳入行 + 各条原因剔除行 == 磁盘真实行，逐行对上。
-    func testSkipClearingReconcilesEveryLine() async throws {
-        let root = try makeFixtureRoot()
-        defer { try? fm.removeItem(at: root) }
+    /// 四类剔除各来一条的最小夹具：纳入 2 行，另有排除目录 3 行 / 未收录后缀 2 行 /
+    /// 无后缀 2 行，再加一枚**刻意不跟随**的软链接（它没有行数，正是「不适用」那一类）。
+    private func writeSkipLedgerFixture(in root: URL) throws {
         _ = try write("let kept = 1\nlet more = 2\n", to: "Keep.swift", in: root)                       // 2 行，纳入
         _ = try write("puts 1\nputs 2\nputs 3\n", to: "vendor/Deep.rb", in: root)                     // 3 行，排除目录
         _ = try write("project(x)\ninstall(FILES a)\n", to: "sub/CMakeLists.cmake", in: root)         // 2 行，后缀未收录
@@ -107,6 +106,28 @@ extension CodeAnalyzerTests {
         try? fm.removeItem(at: symlink)
         try fm.createSymbolicLink(at: symlink, withDestinationURL: root.appendingPathComponent("Keep.swift"))
         // 软链接刻意不跟随：它进台账但没有行数，正是「行数不适用」与「0 行」必须区分的那一类
+    }
+
+    /// 台账必须**接在产品路径上**：`analyzeWithCoverage` 算出的清账要出现在
+    /// `CodeMetrics.scanLimitations` 里，否则那套三态句式只是测试自娱（此前正是如此）。
+    func testSkipClearingReachesTheScanLimitationsField() async throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+        try writeSkipLedgerFixture(in: root)
+        let outcome = try await FileSystemCodeAnalyzer().analyzeWithCoverage(
+            root: root, options: options(skipDirectories: ["vendor"], binaryExtensions: ["png"]))
+        let onScreen = outcome.metrics.scanLimitations ?? []
+        XCTAssertTrue(onScreen.contains { $0.contains("语言表未收录的后缀") && $0.contains("行数未统计") },
+                      "扫描边界那条 ⓘ 里必须能看到逐条清账：\(onScreen)")
+        XCTAssertFalse(onScreen.contains { $0.contains("按规则未纳入统计") },
+                       "旧表述只给总数、不说行数没数过，已经被清账顶掉：\(onScreen)")
+    }
+
+    /// 「比 `find` 少 22%」这类质疑的唯一正经答法：纳入行 + 各条原因剔除行 == 磁盘真实行，逐行对上。
+    func testSkipClearingReconcilesEveryLine() async throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+        try writeSkipLedgerFixture(in: root)
 
         let opts = options(skipDirectories: ["vendor"], binaryExtensions: ["png"])
         let outcome = try await FileSystemCodeAnalyzer().analyzeWithCoverage(root: root, options: opts)
