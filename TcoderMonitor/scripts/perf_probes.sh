@@ -93,8 +93,11 @@ concurrent_heavy_jobs() {  # → 空格分隔的 pid；空 = 机器上没有本�
   # Hitches --time-limit 12s` 连排，而我的闸门写着"机器空"。
   # 自己的不算：本档在**录制开始之前**问这一维，那时自己还没有 xctrace 在场；
   # 真到了要并跑两档的时候，宁可拒跑等窗口，也不出"两边都不准"的数。
+  # `grep -o` 而不是 `sed 's/pid=\([0-9]*\).*/\1/p'`：一行上有两个命中时，
+  # 后者的 `.*` 会把第二个一起吃掉 ⇒ 清单**静默少报**（实测两个 pid 只回来一个）。
+  # 少报本身不会放错行（判空还是判非空），但它会让上下文里"谁在挡我"只剩一个名字。
   local hits; hits=$(concurrent_heavy_jobs_detail)
-  printf '%s\n' "$(printf '%s' "$hits" | sed -n 's/pid=\([0-9]*\).*/\1/p' | tr '\n' ' ')"
+  printf '%s\n' "$(printf '%s' "$hits" | grep -o 'pid=[0-9]*' | cut -d= -f2 | tr '\n' ' ')"
 }
 
 process_cpu_seconds() {  # `ps -o time=` 的 `MM:SS.ss` / `HH:MM:SS` → 秒（取不到给 0）
