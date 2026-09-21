@@ -54,12 +54,27 @@ struct CodeRiskOverviewSection: View {
             trailing: AnyView(RiskBadge(risk: code.overallRisk))
         ) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                DataHeroReadout(value: NumberFormat.percent(code.duplicationRatio, precision: 1),
-                                note: "的代码行落在重复块内 —— 综合风险 "
-                                    + code.overallRisk.rawValue + "，明细见下方「重复代码率」")
+                // 盘点表 C1（hero note，留短藏长 ●）：屏上留「的代码行落在重复块内」——
+                // 它就是原句的头，也是这条主角读数的分母说法；「—— 综合风险 X，明细见下方」
+                // 那半句连同**完整整句**一起进 ⓘ（ⓘ 里不劈半句，英文态才不会语序错）。
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+                    DataHeroReadout(value: NumberFormat.percent(code.duplicationRatio, precision: 1),
+                                    note: "的代码行落在重复块内")
+                    CopyHelpBadge(localizedFormat("的代码行落在重复块内 —— 综合风险 %1$@，明细见下方「重复代码率」",
+                                                  code.overallRisk.rawValue))
+                }
 
-                DataCaption(text: "口径：\(NumberFormat.grouped(code.totalFiles)) 个文件 · "
-                            + "\(NumberFormat.grouped(code.codeLines)) 行有效代码 · 主语言 \(code.primaryLanguage)")
+                // 盘点表 C2（DataCaption 口径，留短藏长 ●）：屏上留三个数本身（口径的**内容**
+                // 必须常驻，不然"这个比例的分母是谁"只剩 hover），
+                // 「口径：」这句完整说法进 ⓘ，与短句同一行、紧跟其后。
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+                    DataCaption(text: Self.scopeCounts(code))
+                    CopyHelpBadge(localizedFormat("口径：%1$@ 个文件 · %2$@ 行有效代码 · 主语言 %3$@",
+                                                  NumberFormat.grouped(code.totalFiles),
+                                                  NumberFormat.grouped(code.codeLines),
+                                                  code.primaryLanguage))
+                    Spacer(minLength: 0)
+                }
 
                 ReadoutStrip {
                     DataReadout(label: "最大文件",
@@ -86,6 +101,15 @@ struct CodeRiskOverviewSection: View {
                         DateFormat.sinceDescription(code.scannedAt),
                         CodeViewFormat.duration(code.durationMs))
     }
+
+    /// 盘点表 C2 的**屏上那一半**：口径里的三个数，去掉「口径：」抬头与「主语言」尾巴。
+    /// 走 `localizedFormat` 的整句模板而不是裸插值：裸插值出来的串不是键，
+    /// 英文态永远命中不了（双语方案 §7.1，同文件 `CodeDataGate` 顶部记过这个坑）。
+    static func scopeCounts(_ code: CodeMetrics) -> String {
+        localizedFormat("%1$@ 个文件 · %2$@ 行有效代码",
+                        NumberFormat.grouped(code.totalFiles),
+                        NumberFormat.grouped(code.codeLines))
+    }
 }
 
 // MARK: - 重复代码率
@@ -100,16 +124,21 @@ struct CodeDuplicationSection: View {
 
     var body: some View {
         let ratio = CodeRiskAnalysis.ratioRole(code.duplicationRatio)
+        // 盘点表 C3（subtitle，留短藏长 ●）：分母这三个字必须常驻（它决定这个百分比怎么读），
+        // 「不含空行与注释」与「分子是什么」那半句进 ⓘ。
         GlassSection(
             "重复代码率",
-            subtitle: "分母是有效代码行数（不含空行与注释）· 分子是落在重复块内的代码行",
-            icon: .duplicate
+            subtitle: "分母是有效代码行数",
+            icon: .duplicate,
+            trailing: AnyView(CopyHelpBadge("分母是有效代码行数（不含空行与注释）· 分子是落在重复块内的代码行"))
         ) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 MiniBarGauge(fraction: code.duplicationRatio, tint: ratio.graphicColor,
                              height: DataGaugeHeight.metric)
 
-                DataCaption(text: CodeRiskAnalysis.duplicationCaption(code))
+                // 盘点表 C4（判「删」：这条 caption 与上一行的读数带同屏两遍）。
+                // 本轮 B 守恒线不许删，整条进 ⓘ；串仍由 `duplicationCaption` 单点产出。
+                CopyHelpBadge(CodeRiskAnalysis.duplicationCaption(code))
 
                 if code.duplicatedBlocks.isEmpty {
                     EmptyStateView(
@@ -225,7 +254,9 @@ struct CodeComplexitySection: View {
                             expanded.toggle()
                         }
                     }
-                    DataFootnote(text: "点击行在 Finder 中定位源文件，行尾图标用默认应用打开。")
+                    // 盘点表 C8（判「藏」的操作提示）：整句进 ⓘ，屏上只多一枚问号。
+                    // 两个动作本身在各自行里已经各带一份 `.help`，这句只是"怎么用这张表"。
+                    CopyHelpBadge("点击行在 Finder 中定位源文件，行尾图标用默认应用打开。")
                 }
             }
         }
@@ -243,10 +274,12 @@ struct CodeSuggestionSection: View {
     let code: CodeMetrics
 
     var body: some View {
+        // 盘点表 C9（判「藏」）：这句是对我们工作方式的自述（"无数字支撑的不写"），
+        // 不改变任何一条读法，所以整句进 ⓘ，挂在卡名右侧那行 —— 它原来就在卡名下面。
         GlassSection(
             "改进建议",
-            subtitle: "逐条对应本次扫描的真实数字，无数字支撑的不写",
-            icon: .info
+            icon: .info,
+            trailing: AnyView(CopyHelpBadge("逐条对应本次扫描的真实数字，无数字支撑的不写"))
         ) {
             let items = CodeRiskAnalysis.suggestions(for: code)
             if items.isEmpty {
