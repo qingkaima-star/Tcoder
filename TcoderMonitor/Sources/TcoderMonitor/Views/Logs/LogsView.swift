@@ -45,7 +45,8 @@ struct LogsView: View {
                               subtitle: subtitle,
                               actions: { actions(window: window) })
             if let note = pendingRescanNote {
-                NoteLine(note, role: Theme.Semantic.warning, icon: .riskWarning)
+                // 屏上只留「要做的那件事」（5 个字），为什么要做（改了窗口 / 清空了附加文件）进 ⓘ。
+                NoteLine("需重新分析", role: Theme.Semantic.warning, icon: .riskWarning, help: note)
             }
             if !attachedItems.isEmpty { attachedFilesLine }
         }
@@ -111,11 +112,16 @@ struct LogsView: View {
     @ViewBuilder
     private var banners: some View {
         if report?.logs == nil {
-            BannerRow(text: "该项目还没有日志分析结果。选择项目目录后点「重新分析」，或手动附加本地日志文件。",
-                      style: .neutral)
+            // **留短藏长**：横幅上只留「这一页现在没有结果」那半句，
+            // 下一步怎么做（选目录 / 点重新分析 / 手动附加）进 hover。
+            // 整句仍是目录里那条键，原文一字未改（守卫 3：改原文 = 烂尾键）。
+            BannerRow(text: "该项目还没有日志分析结果", style: .neutral)
+                .help("该项目还没有日志分析结果。选择项目目录后点「重新分析」，或手动附加本地日志文件。")
         } else if report?.logs?.hasData == false {
-            BannerRow(text: "项目目录与 ~/Library/Logs 里都没有找到可解析的日志文件。用「附加日志」手动选择 error.log、crash.log 后重新分析。",
-                      style: .warning)
+            // 同上：屏上留"扫过了、没找到可解析的文件"这个结论（诚实性），
+            // 搜索范围与手动附加的路径细节进 ⓘ。
+            BannerRow(text: "没找到可解析的日志文件", style: .warning)
+                .help("项目目录与 ~/Library/Logs 里都没有找到可解析的日志文件。用「附加日志」手动选择 error.log、crash.log 后重新分析。")
         }
         if let error = state.lastError {
             BannerRow(text: error, style: .error)

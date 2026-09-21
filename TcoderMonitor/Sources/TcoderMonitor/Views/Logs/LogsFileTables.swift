@@ -34,10 +34,12 @@ struct LogsAffectedFilesCard: View {
         return AnyView(
             GlassSection("受影响源文件",
                          subtitle: subtitle(topCount: top.count),
-                         icon: .duplicate) {
+                         icon: .duplicate,
+                         trailing: AnyView(CopyHelpBadge(subtitleCaliber(topCount: top.count)))) {
                 // 占比行走基座 `Theme.Share.Row`（《45》§3.3 判的重复形状）。
                 // 注意分母：条形与百分比**必须同一个分母**，否则条长和数字各说一套。
                 // 上一版条按峰值归一、旁边只给次数，看着一致其实两个口径，这里一起收掉。
+                // —— 这句分母口径本轮搬进卡头那枚 ⓘ，屏上只留"取前 N 项"。
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     ForEach(top, id: \.key) { item in
                         Theme.Share.Row(label: (item.key as NSString).lastPathComponent,
@@ -55,7 +57,14 @@ struct LogsAffectedFilesCard: View {
         )
     }
 
+    /// 屏上那一行：数量 + 排序依据（分母口径改挂卡头那枚 ⓘ，见 `subtitleCaliber`）。
     private func subtitle(topCount: Int) -> String {
+        "按错误出现次数取前 \(topCount) 项"
+    }
+
+    /// ⓘ 里是完整口径：条形与百分比**同一个分母**，条长才可比；
+    /// 这句原本常驻卡头，与下面的十行条形同时占位。
+    private func subtitleCaliber(topCount: Int) -> String {
         "按错误出现次数取前 \(topCount) 项 · 条形与百分比同为「占全部出现次数」的比重"
     }
 

@@ -16,7 +16,10 @@ struct LogsTrendCard: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                     LogTrendChart(buckets: buckets)
                         .frame(height: Theme.Layout.trendChartHeight)
-                    NoteLine(footnote(buckets))
+                    // **留短藏长**：屏上留"哪条线是什么"（读图必需），
+                    // 与柱状共用纵轴、0…N、台阶取法（{1,2,2.5,5}×10ⁿ，只在这几档里跳）
+                    // 这三段次级说明进同一枚 ⓘ（整句仍由 `footnote` 一处产出）。
+                    NoteLine(Self.trendReading, help: footnote(buckets))
                 }
             } else if logs == nil {
                 SectionEmptyNote(text: "尚未分析，点「重新分析」后这里按天展示错误、异常与崩溃的分布。",
@@ -27,6 +30,9 @@ struct LogsTrendCard: View {
             }
         }
     }
+
+    /// 屏上那一句读图必需的话（完整口径见 `footnote`）。
+    static let trendReading = "柱状为错误 / 异常 / 崩溃按天堆叠，折线为警告数"
 
     private var plottableBuckets: [LogBucket]? {
         guard let logs, !logs.trend.isEmpty else { return nil }
