@@ -209,6 +209,15 @@ F12（CLI 入口不再把读不动的目录报成全零成功）合入后 main �
 > 它要的重拍是它自己的验收责任（见取证 §2.8 末尾"失效边界"那段），
 > 而不是让 WS-CL 的交付证明跟着 main 赛跑。
 
+**文档快修之后按要求补跑的全量兜底**（`MERGE_ALLOW_UNGATED=1` + `MERGE_ALLOW_STALE_BASE=1`
+两次显式放行都写着"合完立刻在 main 上跑全量 test"，所以这条不是可选项）：
+detached 树 `c56cb6a`（= 我的文档合并头，已含 P6 的 `dc4c53f` 与 `79680e6`）上
+`./scripts/locked_build.sh test` →
+`Executed 1037 tests, with 12 tests skipped and 0 failures (0 unexpected) in 183.841 (191.265) seconds`，
+`TEST_EXIT=0`。比 `64b8828` 那趟（1033）多 4 例 —— 这 4 例来自 `dc4c53f` / `79680e6` 两笔里
+新增的用例（**没逐笔归因**，只确认总数与 0 失败）⇒ **main 现在是绿的，
+而且绿的是含他们改动的组合**，不只是各自分支的绿。
+
 | 步 | 实测输出（原样摘自日志） |
 |---|---|
 | 合并前端禁（分支头 `5efc471`，已含 P6 的 `e6bcbac`） | `Executed 1033 tests, with 12 tests skipped and 0 failures (0 unexpected) in 241.032 (328.241) seconds` → `✅ ws/cli-tier4 可以合入 main` |
