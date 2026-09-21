@@ -14,6 +14,17 @@
 #   · 不采交互期：T1 必须真人滚 20 秒（`interact` 档），合成滚动两条撤因见规范 §4。
 set -u
 cd "$(dirname "$0")/.." || exit 1
+# 排程器要等的所有条件，必须和录制档闸门**用同一把尺子**——所以直接 source preflight。
+# 自己再 pgrep 一遍就是第二份口径：两份迟早分叉，而分叉的方向永远是"排程器以为可以了"。
+# shellcheck source=/dev/null
+source scripts/perf_preflight.sh
+# 【反向的那类 bug】探针函数不存在时 `$(concurrent_heavy_jobs)` 得到空串，
+# 于是"没有重活"**永远为真**——一条恒放行闸门比恒拒更危险，因为它连报错都没有。
+# 今天刚修过恒拒（前台名比错），这条断言防的是镜像方向。
+declare -f concurrent_heavy_jobs >/dev/null || {
+  echo "!! scripts/perf_preflight.sh 里没有 concurrent_heavy_jobs —— 这一维看不见东西，拒绝起跑" >&2
+  exit 3
+}
 
 TAG="${1:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
 SAMPLES="${2:-3}"
@@ -90,6 +101,16 @@ cond_quiet() {
   return 1
 }
 
+cond_no_heavy_jobs() {  # 录制档自己会拒这一维，排程器就必须**先等它**，否则只是连续烧掉几次尝试
+  # 实测：2026-09-21 12:02 那轮三趟全被拒，拒因就是别人的 `swift-test`/`xctest`
+  # （`load1` 只有 5.23/15，旧闸门会**静默收下**这三趟污染样本）。
+  declare -f concurrent_heavy_jobs >/dev/null || { echo "探针函数不在场（宁可不量）"; return 1; }
+  local pids; pids=$(concurrent_heavy_jobs)
+  [ -z "$pids" ] && return 0
+  printf '有本仓重活在跑（pid %s：swiftc / swift-test / xctest）' "$pids"
+  return 1
+}
+
 cond_front_is_ours() {
   local f; f=$(front_app)
   case "$f" in *Tcoder*) return 0;; esac
@@ -110,6 +131,7 @@ if [ "$(instance_count)" = "0" ] && [ "$LAUNCH_APP" = "1" ]; then
   started_pid=$(my_instance_pid)
   echo "    已起自己的实例 pid=${started_pid:-?}（收尾只 TERM 这一个）"
 fi
+wait_for "本仓没有重活在跑" cond_no_heavy_jobs || exit 1
 wait_for "实例数恰为 1" cond_one_instance || exit 1
 wait_for "前台是被测 App" cond_front_is_ours || exit 1
 
