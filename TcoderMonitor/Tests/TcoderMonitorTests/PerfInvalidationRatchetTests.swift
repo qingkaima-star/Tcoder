@@ -50,6 +50,18 @@ final class PerfInvalidationRatchetTests: XCTestCase {
     /// 而且不会被粗 API 棘轮抓到——因为它读的就是细格。所以单独一条，**基线 0，一处都不许有**。
     static let reslicePattern = #"\.(curve|cpuRanking|memoryRanking|groupRanking)\s*\.\s*value\s*\.\s*(sorted|suffix|prefix|dropFirst|dropLast|reversed|filter|shuffled)\b"#
 
+    /// **迁移期最容易造出的假零**：`PerfMemoryLead.usedBytes` / `.totalBytes` 是**非 Optional
+    /// 的 `UInt64`**，`.empty` 就是 `0 / 0`（`Services/Performance/PerfReadoutCells.swift`），
+    /// 所以页面一旦绕过三态判据直接渲染它，"还没采到"就会显示成 **"0 B"**——
+    /// 把"没测到"说成"测到 0"，正是本仓 ④⑤ 记过两类的形状。
+    /// 三态判定的**唯一归属**是 `Views/PerfLogs/LiveReadings.swift` 的 `SystemReadings`
+    /// （四条 guard：`snapshot == nil`、`memoryTotalBytes > 0`、`pressure != .unknown`、
+    /// `usedBytes > 0`），迁移只许改"上下文怎么来"，不许把判据搬散。
+    /// 判据是「**非 Optional 且 0 表示没读到**」，所以现在只管内存这两格；
+    /// 以后谁给某个 lead 加了同形状的字段，要往这条里加名字，而不是新造一条。
+    /// **基线 0，一处都不许有。**
+    static let rawMemoryEvidencePattern = #"monitor\s*\.\s*memory\s*\.\s*value\s*\.\s*(usedBytes|totalBytes)\b"#
+
     /// 回归守卫：采集侧不许再把这些退回去。
     /// 1) `processesByMemory` 不许再是计算属性（每次访问全量排序）；
     /// 2) `allProcesses` 必须留在观察图外；

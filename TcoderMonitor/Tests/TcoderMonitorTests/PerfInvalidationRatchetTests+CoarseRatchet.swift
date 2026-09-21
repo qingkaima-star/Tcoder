@@ -150,4 +150,46 @@ extension PerfInvalidationRatchetTests {
                                        in: [Self.syntheticDoc("合规夹具", good)])
         XCTAssertTrue(spared.isEmpty, "合规写法被误伤，逼人家写绕路代码：\n\(spared.joined(separator: "\n"))")
     }
+
+    // MARK: - 3.7 迁移期假零守卫：内存原始格不许被页面直接渲染
+
+    /// 与"假迁移"同族但后果更糟：那不是变慢，这是**把没测到报成 0**。
+    func testRawMemoryEvidenceIsNeverRenderedDirectly() throws {
+        let docs = try scannedConsumerDocs()
+        XCTAssertGreaterThanOrEqual(docs.count, Self.minimumConsumerFiles,
+                                    "只扫到 \(docs.count) 个文件，路径口径坏了——下面那条 0 命中就是永真绿")
+        let hits = try Self.scanHits(pattern: Self.rawMemoryEvidencePattern, in: docs)
+        XCTAssertTrue(hits.isEmpty, """
+        页面绕过 `SystemReadings` 直接渲染内存原始格：
+        \(hits.joined(separator: "\n"))
+        `PerfMemoryLead.usedBytes` / `.totalBytes` 是非 Optional 的 UInt64，空态就是 0，
+        这样渲染会把"--"变成"0 B"。改法：走 `SystemReadings.memoryUsedBytes(_:)`，
+        只把"`SampleContext` 怎么拼"换成从细粒度格取，**判据本身一字不动**。
+        """)
+    }
+
+    /// 元测试（双向）：坏形状必须抓到，两种合规写法不得误伤——
+    /// 尤其"整格递出去"（`let lead = monitor.memory.value`）必须放行，
+    /// 否则迁移第一步（拼上下文）就会被自己人判红。
+    func testRawMemoryEvidenceScannerCatchesBadAndSparesGood() throws {
+        let bad: [(String, String)] = [
+            ("字节格式直接吃原始格", "Text(ByteFormat.string(monitor.memory.value.usedBytes, precision: 1))"),
+            ("比例直接用原始格相除", "let frac = Double(monitor.memory.value.usedBytes) / Double(monitor.memory.value.totalBytes)"),
+        ]
+        for (name, sample) in bad {
+            let hits = try Self.scanHits(pattern: Self.rawMemoryEvidencePattern,
+                                        in: [Self.syntheticDoc("合成夹具", sample)])
+            XCTAssertFalse(hits.isEmpty, "规则抓不住「\(name)」，它就是条废守卫：\(sample)")
+        }
+        let good = """
+        let lead = monitor.memory.value                       // 整格递出去：空态由判据层管
+        Text(DataAbsence.optional(SystemReadings.memoryUsedBytes(ctx)).display)
+        SampleContext(cpu: monitor.cpu.value, memory: monitor.memory.value)
+        // 注释里写 monitor.memory.value.usedBytes 不算调用点
+        """
+        let spared = try Self.scanHits(pattern: Self.rawMemoryEvidencePattern,
+                                       in: [Self.syntheticDoc("合规夹具", good)])
+        XCTAssertTrue(spared.isEmpty, "合规写法被误伤，逼人家写绕路代码：\n\(spared.joined(separator: "\n"))")
+    }
+
 }
