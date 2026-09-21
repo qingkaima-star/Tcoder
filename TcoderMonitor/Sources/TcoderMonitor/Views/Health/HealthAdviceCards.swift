@@ -96,13 +96,19 @@ struct HealthTrendCard: View {
                     HealthTrendChart(points: points, gradeBLine: Self.gradeBLine)
                         .frame(height: Theme.Layout.trendChartHeight)
                     readoutStrip
-                    NoteLine("纵轴固定 0…100 分，B 级参考线 \(Int(Self.gradeBLine)) 分；折线只连已有历史点，不做任何外推。")
+                    // 「不是 0 起点」与「不外推」是这张图的两条防误读声明，留在屏上；
+                    // B 级参考线的具体分值与"只连已有点"的实现细节进 ⓘ（线本身已经画出来了）。
+                    NoteLine("纵轴固定 0…100 分 · 不做任何外推。",
+                             help: "B 级参考线 \(Int(Self.gradeBLine)) 分；折线只连已有历史点，不外插也不预测。")
                     consistencyNote
                 }
             } else {
                 EmptyStateView(icon: IconName.chartLine.rawValue,
                                title: "历史点不足",
-                               message: "至少完成两次分析后可以看到趋势。少于两个点时这里不画线。")
+                               message: "少于两个点时这里不画线。")
+                // 「怎么让它出现」是这条空态里唯一可操作的部分，不能因为版面就丢掉：
+                // 屏上留判定（少于两个点不画线），完整动线进 ⓘ。少一句就是 B 守恒线要红的。
+                CopyHelpBadge("至少完成两次分析后可以看到趋势。")
             }
         }
     }
@@ -137,8 +143,9 @@ struct HealthTrendCard: View {
         // `verdict` 而不是 `overall`：无证据那一份的 0 是占位，
         // 拿它去比历史末点会凭空报一条"评分不一致"的警告（批次 P7-B）。
         if let health, let score = health.verdict, let last = points.last, last.score != score {
-            NoteLine("历史末点 \(last.score) 与本次 \(score) 不一致：可能是旧记录，或本次评分尚未落盘。",
-                     role: Theme.Semantic.warning, icon: .riskWarning)
+            NoteLine("历史末点 \(last.score) 与本次 \(score) 不一致。",
+                     role: Theme.Semantic.warning, icon: .riskWarning,
+                     help: "可能是旧记录，也可能是本次评分尚未落盘。")
         }
     }
 }

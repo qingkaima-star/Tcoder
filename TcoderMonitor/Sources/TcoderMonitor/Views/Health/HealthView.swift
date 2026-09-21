@@ -176,7 +176,11 @@ struct HealthNotScoredCard: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 EmptyStateView(icon: IconName.health.rawValue,
                                title: "尚未计算健康评分",
-                               message: "选择项目目录后点「重新分析」，会综合代码规模、复杂度、重复代码率、Git 活跃度、运行日志与依赖状况给出 0~100 分。")
+                               message: "选择项目目录后点「重新分析」。")
+                // 九维名单与分数区间从常驻句里搬进来：屏上只留"该点哪个按钮"，
+                // 「综合了什么」进 ⓘ。这句不属于诚实性承诺（缺的是"还没算"，界面已用
+                // `EmptyStateView` 明说，没被伪装成分数），所以整句藏进 tooltip 不丢信息。
+                CopyHelpBadge("评分综合代码规模、复杂度、重复代码率、Git 活跃度、运行日志与依赖状况，给出 0~100 分。")
                 HeuristicClaimLine()
             }
         }
@@ -197,11 +201,15 @@ struct HealthNoInputCard: View {
                         Text("本次没有任何维度输入，因此不给综合分。")
                             .font(Theme.Typo.body.font)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text("这里刻意不画一个 0 分红环：0 分会被读成「这个项目很差」，而事实是「没有可算的数据」。")
-                            .font(Theme.Typo.narrative.font)
-                            .foregroundStyle(.secondary)
-                            .lineSpacing(Theme.Typo.narrative.lineSpacing)
-                            .fixedSize(horizontal: false, vertical: true)
+                        // 主句（"不给综合分"这件事）留在屏上；**为什么故意不画红环**是对我们
+                        // 设计动机的自述，读不它都不改变这一页的读法 —— 盘点表判「藏」，
+                        // 且环里已经给了 `--`，那才是真正防止误读的那半个信号。
+                        HStack(spacing: Theme.Spacing.xxs) {
+                            Text("评分器没有可算的输入。")
+                                .font(Theme.Typo.narrative.font)
+                                .foregroundStyle(.secondary)
+                            CopyHelpBadge("这里刻意不画一个 0 分红环：0 分会被读成「这个项目很差」，而事实是「没有可算的数据」。")
+                        }
                         Theme.Readout.Field("计算于", DateFormat.sinceDescription(health.computedAt))
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
