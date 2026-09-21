@@ -193,36 +193,44 @@ final class ShellReadoutTooltipTests: XCTestCase {
                        "同一条只读承诺在两页写成了两句话（本流无权改 Views/Performance，故报总工收常量）")
     }
 
-    // MARK: - ⑦ 交给总工拍板的一条尺子账：新开的两个槽进不进账，取决于这行怎么排版
+    // MARK: - ⑦ 两个新槽的账：排版不再决定它进不进账（这条曾是盲区，已由总工补齐）
 
-    /// `TooltipMigrationGuardTests` 的两条正则都撞不到 main 这轮新开的 `subtitleHelp:` /
-    /// `captionHelp:` 标签（`\bhelp` 撞上的是驼峰 `Help`，`caption:` 后面又隔着 `Help`），
-    /// 于是**按"一个参数一行"的常规排版**写在这两个槽里的整句被判成 `.skipped` ——
-    /// A 与 B 同时看不见它：把常驻长句搬进这两个槽，A 会降、B 的总量也会跟着降，
-    /// 守恒线撞不出红（删字与藏字长得一模一样）。
+    /// **曾经的盲区（S7 交回时点名，后由总工在 `e40afa7` 修）**：
+    /// `TooltipMigrationGuardTests` 的两条正则都撞不到 main 那轮新开的 `subtitleHelp:` /
+    /// `captionHelp:`（`\bhelp` 撞上的是驼峰 `Help`，`caption:` 后面又隔着 `Help`），
+    /// 于是按「一个参数一行」排版的整句被判成 `.skipped` —— **A 与 B 同时看不见它**：
+    /// 把常驻长句搬进这两个槽，A 会降、B 的总量也跟着降，守恒线撞不出红（删字与藏字长得一模一样）。
+    /// 而同一条调用挤在一行时又会被算回 `.visible`。也就是说**排版决定它进不进账**。
     ///
-    /// 但**同一条调用挤在一行**时是另一个方向：那一行里有 `caption: "` 这种可见线索，
-    /// 整句就被算回 `.visible`（保守方向，安全）。所以这条不是"新槽一律免检"，
-    /// 是"排版决定它进不进账"—— 那更该由总工把尺子补齐，而不是靠人记住换行。
-    ///
-    /// 本片自己**没有**踩这个洞：三格 `captionHelp:` 收的都是既有生产者/常量（不是裸字面量），
-    /// 屏上短句一字未动，A/B 读数与改造前完全相同。这里只把事实钉成断言，
-    /// 不改共享尺子（工单红线：守卫常量与基线只由总工改）。main 现存一例：
-    /// `HealthComponentTable.body` 独占一行的 `subtitleHelp:` 整句。
-    func test_theTwoNewSlotsRulerBlindSpotDependsOnLineShape() {
-        let onePerLine = "captionHelp: \"这一长句整句搬进新开的槽位，它既没被算成常驻也没被算成已藏\","
+    /// 尺子补齐之后，下面四条断言钉的是"两种排版必须进同一本账"：
+    /// 独占一行 ⇒ `.tooltip`；同一行里有可见线索 ⇒ 那句仍然只算 `.tooltip`，
+    /// 而它旁边的 `label:` / `caption:` 照旧算常驻。**不再随排版改口。**
+    /// 本片自己的三格 `captionHelp:` 收的都是既有生产者/常量（不是裸字面量），
+    /// 屏上短句一字未动，所以 A/B 读数与改造前相同 —— 这条断言管的是后来的裸字面量。
+    func test_theTwoNewSlotsAreAccountedRegardlessOfLineShape() {
+        let onePerLine = "captionHelp: \"这一长句整句搬进新开的槽位，它算已藏而不是消失\","
         let slots = TooltipMigrationGuardTests.literalSlots(in: onePerLine).map(\.slot)
         XCTAssertEqual(slots.count, 1, "复刻失灵：这一行本该只有一句字面量")
-        XCTAssertEqual(slots.first, .skipped, "尺子已经认得独占一行的 captionHelp: 了 —— 那这条盲区记账可以划掉")
-        // 反向自证一（同形状的小写 `help:` 被认成已藏，说明上一条不是判据失灵）：
-        let carried = "help: \"这一长句整句搬进新开的槽位，它既没被算成常驻也没被算成已藏\","
+        XCTAssertEqual(slots.first, .tooltip,
+                       "独占一行的 captionHelp: 又回到 .skipped 了 ⇒ A 与 B 同时看不见这句")
+
+        let alone = "subtitleHelp: \"这一长句整句搬进新开的槽位，它算已藏而不是消失\","
+        XCTAssertEqual(TooltipMigrationGuardTests.literalSlots(in: alone).map(\.slot).first, .tooltip,
+                       "subtitleHelp: 掉出 tooltip 族了 —— 两条新标签要一起认")
+
+        // 同形状的小写 `help:` 一直认得；它和上面两条必须同向，否则又是一处"按形状改口"。
+        let carried = "help: \"这一长句整句搬进新开的槽位，它算已藏而不是消失\","
         XCTAssertEqual(TooltipMigrationGuardTests.literalSlots(in: carried).map(\.slot).first, .tooltip,
                        "carrier 连 help: 都不认了，本轮所有落点判据失去含义")
-        // 反向自证二（同一条句子挤回带可见线索的一整行 ⇒ 保守方向，算常驻）：
-        let single = "MetricTile(label: \"CPU\", caption: \"屏上短句\", captionHelp: \"这一长句整句搬进新开的槽位，它既没被算成常驻也没被算成已藏\")"
-        XCTAssertEqual(TooltipMigrationGuardTests.literalSlots(in: single).filter { $0.slot == .visible }.count, 3,
-                       "带可见线索的那一行里 captionHelp: 不再算常驻了？两种排版的账分叉要重新记")
-        print("【ⓘ·S7 尺子账】独占一行的 subtitleHelp:/captionHelp: → .skipped（A、B 都看不见）；"
-              + "同形状的小写 help: → .tooltip；同一行里有可见线索 → .visible")
+
+        // 同一行里有可见线索：新槽那句仍算已藏，旁边两句照旧算常驻。
+        let single = "MetricTile(label: \"CPU\", caption: \"屏上短句\", captionHelp: \"这一长句整句搬进新开的槽位，它算已藏而不是消失\")"
+        let counted = TooltipMigrationGuardTests.literalSlots(in: single)
+        XCTAssertEqual(counted.filter { $0.slot == .visible }.count, 2,
+                       "带可见线索的那一行里可见槽位数量变了 ⇒ 逐字面量判槽位退化成了按行判")
+        XCTAssertEqual(counted.filter { $0.slot == .tooltip }.count, 1,
+                       "同一行里的 captionHelp: 被算成常驻 ⇒ 两种排版的账又分叉了")
+        print("【ⓘ·S7 尺子账】subtitleHelp:/captionHelp: 与 help: 同族，"
+              + "独占一行与挤在同一行都是 .tooltip；同行的可见槽位仍各自算 .visible")
     }
 }
