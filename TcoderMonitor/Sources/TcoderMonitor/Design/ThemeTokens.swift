@@ -158,9 +158,14 @@ extension Theme {
         /// 与 `success` 的关系是**刻意同族不同档**：`success` 管数据（健康/涨），
         /// `accent` 管交互（选中/焦点/主行动旁的状态）。参考图本来就让绿色同时承担
         /// "品牌"与"正向"两义，两者在屏幕上从不相邻（一个在导航、一个在数据位）。
+        /// **批次 P6：强调色从绿换成 AiX 的 azure 蓝**（用户裁定，规范
+        /// `docs/界面语言-对齐AiX.md`）。参考图实测选中胶囊是 `#2B76DB`，
+        /// 但白字压上去只有 **4.48:1**（差 0.02 不过 AA），而本仓的 AA 线是硬约束，
+        /// 所以取**同色相、可过线的最近值** `#2A6FD3`：白字 4.92:1、白底图形 4.92:1。
+        /// 深浅两版仍取同一个图形值（原理由见上一版注释：深底想更亮一档时白字会跌破 4.5）。
         static let accent = SemanticRole(
-            name: "accent", textLight: 0x0D7130, textDark: 0x59E08A,
-            graphicLight: 0x15803D, graphicDark: 0x15803D,
+            name: "accent", textLight: 0x1D63C6, textDark: 0x7FB4FF,
+            graphicLight: 0x2A6FD3, graphicDark: 0x2A6FD3,
             onFill: DualColor(lightHex: 0xFFFFFF, darkHex: 0xFFFFFF))
 
         static let success = SemanticRole(
@@ -189,9 +194,19 @@ extension Theme {
             // 浅底深红配白字（6.54），深底浅鲑红配墨字（6.69）
             onFill: DualColor(lightHex: 0xFFFFFF, darkHex: 0x111111))
 
+        /// 批次 P6：**一个蓝**。参考图里只有一种蓝，而 `accent` 换成 azure 之后
+        /// 若 `info` 还留系统蓝 `#007AFF`，就成了批次 P5 刚消灭的那种"两支同族色相"
+        /// （用户读到的是"两套强调色"）。所以 info 并入 accent 那一支，
+        /// 日志等级与交互态靠**图标与位置**区分，不靠色相。
+        ///
+        /// `onFill` 必须**跟着一起搬**：默认档是给绿/黄/红那几支准备的近黑墨 `#111111`
+        /// （黑字压 `#2CA94C` 过线），压在本支 azure 上只有 **3.88:1**。
+        /// 门禁 `testOnFillForegroundClearsWCAG_AA_InBothAppearances` 第一次跑就抓到——
+        /// "并入同一支"如果只改色值不改前景，等于把填充态留成一个不过线的组合。
         static let info = SemanticRole(
-            name: "info", textLight: 0x0A5BCC, textDark: 0x7DBBFF,
-            graphicLight: 0x007AFF, graphicDark: 0x0A84FF)
+            name: "info", textLight: 0x1D63C6, textDark: 0x7FB4FF,
+            graphicLight: 0x2A6FD3, graphicDark: 0x2A6FD3,
+            onFill: DualColor(lightHex: 0xFFFFFF, darkHex: 0xFFFFFF))
 
         static let neutral = SemanticRole(
             name: "neutral", textLight: 0x5F5F64, textDark: 0xA9A9AE,
