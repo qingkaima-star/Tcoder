@@ -10,7 +10,8 @@
 # 用法: scripts/self_score.sh [--build]
 #   --build              先跑 build_app.sh release（默认不建，用现成 dist，靠 provenance 判新鲜）
 #   SCORE_TARGET=<目录>  被扫项目（默认 = git 仓库根，即 dogfooding）
-#   SCORE_SANDBOX=<目录> 支持目录沙箱（默认 /tmp/tcoder-selfscore-<时间戳>，每次新建）
+#   SCORE_SANDBOX=<目录> 支持目录沙箱（默认包根 .scratch/tcoder-selfscore-<时间戳>，每次新建；
+#                        规矩见 AGENTS §1.6：重活产物不进 $TMPDIR，跑完自清）
 #   SCORE_WAIT=<秒>      等报告落盘的上限（默认 300）
 #   SCORE_TERM=1         收尾对**本脚本自己起的、二进制路径核对一致的**那一个 pid 发 SIGTERM；
 #                        默认只通报 pid 等人工 Cmd+Q。绝不按 bundle id 广播 quit（那会全机生效，
@@ -22,7 +23,7 @@ BIN="$PWD/dist/Tcoder.app/Contents/MacOS/TcoderMonitor"
 UUID="11111111-2222-3333-4444-555555555555"
 REPO_ROOT=$(git rev-parse --show-toplevel)
 TARGET="${SCORE_TARGET:-$REPO_ROOT}"
-SANDBOX="${SCORE_SANDBOX:-/tmp/tcoder-selfscore-$(date +%Y%m%d-%H%M%S)}"
+SANDBOX="${SCORE_SANDBOX:-$PWD/.scratch/tcoder-selfscore-$(date +%Y%m%d-%H%M%S)}"
 WAIT="${SCORE_WAIT:-300}"
 
 die() { echo "!! $1"; exit 1; }

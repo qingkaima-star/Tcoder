@@ -11,7 +11,9 @@
 #
 # 用法: scripts/capture_pages_isolated.sh [输出目录]
 #   CAPTURE_TARGET=<目录>   被扫描的项目（默认 = 本仓库根，dogfooding）
-#   CAPTURE_SANDBOX=<目录>  支持目录沙箱（默认 /tmp/tcoder-capture-sandbox-<时间戳>，每次新建）
+#   CAPTURE_SANDBOX=<目录>  支持目录沙箱（默认包根 .scratch/…，见 AGENTS §1.6；
+#                             只有 CAPTURE_LOCK 仍留 /tmp —— 那把锁是**跨工作树**的，
+#                             落到仓库里就变成每棵树各一把，等于没有锁）
 #   SWITCH_MODE=argv        每页起一个新实例并用 -selectedDetailSection 传页名（默认 single）
 #   SWITCH_MODE=single      只起一个实例，靠 defaults write 实时切页（SwiftUI @AppStorage 会响应）
 #   SKIP_PROVENANCE=1       跳过"dist 二进制 == 当前源码"证明（默认不跳，跳了截图就不可信）
@@ -24,7 +26,7 @@ cd "$(dirname "$0")/.." || exit 1
 APP_DIR="$PWD/dist/Tcoder.app"
 BIN="$APP_DIR/Contents/MacOS/TcoderMonitor"
 WINLIST="$PWD/scripts/winlist.swift"
-OUT="${1:-/tmp/tcoder-pages-isolated}"
+OUT="${1:-$PWD/.scratch/tcoder-pages-isolated}"
 DOMAIN="com.tcoder.monitor"
 UUID="11111111-2222-3333-4444-555555555555"
 SWITCH_MODE="${SWITCH_MODE:-single}"
@@ -33,7 +35,7 @@ SECTIONS=("总览" "代码规模" "复杂度风险" "Git 洞察" "贡献者" "�
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 TARGET="${CAPTURE_TARGET:-$REPO_ROOT}"
-SANDBOX="${CAPTURE_SANDBOX:-/tmp/tcoder-capture-sandbox-$(date +%Y%m%d-%H%M%S)}"
+SANDBOX="${CAPTURE_SANDBOX:-$PWD/.scratch/tcoder-capture-sandbox-$(date +%Y%m%d-%H%M%S)}"
 
 die() { echo "!! $1"; exit 1; }
 

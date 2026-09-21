@@ -83,6 +83,34 @@ git diff > .inflight/<流名>.patch                # 同时留一份可读档
 重构类工作建议拆成两步提交：①"新增文件且仍编译" ②"删旧文件且仍编译"。
 把"能编译的修复"和"没写完的重构"混进同一个提交，会连坐被整体撤销。
 
+## 1.6 取证与临时产物的盘上规矩（2026-09-21 由用户定调，需求方刚清完一次盘）
+
+**Why（不是预防性说教，是已经发生过的事）**：这台机上一天被一次没自清的性能取证吃掉 **103 GB**
+（`$TMPDIR` 里 21 个孤儿 `instruments*.ktrace`），可用一度只剩 **4.4 GiB**。
+盘满时最坏的结果不是慢，是**录到一半断掉、而报告读起来像真的**。本仓自己的 xctrace 档同样是 GB 级。
+
+1. **跑重活（构建 / 打包 / trace / 录屏）前先看盘**：`df -h /System/Volumes/Data`，
+   可用 **< 20 GiB 就停下上报**，不要硬跑。
+   `perf_harness.sh` 的 `idle` / `interact` / `switch` 三档已经把这条做成前置
+   （`require_disk_headroom`，覆盖用 `TCODER_MIN_FREE_GIB`）；
+   **读不到余量一律判败**，不静默放行——静默放行的前置等于没有前置。
+2. **一次性产物不进 `$TMPDIR`**，落仓库内的 **`.scratch/`**（已 gitignore）。
+   脚本里的写法是一行公共头：
+   ```bash
+   SCRATCH="${TCODER_SCRATCH:-$(git rev-parse --show-toplevel)/.scratch}"
+   mkdir -p "$SCRATCH" 2>/dev/null || SCRATCH="${TMPDIR:-/tmp}"
+   ```
+   `perf_harness.sh` / `perf_selfcheck.sh` / `perf_preflight.sh` 的默认输出已改到
+   `$SCRATCH/tcoder-*`；`self_score.sh` / `capture_pages_isolated.sh` 的沙箱与截图目录
+   默认落包根 `.scratch/`。要临时换地方用 `TCODER_SCRATCH=<目录>` 覆盖。
+   **两个例外**：`FramePulse` 的脉冲文件路径由 App 侧写死，读它的那行必须跟着 App；
+   `CAPTURE_LOCK` 必须留在 `/tmp`——那是**跨工作树**的锁，落到仓库里就变成每棵树各一把，等于没有锁。
+3. **跑完自清**：一趟取证结束就扫残骸（`.scratch/` 与本机的孤儿 `*.ktrace`），
+   别把"下一次再清"当成清理。
+4. **构建串行，别和别的车道抢盘与 CPU**：本机还有 AiX 那条车道在跑，
+   开工前 `pgrep -fl "swift-(build|test)|xctest"` 看一眼是谁；
+   本仓的 `perf_harness.sh` 已把"有本仓重活在跑"做成拒录条件（它会抢满全部核、抬高相位）。
+
 ## 2. 构建纪律（最重要）
 
 `swift build` 的 `.build` 目录**不支持并发**。多个会话同时编译会互相打坏。

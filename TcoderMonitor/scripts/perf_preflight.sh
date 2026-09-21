@@ -47,8 +47,8 @@ winlist_probe() {  # winlist_probe <pid> → 有在屏窗口时打印 `窗口号
   local pid="$1"
   if [ -z "$WINLIST_BIN" ]; then
     if xcrun swiftc -O -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
-         -target arm64-apple-macos14.0 "$WINLIST" -o "/tmp/tcoder-winlist-$$" 2>/dev/null; then
-      WINLIST_BIN="/tmp/tcoder-winlist-$$"
+         -target arm64-apple-macos14.0 "$WINLIST" -o "$SCRATCH/tcoder-winlist-$$" 2>/dev/null; then
+      WINLIST_BIN="$SCRATCH/tcoder-winlist-$$"
       "$WINLIST_BIN" "$pid" >/dev/null 2>&1 || true
     else
       echo "    ⚠ winlist 编译失败 → 退回 JIT（单次 ~300 ms，只影响存在性探测，不影响时长口径）" >&2
@@ -81,8 +81,8 @@ note_target_flavor() {  # note_target_flavor <pid>
 quiescence_probe() {  # → 一行 `… 静默=12.34s`；取不到时打印 静默=-1.00s（调用方按"取不到"处理）
   if [ -z "$QUIESCE_BIN" ]; then
     if xcrun swiftc -O -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
-         -target arm64-apple-macos14.0 "$QUIESCE_SRC" -o "/tmp/tcoder-quiesce-$$" 2>/dev/null; then
-      QUIESCE_BIN="/tmp/tcoder-quiesce-$$"
+         -target arm64-apple-macos14.0 "$QUIESCE_SRC" -o "$SCRATCH/tcoder-quiesce-$$" 2>/dev/null; then
+      QUIESCE_BIN="$SCRATCH/tcoder-quiesce-$$"
     else
       echo "    ⚠ 静默探针编译失败，退回 JIT（慢一点，不影响读数口径）" >&2
     fi
@@ -128,7 +128,7 @@ preflight_context() {  # preflight_context <outdir> <pid>
   # 拆函数没有改变任何取数顺序，也没有引入新的全局量）。
   preflight_gates
   if [ "$hard" = "1" ] && [ "${IGNORE_CONTEXT_GATE:-0}" != "1" ]; then
-    # 被拒的一趟**必须在目录上留下自认字样**：否则 `ls /tmp/tcoder-perf-*` 会看见
+    # 被拒的一趟**必须在目录上留下自认字样**：否则 `ls $SCRATCH/tcoder-perf-*` 会看见
     # run1/run2/run3 三个"像样本"的空目录，后来的人很容易把"闸门拒了"读成"量过了"。
     # （今天就真出现了三个只有 context/meta 的目录。）
     printf 'REFUSED\n这一趟没有采数：测量上下文不合格，闸门拒跑。原因见同目录 %s。\n' "$(basename "$f")" \

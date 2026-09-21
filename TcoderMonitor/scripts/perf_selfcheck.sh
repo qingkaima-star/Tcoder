@@ -20,7 +20,7 @@
 # selfcheck —— 不起 App、不碰 xctrace，拿合成夹具验这把尺子自己还活着
 # =============================================================================
 cmd_selfcheck() {
-  local out="${1:-/tmp/tcoder-perf-selfcheck-$REV}"
+  local out="${1:-${SCRATCH:-/tmp}/tcoder-perf-selfcheck-$REV}"
   echo "==> selfcheck 档：验尺子（合成夹具，零采样，秒级）"
   rm -rf "$out"; mkdir -p "$out"
   local fails=0
