@@ -140,9 +140,11 @@ extension CodeRiskAnalysis {
             items.append(Item(
                 id: "huge-file", label: "巨大文件", icon: .duplicate,
                 role: Theme.Semantic.role(for: largest.risk),
-                text: "最大文件 \(CodeViewFormat.fileName(largest.path)) 共 "
-                    + "\(NumberFormat.grouped(largest.lineCount)) 行（项目行数峰值 "
-                    + "\(NumberFormat.grouped(code.largestFileLineCount)) 行）：\(largest.suggestion)"
+                text: localizedFormat("最大文件 %1$@ 共 %2$@ 行（项目行数峰值 %3$@ 行）：%4$@",
+                                      CodeViewFormat.fileName(largest.path),
+                                      NumberFormat.grouped(largest.lineCount),
+                                      NumberFormat.grouped(code.largestFileLineCount),
+                                      localizedCopy(largest.suggestion))
             ))
         }
 
