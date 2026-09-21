@@ -134,8 +134,10 @@ struct HealthTrendCard: View {
 
     @ViewBuilder
     private var consistencyNote: some View {
-        if let health, let last = points.last, last.score != health.overall {
-            NoteLine("历史末点 \(last.score) 与本次 \(health.overall) 不一致：可能是旧记录，或本次评分尚未落盘。",
+        // `verdict` 而不是 `overall`：无证据那一份的 0 是占位，
+        // 拿它去比历史末点会凭空报一条"评分不一致"的警告（批次 P7-B）。
+        if let health, let score = health.verdict, let last = points.last, last.score != score {
+            NoteLine("历史末点 \(last.score) 与本次 \(score) 不一致：可能是旧记录，或本次评分尚未落盘。",
                      role: Theme.Semantic.warning, icon: .riskWarning)
         }
     }

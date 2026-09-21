@@ -17,9 +17,7 @@
 "前往" = "Go To";
 "把项目文件夹拖到这里，或选择本地目录" = "Drop a project folder here, or choose a local directory";
 "选择目录…" = "Choose Directory…";
-"加载示例项目" = "Load Sample Project";
 "尚未分析" = "Not analysed yet";
-"示例" = "Sample";
 "重新分析" = "Re-analyse";
 "重新采样" = "Re-sample";
 "暂停" = "Pause";
@@ -44,7 +42,6 @@
 "个" = "items";
 
 /* ===== 批次 P2：外壳与导航（由 LocalizationGuardTests 的完工清单点名后登记）===== */
-"加载示例项目（Tcoder 示例项目）" = "Load Sample Project (Tcoder Sample)";
 "添加项目…" = "Add Project…";
 "工程健康评分" = "Engineering Health";
 "在 Finder 中显示" = "Show in Finder";
@@ -292,17 +289,15 @@
 "选择项目目录后点「重新分析」，会综合代码规模、复杂度、重复代码率、Git 活跃度、运行日志与依赖状况给出 0~100 分。" = "Choose a project directory and click Re-analyse: code size, complexity, duplicate code rate, Git activity, runtime logs and dependency status are combined into a 0~100 score.";
 "尚无错误签名数据" = "No error signature data yet";
 "本窗口没有可归类的错误行。" = "This time window has no error lines that can be grouped.";
-"样例与堆栈" = "Occurrences and Stacks";  // 样例≠示例：示例=Sample 已被 demo 占用
+"样例与堆栈" = "Occurrences and Stacks";  // 用「样例」不用「示例」：后者曾专指内置演示数据（批次 P7-A 已退役）
 "该项目还没有日志分析结果，点「重新分析」后再来查看聚类。" = "This project has no log analysis results yet. Click Re-analyse, then come back to see the clusters.";
 "尚未分析，点「重新分析」后这里按天展示错误、异常与崩溃的分布。" = "Not analysed yet. After you click Re-analyse, this shows the daily distribution of errors, exceptions and crashes.";
 "暂无趋势数据：日志行里没有可解析的时间戳时无法按天分桶，这里不画空柱。" = "No trend data yet: log lines without a parseable timestamp cannot be bucketed by day, so no empty bars are drawn here.";
-"切换后自动重新分析（示例项目与扫描进行中除外）" = "Switching triggers an automatic Re-analyse (except for the sample project and while a scan is in progress)";
 "时间窗口" = "Time Window";
 "清空附加" = "Clear Attachments";
 "该项目还没有日志分析结果。选择项目目录后点「重新分析」，或手动附加本地日志文件。" = "This project has no log analysis results yet. Choose a project directory and click Re-analyse, or attach local log files manually.";
 "附加日志" = "Attach Logs";
 "项目目录与 ~/Library/Logs 里都没有找到可解析的日志文件。用「附加日志」手动选择 error.log、crash.log 后重新分析。" = "No parseable log files were found in the project directory or in ~/Library/Logs. Use Attach Logs to pick error.log or crash.log manually, then click Re-analyse.";
-"在左侧选择本地仓库目录，或加载内置的 Tcoder 示例项目体验完整指标。" = "Choose a local repository directory on the left, or load the built-in Tcoder sample project to see all metrics.";
 "还没有项目" = "No projects yet";
 
 /* ===== P5-c 第四批：tooltip 与无障碍标签（hover 与 VoiceOver 也是界面） ===== */
@@ -587,3 +582,16 @@
 "%1$@ · 一人完成 · %2$@ 次" = "%1$@ alone made %2$@ commits";
 "无作者数据" = "No author data";
 "（%@）" = " (%@)";
+
+// 批次 P7-A：内置示例数据退役，随之删除 5 条只服务于它的键；下面两条是替换后的新文案。
+"切换后自动重新分析（扫描进行中除外）" = "Switching triggers an automatic re-analysis (except while a scan is running)";
+"在左侧「选择目录…」指一个本地仓库目录，九页读数全部由它真实算出来。" = "Point \"Choose Directory…\" on the left at a local repository — every reading across the nine pages is computed from it.";
+
+// 批次 P7-C：扫描阶段只剩四个真实状态（五路并行，没有"正在做第几路"这回事），
+// 且三个渲染点此前都是 `Text(变量)` —— 不查表，英文态一直显示中文。
+"空闲" = "Idle";
+"正在并行分析五路指标…" = "Analysing five metrics in parallel…";
+"分析完成" = "Analysis complete";
+"五路分析全部失败" = "All five analysers failed";
+"已完成 %1$@/%2$@ 路" = "%1$@/%2$@ streams done";
+"识别规则降级：%1$@ 条正则没能编译，函数数与圈复杂度会偏低。这一屏的 0 读作「我们的规则没跑起来」，不读作「这个仓库没有函数」。" = "Analyser degradation: %1$@ regular expression(s) failed to compile, so function counts and cyclomatic complexity will read LOW. A 0 on this page means "our rules did not run", not "this repository has no functions".";

@@ -127,7 +127,7 @@ final class ProjectStoreRoundTripTests: XCTestCase {
         let (store, dir) = try makeIsolatedStore()
         XCTAssertFalse(store.isLoading, "load() 的 defer 必须把 isLoading 落回 false")
 
-        let project = store.add(path: "/tmp/wsv-store-subject", name: "落盘往返", isDemo: false)
+        let project = store.add(path: "/tmp/wsv-store-subject", name: "落盘往返")
         store.upsertReport(makeReport(for: project))
         store.setSelectedProject(project.id)
         store.recordScore(73, for: project.id, projectName: "落盘往返")
@@ -139,7 +139,6 @@ final class ProjectStoreRoundTripTests: XCTestCase {
         let storedProject = try XCTUnwrap(registry.projects.first)
         XCTAssertEqual(storedProject.name, "落盘往返")
         XCTAssertEqual(storedProject.path, "/tmp/wsv-store-subject")
-        XCTAssertEqual(storedProject.isDemo, false)
         // 注册表是在 upsertReport 之后写的，所以它必须与报告里的 project 同步带上扫描时间。
         XCTAssertEqual(storedProject.lastScanAt, Self.fixedGeneratedAt,
                        "注册表与单份报告里的 lastScanAt 不一致，重启后总览页会退回「未扫描」")
@@ -196,13 +195,12 @@ final class ProjectStoreRoundTripTests: XCTestCase {
                        "add() 只 persist 注册表，那份占位报告仅存在于内存——所以 load() 才需要 else 分支"
                      + "在报告文件缺失时重新合成一份；这条断言钉住这个分工，别把它当成写盘缺陷")
 
-        // 同 path + 同 isDemo 幂等；isDemo 不同算另一个条目。
+        // 同 path 幂等。（这里原本还断言"同 path + 不同 isDemo 算两个条目"，
+        // 批次 P7-A 随示例数据退役 —— 身份里不再有"这份数据是编的"这一维。）
         let again = store.add(path: "/tmp/wsv-store-lifecycle", name: "随便起的")
         XCTAssertEqual(again.id, added.id, "重复添加必须返回原条目，不能造出第二个同名项目")
         XCTAssertEqual(store.projects.count, 1)
         XCTAssertEqual(added.name, "生命周期", "幂等分支不许顺手改名")
-        let demo = store.add(path: "/tmp/wsv-store-lifecycle", name: "演示", isDemo: true)
-        XCTAssertNotEqual(demo.id, added.id, "isDemo 是身份的一部分")
 
         store.rename(added, to: "改名后")
         let renamed = try isoDecoder.decode(Registry.self, from: readData(registryURL(in: dir)))

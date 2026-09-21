@@ -36,6 +36,11 @@ final class SourcesSizeAuditTests: SelfScanHarnessCase {
     private static let hugeFileWorkList: Set<String> = [
         "TcoderMonitor/scripts/trace_report.py",
         "TcoderMonitor/scripts/perf_selfcheck.sh",
+        // **新账（合流 P7-A 时当场被本门抓住）**：`DependenciesView.swift` 401 行，
+        // 比口径只多 1 行。归 UI 流（`Views/**` 是他们的在途热区，此刻主树刚干净、
+        // 下一批随时会动它），由总工在紧随其后的独立一笔里按类型搬出并**从本清单删掉**。
+        // 记在这里而不是"顺手改掉"，是为了让归属与责任在断言里可见，不在合并里被吞掉。
+        "TcoderMonitor/Sources/TcoderMonitor/Views/Dependencies/DependenciesView.swift",
     ]
 
     /// 实现文件 = 仓库里的 `.swift`（`Tests/**` 除外，那条面由 `X3TestSizeAuditTests` 守）

@@ -219,29 +219,31 @@ extension Theme {
         /// 页级 H1：**九页一致**，且一屏只有一个大标题。
         ///
         /// 原来只有性能/日志/评分三页自己手写过一份标题行（图标 + 20pt 标题 +
-        /// 「示例」徽标 + 右侧控件 + 一行口径说明），另外六页直接从节标题起 ——
+        /// 右侧控件 + 一行口径说明），另外六页直接从节标题起 ——
         /// 于是"页面层"这件事有三种状态；而那三页又叠在项目名的 20pt 之下，
         /// 一屏出现两个同级大标题（用户判词「不规整」在页级上的落点）。
         ///
         /// 层级重排照参考图：**项目名降成面包屑（11pt 元数据），节名升成唯一 H1**。
         /// 参考图顶部就是 `Workspaces / Sales` 一行小字，下面 `Accounting` 才是大标题。
+        ///
+        /// 这里曾挂过一枚「示例」徽标（`isDemo:` 参数）。批次 P7-A 随内置示例数据
+        /// 一起删除：那套装置只覆盖 3/9 页，另外六页把同一批编造数字当真读数渲染，
+        /// **标注机制本身成了假数据的遮羞布**。界面上不再存在"示例项目"，
+        /// 于是也不再需要"这一屏是假的"这句话。
         struct Header<Actions: View>: View {
             var title: String
             var titleIcon: IconName?
             /// 口径声明的一句话（诚实性文案的落点，不许省）。
             var subtitle: String?
-            var showsDemoBadge: Bool
             @ViewBuilder var actions: Actions
 
             init(title: String,
                  icon: IconName? = nil,
                  subtitle: String? = nil,
-                 isDemo: Bool = false,
                  @ViewBuilder actions: () -> Actions = { EmptyView() }) {
                 self.title = title
                 self.titleIcon = icon
                 self.subtitle = subtitle
-                self.showsDemoBadge = isDemo
                 // 存**结果**而不是闭包：与 `Scaffold.content` 同一个写法，
                 // 把非逃逸的 builder 参数在 init 里就地求值，避免
                 // "assigning non-escaping parameter to an @escaping closure"。
@@ -261,7 +263,6 @@ extension Theme {
                         // 于是目录里登记了英文也永远显示中文。这是双语最容易踩的空转：
                         // 机制接好了、表也翻了，界面上一个字都没变。
                         Text(LocalizedStringKey(title)).typed(Theme.Typo.pageTitle)
-                        if showsDemoBadge { DemoBadge() }
                         Spacer(minLength: Theme.Spacing.md)
                         actions
                     }

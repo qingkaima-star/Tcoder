@@ -43,6 +43,7 @@ struct DependenciesView: View {
                     ForEach(deps.ecosystems) { eco in
                         DependencyEcosystemSection(
                             eco: eco,
+                            vulnerabilityUnchecked: deps.hasVulnerabilityCoverage == false,
                             isExpanded: expanded.contains(eco.id),
                             toggle: { toggle(eco.id) }
                         )
@@ -179,7 +180,10 @@ struct DependencyOverviewSection: View {
                     DataFieldRow(label: "版本来源",
                                  value: Self.versionSourceCaption(deps),
                                  style: .text,
-                                 valueColor: Theme.Semantic.role(for: deps.riskLevel).textColor)
+                                 // 原来吃 `Theme.Semantic.role(for: deps.riskLevel)`：
+                                 // `riskLevel` 在零命中时返回 `.none`，而"零命中"在默认
+                                 // 离线态下只是"没查"（批次 P7-B）。这一格改走同一份判定。
+                                 valueColor: DependencySafetyVerdict(deps).role.textColor)
                     DataRowSeparator()
                     DataFieldRow(label: "生态", value: deps.distinctEcosystemNames.joined(separator: "、"),
                                  style: .text)
@@ -204,17 +208,34 @@ struct DependencyOverviewSection: View {
 
 struct DependencyEcosystemSection: View {
     let eco: EcosystemReport
+    /// 整份报告**没有漏洞核对覆盖**（默认不联网、也没带回公告）。
+    /// 这时"这个生态无风险"是一句没有证据的话：`eco.riskLevel` 里的 `.none`
+    /// 混着"查了没病"与"根本没查"两种意思，展示层必须把它们分开
+    /// （判定本体不动，评分与排序仍读 `riskLevel`）。批次 P7-B。
+    let vulnerabilityUnchecked: Bool
     let isExpanded: Bool
     let toggle: () -> Void
 
     static let rowLimit = 12
+
+    /// 卡头的风险槽。**只有"没查出问题"这一档需要核对覆盖背书**：
+    /// `.low`/`.medium` 来自锁文件里的过期比例，那是离线也算得出的事实，照旧显示。
+    @ViewBuilder
+    private var riskSlot: some View {
+        if vulnerabilityUnchecked && eco.riskLevel == .none {
+            SemanticBadge("未核对", role: Theme.Semantic.neutral, icon: .unverified)
+                .help("默认不联网时漏洞判定恒为 0 条，这是「没有查」，不是「没有病」")
+        } else {
+            RiskBadge(risk: eco.riskLevel)
+        }
+    }
 
     var body: some View {
         GlassSection(
             eco.ecosystem.displayName,
             subtitle: eco.manifestPath,
             icon: .package,
-            trailing: AnyView(RiskBadge(risk: eco.riskLevel))
+            trailing: AnyView(riskSlot)
         ) {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 VStack(spacing: DataRowMetrics.rowGap) {

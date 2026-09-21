@@ -83,7 +83,6 @@ struct PerformanceView: View {
             title: "性能监控",
             icon: .performance,
             subtitle: "系统级实时读数只观测不干预。数值随采样刷新，取不到的一律显示 --，不会补成 0。",
-            isDemo: report?.project.isDemo == true,
             actions: { controls })
     }
 

@@ -118,8 +118,8 @@ struct HealthHeroCard: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: DashboardLayout.heroGap) {
-            HealthRing(score: health?.overall,
-                       grade: health?.grade,
+            HealthRing(score: health?.verdict,
+                       grade: health?.verdictGrade,
                        trend: health?.trendDelta)
                 .frame(width: DashboardLayout.heroRingWidth,
                        height: DashboardLayout.heroRingHeight)

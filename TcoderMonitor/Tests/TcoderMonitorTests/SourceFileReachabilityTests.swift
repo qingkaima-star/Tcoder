@@ -68,7 +68,13 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// `SeverityBadge`/`MiniBarGauge`/`SectionEmptyNote`）与
     /// `Design/LocalizedCopyKit.swift`（`localizedCopy`/`localizedFormat`/`localizedCount`）；
     /// 守卫实报「实现文件 137 · 在用 136 · 未用 0 · 零调用清单：无」。
-    static let censusBaseline = 137
+    /// 135 → 134（批次 P7-A：**删除** `Services/Demo/DemoData.swift`。
+    /// 用户口径「不能有假数据」，那份内置示例九页数字整条退役，实现文件因此少一枚。
+    /// 这是本守卫建立以来第一次分母变小 —— 方向是健康的：它只可能因为"删掉一份没人调用的实现"
+    /// 或"删掉一份假数据"而下降，两者都是净收益。判据本体一条没动。）
+    /// 合流两侧：135 + 2（WS-X8 两枚分片）− 1（P7-A 删掉 DemoData）= 136，
+    /// 且这 136 是守卫**实报**的数（`testDenominatorMatchesCensusBaseline` 跑出来填的，不是算出来的）。
+    static let censusBaseline = 136
 
     static let prunedDirectories: Set<String> = [".git", ".build", ".swiftpm", ".worktrees",
                                                         "node_modules", "DerivedData", "dist", "build", "out"]
