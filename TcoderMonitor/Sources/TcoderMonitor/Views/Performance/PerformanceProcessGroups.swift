@@ -113,7 +113,7 @@ struct PerformanceGroupCard: View {
 
     private var header: some View {
         HStack(spacing: Theme.Spacing.xxs) {
-            Text(group.group.title)
+            Text(localizedCopy(group.group.title))   // 内置分组名住在 Models 的常量里：不查表英文态就是中文
                 .font(Theme.Typo.cardTitle.font)
                 .foregroundStyle(deEmphasized ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                 .lineLimit(1)
@@ -222,7 +222,7 @@ struct PerformanceGroupCard: View {
                 // （「采样已暂停」/「未检测到匹配进程」/「正在采集首个样本」），
                 // 成因整句进 ⓘ。三态的 `message` 文本一字未改、也不合并成通用话 ——
                 // 搬的是落点，不是语义（AGENTS 第四轮红线 5）。
-                Text(copy.title)
+                Text(localizedCopy(copy.title))      // 三态短标题是纯函数返回的元组：同样不查表就上不了英文
                     .font(Theme.Typo.cardTitle.font)
                     .foregroundStyle(.secondary)
                 CopyHelpBadge(copy.message)
@@ -316,11 +316,11 @@ private struct GroupMetricCell: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-            Text(label)
+            Text(localizedCopy(label))
                 .typed(Theme.Typo.groupLabel)
                 .foregroundStyle(.secondary)
             LiveNumber(value, tier: tier, tint: tint)
-            Text(caption)
+            Text(localizedCopy(caption))
                 .typed(Theme.Typo.label)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
