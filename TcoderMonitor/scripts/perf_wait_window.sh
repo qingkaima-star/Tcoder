@@ -158,9 +158,31 @@ cond_no_heavy_jobs() {  # 录制档自己会拒这一维，排程器就必须**�
   return 1
 }
 
+RAISE_BIN=""
+RAISED_THIS_ATTEMPT=0
+ensure_raiser() {  # 编译"把自己的实例带到前台"的小工具（一次尝试只 raise 一次，见那个文件的头注）
+  [ -n "$RAISE_BIN" ] && [ -x "$RAISE_BIN" ] && return 0
+  local want dir; want=$(shasum -a 256 scripts/perf_raise.swift 2>/dev/null | cut -c1-12)
+  dir="${SCRATCH:-$PWD/.scratch}"; mkdir -p "$dir" 2>/dev/null
+  RAISE_BIN="$dir/tcoder-raise-${want:-unknown}"
+  [ -x "$RAISE_BIN" ] && return 0
+  xcrun swiftc -O -target arm64-apple-macos14.0 \
+      -module-cache-path "$dir/swiftmodulecache" scripts/perf_raise.swift -o "$RAISE_BIN.tmp.$$" 2>/dev/null \
+    && mv -f "$RAISE_BIN.tmp.$$" "$RAISE_BIN" && return 0
+  rm -f "$RAISE_BIN.tmp.$$"; RAISE_BIN=""; return 1
+}
+
 cond_front_is_ours() {
   local f; f=$(front_app)
   case "$f" in *Tcoder*) return 0;; esac
+  # 抢不到就如实等；但**每次尝试只主动 raise 一次**：
+  # 两条车道互相 raise 就是焦点拉锯，那会让两边的读数同时变成垃圾。
+  local tp; tp="${TARGET_PID:-$(my_instance_pid 2>/dev/null | head -1)}"
+  if [ "$RAISED_THIS_ATTEMPT" = "0" ] && [ -n "$tp" ] && ensure_raiser; then
+    RAISED_THIS_ATTEMPT=1
+    "$RAISE_BIN" "$tp" >/dev/null 2>&1 \
+      && echo "    （已把自己那个实例带到前台一次 pid=$tp；再被抢走就等，不拉锯）"
+  fi
   printf '前台是「%s」' "${f:-未知}"
   return 1
 }
@@ -186,6 +208,7 @@ wait_for "前台是被测 App" cond_front_is_ours || exit 1
 fails=0
 for i in $(seq 1 "$SAMPLES"); do
   echo "==> 第 $i/$SAMPLES 趟（档=$MODE）"
+  RAISED_THIS_ATTEMPT=0
   # 【每一趟之前都重等一次，而不是开头等一次再连撞三次】
   # 实测 12:20：第 1 趟条件极好（人手已静默 478 s）并成功出数；第 2、3 趟
   # 因为人回来把 ChatGPT 调到最前面而被拒——当时的排程器只会立刻硬撞下一趟，
