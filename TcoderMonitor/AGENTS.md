@@ -536,6 +536,7 @@ WS-A/WS-B/WS-C 此刻在**主树里有未提交在途改动**。不允许直接�
 |---|---|---|---|
 | `Utilities/SharedUtilities.swift` | `DateFormat.day`（日期档格式化器，`full` 一字未动） | `PerfHitchGuardTests` 的 `directFormatters` 现量 1 / 上限 1，把 `DateFormatter()` 挪进 `Views/**` 当场红；格式化器必须住在扫描面之外的共用层 | `DesignAbsenceStateTests` 钉「读数格走 day 且正好 10 字符」 |
 | `Models/CodeMetrics.swift` | `scanLimitations: [String]?`（一个字段，其余一字未动） | WS-A 在 `FileSystemCodeAnalyzer` 里把"哪些上限真的生效过"算好了却无处安放，注释点名"交给总工决定接入点"——这就是那个接入点的另一半。**必须是 Optional**：非 Optional 带默认值会让旧报告整份解码失败 | `FunctionalHonestyGuardTests` G9（写/读两头都在）+ `CodeAnalyzerPrecisionTests` 行为两向（截断→非空、未截断→nil）|
+| `Design/SharedComponents.swift` | `MetricTile` 的自定义 `init` 补一个 `captionHelp: String? = nil` 形参（插在 `caption:` 之后，带默认值） | 属性与渲染 main 早就开好了，**只有 init 不收这个参数 ⇒ 调用点传不进去**；「留短藏长」的格子没有别的挂载点，而 42 处现有调用点靠默认值一字不改 | `TooltipMigrationGuardTests+HelpSlots`（新标签必须进 A/B 两本账）+ S7 的 `ShellReadoutTooltipTests`（三格 captionHelp 只指既有真值生产者，不许重抄中文） |
 
 不在这张表里的冻结区改动一律视为越界。历史批次（P7-A 退役示例数据动过
 `Models/Project.swift`、`Models/HealthScore.swift`、`App/AppState.swift`、

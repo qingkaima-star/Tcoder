@@ -656,3 +656,7 @@
 "Node 服务" = "Node service";
 "未检测到匹配进程" = "No matching process detected";
 "本次扫描有 %1$@ 条边界生效，这一页的数字是部分测量。" = "This scan hit %1$@ limit(s), so the numbers on this page are a partial measurement.";
+
+// 批次 ⓘ·S7 收尾：`SystemReadings.memoryCaliber` 一直是 `static let` ⇒ 双语守卫看不见，
+// 而它现在有两个上屏落点（性能页 + 总览读数带）。登记一次，两页的英文态一起接得住。
+"口径 = 总量 −（空闲 + 推测 + 可清除），与活动监视器一致；这是「在用」，不是「剩余可用」。" = "In use = total − (free + speculative + purgable), matching Activity Monitor; this is what is BEING USED, not what is left free.";
