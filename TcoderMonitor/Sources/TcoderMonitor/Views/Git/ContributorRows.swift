@@ -80,7 +80,13 @@ struct ContributorRow: View {
     /// 任何信息，只把页面切成橙/绿两条彩带（用户实拍：#1 橙 95.3%、#2 绿 4.7%）。
     /// 收成墨之后，最长的那根条自然成为重点，而 24 小时分布回到参考图那种
     /// 「单色按强度加浓」的直方图。
+    /// 身份装饰色（头像圈）。**结构**，走纯墨/灰阶，不是数据块。
     private var tint: Color { Theme.Palette.Surface.ink }
+
+    /// 数据块色（占比条 + 时段条）。原来这两处与头像共用一个 `tint`，
+    /// 于是"改数据块颜色"必然顺手把头像也涂蓝 —— 一个变量服务两个语义，
+    /// 是"同一属性两份规则"的另一种形态。批次 P6 拆成两个。
+    private var dataTint: Color { ChartSeries.dataMarkColor }
 
     private var share: Double? {
         guard let value = git.authorShare(of: author) else { return nil }
@@ -131,7 +137,7 @@ struct ContributorRow: View {
             }
 
             HStack(spacing: DataRowMetrics.cellGap) {
-                MiniBarGauge(fraction: share ?? 0, tint: tint, height: DataGaugeHeight.inline)
+                MiniBarGauge(fraction: share ?? 0, tint: dataTint, height: DataGaugeHeight.inline)
                     .frame(maxWidth: .infinity)
                 Text(shareAbsence.display)
                     .font(CodeGitType.number(Theme.Typo.microLabel))
@@ -141,7 +147,7 @@ struct ContributorRow: View {
                           ?? "占非合并提交 \(NumberFormat.grouped(git.commitScope.authorBasis)) 次的比例")
             }
 
-            ContributorHourRow(counts: author.activityByHour, tint: tint)
+            ContributorHourRow(counts: author.activityByHour, tint: dataTint)
         }
         .dataTableRow()
         .accessibilityElement(children: .combine)

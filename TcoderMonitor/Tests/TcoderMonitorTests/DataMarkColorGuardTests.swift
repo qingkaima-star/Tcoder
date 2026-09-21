@@ -17,7 +17,10 @@ final class DataMarkColorGuardTests: XCTestCase {
     /// 判据形状：`DataShareBarRow(` 或 `Theme.Share.Row(` 之后 8 行内出现
     /// `tint: Theme.Palette.Surface.ink` / `color: Theme.Palette.Surface.ink`。
     static func inkShareBars(in files: [(path: String, content: String)]) -> [String] {
-        let openers = ["DataShareBarRow(", "Theme.Share.Row("]
+        // 三类"直接画的数据块"都要盯：占比条组件、行内量条、时段条。
+        // 只盯组件名会漏 —— 贡献者页的占比条与时段条原本各自直接画，
+        // 第一版守卫就只查到 `DataShareBarRow(`，那两处从守卫眼里过去了。
+        let openers = ["DataShareBarRow(", "Theme.Share.Row(", "MiniBarGauge(", "ContributorHourRow("]
         let badTints = ["tint: Theme.Palette.Surface.ink", "color: Theme.Palette.Surface.ink"]
         return files.flatMap { file in
             let lines = file.content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
@@ -43,6 +46,18 @@ final class DataMarkColorGuardTests: XCTestCase {
         // 反向自证：判据必须真的看得到合法写法，否则"零命中"可能只是没扫到。
         XCTAssertTrue(views.contains { $0.content.contains("tint: ChartSeries.dataMarkColor") },
                       "全仓没有一处 `dataMarkColor` —— 上面那条断言成了永真绿")
+    }
+
+    /// 头像圈是**身份装饰**（结构），不是数据块：它必须继续走纯墨，
+    /// 否则"给数据块上蓝"会顺手把每个作者的名字前涂成一排蓝圈。
+    func test_identityAvatarsStayInk() throws {
+        let rows = try SurfaceScanKit.sourceFiles(under: "Views/Git")
+            .first { $0.path.hasSuffix("ContributorRows.swift") }
+        let body = rows?.content ?? ""
+        XCTAssertTrue(body.contains("ContributorAvatar(author: author, tint: tint"),
+                      "头像被并进了数据块取色 —— 它不是数据。一个变量服务两个语义时先拆开，别一刀切。")
+        XCTAssertTrue(body.contains("tint: dataTint"),
+                      "贡献者页的占比条/时段条不再走 dataMarkColor，数据块取色又分家了")
     }
 
     /// 数字前景必须仍是纯墨（`tint:` 同名参数，语义完全不同）。
