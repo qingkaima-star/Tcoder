@@ -304,6 +304,13 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 
 ### 第 2 步：帧率复测（分两小步，因为其中一步需要人手）
 
+> **一条现在正生效的排程约束（02:29 写下，免得下一位自己把自己挡掉）**：
+> `perf_wait_window.sh` 挂后台等窗口时，**这台机器上不要跑 `swift build` / `swift test`**——
+> `idle` 档的闸门之一正是"`pgrep -x swiftc` 为空"，我自己的编译会让 watcher 一直拒跑。
+> 同理门禁（`premerge_check`）要么等 watcher 结束（默认最长 25 分钟 / `LAUNCH_APP=0` 时更短），
+> 要么先 `kill` 掉 watcher（只有它自己起的那个 pid，它退出时自己 TERM）。
+> **别为了让门禁过而把 watcher 的闸门调松**——那五维就是它存在的理由。
+
 > **顺带要量的一个新数（01:59 立，别让它停在推理上）**：我这轮把 6 处读点判成"顺手"，
 > 依据是它们的宿主属性走 `write(\.x,…)` 等值闸门。但**"有闸门"不等于"闸门真的经常关"**——
 > `measuredProcessCount` 在一台真机器上每 tick 都在变的话，skip 率接近 0，那这 6 处就仍然每 tick 抖。
