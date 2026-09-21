@@ -29,9 +29,13 @@ struct PerformanceProcessTableCard: View {
                      icon: .processes,
                      trailing: AnyView(sortPicker)) {
             if shown.isEmpty {
+                // 判词说的是「小文案太多」，不是「把话说两遍」。这句预告（列名的枚举）
+                // 与表头逐字重复，盘点表 F 组判 `藏` —— 屏上留空态标题那一句，
+                // 整句挂在同容器紧跟的 ⓘ 上（`CopyHelpBadge` 是全站唯一那枚问号）。
                 EmptyStateView(icon: IconName.emptyTray.rawValue,
                                title: "尚未采到进程数据",
-                               message: "完成一次采样后会列出占用最高的进程（PID、名称、CPU 核当量、内存、线程、打开文件）。")
+                               message: "")
+                CopyHelpBadge("完成一次采样后会列出占用最高的进程（PID、名称、CPU 核当量、内存、线程、打开文件）。")
             } else {
                 table
                 if rows.count > shown.count {

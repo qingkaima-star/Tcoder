@@ -109,32 +109,62 @@ struct PerformanceLiveCharts: View {
                     .frame(height: Theme.Layout.chartMinHeight)
             } else {
                 // 可信点不够时说明为什么没有线，而不是画一条 0 线冒充平稳。
-                NoteLine(localizedFormat("本窗口没有足够的可信内存读数可画曲线（%1$@/%2$@ 点可用）。",
-                                           NumberFormat.grouped(trusted.count),
-                                           NumberFormat.grouped(points.count)),
-                         role: Theme.Semantic.warning, icon: .riskWarning)
+                // **留短藏长**：屏上留「N/M 点可用」这个数（它决定这条线还有没有证据），
+                // 完整句式进 ⓘ；ⓘ 里那条仍是目录里的整句键，原文一字未改。
+                NoteLine("可信点不够画曲线（\(NumberFormat.grouped(trusted.count))/\(NumberFormat.grouped(points.count))）",
+                         role: Theme.Semantic.warning, icon: .riskWarning,
+                         help: localizedFormat("本窗口没有足够的可信内存读数可画曲线（%1$@/%2$@ 点可用）。",
+                                               NumberFormat.grouped(trusted.count),
+                                               NumberFormat.grouped(points.count)))
                     .frame(height: Theme.Layout.chartMinHeight, alignment: .center)
             }
         }
     }
 
-    /// 轴口径全部写在卡面上：收窄过就必须承认不是 0 起点。
+    /// 轴口径全部写在卡面上：**收窄过就必须承认不是 0 起点**（盘点表 Z 节「轴不能骗人」）。
+    /// 本轮的搬法：屏上那一行压成**紧凑读数**（横轴步长 + 两条纵轴区间 + 会不会读错的那句结论），
+    /// 「窗口为什么切成距今秒数」「轴什么时候会收窄」这两段次级说明进 ⓘ 的 hover。
+    /// ⚠ 「不是 0 起点」这五个字不许进 ⓘ —— 藏掉它，陡峭的曲线就会被读成暴涨。
     private var axisNotes: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-            NoteLine("横轴：\(usesRelativeAxis ? "距今秒数（窗口不足 \(Int(ChartScale.relativeAxisLimitSeconds)) 秒，时钟读数没有区分度）" : "每 \(ChartScale.secondsStride(windowSeconds: actualSpanSeconds)) 秒一格")。"
-                     + "纵轴：CPU \(cpuAxis.domainText)%、内存 \(memoryAxis.domainText)%。"
-                     // 这一句不能用 markdown 星号做强调：`NoteLine` 走 `Text(String)`
-                     // 逐字初始化、不解析 markdown，星号会原样上屏（实测屏幕上出现过 `**`）。
-                     + (cpuAxis.isZoomed || memoryAxis.isZoomed
-                        ? "带下限的轴是为看清走势而收窄的，不是 0 起点。"
-                        : "两张图均为 0 起点。"))
+            NoteLine("横轴 \(axisStrideReading) · 纵轴 CPU \(cpuAxis.domainText)% / 内存 \(memoryAxis.domainText)% · "
+                     + (axisIsZoomed ? "轴不是 0 起点" : "两张图均为 0 起点"),
+                     role: axisIsZoomed ? Theme.Semantic.warning : Theme.Semantic.neutral,
+                     icon: axisIsZoomed ? .riskWarning : .info,
+                     help: Self.axisCaliber)
             let rejected = SystemReadings.rejectedMemoryPoints(points)
             if rejected > 0 {
-                NoteLine("内存曲线已剔除 \(NumberFormat.grouped(rejected)) 个无证据读数（引擎给出压力档 unknown 或字节数为 0）。",
-                         role: Theme.Semantic.warning, icon: .riskWarning)
+                // 剔除的**个数**留在屏上（它决定这条线还剩多少证据），判据进 ⓘ。
+                NoteLine("内存曲线已剔除 \(NumberFormat.grouped(rejected)) 个无证据读数",
+                         role: Theme.Semantic.warning, icon: .riskWarning,
+                         help: Self.rejectedMemoryCaliber)
             }
         }
     }
+
+    /// 任一纵轴带下限 = 轴被收窄过。
+    private var axisIsZoomed: Bool { cpuAxis.isZoomed || memoryAxis.isZoomed }
+
+    /// 横轴那一格怎么读（屏上只留这一小截，理由在 ⓘ 里）。
+    private var axisStrideReading: String {
+        usesRelativeAxis ? "距今秒数"
+            : "每 \(ChartScale.secondsStride(windowSeconds: actualSpanSeconds)) 秒一格"
+    }
+
+    /// 进 ⓘ 的轴口径：**必须是完整句**（半句键在英文态语序必坏），
+    /// 且原句「带下限的轴是为看清走势而收窄的，不是 0 起点」一字不改地搬进来——
+    /// 本轮只换落点（屏上 → hover），不改口径也不删口径。
+    /// 秒数与两个收窄触发点一律从 `ChartScale` 取，页面不写第二个真值（性能 spec §5.1）。
+    static let axisCaliber =
+        "横轴：窗口不足 \(Int(ChartScale.relativeAxisLimitSeconds)) 秒（或少于 8 个点）时改标距今秒数——"
+        + "绝对时钟在这个尺度上没有区分度；否则每格步长从固定档位里选，不按点数现算，免得点数一变整个时间轴就重排。"
+        + "带下限的轴是为看清走势而收窄的，不是 0 起点：内存长期在九成是 macOS 的常态，"
+        + "0…100 的域里 93→97 的波动只够画 4pt，肉眼看是一条直线，所以峰值过 "
+        + "\(Int(ChartScale.zoomTriggerPercent))% 收到 50…100、过 \(Int(ChartScale.midZoomPercent))% 收到 75…100。"
+
+    /// 「无证据读数」的剔除判据：与 `SystemReadings.trustedMemoryPoints` 同一份口径。
+    static let rejectedMemoryCaliber =
+        "引擎给出压力档 unknown 或字节数为 0 的点不进曲线：剔掉多少个就在屏上报多少个，不补 0、也不静默丢。"
 
     static func percentLabel(_ value: Double) -> String { "\(ChartAxis.plain(value))%" }
 

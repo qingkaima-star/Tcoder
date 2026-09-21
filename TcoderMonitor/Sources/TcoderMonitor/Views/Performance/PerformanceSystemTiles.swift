@@ -42,9 +42,13 @@ struct PerformanceSystemTiles: View {
                 networkTile
             }
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                NoteLine(SystemReadings.memoryCaliber,
+                // **留短藏长**（盘点表 F 组）：屏上只留最容易被读错的那半句
+                // （「在用」≠「剩余可用」），44 字的完整口径进 ⓘ 的 hover。
+                // 长句走 `SystemReadings.memoryCaliber` 那一份唯一真值，不在这里重抄一遍。
+                NoteLine("这是「在用」",
                          role: memoryIsMissing ? Theme.Semantic.warning : Theme.Semantic.neutral,
-                         icon: memoryIsMissing ? .riskWarning : .info)
+                         icon: memoryIsMissing ? .riskWarning : .info,
+                         help: SystemReadings.memoryCaliber)
                 statusStrip
             }
         }

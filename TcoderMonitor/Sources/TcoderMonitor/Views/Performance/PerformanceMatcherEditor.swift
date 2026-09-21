@@ -28,7 +28,10 @@ struct PerformanceMatcherEditor: View {
                     GlassButton("添加分组", icon: .add, style: .prominent, isEnabled: canAdd) { add() }
                 }
                 .onSubmit { if canAdd { add() } }
-                NoteLine("匹配模式对进程名与命令行做包含匹配，例如 java、nginx、mysqld。规则本身不改变任何进程。")
+                // **留短藏长**：屏上只留那句对外承诺（规则不碰进程），
+                // 举例与匹配方式进 ⓘ。整句仍是目录里已有的那条键，原文一字未改
+                // （`LocalizationGuardTests` 守卫 3：改了原文就是烂尾键）。
+                NoteLine("规则本身不改变任何进程", help: "匹配模式对进程名与命令行做包含匹配，例如 java、nginx、mysqld。规则本身不改变任何进程。")
             }
         }
     }
