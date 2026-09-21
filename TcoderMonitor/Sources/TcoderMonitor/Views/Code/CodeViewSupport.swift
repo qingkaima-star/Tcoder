@@ -180,7 +180,9 @@ struct CodeHotspotRow: View {
                     .tableCell(DataColumns.column(columns, 0))
 
                     MiniBarGauge(fraction: fraction,
-                                 tint: Theme.Semantic.role(for: hotspot.risk).graphicColor,
+                                 // 柱长是**体量**（本文件行数 / 全仓最大行数），风险在下一列已有徽标；
+                                 // 涂风险色等于一个字形说两件事，页尾实拍里九行全绿被读成"九个体量都是好事"。
+                                 tint: ChartSeries.dataMarkColor,
                                  height: DataGaugeHeight.inline)
                         .frame(maxWidth: .infinity)
                         .tableCell(DataColumns.column(columns, 1))

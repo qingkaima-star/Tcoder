@@ -93,11 +93,14 @@ final class LocalizationGuardTests: XCTestCase {
         // 拼字符串而不是写多行字面量：`"""` 里的行尾 `\` 续行会在行尾空格上翻车，
         // 而正则里多出来的一个空格会让整条模式静默不匹配（= 永真绿）。
         let entryPoints = "(?:Text|Button|GlassButton|Label|Menu|Toggle|TextField|Picker"
-            + "|NavigationLink|LabeledContent)\\(\\s*(?:verbatim:\\s*)?"
+            + "|NavigationLink|LabeledContent|CopyHelpBadge)\\(\\s*(?:verbatim:\\s*)?"
         let modifiers = "\\.(?:help|accessibilityLabel|navigationTitle)\\(\\s*"
         let lookups = "(?:localizedCopy|localizedFormat|localizedCount)\\(\\s*"
+        // `help` / `subtitleHelp` / `captionHelp` 是**本轮「留短藏长」的落点**：
+        // 这些组件内部替调用方过了 `localizedCopy`，所以调用点那个中文字面量就是键。
+        // 少了这三个标签，全站的 ⓘ 解释句会整片躲开双语棘轮 —— 英文态漏出中文而守卫一片绿。
         let stringParams = "(?:label|caption|text|title|subtitle|unit|message|note|placeholder"
-            + "|emptyNote|iconLabel)\\s*:\\s*"
+            + "|emptyNote|iconLabel|help|subtitleHelp|captionHelp)\\s*:\\s*"
         let pattern = "(?:" + entryPoints + "|" + modifiers + "|" + lookups + "|" + stringParams + ")"
             + "\"((?:[^\"\\\\]|\\\\.)*[\\u4E00-\\u9FFF](?:[^\"\\\\]|\\\\.)*)\""
         let re = try! NSRegularExpression(pattern: pattern, options: [])
@@ -122,18 +125,12 @@ final class LocalizationGuardTests: XCTestCase {
     }
 
     static func sourceFiles() throws -> [(path: String, content: String)] {
-        let root = packageRoot.appendingPathComponent("Sources/TcoderMonitor").path
-        var out: [(String, String)] = []
-        // 五个目录：**Services/ 与 Models/ 会产出喂给界面的整句**
-        /// （健康页那句"综合 76 分（B 级）…"就住在 `Services/Health/ScoreCurves.swift`）。
-        /// 只扫界面目录会得到一份**系统性低估**的存量 —— 英文实拍当场证伪：
-        /// 页头出英文、同页的评分叙述仍是中文。
-        for sub in ["Views", "Design", "App", "Services", "Models"] {
-            for url in walkFiles(in: "\(root)/\(sub)") where url.hasSuffix(".swift") {
-                out.append((String(url.dropFirst(root.count + 1)),
-                            (try? String(contentsOfFile: url, encoding: .utf8)) ?? ""))
-            }
-        }
+        // **动态枚举整个 `Sources/TcoderMonitor`**，不再写死目录名：写死的清单只会数
+        // "想到名字的那几个"（`Utilities/` 就一直没进来）。动态枚举之后只有一条元测试
+        // 兜住反向风险 —— 见 `test_meta_scanSurfaceCoversEveryTopLevelDirectory`。
+        // 五个目录时代的教训仍然成立：**Services/ 与 Models/ 会产出喂给界面的整句**
+        // （健康页那句"综合 76 分（B 级）…"就住在 `Services/Health/ScoreCurves.swift`）。
+        let out = try SurfaceScanKit.sourceFiles(under: "")
         XCTAssertGreaterThanOrEqual(out.count, 40, "扫到的界面文件只有 \(out.count) 个，分母不对")
         return out
     }
@@ -188,7 +185,16 @@ final class LocalizationGuardTests: XCTestCase {
     /// 这个数字是"面"闸门第一次跑出来的存量，不是估的 ——
     /// 只按 `Text("中文")` 扫会得到 43 条，漏掉的 221 条住在 tooltip、
     /// `label:` / `caption:` 这类字符串型参数与 `localizedCopy` 口子里。
-    private static let unregisteredLiteralCeiling = 28
+    ///
+    /// **2026-09-21 第二次扩口：28 → 30 → 19**（`CopyHelpBadge(` 与 `help:` /
+    /// `subtitleHelp:` / `captionHelp:` 进入口族后实扫 30 = 旧口径 17 + S4 新增 1
+    /// + **一直在盲区的 12** —— 这些组件内部替调用方过了 `localizedCopy`，调用点
+    /// 那句中文就是键）。同日登记掉 11 条（`c89e746`）落到 19：17 条内插串（进不了
+    ///
+    /// **同日 S5 合流 19 → 21（新增债显形）**：搬字那趟新造 2 条内插短句（`LogsErrorClusters`
+    /// 排序口径、`LogsMetricGrid` 每千行归一句）。还法：改 `localizedFormat` 整句键后降回 19。
+    /// 目录，须改成 `localizedFormat` 整句键）+ 2 条 `Text(变量)`。逐条台账见 §6。
+    private static let unregisteredLiteralCeiling = 21
 
     func test_unregisteredLiteralInventoryPrintsAndShrinks() throws {
         let registered = Set(try Self.catalog().map(\.key)).union(Self.registeredStringsDictKeys())

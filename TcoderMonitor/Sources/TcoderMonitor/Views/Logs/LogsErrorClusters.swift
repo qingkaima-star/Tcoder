@@ -6,7 +6,7 @@ struct LogsErrorClustersCard: View {
     let logs: LogSummary?
 
     var body: some View {
-        GlassSection("高频错误", subtitle: subtitle, icon: .logs) {
+        GlassSection("高频错误", subtitle: subtitle, icon: .logs, trailing: sortHelp) {
             if let clusters, !clusters.isEmpty {
                 // 每条签名是「签名 + 原文 + 时间 + 可展开」的多行块，
                 // 块与块之间必须是组间档（16），不能再和块内部的 4pt 挤在同一个数上。
@@ -24,22 +24,34 @@ struct LogsErrorClustersCard: View {
 
     private var clusters: [ErrorCluster]? { logs?.topErrors }
 
+    /// 屏上只留**数量**（它是这一节的信息量所在），排序口径进 ⓘ。
     private var subtitle: String? {
         guard let logs, logs.hasData, let clusters = clusters else { return nil }
-        return "共 \(NumberFormat.grouped(clusters.count)) 类签名 · 按出现次数排序"
+        return "共 \(NumberFormat.grouped(clusters.count)) 类签名"
+    }
+
+    /// ⓘ 里那句是完整口径：数量 + 排序依据。数量在屏上重复一次是故意的——
+    /// 读屏与 hover 都要能独立成句（半句键在英文态语序必坏）。
+    private var sortHelp: AnyView? {
+        guard let subtitle, let clusters else { return nil }
+        return AnyView(CopyHelpBadge("\(subtitle) · 按出现次数排序"))
     }
 
     @ViewBuilder
     private var emptyState: some View {
         if logs == nil {
+            // 判词要的是「屏上的字变少」，不是「把话说三遍」：这一支整句进 ⓘ，
+            // 屏上留标题那一句（「还没有结果」这个状态本身不许藏）。
             EmptyStateView(icon: IconName.emptyUnknown.rawValue,
                            title: "尚无错误签名数据",
-                           message: "该项目还没有日志分析结果，点「重新分析」后再来查看聚类。")
+                           message: "")
+            CopyHelpBadge("该项目还没有日志分析结果，点「重新分析」后再来查看聚类。")
         } else if let logs, !logs.hasData {
             // 原因与下一步**页顶横幅已经说过一次**，这里只说本节画不出什么。
             SectionEmptyNote(text: "本窗口没有可归类的错误行。", icon: .emptyUnknown)
         } else if let logs {
             // ② 查了但空的句式：给出扫过的行数，让「0」成为一个结论而不是空白。
+            // 这一句是「扫了但没命中」的诚实性告知，整句常驻，不搬。
             EmptyStateView(icon: IconName.noRisk.rawValue,
                            // 三态句式全站只有一个出处：WS-K 在 Views/Shell 里定的 ShellCopy。
                            title: ShellCopy.scannedButFoundNone(.errorLevelLogs),

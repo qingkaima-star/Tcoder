@@ -188,15 +188,15 @@ struct DashboardView: View {
                     }
                 }
             } else {
+                let scanned = report?.logs?.hasData == true
+                // 屏上留判定本身（「没有命中错误行」是 C 名单要求的承诺句），次级说明整句进 ⓘ。
                 EmptyStateView(
-                    icon: (report?.logs?.hasData == true) ? IconName.noRisk.rawValue
-                        : IconName.emptyTray.rawValue,
-                    title: (report?.logs?.hasData == true)
-                        ? ShellCopy.scannedButFoundNone(.errors)
-                        : ShellCopy.notAnalyzed(.errorLogs),
-                    message: (report?.logs?.hasData == true)
+                    icon: scanned ? IconName.noRisk.rawValue : IconName.emptyTray.rawValue,
+                    title: scanned ? ShellCopy.scannedButFoundNone(.errors) : ShellCopy.notAnalyzed(.errorLogs),
+                    message: scanned ? "没有命中错误行。" : "用「附加日志文件」手动选择。",
+                    help: scanned
                         ? localizedFormat("已扫描 %1$@ 个日志文件，没有命中错误行。",
-                                              NumberFormat.grouped(report?.logs?.scannedFiles.count ?? 0))
+                                          NumberFormat.grouped(report?.logs?.scannedFiles.count ?? 0))
                         : "在项目内放置 Logs/error.log 或 crash.log，或用「附加日志文件」手动选择。"
                 )
             }
@@ -238,11 +238,15 @@ struct DashboardView: View {
                              value: coverage.integration.map { Self.percentOf100($0.linePercent) } ?? "无报告")
                 }
                 VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                    Text(coverageCaliberLine(coverage))
-                        .font(Theme.Typo.microLabel.font.monospacedDigit())
-                        // 原来是 `.tertiary`：这一行里是**测得值**（含测试代码占比、差值），
-                        // 测得值不得用 tertiary。降到 10pt 已经足够安静了。
-                        .foregroundStyle(.secondary)
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+                        // 盘点表 A 组第 1 条「留短藏长 ●」：屏上留短标签，完整口径整句进 ⓘ。
+                        Text(Self.coverageCaliberTag(coverage))
+                            .font(Theme.Typo.microLabel.font.monospacedDigit())
+                            // 原来是 `.tertiary`：这一行里是**测得值**（含测试代码占比、差值），
+                            // 测得值不得用 tertiary。降到 10pt 已经足够安静了。
+                            .foregroundStyle(.secondary)
+                        CopyHelpBadge(Self.coverageCaliberLine(coverage))
+                    }
                     // #38：这些读数是把几份本地报告合起来算的，而报告本身是 .gitignore 挡着的
                     // 本地产物——不写「哪天生成的」，一份几天前的 lcov 就能长期冒充新鲜数据进健康分。
                     // 多份报告按最旧那份说（见 `CoverageMetrics.generationSummaryText`）。
@@ -264,9 +268,16 @@ struct DashboardView: View {
         }
     }
 
+    /// 屏上短标签 = `coverageCaliberLine` 三条整句各自的前缀子串（不新造修辞），判据与那个 guard 同一条。
+    static func coverageCaliberTag(_ coverage: CoverageMetrics) -> String {
+        guard coverage.scopeIsSeparated, coverage.allSourcesLinePercent != nil,
+              coverage.overallLinePercent != nil else { return localizedCopy("口径：报告只有汇总粒度") }
+        return localizedCopy("口径：仅生产码")
+    }
+
     /// 口径说明一行字：报告没有源文件粒度时必须明说「等同全量」，
     /// 不能让一个没区分过的数字顶着「生产码」的标签。
-    private func coverageCaliberLine(_ coverage: CoverageMetrics) -> String {
+    static func coverageCaliberLine(_ coverage: CoverageMetrics) -> String {
         let sources = coverage.reports.map { $0.toolName }.joined(separator: " / ")
         guard coverage.scopeIsSeparated, let full = coverage.allSourcesLinePercent,
               let production = coverage.overallLinePercent else {

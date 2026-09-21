@@ -199,7 +199,11 @@ struct CodeDuplicationSummarySection: View {
                 }
 
                 MiniBarGauge(fraction: code.duplicationRatio,
-                             tint: Theme.Semantic.role(for: code.overallRisk).graphicColor,
+                             // 这根条的**长度**是重复率，而卡上那三个彩色（读数 2.4%、条、
+                             // 卡头「风险：中」）原本全取 `overallRisk`：条于是同时说两件事
+                             // ——长度说重复率、颜色说整档风险。一个语义一处着色：判档留在
+                             // 读数与徽标上，条退回数据块蓝（与巨大文件榜同一处理）。
+                             tint: ChartSeries.dataMarkColor,
                              height: DataGaugeHeight.metric)
                 // 盘点表 B17（判「删」：重复块本卡读数带已占一格，复杂度上榜在
                 // 「复杂度风险」页的读数带占一格）。本轮 B 守恒线不许删，整条进 ⓘ。

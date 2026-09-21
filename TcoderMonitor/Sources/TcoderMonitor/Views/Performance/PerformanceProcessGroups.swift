@@ -30,7 +30,9 @@ struct PerformanceProcessGroupsCard: View {
                                message: "在下方「匹配模式」里添加分组，例如 java、nginx、mysqld 这类通用进程名。")
             } else {
                 groupList
-                NoteLine(coverageFootnote)
+                // **留短藏长**：屏上只留「零命中该怎么读」这半句（它挡的是"服务挂了"这个误读），
+                // 时间预算与覆盖度去处进 ⓘ。完整口径仍由 `coverageFootnote` 一处产出。
+                NoteLine(Self.zeroMatchReading, help: coverageFootnote)
             }
         }
     }
@@ -64,6 +66,9 @@ struct PerformanceProcessGroupsCard: View {
         }
         return note
     }
+
+    /// 屏上留的那半句（挡的是「服务挂了」这个误读）；完整口径进 ⓘ。
+    static let zeroMatchReading = "命中数为 0 只说明「这一帧没有匹配的进程」"
 }
 
 /// 单组汇总：组头（含状态徽标）+ 匹配模式提示 + 四项指标（CPU 核当量 / 内存 / 线程 / 打开文件）。
@@ -84,11 +89,17 @@ struct PerformanceGroupCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             header
-            Text(localizedFormat("匹配模式 %1$@ · 对进程名与命令行做包含匹配", pattern))
-                .font(Theme.Typo.monoSmall.font)
-                .foregroundStyle(deEmphasized ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
-                .lineLimit(1)
-                .truncationMode(.middle)
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+                // 屏上只留**这一组在匹配什么**（模式本身是数据），
+                // 「怎么匹配的」进 ⓘ —— ⓘ 里放的仍是目录里那条**整句键**，不改原文
+                // （`LocalizationGuardTests` 守卫 3 钉着：动了原文就是烂尾键）。
+                Text(localizedFormat("匹配模式 %@", pattern))
+                    .font(Theme.Typo.monoSmall.font)
+                    .foregroundStyle(deEmphasized ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                CopyHelpBadge(localizedFormat("匹配模式 %1$@ · 对进程名与命令行做包含匹配", pattern))
+            }
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -206,14 +217,16 @@ struct PerformanceGroupCard: View {
                                              totalProcesses: context.snapshot?.processCount,
                                              intervalText: intervalText)
         return VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-            Text(copy.title)
-                .font(Theme.Typo.cardTitle.font)
-                .foregroundStyle(.secondary)
-            Text(copy.message)
-                .font(Theme.Typo.label.font)
-                .foregroundStyle(.tertiary)
-                .lineSpacing(Theme.Typo.label.lineSpacing)
-                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+                // **全场最重的三态整句按「留短藏长」落地**：屏上留 `title` 那一句最短结论
+                // （「采样已暂停」/「未检测到匹配进程」/「正在采集首个样本」），
+                // 成因整句进 ⓘ。三态的 `message` 文本一字未改、也不合并成通用话 ——
+                // 搬的是落点，不是语义（AGENTS 第四轮红线 5）。
+                Text(copy.title)
+                    .font(Theme.Typo.cardTitle.font)
+                    .foregroundStyle(.secondary)
+                CopyHelpBadge(copy.message)
+            }
             DataRowSeparator()
             HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
                 // 「下一步」是引导文字而不是链接：蓝在这套体系里只代表交互 / 选中
