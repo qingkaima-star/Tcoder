@@ -632,9 +632,16 @@ selfcheck_probe_sentinel() {  # selfcheck_probe_sentinel <outdir>
   # 这条要一起重写而不是悄悄留一段"防的是不存在的东西"的守卫。
   [ "$(human_input_in_window -1.00 3)" = "窗口内有人" ] \
     || { fail "human_input_in_window 不再被 -1 骗过——第 20 项前半段的理由要重写"; return; }
-  # 结构钉：排程器只准 source 尺子，不准自己编一份（两份迟早分叉，这次分叉在开录那一刻）
-  grep -Eq '^[[:space:]]*(xcrun )?swiftc' scripts/perf_wait_window.sh \
-    && { fail "perf_wait_window.sh 里又自己编探针了——删掉，改成 source preflight"; bad=1; }
+  # 结构钉：排程器不许长出**第二份静默探针**（两份迟早分叉，这次分叉正好在开录那一刻）。
+  # 这条一开始写成"排程器里不许出现 swiftc"——那是个**代理指标**，
+  # 今天就被自己的合成输入器（`perf_synth_scroll.swift`，投 CGEvent 的、不是尺子）撞红。
+  # 代理指标的后果是：要么守卫被绕过习惯，要么正当事务被拦。改成钉它真正保护的东西：
+  # 静默探针的源码名只许出现在 preflight/probes 那边。
+  grep -q 'input_quiescence.swift' scripts/perf_wait_window.sh \
+    && { fail "perf_wait_window.sh 里又出现静默探针源码——删掉，改成 source preflight 那把尺子"; bad=1; }
+  # 反向钉：合成输入器**必须**继续从唯一的源文件编（别哪天在排程器里手抄一份投事件逻辑）
+  grep -q 'perf_synth_scroll.swift' scripts/perf_wait_window.sh \
+    || { fail "排程器不再从 scripts/perf_synth_scroll.swift 取合成输入器——大概又手抄了一份" ; bad=1; }
   ok "哨兵判定四类都对、且它防的失效真实存在；排程器只剩一把尺子"
 }
 

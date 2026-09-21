@@ -78,11 +78,15 @@ def period_eligibility(meta):
     ⇒ 写进 meta 不等于被看见；判资格必须把复核读回来。
     """
     period = str(meta.get("period") or "idle")
+    # 输入来源决定这句话能不能说"真人"：synthetic 的样本答的是
+    # "连续滚动下渲染路径有没有 hitch"，答不了主观手感 —— 混为一谈就是造假证据。
+    source = str(meta.get("input_source") or "human")
+    tag = "" if source == "human" else "【合成输入：CGEvent 投递，非真人手感】"
     if period == "interaction":
         if str(meta.get("no_human_input_during_window") or "") == "1":
             return False, ("声明交互期，但收尾复核记着**整窗没一次人手事件** ⇒ 不可当交互期样本，"
                            "要判 T1 得重录并真的持续滚动")
-        return True, "有资格答 T1（交互期 hitch = 0）"
+        return True, tag + "有资格答 T1（交互期 hitch = 0）"
     if str(meta.get("contaminated_by_human_input") or "") == "1":
         return False, ("声明心跳期，但收尾复核记着**窗口内有人动手** ⇒ 样本已污染，"
                        "不得进前后对比表")

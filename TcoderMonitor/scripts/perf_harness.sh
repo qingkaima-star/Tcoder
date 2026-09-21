@@ -116,6 +116,7 @@ cmd_idle() {
   require_idle_target
   mkdir -p "$out" || die "建不了 $out"
   meta_write "$out" "mode=idle" "period=$period" "pid=$PID" "binary=$TARGET_BINARY" \
+           "input_source=${INPUT_SOURCE:-human}" \
     "hitches_seconds=$SECONDS_HITCHES" "tp_seconds=$SECONDS_TP" "coexisting_instances=${COEXIST:-1}" \
     "templates=$TEMPLATE_HITCH + $TEMPLATE_TP" "build_flavor=$TARGET_FLAVOR"
   preflight_context "$out" "$PID"
@@ -329,13 +330,20 @@ except Exception:
     print(20)
 PY
 )
-  python3 "$TRACE_REPORT" summary "$out" --seconds "$secs"
+  python3 "$TRACE_REPORT" summary "$out" --seconds "$secs"; local src=$?
   [ -s "$out/time-profile.xml" ] && python3 "$TRACE_REPORT" threads "$out/time-profile.xml" --thread "Main Thread"
   [ -d "$out/pages" ] && python3 "$TRACE_REPORT" switches "$out/pages"
   # 显式收尾：上面两条都是 `[ 测试 ] && 命令` 的形状，没有 pages 目录时（idle 档就是没有）
   # 最后一条测试自己返回 1，会把"重打成功"报成"档口失败"。
   # 实测踩过：修尺子那轮 `report` 明明全打出来了，退出码仍是 1，逼得人回头去查 Traceback。
-  return 0
+  # 但"如实传 rc"不等于"一律传 0"：summary 判**期间自我矛盾**时给的是 3，
+  # 上面那句 `return 0` 会把它一起吞掉 ⇒ 表头翻对了话术、脚本拿到的还是绿灯。
+  case "$src" in
+    0) return 0 ;;
+    3) echo "    ⇒ 以 rc=3 退出：本目录的档位声明与收尾复核互相矛盾，不得作为结论提交。" >&2
+       return 3 ;;
+    *) return "$src" ;;
+  esac
 }
 
 # =============================================================================

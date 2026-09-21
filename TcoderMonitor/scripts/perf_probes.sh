@@ -65,15 +65,31 @@ note_target_flavor() {  # note_target_flavor <pid>
   echo "    被采二进制=${TARGET_BINARY:-（取不到）} 口径=$TARGET_FLAVOR"
 }
 quiescence_probe() {  # → 一行 `… 静默=12.34s`；取不到时打印 静默=-1.00s（调用方按"取不到"处理）
-  if [ -z "$QUIESCE_BIN" ]; then
+  # 【为什么按内容哈希缓存】原来每个新进程都 `-o /tmp/tcoder-quiesce-$$` 重编一遍：
+  # ① 白烧 CPU（编译期间 load 抬高，正好污染我要量的那一维）；
+  # ② 更坏的是**多个会话共用 /tmp 这个命名空间**——现场就有 `/tmp/tcoder-quiesce-trial`
+  #    是个**目录**（另一路会话起的名字），撞上 `-o` 就"编译失败"，
+  #    症状是探针时好时坏地报 `-1.00`，看起来像"机器没人动"却其实是尺子掉了。
+  # ③ 默认 module cache 在并发编译下也会偶发失败 ⇒ 显式指一个自己的缓存目录。
+  local want bin tmp
+  want=$(printf '%s' "$(shasum -a 256 "$QUIESCE_SRC" 2>/dev/null | cut -c1-12)")
+  bin="/tmp/tcoder-quiesce-${want:-srcunknown}"
+  [ -d "$bin" ] && bin="$bin.$$"          # 别人在那儿放了目录：换一个，绝不硬来
+  if [ ! -x "$bin" ]; then
+    tmp="$bin.build.$$"
     if xcrun swiftc -O -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
-         -target arm64-apple-macos14.0 "$QUIESCE_SRC" -o "/tmp/tcoder-quiesce-$$" 2>/dev/null; then
-      QUIESCE_BIN="/tmp/tcoder-quiesce-$$"
+         -target arm64-apple-macos14.0 \
+         -module-cache-path /tmp/tcoder-swiftmodulecache \
+         "$QUIESCE_SRC" -o "$tmp" 2>/dev/null; then
+      mv -f "$tmp" "$bin"                 # 先写临时名再原子替换：并发编译不会留下半个文件
     else
-      echo "    ⚠ 静默探针编译失败，退回 JIT（慢一点，不影响读数口径）" >&2
+      rm -f "$tmp"
+      QUIESCE_WARNED="${QUIESCE_WARNED:-}"
+      [ -n "$QUIESCE_WARNED" ] || { echo "    ⚠ 静默探针编译不成，本进程退回 JIT（慢，但口径不变）" >&2; QUIESCE_WARNED=1; }
     fi
   fi
-  if [ -n "$QUIESCE_BIN" ]; then
+  QUIESCE_BIN="$bin"
+  if [ -x "$QUIESCE_BIN" ]; then
     "$QUIESCE_BIN" 2>/dev/null || echo "静默=-1.00s"
   else
     xcrun swift "$QUIESCE_SRC" 2>/dev/null || echo "静默=-1.00s"

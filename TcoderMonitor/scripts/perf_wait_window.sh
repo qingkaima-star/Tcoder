@@ -28,7 +28,11 @@ declare -f concurrent_heavy_jobs >/dev/null || {
 
 TAG="${1:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
 SAMPLES="${2:-3}"
-MODE="${MODE:-idle}"                   # idle=答 T2；interact=答 T1（**必须真人滚**）
+MODE="${MODE:-idle}"                   # idle=答 T2；interact=答 T1
+INPUT="${INPUT:-human}"                  # human=等真人滚；synth=自己投 CGEvent 滚动
+# ⇒ 两种输入走**同一道**开录闸门与**同一道**收尾复核：闸门读的是
+#   `secondsSinceLastEventType`，它本来就不区分事件来自手还是来自 CGEvent 投递。
+#   为 synth 单开一条"跳过检查"的分支，就是给将来的自己留一个骗自己的地方。
 DEADLINE_SECS="${3:-1800}"          # 总共最多等多久（默认 30 分钟），超了就如实放弃
 LAUNCH_APP="${LAUNCH_APP:-1}"      # 0 = 只等你自己把 App 开到最前面
 QUIET_WANT=8                        # 比闸门的 5 s 留一点余量，免得刚过线就开始动
@@ -96,6 +100,20 @@ cond_quiet() {  # idle 档：等"整段够久没人动"
   [ "$(human_input_in_window "$q" "$QUIET_WANT")" = "窗口内没人" ] && return 0
   echo "人手 ${q}s 前还在动（要 ≥${QUIET_WANT}s）"
   return 1
+}
+
+SYNTH_PID=""
+start_synth_scroller() {  # 编一条 CGEvent 投滚动事件的后台器，覆盖一整趟录制 + 余量
+  # 时长 = hitches(20) + time-profiler(25) + 导出与换趟的空档，宁可多投一会儿：
+  # 少投会在录制后半段"没人动"，那趟就被收尾复核判废——宁可多也不能假装有。
+  local bin="/tmp/tcoder-synth-scroll-$$" secs="${SYNTH_SECS:-75}"
+  xcrun swiftc -O -target arm64-apple-macos14.0 \
+      scripts/perf_synth_scroll.swift -o "$bin" 2>/dev/null \
+    || { echo "!! 合成输入器编译不成（scripts/perf_synth_scroll.swift）" >&2; return 1; }
+  "$bin" "$secs" 14 40 >&2 &
+  SYNTH_PID=$!
+  echo "    合成输入器 pid=$SYNTH_PID（投 ${secs}s，来源会写进 meta：input_source=synthetic）"
+  return 0
 }
 
 cond_someone_active() {  # interact 档：**必须检测到有人正在动**才开录
@@ -166,6 +184,11 @@ for i in $(seq 1 "$SAMPLES"); do
     # 根因不是人不配合，是我的时序自相矛盾：这一档要求窗口里有人滚，
     # 我却**先等 8 秒静默再开录**——开录那一刻恰好最没人动，之后全靠人猜"现在该滚了"。
     # 改成：你只管滚，我检测到你在滚才开录，整段窗口自然落在滚动过程中。
+    if [ "$INPUT" = "synth" ]; then
+      # 投事件器活着才谈开录：编译失败 / 投递 0 拍都会让它非零退出，
+      # 而闸门那边看不到任何"新的输入事件" ⇒ 自然走"等不到人在动"那条放弃路径。
+      start_synth_scroller || { echo "!! 合成输入器起不来，本趟不开录" >&2; break; }
+    fi
     wait_for "有人正在滚动（静默 <${INTERACT_WANT}s）" cond_someone_active || break
   else
     wait_for "人手静默 ≥${QUIET_WANT}s" cond_quiet || break
@@ -177,6 +200,7 @@ for i in $(seq 1 "$SAMPLES"); do
     echo "    ★ 请**从现在起持续滚动**被测窗口（性能页或代码页都行，按 120Hz 的体感滚，别停）。"
     echo "      我一检测到你正在滚就开录（约 50 s），你不用猜时机、也不用等我发话。"
   fi
+  INPUT_SOURCE="$INPUT" export INPUT_SOURCE
   if ./scripts/perf_harness.sh "$MODE" "/tmp/tcoder-perf-$TAG-$MODE-run$i"; then
     echo "    ✓ 第 $i 趟完成"
   else
