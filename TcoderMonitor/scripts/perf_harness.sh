@@ -31,7 +31,7 @@
 # 汇总表里的每一列都必须来自同一档产物，跨档拼表等于造假。
 #
 # ## 输出目录必须带短 HEAD 后缀
-# `/tmp/tcoder-perf-<rev>/`：不带后缀时后一批会静默覆盖前一批，
+# `$PERF_ROOT/tcoder-perf-<rev>/`：不带后缀时后一批会静默覆盖前一批，
 # 于是"改前 vs 改后"最后只剩一列数，回归门禁当场失效。
 #
 # 用法:
@@ -103,7 +103,7 @@ PREFLIGHT_SRC="$PWD/scripts/perf_preflight.sh"
 # idle —— 不碰它，量心跳（spec §1 / §3 T2 的那一档）
 # =============================================================================
 cmd_idle() {
-  local out="${1:-/tmp/tcoder-perf-$REV}"
+  local out="${1:-"$PERF_ROOT"/tcoder-perf-$REV}"
   # period 决定这一批读数**有资格回答哪个问题**：idle 只能答"心跳期"，T1（交互期 hitch=0）
   # 只认 period=interaction 的样本。写进 meta 是为了让 report 阶段还能看见它——
   # 否则过两天没人记得当时到底碰没碰鼠标，就会拿心跳期的数去交交互期的结论。
@@ -148,6 +148,10 @@ idle_record_hitches() {  # idle_record_hitches <outdir> <period>
   # 录制窗口一结束就问一次人手探针：这是"这批能不能进对比表"的判据，必须在导表之后、
   # 在下一个窗口（Time Profiler）开始之前问，否则两个窗口的静默读数会互相顶包。
   [ "$DRY_RUN" = "1" ] || post_window_quiescence "$out" "$SECONDS_HITCHES"
+  # 每轮收尾固定动作：确认自己起的采集进程真退了 + 扫 $TMPDIR 里的 .ktrace 残骸。
+  # 盘满不是"报错退出"那种失败——它会让 xctrace 写不进中间产物，
+  # 样本**照样出一份看起来合理的表**，所以必须在代码里做，不能靠人记得。
+  post_run_disk_hygiene
 }
 
 idle_record_time_profiler() {  # idle_record_time_profiler <outdir>
@@ -279,7 +283,7 @@ switch_record_page() {  # switch_record_page <page> <dir> <sandbox>：一页的�
 }
 
 cmd_switch() {
-  local out="${1:-/tmp/tcoder-perf-$REV}"
+  local out="${1:-"$PERF_ROOT"/tcoder-perf-$REV}"
   echo "==> switch 档：逐页冷启动（自带沙箱，不写用户的 defaults）"
   [ -x "$PERF_BIN" ] || die "找不到被采二进制 $PERF_BIN（先跑 ./scripts/build_app.sh release，或传 PERF_BIN=）"
   local pages
@@ -314,7 +318,7 @@ cmd_switch() {
 }
 
 cmd_report() {
-  local out="${1:-/tmp/tcoder-perf-$REV}"
+  local out="${1:-"$PERF_ROOT"/tcoder-perf-$REV}"
   [ -d "$out" ] || die "没有这个输出目录：$out"
   # 被闸门拒掉的那趟**不许被 report 当成一趟数据重打**：
   # 它只有 context/meta，喂给汇总表会得到"没有 hitch"形状的漂亮空表。
@@ -365,7 +369,7 @@ cmd_probe() {
 cmd_interact() {
   # 不复制一份录制逻辑，只换 period 与提示语——两档共享同一实现，
   # 才不会哪天只修了 idle 那一半、两档的口径悄悄分叉。
-  PERIOD=interaction cmd_idle "${1:-/tmp/tcoder-perf-interact-$REV}"
+  PERIOD=interaction cmd_idle "${1:-"$PERF_ROOT"/tcoder-perf-interact-$REV}"
 }
 
 main() {

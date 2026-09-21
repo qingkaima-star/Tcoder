@@ -136,7 +136,15 @@ heavy_job_is_live() {  # heavy_job_is_live <pid> <进程名> → 0=真在干活�
 }
 
 heavy_job_names() {  # 名单**只在这儿列一次**：闸门取 pid、话术取名字，两边不许各抄一份
-  printf '%s\n' swiftc swift-test xctest xctrace
+  # `swift-frontend` 是**真正的编译工人**：`swiftc` 只是驱动，驱动会把活派给
+  # 一堆 `swift-frontend` 子进程，且驱动常在子进程干完之前就退场。
+  # 实测 2026-09-21 17:23：`pgrep -x swiftc` = 0、闸门打印「✓ 没有重活在跑」，
+  # 而同一时刻 `swift-frontend` 正吃 94.8% CPU。回头看时间线，那大概率是**我自己**
+  # 刚为合成输入器起的那次编译（约 20 秒后消失，时长也对得上）——
+  # 我第一版把它写成"别的会话在编译"，那是未经核实的归属，已改。
+  # 但结论不受归属影响：不管是谁的编译，工人都得在名单里。
+  # 少了这个名字，那一趟交互期样本会五闸全过、load1 却 11.22/15。
+  printf '%s\n' swiftc swift-frontend swift-test swiftTestDriver xctest xctrace
 }
 
 concurrent_heavy_jobs_detail() {  # → `pid=42493 name=xctrace` 一串，只给话术用

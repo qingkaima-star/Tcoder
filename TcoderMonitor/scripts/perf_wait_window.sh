@@ -71,7 +71,10 @@ my_instance_pid() { pgrep -fx "$MY_BIN" 2>/dev/null | head -1; }
 
 wait_for() {  # wait_for <人类可读的条件名> <判定函数>；不满足就一直等，超时按失败退出
   local what="$1" check="$2" waited=0 reason=""
-  while :; do
+  if [ "$MODE" = "interact" ] && [ "$INPUT" = "synth" ]; then
+  ensure_synth_scroller || { echo "!! 合成输入器准备失败 ⇒ 一趟都不跑（不拿 idle 数冒充 T1）" >&2; exit 4; }
+fi
+while :; do
     if reason=$($check); then
       echo "    ✓ $what"
       return 0
@@ -103,16 +106,30 @@ cond_quiet() {  # idle 档：等"整段够久没人动"
 }
 
 SYNTH_PID=""
-start_synth_scroller() {  # 编一条 CGEvent 投滚动事件的后台器，覆盖一整趟录制 + 余量
-  # 时长 = hitches(20) + time-profiler(25) + 导出与换趟的空档，宁可多投一会儿：
-  # 少投会在录制后半段"没人动"，那趟就被收尾复核判废——宁可多也不能假装有。
-  local bin="/tmp/tcoder-synth-scroll-$$" secs="${SYNTH_SECS:-75}"
+SYNTH_BIN=""
+ensure_synth_scroller() {  # **进等待循环之前**把投事件器编好（内容哈希缓存，全机一次）
+  # 原来编译写在 start_synth_scroller 里，而它是"开录闸门之后"才调的
+  # ⇒ `swiftc` 派出的 `swift-frontend` 还在吃 94.8% CPU 的时候，录制窗口已经开始了。
+  # 自己刚起的编译绕过自己刚过的闸门，这种污染比别人的干扰更难发现。
+  local want
+  want=$(shasum -a 256 scripts/perf_synth_scroll.swift 2>/dev/null | cut -c1-12)
+  SYNTH_BIN="/tmp/tcoder-synth-scroll-${want:-unknown}"
+  [ -d "$SYNTH_BIN" ] && SYNTH_BIN="$SYNTH_BIN.$$"     # 别人占了这个名字：换，不硬来
+  [ -x "$SYNTH_BIN" ] && return 0
+  local tmp="$SYNTH_BIN.build.$$"
   xcrun swiftc -O -target arm64-apple-macos14.0 \
-      scripts/perf_synth_scroll.swift -o "$bin" 2>/dev/null \
-    || { echo "!! 合成输入器编译不成（scripts/perf_synth_scroll.swift）" >&2; return 1; }
-  "$bin" "$secs" 14 40 >&2 &
+      -module-cache-path /tmp/tcoder-swiftmodulecache \
+      scripts/perf_synth_scroll.swift -o "$tmp" 2>/dev/null \
+    || { rm -f "$tmp"; echo "!! 合成输入器编不出来（scripts/perf_synth_scroll.swift）" >&2; return 1; }
+  mv -f "$tmp" "$SYNTH_BIN"
+}
+
+start_synth_scroller() {  # 只管"跑起来"：编译不许出现在闸门与录制之间
+  local secs="${SYNTH_SECS:-95}"
+  [ -x "$SYNTH_BIN" ] || { echo "!! 合成输入器没预备好（应先跑 ensure_synth_scroller）" >&2; return 1; }
+  "$SYNTH_BIN" "$secs" 14 40 >&2 &
   SYNTH_PID=$!
-  echo "    合成输入器 pid=$SYNTH_PID（投 ${secs}s，来源会写进 meta：input_source=synthetic）"
+  echo "    合成输入器 pid=$SYNTH_PID（投 ${secs}s；meta 记 input_source=synth）"
   return 0
 }
 
@@ -201,7 +218,7 @@ for i in $(seq 1 "$SAMPLES"); do
     echo "      我一检测到你正在滚就开录（约 50 s），你不用猜时机、也不用等我发话。"
   fi
   INPUT_SOURCE="$INPUT" export INPUT_SOURCE
-  if ./scripts/perf_harness.sh "$MODE" "/tmp/tcoder-perf-$TAG-$MODE-run$i"; then
+  if ./scripts/perf_harness.sh "$MODE" "$PERF_ROOT/tcoder-perf-$TAG-$MODE-run$i"; then
     echo "    ✓ 第 $i 趟完成"
   else
     echo "    ✗ 第 $i 趟被闸门拒绝或失败（不绕、不记）"
@@ -209,7 +226,7 @@ for i in $(seq 1 "$SAMPLES"); do
   fi
 done
 
-echo "==> 完成：$((SAMPLES - fails))/$SAMPLES 趟可用（档=$MODE）；产物 /tmp/tcoder-perf-$TAG-$MODE-run*/"
-echo "    重打读数：./scripts/perf_harness.sh report /tmp/tcoder-perf-$TAG-$MODE-run1"
+echo "==> 完成：$((SAMPLES - fails))/$SAMPLES 趟可用（档=$MODE）；产物 $PERF_ROOT/tcoder-perf-$TAG-$MODE-run*/"
+echo "    重打读数：./scripts/perf_harness.sh report $PERF_ROOT/tcoder-perf-$TAG-$MODE-run1"
 echo "    （表头会写明测量期间；interact 档才有资格答 T1，idle 档只答心跳期）"
 [ "$fails" -lt "$SAMPLES" ] || exit 1

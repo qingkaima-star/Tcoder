@@ -22,6 +22,15 @@
 # 否则两边页名漂移会让 switch 档悄悄测到不存在的页（SwiftUI 会回落到默认页）。
 # -----------------------------------------------------------------------------
 source "$(dirname "${BASH_SOURCE[0]}")/perf_probes.sh"  # 探针族搬出去了，见那个文件的头注
+# ── 磁盘卫生：第七维（2026-09-21 把这台机器吃到只剩 4.4 GiB 之后加的）────────
+# 根因不在我的样本目录，而在 **xctrace 的中间产物**：`instruments*.ktrace`
+# 默认落在 `$TMPDIR`，而采集进程被 kill、超时或崩溃时**不会自己清**。
+# 现场是 21 个孤儿共 103 GB。⇒ 三条硬规矩进代码，不靠我记得：
+#   ① 样本根目录进项目内被忽略的 `tmp/perf/`（不再用全局 /tmp，也不再靠 $TMPDIR）
+#   ② 每轮收尾固定扫残留 + 确认自己起的采集进程真退了
+#   ③ 可用低于阈值就**拒跑**（与其余六维同形状、同一个 hard 标记）
+PERF_ROOT="${PERF_ROOT:-$PWD/tmp/perf}"
+MIN_FREE_GIB="${MIN_FREE_GIB:-20}"
 QUIESCE_MIN="${QUIESCE_MIN:-5}"  # 静默合格线（与 perf_harness.sh 同值）。写在闸门这边，
 # 是因为**阈值**属于判定、不属于取数；排程器单独 source 本文件时也要有默认值可走。
 
@@ -45,7 +54,7 @@ sections() {
 source "$(dirname "${BASH_SOURCE[0]}")/perf_provenance.sh"
 
 preflight_context() {  # preflight_context <outdir> <pid>
-  local out="$1" pid="$2" f="" cores load1 front visible others other_detail hard=0
+  local out="$1" pid="$2" f="" cores load1 front visible others other_detail free_gib hard=0
   cores=$(sysctl -n hw.ncpu 2>/dev/null || echo 8)
   load1=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | awk '{print $1}')
   [ -n "$load1" ] || load1=0
@@ -53,6 +62,8 @@ preflight_context() {  # preflight_context <outdir> <pid>
   front=$(preflight_front_app)
   visible=$(preflight_window_state "$pid")
   others=$(concurrent_heavy_jobs)
+  free_gib=$(disk_free_gib)
+  mkdir -p "$PERF_ROOT" 2>/dev/null || true   # 样本根目录：项目内、.gitignore 已忽略
   other_detail=$(concurrent_heavy_jobs_detail)
   # 运行时漏翻台账（i18n 报告器）会在渲染路径上记键、按 200 次节流写盘。
   # 设了它再量帧率，量的就是台账自己的开销——所以这一维写进上下文，并且直接拒跑。
@@ -73,7 +84,7 @@ preflight_context() {  # preflight_context <outdir> <pid>
   # 拆函数没有改变任何取数顺序，也没有引入新的全局量）。
   preflight_gates
   if [ "$hard" = "1" ] && [ "${IGNORE_CONTEXT_GATE:-0}" != "1" ]; then
-    # 被拒的一趟**必须在目录上留下自认字样**：否则 `ls /tmp/tcoder-perf-*` 会看见
+    # 被拒的一趟**必须在目录上留下自认字样**：否则 `ls $PERF_ROOT/tcoder-perf-*` 会看见
     # run1/run2/run3 三个"像样本"的空目录，后来的人很容易把"闸门拒了"读成"量过了"。
     # （今天就真出现了三个只有 context/meta 的目录。）
     printf 'REFUSED\n这一趟没有采数：测量上下文不合格，闸门拒跑。原因见同目录 %s。\n' "$(basename "$f")" \
@@ -103,7 +114,7 @@ preflight_write_context() {  # preflight_write_context <outdir> <context 文件�
     echo "hitches_seconds=$SECONDS_HITCHES  tp_seconds=$SECONDS_TP"
     echo "诊断开关 TCODER_I18N_RUNTIME_LEDGER=${i18n_ledger:-未设（渲染路径零成本）}"
   } > "$f" 2>/dev/null || die "写不出 $f"
-  echo "    上下文：前台=$front  visible=$visible  load1=$load1/$cores  并发重活=${other_detail:-无}  静默=${quiet:-取不到}s"
+  echo "    上下文：前台=$front  visible=$visible  load1=$load1/$cores  并发重活=${other_detail:-无}  静默=${quiet:-取不到}s  磁盘可用=${free_gib:-取不到}GiB"
 }
 
 # 身份两维：被量的到底是不是这份代码、以及采样时有没有开着诊断报告器。
@@ -139,6 +150,14 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
     # 现场看起来像"探针输出正常、后面凭空没了"）。
     echo "!! 机器上有重活在跑（${other_detail:-只拿到 pid $others，没拿到名字}）——" \
          "它会抢满全部核，app-update 相位会被显著抬高。等它跑完再来。" >&2
+    hard=1
+  fi
+  # 【第七维：磁盘】2026-09-21 这台机器被取证吃到只剩 4.4 GiB，
+  # 而且是**崩在录制中途**——盘满时 xctrace 写不进中间产物，样本会静默变形，
+  # 比"量不到"更坏：它会给你一份看起来合理的数。
+  if awk -v f="${free_gib:--1}" -v m="$MIN_FREE_GIB" 'BEGIN{exit !(f < m)}'; then
+    echo "!! 数据卷可用 ${free_gib:-取不到} GiB（要求 ≥${MIN_FREE_GIB}）——一趟 trace 轻则几百 MB、" \
+         "重则十几 GB，且 $TMPDIR 里的 .ktrace 中断不会自己清。先清盘再来，不硬跑。" >&2
     hard=1
   fi
   # 负载阈值：默认 1 分钟 load 不超过核数的 1.5 倍（LOAD_MAX=<数> 可覆盖，但覆盖了就要在报告里写）
@@ -291,4 +310,29 @@ json.dump({"projects": [{"id": uuid, "name": "Tcoder（性能沙箱）", "path":
            "selectedProjectID": uuid},
           open("%s/projects.json" % support, "w"), indent=2)
 PY
+}
+
+disk_free_gib() {  # → 数据卷可用 GiB（一位小数）；取不到给 -1（调用方按"不可用"处理）
+  df -k /System/Volumes/Data 2>/dev/null | awk 'NR==2{printf "%.1f", $4/1024/1024}'
+}
+
+sweep_orphan_traces() {  # 只删**没有任何进程打开着**的 .ktrace 中间产物
+  # 为什么先看 lsof：正在录的那趟也会在自己的 $TMPDIR 里留 .ktrace，
+  # 无差别删会把**正在进行的采集**打断（那是比留残骸更坏的修法）。
+  local root="${1:-${TMPDIR:-/tmp}}" f kept=0 deleted=0
+  [ -d "$root" ] || { printf '孤儿 trace：目标目录不在（%s），跳过\n' "$root"; return 0; }
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if lsof -- "$f" >/dev/null 2>&1; then kept=$((kept + 1)); continue; fi
+    rm -rf -- "$f" && deleted=$((deleted + 1))
+  done < <(find "$root" -maxdepth 1 \( -name 'instruments*.ktrace' -o -name '*.ktrace' \) 2>/dev/null)
+  printf '孤儿 trace：删 %d 个、仍被进程打开而保留 %d 个（根 %s）\n' "$deleted" "$kept" "$root"
+}
+
+post_run_disk_hygiene() {  # 每轮收尾固定两件事：进程真退了没 + $TMPDIR 残骸
+  local left
+  left=$(pgrep -x xctrace 2>/dev/null | tr '\n' ' ')
+  [ -n "$left" ] && echo "    ⚠ 还有 xctrace 在场（pid ${left% }）——先别开下一趟" >&2
+  printf '    %s\n' "$(sweep_orphan_traces "${1:-${TMPDIR:-/tmp}}")"
+  echo "    磁盘可用 $(disk_free_gib) GiB（低于 ${MIN_FREE_GIB} 就不开新趟）"
 }

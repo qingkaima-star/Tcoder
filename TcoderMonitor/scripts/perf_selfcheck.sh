@@ -20,7 +20,7 @@
 # selfcheck —— 不起 App、不碰 xctrace，拿合成夹具验这把尺子自己还活着
 # =============================================================================
 cmd_selfcheck() {
-  local out="${1:-/tmp/tcoder-perf-selfcheck-$REV}"
+  local out="${1:-$PERF_ROOT/tcoder-perf-selfcheck-$REV}"
   echo "==> selfcheck 档：验尺子（合成夹具，零采样，秒级）"
   rm -rf "$out"; mkdir -p "$out"
   local fails=0
@@ -43,12 +43,13 @@ cmd_selfcheck() {
   selfcheck_binary_provenance "$out" # 14) 被量的二进制必须就是这份代码（rev 对齐）
   selfcheck_baseline_text_is_derived "$out"  # 15) 对照列文字不许是字典的第二份手抄
   selfcheck_heavy_jobs_probe "$out"  # 16) 并发重活：三个名字都要认，输出必须是 pid 清单
-  selfcheck_gate_matrix "$out"      # 17) 六维闸门合成矩阵：能放行，也会逐维拒
+  selfcheck_gate_matrix "$out"      # 17) 七维闸门合成矩阵：能放行，也会逐维拒
   selfcheck_page_list_shape "$out"    # 18) 九页页名逐条完整（带空格的那条不许被拆）
   selfcheck_launch_ready "$out"       # 19) 首帧要剔除运行期尾巴，不许拿求和冒充
   selfcheck_probe_sentinel "$out"     # 20) 探针取不到的哨兵不许骗过"有人在动"那条判定
   selfcheck_period_eligibility "$out" # 21) 档位声明与收尾复核互相矛盾的样本不许拿到 T1 资格
   selfcheck_probe_self_sufficient "$out" # 22) 探针必须能被裸 `set -u` 消费者调用（不靠 harness）
+  selfcheck_perf_root_ignored "$out"    # 23) 样本根必须真的被 git 忽略，且不许有第二处写死 /tmp 默认值
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
@@ -504,7 +505,7 @@ selfcheck_heavy_jobs_probe() {  # selfcheck_heavy_jobs_probe <outdir>
   # `xctrace` 是 2026-09-21 补的：另一个工程同时在录 Animation Hitches，
   # 而这一维当时读成"机器空"。两档 xctrace 互踩，量出来的两边都不准。
   local n missing=""
-  for n in swiftc swift-test xctest xctrace; do
+  for n in swiftc swift-frontend swift-test swiftTestDriver xctest xctrace; do
     grep -q "\b$n\b" <(declare -f heavy_job_names) || missing="$missing $n"
   done
   # xctrace 那一维必须认"真在采"，不能认"在场"：机器上此刻就挂着一个别的工程
@@ -525,12 +526,12 @@ selfcheck_heavy_jobs_probe() {  # selfcheck_heavy_jobs_probe <outdir>
     && grep -q 'concurrent_heavy_jobs_detail' <(declare -f preflight_context) \
     || missing="$missing 话术未走带名字的明细版"
   [ -z "$missing" ] \
-    && ok "探针覆盖 swiftc / swift-test / xctest / xctrace 四种重活，话术带真名字" \
+    && ok "探针覆盖 6 类重活（含编译工人 swift-frontend），话术带真名字" \
     || fail "探针不再认识这些重活：${missing# }——全量门禁在跑时会被读成机器空"
 }
 
 selfcheck_gate_matrix() {  # selfcheck_gate_matrix <outdir>
-  # 17) 六维闸门合成矩阵：喂一份"全合格"的假上下文，要求
+  # 17) 七维闸门合成矩阵：喂一份"全合格"的假上下文，要求
   #     ① 全合格 ⇒ 放行；② 每一维单独破坏 ⇒ 拒。
   #     为什么必须有：前五维各自都修过一次 bug，但没有一个测试证明"闸门既能放行也会拒"。
   #     恒拒（前台名比错）与恒放行（探针函数不在场）都不报错，只能靠这张矩阵抓。
@@ -540,13 +541,13 @@ selfcheck_gate_matrix() {  # selfcheck_gate_matrix <outdir>
   fi
   local head_sha hard_all=0
   head_sha=$(git rev-parse HEAD 2>/dev/null)
-  # 一份"全合格"的上下文（六维取数都是本文件的 local，动态作用域里直接覆盖）
+  # 一份"全合格"的上下文（各维取数都是本文件的 local，动态作用域里直接覆盖）
   gate_feed() {
     others=""; BUILD_REV="$head_sha"; BUILD_CLEAN="true"; front="Tcoder"
     visible="有在屏窗口（Tcoder）"; load1=3; cores=15; quiet=30; qline="静默=30s"
     other_detail=""
     COEXIST=1; SECONDS_HITCHES=20; SECONDS_TP=25; i18n_ledger=""
-    BUILD_TREE=""; HEAD_TREE=""; hard=0
+    BUILD_TREE=""; HEAD_TREE=""; hard=0; free_gib=400
   }
   gate_feed; preflight_gates >/dev/null 2>&1
   [ "$hard" = "0" ] || { fail "六维全合格却被拒 ⇒ 又造出一条永远不可能通过的闸门"; hard_all=1; }
@@ -562,7 +563,11 @@ selfcheck_gate_matrix() {  # selfcheck_gate_matrix <outdir>
   [ "$hard" = "1" ] || { fail "load1 超阈值却放行"; hard_all=1; }
   gate_feed; i18n_ledger="/tmp/x.log"; preflight_gates >/dev/null 2>&1
   [ "$hard" = "1" ] || { fail "设着漏翻台账还放行——那批量的是台账的开销"; hard_all=1; }
-  [ "$hard_all" = "0" ] && ok "六维闸门矩阵：全合格放行、逐维破坏各判一次拒"
+  gate_feed; free_gib=3;    preflight_gates >/dev/null 2>&1
+  [ "$hard" = "1" ] || { fail "盘只剩 3 GiB 还放行——盘满时 trace 写不进去，样本会静默变形"; hard_all=1; }
+  gate_feed; free_gib="";   preflight_gates >/dev/null 2>&1
+  [ "$hard" = "1" ] || { fail "磁盘可用取不到（空值）却放行——取不到必须按不合格处理"; hard_all=1; }
+  [ "$hard_all" = "0" ] && ok "七维闸门矩阵：全合格放行、逐维破坏各判一次拒（含空值判败）"
 }
 
 selfcheck_page_list_shape() {  # selfcheck_page_list_shape <outdir>
@@ -699,4 +704,22 @@ selfcheck_probe_self_sufficient() {  # selfcheck_probe_self_sufficient <outdir>
   [ "$(bash -c 'set -euo pipefail; source scripts/perf_preflight.sh >/dev/null 2>&1; printf %s "$QUIESCE_MIN"')" = "5" ] \
     || { fail "单独 source perf_preflight.sh 时 QUIESCE_MIN 没兜到 5（阈值默认不在闸门这边了）"; return; }
   ok "探针裸可调（自带默认）、阈值仍只住在闸门（双向都钉）"
+}
+
+selfcheck_perf_root_ignored() {  # selfcheck_perf_root_ignored <outdir>
+  # 23) "样本落项目内被忽略的目录"这条规矩要有人守：改名、换路径、忘了加忽略，
+  #     都会让 GB 级 .trace 静默出现在 `git status` 里（今天就把 tmp/ 暴露过一次）。
+  local probe="$PERF_ROOT/probe-only.trace/contents"
+  git check-ignore -q "$probe" \
+    || { fail "$PERF_ROOT 没被 git 忽略（试 $probe）——下一轮取证就会把 trace 摊进版本库"; bad=1; }
+  # 反向钉：不许再有人把样本默认值写回全局 /tmp（单点定义在 preflight 的 PERF_ROOT）
+  local strays
+  # 模式里那个 `[p]` 不是笔误：写成 `tcoder-perf` 会让这条 grep **先命中本文件里
+  # 这串模式本身**（第 20 项的 `^provenance_ok() {` 今天已经为同样的事红过一次）。
+  strays=$(grep -ln ':-/tmp/tcoder-[p]erf' scripts/*.sh 2>/dev/null | tr '\n' ' ')
+  [ -z "$strays" ] \
+    || { fail "这些文件里又出现写死的 /tmp 样本默认值：$strays（只许走 \$PERF_ROOT）"; bad=1; }
+  # `${bad:-0}`：我自己刚立的规矩——闸门与判据里的量一律兜底，
+  # 否则 `set -u` 下"读一个还没被赋过值的全局"就是**静默中止**（今天已经栽过一次）。
+  [ "${bad:-0}" = "0" ] && ok "样本根已被 git 忽略，且没有第二处写死默认值"
 }
