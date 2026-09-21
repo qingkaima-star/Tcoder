@@ -130,9 +130,10 @@ start_synth_scroller() {  # 只管"跑起来"：编译不许出现在闸门与�
   # 被测 pid：优先用本档自己起的那个；attach 模式下用唯一在场的那个
   local tp; tp="${TARGET_PID:-$(my_instance_pid 2>/dev/null | head -1)}"
   [ -n "$tp" ] || { echo "!! 不知道往哪个 pid 投事件 ⇒ 不开录（空转样本比没有样本更坏）" >&2; return 1; }
-  "$SYNTH_BIN" "$secs" "$tp" 14 40 >&2 &
+  # 14 px / 8 ms ⇒ ~125 Hz 的事件节奏；每次改动都记进日志，免得读表的人不知道输入多快
+  "$SYNTH_BIN" "$secs" "$tp" "${SYNTH_PX:-14}" "${SYNTH_GAP_MS:-8}" >&2 &
   SYNTH_PID=$!
-  echo "    合成输入器 pid=$SYNTH_PID（投 ${secs}s；meta 记 input_source=synth）"
+  echo "    合成输入器 pid=$SYNTH_PID（投 ${secs}s，${SYNTH_PX:-14}px/${SYNTH_GAP_MS:-8}ms ≈ $((1000 / ${SYNTH_GAP_MS:-8})) Hz 事件节奏；meta 记 input_source=synth）"
   return 0
 }
 

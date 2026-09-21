@@ -25,7 +25,11 @@ guard args.count >= 3, let secs = Double(args[1]), secs > 0, let pid = Int(args[
     exit(2)
 }
 let dy = args.count > 3 ? (Double(args[3]) ?? 14) : 14
-let gapMs = args.count > 4 ? (Double(args[4]) ?? 40) : 40
+// 投递节奏默认 **8 ms ≈ 125 Hz**，与被测档的标称刷新率同量级。
+// 第一版用 40 ms（25 Hz）：那会让"实测出帧只有 41~53/s"这件事**没法归因**——
+// 到底是 App 画不动，还是我的输入器每秒只推 25 下、画面本来就没必要重画？
+// ⇒ 输入器的频率必须 ≥ 想证明的帧率，否则这个变量就是我自己造的假象。
+let gapMs = args.count > 4 ? (Double(args[4]) ?? 8) : 8
 
 /// 在屏窗口里属于该 pid、层号为 0（普通窗口）、面积最大的那个的中心点。
 func targetWindowCenter(for owner: Int) -> CGPoint? {
