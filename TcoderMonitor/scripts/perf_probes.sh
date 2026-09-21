@@ -17,7 +17,17 @@ pid_binary() {  # pid_binary <pid>
   lsof -p "$1" 2>/dev/null | awk '$4 == "txt" { print $NF; exit }'
 }
 
-WINLIST_BIN=""
+# ── 探针必须能被**不经过 perf_harness.sh** 的消费者裸调 ────────────────────
+# 这些量原先只在 `perf_harness.sh` 头部赋一次；而 `perf_wait_window.sh` 是直接 source
+# 本文件的，于是进了 `set -u` 就炸在 `QUIESCE_BIN: unbound variable`
+# ——今天 T1 采样断在这里（三轮作废之后第一次真的跑到开录，被我自己的脚本绊倒）。
+# 路径按 `BASH_SOURCE` 算而不是 `$PWD`：换个目录跑也不会指错探针源码。
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WINLIST="${WINLIST:-$HERE/winlist.swift}"
+WINLIST_BIN="${WINLIST_BIN:-}"
+QUIESCE_SRC="${QUIESCE_SRC:-$HERE/input_quiescence.swift}"
+QUIESCE_BIN="${QUIESCE_BIN:-}"
+
 # 窗口存在性探测。**为什么先编译一次**：`xcrun swift winlist.swift` 是 JIT，实测每次 0.3 s；
 # 原来 `switch` 档把它放在"首帧轮询"里（最多 60 次），既慢又把探测开销混进了计时。
 # 编译成二进制后稳态实测 39~45 ms，且首次 ~508 ms 的 dyld 冷启动由下面这次预热挡在计时窗外。

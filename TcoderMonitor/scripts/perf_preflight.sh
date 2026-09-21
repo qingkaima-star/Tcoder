@@ -22,6 +22,8 @@
 # 否则两边页名漂移会让 switch 档悄悄测到不存在的页（SwiftUI 会回落到默认页）。
 # -----------------------------------------------------------------------------
 source "$(dirname "${BASH_SOURCE[0]}")/perf_probes.sh"  # 探针族搬出去了，见那个文件的头注
+QUIESCE_MIN="${QUIESCE_MIN:-5}"  # 静默合格线（与 perf_harness.sh 同值）。写在闸门这边，
+# 是因为**阈值**属于判定、不属于取数；排程器单独 source 本文件时也要有默认值可走。
 
 sections() {
   local line

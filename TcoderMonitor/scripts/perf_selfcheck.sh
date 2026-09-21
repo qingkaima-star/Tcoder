@@ -48,6 +48,7 @@ cmd_selfcheck() {
   selfcheck_launch_ready "$out"       # 19) 首帧要剔除运行期尾巴，不许拿求和冒充
   selfcheck_probe_sentinel "$out"     # 20) 探针取不到的哨兵不许骗过"有人在动"那条判定
   selfcheck_period_eligibility "$out" # 21) 档位声明与收尾复核互相矛盾的样本不许拿到 T1 资格
+  selfcheck_probe_self_sufficient "$out" # 22) 探针必须能被裸 `set -u` 消费者调用（不靠 harness）
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
@@ -645,4 +646,26 @@ print("|".join("%s=%s" % (k, "Y" if pe(v)[0] else "N") for k, v in cases))')
   case "$no" in *"不可当交互期样本"*) ;; *) fail "没人滚的 interaction 样本话术没翻转（还是「$no」）——退出码判了、表头在骗人" ;; esac
   [ "$yes" != "$no" ] || { fail "两种样本话术一模一样，等于没判"; return; }
   ok "期间资格：四种形状各判一次，且表头话术跟着翻转"
+}
+
+selfcheck_probe_self_sufficient() {  # selfcheck_probe_self_sufficient <outdir>
+  # 22) 今天 T1 采样断在这里：`perf_wait_window.sh` 直接 source 探针族，
+  #     而 `QUIESCE_BIN` 只在 `perf_harness.sh` 头部赋过 ⇒ 一进 `set -u` 就
+  #     `unbound variable`，脚本在"即将开录"那一刻死掉，人白等一场。
+  #     ⇒ 取数原语必须**自带默认**；但**阈值不许跟着搬**（那是判定侧的东西）。
+  local raw
+  raw=$(bash -c 'set -euo pipefail
+                 source scripts/perf_probes.sh 2>/dev/null
+                 quiescence_probe' 2>&1)
+  case "$raw" in
+    *"unbound variable"*) fail "探针族在裸 set -u 消费者下仍有未初始化量：$raw"; return ;;
+  esac
+  [ -n "$(quietest_seconds "$raw")" ] \
+    || { fail "裸调探针取不到可解析的静默秒数（拿到「$raw」）"; return; }
+  # 反向钉：阈值**不许**住在探针文件里（搬过去就等于把判定混进取数原语）
+  bash -c 'set -euo pipefail; source scripts/perf_probes.sh >/dev/null 2>&1; [ -n "${QUIESCE_MIN:-}" ]' \
+    && { fail "QUIESCE_MIN 跑进了 perf_probes.sh —— 合格线属于闸门，不该由取数原语带默认"; return; }
+  [ "$(bash -c 'set -euo pipefail; source scripts/perf_preflight.sh >/dev/null 2>&1; printf %s "$QUIESCE_MIN"')" = "5" ] \
+    || { fail "单独 source perf_preflight.sh 时 QUIESCE_MIN 没兜到 5（阈值默认不在闸门这边了）"; return; }
+  ok "探针裸可调（自带默认）、阈值仍只住在闸门（双向都钉）"
 }

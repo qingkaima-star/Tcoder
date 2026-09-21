@@ -18,8 +18,6 @@ cd "$(dirname "$0")/.." || exit 1
 # 自己再 pgrep 一遍就是第二份口径：两份迟早分叉，而分叉的方向永远是"排程器以为可以了"。
 # shellcheck source=/dev/null
 source scripts/perf_preflight.sh
-QUIESCE_SRC="${QUIESCE_SRC:-$PWD/scripts/input_quiescence.swift}"  # preflight 的探针要这个量，
-# 平时由 perf_harness.sh 设；本档可以单独跑，所以自己兜一份（同一路径，不是第二把尺子）。
 # 【反向的那类 bug】探针函数不存在时 `$(concurrent_heavy_jobs)` 得到空串，
 # 于是"没有重活"**永远为真**——一条恒放行闸门比恒拒更危险，因为它连报错都没有。
 # 今天刚修过恒拒（前台名比错），这条断言防的是镜像方向。
