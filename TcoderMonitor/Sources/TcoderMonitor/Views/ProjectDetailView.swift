@@ -111,10 +111,13 @@ struct ProjectDetailView: View {
             EmptyStateView(
                 icon: IconName.emptyUnknown.rawValue,
                 title: "还没有项目",
-                message: "在左侧「选择目录…」指一个本地仓库目录，九页读数全部由它真实算出来。",
+                // 盘点表 A 组第 6 条「留短藏长」：屏上留「按钮按了要指哪儿」这半句短标签
+                // （原句子串），「在左侧」的位置说明与「九页读数由它算出」整句进 ⓘ。
+                message: "指一个本地仓库目录",
                 action: AnyView(GlassButton("选择目录…", icon: .add, style: .prominent) {
                     NotificationCenter.default.post(name: .requestAddProject, object: nil)
-                })
+                }),
+                help: "在左侧「选择目录…」指一个本地仓库目录，九页读数全部由它真实算出来。"
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
