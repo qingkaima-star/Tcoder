@@ -97,8 +97,19 @@ final class TooltipMigrationGuardTests: XCTestCase {
     /// 只许往下调：每还一笔债就写清是哪一片还的。
     private static let visibleCaliberCeiling = 88
 
-    /// 总量下限 = 播种时的可见 + tooltip 之和。**只许往上**（新增口径允许，删口径不行）。
-    private static let totalCaliberFloor = 101
+    /// 总量下限 = 播种时的可见 + tooltip 之和 **减去已核准的删除数**。
+    ///
+    /// 为什么必须有豁免口：盘点表里 16 处判的是「删」（同屏两遍、卡名换个说法再讲一遍），
+    /// 那些不是"藏起来"，是本来就不该占两处。一条只许往上的守恒线会把合理的删句一起拦下，
+    /// 而被人嫌烦的守卫活不过下一轮 —— 所以给一个**逐条留名**的口，而不是放宽判据。
+    private static let totalCaliberFloor = 101 - acceptedCaliberDeletions.count
+
+    /// 已核准「删掉而不是藏进 ⓘ」的口径句：片段 → 为什么该删。
+    /// **只由总工写**：切片负责人在自己汇报里列《建议删除》清单，由总工在合流时逐条登记。
+    /// 每一条都要能被读者反驳 —— 空着的时候这条守卫就是纯守恒。
+    /// 2026-09-21 播种时为空 —— 还没有任何一条删除经过复核。
+    /// （空表得写 `[:]`：Swift 不接受只由注释撑着的 `[ ]` 当字典字面量。）
+    static let acceptedCaliberDeletions: [String: String] = [:]
 
     /// 承担诚实性告知、**不许只活在 hover 里**的句子片段。
     /// 取值前逐个核实过当前确实常驻上屏（片段是为了避开同一句在两个页面各写一份时的措辞差）。
@@ -239,7 +250,18 @@ final class TooltipMigrationGuardTests: XCTestCase {
                       "删掉承诺句必须被单独点名，不能和「只剩 hover 可见」混成同一条")
     }
 
-    /// 已知保守处必须显形：跨行写的 `.help(` 实参会被算成"可见"。
+    /// 豁免口自己也要有读者：登记必须**带原因**，且下界随登记数同步 ——
+    /// 否则它就是一个可以悄悄清空存量的口子（本仓在别的基线清单上栽过同款）。
+    func test_deletionRegistryCarriesAReasonAndMovesTheFloorOnlyThatMuch() {
+        for (fragment, why) in Self.acceptedCaliberDeletions {
+            XCTAssertFalse(fragment.trimmingCharacters(in: .whitespaces).isEmpty)
+            XCTAssertGreaterThanOrEqual(why.trimmingCharacters(in: .whitespaces).count, 8,
+                                        "「\(fragment)」的删除理由太短，无法被反驳：" + why)
+        }
+        XCTAssertEqual(Self.totalCaliberFloor, 101 - Self.acceptedCaliberDeletions.count,
+                       "下界只能被登记数逐条抵掉，不许另写一个更小的数")
+    }
+
     /// 记成测试是为了将来有人改判据时知道这条边界在哪儿 —— 方向是安全的（多要求藏，不会少要求）。
     func test_multilineHelpArgumentFailsSafeAsVisible() {
         let split = [(path: "Views/Fake.swift", content: """
