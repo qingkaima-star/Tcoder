@@ -125,9 +125,12 @@ ensure_synth_scroller() {  # **进等待循环之前**把投事件器编好（�
 }
 
 start_synth_scroller() {  # 只管"跑起来"：编译不许出现在闸门与录制之间
-  local secs="${SYNTH_SECS:-95}"
+  local secs="${SYNTH_SECS:-95}"   # 覆盖一整趟（hitches 20s + time-profile 25s + 导出与换趟空档）
   [ -x "$SYNTH_BIN" ] || { echo "!! 合成输入器没预备好（应先跑 ensure_synth_scroller）" >&2; return 1; }
-  "$SYNTH_BIN" "$secs" 14 40 >&2 &
+  # 被测 pid：优先用本档自己起的那个；attach 模式下用唯一在场的那个
+  local tp; tp="${TARGET_PID:-$(my_instance_pid 2>/dev/null | head -1)}"
+  [ -n "$tp" ] || { echo "!! 不知道往哪个 pid 投事件 ⇒ 不开录（空转样本比没有样本更坏）" >&2; return 1; }
+  "$SYNTH_BIN" "$secs" "$tp" 14 40 >&2 &
   SYNTH_PID=$!
   echo "    合成输入器 pid=$SYNTH_PID（投 ${secs}s；meta 记 input_source=synth）"
   return 0
