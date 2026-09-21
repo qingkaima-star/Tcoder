@@ -77,7 +77,23 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 136 → 137（紧随其后还掉本门挂的那笔新账：`DependenciesView.swift` 401 行越线，
     /// 把只被它自己使用的 `NetworkOptionsCard` 搬成同目录分片 `Dependencies/NetworkOptionsCard.swift`；
     /// 守卫实报「实现文件 137 · 零调用清单：无」，`hugeFileWorkList` 里那条已删）。
-    static let censusBaseline = 137
+    /// 137 → 141（WS-CL 无头 CLI，四枚全在 `Services/CLI/`，**2026-09-21 由总工按守卫实报填**：
+    /// `CLIRouter.swift`（argv 词表 + 参数 + 退出码）由 `App/TcoderMonitorApp.init()` 直接调用 ——
+    /// 命中子命令词才走它，GUI 路径一字不动；
+    /// `CLIScan.swift`（五路扇出，复用 GUI 那五个分析器）由 `CLIRouter.runReport` 调用；
+    /// `CLIScoreText.swift`（`score` 文本读数）与 `CLIOutput.swift`（`CLIConfig` 口径自检 +
+    /// stdout/stderr 分流）各由 `CLIRouter` 调用。四枚都是"入口"而不是"第二把尺子"：
+    /// 评分与 schema 一律沿用 `Models/ProjectReport.swift` 本体。守卫实报「实现文件 141 ·
+    /// 零调用清单：无」（`unused.isEmpty` 通过 = 四枚都有产品侧引用，不是被单测喂活的）。
+    /// 141 → 142（同一条流紧随其后的一笔：`Services/Health/HealthBreakdown.swift` ——
+    /// 把 `ScoreRow` / `HealthBreakdown` / `WeightShiftCause` / `DimensionDisplay` /
+    /// `MissingDimensionReason` 从 `Views/Health/HealthComponentTable.swift` **整块下移**，
+    /// 让无头 CLI 与界面共用同一份"哪些维度缺席、为什么缺席"。引用点：
+    /// `Views/Health/HealthComponentTable.swift`（原调用方，一字未改）、
+    /// `Design/DataTable.swift`（此前一直在反向引用 `HealthBreakdown.weightColumnHelp`，
+    /// 这次连方向一起摆正）、`Services/CLI/CLIScoreText.swift`（新增的第二位读者）。
+    static let censusBaseline = 142
+
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
