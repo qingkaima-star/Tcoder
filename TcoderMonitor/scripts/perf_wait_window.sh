@@ -244,7 +244,11 @@ for i in $(seq 1 "$SAMPLES"); do
     echo "    ★ 请**从现在起持续滚动**被测窗口（性能页或代码页都行，按 120Hz 的体感滚，别停）。"
     echo "      我一检测到你正在滚就开录（约 50 s），你不用猜时机、也不用等我发话。"
   fi
-  INPUT_SOURCE="$INPUT" export INPUT_SOURCE
+  # meta 里的来源要带上**投递节奏**：25 Hz 与 125 Hz 的输入器采出的帧数不是一回事，
+  # 不带参数的话，两批不同输入率的样本会被当成同一批混着引用（今晚就差点这么混）。
+  INPUT_SOURCE="$INPUT"
+  [ "$INPUT" = "synth" ] && INPUT_SOURCE="synth@${SYNTH_GAP_MS:-8}ms"
+  export INPUT_SOURCE
   if ./scripts/perf_harness.sh "$MODE" "$SCRATCH/tcoder-perf-$TAG-$MODE-run$i"; then
     echo "    ✓ 第 $i 趟完成"
   else
