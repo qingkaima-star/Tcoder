@@ -264,6 +264,16 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 
 ### 第 1.5 步（与第 1 步同批、但收益不同期）：渲染路径剩下的 12 处**全在页面侧**
 
+> **02:45 一条时效性很强的补充**：接管者**此刻在途的这批**（主树 32 个未提交文件）正好覆盖
+> 10 处排序债里的 **5 处**，包括其中**最贵的那一处**：
+> `Dependencies/DependenciesView.swift`（`dependencies.sorted`，n 可到上千）、
+> `Git/ContributorRows.swift` ×2、`Git/ContributorsView.swift`、`Health/HealthComponentTable.swift`。
+> 判据和第 1 步一样：**这些文件正在被重写，换排序位置是同一次编辑**；
+> 这批过了再单开一趟，就要在同样的行上第二次合并。
+> 未被这批覆盖的 5 处（`Logs/*` 四处 + `Code/CodeMetricsView`）留到 Logs 批次顺手做。
+> **注意别和视觉改动混判**：这批若顺手清了排序，`fullSort` 会从 10 掉下来，
+> 那是**收益**，但复测时不能把帧率变化记给"视觉批次"——所以清哪几处要留在 commit message 里。
+
 01:49 用守卫自己的规则复算了全部命中并落进台账明细（`tcoder-perf-renderpath-debt.txt` 现在带
 `文件:行 + 原文`，不再只报一个数）：`fullSort 10` + `syncFileIO 2` **一处都不在 `Services/`、`Design/`、`App/` 里**
 ⇒ 性能侧**没有可以自救的份**，这 12 处只能由写页面的人做。清单：
