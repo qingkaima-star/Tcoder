@@ -358,9 +358,11 @@ struct DashboardLiveReadout: View {
                     }
                 }
             } else {
+                // 盘点表 A 组第 7 条「藏」：整句预告收进 ⓘ，屏上只留状态本身。
                 EmptyStateView(icon: IconName.performance.rawValue,
                                title: "正在采集…",
-                               message: "首个采样点到达后显示曲线。")
+                               message: "首个采样点",
+                               help: "首个采样点到达后显示曲线。")
             }
         }
     }

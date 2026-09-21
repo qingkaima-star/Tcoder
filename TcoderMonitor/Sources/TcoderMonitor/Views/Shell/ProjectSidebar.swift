@@ -175,17 +175,18 @@ struct AddProjectGuideCard: View {
                     Text("还没有监控项目")
                         .font(Theme.Typo.cardTitle.font)
                         .foregroundStyle(.secondary)
-                    hint
-                    GlassButton("选择目录…", icon: .add, style: .prominent,
-                                action: onChooseFolder)
+                    HStack(spacing: Theme.Spacing.xxs) {
+                        GlassButton("选择目录…", icon: .add, style: .prominent,
+                                    action: onChooseFolder)
+                        hintBadge
+                    }
                 }
                 .frame(maxWidth: .infinity, minHeight: ShellLayout.guideMinHeight)
             } else {
                 HStack(spacing: Theme.Spacing.xs) {
-                    // 紧凑态**不再在文字左边再来一枚 ⊕**：行尾本来就有一枚可点的
-                    // 「选择目录」按钮，两枚同义图标把 17 字的提示挤到截断
-                    // （实拍「把项目文件夹拖到这里，或…」）。
-                    hint
+                    // 紧凑态只有左端一枚 ⓘ 与行尾那枚可点的「选择目录」⊕：
+                    // 上一轮这里挤着两枚同义图标，把 17 个字的提示挤到截断（实拍）。
+                    hintBadge
                     Spacer(minLength: Theme.Spacing.xs)
                     Button(action: onChooseFolder) {
                         ThemedIcon(.add, role: .badge, label: "选择目录")
@@ -221,11 +222,14 @@ struct AddProjectGuideCard: View {
         isDropTargeted ? Theme.Semantic.accent.textColor : Color(nsColor: .separatorColor)
     }
 
-    private var hint: some View {
-        Text("把项目文件夹拖到这里，或选择本地目录")
-            .font(Theme.Typo.label.font)
-            .foregroundStyle(.tertiary)
-            .lineSpacing(Theme.Typo.label.lineSpacing)
+    /// 引导提示**整句**进 ⓘ（盘点表 A 组第 8 条）。
+    ///
+    /// 为什么不是「留短藏长」：本文件在 `LocalizationGuardTests.migratedFiles`
+    /// 那张**零余量**名单里，屏上留的短半句会是一条未登记新键 —— 本流不得写
+    /// `Localizable.strings`，加短标签当场红守卫 1。所以两支共用这一枚 ⓘ，
+    /// 原文只写这一处（B 守恒：一个字没删，只是从常驻改成悬停可见）。
+    private var hintBadge: some View {
+        CopyHelpBadge("把项目文件夹拖到这里，或选择本地目录")
     }
 }
 

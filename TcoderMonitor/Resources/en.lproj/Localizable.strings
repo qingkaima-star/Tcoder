@@ -639,3 +639,12 @@
 "该项目还没有日志分析结果" = "This project has no log analysis results yet.";
 "采样已暂停：最后一次结果" = "Sampling is paused — these are the last results captured.";
 "匹配模式 %@" = "Match pattern %@";
+
+// 批次 ⓘ·S1 外壳与总览：本片留下的 6 条短句键（其中 2 条写在三元 `message:` 里，
+// 入口族看不见，但组件内部过了 `localizedCopy` —— 登记之后英文态才接得住）。
+"口径：仅生产码" = "Basis: production code only";
+"口径：报告只有汇总粒度" = "Basis: the report is summary-granular only";
+"指一个本地仓库目录" = "point at a local repository folder";
+"首个采样点" = "first sample";
+"没有命中错误行。" = "No error lines were matched.";
+"用「附加日志文件」手动选择。" = "Use 「Attach Log Files」 to pick them by hand.";
