@@ -137,8 +137,6 @@ final class AppState {
         store.report(for: selectedProject)
     }
 
-    var hasProjects: Bool { !store.projects.isEmpty }
-
     // MARK: - Lifecycle
 
     private func bootstrapIfNeeded() {

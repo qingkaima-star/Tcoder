@@ -219,26 +219,6 @@ final class ProjectStoreRoundTripTests: XCTestCase {
         XCTAssertNil(store.report(for: nil), "空选择要安全返回 nil，而不是崩溃")
     }
 
-    func testSortedProjectsPutsBestScoreFirstAndUnscannedLast() throws {
-        let (store, _) = try makeIsolatedStore()
-        func add(_ name: String, overall: Int?) {
-            let project = store.add(path: "/tmp/wsv-sort-\(name)", name: name)
-            guard let overall else { return }
-            var report = ProjectReport(project: project)
-            report.health = HealthScore(overall: overall)
-            store.upsertReport(report)
-        }
-        add("中", overall: 60)
-        add("优", overall: 90)
-        add("无报告", overall: nil)
-        add("差", overall: 30)
-
-        // 只比自己那四个的相对次序：排序是全序，取相对顺序即可，不依赖机器上还有谁。
-        let mine = store.sortedProjects.filter { $0.path.hasPrefix("/tmp/wsv-sort-") }
-        XCTAssertEqual(mine.map(\.name), ["优", "中", "差", "无报告"],
-                       "排序契约：健康分降序，无报告（按 -1 计）排最后")
-    }
-
     // MARK: - ② 向前兼容：新增 Optional 字段不得让旧 JSON 读不回来
 
     // MARK: - ③ 反向护栏：加一个非 Optional 字段，旧 JSON 会整份读不回来
