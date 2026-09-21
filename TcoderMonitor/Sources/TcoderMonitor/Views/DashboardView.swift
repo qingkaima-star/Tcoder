@@ -240,12 +240,12 @@ struct DashboardView: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                     HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
                         // 盘点表 A 组第 1 条「留短藏长 ●」：屏上留短标签，完整口径整句进 ⓘ。
-                        Text(coverageCaliberTag(coverage))
+                        Text(Self.coverageCaliberTag(coverage))
                             .font(Theme.Typo.microLabel.font.monospacedDigit())
                             // 原来是 `.tertiary`：这一行里是**测得值**（含测试代码占比、差值），
                             // 测得值不得用 tertiary。降到 10pt 已经足够安静了。
                             .foregroundStyle(.secondary)
-                        CopyHelpBadge(coverageCaliberLine(coverage))
+                        CopyHelpBadge(Self.coverageCaliberLine(coverage))
                     }
                     // #38：这些读数是把几份本地报告合起来算的，而报告本身是 .gitignore 挡着的
                     // 本地产物——不写「哪天生成的」，一份几天前的 lcov 就能长期冒充新鲜数据进健康分。
@@ -269,7 +269,7 @@ struct DashboardView: View {
     }
 
     /// 屏上短标签 = `coverageCaliberLine` 三条整句各自的前缀子串（不新造修辞），判据与那个 guard 同一条。
-    private func coverageCaliberTag(_ coverage: CoverageMetrics) -> String {
+    static func coverageCaliberTag(_ coverage: CoverageMetrics) -> String {
         guard coverage.scopeIsSeparated, coverage.allSourcesLinePercent != nil,
               coverage.overallLinePercent != nil else { return localizedCopy("口径：报告只有汇总粒度") }
         return localizedCopy("口径：仅生产码")
@@ -277,7 +277,7 @@ struct DashboardView: View {
 
     /// 口径说明一行字：报告没有源文件粒度时必须明说「等同全量」，
     /// 不能让一个没区分过的数字顶着「生产码」的标签。
-    private func coverageCaliberLine(_ coverage: CoverageMetrics) -> String {
+    static func coverageCaliberLine(_ coverage: CoverageMetrics) -> String {
         let sources = coverage.reports.map { $0.toolName }.joined(separator: " / ")
         guard coverage.scopeIsSeparated, let full = coverage.allSourcesLinePercent,
               let production = coverage.overallLinePercent else {
