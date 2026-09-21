@@ -186,15 +186,10 @@ final class LocalizationGuardTests: XCTestCase {
     /// 只按 `Text("中文")` 扫会得到 43 条，漏掉的 221 条住在 tooltip、
     /// `label:` / `caption:` 这类字符串型参数与 `localizedCopy` 口子里。
     ///
-    /// **2026-09-21 第二次扩口：28 → 30 → 19**（`CopyHelpBadge(` 与 `help:` /
-    /// `subtitleHelp:` / `captionHelp:` 进入口族后实扫 30 = 旧口径 17 + S4 新增 1
-    /// + **一直在盲区的 12** —— 这些组件内部替调用方过了 `localizedCopy`，调用点
-    /// 那句中文就是键）。同日登记掉 11 条（`c89e746`）落到 19：17 条内插串（进不了
-    ///
-    /// **同日 S5 合流 19 → 21（新增债显形）**：搬字那趟新造 2 条内插短句（`LogsErrorClusters`
-    /// 排序口径、`LogsMetricGrid` 每千行归一句）。还法：改 `localizedFormat` 整句键后降回 19。
-    /// 目录，须改成 `localizedFormat` 整句键）+ 2 条 `Text(变量)`。逐条台账见 §6。
-    private static let unregisteredLiteralCeiling = 21
+    /// **2026-09-21 一天之内动了两次数字：19 → 21 → 19**，两次都是实扫现量、方向由守卫自己打印：
+    /// 扩口 + S5 搬字让存量涨 2（新增债显形），补账轮把两处 `Text(变量)` 改成查表又降 2。
+    /// 剩下的 19 条**全部是内插短句**，逐条台账与还法见计划文档 §6（本文件从 399 行让 1 行给这条）。
+    private static let unregisteredLiteralCeiling = 19
 
     func test_unregisteredLiteralInventoryPrintsAndShrinks() throws {
         let registered = Set(try Self.catalog().map(\.key)).union(Self.registeredStringsDictKeys())

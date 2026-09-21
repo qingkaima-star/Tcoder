@@ -526,6 +526,22 @@ WS-A/WS-B/WS-C 此刻在**主树里有未提交在途改动**。不允许直接�
 过渡办法（总工执行）：先让三人各自在主树把当前成果 commit（双绿为前提），
 总工随后从该 main 切出各自 worktree，**下一轮起所有人只能在 worktree 里干活**。
 
+### 冻结区 additive 变更登记（第三轮 · P6-Q / P7-D，总工本人）
+
+22:40 单人接管后，「冻结区缺口由总工处理」这句的执行者就是本流自己。为避免它变成
+"总工想改就改"，这里逐条登记本轮动过的冻结文件，并给自己立两条判据：**只加不改**
+（不改动任何既有取义与既有成员）、**新增的东西必须自带守卫**（否则下一轮长回去没人知道）。
+
+| 冻结文件 | 加了什么 | 为什么不能在别的文件里 | 自带守卫 |
+|---|---|---|---|
+| `Utilities/SharedUtilities.swift` | `DateFormat.day`（日期档格式化器，`full` 一字未动） | `PerfHitchGuardTests` 的 `directFormatters` 现量 1 / 上限 1，把 `DateFormatter()` 挪进 `Views/**` 当场红；格式化器必须住在扫描面之外的共用层 | `DesignAbsenceStateTests` 钉「读数格走 day 且正好 10 字符」 |
+| `Models/CodeMetrics.swift` | `scanLimitations: [String]?`（一个字段，其余一字未动） | WS-A 在 `FileSystemCodeAnalyzer` 里把"哪些上限真的生效过"算好了却无处安放，注释点名"交给总工决定接入点"——这就是那个接入点的另一半。**必须是 Optional**：非 Optional 带默认值会让旧报告整份解码失败 | `FunctionalHonestyGuardTests` G9（写/读两头都在）+ `CodeAnalyzerPrecisionTests` 行为两向（截断→非空、未截断→nil）|
+
+不在这张表里的冻结区改动一律视为越界。历史批次（P7-A 退役示例数据动过
+`Models/Project.swift`、`Models/HealthScore.swift`、`App/AppState.swift`、
+`Services/ProjectStore.swift`）是同一性质的 additive/删除，**当时没有登记**，
+补记在此只是为了让下一轮看得见，不是为了追认流程无瑕疵。
+
 ## 6. 完成标准（Definition of Done）
 
 1. `./scripts/locked_build.sh build` 通过（贴输出）。

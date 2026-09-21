@@ -41,6 +41,7 @@ extension LocalizationGuardTests {
     static let renderPointHosts: Set<String> = [
         "Views/CodeGit/CodeGitDesignKit.swift",
         "Views/PerfLogs/NumberText.swift",
+        "Views/Performance/PerformanceProcessGroups.swift",
     ]
 
     static func unlocalizedRenderPoints(in files: [(path: String, content: String)]) -> [String] {

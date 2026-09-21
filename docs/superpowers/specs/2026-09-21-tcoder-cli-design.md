@@ -30,13 +30,15 @@
 
 | | 做法 | 判定 |
 |---|---|---|
-| **A** | **同一个二进制，argv 分派**：`TcoderMonitorApp.init()` 认出子命令词就跑无头流程，跑完 `exit(code)` | **选它** |
+| **A** | **同一个二进制，argv 分派**：进程入口认出子命令词就跑无头流程，跑完 `exit(code)`（**2026-09-21 修正**：入口是 `App/TcoderEntry.swift`，不再是 `TcoderMonitorApp.init()`，理由见下方与改进清单 F10） | **选它** |
 | B | 第二个 `executableTarget` + 把分析层抽成 library | 否 |
 | C | 写 shell 拼 `git` + `wc` 出读数 | 否 |
 
 - **A 的理由**：`Package.swift` 不动、`build_app.sh` / `verify_provenance.sh` / `dist` 一字不改，
   "交付二进制 == HEAD"这句话仍然只指一个二进制；schema 天然同源（同一个模块内的同一个类型）。
-  代价是一个 GUI 二进制里带着 CLI 代码，以及 CLI 生命周期挂在 `App.init()` 上 —— 后者已由 §1 的 spike 证伪。
+  代价是一个 GUI 二进制里带着 CLI 代码，以及 CLI 生命周期挂在启动流程上。
+  **原文在这里写过一句错判并留着不删**（「挂在 `App.init()` 上」这一风险「已由 §1 的 spike 证伪」）：不成立 —— spike 只跑过「真干了 1 秒活」那一档，没跑即时返回的那几档。实测 `score <不存在的路径>` 在 `App.init()` 里 `exit()` 会撞上 AppKit 的窗口状态恢复，release 二进制挂死 16 分钟不出声，连 600 秒硬超时都没走到（改进清单 F10）。
+  现在由 `TcoderEntry.main()` 在**任何 AppKit 之前**分派；GUI 那一路仍调 `TcoderMonitorApp.main()`，一字未动。
 - **B 否的理由**：SwiftPM 里 `executableTarget` 不能作为另一个 `executableTarget` 的依赖，
   所以只能把 `Sources/TcoderMonitor` 整体降级为 library + 薄 GUI 壳。全仓 `@testable import TcoderMonitor`、
   `.build` 布局、打包与来源证明链都要跟着震，还会撞逐符号零引用普查与 400/800 行棘轮。
@@ -122,7 +124,7 @@ CLI 内部就是把 `AppState.scan` 那五路扇出搬过来（`code / git / log
 
 ## 5. 分派条件（不许误判 GUI）
 
-`TcoderMonitorApp.init()` 里，仅当 **`CommandLine.arguments[1]` 精确等于**
+`TcoderEntry.main()` 里（**2026-09-21 从 `App.init()` 提上来**，理由见 F10），仅当 **`CommandLine.arguments[1]` 精确等于**
 `scan` / `score` / `doctor` / `--help` / `-h` / `help` / `--version` 之一时进 CLI 流程；
 其余一律照常起 GUI。
 
@@ -140,7 +142,7 @@ LaunchServices 起 App 会传 `-psn_…`，它们都以 `-` 开头、都不在�
 | `CLIScan.swift` | 五路扇出、`HealthInputs` 组装、`ProjectReport` 编码 |
 | `CLIScoreText.swift` | `score` 的文本读数（失败路优先的形状） |
 
-被引用性：三者都由 `TcoderMonitorApp.init()` 这条产品代码路径调用，天然过逐符号零引用普查。
+被引用性：三者都由 `TcoderEntry.main()` 这条产品代码路径调用，天然过逐符号零引用普查。
 `censusBaseline`（现 110）**只由总工按实测更新**，且新增文件的注释要写清"谁加的、凭什么被引用"。
 
 **可测性要求（不写下来就做不到）**：`CLIScan` 必须把五路分析器做成**带默认值的构造参数**
@@ -173,12 +175,12 @@ LaunchServices 起 App 会传 `-psn_…`，它们都以 `-` 开头、都不在�
 
 | 风险 | 应对 |
 |---|---|
-| `App.init()` 里阻塞主线程导致某路分析器需要主线程 while 等待 → 死锁 | spike 已证两路可跑；实现时给整体等待加硬上限，超时按退出码 4 并**明写"超时未回"而不是"没有数据"** |
+| 入口里阻塞主线程导致某路分析器需要主线程 while 等待 → 死锁 | **原判据不成立**：硬上限只能救「等在信号量里」那一种，救不了「`exit()` 与 AppKit 恢复流程互等」（实测 16 分钟不出声）。现由**入口前置**消掉整类风险，并由 `CLIProcessTests` 6 条真·子进程断言 + 墙钟上限盯着（F10） |
 | 五路里 `deps` 在线查在 CI 无网时慢 | 默认 `allowNetwork=false`，在线查只在 `--allow-network` 下发生 |
 | 新增三个 Sources 文件撞零引用普查 / 400 行线 | 提交前先跑 `build --build-tests` + 全量 `test`，撞了就是拆，不调阈值 |
 | 未来有人拿 CLI 当"官方接口"，把 schema 当契约依赖 | 本轮只在 `docs/口径与已知限制.md` 记一句"CLI 为内部工具，schema 不承诺稳定" |
 
-**回退**：CLI 是纯增量入口，不动任何分析器实现。出问题就把 `App.init()` 里那一分派调用摘掉
+**回退**：CLI 是纯增量入口，不动任何分析器实现。出问题就把 `TcoderEntry.main()` 里那一分派调用摘掉
 （GUI 行为回到改动前），`self_score.sh` 保留原 GUI 轮的形态到一个提交，随时可退。
 
 ## 9. 明确不做（防范围膨胀）

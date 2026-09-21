@@ -291,6 +291,53 @@ final class FunctionalHonestyGuardTests: XCTestCase {
                       "注释里交代退役历史就被判红 → 一年后没人记得它为什么错")
     }
 
+    /// G8：覆盖率那一维的「没数据」必须说清是**哪一种**没数据。
+    /// 三档合成一句「该项目没有产出覆盖率报告」= 拿「没读到」冒充「没有」（§S2）。
+    func test_coverageAbsenceNamesTheActualInputState() {
+        XCTAssertEqual(MissingDimensionReason.testingAbsence(coverage: nil), "尚未分析覆盖率报告，不参与计分。",
+                       "没跑过分析 = 状态未知，不能替项目下「没有产出报告」的结论")
+
+        let foundButUnreadable = CoverageMetrics(reports: [], scannedFileCount: 2)
+        let unreadable = MissingDimensionReason.testingAbsence(coverage: foundButUnreadable) ?? ""
+        XCTAssertTrue(unreadable.contains("扫到 2 个"), "扫到了报告文件这件事必须上屏：\(unreadable)")
+        XCTAssertFalse(unreadable.contains("没有产出覆盖率报告"),
+                       "读不出数字被说成没有报告：\(unreadable)")
+
+        let nothingFound = CoverageMetrics(reports: [], scannedFileCount: 0)
+        let note = MissingDimensionReason.testingAbsence(coverage: nothingFound) ?? ""
+        XCTAssertTrue(note.contains("没有产出覆盖率报告"), "真的没有报告时这句必须还在：\(note)")
+    }
+
+    /// G9（P7-C 3-2）：诚实字段必须**两头都在** —— 分析器写它、视图读它。
+    /// `CodeScanCoverage` 就是反面教材：上限算得清清楚楚，但契约里没有承接字段，
+    /// 于是"只读了前 3 个文件"的报告在屏上与全量报告长得一模一样。
+    static func deadHonestyFields(_ fields: [String],
+                                  written: [(path: String, content: String)],
+                                  read: [(path: String, content: String)]) -> [String] {
+        let writeText = written.map(\.content).joined(separator: "\n")
+        let readText = read.map(\.content).joined(separator: "\n")
+        return fields.filter { field in
+            !(writeText.contains("\(field) =") && readText.contains(field))
+        }
+    }
+
+    func test_honestyFieldsAreBothWrittenAndDisplayed() throws {
+        let services = try SurfaceScanKit.sourceFiles(under: "Services")
+        let views = try SurfaceScanKit.sourceFiles(under: "Views")
+        let dead = Self.deadHonestyFields(["analyzerRuleFailures", "scanLimitations"],
+                                          written: services, read: views)
+        XCTAssertTrue(dead.isEmpty, "这些诚实字段有写无读（或缺写入点）：\(dead)")
+    }
+
+    func test_deadFieldScannerCatchesSyntheticAndSparesWired() {
+        let writtenOnly = [(path: "Services/Code/Fake.swift", content: "metrics.scanLimitations = limits\n")]
+        XCTAssertEqual(Self.deadHonestyFields(["scanLimitations"], written: writtenOnly, read: []),
+                       ["scanLimitations"], "只写不读没抓到 → 守卫是摆设")
+        let wired = [(path: "Views/Code/Fake.swift", content: "code.scanLimitations\n")]
+        XCTAssertTrue(Self.deadHonestyFields(["scanLimitations"], written: writtenOnly, read: wired).isEmpty,
+                      "两头都在的合法写法被误伤")
+    }
+
     /// G6 的两向元测试：老写法必须被抓到，`AnalysisSectionRow` 那种
     /// "只有一个 style" 的合法写法不许误伤（它本来就该是 plain 的导航行）。
     func test_buttonStyleScannerCatchesTheShadowingShape() {

@@ -98,14 +98,24 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 在性能 / 日志 / 健康三页的挂载点，ⓘ 的画法全站只许这一份
     ///（新增的 `CopyHelpBadgeTests` 三条判据 + 注入坏样例的元测试钉住）。
     /// 守卫实报「实现文件 143 · 在用 142 · 未用 0 · 零调用清单：无」）。
-    static let censusBaseline = 143
+    /// 143 → 144（WS-CL 第二轮·入口重排，**2026-09-22 由总工按守卫实报填**：
+    /// 新增 `App/TcoderEntry.swift` 持有 `@main`。**凭什么被引用**：它就是进程入口，
+    /// 由链接器/`@main` 展开的 `main()` 调用（与 `App/TcoderMonitorApp.swift` 同一类证据，
+    /// 区别只是那个类型不再隐式调度）；它自己调用 `CLIRouter.main` 与 `TcoderMonitorApp.main()`
+    /// 两路，所以**两边都不成孤儿**。动它的理由不是审美：真二进制实测
+    /// `score <不存在的路径>` 在 `App.init()` 里 `exit()` 会撞上 AppKit 的窗口状态恢复，
+    /// 挂死 16 分钟不出声，而 in-process 的 20 条 CLI 单测全绿（盲区由
+    /// 新增的 `CLIProcessTests` 真子进程一把堵上）。
+    /// 同时 `frameworkWhitelist` 从 `TcoderMonitorApp.swift` 换成 `TcoderEntry.swift`
+    /// —— 白名单只留"真正写着 `@main` 的那一个"，`TcoderMonitorApp` 改由 `TcoderEntry` 点名调用。
+    static let censusBaseline = 144
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
 
     /// 框架隐式调度的入口白名单。**只有 `@main` 一处**，且下面的门要求每个条目正文里真写着
     /// `@main`、并且它本身也拿得出证据——白名单不许变遮羞布。
-    static let frameworkWhitelist: Set<String> = ["App/TcoderMonitorApp.swift"]
+    static let frameworkWhitelist: Set<String> = ["App/TcoderEntry.swift"]
 
     /// 普查点名的三个扩展分片（坑 1）：自己不声明顶层类型，只写 `extension SomeType`。
     /// 分片全集由扫描动态得出，这里钉三个具体名字，防止「发现逻辑哪天退化成空集」。

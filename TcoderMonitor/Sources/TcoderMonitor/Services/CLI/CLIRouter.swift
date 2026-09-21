@@ -102,6 +102,13 @@ enum CLIRouter {
     }
 
     private static func runReport(_ req: CLIRequest) -> Int32 {
+        // 「路径不可用」是**根本没开跑**那一档，必须同步回，不许借道并发池与信号量：
+        // 上一版把它丢进 `Task.detached` 里判，真二进制上那一档会连着启动流程一起卡住
+        // （回归测试见 `CLIProcessTests.test_realProcess_unusablePathExitsThreeFast`）。
+        guard let target = req.path, CLIScan.validatedURL(for: target) != nil else {
+            CLIOutput.fail("路径不可用：\(req.path ?? "")（不存在、不是目录或不可读）")
+            return CLIExit.badPath.rawValue
+        }
         let scan = CLIScan()
         var outcome = CLIScanOutcome(report: nil, exit: .allFailed, problem: "未开跑")
         let gate = DispatchSemaphore(value: 0)

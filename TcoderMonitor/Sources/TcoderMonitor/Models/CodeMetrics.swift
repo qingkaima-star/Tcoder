@@ -48,6 +48,14 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     /// 这条台账把"我们的规则没跑起来"与"这个仓库真的没有"分开。
     /// **Optional 是落盘兼容要求**：非 Optional 带默认值会让旧报告整份解码失败。
     var analyzerRuleFailures: [String]? = nil
+    /// 本次扫描**生效过的边界与上限**（批次 P7-C 3-2），一行一条，全部带真实数字。
+    /// `nil` = 一条都没生效，这份数字是全量；非空 = 部分测量，界面不得把它画成"扫完了"。
+    ///
+    /// 存在理由：`CodeScanCoverage` 早就算出了"被哪条上限切掉多少"，但契约里没有承接字段，
+    /// 于是 `analyze` 只取 `metrics`，那四个字段连同中文说明一起被丢掉 —— 一份只读了
+    /// 前 3 个文件的报告在屏上与全量报告长得一模一样。
+    /// **Optional 是落盘兼容要求**：非 Optional 带默认值会让旧报告整份解码失败。
+    var scanLimitations: [String]? = nil
 
     /// 0...1 — share of code lines that fall inside a duplicated block.
     var duplicationRatio: Double = 0
