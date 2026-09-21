@@ -21,6 +21,7 @@ struct TcoderMonitorApp: App {
             RootView()
                 .environment(state)
                 .frame(minWidth: 1080, minHeight: 680)
+                .background(CaptureWindowSizer())
         }
         .defaultSize(width: CaptureWindow.width, height: CaptureWindow.height)
         .commands {
@@ -91,5 +92,41 @@ enum CaptureWindow {
     static var height: CGFloat {
         dimension(from: ProcessInfo.processInfo.environment["TCODER_CAPTURE_WINDOW_HEIGHT"],
                   fallback: defaultHeight)
+    }
+}
+
+/// 取证时把窗口内容尺寸真正设成 `CaptureWindow` 要的那档。
+///
+/// 为什么 `.defaultSize` 不够（2026-09-21 实测）：SwiftUI 会把窗口帧写进 app 的
+/// defaults 域（键名形如 `NSWindow Frame SwiftUI.ModifiedContent<…>-1-AppWindow-1`），
+/// 下次启动**恢复的帧优先于 `.defaultSize`** —— 于是取证脚本传了
+/// `TCODER_CAPTURE_WINDOW_HEIGHT=1000` 之后图仍然是 1640px（= 820pt），
+/// 长页折叠线以下照样没进证据。`-ApplePersistenceIgnoreState YES` 管的是
+/// restorable state，管不到这条帧自动保存。
+///
+/// 只在设了环境变量时动作，且**只执行一次**：之后用户手动拖窗口不该被 App 拽回去。
+private struct CaptureWindowSizer: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { apply(to: view.window) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        // 首帧可能还没有 window，补一次；`applied` 保证只真的改一次。
+        DispatchQueue.main.async { apply(to: nsView.window) }
+    }
+
+    private static var applied = false
+
+    private func apply(to window: NSWindow?) {
+        guard !Self.applied, let window,
+              ProcessInfo.processInfo.environment["TCODER_CAPTURE_WINDOW_HEIGHT"] != nil
+                || ProcessInfo.processInfo.environment["TCODER_CAPTURE_WINDOW_WIDTH"] != nil else { return }
+        let target = NSSize(width: CaptureWindow.width, height: CaptureWindow.height)
+        guard window.contentView?.frame.size != target else { Self.applied = true; return }
+        window.setContentSize(target)
+        window.center()
+        Self.applied = true
     }
 }

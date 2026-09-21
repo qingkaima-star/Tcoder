@@ -166,6 +166,9 @@ struct MiniBarGauge: View {
 struct SectionEmptyNote: View {
     var text: String
     var icon: IconName = .info
+    /// 「留短藏长」槽：屏上留 `text` 那一句短的，改变读法的长口径进 ⓘ。
+    /// 与 `NoteLine.help:` 同一套语义（画法仍复用全站唯一的 `CopyHelpBadge`）。
+    var help: String? = nil
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
@@ -177,6 +180,9 @@ struct SectionEmptyNote: View {
                 // 实拍里 tertiary 的 11pt 灰字几乎读不出（清单 3.11 的伴生问题）。
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if let help {
+                CopyHelpBadge(help)
+            }
             Spacer(minLength: 0)
         }
     }

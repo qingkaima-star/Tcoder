@@ -13,7 +13,11 @@ struct HealthComponentTable: View {
 
     var body: some View {
         GlassSection("维度分量",
-                     subtitle: "综合分 = Σ（得分 × 归一化权重） · 按拖累程度排序，贡献最低者在前",
+                     subtitle: "按拖累程度排序，贡献最低者在前",
+                     // 公式那半句搬进 ⓘ：它与 `HeuristicClaimLine` 的 help 本来就重复
+                     // （盘点表 I 节点名"前半重复"）。基座补了 `subtitleHelp:` 之后，
+                     // 不必再把它挤进 `trailing:` 与合计读数抢一行。
+                     subtitleHelp: "综合分 = Σ（得分 × 归一化权重）。",
                      icon: .health,
                      // 卡头 trailing 位只有一行，没有"第二行的值要竖向对齐"这回事，
                      // 所以标签不占 160pt 列宽 —— 占了就变成「合计 ………… 60.1」
@@ -25,8 +29,10 @@ struct HealthComponentTable: View {
                 DataRowSeparator()
                 missingBlock
                 if let score = health.verdict, !HealthBreakdown.isSumConsistent(sum, with: score) {
-                    NoteLine("分量合计 \(Live.fixed(sum, digits: 1)) 与综合分 \(score) 有出入，通常是评分器的归一化或取整口径不同。",
-                             role: Theme.Semantic.warning, icon: .riskWarning)
+                    // 两个数必须留在屏上（它们就是"对不上"这件事的证据），归因进 ⓘ。
+                    NoteLine("分量合计 \(Live.fixed(sum, digits: 1)) 与综合分 \(score) 有出入。",
+                             role: Theme.Semantic.warning, icon: .riskWarning,
+                             help: "出入通常来自评分器的归一化或取整口径不同，界面以评分器发布值为准。")
                 }
             }
         }
