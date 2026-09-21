@@ -680,8 +680,12 @@ selfcheck_probe_self_sufficient() {  # selfcheck_probe_self_sufficient <outdir>
   case "$raw" in
     *"unbound variable"*) fail "探针族在裸 set -u 消费者下仍有未初始化量：$raw"; return ;;
   esac
-  [ -n "$(quietest_seconds "$raw")" ] \
-    || { fail "裸调探针取不到可解析的静默秒数（拿到「$raw」）"; return; }
+  local q; q=$(quietest_seconds "$raw")
+  [ -n "$q" ] || { fail "裸调探针取不到可解析的静默秒数（拿到「$raw」）"; return; }
+  # 光"解析得出数字"不够：探针取不到时打的是 `静默=-1.00s`，**它解析得出来**！
+  # 第一版第 22 项就是把这条写在解析层，于是探针路径指错（QUIESCE_SRC 少一段目录、
+  # 编译失败退 JIT、JIT 也失败）时它照样绿——一条量不到东西的守卫比没有更坏。
+  probe_usable "$q" || { fail "裸调探针只拿到哨兵 $q（编译/路径坏了），第 22 项不许把哨兵当读数"; return; }
   # 反向钉：阈值**不许**住在探针文件里（搬过去就等于把判定混进取数原语）
   bash -c 'set -euo pipefail; source scripts/perf_probes.sh >/dev/null 2>&1; [ -n "${QUIESCE_MIN:-}" ]' \
     && { fail "QUIESCE_MIN 跑进了 perf_probes.sh —— 合格线属于闸门，不该由取数原语带默认"; return; }
