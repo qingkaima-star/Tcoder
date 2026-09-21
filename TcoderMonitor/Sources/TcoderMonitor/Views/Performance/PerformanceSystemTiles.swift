@@ -52,7 +52,7 @@ struct PerformanceSystemTiles: View {
 
     private var sectionSubtitle: String {
         guard let cores = SystemReadings.coreCount(context) else { return "等待首个样本" }
-        return "\(cores) 个核心 · 口径与活动监视器一致"
+        return localizedFormat("%1$@ 个核心 · 口径与活动监视器一致", String(cores))
     }
 
     private var memoryIsMissing: Bool { SystemReadings.memoryUsedBytes(context) == nil }
@@ -89,7 +89,9 @@ struct PerformanceSystemTiles: View {
             unit: (used != nil && total != nil) ? "/ \(Live.bytes(total, precision: 1))" : nil,
             caption: used == nil
                     ? (SystemReadings.memoryGapReason(context) ?? "等待首个样本")
-                    : "在用 \(Live.percent(fraction, precision: 0)) · 压力 \(pressure?.rawValue ?? Live.missing)",
+                    : localizedFormat("在用 %1$@ · 压力 %2$@",
+                        Live.percent(fraction, precision: 0),
+                        localizedCopy(pressure?.rawValue ?? Live.missing)),
             tint: Theme.Palette.Surface.ink,
             systemImage: IconName.memory.rawValue,
             gauge: Self.gaugeSlot(fraction, role)
@@ -103,7 +105,9 @@ struct PerformanceSystemTiles: View {
             value: total == nil ? nil : Live.rate(total),
             caption: total == nil
                     ? "首个差分帧到达前，不给速率"
-                    : "读 \(Live.rate(SystemReadings.diskReadBytesPerSecond(context))) / 写 \(Live.rate(SystemReadings.diskWriteBytesPerSecond(context)))",
+                    : localizedFormat("读 %1$@ / 写 %2$@",
+                        Live.rate(SystemReadings.diskReadBytesPerSecond(context)),
+                        Live.rate(SystemReadings.diskWriteBytesPerSecond(context))),
             systemImage: IconName.disk.rawValue,
             gauge: .empty   // 没有可信分母：留等高占位，不画假条
         )
@@ -140,7 +144,8 @@ struct PerformanceSystemTiles: View {
             + "\(Live.fixed(snapshot.loadAverage5, digits: 2)) / "
             + "\(Live.fixed(snapshot.loadAverage15, digits: 2))"
         guard context.hasDerivative else { return "负载 \(load) · 差分帧未到，占用率暂不给出" }
-        return "在用 \(Live.cores(cores)) 核 / 共 \(snapshot.cpuCoreCount) 核 · 负载 \(load)"
+        return localizedFormat("在用 %1$@ 核 / 共 %2$@ 核 · 负载 %3$@",
+                           Live.cores(cores), String(snapshot.cpuCoreCount), load)
     }
 
     // MARK: 机器状态条

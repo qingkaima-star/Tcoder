@@ -146,8 +146,9 @@ struct ContributorsMetricGrid: View {
                         value: scope.authorBasis > 0
                             ? NumberFormat.grouped(git.totalAdditions + git.totalDeletions) : nil,
                         unit: "行",
-                        caption: "\(NumberFormat.signed(git.totalAdditions)) / "
-                            + "\(NumberFormat.signed(-git.totalDeletions)) · 按非合并提交统计"
+                        caption: localizedFormat("%1$@ / %2$@ · 按非合并提交统计",
+                                                 NumberFormat.signed(git.totalAdditions),
+                                                 NumberFormat.signed(-git.totalDeletions))
                     )
                     DataBandSeparator()
                     MetricTile(

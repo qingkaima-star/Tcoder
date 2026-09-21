@@ -50,7 +50,9 @@ struct PerformanceProcessTableCard: View {
         guard let totalCount, totalCount > 0, measuredCount > 0 else {
             return "只读展示，不提供任何进程操作"
         }
-        var note = "已取指标 \(NumberFormat.grouped(measuredCount)) / 全系统 \(NumberFormat.grouped(totalCount)) 个进程 · 只读"
+        var note = localizedFormat("已取指标 %1$@ / 全系统 %2$@ 个进程 · 只读",
+                                   NumberFormat.grouped(measuredCount),
+                                   NumberFormat.grouped(totalCount))
         if isTruncated { note += " · 句柄列受时间预算限制" }
         return note
     }

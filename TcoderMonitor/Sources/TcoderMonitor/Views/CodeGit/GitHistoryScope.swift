@@ -82,11 +82,12 @@ struct GitHistoryScope: Equatable {
         let total = "共 \(NumberFormat.grouped(totalCommits)) 次提交"
         switch basis {
         case .complete(let merges) where merges > 0:
-            return "\(total)（含 \(NumberFormat.grouped(merges)) 次合并）· 作者与代码行统计基于 "
-                + "\(NumberFormat.grouped(nonMergeCommitsAnalysed)) 次非合并提交"
+            return localizedFormat("%1$@（含 %2$@ 次合并）· 作者与代码行统计基于 %3$@ 次非合并提交",
+                                     String(total), NumberFormat.grouped(merges),
+                                     NumberFormat.grouped(nonMergeCommitsAnalysed))
         case .complete:
-            return "\(total) · 历史中没有合并提交，作者与代码行统计覆盖全部 "
-                + "\(NumberFormat.grouped(nonMergeCommitsAnalysed)) 次提交"
+            return localizedFormat("%1$@ · 历史中没有合并提交，作者与代码行统计覆盖全部 %2$@ 次提交",
+                                     String(total), NumberFormat.grouped(nonMergeCommitsAnalysed))
         case .windowCapped:
             return "\(total)（含合并）· 作者与代码行统计只覆盖最近 "
                 + "\(NumberFormat.grouped(nonMergeCommitsAnalysed)) 次非合并提交，更早的历史未纳入"

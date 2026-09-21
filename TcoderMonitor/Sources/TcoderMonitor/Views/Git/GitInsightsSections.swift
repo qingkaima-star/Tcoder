@@ -356,8 +356,9 @@ struct GitRecentCommitsSection: View {
             "最近提交",
             subtitle: git.recentCommits.isEmpty
                 ? "无提交记录"
-                : "显示 \(NumberFormat.grouped(rows.count)) / "
-                    + "\(NumberFormat.grouped(git.recentCommits.count)) 条",
+                : localizedFormat("显示 %1$@ / %2$@ 条",
+                                   NumberFormat.grouped(rows.count),
+                                   NumberFormat.grouped(git.recentCommits.count)),
             icon: .processes
         ) {
             if git.recentCommits.isEmpty {

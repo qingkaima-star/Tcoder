@@ -50,7 +50,7 @@ enum CodeRiskAnalysis {
 
     static func averageComplexityCaption(_ code: CodeMetrics) -> String {
         guard code.averageCyclomaticComplexity != nil else { return "未识别到函数" }
-        return "\(NumberFormat.grouped(code.analyzedFunctionCount)) 个函数平均"
+        return localizedFormat("%1$@ 个函数平均", NumberFormat.grouped(code.analyzedFunctionCount))
     }
 
     static func complexitySubtitle(_ code: CodeMetrics) -> String {
