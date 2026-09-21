@@ -48,9 +48,9 @@ ceiling=0，扫描分母含 `.py/.sh/.md`）。你**没有改阈值**，只把�
    **前后对比必须同路同档**：改前那棵封存产物 `/tmp/tcoder-before.app`（rev `415f0f0`）
    里根本没有 `FramePulse`，拿路 B 量改后、拿路 A 量改前 = 两把不同的尺子比同一个数，不作数。
    不带 `--interaction` / 不写 `period=interaction` 的读数一律只算 idle——**别拿它当 T1 达标**。
-3. 禁则棘轮现在每次跑都打「现量/上限」。我把 `dynamicNSColor` 从 107 拧到 **86**
-   （你们 `165faa7` 已经还掉 21 处，而那 21 处当时藏在余量里没人看见）。
-   四条现在**零余量**：`1/1 86/86 10/10 2/2`——再新增一处当场红。
+3. 禁则棘轮现在每次跑都打「现量/上限」，并落一份 `$TMPDIR/tcoder-perf-renderpath-debt.txt` 台账。`dynamicNSColor` 已从 107 → 86（图表取色上提）→ **59**（`c60abbd` 颜色面积收敛又还掉 27 处）
+   （两笔都是靠这条打印才现形的：`165faa7` 还掉 21 处、`c60abbd` 还掉 27 处，之前都藏在余量里没人看见）。
+   四条现在**零余量**：`1/1 59/59 10/10 2/2`——再新增一处当场红。
 
 ## 0.0.1 给马上要跑九页取证的那位：`capture_pages_isolated.sh` 收尾改了
 
@@ -149,8 +149,11 @@ python3 scripts/trace_report.py migration --strict   # 挂进自家收尾检查�
 | **WS-P** | 0 处 | 本项无工（其余 P 工单照旧） |
 
 三条红线（都会被当场拦，别试）：
-1. **不要新增第 17 处**——棘轮零余量（`1/1 86/86 10/10 2/2`），多一处立即红；
+1. **不要新增第 17 处**——棘轮零余量（`1/1 59/59 10/10 2/2`），多一处立即红；
 2. **不要用 `AnyView` / `id: \.offset` 绕失效面**——那只是把重建换个名字，守卫与本工单都不认；
+   （新加一条同族守卫 `testPreparedCellsAreNeverReslicedOrResorted`：**读到细格之后又再切一次窗口、
+   再排一次榜单**也算假迁移——编译通过、画面也对，收益却留在原地，粗 API 棘轮抓不到它，
+   所以基线从写作起就是 **0**，元测试双向验过）；
 3. **不要对 `curve.value` 再 `suffix`、对 `cpuRanking.value` 再 `sorted`**——排序与切窗已在采集侧做一次。
 
 ### 交回标准（我不接受口头完成）
@@ -190,7 +193,115 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
   → 再把 `consumptionGateOpen` 翻成 `true`。**没迁完就翻会当场判红**，所以"它翻得动"就是证据。
 - 顺带把 W-6 一起收：`isCollectingForDisplay` 目前仍 0 读取（"重新采样"点了最长 1.5 s 没反馈）。
 
+#### 但请按这张表加权，别对 16 处平均使力（09-21 01:2x 读 `publish()` 实测，含对我自己上一条的更正）
+
+> **这张表现在有机器出处**，不是一份会腐烂的手抄名单：
+> **先看清这件事的前置**：下面点名的守卫（`classifyCoarseWrites` / `publishBody` /
+> `testCoarseReadoutSitesSplitIntoLoadBearingAndIncidental`）与台账
+> `tcoder-perf-migration-weighting.txt` **现在只在 `ws/perf-base` 上，还没进 main**
+> （本文件这段是先落 main 的，包本身在 §0.5 第 0 步排队）。
+> 所以在 main 上你要的是**结论**（10 承重 / 6 顺手、以及哪几处），不是那条打印——
+> 现在想在 main 上复现分级，只能照本节末尾那四条替换关系手点，或等守卫进 main 之后自动打。
+> `PerfHitchGuardTests` 那份**逐条点名**的渲染路径台账同理：明细已在 main 的守卫里，
+> 但"落文件"这件事跟着 `966f896` 排队。
+>
+> 守卫落地后每次跑都会打印
+> `承重 N / 顺手 M / 合计 K` 并落台账 `$TMPDIR/tcoder-perf-migration-weighting.txt`，
+> 分类由 `classifyCoarseWrites(declarations:tickBody:symbols:)` **从 `publish()` 源码现读**
+> （符号名单从 `coarsePattern` 的交替组取，只有一处真相）。
+> 谁改了闸门写法而没回来改口径，那两条测试会红——它已经在第一次跑的时候抓到我一处口径错
+> （`refreshGroups()` 里的一次性裸写被算成了每 tick 成本），所以下面的数字是过了这一关的。
+
+机制只有一条：`publish()` 里**只有两处是无闸门写**，而它们的值每 tick 必然变——
+
+| 粗属性 | 写法（`MachSystemMonitor.publish` 内） | 每 tick 真的换值吗 | 读它的代价 |
+|---|---|---|---|
+| `latestSnapshot`（`:535`）、`history`（`:544`） | `latestSnapshot = batch.snapshot` / `history = frames` **无闸门** | 是（`timestamp` 每帧新、数组每帧追加） | **每次心跳都重算读它的那棵 body** |
+| `topProcesses` / `processesByMemory` / `trackedGroups` / `measuredProcessCount` / `processMetricsTruncated` | 走 `write(\…, &stats)` **等值闸门** | 不一定（榜单/计数常整帧不变，闸门会 skip） | 只在值真变时重算 |
+
+所以 16 处**不是 16 份等价收益**：
+
+- **承重的 10 处**（读上面那两个无闸门属性）：`DashboardView` 333 / 458 / 459、
+  `LiveReadings` 25 / 26、`ProjectSidebar` 443、`PerformanceView` 54 / 63 / 94 / 95。
+  `PerformanceView:94` 的 `monitor.lastSampleAt` 其实是 `latestSnapshot?.timestamp`（`:280`），也算这一类。
+- **顺手的 6 处**（读已闸门属性）：`PerformanceView` 45 / 47 / 53 / 55 / 68 / 69。
+  它们和 `:54` 在**同一个 body**里，所以单独迁它们**测不出差异**——那一屏仍被 `latestSnapshot` 拽着重算。
+  既然人到现场了，一并改掉是对的（棘轮要的是 0，不是"有效的 0"），但**别把收益记在它们头上**。
+- 10 处承重里，**7 处是 1:1 换名**（`curve.value` 直接顶 `Array(history.suffix(90))`、
+  `pulse.value.historyCount` 顶 `history.count`、`pulse.value.sampleAt` 顶 `lastSampleAt`、
+  `ledger.value.systemWideCount` 顶 `latestSnapshot?.processCount`；四 + 一 + 一 + 一 正好七处），
+  剩下 **3 处是"把整份快照递给别人"**，性质和 `SampleContext` 一样，要改的是**接收方的入参**：
+  1. `LiveReadings.swift:25` `SampleContext(snapshot:)` —— 喂着 `PerformanceView` 里五个子视图；
+  2. `DashboardView.swift:333` `private var snapshot: SystemSnapshot? { monitor.latestSnapshot }`
+     —— 页内 10 处读点共用这个别名，实际只碰 `disk*/network*` 四个速率字段（都在 `rates.value`）；
+  3. `ProjectSidebar.swift:443` `LiveCPUBadge(snapshot: monitor.latestSnapshot)` —— 子视图收整份快照，
+     它要的只是 `cpu.value.usage`（＋ `coreCount`）。
+  这三处**不要**原地换成 `monitor.latestSnapshot` 的另一种写法：那还是同一棵 body 每 tick 重算。
+- 顺序建议：**先做那 7 处 1:1 的**（零判断、当场能让 `migration` 掉 7 个），
+  再按 `ProjectSidebar` → `DashboardView` → `PerformanceView`+`LiveReadings` 做那 3 处（由小到大，
+  `LiveCPUBadge` 只有一枚徽章、`SampleContext` 要动五个子视图的入参，放最后）。
+
+`SampleContext`（`LiveReadings.swift:15`）是唯一需要决策的一处，其余都是 1:1 换名。
+它是"整份 `SystemSnapshot` 塞进一个值"，喂着 `PerformanceView`/`SystemTiles`/`ProcessTable`/
+`LiveCharts`/`ProcessGroups` 五处的 `let context: SampleContext`——**只要它还在，那一屏就还整棵重算**。
+它的 20 个纯读数函数不需要新契约：把视图里经 `ctx.snapshot` 读到的字段逐个对过去，
+**14 个不同字段全部已在九格里**（`cpuUsage/cpuCoreCount/thermalState/uptimeSeconds`→`cpu`，
+`memoryUsedBytes/memoryTotalBytes/memoryPressure`→`memory`，`disk*/network*` 四个→`rates`，
+`processCount`→`ledger.systemWideCount`＋`countIsSystemWide` 管"全系统 vs 本用户子集"三态，
+`historyCount/lastSampleAt`→`pulse`，榜单→`cpuRanking/memoryRanking`）。
+也就是说**契约侧没有缺口**，缺口只在"改签名"：把 `ctx.snapshot?.x` 换成读对应的格。
+一个提醒：`PerfCPULead.usage` 等是 `Double?`，比 `SystemSnapshot` 的裸 `Double` **更能表达"没取到"**，
+所以换过去之后 `cpuFraction/memoryGapReason` 那几条的三态判据要**逐条重看**，不要机械替换后沿用旧的
+"snapshot 为 nil 才算缺"——那是把更强的诚实性降级掉（同 §0.0 的红线：诚实性语义一条不降）。
+
+还有一条**留给 `trace_report.py` 的下一个人**（我这轮故意不动它：`ws/x2-runtimesvc` 正在二次拆这个文件，
+我改就是撞车）：`migration` 现在只报"还剩 16 处"，应该把上面的 `承重/顺手` 分级一起打出来，
+让派单的人一眼看见"先做哪 10 处"。分级逻辑已经有了（守卫里的 `classifyCoarseWrites`），
+照它读 `coarsePattern` 的写法再读一遍 `tickBody` 就行——**别手抄第二份名单**，那正是 #44 的形状。
+
+### 第 1.5 步（与第 1 步同批、但收益不同期）：渲染路径剩下的 12 处**全在页面侧**
+
+01:49 用守卫自己的规则复算了全部命中并落进台账明细（`tcoder-perf-renderpath-debt.txt` 现在带
+`文件:行 + 原文`，不再只报一个数）：`fullSort 10` + `syncFileIO 2` **一处都不在 `Services/`、`Design/`、`App/` 里**
+⇒ 性能侧**没有可以自救的份**，这 12 处只能由写页面的人做。清单：
+
+| 处 | 位置 | 被排集合规模 n | 与哪条验收有关 |
+|---|---|---|---|
+| 1 | `Dependencies/DependenciesView.swift:278` `dependencies.sorted { name, version }` | **可到上千**（全仓依赖） | **T1 交互期**（依赖页滚动/切页时重算） |
+| 1 | `Logs/LogsFileTables.swift:104` `scannedFiles.sorted` | **数百～上千**（扫到的日志文件） | **T1 交互期** |
+| 1 | `Logs/LogsFileTables.swift:65` `affectedFiles.sorted` | 数十～数百 | T1，量级次之 |
+| 1 | `Code/CodeMetricsView.swift:56` `languages.sorted` | 个位数～几十 | 清了口径，**别提帧率收益** |
+| 2 | `Git/ContributorRows.swift:11 / :62`、`Git/ContributorsView.swift:22` | 作者数十 | 同上 |
+| 1 | `Health/HealthComponentTable.swift:47` | 组件数固定 | 同上 |
+| 1 | `Logs/LogsMetricGrid.swift:92` `grouped.keys.sorted()` | 几个 key 拼文案 | 同上 |
+| 1 | `Logs/LogsTrendCard.swift:33` `trend.sorted { date }` | 按天分桶，≤90 | 同上（且生产侧本就可以有序） |
+| 2 | `Logs/LogsView.swift:176 / :209` `fileExists` / `attributesOfItem` | **同步 stat()** | **T1**：日志页滚动期做磁盘 I/O |
+
+**为什么这 12 处不牵 T2（心跳 4 ms）**：这五页**一处都不读监控格**——01:50 逐个文件数过
+`grep -c 'monitor\.'`：`DependenciesView`/`LogsView`/`LogsFileTables`/`LogsTrendCard`/
+`LogsMetricGrid`/`CodeMetricsView`/`ContributorRows`/`ContributorsView`/`HealthComponentTable`
+**九个文件全是 0**（粗读点名册里也只有 `DashboardView`/`LiveReadings`/`ProjectSidebar`/`PerformanceView`）。
+所以它们的 body 不随心跳失效，里面的排序/I-O 不会每 tick 跑。⇒ **它们是"切页与滚动期"的成本，归 T1 管，不归 T2 管**。
+派单时别把它们和那 10 处承重粗读点混成一句"清完渲染路径"，两批的验收证据不是同一个窗口。
+
+正解形状与 `cpuRanking` 同一种：**排一次、放进产出，页面读现成的**
+（`PerfLeads.derive` 就是在采集侧一次性排好、页面零排序）。依赖表/日志文件表那两处大集合
+适合挪到分析侧产出有序结果，页面只读——**采集侧改动归我，页面那一行删除归你**。
+要的话我先在服务端把有序版本准备好（不碰 `Views/**`），你那边只剩删调用。
+
 ### 第 2 步：帧率复测（分两小步，因为其中一步需要人手）
+
+> **顺带要量的一个新数（01:59 立，别让它停在推理上）**：我这轮把 6 处读点判成"顺手"，
+> 依据是它们的宿主属性走 `write(\.x,…)` 等值闸门。但**"有闸门"不等于"闸门真的经常关"**——
+> `measuredProcessCount` 在一台真机器上每 tick 都在变的话，skip 率接近 0，那这 6 处就仍然每 tick 抖。
+> 好消息是不管 skip 率多少，排序不变（无闸门那两处**必然**每 tick 换值，闸门写最多和它一样频繁），
+> 所以派单顺序不依赖这个数；但这个数会决定"顺手"是"零收益"还是"小收益"，
+> 而且**它已经可测**：`lastPublishStats` 就在产品里（`@ObservationIgnored`，不进观察图），
+> `ticks`/`writes`/`skips` 三个数，跑 `idle` 档时顺手读一次台账即可。
+> 量法：`writes + skips` 应等于 `ticks × 12`（7 个细格 + 5 个闸门粗属性），
+> 不等就是记账漏了一格——那才是这条读数的第一用途。
+> **口径提醒**：这条量的是"闸门有没有在关"，不是"页面有没有重算"，两件事分别由
+> `idle` 档的 xctrace app-update 与这里的 stats 管，别拿一个数交两条验收。
 
 ```bash
 ./scripts/perf_harness.sh selfcheck          # 11 项，红了所有读数作废——先量尺子再量代码
@@ -224,10 +335,99 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 
 两个操作者、同一台机器、同一档量级 ⇒ 这条结案可以认为是稳的。
 它的价值是**把候选排除了**：持久化不占主线程预算，所以剩下的怀疑对象只有视图图更新，
-也就是第 1 步那 16 处。
+也就是第 1 步那 **10 处承重读点**（不是 16 处——见上面的加权表）。
+
+## 0.5 交接状态（09-21 00:31）——写给"一个人接两条线"的那位，免考古
+
+**已进 main 的性能侧东西**（`main = f9841ae` 之前的 `3a3381c`）：
+细粒度九格契约 + 交互期引用计数暂停（`Services/Performance/MachSystemMonitor.swift`、`App/AppState.swift`）、
+Design 令牌缓存、尺子五档 + `probe` + `selfcheck`（11 项）、`migration` 命令、
+五维 preflight（含**人手静默**）、四条禁则零余量 `1/1 59/59 10/10 2/2`、
+§5.4 与 **T2 两半归因**（主线程九格写入 0.01 ms / 900 进程派生 9.3 ms 在后台）。
+
+**已提交、只差合的两包**（09-21 01:2x 更正：**不再是"主树一干净就落"**，见下面第 0 条）：
+```bash
+ls /tmp/premerge-pass-ws_perf-base-*.ok | tail -2          # 看回执对应的头
+cd TcoderMonitor && ./scripts/merge_stream.sh ws/perf-base "merge ws/perf-base: 台账 + 假迁移守卫"
+```
+内容 = `dynamicNSColor` 拧到 59、两条棘轮各落一份 `$TMPDIR` 台账、
+新守卫 `testPreparedCellsAreNeverReslicedOrResorted`（防"迁了个假的"）。
+
+**合入顺序现在多了一条前置条件（09-21 01:2x 实查 `ws/x3-testsplit`）**：
+WS-X3 把这两条守卫的**宿主文件按行数拆成了 extension**——
+`PerfInvalidationRatchetTests.swift`(190) + `+CoarseRatchet.swift`(104) + `+InvalidationBehavior.swift`(209)、
+`PerfHitchGuardTests.swift`(252) + `+FramePulse.swift`(111)，而我这两包的 hunk 正落在宿主文件里。
+所以：
+0. **等 X3/X0 那批先进 main，我再把自己的两包"重新落位"到拆后的布局上**（把 `reslicePattern` 那两条测试
+   放进 `+CoarseRatchet.swift`、`knownBaseline` 的改动留在主文件），跑一遍门再合。
+   ~~落位时必须顺手把 §3.6「收益分级」整段搬进一个新的 extension 文件~~ —— **01:54 已经做掉了**：
+   那段现在在 `PerfInvalidationRatchetTests+CoarseWeighting.swift`(252 行)，主文件回到 **541 行**
+   （原来 781 行、离 800 上限只剩 19 行，再写一条测试就会把 main 弄红；**拆文件才是修复，改阈值不是**）。
+   搬动方式**不是复制一份尺子**：`coarsePattern`/`scanHits`/`codeLines`/`Doc`/`Line`/`moduleRoot`/
+   `scannedConsumerDocs` 从 `private` 放开成 `internal`，两段代码共用同一把尺子。
+   搬完 23 条测试的数量与全部读数**一字不差**（承重 10 / 顺手 6 / 合计 16、`publish()` 抽到 33 行、
+   `1/1 59/59 10/10 2/2`）。X3 拆的是主文件、他们树上没有 `+CoarseWeighting.swift`
+   ⇒ 我的净增行数已经从宿主文件里挪走，将来的冲突面比 01:31 写这条时小。
+   顺序反过来会变成"我先进、他们拆的时候撞我的 hunk"，冲突由不懂这套口径的人解更容易出事。
+   **好消息已经核过**：X3 把口径常量（`coarsePattern` / `finePattern` / `coarseCallSiteCeiling` /
+   `consumerDirectories` / `knownBaseline`）**留在主文件里没搬**，所以 `trace_report.py migration`
+   那把"从守卫里现读尺子"的机器在 X3 树上照样跑得出 `16/16/0`——**拆文件没有把尺子的取数口拆断**。
+   若后续谁把这些常量搬进 extension，`migration` 会**报错而不是用一份手抄的旧尺子**，那是设计行为。
+   **01:57 又实测了一遍落位兼容性，结论比 01:31 乐观**：X3 把 `moduleRoot` / `Line` / `Doc` /
+   `codeLines` / `scanHits` / `documents` / `scannedConsumerDocs` **留在宿主文件里、而且已经全部
+   放开成 `internal`**（逐条 `grep` 核过 `.worktrees/x3-testsplit`）——与我 01:54 为了跨文件共用
+   做的六处放开**是同一批成员、同一个可见性**。
+   ⇒ 我的 `+CoarseWeighting.swift` 对着他们的布局**不需要任何改动就能编译**，
+   重新落位缩成两小步：`reslicePattern` 那两条测试挪进 `+CoarseRatchet.swift`、
+   `knownBaseline` 与台账明细的改动留在 `PerfHitchGuardTests.swift` 主文件。
+1. **§0.4 第 1 步**：**10 处承重**粗读点迁完（`python3 scripts/trace_report.py migration` 报 0）
+   → 我再把 `coarseCallSiteCeiling` 拧 0、翻 `consumptionGateOpen`；
+2. **§0.4 第 2 步**：约 5 分钟安静窗口（`idle`×3 不需要人；`interact`×3 需要你持续滚 20 秒）。
+   被挡过两次的真实原因都写在 `measurement-context.txt` 里，脚本会自己拒，不用你判断。
+
+**这一轮还查到两件与派单有关的事实**（都影响"下一步做什么"）：
+- **`ws/x0-chief`、`x1`、`x2`、`x3` 四棵树里 16 处读点一处没动**（01:2x 逐树跑 `migration` 全是 `16/16/0`）。
+  这批是**体量/圈复杂度拆分轮**，不是 120Hz 轮；`x2` 那位还在二次拆我的 `trace_report.py`、
+  把 `selfcheck` 搬进 `perf_selfcheck.sh`（读数我核过没变）。⇒ **交互期 hitch 的收益仍然完全押在第 1 步上**，
+  它一旦再排到下一批，这一轮的 T1 就没法结。
+- `ws/chief`（`f5c0449`，13:30）**已全部在 main 里、树是干净的**，是上一轮留下的空树。
+  不是我建的、也不归我清，报给接管者处置：`git worktree remove .worktrees/chief && git branch -d ws/chief`。
+
+**别做这三件事**（都是这一轮踩过或量过的）：
+不要为了"零动态色"删取色引用（终点不是 0，见规范 T5）；
+不要把任何阈值调松来变绿（`ceiling = 0` 与 ≤800 行那条一样，"改这里的数字不是修复"）；
+不要拿 `probe` 去和改前对照物比（`/tmp/tcoder-before.app` 里没有 `FramePulse`，只能同走 xctrace）。
+
+## 0.6 【01:55~02:02 实测】那 10 处该**折进观感批次**做，不要另起一趟派单
+
+数了主线上最近六笔碰过哪些文件，结论很直接：**迁移的四个目标文件正是观感批次反复重写的文件**。
+
+| 目标文件 | 最近被谁碰 | 时间 |
+|---|---|---|
+| `DashboardView.swift` | 批次 H1（分隔线收口） | 01:55 |
+| `PerformanceView.swift` | 批次 E、批次 ABC | 更早几笔 |
+| `ProjectSidebar.swift` | 批次 H1 之前的 4efcfee、批次 ABC | 同一批 |
+| `PerfLogs/LiveReadings.swift` | 近期**没有**观感批次碰它 | — |
+
+⇒ 另起一趟"性能迁移派单"必然和下一批观感改动撞在同一批行上：**两拨人改同一个 body 的同几行**，
+这就是 21:15 那条"性能侧不许写 `Views/**`"裁定要防的事，它到现在仍然是对的。
+更省的做法是**在同一批观感改动里顺手换掉读法**：那几行本来就要重写，
+换 `monitor.curve.value` / `monitor.pulse.value` 与换一种分隔线画法是同一次编辑，
+**不多花一次合并、不多花一遍门禁、也不多占一次实机测量窗口**。
+
+给接管者的三句可执行版本（都是 1:1，零判断）：
+`Array(history.suffix(90))` → `curve.value`（四处：`DashboardView:458/459`、`PerformanceView:63/95`）；
+`history.count` → `pulse.value.historyCount`（`LiveReadings:26`）；
+`lastSampleAt` → `pulse.value.sampleAt`（`PerformanceView:94`）；
+`latestSnapshot?.processCount` → `ledger.value.systemWideCount`（`PerformanceView:54`）。
+剩下 3 处（`SampleContext`、`DashboardView.snapshot` 别名、`LiveCPUBadge(snapshot:)`）要改接收方入参，
+适合作为**单独一小批**，和"分隔线收口"这种纯视觉改动混在一起反而看不清是谁的效果。
+
+**验收仍然不认口头**：`python3 scripts/trace_report.py migration` 报 0 → 我把
+`coarseCallSiteCeiling` 拧 0 → 再翻 `consumptionGateOpen`。**这批折进哪一轮做都行，
+但只要它没做，T1（交互期 hitch = 0）就没有可交的证据**，而这是目标里排第一的那条。
 
 ## 0. 消费什么（都已进 main，不用等）
-
 
 `state.monitor` 上的 9 个独立观察格与派生入口，签名与语义见
 `docs/superpowers/specs/2026-09-20-performance-120hz-design.md` §5.3。要点：
@@ -264,7 +464,7 @@ cd /Users/one/Documents/Tcoder && git worktree remove .worktrees/<树名>   # �
 - **锁按树独立**：`locked_build.sh` 的锁在各树自己的 `.build/agents.lock`，
   所以"一家只跑一个编译"是**约定**不是机制——请自觉，别和别的流同时抢 CPU（读数会被污染）。
 - **不要动 `Design/**` 与 `App/Theme.swift` 的取值**（归 UI 总工），这单只改读法；
-- **不要为了少改而新增第 17 处粗读**：棘轮零余量（`1/1 86/86 10/10 2/2` 与粗读 `16/16`），加一处当场红。
+- **不要为了少改而新增第 17 处粗读**：棘轮零余量（`1/1 59/59 10/10 2/2` 与粗读 `16/16`），加一处当场红。
 
 ### 为什么这 16 处现在更是唯一有收益的路
 
