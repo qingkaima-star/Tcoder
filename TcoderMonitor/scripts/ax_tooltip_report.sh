@@ -15,6 +15,8 @@
 #   AX_SET=<名字>       同一轮取证的子目录名（默认 `full`；空态那趟用 `empty`），
 #                       免得两批读数互相覆盖。
 #   AX_EMPTY_REGISTRY=1 注册表置空，拍**首启空态**那一档的 ⓘ（那一档不产报告，故不等分析）
+#   AX_LANG=en              以英文态读数（只给本脚本起的实例加 `-AppleLanguages`，不动系统语言）
+#                           —— 用来量"英文界面上还挂着多少中文 tooltip"这一类双语残留
 #   WAIT_BUDGET=<秒>    等第一轮分析落盘的预算（默认 420）
 # 产物: $SCRATCH/tcoder-ax-tooltip/<AX_SET>/<页>--<top|bottom>.txt
 set -uo pipefail
@@ -31,6 +33,8 @@ AX_SET="${AX_SET:-full}"
 OUT="$SCRATCH/tcoder-ax-tooltip/$AX_SET"
 SANDBOX="$SCRATCH/tcoder-ax-tooltip/sandbox-$AX_SET"
 TARGET="${AX_TARGET:-$(git rev-parse --show-toplevel)}"
+LANG_ARGS=()
+if [ "${AX_LANG:-}" = "en" ]; then LANG_ARGS+=(-AppleLanguages "(en)"); fi
 UUID="11111111-2222-3333-4444-555555555555"
 WAIT_BUDGET="${WAIT_BUDGET:-420}"
 LAST_COUNT=-1
@@ -106,7 +110,7 @@ dump_one() {  # dump_one <页名> <top|bottom> ；条数写进全局 LAST_COUNT�
   local name="$1" scroll="$2" file="$OUT/$name--$scroll.txt" pid code
   LAST_COUNT=-1
   env TCODER_SUPPORT_DIR="$SANDBOX" TCODER_CAPTURE_SCROLL="$scroll" "$BIN" \
-      -ApplePersistenceIgnoreState YES -selectedDetailSection "$name" \
+      -ApplePersistenceIgnoreState YES "${LANG_ARGS[@]+"${LANG_ARGS[@]}"}" -selectedDetailSection "$name" \
       > "$OUT/$name--$scroll.instance.log" 2>&1 &
   pid=$!
   sleep 6

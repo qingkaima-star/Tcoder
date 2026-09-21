@@ -77,7 +77,7 @@ struct LogsView: View {
                                 selection: window.wrappedValue,
                                 onSelect: { window.wrappedValue = $0 })
                 .accessibilityLabel("时间窗口")
-                .help("切换后自动重新分析（扫描进行中除外）")
+                .help(localizedCopy("切换后自动重新分析（扫描进行中除外）"))
             controls
         }
     }

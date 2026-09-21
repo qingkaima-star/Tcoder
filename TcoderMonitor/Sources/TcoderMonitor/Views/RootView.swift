@@ -42,7 +42,7 @@ struct RootView: View {
                 .buttonStyle(.plain)
                 .glassButtonStyle(.bordered)
                 .disabled(state.isScanning || state.selectedProject == nil)
-                .help("对当前项目重新执行全部分析器")
+                .help(localizedCopy("对当前项目重新执行全部分析器"))
 
                 if state.isScanning {
                     ProgressOverlay(phase: state.phase,

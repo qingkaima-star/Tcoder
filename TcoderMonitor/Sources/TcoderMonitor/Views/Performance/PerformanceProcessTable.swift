@@ -85,7 +85,7 @@ struct PerformanceProcessTableCard: View {
                             selection: sortKey,
                             onSelect: { sortKey = $0 })
             .accessibilityLabel("排序")
-            .help("切换排序口径；两种都是全系统范围的占用排序")
+            .help(localizedCopy("切换排序口径；两种都是全系统范围的占用排序"))
     }
 
     /// 表头与行都从 `DataColumns.processes` 取布局（#34 收敛前这里是 `Grid` +

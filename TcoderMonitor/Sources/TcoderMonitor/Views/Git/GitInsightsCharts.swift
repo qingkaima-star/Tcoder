@@ -190,7 +190,7 @@ struct GitActivityHeatmap: View {
         .frame(height: Self.totalHeight)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("24 小时与星期的近似活跃分布矩阵")
-        .help("提交活跃度按星期与小时近似分布；强度为两条边际归一边际的平均值，是近似值")
+        .help(localizedCopy("提交活跃度按星期与小时近似分布；强度为两条边际归一边际的平均值，是近似值"))
     }
 
     /// 两条边际全零 = 时间戳根本没解析出来，这是「没有数据」，不是「没人半夜提交」。

@@ -32,7 +32,7 @@ struct NetworkOptionsCard: View {
                     Spacer(minLength: Theme.Spacing.sm)
                     GlassButton("重新分析", icon: .reanalyze, style: .prominent,
                                 isEnabled: canRescan, action: rescan)
-                        .help("对当前项目重新执行全部分析器")
+                        .help(localizedCopy("对当前项目重新执行全部分析器"))
                 }
                 Text(Self.statusCaption(allowNetwork: allowNetwork))
                     .monospacedDigit()

@@ -119,7 +119,50 @@ def selfcheck() -> int:
     return 0
 
 
+def language_audit(argv) -> int:
+    """英文态双语残留台账：把每个 help 片段分成三类，**逐条列出来给人判**。
+
+    为什么不是"含中文即缺陷"：项目名、提交标题、文件路径这些**本来就是用户的数据**，
+    英文态不翻才对。真正的缺陷是"界面的话术"没查表。所以分三类：
+      A 有键没查 —— 这句已经在 `Localizable.strings` 里，说明本该翻而没去查；
+      B 未登记的界面话术 —— 没键，但句式像文案（含标点/句式词），要人过一眼再登记；
+      C 像数据 —— 路径 / 项目名 / 提交标题 / 纯计数，不翻。
+    只报数不判败（报告器）。
+    """
+    dirs = live_help_dirs(argv)
+    evidence = [p for d in dirs for p in sorted(d.glob("*.txt"))]
+    if not evidence:
+        print("!! 没有取证产物（英文态那趟：AX_LANG=en AX_SET=en ./scripts/ax_tooltip_report.sh）")
+        return 1
+    catalog = repo_root() / "TcoderMonitor/Resources/en.lproj/Localizable.strings"
+    text = catalog.read_text(encoding="utf-8") if catalog.exists() else ""
+    keys = set(re.findall(r'^"((?:[^"\\]|\\.)+)"\s*=', text, re.M))
+    han = re.compile(r"[一-鿿]")
+    counts: dict[str, int] = {}
+    for path in evidence:
+        for entry in read_help_entries(path):
+            for piece in entry.split(" ⏎ "):
+                piece = piece.strip()
+                if piece and han.search(piece):
+                    counts[piece] = counts.get(piece, 0) + 1
+    a = [k for k in counts if any(k.startswith(key[:12]) or key.startswith(k[:12]) for key in keys)]
+    data = [k for k in counts
+            if k not in a and ("/" in k or re.search(r"^(Latest|最新)[：:]", k) or "Tcoder（" in k)]
+    b = [k for k in counts if k not in a and k not in data]
+    print(f"== 英文态含中文片段 {sum(counts.values())} 次 / 去重 {len(counts)} 句"
+          f"（{len(evidence)} 趟）")
+    print(f"   A 有键没查 : {len(a)} 句 ← 这是缺陷，且修法只是包一层 localizedCopy")
+    print(f"   B 未登记话术: {len(b)} 句 ← 要登记键 + 包查表（或确认是数据后归 C）")
+    print(f"   C 像数据   : {len(data)} 句 ← 项目名 / 路径 / 提交标题，不翻是对的")
+    for label, group in (("A", a), ("B", b)):
+        for k in sorted(group, key=lambda x: -counts[x])[:12]:
+            print(f"   {label} {counts[k]:3d}× {k[:76]}")
+    return 0
+
+
 def main(argv):
+    if argv and argv[0] == "--language-audit":
+        return language_audit(argv[1:])
     if argv and argv[0] == "--selfcheck":
         return selfcheck()
     root = repo_root()

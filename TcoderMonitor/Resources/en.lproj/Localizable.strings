@@ -668,3 +668,15 @@
 // 批次 ⓘ·S7 收尾：`SystemReadings.memoryCaliber` 一直是 `static let` ⇒ 双语守卫看不见，
 // 而它现在有两个上屏落点（性能页 + 总览读数带）。登记一次，两页的英文态一起接得住。
 "口径 = 总量 −（空闲 + 推测 + 可清除），与活动监视器一致；这是「在用」，不是「剩余可用」。" = "In use = total − (free + speculative + purgable), matching Activity Monitor; this is what is BEING USED, not what is left free.";
+
+// ── 批次 P14：`.help()` 槽位接进查表面（英文态 tooltip 残留中文）─────────────
+// 这 7 条是新键；另有 9 条**早就在目录里**，只是 `.help()` 自己不查表 ——
+// "键存在"从来不等于"查得中"（见 docs/中英双语方案.md §7.1）。
+// 守卫：`TooltipLocalizationGuardTests`（零容忍：裸中文 `.help(` 实参当场红）。
+"%1$@ · 点击在 Finder 中显示" = "%1$@ · Click to reveal in Finder";
+"%1$@ · %2$@ 次改动" = "%1$@ · %2$@ changes";
+"报告里的非合并提交数" = "the non-merge commit count in the report";
+"该项的分母" = "this item's denominator";
+"已完成扫描，这一项确实没有命中任何记录——这个 0 是测得的结果，不是没查。" = "Scan completed: this item genuinely matched no records — this 0 is a measurement, not a missing check.";
+"算不出来：分母（%1$@）为 0，这个比值没有定义。这里既不是没扫，也不是 0。" = "Not computable: the denominator (%1$@) is 0, so this ratio is undefined. This is neither an unscanned item nor a zero.";
+"还没查到：这一项的扫描或采样没有完成，先跑一次分析、或等首帧到达。" = "Not yet available: this item's scan or sample has not finished — run an analysis, or wait for the first frame.";

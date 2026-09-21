@@ -56,7 +56,7 @@ struct HeuristicClaimLine: View {
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
         }
-        .help("综合分 = Σ（维度得分 × 归一化权重），全部由本机规则从扫描结果算出，不访问网络，也不调用任何外部模型。")
+        .help(localizedCopy("综合分 = Σ（维度得分 × 归一化权重），全部由本机规则从扫描结果算出，不访问网络，也不调用任何外部模型。"))
     }
 
     static let claim = "启发式加权计算，未调用外部模型"

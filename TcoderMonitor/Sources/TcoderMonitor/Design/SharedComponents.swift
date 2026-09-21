@@ -320,7 +320,7 @@ struct ProgressOverlay: View {
                     .font(Theme.Typo.microLabel.font)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
-                    .help("五路分析并行执行，这个数字是已经返回的路数，不是顺序进度")
+                    .help(localizedCopy("五路分析并行执行，这个数字是已经返回的路数，不是顺序进度"))
             }
         }
         .padding(.horizontal, Theme.Spacing.sm)

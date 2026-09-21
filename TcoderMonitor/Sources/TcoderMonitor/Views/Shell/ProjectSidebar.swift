@@ -379,7 +379,7 @@ struct LiveCPUBadge: View {
         // 这里刻意**不**再套 `.accessibilityLabel`——那会覆盖掉合并来的数值，
         // 只剩一句「本机实时 CPU」，等于把读数从读屏里拿走。
         .accessibilityElement(children: .combine)
-        .help("本机实时 CPU / 已用内存")
+        .help(localizedCopy("本机实时 CPU / 已用内存"))
     }
 }
 

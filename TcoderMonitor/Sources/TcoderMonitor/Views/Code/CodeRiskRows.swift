@@ -305,7 +305,7 @@ struct CodeComplexityRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("\(hotspot.filePath):\(hotspot.startLine) · 点击在 Finder 中显示")
+            .help(localizedFormat("%1$@ · 点击在 Finder 中显示", "\(hotspot.filePath):\(hotspot.startLine)"))
 
             CodeOpenFileButton(path: hotspot.filePath, root: root)
                 .tableCell(DataColumns.column(columns, 6))
