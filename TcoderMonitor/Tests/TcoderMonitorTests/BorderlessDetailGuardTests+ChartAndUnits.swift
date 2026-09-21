@@ -298,5 +298,31 @@ extension BorderlessDetailGuardTests {
                       "注释被误判成代码")
     }
 
+    // MARK: 批次 P5-f：读数带底边必须齐
+
+    /// 两批实拍都点名"同排四格底边参差"。修法不是截脚注（口径截了就等于丢掉可核对性），
+    /// 而是**每格预留同一块行位**。这条守卫钉住机制本身：
+    /// ① 预留常量必须是 `ReadoutStrip` 注入、`MetricTile` 消费；
+    /// ② 预留高度必须由排版令牌算出来（不许出现魔法数），且随行数线性增长；
+    /// ③ 不在读数带里（`reserve == nil`）时必须预留 0 —— 否则独立格子凭空多一块空白。
+    func test_readoutBandReservesOneSharedCaptionBlock() throws {
+        XCTAssertEqual(TileCaptionLayout.reserveLines, 2,
+                       "脚注预留行数改了要同步实拍复核：两行是「摘要一行 + 口径一行」的约定")
+        let one = TileCaptionLayout.minHeight(reserve: 1)
+        let two = TileCaptionLayout.minHeight(reserve: 2)
+        XCTAssertGreaterThan(one, 0, "预留高度算出 0 —— 令牌读不到，等于没预留")
+        XCTAssertEqual(two - one, Theme.Typo.label.size + Theme.Typo.label.lineSpacing,
+                       accuracy: 0.001, "多留一行的增量不等于一行行高，说明公式写错了")
+        XCTAssertEqual(TileCaptionLayout.minHeight(reserve: nil), 0,
+                       "带外使用也必须预留会让独立格子凭空多一块空白")
+
+        let strip = try SurfaceScanKit.sourceFiles(under: "Design")
+            .first { $0.path.hasSuffix("SharedComponents.swift") }!
+        XCTAssertTrue(strip.content.contains(".environment(\\.tileCaptionReserve, TileCaptionLayout.reserveLines)"),
+                      "ReadoutStrip 不再注入预留 ⇒ 底边又会各走各的")
+        XCTAssertTrue(strip.content.contains("TileCaptionLayout.minHeight(reserve: tileCaptionReserve)"),
+                      "MetricTile 不再消费预留 ⇒ 注入成了空操作")
+    }
+
 }
 
