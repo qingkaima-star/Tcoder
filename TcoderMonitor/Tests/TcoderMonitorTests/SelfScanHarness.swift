@@ -37,15 +37,26 @@ class SelfScanHarnessCase: XCTestCase {
             .deletingLastPathComponent()   // 工作树根
     }()
 
-    /// `.inflight` 是 `.gitignore` 里明写的「过程遗留」目录（在途 patch、取证沙箱、
-    /// 打包中间件都往里写）。不剪掉它，本门的结果就取决于"这一刻有没有人留着产物"：
-    /// 2026-09-21 实测，一份取证沙箱里的 `reports/*.json`（1322 行）被自扫算成
-    /// "仓库新增一个超 800 行的巨大文件"，把三条无关的测试一起判红。
-    /// 同一条剪枝在 `SourceFileReachabilityTests` 与 `DocReferenceRatchetTests` 里
-    /// 各有一份副本（本仓已知重复），三处一起改，否则两边量的不是同一棵树。
+    /// **仓库遍历剪枝的唯一来源**：`SourceFileReachabilityTests` 与
+    /// `DocReferenceRatchetTests` 都引用这一份，不再各抄一遍。
+    ///
+    /// 为什么要收成一份：三处副本各有一份清单，改一处漏两处时，两把尺子量的就不是同一棵树，
+    /// 一边绿一边红无法归因。`GitignorePruneGuardTests` 现在机器守住"`.gitignore` 里
+    /// 声明的每个目录都必须出现在这一份里"，所以新增落点不会再靠人记得去改三处。
+    ///
+    /// `.inflight` / `.scratch` 都是 `.gitignore` 里明写的「过程遗留」目录
+    /// （在途 patch、取证沙箱、打包中间件、录屏）。不剪掉它们，本门的结果就取决于
+    /// "这一刻有没有人留着产物"：2026-09-21 实测，一份取证沙箱里的 `reports/*.json`
+    /// （1322 行）被自扫算成"仓库新增一个超 800 行的巨大文件"，把三条无关的测试一起判红。
     static let skipDirectoryNames: Set<String> = [
         ".git", ".build", ".swiftpm", "dist", "build", "node_modules", ".worktrees",
-        ".inflight",
+        "DerivedData", "out", ".inflight", ".scratch",
+        // 下面两条是新增的守卫（`GitignorePruneGuardTests`）当场抓出来的：
+        // `.tc-typecheck` 是并行自查的编译探针目录（会留 `.o`，也可能留 `.swift` 探针，
+        // 那样连"实现文件分母"都会被别人的临时文件改动）；
+        // `coverage` 是 `swift test --enable-code-coverage` 产出的 lcov ——
+        // 本 App 扫自己时读到一份过期 lcov，比读不到更坏。
+        ".tc-typecheck", "coverage",
     ]
 
     // MARK: - 一次性扫描缓存（六个分析器都跑一遍，多个测试复用）
