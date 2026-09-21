@@ -242,6 +242,13 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
    **不设合成输入的 `scroll` 档**（原计划里有，现撤）：合成滚轮要 `CGEvent.post`，而本机 System Events
    权限被拒（§4.1 探测时实测），事件会被静默丢弃——那会造出"交互期 0 hitch"的**假绿**。
    交互由人真滚，`interact` 档负责把它标成交互期样本。
+   **02:31 补第二条独立的撤因（免得下一个人重新想到同一条路）**：也**不要**改成"让 App 自己滚"
+   （进程内 `NSScrollView` 程序化滚动，看起来能绕开权限）。它绕开了权限，却绕不开语义：
+   T3 的暂停是靠 `AppState` 的 **`NSEvent` 本地监视器**认"有人在滚"（§4.1），
+   程序化滚动**不产生 NSEvent**，于是监视器不触发、实时刷新不暂停——
+   测出来的将是一个"一边刷新一边滚"的混合态，与真实交互不是同一件事。
+   **要自动化就必须连暂停语义一起造，而那等于测我自己造的假现场。**
+   ⇒ T1 的这一档必须人滚 20 秒，这是度量前提，不是工具没做完。
 2. `FramePulse`（新，`Services/Performance/`）：`CVDisplayLink` 时间戳 + 主线程 runloop 心跳看门狗
    + `os_signpost`，**仅 `TCODER_PERF_PROBE=1` 时启动**（常驻开销不可接受），
    读数落 `$TCODER_PERF_OUT` 或 `/tmp` 文件——**取证 print 必须落文件**，`swift test` 会丢子进程 stdout 后半段。
