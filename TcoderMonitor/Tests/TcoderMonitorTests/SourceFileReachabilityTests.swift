@@ -92,8 +92,13 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// `Views/Health/HealthComponentTable.swift`（原调用方，一字未改）、
     /// `Design/DataTable.swift`（此前一直在反向引用 `HealthBreakdown.weightColumnHelp`，
     /// 这次连方向一起摆正）、`Services/CLI/CLIScoreText.swift`（新增的第二位读者）。
-    static let censusBaseline = 142
-
+    /// 142 → 143（WS-X8 ⓘ 前置：新增 `Design/CopyHelp.swift`，声明 `CopyHelpBadge`。
+    /// **凭什么被引用**：`Views/PerfLogs/NumberText.swift` 的 `NoteLine(_:role:icon:help:)`
+    /// 在 `help != nil` 那一支渲染它 —— 那是「留短藏长」类槽位（盘点表 129 槽里 94 槽判这一类）
+    /// 在性能 / 日志 / 健康三页的挂载点，ⓘ 的画法全站只许这一份
+    ///（新增的 `CopyHelpBadgeTests` 三条判据 + 注入坏样例的元测试钉住）。
+    /// 守卫实报「实现文件 143 · 在用 142 · 未用 0 · 零调用清单：无」）。
+    static let censusBaseline = 143
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
