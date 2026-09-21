@@ -109,7 +109,7 @@ python3 scripts/trace_report.py migration --module-root ../<你的树>/TcoderMon
 |  | 69 | `monitor.processesByMemory` | `monitor.memoryRanking.value` |
 |  | 104 | `monitor.lastSampleAt` | `monitor.pulse.value.sampleAt` |
 |  | 105 | `monitor.history.count` | `monitor.pulse.value.historyCount` |
-| `Views/Shell/ProjectSidebar.swift` | 411 | `state.monitor.latestSnapshot`（喂 `LiveCPUBadge`） | `monitor.cpu.value`（badge 只需 CPU） |
+| `Views/Shell/ProjectSidebar.swift` | 411 | `state.monitor.latestSnapshot`（喂 `LiveCPUBadge`） | **经 `SystemReadings` 读 `cpu.value.usage` + `memory.value`**（徽章要两格；直接渲染 `memory.value.usedBytes` 会把 `--` 变成 `0 B`，见 §0.6 末尾那条更正） |
 
 > 顺带：`isCollectingForDisplay` 也是 **0 读取**（见 W-6）。
 > 这两个 0 是同一件事的两面——**新契约没接，旧入口没撤**。
@@ -490,9 +490,25 @@ WS-X3 把这两条守卫的**宿主文件按行数拆成了 extension**——
 `monitor.latestSnapshot?.processCount` → `monitor.ledger.value.systemWideCount`（`PerformanceView.body`）。
 剩下 3 处要改**接收方**，不是换名：`SampleContext.from`（喂五个子视图）、
 `DashboardLiveReadout.snapshot`（页内 10 处共用的别名）、`SidebarLiveFooter` 递给
-`LiveCPUBadge(snapshot:)` 的那个入参（徽章只要 `cpu.value.usage`）。
+`LiveCPUBadge(snapshot:)` 的那个入参。
 这三处适合作为**单独一小批**，和纯视觉改动混在一起会看不清是谁的效果。
 
+> **02:07 更正我上面这条建议里的一处危险简化（照我原话说会造出假零）。**
+> 我写"徽章只要 `cpu.value.usage`"，但徽章其实吃**两格**：`cpuUsage` 与 `memoryUsedBytes`，
+> 现在靠 `DataAbsence.optional(snapshot.map { … })` 表达"还没采到" ⇒ 显示 `--`。
+> 而 `PerfMemoryLead.usedBytes` / `.totalBytes` 是**非 Optional 的 `UInt64`**，
+> `.empty` 就是 `0 / 0`（`Services/Performance/PerfReadoutCells.swift:83`）——
+> **照直渲染就是"0 B"**，把"没测到"说成"测到 0"，正是本仓 ④⑤ 两类事故的形状。
+>
+> ⇒ 正确路线**不是让页面去读原始格**，而是继续走 `SystemReadings`：
+> 它是三态判定的唯一归属（四条 guard：`snapshot == nil`、`memoryTotalBytes > 0`、
+> `pressure != .unknown`、`usedBytes > 0` 才算有证据），迁移只该改"**上下文怎么来**"，
+> 不该把判据搬进页面、也不该为此改格类型的字段。
+> 所以那 3 处的做法是：**把 `SampleContext.from(_:)` 改成从细粒度格拼**（一个文件、一处），
+> 五个子视图与徽章继续吃 `SystemReadings`，判据一字不改。
+>
+> 顺带一句：`migration` 的提示语对这三处偏简单——**那句是给 7 处 1:1 用的**，
+> 这 3 处请按本节办。
 **验收仍然不认口头**：`python3 scripts/trace_report.py migration` 报 0 → 我把
 `coarseCallSiteCeiling` 拧 0 → 再翻 `consumptionGateOpen`。**这批折进哪一轮做都行，
 但只要它没做，T1（交互期 hitch = 0）就没有可交的证据**，而这是目标里排第一的那条。
