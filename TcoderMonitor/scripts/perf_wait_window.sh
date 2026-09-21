@@ -24,7 +24,7 @@ QUIESCE_SRC="${QUIESCE_SRC:-$PWD/scripts/input_quiescence.swift}"  # preflight �
 # 于是"没有重活"**永远为真**——一条恒放行闸门比恒拒更危险，因为它连报错都没有。
 # 今天刚修过恒拒（前台名比错），这条断言防的是镜像方向。
 declare -f concurrent_heavy_jobs >/dev/null || {
-  echo "!! scripts/perf_preflight.sh 里没有 concurrent_heavy_jobs —— 这一维看不见东西，拒绝起跑" >&2
+  echo "!! source 链里没有 concurrent_heavy_jobs（现在住在 scripts/perf_probes.sh）—— 这一维看不见东西，拒绝起跑" >&2
   exit 3
 }
 

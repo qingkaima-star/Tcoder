@@ -21,6 +21,8 @@
 # 页名不自己编：与 capture_pages_isolated.sh 共用一份事实来源，
 # 否则两边页名漂移会让 switch 档悄悄测到不存在的页（SwiftUI 会回落到默认页）。
 # -----------------------------------------------------------------------------
+source "$(dirname "${BASH_SOURCE[0]}")/perf_probes.sh"  # 探针族搬出去了，见那个文件的头注
+
 sections() {
   local line
   line=$(grep -m1 '^SECTIONS=(' scripts/capture_pages_isolated.sh) || return 1
@@ -30,75 +32,11 @@ sections() {
   printf '%s\n' "$line" | grep -o '"[^"]*"' | sed -e 's/^"//' -e 's/"$//'
 }
 
-instance_pids() { pgrep -x TcoderMonitor 2>/dev/null || true; }
 
-# 取某 pid 的可执行文件绝对路径。**为什么不用 `ps -o args=`**：本机 `ps` 被系统拒绝
-# （`/bin/ps: Operation not permitted`，实测在非沙箱下同样如此），于是原来那行永远取空，
-# 而 `TARGET_FLAVOR` 会**默认成 release** —— 等于给一份可能来自 debug 的读数贴上 release 标签，
-# 正好违反 spec §7.3「两档绝对值不可混比」。`lsof -p` 在本机可用，`txt` 行就是可执行文件。
-pid_binary() {  # pid_binary <pid>
-  lsof -p "$1" 2>/dev/null | awk '$4 == "txt" { print $NF; exit }'
-}
 
-WINLIST_BIN=""
 
-# 窗口存在性探测。**为什么先编译一次**：`xcrun swift winlist.swift` 是 JIT，实测每次 0.3 s；
-# 原来 `switch` 档把它放在"首帧轮询"里（最多 60 次），既慢又把探测开销混进了计时。
-# 编译成二进制后稳态实测 39~45 ms，且首次 ~508 ms 的 dyld 冷启动由下面这次预热挡在计时窗外。
-winlist_probe() {  # winlist_probe <pid> → 有在屏窗口时打印 `窗口号|标题|宽`，否则空
-  local pid="$1"
-  if [ -z "$WINLIST_BIN" ]; then
-    if xcrun swiftc -O -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
-         -target arm64-apple-macos14.0 "$WINLIST" -o "/tmp/tcoder-winlist-$$" 2>/dev/null; then
-      WINLIST_BIN="/tmp/tcoder-winlist-$$"
-      "$WINLIST_BIN" "$pid" >/dev/null 2>&1 || true
-    else
-      echo "    ⚠ winlist 编译失败 → 退回 JIT（单次 ~300 ms，只影响存在性探测，不影响时长口径）" >&2
-    fi
-  fi
-  if [ -n "$WINLIST_BIN" ]; then
-    "$WINLIST_BIN" "$pid" 2>/dev/null | head -1
-  else
-    xcrun swift "$WINLIST" "$pid" 2>/dev/null | head -1
-  fi
-}
 
-TARGET_BINARY=""   # 由 require_idle_target 填：实际被采的那个二进制的绝对路径
-TARGET_FLAVOR=""   # release / debug —— spec §7.3 要求两档的绝对值永不混比
 
-note_target_flavor() {  # note_target_flavor <pid>
-  TARGET_BINARY=$(pid_binary "$1")
-  # **认不出就说认不出**：原来 `*) release` 是个兜底，配上取不到路径的 `ps`，
-  # 会稳定地把「不知道」说成 release。release 与 debug 的绝对值差着一个量级，
-  # 这种默认值是把读数卖给第一个来查的人。
-  case "$TARGET_BINARY" in
-    "") TARGET_FLAVOR="未知（取不到被采二进制 → release/debug 不可判定，本批读数不得与任何基线比）" ;;
-    *".build/debug"*) TARGET_FLAVOR="debug" ;;
-    *"/dist/Tcoder.app/"*) TARGET_FLAVOR="release" ;;
-    *) TARGET_FLAVOR="未知（路径既非 .build/debug 也非 dist/Tcoder.app：$TARGET_BINARY）" ;;
-  esac
-  echo "    被采二进制=${TARGET_BINARY:-（取不到）} 口径=$TARGET_FLAVOR"
-}
-
-quiescence_probe() {  # → 一行 `… 静默=12.34s`；取不到时打印 静默=-1.00s（调用方按"取不到"处理）
-  if [ -z "$QUIESCE_BIN" ]; then
-    if xcrun swiftc -O -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
-         -target arm64-apple-macos14.0 "$QUIESCE_SRC" -o "/tmp/tcoder-quiesce-$$" 2>/dev/null; then
-      QUIESCE_BIN="/tmp/tcoder-quiesce-$$"
-    else
-      echo "    ⚠ 静默探针编译失败，退回 JIT（慢一点，不影响读数口径）" >&2
-    fi
-  fi
-  if [ -n "$QUIESCE_BIN" ]; then
-    "$QUIESCE_BIN" 2>/dev/null || echo "静默=-1.00s"
-  else
-    xcrun swift "$QUIESCE_SRC" 2>/dev/null || echo "静默=-1.00s"
-  fi
-}
-
-quietest_seconds() {  # 从探针那一行里抠出"静默=Xs"的 X
-  printf '%s' "${1:-}" | sed -n 's/.*静默=\([0-9.-]*\)s.*/\1/p'
-}
 
 # "产物到底是不是这份代码"的判定**不在本文件里**——它归 scripts/perf_provenance.sh，
 # 与 `verify_provenance.sh` 共用同一把手尺子（见那个文件的头注）。
@@ -143,55 +81,9 @@ preflight_context() {  # preflight_context <outdir> <pid>
   echo "    上下文已落 $f"
 }
 
-concurrent_heavy_jobs() {  # → 空格分隔的 pid；空 = 机器上没有本仓的重活
-  # 【为什么不止 swiftc】第一版只 `pgrep -x swiftc`，于是**跑全量门禁的那段时间**
-  # （进程叫 swift-test / xctest，编译早已结束）在它眼里是"机器空着"——
-  # 而那恰恰是 load 与调度最不干净的时候，量出来的样本会五闸全过。
-  # 实测 2026-09-21 11:46：门禁在测时 `swiftc 在场数=0`、load1=4.23，全部门槛放行。
-  local names=(swiftc swift-test xctest) out="" n p
-  for n in "${names[@]}"; do
-    p=$(pgrep -x "$n" 2>/dev/null | tr '\n' ' ')
-    [ -n "$p" ] && out="$out$p "
-  done
-  printf '%s\n' "${out% }"
-}
 
-front_is_target() {  # front_is_target <前台App名> → 0=就是被测 App
-  # 【今天修掉一个让所有测量永远跑不通的闸门 bug】
-  # 旧写法 `[ "$front" != "TcoderMonitor" ]`，而 `lsappinfo` 给的是**显示名 "Tcoder"**；
-  # 只有 System Events 那条路给进程名 TcoderMonitor，而本机它被权限拒。
-  # 于是三趟全部以「被测窗口不在前台（前台是「Tcoder」）」被拒——**自相矛盾**：
-  # 它一边报出前台是 Tcoder，一边说 Tcoder 不算前台。
-  # 两种名字都认（显示名 / 进程名），但只认这两个：微信、Chrome 照样必须拒。
-  case "$1" in
-    Tcoder|TcoderMonitor) return 0 ;;
-    *) return 1 ;;
-  esac
-}
 
-preflight_front_app() {  # → 一行前台 App 名；取不到就是「未知」
-  # 前台 App：**先走 `lsappinfo`（零权限）**。原来只用 `osascript` + System Events，
-  # 而本机那条路被权限拒（实测 `-10004 发生权限违例`），于是永远得到「未知」、
-  # 闸门永远拒跑——一条因为取不到数就永远说"不合格"的闸门，等于没有这把尺子。
-  local asn win
-  asn=$(lsappinfo front 2>/dev/null || true)
-  front=""
-  [ -n "$asn" ] && front=$(lsappinfo info -only name "$asn" 2>/dev/null | sed -n 's/^"LSDisplayName"="\(.*\)"$/\1/p')
-  [ -n "$front" ] || front=$(osascript -e 'tell application "System Events" to name of first application process whose frontmost is true' 2>/dev/null | tr -d '\n')
-  [ -n "$front" ] || front="未知"
-  printf '%s\n' "$front"
-}
 
-preflight_window_state() {  # preflight_window_state <pid> → 那句 visible 描述
-  local win
-  # 窗口在不在屏：走 `winlist.swift`（CGWindowList，**零权限**），与其它三个取证脚本同一把尺子。
-  win=$(winlist_probe "$1")
-  if [ -n "$win" ]; then
-    echo "有在屏窗口（$(printf '%s' "$win" | cut -d'|' -f2)）"
-  else
-    echo "无在屏窗口（隐藏/最小化/不在屏）"
-  fi
-}
 
 preflight_write_context() {  # preflight_write_context <outdir> <context 文件路径>
   # 这一份上下文是"读数可互比"的凭据：谁后面拿这批数做对比，都得先看见同一组条件。
@@ -276,18 +168,7 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
   fi
 }
 
-human_input_in_window() {  # human_input_in_window <静默秒> <窗口秒> → 分类，便于拿合成数字验判定
-  awk -v q="$1" -v w="$2" 'BEGIN{ if (q >= w) print "窗口内没人"; else print "窗口内有人" }'
-}
 
-probe_usable() {  # 探针"取不到"必须是**一个词**，两侧档位共用
-  # 哨兵是 -1（`quiescence_probe` 编不出来或跑不起来时打 静默=-1.00s）。
-  # 它在数轴上是**最小**的静默 ⇒ 任何"静默 < 阈值"的判定（交互档开录）都会被它**骗成合格**。
-  # 所以"有没有人在动"之前，先问"这把尺子今天在场吗"。
-  local q="${1:-}"
-  case "$q" in ''|-1|-1.0|-1.00) return 1 ;; esac
-  return 0
-}
 
 post_window_quiescence() {  # post_window_quiescence <outdir> <窗口秒数>；按 PERIOD 决定"什么样的收尾算合格"
   # 收尾**再问一次**探针：若"距离上次人手事件"仍短于刚录的窗口，说明窗口里有人动过手。
@@ -405,4 +286,3 @@ json.dump({"projects": [{"id": uuid, "name": "Tcoder（性能沙箱）", "path":
           open("%s/projects.json" % support, "w"), indent=2)
 PY
 }
-
