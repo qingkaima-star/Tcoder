@@ -5,6 +5,13 @@ struct TcoderMonitorApp: App {
     init() {
         // 运行时漏翻台账要在退出时落盘（只在设了 TCODER_I18N_RUNTIME_LEDGER 时才写）。
         atexit { LocalizationLedger.shared.flush() }
+        // 无头模式：argv[1] 精确命中子命令词才走这里，跑完直接 exit，GUI 永不出现。
+        // 为什么放在 init 而不是另起一个 executable target：见
+        // `docs/superpowers/specs/2026-09-21-tcoder-cli-design.md` §2（一个二进制 = 一句
+        // "交付二进制 == HEAD"仍然只指一个东西，打包链与来源证明链一字不动）。
+        if CLIRouter.isHeadlessInvocation(argv: CommandLine.arguments) {
+            exit(CLIRouter.main(argv: CommandLine.arguments))
+        }
     }
 
     @State private var state = AppState()
