@@ -109,10 +109,13 @@ struct PerformanceLiveCharts: View {
                     .frame(height: Theme.Layout.chartMinHeight)
             } else {
                 // 可信点不够时说明为什么没有线，而不是画一条 0 线冒充平稳。
-                NoteLine(localizedFormat("本窗口没有足够的可信内存读数可画曲线（%1$@/%2$@ 点可用）。",
-                                           NumberFormat.grouped(trusted.count),
-                                           NumberFormat.grouped(points.count)),
-                         role: Theme.Semantic.warning, icon: .riskWarning)
+                // **留短藏长**：屏上留「N/M 点可用」这个数（它决定这条线还有没有证据），
+                // 完整句式进 ⓘ；ⓘ 里那条仍是目录里的整句键，原文一字未改。
+                NoteLine("可信点不够画曲线（\(NumberFormat.grouped(trusted.count))/\(NumberFormat.grouped(points.count))）",
+                         role: Theme.Semantic.warning, icon: .riskWarning,
+                         help: localizedFormat("本窗口没有足够的可信内存读数可画曲线（%1$@/%2$@ 点可用）。",
+                                               NumberFormat.grouped(trusted.count),
+                                               NumberFormat.grouped(points.count)))
                     .frame(height: Theme.Layout.chartMinHeight, alignment: .center)
             }
         }
@@ -149,14 +152,15 @@ struct PerformanceLiveCharts: View {
     }
 
     /// 进 ⓘ 的轴口径：**必须是完整句**（半句键在英文态语序必坏），
-    /// 且与屏上那一行不重复一个字——搬走的才是这两段理由。
-    /// 秒数与判据一律从 `ChartScale` 取，页面不写第二个真值（性能 spec §5.1）。
+    /// 且原句「带下限的轴是为看清走势而收窄的，不是 0 起点」一字不改地搬进来——
+    /// 本轮只换落点（屏上 → hover），不改口径也不删口径。
+    /// 秒数与两个收窄触发点一律从 `ChartScale` 取，页面不写第二个真值（性能 spec §5.1）。
     static let axisCaliber =
-        "横轴：窗口不足 \(Int(ChartScale.relativeAxisLimitSeconds)) 秒（或少于 8 个点）时改标距今秒数，"
-        + "因为绝对时钟在这个尺度上没有区分度。纵轴：内存长期在九成是 macOS 的常态，"
-        + "0…100 的域里 93→97 的波动只够画 4pt，看着像一条直线，"
-        + "所以峰值过 \(Int(ChartScale.zoomTriggerPercent))% 会把轴收到 50…100、过 "
-        + "\(Int(ChartScale.midZoomPercent))% 收到 75…100——收窄是为了看清走势，不是为了好看。"
+        "横轴：窗口不足 \(Int(ChartScale.relativeAxisLimitSeconds)) 秒（或少于 8 个点）时改标距今秒数——"
+        + "绝对时钟在这个尺度上没有区分度；否则每格步长从固定档位里选，不按点数现算，免得点数一变整个时间轴就重排。"
+        + "带下限的轴是为看清走势而收窄的，不是 0 起点：内存长期在九成是 macOS 的常态，"
+        + "0…100 的域里 93→97 的波动只够画 4pt，肉眼看是一条直线，所以峰值过 "
+        + "\(Int(ChartScale.zoomTriggerPercent))% 收到 50…100、过 \(Int(ChartScale.midZoomPercent))% 收到 75…100。"
 
     /// 「无证据读数」的剔除判据：与 `SystemReadings.trustedMemoryPoints` 同一份口径。
     static let rejectedMemoryCaliber =
