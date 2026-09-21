@@ -317,6 +317,14 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 
 ### 第 2 步：帧率复测（分两小步，因为其中一步需要人手）
 
+> **进度（09-21 11:07 更新，接上面那条排程约束）**：闸门修好后**第一趟受控 idle 已经出数**
+> ——`app-update` 0.6~1.0 ms（T2 红线 ≤4.0）、hitch 0 次、HTR 0.00、`potential-hangs` 0 次，
+> 上下文与拒因都落在 `/tmp/tcoder-perf-ab26811-run{1,2,3}/measurement-context.txt`。
+> 但**它只是 N=1**：同一轮第 2、3 趟被闸门拒（前台被 `AiX` 抢走，其余四条闸全合格）⇒
+> 按 §1.3"连测 ≥3 次且取值一致"的规矩，**T2 还不能申报达标**，还差 2 趟。
+> 同批还修了尺子三处口径（跨机制裸比比率 / 未受控对照列冒充 X / 绕开 harness 必崩表），
+> 见 spec §1.6 与 `fd5d06e`。下面那条"顺手 6 处的 skip 率"**仍未量**，别把它当已结案。
+>
 > **一条现在正生效的排程约束（02:29 写下，免得下一位自己把自己挡掉）**：
 > `perf_wait_window.sh` 挂后台等窗口时，**这台机器上不要跑 `swift build` / `swift test`**——
 > `idle` 档的闸门之一正是"`pgrep -x swiftc` 为空"，我自己的编译会让 watcher 一直拒跑。
