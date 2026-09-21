@@ -17,16 +17,27 @@ import SwiftUI
 extension Theme {
     enum Chart {
         /// 唯一色值来源。`private` 是刻意的：任何新入口都必须经过 `pair(at:)` 的
-        /// 越界回绕，页面拿不到数组，也就没法"顺手挑一个颜色"。
+        /// 越界回绕，页面拿不到裸色值（也就没法"顺手挑一个颜色"）。
+        ///
+        /// **批次 P6 从"八支色相"改成"一系蓝 + 中性灰收尾"**。依据是对参考图的像素普查：
+        /// 有饱和度的像素里蓝约 11,500 个，而绿/黄/红各自只有 130–180 个 ——
+        /// 那三个是状态小圆点，**不是图表色**；环图里未被强调的那一块是灰。
+        /// 我们原来给分类序列发八支色相（紫/粉/青/棕…），于是"一个小区块里五种颜色"
+        /// 这类判词在图表层一直成立 —— 用户第⑦条主诉「没有主次」的形态之一。
+        ///
+        /// 分档规则：**同色相，靠明度拉开**（0→4 由亮 azure 到深靛再到浅蓝），
+        /// 5→7 是中性灰收尾（"其余/长尾"）。多序列时宁可明度相近，也不要引入第二支色相。
+        /// 号位数量保持 8 不变：`wrapped(_:)`、渐变表长度、以及"按键取色 = 按号取色"
+        /// 那类断言都按 `palette.count` 算，改长度等于同时改一批口径。
         private static let palette: [ColorTokenPair] = [
-            ColorTokenPair(light: ColorToken(hex: 0x0A82FF), dark: ColorToken(hex: 0x0A84FF)), // 主 / 自身数据
-            ColorTokenPair(light: ColorToken(hex: 0x34C759), dark: ColorToken(hex: 0x30D158)), // 正向
-            ColorTokenPair(light: ColorToken(hex: 0xFF9F0A), dark: ColorToken(hex: 0xFFD60A)), // 关注
-            ColorTokenPair(light: ColorToken(hex: 0xFF3B30), dark: ColorToken(hex: 0xFF453A)), // 风险
-            ColorTokenPair(light: ColorToken(hex: 0xAF52DE), dark: ColorToken(hex: 0xBF5AF2)), // 分类 A
-            ColorTokenPair(light: ColorToken(hex: 0xFF2D55), dark: ColorToken(hex: 0xFF375F)), // 分类 B
-            ColorTokenPair(light: ColorToken(hex: 0x64D2FF), dark: ColorToken(hex: 0x64D2FF)), // 分类 C
-            ColorTokenPair(light: ColorToken(hex: 0xA2845E), dark: ColorToken(hex: 0xAC8E68)), // 分类 D
+            ColorTokenPair(light: ColorToken(hex: 0x0A7AF8), dark: ColorToken(hex: 0x0A84FF)), // 0 主 / 自身数据
+            ColorTokenPair(light: ColorToken(hex: 0x0B57C4), dark: ColorToken(hex: 0x64A6FF)), // 1 深一档
+            ColorTokenPair(light: ColorToken(hex: 0x5AA7F7), dark: ColorToken(hex: 0x2E6FD9)), // 2 亮一档
+            ColorTokenPair(light: ColorToken(hex: 0x123E86), dark: ColorToken(hex: 0x9EC5FF)), // 3 最深
+            ColorTokenPair(light: ColorToken(hex: 0x9CCBF5), dark: ColorToken(hex: 0x7FB8FF)), // 4 最浅
+            ColorTokenPair(light: ColorToken(hex: 0x8E8E93), dark: ColorToken(hex: 0x98989D)), // 5 中性：其余/长尾
+            ColorTokenPair(light: ColorToken(hex: 0xAEAEB2), dark: ColorToken(hex: 0x7C7C7F)), // 6 中性
+            ColorTokenPair(light: ColorToken(hex: 0xC6C6CB), dark: ColorToken(hex: 0xAEAEB2)), // 7 中性
         ]
 
         static var count: Int { palette.count }
