@@ -3,20 +3,22 @@ import XCTest
 
 /// OWNER: WS-S7 外壳二 —— 总览页剩下三处的落点自检。
 ///
-/// 工单是《2026-09-21 九页碎文案盘点表》A 组里 S1 交回时说"槽位还没开所以没做"的那三处：
+/// 工单是《2026-09-21 九页碎文案盘点表》A 组里 S1 交回时说「槽位还没开所以没做」的那三处：
 /// `DashboardLiveReadout.cadenceSubtitle`（ⓘ 走 `GlassSection.subtitleHelp:`）、
 /// 同页读数带的 `MetricTile.captionHelp:`、以及 `BannerRow` 新开的 `help:` 槽。
 ///
 /// **本文件不复制那三条成对守卫**（A 常驻长句 / B 总量守恒 / C 承诺句常驻住在
-/// `TooltipMigrationGuardTests`，两处各写一遍 = 两把尺子）。本文件只管 S7 自己写下的四件事：
+/// `TooltipMigrationGuardTests`，两处各写一遍 = 两把尺子）。本文件只管 S7 自己写下的事：
 ///   ① `BannerRow.help:` 挂的是全站唯一的 `CopyHelpBadge`，且默认 `nil` 时零版面成本；
 ///   ② 横幅的长下文**只许**走 `help:` 槽，不许再挂在整条横幅外面的裸 `.help`（匿名 tooltip）；
-///   ③ 三处搬字一条字都没少：搬走的整句仍能在源码里找到，且走的是**既有真值生产者/常量**
+///   ③ 搬字一条字都没少：三格 ⓘ 走的是**既有真值生产者/常量**
 ///      （`SystemReadings.memoryCaliber`、`GitHistoryScope.headline`、`PerformanceLiveCharts.cpuBasis`），
-///      而不是在本片再抄一遍中文；
-///   ④ 读数带四枚 tile 的 `caption:` 一格都没空掉 —— `caption == nil` 会照
-///      `TileCaptionLayout` 留白，去掉脚注等于挪动整条读数带（S4 为这条写过基线自检）。
-/// 外加本片那处"第二落点"的防分叉自检（⑥）：总览 ⓘ 里那句与性能页页头那句必须逐字同一句。
+///      而不是在本片再抄一遍中文，且被引用的整句仍能在源码里找到；
+///   ④ 「今日错误」那格不挂 ⓘ 的延伸红线：任何 `captionHelp:` 行里不许出现 `ShellCopy.`；
+///   ⑤ 读数带四枚 tile 的 `caption:` 一格都没空掉 —— `caption == nil` 会照
+///      `TileCaptionLayout` 留白，去掉脚注等于挪动整条读数带（S4 为这条写过基线自检）；
+///   ⑥ 防分叉：总览 ⓘ 里那句只读承诺与性能页页头那句必须逐字同一句；
+///   ⑦ 交给总工拍板的一条尺子账：main 新开的两个槽进不进账，取决于那一行怎么排版。
 final class ShellReadoutTooltipTests: XCTestCase {
 
     static let readoutsPath = "Views/Shell/DashboardReadouts.swift"
@@ -189,5 +191,38 @@ final class ShellReadoutTooltipTests: XCTestCase {
         let headerCopy = String(tail[..<tail.range(of: "\"")!.lowerBound])
         XCTAssertEqual(DashboardLiveReadout.liveReadingsCaliber, headerCopy,
                        "同一条只读承诺在两页写成了两句话（本流无权改 Views/Performance，故报总工收常量）")
+    }
+
+    // MARK: - ⑦ 交给总工拍板的一条尺子账：新开的两个槽进不进账，取决于这行怎么排版
+
+    /// `TooltipMigrationGuardTests` 的两条正则都撞不到 main 这轮新开的 `subtitleHelp:` /
+    /// `captionHelp:` 标签（`\bhelp` 撞上的是驼峰 `Help`，`caption:` 后面又隔着 `Help`），
+    /// 于是**按"一个参数一行"的常规排版**写在这两个槽里的整句被判成 `.skipped` ——
+    /// A 与 B 同时看不见它：把常驻长句搬进这两个槽，A 会降、B 的总量也会跟着降，
+    /// 守恒线撞不出红（删字与藏字长得一模一样）。
+    ///
+    /// 但**同一条调用挤在一行**时是另一个方向：那一行里有 `caption: "` 这种可见线索，
+    /// 整句就被算回 `.visible`（保守方向，安全）。所以这条不是"新槽一律免检"，
+    /// 是"排版决定它进不进账"—— 那更该由总工把尺子补齐，而不是靠人记住换行。
+    ///
+    /// 本片自己**没有**踩这个洞：三格 `captionHelp:` 收的都是既有生产者/常量（不是裸字面量），
+    /// 屏上短句一字未动，A/B 读数与改造前完全相同。这里只把事实钉成断言，
+    /// 不改共享尺子（工单红线：守卫常量与基线只由总工改）。main 现存一例：
+    /// `HealthComponentTable.body` 独占一行的 `subtitleHelp:` 整句。
+    func test_theTwoNewSlotsRulerBlindSpotDependsOnLineShape() {
+        let onePerLine = "captionHelp: \"这一长句整句搬进新开的槽位，它既没被算成常驻也没被算成已藏\","
+        let slots = TooltipMigrationGuardTests.literalSlots(in: onePerLine).map(\.slot)
+        XCTAssertEqual(slots.count, 1, "复刻失灵：这一行本该只有一句字面量")
+        XCTAssertEqual(slots.first, .skipped, "尺子已经认得独占一行的 captionHelp: 了 —— 那这条盲区记账可以划掉")
+        // 反向自证一（同形状的小写 `help:` 被认成已藏，说明上一条不是判据失灵）：
+        let carried = "help: \"这一长句整句搬进新开的槽位，它既没被算成常驻也没被算成已藏\","
+        XCTAssertEqual(TooltipMigrationGuardTests.literalSlots(in: carried).map(\.slot).first, .tooltip,
+                       "carrier 连 help: 都不认了，本轮所有落点判据失去含义")
+        // 反向自证二（同一条句子挤回带可见线索的一整行 ⇒ 保守方向，算常驻）：
+        let single = "MetricTile(label: \"CPU\", caption: \"屏上短句\", captionHelp: \"这一长句整句搬进新开的槽位，它既没被算成常驻也没被算成已藏\")"
+        XCTAssertEqual(TooltipMigrationGuardTests.literalSlots(in: single).filter { $0.slot == .visible }.count, 3,
+                       "带可见线索的那一行里 captionHelp: 不再算常驻了？两种排版的账分叉要重新记")
+        print("【ⓘ·S7 尺子账】独占一行的 subtitleHelp:/captionHelp: → .skipped（A、B 都看不见）；"
+              + "同形状的小写 help: → .tooltip；同一行里有可见线索 → .visible")
     }
 }
