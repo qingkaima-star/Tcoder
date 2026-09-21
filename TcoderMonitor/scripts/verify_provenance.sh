@@ -47,17 +47,28 @@ HEAD_SHA=$(git rev-parse HEAD)
 # rev / 构建时是否干净：判定与测量档共用同一把手尺子（`perf_provenance.sh`），
 # 本文件只负责把它的结论翻成 ✅/❌ 那一行；不许在这里再写一遍 `[ "$a" = "$b" ]`。
 source "$(dirname "$0")/perf_provenance.sh"
-PROV_WHY=$(provenance_ok "$MF_REVISION" "$HEAD_SHA" "$MF_CLEAN") && prov_ok=1 || prov_ok=0
+MF_TREE=$(mf_get PRODUCT_TREE)
+HEAD_TREE=$(provenance_product_tree HEAD)
+PROV_WHY=$(provenance_ok "$MF_REVISION" "$HEAD_SHA" "$MF_CLEAN" "$MF_TREE" "$HEAD_TREE") && prov_ok=1 || prov_ok=0
+# prov_ok=1 且 PROV_WHY 非空 ⇒ 是"rev 不同但产物码 tree 相同"的放行，
+# 此时 Info.plist 那条不能再拿裸 sha 比 HEAD（它存的是建物的那个提交号）。
+PROV_BY_TREE=$([ "$prov_ok" = "1" ] && [ -n "$PROV_WHY" ] && echo 1 || echo 0)
 
 echo "=== provenance 校验 ==="
 chk "交付二进制哈希 == manifest 记录" "$MF_SHA" "$ACTUAL_SHA"
 if [ "$prov_ok" = "1" ]; then
-  echo "  ✅ 产物 rev == HEAD，且构建时工作树干净（判定来自 perf_provenance.sh）"
+  echo "  ✅ 产物与当前代码同一份产物码（判定来自 perf_provenance.sh）"
 else
   echo "  ❌ 产物与代码不是同一份：$PROV_WHY"; fail=1
 fi
-chk "Info.plist 内 revision == HEAD" \
-    "$(plutil -extract TCODERGitRevision raw "${APP_DIR}/Contents/Info.plist" 2>/dev/null)" "$HEAD_SHA"
+if [ "$PROV_BY_TREE" = "1" ]; then
+  echo "  ✅ 产物与代码同源（按产物码 tree 归属，rev 不同）：${PROV_WHY}"
+  chk "Info.plist 内 revision == 产物 rev" \
+      "$(plutil -extract TCODERGitRevision raw "${APP_DIR}/Contents/Info.plist" 2>/dev/null)" "$MF_REVISION"
+else
+  chk "Info.plist 内 revision == HEAD" \
+      "$(plutil -extract TCODERGitRevision raw "${APP_DIR}/Contents/Info.plist" 2>/dev/null)" "$HEAD_SHA"
+fi
 
 if [ -z "$MF_PRESHA" ]; then
   echo "  ❌ 缺 presign 值，无法判断哈希是否为签名后重算"; fail=1

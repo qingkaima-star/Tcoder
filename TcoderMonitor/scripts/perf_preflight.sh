@@ -21,89 +21,41 @@
 # 页名不自己编：与 capture_pages_isolated.sh 共用一份事实来源，
 # 否则两边页名漂移会让 switch 档悄悄测到不存在的页（SwiftUI 会回落到默认页）。
 # -----------------------------------------------------------------------------
+source "$(dirname "${BASH_SOURCE[0]}")/perf_probes.sh"  # 探针族搬出去了，见那个文件的头注
+# ── 磁盘卫生：第七维（2026-09-21 把这台机器吃到只剩 4.4 GiB 之后加的）────────
+# 根因不在我的样本目录，而在 **xctrace 的中间产物**：`instruments*.ktrace`
+# 默认落在 `$TMPDIR`，而采集进程被 kill、超时或崩溃时**不会自己清**。
+# 现场是 21 个孤儿共 103 GB。⇒ 三条硬规矩进代码，不靠我记得：
+#   ① 样本根目录 = 仓库内 `.scratch/`（AGENTS §1.6 的一次性产物落点，已 gitignore；
+#      不再用全局 /tmp，也不再靠 $TMPDIR）
+#   ② 每轮收尾固定扫残留 + 确认自己起的采集进程真退了
+#   ③ 可用低于阈值就**拒跑**（与其余六维同形状、同一个 hard 标记）
+SCRATCH="${SCRATCH:-$(git rev-parse --show-toplevel)/.scratch}"
+# 阈值与判定都在 `disk_headroom_bad`（环境变量 TCODER_MIN_FREE_GIB 可覆盖）
+QUIESCE_MIN="${QUIESCE_MIN:-5}"  # 静默合格线（与 perf_harness.sh 同值）。写在闸门这边，
+# 是因为**阈值**属于判定、不属于取数；排程器单独 source 本文件时也要有默认值可走。
+
 sections() {
   local line
   line=$(grep -m1 '^SECTIONS=(' scripts/capture_pages_isolated.sh) || return 1
-  echo "$line" | sed -e 's/^SECTIONS=(//' -e 's/)[^)]*$//' | tr -d '"' | tr ' ' '\n' \
-    | sed '/^$/d'
+  # 【按引号取，不许按空格拆】旧写法 `tr ' \n'` 会把**引号内部的空格**也当分隔符，
+  # 于是 `Git 洞察` 变成 "Git" 与 "洞察" 两页：九页扫描实际只覆盖 8 页，
+  # 还有一页是用错名字起的 App。实测抓到于 2026-09-21 14:57（DRY_RUN 里出现 10 行）。
+  printf '%s\n' "$line" | grep -o '"[^"]*"' | sed -e 's/^"//' -e 's/"$//'
 }
 
-instance_pids() { pgrep -x TcoderMonitor 2>/dev/null || true; }
 
-# 取某 pid 的可执行文件绝对路径。**为什么不用 `ps -o args=`**：本机 `ps` 被系统拒绝
-# （`/bin/ps: Operation not permitted`，实测在非沙箱下同样如此），于是原来那行永远取空，
-# 而 `TARGET_FLAVOR` 会**默认成 release** —— 等于给一份可能来自 debug 的读数贴上 release 标签，
-# 正好违反 spec §7.3「两档绝对值不可混比」。`lsof -p` 在本机可用，`txt` 行就是可执行文件。
-pid_binary() {  # pid_binary <pid>
-  lsof -p "$1" 2>/dev/null | awk '$4 == "txt" { print $NF; exit }'
-}
 
-WINLIST_BIN=""
 
-# 窗口存在性探测。**为什么先编译一次**：`xcrun swift winlist.swift` 是 JIT，实测每次 0.3 s；
-# 原来 `switch` 档把它放在"首帧轮询"里（最多 60 次），既慢又把探测开销混进了计时。
-# 编译成二进制后稳态实测 39~45 ms，且首次 ~508 ms 的 dyld 冷启动由下面这次预热挡在计时窗外。
-winlist_probe() {  # winlist_probe <pid> → 有在屏窗口时打印 `窗口号|标题|宽`，否则空
-  local pid="$1"
-  if [ -z "$WINLIST_BIN" ]; then
-    if xcrun swiftc -O -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
-         -target arm64-apple-macos14.0 "$WINLIST" -o "$SCRATCH/tcoder-winlist-$$" 2>/dev/null; then
-      WINLIST_BIN="$SCRATCH/tcoder-winlist-$$"
-      "$WINLIST_BIN" "$pid" >/dev/null 2>&1 || true
-    else
-      echo "    ⚠ winlist 编译失败 → 退回 JIT（单次 ~300 ms，只影响存在性探测，不影响时长口径）" >&2
-    fi
-  fi
-  if [ -n "$WINLIST_BIN" ]; then
-    "$WINLIST_BIN" "$pid" 2>/dev/null | head -1
-  else
-    xcrun swift "$WINLIST" "$pid" 2>/dev/null | head -1
-  fi
-}
 
-TARGET_BINARY=""   # 由 require_idle_target 填：实际被采的那个二进制的绝对路径
-TARGET_FLAVOR=""   # release / debug —— spec §7.3 要求两档的绝对值永不混比
 
-note_target_flavor() {  # note_target_flavor <pid>
-  TARGET_BINARY=$(pid_binary "$1")
-  # **认不出就说认不出**：原来 `*) release` 是个兜底，配上取不到路径的 `ps`，
-  # 会稳定地把「不知道」说成 release。release 与 debug 的绝对值差着一个量级，
-  # 这种默认值是把读数卖给第一个来查的人。
-  case "$TARGET_BINARY" in
-    "") TARGET_FLAVOR="未知（取不到被采二进制 → release/debug 不可判定，本批读数不得与任何基线比）" ;;
-    *".build/debug"*) TARGET_FLAVOR="debug" ;;
-    *"/dist/Tcoder.app/"*) TARGET_FLAVOR="release" ;;
-    *) TARGET_FLAVOR="未知（路径既非 .build/debug 也非 dist/Tcoder.app：$TARGET_BINARY）" ;;
-  esac
-  echo "    被采二进制=${TARGET_BINARY:-（取不到）} 口径=$TARGET_FLAVOR"
-}
-
-quiescence_probe() {  # → 一行 `… 静默=12.34s`；取不到时打印 静默=-1.00s（调用方按"取不到"处理）
-  if [ -z "$QUIESCE_BIN" ]; then
-    if xcrun swiftc -O -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
-         -target arm64-apple-macos14.0 "$QUIESCE_SRC" -o "$SCRATCH/tcoder-quiesce-$$" 2>/dev/null; then
-      QUIESCE_BIN="$SCRATCH/tcoder-quiesce-$$"
-    else
-      echo "    ⚠ 静默探针编译失败，退回 JIT（慢一点，不影响读数口径）" >&2
-    fi
-  fi
-  if [ -n "$QUIESCE_BIN" ]; then
-    "$QUIESCE_BIN" 2>/dev/null || echo "静默=-1.00s"
-  else
-    xcrun swift "$QUIESCE_SRC" 2>/dev/null || echo "静默=-1.00s"
-  fi
-}
-
-quietest_seconds() {  # 从探针那一行里抠出"静默=Xs"的 X
-  printf '%s' "${1:-}" | sed -n 's/.*静默=\([0-9.-]*\)s.*/\1/p'
-}
 
 # "产物到底是不是这份代码"的判定**不在本文件里**——它归 scripts/perf_provenance.sh，
 # 与 `verify_provenance.sh` 共用同一把手尺子（见那个文件的头注）。
 source "$(dirname "${BASH_SOURCE[0]}")/perf_provenance.sh"
 
 preflight_context() {  # preflight_context <outdir> <pid>
-  local out="$1" pid="$2" f="" cores load1 front visible others hard=0
+  local out="$1" pid="$2" f="" cores load1 front visible others other_detail free_gib hard=0
   cores=$(sysctl -n hw.ncpu 2>/dev/null || echo 8)
   load1=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | awk '{print $1}')
   [ -n "$load1" ] || load1=0
@@ -111,6 +63,9 @@ preflight_context() {  # preflight_context <outdir> <pid>
   front=$(preflight_front_app)
   visible=$(preflight_window_state "$pid")
   others=$(concurrent_heavy_jobs)
+  free_gib=$(disk_free_gib)
+  mkdir -p "$SCRATCH" 2>/dev/null || true   # 样本根目录：项目内、.gitignore 已忽略
+  other_detail=$(concurrent_heavy_jobs_detail)
   # 运行时漏翻台账（i18n 报告器）会在渲染路径上记键、按 200 次节流写盘。
   # 设了它再量帧率，量的就是台账自己的开销——所以这一维写进上下文，并且直接拒跑。
   i18n_ledger="${TCODER_I18N_RUNTIME_LEDGER:-}"
@@ -122,6 +77,8 @@ preflight_context() {  # preflight_context <outdir> <pid>
   # 取二进制的出身（**不是**工作树 HEAD）：闸门第六维与上下文都要用
   BUILD_REV=$(provenance_manifest_value TCODER_GIT_REVISION)
   BUILD_CLEAN=$(provenance_manifest_value TCODER_GIT_CLEAN)
+  BUILD_TREE=$(provenance_manifest_value TCODER_PRODUCT_TREE)
+  HEAD_TREE=$(provenance_product_tree HEAD)
 
   preflight_write_context "$out" "$f"
   # 六条硬闸各自读上面那几个量（bash 是动态作用域：本函数的 `local` 在被调函数里照样可见，
@@ -139,55 +96,9 @@ preflight_context() {  # preflight_context <outdir> <pid>
   echo "    上下文已落 $f"
 }
 
-concurrent_heavy_jobs() {  # → 空格分隔的 pid；空 = 机器上没有本仓的重活
-  # 【为什么不止 swiftc】第一版只 `pgrep -x swiftc`，于是**跑全量门禁的那段时间**
-  # （进程叫 swift-test / xctest，编译早已结束）在它眼里是"机器空着"——
-  # 而那恰恰是 load 与调度最不干净的时候，量出来的样本会五闸全过。
-  # 实测 2026-09-21 11:46：门禁在测时 `swiftc 在场数=0`、load1=4.23，全部门槛放行。
-  local names=(swiftc swift-test xctest) out="" n p
-  for n in "${names[@]}"; do
-    p=$(pgrep -x "$n" 2>/dev/null | tr '\n' ' ')
-    [ -n "$p" ] && out="$out$p "
-  done
-  printf '%s\n' "${out% }"
-}
 
-front_is_target() {  # front_is_target <前台App名> → 0=就是被测 App
-  # 【今天修掉一个让所有测量永远跑不通的闸门 bug】
-  # 旧写法 `[ "$front" != "TcoderMonitor" ]`，而 `lsappinfo` 给的是**显示名 "Tcoder"**；
-  # 只有 System Events 那条路给进程名 TcoderMonitor，而本机它被权限拒。
-  # 于是三趟全部以「被测窗口不在前台（前台是「Tcoder」）」被拒——**自相矛盾**：
-  # 它一边报出前台是 Tcoder，一边说 Tcoder 不算前台。
-  # 两种名字都认（显示名 / 进程名），但只认这两个：微信、Chrome 照样必须拒。
-  case "$1" in
-    Tcoder|TcoderMonitor) return 0 ;;
-    *) return 1 ;;
-  esac
-}
 
-preflight_front_app() {  # → 一行前台 App 名；取不到就是「未知」
-  # 前台 App：**先走 `lsappinfo`（零权限）**。原来只用 `osascript` + System Events，
-  # 而本机那条路被权限拒（实测 `-10004 发生权限违例`），于是永远得到「未知」、
-  # 闸门永远拒跑——一条因为取不到数就永远说"不合格"的闸门，等于没有这把尺子。
-  local asn win
-  asn=$(lsappinfo front 2>/dev/null || true)
-  front=""
-  [ -n "$asn" ] && front=$(lsappinfo info -only name "$asn" 2>/dev/null | sed -n 's/^"LSDisplayName"="\(.*\)"$/\1/p')
-  [ -n "$front" ] || front=$(osascript -e 'tell application "System Events" to name of first application process whose frontmost is true' 2>/dev/null | tr -d '\n')
-  [ -n "$front" ] || front="未知"
-  printf '%s\n' "$front"
-}
 
-preflight_window_state() {  # preflight_window_state <pid> → 那句 visible 描述
-  local win
-  # 窗口在不在屏：走 `winlist.swift`（CGWindowList，**零权限**），与其它三个取证脚本同一把尺子。
-  win=$(winlist_probe "$1")
-  if [ -n "$win" ]; then
-    echo "有在屏窗口（$(printf '%s' "$win" | cut -d'|' -f2)）"
-  else
-    echo "无在屏窗口（隐藏/最小化/不在屏）"
-  fi
-}
 
 preflight_write_context() {  # preflight_write_context <outdir> <context 文件路径>
   # 这一份上下文是"读数可互比"的凭据：谁后面拿这批数做对比，都得先看见同一组条件。
@@ -195,14 +106,16 @@ preflight_write_context() {  # preflight_write_context <outdir> <context 文件�
   { echo "# 测量上下文（读数只有在这一组条件下才可互比）"
     echo "时间=$(date '+%F %T')  HEAD=$(git rev-parse --short HEAD 2>/dev/null)  工作树改动数=$DIRTY"
     echo "被采pid=$pid  二进制=$TARGET_BINARY  口径=$TARGET_FLAVOR"
+    echo "   产物码 tree=${BUILD_TREE:-未记录}  当前=${HEAD_TREE:-未记录}"
     echo "产物构建rev=${BUILD_REV:-未记录}  构建时树clean=${BUILD_CLEAN:-未记录}  ← 必须与上面 HEAD= 同一份代码，否则读数归错对象"
+    [ -n "${PROVENANCE_NOTE:-}" ] && echo "   ※ 归属靠产物码 tree 放行（rev 不同）：${PROVENANCE_NOTE}"
     echo "实例数=${COEXIST:-1}  前台App=$front  被测进程visible=$visible"
-    echo "load1=$load1  核数=$cores  并发swiftc=${others:-无}"
+    echo "load1=$load1  核数=$cores  并发重活=${other_detail:-无}"
     echo "人输入静默=${quiet:-取不到}s  明细=${qline:-（探针没跑起来）}"
     echo "hitches_seconds=$SECONDS_HITCHES  tp_seconds=$SECONDS_TP"
     echo "诊断开关 TCODER_I18N_RUNTIME_LEDGER=${i18n_ledger:-未设（渲染路径零成本）}"
   } > "$f" 2>/dev/null || die "写不出 $f"
-  echo "    上下文：前台=$front  visible=$visible  load1=$load1/$cores  并发swiftc=${others:-无}  静默=${quiet:-取不到}s"
+  echo "    上下文：前台=$front  visible=$visible  load1=$load1/$cores  并发重活=${other_detail:-无}  静默=${quiet:-取不到}s  磁盘可用=${free_gib:-取不到}GiB"
 }
 
 # 身份两维：被量的到底是不是这份代码、以及采样时有没有开着诊断报告器。
@@ -213,13 +126,27 @@ preflight_gates_identity() {
   # 而我 attach 的那个 `dist/Tcoder.app` 是两小时前 `build_app.sh` 从 `41add9e` 建的，
   # 中间隔了 39 个产物文件（整批 i18n + 我自己的 `PerfReadoutCells` 修复）。
   # 于是"e991c6d 的 T2 读数"这句话从头到尾是假的——量的是旧二进制，只是恰好在新树上按了回车。
-  if ! PROVENANCE_WHY=$(provenance_ok "$BUILD_REV" "$(git rev-parse HEAD 2>/dev/null)" "$BUILD_CLEAN"); then
+  if ! PROVENANCE_WHY=$(provenance_ok "$BUILD_REV" "$(git rev-parse HEAD 2>/dev/null)" "$BUILD_CLEAN" "${BUILD_TREE:-}" "${HEAD_TREE:-}"); then
     echo "!! 二进制与代码不是同一份：${PROVENANCE_WHY} —— 先跑 scripts/build_app.sh release 再量。" >&2
     hard=1
+  else
+    # 放行也可能带话——那就是"靠 tree 归属"的留痕，必须印进上下文，不许悄悄过。
+    PROVENANCE_NOTE="$PROVENANCE_WHY"
   fi
   if [ -n "${i18n_ledger:-}" ]; then
     echo "!! 设了 TCODER_I18N_RUNTIME_LEDGER（=$i18n_ledger）——渲染路径在记漏翻台账并节流写盘；
    这批读数量的是台账的开销，不是 App 的心跳。取消该变量再测。" >&2
+    hard=1
+  fi
+}
+
+preflight_gates_disk() {  # 【第七维：磁盘】判定只有一份（probes 的 disk_headroom_bad）
+  # 盘满最坏的后果不是失败退出，而是 xctrace 写不进中间产物、
+  # **样本照样出一份看起来合理的数** ⇒ 读不到余量与余量不足同等对待。
+  local why
+  if why=$(disk_headroom_bad "${free_gib:-}"); then
+    echo "!! $why——一趟 trace 轻则几百 MB、重则十几 GB，" \
+         "且 $TMPDIR 里的 .ktrace 中断不会自己清。先清盘再来，不硬跑。" >&2
     hard=1
   fi
 }
@@ -230,10 +157,14 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
   # 一条静默失效的闸门。selfcheck 第 17 项（六维矩阵）抓的就是它。
   preflight_gates_identity
   if [ -n "$others" ]; then
-    echo "!! 有本仓的重活在跑（pid $others：swiftc / swift-test / xctest）——" \
+    # ${…:-} 不是洁癖：这一维在合成夹具里被单维破坏时，别的量可能是空的，
+    # 而 `set -u` 下引用未声明变量会**静默中止整条闸门**（今天就是这样把 selfcheck 打断的，
+    # 现场看起来像"探针输出正常、后面凭空没了"）。
+    echo "!! 机器上有重活在跑（${other_detail:-只拿到 pid $others，没拿到名字}）——" \
          "它会抢满全部核，app-update 相位会被显著抬高。等它跑完再来。" >&2
     hard=1
   fi
+  preflight_gates_disk
   # 负载阈值：默认 1 分钟 load 不超过核数的 1.5 倍（LOAD_MAX=<数> 可覆盖，但覆盖了就要在报告里写）
   if awk -v l="$load1" -v c="$cores" 'BEGIN{exit !(l > c*1.5)}'; then
     echo "!! load1=$load1 已是核数($cores)的 1.5 倍以上：整机排队，任何帧节拍读数都不作数。" >&2
@@ -267,16 +198,14 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
   fi
 }
 
-human_input_in_window() {  # human_input_in_window <静默秒> <窗口秒> → 分类，便于拿合成数字验判定
-  awk -v q="$1" -v w="$2" 'BEGIN{ if (q >= w) print "窗口内没人"; else print "窗口内有人" }'
-}
+
 
 post_window_quiescence() {  # post_window_quiescence <outdir> <窗口秒数>；按 PERIOD 决定"什么样的收尾算合格"
   # 收尾**再问一次**探针：若"距离上次人手事件"仍短于刚录的窗口，说明窗口里有人动过手。
   # idle 档要的是"整窗没人动"；interact 档要的正好相反——没人动那批只能退回当 idle 数。
   local out="$1" window="$2" quiet period="${PERIOD:-idle}" verdict
   quiet=$(quietest_seconds "$(quiescence_probe)")
-  [ -n "$quiet" ] && [ "$quiet" != "-1.00" ] || { echo "    （收尾静默探针取不到，污染判定不做）"; return 0; }
+  probe_usable "$quiet" || { echo "    （收尾静默探针取不到，污染判定不做）"; return 0; }
   verdict=$(human_input_in_window "$quiet" "$window")
   meta_write "$out" "quiescence_after_seconds=$quiet" "period=$period" "window_verdict=$verdict"
   if [ "$period" = "interaction" ]; then
@@ -388,3 +317,23 @@ json.dump({"projects": [{"id": uuid, "name": "Tcoder（性能沙箱）", "path":
 PY
 }
 
+sweep_orphan_traces() {  # 只删**没有任何进程打开着**的 .ktrace 中间产物
+  # 为什么先看 lsof：正在录的那趟也会在自己的 $TMPDIR 里留 .ktrace，
+  # 无差别删会把**正在进行的采集**打断（那是比留残骸更坏的修法）。
+  local root="${1:-${TMPDIR:-/tmp}}" f kept=0 deleted=0
+  [ -d "$root" ] || { printf '孤儿 trace：目标目录不在（%s），跳过\n' "$root"; return 0; }
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if lsof -- "$f" >/dev/null 2>&1; then kept=$((kept + 1)); continue; fi
+    rm -rf -- "$f" && deleted=$((deleted + 1))
+  done < <(find "$root" -maxdepth 1 \( -name 'instruments*.ktrace' -o -name '*.ktrace' \) 2>/dev/null)
+  printf '孤儿 trace：删 %d 个、仍被进程打开而保留 %d 个（根 %s）\n' "$deleted" "$kept" "$root"
+}
+
+post_run_disk_hygiene() {  # 每轮收尾固定两件事：进程真退了没 + $TMPDIR 残骸
+  local left
+  left=$(pgrep -x xctrace 2>/dev/null | tr '\n' ' ')
+  [ -n "$left" ] && echo "    ⚠ 还有 xctrace 在场（pid ${left% }）——先别开下一趟" >&2
+  printf '    %s\n' "$(sweep_orphan_traces "${1:-${TMPDIR:-/tmp}}")"
+  echo "    磁盘可用 $(disk_free_gib) GiB（低于 ${MIN_FREE_GIB} 就不开新趟）"
+}

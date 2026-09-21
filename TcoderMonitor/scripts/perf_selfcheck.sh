@@ -43,7 +43,14 @@ cmd_selfcheck() {
   selfcheck_binary_provenance "$out" # 14) 被量的二进制必须就是这份代码（rev 对齐）
   selfcheck_baseline_text_is_derived "$out"  # 15) 对照列文字不许是字典的第二份手抄
   selfcheck_heavy_jobs_probe "$out"  # 16) 并发重活：三个名字都要认，输出必须是 pid 清单
-  selfcheck_gate_matrix "$out"      # 17) 六维闸门合成矩阵：能放行，也会逐维拒
+  selfcheck_gate_matrix "$out"      # 17) 七维闸门合成矩阵：能放行，也会逐维拒
+  selfcheck_page_list_shape "$out"    # 18) 九页页名逐条完整（带空格的那条不许被拆）
+  selfcheck_launch_ready "$out"       # 19) 首帧要剔除运行期尾巴，不许拿求和冒充
+  selfcheck_probe_sentinel "$out"     # 20) 探针取不到的哨兵不许骗过"有人在动"那条判定
+  selfcheck_period_eligibility "$out" # 21) 档位声明与收尾复核互相矛盾的样本不许拿到 T1 资格
+  selfcheck_probe_self_sufficient "$out" # 22) 探针必须能被裸 `set -u` 消费者调用（不靠 harness）
+  selfcheck_perf_root_ignored "$out"    # 23) 样本根必须真的被 git 忽略，且不许有第二处写死 /tmp 默认值
+  selfcheck_disk_precondition "$out"    # 24) 前置必须**能失败**：判定要在、且全仓只有一份
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
@@ -405,21 +412,29 @@ selfcheck_binary_provenance() {  # selfcheck_binary_provenance <outdir>
   if provenance_ok "" "$H" true; then fail "读不到 manifest 却放行"; bad=1; fi
   if provenance_ok "$H" "$H" false; then fail "构建时工作树是脏的却放行——那时连 rev 本身都不可信"; bad=1; fi
   if provenance_ok "$H" "" true; then fail "取不到 HEAD 却放行——无法比对就等于没验"; bad=1; fi
-  # 【同一件事只许有一把手尺子】我补这一维时先是**又写了一份**，才发现
-  # `verify_provenance.sh` 早就在做同一件事。现在判定住在 `perf_provenance.sh`，
-  # 两边都 source 它。下面三条把这个结构钉住：定义处唯一、交付档确实走它、
-  # 测量档不许留本地副本（漏一天就会分叉，而分叉之后错的那份常在喂结论）。
-  local defs
-  # 模式必须锚行首：不锚的话它会把我**写在自检里的这串模式本身**当成一处定义
-  # （第一版就是这么红的——报错报到自己头上，说明它真的在看内容）。
-  defs=$(grep -lr '^provenance_ok() {' scripts/ 2>/dev/null | tr '\n' ' ')
-  [ "$defs" = "scripts/perf_provenance.sh " ] \
-    || { fail "provenance_ok 的定义不止一处（$defs）——同一判定又长出第二份了"; bad=1; }
-  grep -q 'provenance_ok' scripts/verify_provenance.sh \
-    || { fail "verify_provenance.sh 不再经过共享判定（大概又手抄了一遍 [ a = b ]）"; bad=1; }
-  grep -q 'preflight_manifest_value\|^provenance_ok() {' scripts/perf_preflight.sh \
-    && { fail "perf_preflight.sh 里还留着本地副本，删掉、只 source"; bad=1; }
-  [ "$bad" = "0" ] && ok "二进制出身判定五向都对，且定义唯一（verify 与 preflight 共用 perf_provenance.sh）"
+  # 【同一件事只许有一把手尺子】这三条结构钉拆到 `provenance_single_ruler_cases`：
+  # 本仓 50 行线（`PerfRulerHotspotRatchetTests`）——拆函数才是修复，抬数字不是。
+  provenance_single_ruler_cases
+  # tree 放行这一支必须单独钉：它是"假拒"的唯一解药，也是最容易被写歪的一支
+  #（写歪的方向是"永远认为相同"或"永远认为不同"，两边都不报错）。
+  local T1=1111111111111111111111111111111111111111111111111111111111111111
+  local T2=2222222222222222222222222222222222222222222222222222222222222222
+  # 用**调用方的形状**验：真实调用一律 `WHY=$(provenance_ok …)`，所以留痕必须在 stdout 里——
+  # 对变量的赋值出不了子 shell，上一版就是这样把"必须留痕"变成一句空话的。
+  local treenote
+  if treenote=$(provenance_ok "$B" "$H" true "$T1" "$T1"); then
+    [ -n "$treenote" ] \
+      || { fail "靠 tree 放行了却没把理由写到 stdout —— 悄悄放行比拒错更糟"; bad=1; }
+  else
+    fail "rev 不同但产物码 tree 相同却仍被拒（落地后同步头会被假拒，实测踩过一次）"; bad=1
+  fi
+  if provenance_ok "$B" "$H" true "$T1" "$T2"; then
+    fail "产物码 tree 不同却放行 —— 那就是把身份判据废了"; bad=1
+  fi
+  if provenance_ok "$B" "$H" true "" "$T1"; then
+    fail "缺 tree 信息还走 tree 放行（老 manifest 必须退回严格比 sha）"; bad=1
+  fi
+  [ "$bad" = "0" ] && ok "二进制出身判定双向都对（sha 相同 / tree 相同可放行且留痕 / 逐维破坏各判拒）"
 }
 
 selfcheck_baseline_text_is_derived() {  # selfcheck_baseline_text_is_derived <outdir>
@@ -487,18 +502,37 @@ selfcheck_heavy_jobs_probe() {  # selfcheck_heavy_jobs_probe <outdir>
     *[!0-9\ ]*) fail "并发重活探针输出不是 pid 列表（拿到「$out」）——话术会跟着一起胡说" ;;
     *) ok "并发重活探针可跑可解析（现在：${out:-机器空}）" ;;
   esac
-  # 清单被削回只认 swiftc 的话，本仓全量门禁期间就会假装机器空着——钉住三个名字。
+  # 清单被削回只认 swiftc 的话，本仓全量门禁期间就会假装机器空着——钉住四个名字。
+  # `xctrace` 是 2026-09-21 补的：另一个工程同时在录 Animation Hitches，
+  # 而这一维当时读成"机器空"。两档 xctrace 互踩，量出来的两边都不准。
   local n missing=""
-  for n in swiftc swift-test xctest; do
-    grep -q "\b$n\b" <(declare -f concurrent_heavy_jobs) || missing="$missing $n"
+  for n in swiftc swift-frontend swift-test swiftTestDriver xctest xctrace; do
+    grep -q "\b$n\b" <(declare -f heavy_job_names) || missing="$missing $n"
   done
+  # xctrace 那一维必须认"真在采"，不能认"在场"：机器上此刻就挂着一个别的工程
+  # 21 小时前留下的停着的 xctrace（%cpu=0），按在场即拒会让这条闸门永远不可满足。
+  # 两个方向都用**合成进程**钉：空转一个烧 CPU 的 bash、一个睡觉的 bash，
+  # 名字都由调用方指给函数看 —— 验的是分支逻辑，不依赖现场有没有真 xctrace。
+  local busy idle liveness=1
+  bash -c 'while :; do :; done' & busy=$!
+  sleep 1 & idle=$!
+  heavy_job_is_live "$busy" xctrace || liveness=0     # 在吃 CPU ⇒ 必须算重活
+  heavy_job_is_live "$idle" xctrace && liveness=0     # 停着 ⇒ 不许算重活
+  heavy_job_is_live "$idle" swiftc || liveness=0      # 编译类不看增量，在场即重活
+  kill -TERM "$busy" "$idle" 2>/dev/null
+  [ "$liveness" = "1" ] \
+    || fail "xctrace 活性判定不对（烧 CPU 的没算重活 / 停着的算了重活 / 编译类看了增量）"
+  # 话术不许再硬编码名单：那正是"加了 xctrace 却把它说成本仓编译"的来源
+  declare -f concurrent_heavy_jobs_detail >/dev/null \
+    && grep -q 'concurrent_heavy_jobs_detail' <(declare -f preflight_context) \
+    || missing="$missing 话术未走带名字的明细版"
   [ -z "$missing" ] \
-    && ok "探针覆盖 swiftc / swift-test / xctest 三种重活" \
+    && ok "探针覆盖 6 类重活（含编译工人 swift-frontend），话术带真名字" \
     || fail "探针不再认识这些重活：${missing# }——全量门禁在跑时会被读成机器空"
 }
 
 selfcheck_gate_matrix() {  # selfcheck_gate_matrix <outdir>
-  # 17) 六维闸门合成矩阵：喂一份"全合格"的假上下文，要求
+  # 17) 七维闸门合成矩阵：喂一份"全合格"的假上下文，要求
   #     ① 全合格 ⇒ 放行；② 每一维单独破坏 ⇒ 拒。
   #     为什么必须有：前五维各自都修过一次 bug，但没有一个测试证明"闸门既能放行也会拒"。
   #     恒拒（前台名比错）与恒放行（探针函数不在场）都不报错，只能靠这张矩阵抓。
@@ -508,11 +542,13 @@ selfcheck_gate_matrix() {  # selfcheck_gate_matrix <outdir>
   fi
   local head_sha hard_all=0
   head_sha=$(git rev-parse HEAD 2>/dev/null)
-  # 一份"全合格"的上下文（六维取数都是本文件的 local，动态作用域里直接覆盖）
+  # 一份"全合格"的上下文（各维取数都是本文件的 local，动态作用域里直接覆盖）
   gate_feed() {
     others=""; BUILD_REV="$head_sha"; BUILD_CLEAN="true"; front="Tcoder"
     visible="有在屏窗口（Tcoder）"; load1=3; cores=15; quiet=30; qline="静默=30s"
-    COEXIST=1; SECONDS_HITCHES=20; SECONDS_TP=25; i18n_ledger=""; hard=0
+    other_detail=""
+    COEXIST=1; SECONDS_HITCHES=20; SECONDS_TP=25; i18n_ledger=""
+    BUILD_TREE=""; HEAD_TREE=""; hard=0; free_gib=400
   }
   gate_feed; preflight_gates >/dev/null 2>&1
   [ "$hard" = "0" ] || { fail "六维全合格却被拒 ⇒ 又造出一条永远不可能通过的闸门"; hard_all=1; }
@@ -528,5 +564,185 @@ selfcheck_gate_matrix() {  # selfcheck_gate_matrix <outdir>
   [ "$hard" = "1" ] || { fail "load1 超阈值却放行"; hard_all=1; }
   gate_feed; i18n_ledger="/tmp/x.log"; preflight_gates >/dev/null 2>&1
   [ "$hard" = "1" ] || { fail "设着漏翻台账还放行——那批量的是台账的开销"; hard_all=1; }
-  [ "$hard_all" = "0" ] && ok "六维闸门矩阵：全合格放行、逐维破坏各判一次拒"
+  gate_feed; free_gib=3;    preflight_gates >/dev/null 2>&1
+  [ "$hard" = "1" ] || { fail "盘只剩 3 GiB 还放行——盘满时 trace 写不进去，样本会静默变形"; hard_all=1; }
+  gate_feed; free_gib="";   preflight_gates >/dev/null 2>&1
+  [ "$hard" = "1" ] || { fail "磁盘可用取不到（空值）却放行——取不到必须按不合格处理"; hard_all=1; }
+  [ "$hard_all" = "0" ] && ok "七维闸门矩阵：全合格放行、逐维破坏各判一次拒（含空值判败）"
+}
+
+selfcheck_page_list_shape() {  # selfcheck_page_list_shape <outdir>
+  # 18) 九页的页名必须**逐条完整**：`Git 洞察` 这种带空格的页名是这条的活靶子。
+  #     旧实现按空格拆（`tr ' ' '\n'`），把九页拆成 10 项、少一页，而扫描一路"成功"跑完。
+  local n line
+  n=$(sections 2>/dev/null | wc -l | tr -d ' ')
+  [ "$n" = "9" ] || { fail "SECTIONS 解析出 $n 条页名（应为 9）——逐页扫描会漏页或重页"; return; }
+  line=$(sections 2>/dev/null | tr '\n' '|')
+  case "$line" in
+    *Git\ 洞察*) ok "九页页名完整（含带空格的「Git 洞察」）" ;;
+    *) fail "页名里没有完整的「Git 洞察」（拿到 $line）——空格又被当成分隔符了" ;;
+  esac
+}
+
+selfcheck_launch_ready() {  # selfcheck_launch_ready <outdir>
+  # 19) "启动到就绪"必须剔除"活到窗口结束"的运行期尾巴。
+  #     旧写法直接求和 ⇒ 每页都算成 ≈录制时长（实测总览页 10338 ms / 真值 837 ms），
+  #     T4（冷启动 ≤1.0 s）于是**永远不可能达标**——一条不可能达标的判据比没有更坏。
+  local r
+  r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_trace_metrics import launch_ready_ms
+# 真产物形状：一堆小段 + 一段很长的运行期尾巴
+with_tail = [(0.0, 377.7), (377.7, 5.7), (383.4, 192.3), (837.4, 9550.2)]
+no_tail = [(0.0, 300.0), (300.0, 200.0), (500.0, 120.0)]
+a = launch_ready_ms(with_tail); b = launch_ready_ms(no_tail); c = launch_ready_ms([])
+d = launch_ready_ms([(0.0, 0.0), (5.0, 40.0)])
+print("%s|%s|%s|%s" % (a, b, c, d))')
+  case "$r" in
+    837.4|837.40|837.4*) ;;
+    *) fail "有尾巴的表没取到尾巴起点（拿到 $r，期望就绪点 837.4 ms）——又在拿求和冒充首帧"; return ;;
+  esac
+  echo "$r" | grep -q "|620" || { fail "没有尾巴的表应当取末端 620 ms（拿到 $r）"; return; }
+  echo "$r" | grep -q "|None" || { fail "空表必须返回 None（按未覆盖处理，不许算 0 ms 达标）"; return; }
+  ok "launch_ready_ms 三向都对（剔尾巴 / 无尾巴取末端 / 空表为 None）"
+}
+
+provenance_single_ruler_cases() {  # 【同一件事只许有一把手尺子】结构钉，由 selfcheck_binary_provenance 调用
+  # 我补 provenance 这一维时先是**又写了一份**，才发现 `verify_provenance.sh` 早就在做同一件事。
+  # 现在判定住在 `perf_provenance.sh`，两边都 source 它。下面三条把这个结构钉住：
+  # 定义处唯一、交付档确实走它、测量档不许留本地副本
+  # （漏一天就会分叉，而分叉之后错的那份常在喂结论）。
+  local defs
+  # 模式必须锚行首：不锚的话它会把我**写在自检里的这串模式本身**当成一处定义
+  # （第一版就是这么红的——报错报到自己头上，说明它真的在看内容）。
+  defs=$(grep -lr '^provenance_ok() {' scripts/ 2>/dev/null | tr '\n' ' ')
+  [ "$defs" = "scripts/perf_provenance.sh " ] \
+    || { fail "provenance_ok 的定义不止一处（$defs）——同一判定又长出第二份了"; bad=1; }
+  grep -q 'provenance_ok' scripts/verify_provenance.sh \
+    || { fail "verify_provenance.sh 不再经过共享判定（大概又手抄了一遍 [ a = b ]）"; bad=1; }
+  grep -q 'preflight_manifest_value\|^provenance_ok() {' scripts/perf_preflight.sh \
+    && { fail "perf_preflight.sh 里还留着本地副本，删掉、只 source"; bad=1; }
+}
+
+selfcheck_probe_sentinel() {  # selfcheck_probe_sentinel <outdir>
+  # 20) "探针取不到"这个哨兵必须是**一条判据**，而且是**数值之外**的一条。
+  #     交互档的开录条件是"静默 <3s"，而 `quiescence_probe` 失败时打 `静默=-1.00s`——
+  #     -1 在数轴上最小，直接拿它比阈值就等于"量不到 ⇒ 最有人在动 ⇒ 立刻开录"，
+  #     一条恒真的闸门。今天写 cond_someone_active 时就是这么错的，靠这条钉住。
+  local ok=1
+  probe_usable "" && ok=0
+  probe_usable "-1" && ok=0
+  probe_usable "-1.00" && ok=0
+  probe_usable "2.50" || ok=0
+  [ "$ok" = "1" ] || { fail "probe_usable 四类输入判错（空/-1/-1.00 须拒、2.50 须放）"; return; }
+  # 反向钉：承认哨兵确实会骗过阈值。哪天 awk 改了口径，上面那条的必要性就变了，
+  # 这条要一起重写而不是悄悄留一段"防的是不存在的东西"的守卫。
+  [ "$(human_input_in_window -1.00 3)" = "窗口内有人" ] \
+    || { fail "human_input_in_window 不再被 -1 骗过——第 20 项前半段的理由要重写"; return; }
+  # 结构钉：排程器不许长出**第二份静默探针**（两份迟早分叉，这次分叉正好在开录那一刻）。
+  # 这条一开始写成"排程器里不许出现 swiftc"——那是个**代理指标**，
+  # 今天就被自己的合成输入器（`perf_synth_scroll.swift`，投 CGEvent 的、不是尺子）撞红。
+  # 代理指标的后果是：要么守卫被绕过习惯，要么正当事务被拦。改成钉它真正保护的东西：
+  # 静默探针的源码名只许出现在 preflight/probes 那边。
+  grep -q 'input_quiescence.swift' scripts/perf_wait_window.sh \
+    && { fail "perf_wait_window.sh 里又出现静默探针源码——删掉，改成 source preflight 那把尺子"; bad=1; }
+  # 反向钉：合成输入器**必须**继续从唯一的源文件编（别哪天在排程器里手抄一份投事件逻辑）
+  grep -q 'perf_synth_scroll.swift' scripts/perf_wait_window.sh \
+    || { fail "排程器不再从 scripts/perf_synth_scroll.swift 取合成输入器——大概又手抄了一份" ; bad=1; }
+  ok "哨兵判定四类都对、且它防的失效真实存在；排程器只剩一把尺子"
+}
+
+selfcheck_period_eligibility() {  # selfcheck_period_eligibility <outdir>
+  # 21) 「声明了什么档」和「收尾复核是否同意」必须一起判。
+  #     这两个标记此前只有写的人没有读的人 ⇒ 整窗没人动的 interaction 样本
+  #     照样打印「有资格答 T1」。四种形状各钉一次，且**两个否定必须与肯定不同**
+  #     （否则这条断言会被一个恒真的实现糊过去）。
+  local r
+  r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_trace_summary import period_eligibility as pe
+cases = [("clean-idle", {"period": "idle"}),
+         ("dirty-idle", {"period": "idle", "contaminated_by_human_input": "1"}),
+         ("clean-inter", {"period": "interaction"}),
+         ("nobody-inter", {"period": "interaction", "no_human_input_during_window": "1"}),
+         ("no-meta", {})]
+print("|".join("%s=%s" % (k, "Y" if pe(v)[0] else "N") for k, v in cases))')
+  # 注意 `case` 里的 `|` 是**或**不是"与"：写成 `a=Y|b=N` 会被读成两个候选模式，
+  # 于是"全串等于预期"永远匹不上——第一版就是这么红的（红得有价值：它当场把实际值打给我看）。
+  [ "$r" = "clean-idle=Y|dirty-idle=N|clean-inter=Y|nobody-inter=N|no-meta=Y" ] \
+    || { fail "四种形状的资格判定不对（拿到 ${r:-解析失败}）——自我矛盾的样本又能蒙混了"; return; }
+  # 反向钉：结论话术要跟着翻转，不能只改退出码、表头还写着"有资格"
+  local yes no
+  yes=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c \
+    'from perf_trace_summary import period_eligibility as pe; print(pe({"period":"interaction"})[1])')
+  no=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c \
+    'from perf_trace_summary import period_eligibility as pe; print(pe({"period":"interaction","no_human_input_during_window":"1"})[1])')
+  case "$yes" in *有资格*) ;; *) fail "干净 interaction 样本的话术里不再有「有资格」：$yes" ;; esac
+  case "$no" in *"不可当交互期样本"*) ;; *) fail "没人滚的 interaction 样本话术没翻转（还是「$no」）——退出码判了、表头在骗人" ;; esac
+  [ "$yes" != "$no" ] || { fail "两种样本话术一模一样，等于没判"; return; }
+  ok "期间资格：四种形状各判一次，且表头话术跟着翻转"
+}
+
+selfcheck_probe_self_sufficient() {  # selfcheck_probe_self_sufficient <outdir>
+  # 22) 今天 T1 采样断在这里：`perf_wait_window.sh` 直接 source 探针族，
+  #     而 `QUIESCE_BIN` 只在 `perf_harness.sh` 头部赋过 ⇒ 一进 `set -u` 就
+  #     `unbound variable`，脚本在"即将开录"那一刻死掉，人白等一场。
+  #     ⇒ 取数原语必须**自带默认**；但**阈值不许跟着搬**（那是判定侧的东西）。
+  local raw
+  raw=$(bash -c 'set -euo pipefail
+                 source scripts/perf_probes.sh 2>/dev/null
+                 quiescence_probe' 2>&1)
+  case "$raw" in
+    *"unbound variable"*) fail "探针族在裸 set -u 消费者下仍有未初始化量：$raw"; return ;;
+  esac
+  local q; q=$(quietest_seconds "$raw")
+  [ -n "$q" ] || { fail "裸调探针取不到可解析的静默秒数（拿到「$raw」）"; return; }
+  # 光"解析得出数字"不够：探针取不到时打的是 `静默=-1.00s`，**它解析得出来**！
+  # 第一版第 22 项就是把这条写在解析层，于是探针路径指错（QUIESCE_SRC 少一段目录、
+  # 编译失败退 JIT、JIT 也失败）时它照样绿——一条量不到东西的守卫比没有更坏。
+  probe_usable "$q" || { fail "裸调探针只拿到哨兵 $q（编译/路径坏了），第 22 项不许把哨兵当读数"; return; }
+  # 反向钉：阈值**不许**住在探针文件里（搬过去就等于把判定混进取数原语）
+  bash -c 'set -euo pipefail; source scripts/perf_probes.sh >/dev/null 2>&1; [ -n "${QUIESCE_MIN:-}" ]' \
+    && { fail "QUIESCE_MIN 跑进了 perf_probes.sh —— 合格线属于闸门，不该由取数原语带默认"; return; }
+  [ "$(bash -c 'set -euo pipefail; source scripts/perf_preflight.sh >/dev/null 2>&1; printf %s "$QUIESCE_MIN"')" = "5" ] \
+    || { fail "单独 source perf_preflight.sh 时 QUIESCE_MIN 没兜到 5（阈值默认不在闸门这边了）"; return; }
+  ok "探针裸可调（自带默认）、阈值仍只住在闸门（双向都钉）"
+}
+
+selfcheck_perf_root_ignored() {  # selfcheck_perf_root_ignored <outdir>
+  # 23) "样本落项目内被忽略的目录"这条规矩要有人守：改名、换路径、忘了加忽略，
+  #     都会让 GB 级 .trace 静默出现在 `git status` 里（今天就把 tmp/ 暴露过一次）。
+  local probe="$SCRATCH/probe-only.trace/contents"
+  git check-ignore -q "$probe" \
+    || { fail "$SCRATCH 没被 git 忽略（试 $probe）——下一轮取证就会把 trace 摊进版本库"; bad=1; }
+  # 反向钉：不许再有人把样本默认值写回全局 /tmp（根名单点 = preflight 的 SCRATCH）
+  local strays
+  # 模式里那个 `[p]` 不是笔误：写成 `tcoder-perf` 会让这条 grep **先命中本文件里
+  # 这串模式本身**（第 20 项的 `^provenance_ok() {` 今天已经为同样的事红过一次）。
+  strays=$(grep -ln ':-/tmp/tcoder-[p]erf' scripts/*.sh 2>/dev/null | tr '\n' ' ')
+  [ -z "$strays" ] \
+    || { fail "这些文件里又出现写死的 /tmp 样本默认值：$strays（只许走 \$SCRATCH）"; bad=1; }
+  # `${bad:-0}`：我自己刚立的规矩——闸门与判据里的量一律兜底，
+  # 否则 `set -u` 下"读一个还没被赋过值的全局"就是**静默中止**（今天已经栽过一次）。
+  [ "${bad:-0}" = "0" ] && ok "样本根已被 git 忽略，且没有第二处写死默认值"
+}
+
+selfcheck_disk_precondition() {  # selfcheck_disk_precondition <outdir>
+  # 24) 今晚真发生的事：合并时"磁盘余量"这条判据留下了**两份实现**
+  #     （preflight 的第七维 + harness 的 require_disk_headroom），
+  #     我把 harness 那份改成委托时先指向了一个**不存在的函数**——
+  #     `why=$(disk_headroom_bad …) && die` 里命令找不到 ⇒ rc≠0 ⇒ `&&` 不成立 ⇒
+  #     前置**永远放行**，而 selfcheck 一路全绿。一条永真的前置比没有更坏。
+  declare -f disk_headroom_bad >/dev/null \
+    || { fail "disk_headroom_bad 不在场——所有调它的前置都会静默放行（今天就差一点）"; return; }
+  local ok=1
+  disk_headroom_bad 400 >/dev/null && ok=0       # 充足 ⇒ 合格
+  disk_headroom_bad 3 >/dev/null || ok=0         # 不足 ⇒ 不合格
+  disk_headroom_bad "" >/dev/null || ok=0        # 读不到 ⇒ 与不足同等对待
+  [ -n "$(disk_headroom_bad 3)" ] || ok=0       # 不合格时要给出人话
+  [ "$ok" = "1" ] || { fail "磁盘前置的三种输入（充足/不足/读不到）没各判对一次"; return; }
+  # 结构钉：只许有一份实现（两处各写一遍就是这次合并撞出来的分叉）
+  grep -Eq 'df +-k( -P)? +/System/Volumes/Data' scripts/perf_harness.sh \
+    && { fail "perf_harness.sh 里又自己解析 df 了——删掉，改调 disk_headroom_bad"; bad=1; }
+  grep -q 'disk_headroom_bad' scripts/perf_harness.sh \
+    || { fail "录制前置不再经过共享判定（大概又手写了一遍 [ free -lt min ]）"; bad=1; }
+  [ "${bad:-0}" = "0" ] && ok "磁盘前置三种输入各判对、且全仓只有一份判定"
 }
