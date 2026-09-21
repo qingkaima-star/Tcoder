@@ -75,15 +75,17 @@ struct ContributorBusFactorSection: View {
         }
         let share = NumberFormat.percent(Double(top.commits) / Double(scope.authorBasis), precision: 0)
         let name = ContributorAnalysis.displayName(top)
-        let basis = "（分母 = \(NumberFormat.grouped(scope.authorBasis)) 次非合并提交）"
+        let basis = localizedFormat("（分母 = %1$@ 次非合并提交）",
+                                      NumberFormat.grouped(scope.authorBasis))
         switch ContributorAnalysis.busFactorRisk(git) {
         case .critical:
-            return "单点风险：\(basis) 全部来自 \(name) 一人，活跃作者仅 "
-                + "\(NumberFormat.grouped(git.activeAuthorCount)) 人。"
+            return localizedFormat("单点风险：%1$@ 全部来自 %2$@ 一人，活跃作者仅 %3$@ 人。",
+                                     basis, name,
+                                     NumberFormat.grouped(git.activeAuthorCount))
         case .high:
-            return "\(share) 的提交由 \(name) 一人完成 \(basis)，存在单点风险。"
+            return localizedFormat("%1$@ 的提交由 %2$@ 一人完成 %3$@，存在单点风险。", share, name, basis)
         case .medium:
-            return "\(share) 的提交来自 \(name) \(basis)，建议安排代码评审与交接。"
+            return localizedFormat("%1$@ 的提交来自 %2$@ %3$@，建议安排代码评审与交接。", share, name, basis)
         case .low:
             return "贡献分布健康：\(NumberFormat.grouped(git.activeAuthorCount)) 位活跃作者，"
                 + "最高占比 \(share)（\(name)）。"

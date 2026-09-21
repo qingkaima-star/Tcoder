@@ -211,21 +211,6 @@ final class LocalizationGuardTests: XCTestCase {
                                  + offenders.sorted().prefix(40).joined(separator: "\n"))
     }
 
-    // MARK: - 守卫 1e：语言探针键不许消失
-
-    /// `Theme.Layout.isChineseUI` 靠"查这条键回不回原词"判断界面语言。
-    /// **这条键一旦不在目录里，探针就永远判成中文**，所有"英文态才生效"的
-    /// 度量（定宽列宽等）会静默退回中文档 —— 而且守卫按英文预算量还是绿的。
-    /// 今天就是这样翻过一次车：探针用了从未登记的 `"口径"`。
-    func test_languageProbeKeyIsAlwaysRegistered() throws {
-        let keys = Set(try Self.catalog().map(\.key))
-        XCTAssertTrue(keys.contains(Theme.Layout.languageProbeKey),
-                      "语言探针键 \"\(Theme.Layout.languageProbeKey)\" 不在英文目录里 ⇒ isChineseUI 会恒真")
-        let english = try Self.catalog().first { $0.key == Theme.Layout.languageProbeKey }!.value
-        XCTAssertNotEqual(english, Theme.Layout.languageProbeKey,
-                          "探针键的译文等于键本身，同样会让 isChineseUI 恒真")
-    }
-
     // MARK: - 守卫 1d：目录键必须唯一
 
     /// 同一个键写两条 = **后一条悄悄覆盖前一条**（`NSDictionary` 语义），

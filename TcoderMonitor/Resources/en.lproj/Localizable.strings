@@ -455,7 +455,6 @@
 "跨度" = "Span";
 "无记录" = "No history";
 "每%@" = "per %@";
-" · 耗时 %@" = " · took %@";
 
 /* ===== P5-e：运行时漏翻台账（英文态渲染那一刻）点名的 55 条定宽/列名/标签 ===== */
 "维度" = "Dimension";
@@ -534,3 +533,14 @@
 "窗口内非合并提交" = "Non-merge commits in the window";
 "未识别到函数" = "No functions identified";
 "无提交记录" = "No commits";
+"共 %1$@ 次提交" = "%1$@ commits in total";
+"%1$@ 人 · 分母口径未记录" = "%1$@ people · the denominator basis was not recorded";
+"%1$@ 人 · 基于非合并提交%2$@" = "%1$@ people · based on non-merge commits%2$@";
+"（已排除 %1$@ 次合并）" = " (%1$@ merges excluded)";
+"最近扫描 %1$@ · 耗时 %2$@" = "Last scan %1$@ · took %2$@";
+"（分母 = %1$@ 次非合并提交）" = "(denominator = %1$@ non-merge commits)";
+"单点风险：%1$@ 全部来自 %2$@ 一人，活跃作者仅 %3$@ 人。" = "Single point of failure: %1$@ all come from %2$@ alone, with only %3$@ active authors.";
+"%1$@ 的提交由 %2$@ 一人完成 %3$@，存在单点风险。" = "%1$@ of commits are made by %2$@ alone %3$@ — a single point of risk.";
+"%1$@ 的提交来自 %2$@ %3$@，建议安排代码评审与交接。" = "%1$@ of commits come from %2$@ %3$@; set up code review and hand-off.";
+"%1$@（含合并）· 作者与代码行统计只覆盖最近 %2$@ 次非合并提交，更早的历史未纳入" = "%1$@ (merges included) · authors and code lines cover only the most recent %2$@ non-merge commits; older history is not included";
+"%1$@（含合并）· 这份报告没有记录非合并提交数，作者与代码行仍按旧口径统计，重新分析后可拆分" = "%1$@ (merges included) · this report did not record the non-merge commit count, so authors and code lines still use the old basis; re-analyse to split it";
