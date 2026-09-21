@@ -196,7 +196,16 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 #### 但请按这张表加权，别对 16 处平均使力（09-21 01:2x 读 `publish()` 实测，含对我自己上一条的更正）
 
 > **这张表现在有机器出处**，不是一份会腐烂的手抄名单：
-> `testCoarseReadoutSitesSplitIntoLoadBearingAndIncidental` 每次跑都打印
+> **先看清这件事的前置**：下面点名的守卫（`classifyCoarseWrites` / `publishBody` /
+> `testCoarseReadoutSitesSplitIntoLoadBearingAndIncidental`）与台账
+> `tcoder-perf-migration-weighting.txt` **现在只在 `ws/perf-base` 上，还没进 main**
+> （本文件这段是先落 main 的，包本身在 §0.5 第 0 步排队）。
+> 所以在 main 上你要的是**结论**（10 承重 / 6 顺手、以及哪几处），不是那条打印——
+> 现在想在 main 上复现分级，只能照本节末尾那四条替换关系手点，或等守卫进 main 之后自动打。
+> `PerfHitchGuardTests` 那份**逐条点名**的渲染路径台账同理：明细已在 main 的守卫里，
+> 但"落文件"这件事跟着 `966f896` 排队。
+>
+> 守卫落地后每次跑都会打印
 > `承重 N / 顺手 M / 合计 K` 并落台账 `$TMPDIR/tcoder-perf-migration-weighting.txt`，
 > 分类由 `classifyCoarseWrites(declarations:tickBody:symbols:)` **从 `publish()` 源码现读**
 > （符号名单从 `coarsePattern` 的交替组取，只有一处真相）。
