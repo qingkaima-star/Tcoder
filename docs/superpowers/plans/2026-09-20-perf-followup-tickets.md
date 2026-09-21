@@ -317,7 +317,7 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 > `idle` 档的 xctrace app-update 与这里的 stats 管，别拿一个数交两条验收。
 
 ```bash
-./scripts/perf_harness.sh selfcheck          # 11 项，红了所有读数作废——先量尺子再量代码
+./scripts/perf_harness.sh selfcheck          # 14 项（02:00 加了收益分级三项后），红了所有读数作废
 ./scripts/perf_harness.sh idle   /tmp/tcoder-perf-after-<rev>     # 2a：不需要人**操作**，但需要人**离开**
 #   （02:51 实测更正：原先写"不需要人"是错的。三趟全被拒：
 #    ① 前台是「微信」——不在前的窗口被 macOS 节流绘制，同一二进制后台 app-update 只有 1.9~3.0 ms，
@@ -391,7 +391,7 @@ pointerSettleTask = Task { @MainActor in … }    // 每事件新建一个非结
 
 **已进 main 的性能侧东西**（`main = f9841ae` 之前的 `3a3381c`）：
 细粒度九格契约 + 交互期引用计数暂停（`Services/Performance/MachSystemMonitor.swift`、`App/AppState.swift`）、
-Design 令牌缓存、尺子五档 + `probe` + `selfcheck`（11 项）、`migration` 命令、
+Design 令牌缓存、尺子六档 + `selfcheck`（14 项）、`migration` 命令（含收益分级）、
 五维 preflight（含**人手静默**）、四条禁则零余量 `1/1 59/59 10/10 2/2`、
 §5.4 与 **T2 两半归因**（主线程九格写入 0.01 ms / 900 进程派生 9.3 ms 在后台）。
 
