@@ -52,7 +52,7 @@ struct HeuristicClaimLine: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
             ThemedIcon(.info, role: .badge).foregroundStyle(Theme.Semantic.neutral.textColor)
-            Text(Self.claim)
+            Text(localizedCopy(Self.claim))
                 .font(Theme.Typo.label.font)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
@@ -239,8 +239,13 @@ struct HealthCodeScopeReadout: View {
     }
 
     private var membershipLine: String {
-        let included = "计入 \(scope.includedDimensions.joined(separator: "、"))"
-        guard !scope.excludedDimensions.isEmpty else { return included + "（与综合分同一批分量）" }
-        return included + "；不含 \(scope.excludedDimensions.joined(separator: "、"))"
+        // 整句键 + 分隔符也查表：英文里顿号 `、` 不存在，硬留就成了 `a、b、c`。
+        let sep = localizedCopy("、")
+        let included = scope.includedDimensions.map(localizedCopy).joined(separator: sep)
+        guard !scope.excludedDimensions.isEmpty else {
+            return localizedFormat("计入 %@（与综合分同一批分量）", included)
+        }
+        let excluded = scope.excludedDimensions.map(localizedCopy).joined(separator: sep)
+        return localizedFormat("计入 %1$@；不含 %2$@", included, excluded)
     }
 }

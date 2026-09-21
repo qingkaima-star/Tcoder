@@ -444,3 +444,6 @@
 "%1$@ · %2$@ 级" = "%1$@ · grade %2$@";
 "启发式加权计算，未调用外部模型" = "Heuristic weighted calculation, no external model called";
 "工程质量（代码口径）" = "Engineering Quality (code basis)";
+"计入 %@（与综合分同一批分量）" = "Counted: %@ (the same components behind the overall score)";
+"计入 %1$@；不含 %2$@" = "Counted: %1$@; excluded: %2$@";
+"、" = ", ";
