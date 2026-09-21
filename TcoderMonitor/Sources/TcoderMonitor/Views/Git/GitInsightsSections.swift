@@ -59,9 +59,9 @@ struct GitRepositorySourceSection: View {
                                  style: .path,
                                  // 盘点表 D7「留短藏长」：屏上留「来源未记录」这个态，
                                  // 「旧数据 / 重新分析后可见」这句怎么办才变得可见，进 ⓘ。
-                                 help: root.isEmpty
-                                     ? "来源未记录（旧数据，重新分析后可见）"
-                                     : nil)
+                                 // 整句与 `help:` 写在同一行：ⓘ 的落点判定按行扫，
+                                 // 换行会让这一串被读成「仍然常驻屏上」而不是「已收进 ⓘ」。
+                                 help: root.isEmpty ? "来源未记录（旧数据，重新分析后可见）" : nil)
                     // 盘点表 D6「藏」：这一句回答的是「为什么定位到了这里」，
                     // 是不改变任何数字读法的次级解释 ⇒ 屏上只留一枚 ⓘ，字面一字未改。
                     CopyHelpBadge(Self.discoveryDetail(git))
