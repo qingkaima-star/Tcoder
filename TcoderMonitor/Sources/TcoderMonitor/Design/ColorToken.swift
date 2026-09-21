@@ -232,12 +232,20 @@ enum DesignAppearance: CaseIterable, Hashable {
     case light
     case dark
 
+    /// 对比度 harness 的参考背景。**批次 P6 起取"两层里更差的那一面"**。
+    ///
+    /// 原来它钉的是 `NSColor.controlBackgroundColor`（aqua `#FFFFFF` / darkAqua `#1E1E1E`），
+    /// 那是"地面纯白"时代的正确参考。新语言是**灰画布 + 白卡**，同一支墨可能落在
+    /// 两个面上：浅色下 `#F7F7F7` 比白底更暗 ⇒ 深字对比更低；
+    /// 深色下卡面 `#1C1E22` 比画布 `#0E0E10` 更亮 ⇒ 浅字对比更低。
+    /// 取各自更差的一面，"过线"才意味着**落在哪一层都过线**。
+    ///
+    /// ⚠ 这是**加严**，不是为了让谁通过：改完之后如果有角色掉线，正解是把它调深/调亮，
+    ///   不是把这行改回去（本仓红线：阈值不许为了刷分而动）。
     var referenceSurface: ColorToken {
         switch self {
-        // 实测值：NSColor.controlBackgroundColor 在 aqua = #FFFFFF、darkAqua = #1E1E1E
-        // （用编译产物 resolve 两个 NSAppearance 得到，见笔记 42）
-        case .light: return ColorToken(hex: 0xFFFFFF)
-        case .dark: return ColorToken(hex: 0x1E1E1E)
+        case .light: return ColorToken(hex: 0xF7F7F7)   // = Palette.Surface.ground
+        case .dark: return ColorToken(hex: 0x1C1E22)    // = Palette.Surface.card
         }
     }
 }

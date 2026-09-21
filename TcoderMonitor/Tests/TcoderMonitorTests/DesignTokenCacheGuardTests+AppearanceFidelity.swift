@@ -16,7 +16,11 @@ extension DesignTokenCacheGuardTests {
         // 语义色文字层（双层色的存在理由就是浅深各自达标）
         XCTAssertEqual(Self.resolveHex(Theme.Semantic.danger.textColor, under: .aqua), "C2251C")
         XCTAssertEqual(Self.resolveHex(Theme.Semantic.danger.textColor, under: .darkAqua), "FF6B63")
-        XCTAssertEqual(Self.resolveHex(Theme.Semantic.success.textColor, under: .aqua), "157A32")
+        // 157A32 → 13702E：批次 P6 把对比度 harness 改成"量两层里更差的那一面"
+        // （浅色画布 `#F7F7F7` 比白底暗，success 文字压在自己 15% badge 底上只剩 4.38），
+        // 正解是把值调深、不是把尺子改回去。本条断言的**目的没变**：
+        // 动态色在 aqua 下必须解析到浅色档那一个具体值。
+        XCTAssertEqual(Self.resolveHex(Theme.Semantic.success.textColor, under: .aqua), "13702E")
         XCTAssertEqual(Self.resolveHex(Theme.Semantic.success.textColor, under: .darkAqua), "5BE28A")
         // critical 是唯一 onFill 随外观翻转的角色
         XCTAssertEqual(Self.resolveHex(Theme.Semantic.critical.onFillColor, under: .aqua), "FFFFFF")
