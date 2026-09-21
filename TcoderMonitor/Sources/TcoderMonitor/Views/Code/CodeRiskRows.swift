@@ -56,9 +56,10 @@ enum CodeRiskAnalysis {
     static func complexitySubtitle(_ code: CodeMetrics) -> String {
         guard !code.topComplexFunctions.isEmpty else { return "按圈复杂度降序" }
         let complexities = code.topComplexFunctions.map(\.cyclomaticComplexity)
-        return "按圈复杂度降序 · 上榜 \(NumberFormat.grouped(code.topComplexFunctions.count)) 个 · CC 区间 "
-            + "\(NumberFormat.grouped(complexities.min() ?? 0))~\(NumberFormat.grouped(complexities.max() ?? 0))"
-            + " · 颜色取自引擎给出的风险分档"
+        return localizedFormat("按圈复杂度降序 · 上榜 %1$@ 个 · CC 区间 %2$@~%3$@ · 颜色取自引擎给出的风险分档",
+                                NumberFormat.grouped(code.topComplexFunctions.count),
+                                NumberFormat.grouped(complexities.min() ?? 0),
+                                NumberFormat.grouped(complexities.max() ?? 0))
     }
 
     static func noRiskNote(_ code: CodeMetrics) -> String {

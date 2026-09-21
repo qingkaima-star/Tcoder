@@ -138,8 +138,9 @@ struct CodeHotspotSection: View {
 
     static func subtitle(_ code: CodeMetrics) -> String {
         if code.hugeFiles.isEmpty { return "行数是单文件总行数（含空行与注释）" }
-        return "共 \(NumberFormat.grouped(code.hugeFiles.count)) 个 · 最大 "
-            + "\(NumberFormat.grouped(largestLineCount(code))) 行 · 点击条目在 Finder 中显示"
+        return localizedFormat("共 %1$@ 个 · 最大 %2$@ 行 · 点击条目在 Finder 中显示",
+                                NumberFormat.grouped(code.hugeFiles.count),
+                                NumberFormat.grouped(largestLineCount(code)))
     }
 }
 

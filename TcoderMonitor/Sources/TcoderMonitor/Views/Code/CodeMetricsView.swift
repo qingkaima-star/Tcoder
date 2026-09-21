@@ -95,8 +95,9 @@ struct CodeMetricsSummaryGrid: View {
                     label: "代码文件",
                     value: NumberFormat.grouped(code.totalFiles),
                     unit: "个",
-                    caption: "主语言 \(code.primaryLanguage) · 扫描于 "
-                        + DateFormat.sinceDescription(code.scannedAt)
+                    caption: localizedFormat("主语言 %1$@ · 扫描于 %2$@",
+                                             code.primaryLanguage,
+                                             DateFormat.sinceDescription(code.scannedAt))
                 )
                 DataBandSeparator()
                 MetricTile(
@@ -121,7 +122,7 @@ struct CodeMetricsSummaryGrid: View {
                     label: "空行数",
                     value: NumberFormat.grouped(code.blankLines),
                     unit: "行",
-                    caption: "空行占 " + Self.shareOf(code.blankLines, code)
+                    caption: localizedFormat("空行占 %@", Self.shareOf(code.blankLines, code))
                         + " · 与注释、代码共同构成总行数"
                 )
             }
@@ -193,8 +194,9 @@ struct CodeScaleSection: View {
         let counted = code.languages.filter { $0.share > 0 }.count
         guard counted > 0 else { return "尚无语言占比" }
         let head = min(CodeMetricsView.languageHeadCount, counted)
-        return "按有效代码行计，共 \(NumberFormat.grouped(code.languages.count)) 种语言，"
-            + "展示前 \(NumberFormat.grouped(head)) 种"
+        return localizedFormat("按有效代码行计，共 %1$@ 种语言，展示前 %2$@ 种",
+                                NumberFormat.grouped(code.languages.count),
+                                NumberFormat.grouped(head))
     }
 
     /// 平均文件行数 = 总行数 / 文件数。两个分母任期为 0 都是「算不出」，

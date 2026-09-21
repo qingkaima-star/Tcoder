@@ -117,9 +117,9 @@ extension CodeRiskAnalysis {
                 id: "long-functions", label: "函数长度", symbol: CodeGitSymbol.longFunction,
                 role: code.averageFunctionLength > longAverageFunctionLines
                     ? Theme.Semantic.warning : Theme.Semantic.neutral,
-                text: "识别到 \(NumberFormat.grouped(code.longFunctions)) 个超长函数，"
-                    + "平均函数长度 \(NumberFormat.grouped(code.averageFunctionLength)) 行："
-                    + "按段落把函数拆成职责单一的私有方法，一个函数只做一件事。"
+                text: localizedFormat("识别到 %1$@ 个超长函数，平均函数长度 %2$@ 行：按段落把函数拆成职责单一的私有方法，一个函数只做一件事。",
+                                      NumberFormat.grouped(code.longFunctions),
+                                      NumberFormat.grouped(code.averageFunctionLength))
             ))
         }
 
@@ -150,9 +150,10 @@ extension CodeRiskAnalysis {
             let perKilo = Double(code.fixmeCount + code.todoCount) * 1_000 / Double(max(1, code.codeLines))
             items.append(Item(
                 id: "markers", label: "待办标记", symbol: CodeGitSymbol.marker, role: Theme.Semantic.warning,
-                text: "源码里留着 \(NumberFormat.grouped(code.fixmeCount)) 处 FIXME（另有 "
-                    + "\(NumberFormat.grouped(code.todoCount)) 处 TODO），平均每千行有效代码 "
-                    + String(format: "%.2f", perKilo) + " 条：逐条确认是修掉还是删注释，避免长期失真。"
+                text: localizedFormat("源码里留着 %1$@ 处 FIXME（另有 %2$@ 处 TODO），平均每千行有效代码 %3$@ 条：逐条确认是修掉还是删注释，避免长期失真。",
+                                      NumberFormat.grouped(code.fixmeCount),
+                                      NumberFormat.grouped(code.todoCount),
+                                      String(format: "%.2f", perKilo))
             ))
         }
 
