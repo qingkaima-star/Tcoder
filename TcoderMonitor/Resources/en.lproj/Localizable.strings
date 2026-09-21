@@ -14,6 +14,7 @@
 "项目" = "Projects";
 "分析视图" = "Analysis";
 "添加项目" = "Add Project";
+"前往" = "Go To";
 "把项目文件夹拖到这里，或选择本地目录" = "Drop a project folder here, or choose a local directory";
 "选择目录…" = "Choose Directory…";
 "加载示例项目" = "Load Sample Project";
@@ -143,3 +144,13 @@
 "采样已暂停" = "Sampling paused";
 "上次采样 %1$@ · 采样点 %2$@ · 间隔 %3$@" = "Last sample %1$@ · %2$@ points · every %3$@";
 "最近 %1$@ 点 · %2$@ · 窗口约 %3$@ 秒" = "Last %1$@ points · %2$@ · ~%3$@ s window";
+
+/* ===== P5-c 代码页：整句键。原来这些串是 `\(…)` 拼接 —— 带插值的
+   `Text("…")` 生成的键含内部记号，手工目录对不上，于是英文态**永远**退回中文。
+   改成 `localizedFormat("整句 %1$@ …", …)`：键里没有插值，目录才接得住。 ===== */
+"总行数 %1$@ · 代码占 %2$@" = "Total %1$@ lines · code accounts for %2$@";
+"注释率 %1$@（分母为总行数 %2$@ 行）" = "Comment ratio %1$@ (denominator: %2$@ total lines)";
+"主语言 %1$@ · 共 %2$@ 个文件" = "Main language %1$@ · %2$@ files";
+"扫描到 %1$@ 个文件，但没有任何语言的有效代码行占比大于 0。" = "Scanned %1$@ files, but no language has an effective code-line share above 0.";
+"分项之和 %1$@ 与总行数相差 %2$@ 行，以扫描器输出为准。" = "The itemised sum %1$@ differs from the total by %2$@ lines; the scanner output governs.";
+"已完成扫描，单文件行数峰值为 %1$@ 行，未超过阈值。这是测得的结果，不是没扫。" = "Scan complete: the largest file peaks at %1$@ lines, under the threshold. This is a measurement, not a missed scan.";

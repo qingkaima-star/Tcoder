@@ -139,8 +139,12 @@ struct ContributorsMetricGrid: View {
                     DataBandSeparator()
                     MetricTile(
                         label: "累计变更",
+                        // 同一格里不许两套记法：原来 value 走 compact（"147k"）、
+                        // caption 走千分位（"+105,340"），是同一个量的两种写法（批次 P5）。
+                        // 侧栏那格留 compact 是因为窄列 + 实时跳动（9k→182k 会推走邻居），
+                        // 这里是 KPI 格，没有那个约束 ⇒ 与全站其余读数同一把尺子。
                         value: scope.authorBasis > 0
-                            ? NumberFormat.compact(git.totalAdditions + git.totalDeletions) : nil,
+                            ? NumberFormat.grouped(git.totalAdditions + git.totalDeletions) : nil,
                         unit: "行",
                         caption: "\(NumberFormat.signed(git.totalAdditions)) / "
                             + "\(NumberFormat.signed(-git.totalDeletions)) · 按非合并提交统计"

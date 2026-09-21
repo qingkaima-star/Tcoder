@@ -85,7 +85,8 @@ struct PerformanceSystemTiles: View {
         return MetricTile(
             label: "内存",
             value: used == nil ? nil : Live.bytes(used, precision: 1),
-            unit: (used != nil && total != nil) ? "/ \(Live.bytes(total, precision: 0))" : nil,
+            // 分子/分母同精度：`48.0 GB / 64 GB` 是同一行里的两套小数位（批次 P5）。
+            unit: (used != nil && total != nil) ? "/ \(Live.bytes(total, precision: 1))" : nil,
             caption: used == nil
                     ? (SystemReadings.memoryGapReason(context) ?? "等待首个样本")
                     : "在用 \(Live.percent(fraction, precision: 0)) · 压力 \(pressure?.rawValue ?? Live.missing)",

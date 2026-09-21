@@ -91,8 +91,8 @@ struct CodeHotspotSection: View {
                 EmptyStateView(
                     icon: .noRisk,
                     title: "本次扫描未发现巨大文件",
-                    message: "已完成扫描，单文件行数峰值为 \(NumberFormat.grouped(code.largestFileLineCount)) 行，"
-                        + "未超过阈值。这是测得的结果，不是没扫。"
+                    message: localizedFormat("已完成扫描，单文件行数峰值为 %1$@ 行，未超过阈值。这是测得的结果，不是没扫。",
+                                             NumberFormat.grouped(code.largestFileLineCount))
                 )
             } else {
                 let rows = visibleRows

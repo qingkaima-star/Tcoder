@@ -270,7 +270,7 @@ struct DashboardLiveReadout: View {
             value: snapshot.map { ByteFormat.string($0.memoryUsedBytes, precision: 1) },
             caption: snapshot.map {
                 localizedFormat("共 %1$@ · %2$@",
-                                ByteFormat.string($0.memoryTotalBytes, precision: 0),
+                                ByteFormat.string($0.memoryTotalBytes, precision: 1),
                                 NumberFormat.percent($0.memoryFraction, precision: 0))
             },
             systemImage: IconName.memory.rawValue
