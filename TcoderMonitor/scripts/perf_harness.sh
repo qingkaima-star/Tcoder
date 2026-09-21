@@ -241,10 +241,14 @@ switch_record_page() {  # switch_record_page <page> <dir> <sandbox>：一页的�
   run rm -rf "$dir/launch.trace"
   local t0 t1
   t0=$(python3 -c 'import time;print(time.time())')
+  # xctrace 自己的选项**必须写在 `--launch --` 之前**：`--` 之后的东西整段交给被启动的进程，
+  # 所以旧写法把 `--time-limit/--output/--no-prompt/--quiet` 全喂给了 App ——
+  # 结果 trace 用默认名掉在仓库里（九个 .trace 目录），页目录空、九页全"未覆盖"，
+  # 而退出码仍是 0。实测抓到于 2026-09-21 15:17。
   xcrun xctrace record --template "$TEMPLATE_LAUNCH" \
     --env "TCODER_SUPPORT_DIR=$sandbox" \
-    --launch -- "$PERF_BIN" -ApplePersistenceIgnoreState YES -selectedDetailSection "$page" \
-    --time-limit "${SECONDS_LAUNCH}s" --output "$dir/launch.trace" --no-prompt --quiet
+    --time-limit "${SECONDS_LAUNCH}s" --output "$dir/launch.trace" --no-prompt --quiet \
+    --launch -- "$PERF_BIN" -ApplePersistenceIgnoreState YES -selectedDetailSection "$page"
   t1=$(python3 -c 'import time;print(time.time())')
   # 首帧**不能**用墙钟轮询量。原实现的顺序是：t0 → `xctrace record --launch
   # --time-limit 10s`（阻塞满 10 s）→ 才去轮询窗口出现 → `first = now - t0`，
@@ -294,7 +298,7 @@ cmd_switch() {
     echo "--> $n) $page"
     if [ "$DRY_RUN" = "1" ]; then
       echo "    \$ TCODER_SUPPORT_DIR=$sandbox $PERF_BIN -ApplePersistenceIgnoreState YES -selectedDetailSection $page"
-      echo "    \$ xctrace record --template \"$TEMPLATE_LAUNCH\" --launch -- … --time-limit ${SECONDS_LAUNCH}s"
+      echo "    \$ xctrace record --template \"$TEMPLATE_LAUNCH\" --time-limit ${SECONDS_LAUNCH}s --output … --launch -- <bin> …"
       continue
     fi
     switch_record_page "$page" "$dir" "$sandbox"
