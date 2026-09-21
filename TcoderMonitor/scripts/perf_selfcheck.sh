@@ -51,6 +51,7 @@ cmd_selfcheck() {
   selfcheck_probe_self_sufficient "$out" # 22) 探针必须能被裸 `set -u` 消费者调用（不靠 harness）
   selfcheck_perf_root_ignored "$out"    # 23) 样本根必须真的被 git 忽略，且不许有第二处写死 /tmp 默认值
   selfcheck_disk_precondition "$out"    # 24) 前置必须**能失败**：判定要在、且全仓只有一份
+  selfcheck_display_regime "$out"       # 25) 120Hz 预算只对 120Hz 档成立：降频档里不许印"危急"
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
@@ -756,4 +757,36 @@ selfcheck_disk_precondition() {  # selfcheck_disk_precondition <outdir>
   grep -q 'disk_headroom_bad' scripts/perf_harness.sh \
     || { fail "录制前置不再经过共享判定（大概又手写了一遍 [ free -lt min ]）"; bad=1; }
   [ "${bad:-0}" = "0" ] && ok "磁盘前置三种输入各判对、且全仓只有一份判定"
+}
+
+selfcheck_display_regime() {  # selfcheck_display_regime <outdir>
+  # 25) 2026-09-21 的现场：一份 idle 读数报 `HTR 18.33 危急·立刻处理`，
+  #     但同一份数据里主线程 88.6% 的样本在等事件、整窗零人手输入、实测出帧只有 ~48/s——
+  #     窗口静止时 ProMotion 降到 ~50 Hz，一帧本就该花 ~20 ms，
+  #     拿 120 Hz 的 8.333 ms 预算去判必然系统性偏坏。**我差点把这句话当结论交出去。**
+  # ⇒ 档位词必须先看实际出帧。四个边界各钉一次（含"读不到出帧数"不许用来给坏消息打折）。
+  local r
+  r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_trace_metrics import in_display_regime as f
+print(",".join("Y" if f(v, 8.333) else "N" for v in (119.7, 96.0, 95.9, 49.8, None, 0)))')
+  [ "$r" = "Y,Y,N,N,Y,Y" ] \
+    || { fail "实际刷新档位判定不对（拿到 $r，期望 Y,Y,N,N,Y,Y）——档位词会乱印"; return; }
+  # 话术钉：喂**合成 loaded**，不依赖现场有没有真样本
+  #     （第一版这里写成 `report "$1"`，$1 是自检目录、没有 hitch 表 ⇒
+  #      拿到的是"未覆盖"那行，于是这条断言红在**夹具选错**上，不是守卫逻辑错。）
+  local words
+  words=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_trace_summary import hitch_regime_suffix as h
+low = {"displayed-surfaces-per-second": {"json": {"fps_p50": 48}}}
+hi = {"displayed-surfaces-per-second": {"json": {"fps_p50": 119.7}}}
+# 夹具必须**长得像生产代码给的形状**（load_measure 返回的是 json/doc/present 三件套）：
+# 只塞 {"json": None} 会让 fps_counts 去摸不存在的 doc 键，红的其实是夹具。
+none = {"displayed-surfaces-per-second": {"json": None, "doc": None, "present": False}}
+print("%s|%s|%s" % (bool(h(low, 8.333)), bool(h(hi, 8.333)), bool(h(none, 8.333))))
+print(h(low, 8.333))')
+  [ "$(printf '%s\n' "$words" | head -1)" = "True|False|False" ] \
+    || { fail "越档后缀三态不对（拿到 $(printf '%s' "$words" | head -1)）"; return; }
+  printf '%s\n' "$words" | tail -1 | grep -q '不判档' \
+    || { fail "越档时话术里没有「不判档」——档位词还在乱印"; return; }
+  ok "越档读数改口为「不判档，只记形状」；四边界与三态话术全对"
 }

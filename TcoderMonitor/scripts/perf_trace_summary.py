@@ -18,7 +18,7 @@ AGENTS.md 第四轮红线 5（诚实性语义与阈值不许为任何指标放�
 import os
 import statistics
 
-from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, as_int, base_app_update_line, base_hang_line, base_hitch_frame_line, base_hitches_line, base_hotspot_line, base_main_thread_line, base_render_line, dedupe_pairs, disp_values, fmt_row, fps_counts, load_measure, over_budget, percentile, read_json, regime_note)
+from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, as_int, base_app_update_line, base_hang_line, base_hitch_frame_line, base_hitches_line, base_hotspot_line, base_main_thread_line, base_render_line, dedupe_pairs, disp_values, fmt_row, fps_counts, load_measure, over_budget, percentile, read_json, regime_note, in_display_regime)
 from perf_trace_xml import cross_check_durations, find_tag
 
 
@@ -196,24 +196,46 @@ def summary_app_update_row(loaded, budget):
                 "无 app-update = 无 hitch" if loaded["hitches-updates"]["present"] else "未覆盖", "—")
 
 
+def hitch_regime_suffix(loaded, budget):
+    """越出标称刷新率档时，hitch/HTR 的判定后缀（在档内则空串）。
+
+    【为什么要有这条】预算 8.333 ms 只对 **120 Hz 档**成立。窗口静止时 ProMotion 会把
+    实际出帧降到 ~50 Hz，那时一帧本就该花 ~20 ms —— 拿 120 Hz 的尺子去判，
+    "超预算帧数"与 HTR 会**系统性偏坏**。2026-09-21 就被这样一份 idle 读数唬过一次
+    （HTR 18.33「危急·立刻处理」，而同一份数据里主线程 88.6% 在等事件、整窗零输入）。
+    做成纯函数是为了能被合成夹具双向钉住（selfcheck 第 25 项）。
+    """
+    fps = (loaded or {}).get("displayed-surfaces-per-second") or {}
+    # 只有"确实采到过这张表"才去解析它：`json` 缺席就重解析 XML 会让**每一趟 idle**
+    # 都为这句话多跑一次 XML，而且合成夹具里没有 `doc` 键时直接 KeyError。
+    counts = fps.get("json")
+    if not counts and fps.get("present"):
+        counts = fps_counts(fps)
+    achieved = (counts or {}).get("fps_p50")
+    if in_display_regime(achieved, budget):
+        return ""
+    return "｜实测出帧 %s/s，已不在 %.1f Hz 档 ⇒ 不判档，只记形状" % (achieved, 1000.0 / budget)
+
+
 def summary_hitch_rows(loaded, seconds, budget):
     # 4) hitch 次数 / 速率
     hitch = disp_values(loaded["hitches"])
+    suffix = hitch_regime_suffix(loaded, budget)
     if loaded["hitches"]["present"]:
         rate = (len(hitch) / seconds) if seconds else 0.0
         fmt_row("hitch 次数 / 速率", base_hitches_line(),
                 "%d 次 / %ds = %.2f /s" % (len(hitch), seconds, rate),
-                "达标(0 次)" if not hitch else ("超(预算 0)" if rate < 1.0 else "严重超(>=1/s)"))
+                "达标(0 次)" if not hitch else (("超(预算 0)" if rate < 1.0 else "严重超(>=1/s)") + suffix))
         fmt_row("hitch 帧时长", base_hitch_frame_line(),
                 ("%.2f~%.2f ms" % (min(hitch), max(hitch))) if hitch else "无 hitch",
-                "超" if hitch and max(hitch) > budget else "达标")
+                ("超" if hitch and max(hitch) > budget else "达标") + suffix)
         # Hitch Time Ratio：Apple 的正式指标（tech-talk 10855）——
         # 本实现取 Σ max(0, 帧时长 − 预算) / 秒数，是"晚了多少"的保守上界。
         # 档位（Apple 原文）：<5 无感 / 5~10 可察觉需排查 / >10 危急需立刻处理 / 理想 0。
         htr = (sum(max(0.0, d - budget) for d in hitch) / seconds) if seconds else 0.0
         band = "理想(0)" if not hitch else ("无感" if htr < 5 else ("可察觉·需排查" if htr <= 10 else "危急·立刻处理"))
         fmt_row("Hitch Time Ratio (ms/s)", "%.2f（危急档）" % BASELINE.get("hitch_time_ratio_ms_per_s", 12.9),
-                "%.2f（%d 帧迟到，预算 %.3f ms）" % (htr, len(hitch), budget), band)
+                "%.2f（%d 帧迟到，预算 %.3f ms）" % (htr, len(hitch), budget), band + suffix)
     else:
         fmt_row("hitch 次数 / 速率", base_hitches_line(), "未覆盖", "—")
         fmt_row("hitch 帧时长", base_hitch_frame_line(), "未覆盖", "—")

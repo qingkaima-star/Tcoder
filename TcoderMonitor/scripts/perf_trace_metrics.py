@@ -127,6 +127,24 @@ def launch_ready_ms(rows):
     return horizon
 
 
+def in_display_regime(achieved_fps, budget_ms, ratio=0.8):
+    """实测出帧是否还落在 `budget_ms` 所假设的那个刷新率档内。
+
+    8.333 ms 这个预算**只在 120 Hz 档成立**。外接/内建标称 120 Hz，
+    但窗口静止时 ProMotion 会把实际出帧降到 ~50 Hz —— 这时候
+    一帧本就该花 ~20 ms，拿 8.333 ms 去判就会把 36 帧判成"超预算"、
+    把 HTR 判成"危急·立刻处理"。我今晚就是这么被自己的一份 idle 读数
+    唬住了一次（主线程 88.6% 在等事件、整窗零输入，却报"危急"）。
+    ⇒ 拿不到出帧数时**保守判为在档内**（不许用"未知"去给坏消息打折）。
+    """
+    if not achieved_fps or achieved_fps <= 0 or not budget_ms or budget_ms <= 0:
+        return True
+    # `1000/8.333 = 120.005` 会比真实的 120 Hz 多出一丝，边界上会把 96.0 这种
+    # 正好该算"在档内"的值判成越界——所以先把标称 Hz 收一位小数再乘系数。
+    implied_hz = round(1000.0 / float(budget_ms), 1)
+    return float(achieved_fps) >= implied_hz * ratio
+
+
 def percentile(values, p):
     """int(n·p) 下标取法——与 §1 基线脚本同口径，换算法等于换门禁。"""
     if not values:
