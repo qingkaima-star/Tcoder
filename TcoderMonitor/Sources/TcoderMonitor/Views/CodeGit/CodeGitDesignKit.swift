@@ -157,7 +157,11 @@ struct DataFootnote: View {
     var alignment: HorizontalAlignment = .leading
 
     var body: some View {
-        Text(text)
+        // 必须查表：`Text(变量)` 走 verbatim 初始化，目录里翻了也不会变（双语方案 §7.1）。
+        // 全仓 9 处 `DataFootnote(text:)` 与 4 处 `DataCaption(text:)` 调用点此前都从这两行直出，
+        // 而英文目录里早就有它们的键 —— `DataFootnote` 侧的「点击行在 Finder 中定位源文件…」
+        // 与 `DataCaption` 侧的「该清单没有解析出可枚举的依赖项。」：键在、不查，等于没翻。
+        Text(localizedCopy(text))
             .font(CodeGitType.prose(Theme.Typo.microLabel))
             .foregroundStyle(.secondary)
             .multilineTextAlignment(alignment == .leading ? .leading : .center)
@@ -173,7 +177,8 @@ struct DataCaption: View {
     let text: String
 
     var body: some View {
-        Text(text)
+        // 同 `DataFootnote`：查表之后 `text:` 槽里的键才会真的生效。
+        Text(localizedCopy(text))
             .font(CodeGitType.prose(Theme.Typo.narrative))
             .lineSpacing(Theme.Typo.narrative.lineSpacing)
             .foregroundStyle(.secondary)

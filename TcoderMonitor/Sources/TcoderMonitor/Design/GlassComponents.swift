@@ -56,6 +56,10 @@ struct GlassCard<Content: View>: View {
 struct GlassSection<Content: View>: View {
     var title: String
     var subtitle: String?
+    /// 卡副标题的「留短藏长」槽。副标题是全站用得最多的文案位（46 处调用），
+    /// 没有这个槽之前，页面只能把长口径整句塞进副标题，或者把 ⓘ 挤进 `trailing:`
+    /// 与合计读数抢一行。画法仍复用全站唯一的 `CopyHelpBadge`。
+    var subtitleHelp: String?
     var icon: IconName?
     /// 标题行右侧插槽用 `AnyView?` 而非泛型 trailing：
     /// 与页面自 `SectionCard` 时代起就传 `AnyView` 的调用点保持兼容（该壳已在 #28 删除）。
@@ -67,6 +71,7 @@ struct GlassSection<Content: View>: View {
     init(
         _ title: String,
         subtitle: String? = nil,
+        subtitleHelp: String? = nil,
         icon: IconName? = nil,
         trailing: AnyView? = nil,
         padding: CGFloat = Theme.Spacing.cardPadding,
@@ -75,6 +80,7 @@ struct GlassSection<Content: View>: View {
     ) {
         self.title = title
         self.subtitle = subtitle
+        self.subtitleHelp = subtitleHelp
         self.icon = icon
         self.trailing = trailing
         self.padding = padding
@@ -108,10 +114,15 @@ struct GlassSection<Content: View>: View {
                             .foregroundStyle(Theme.Palette.Surface.ink)
                     }
                     if let subtitle {
-                        Text(localizedCopy(subtitle))
-                            .font(Theme.Typo.label.font)
-                            .foregroundStyle(.secondary)
-                            .lineSpacing(Theme.Typo.label.lineSpacing)
+                        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+                            Text(localizedCopy(subtitle))
+                                .font(Theme.Typo.label.font)
+                                .foregroundStyle(.secondary)
+                                .lineSpacing(Theme.Typo.label.lineSpacing)
+                            if let subtitleHelp {
+                                CopyHelpBadge(subtitleHelp)
+                            }
+                        }
                     }
                 }
                 Spacer(minLength: Theme.Spacing.xs)

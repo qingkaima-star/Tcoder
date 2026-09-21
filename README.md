@@ -109,6 +109,17 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
 
 # 证明 dist 里的 .app 确实来自某一次提交（六项机械比对，空值一律判失败）
 ./scripts/build_app.sh release && ./scripts/verify_provenance.sh
+
+# 无头 CLI：不启动 App 就把一个仓库的工程指标读到终端 / 管道里。
+# 同一个二进制的 argv 分派（词表见 CLIRouter.headlessWords），GUI 启动路径零影响。
+./.build/debug/TcoderMonitor score /path/to/repo        # 只出读数：失败路在前，缺席维度带原因
+./dist/Tcoder.app/Contents/MacOS/TcoderMonitor scan . --compact | jq .health.overall
+./dist/Tcoder.app/Contents/MacOS/TcoderMonitor doctor   # 我在用哪个二进制、debug 还是 release
+./scripts/self_score.sh                                 # 扫本仓库自己（改造前要起 App 轮询落盘，上限 300 秒）
+
+# 为什么要这个入口：AI 与子代理此前各自拿 find|wc、git shortlog 数同一件事，
+# 那些就是第二把尺子。退出码 0 / 2 / 3 / 4 / 64 里**没有"静默成功"这一档**：
+# 非 0 时先读 failedSections 再谈结论；缺席的那一路在 JSON 里整键缺席，而不是被填成 0。
 ```
 
 打包会把 `git rev-parse HEAD`、分支、**工作树是否干净**、构建时间与

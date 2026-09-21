@@ -112,7 +112,7 @@ extension HealthCurves {
             "注释占比 \(percent(ratio))（\(band)）",
             "TODO \(whole(todoCount)) 个",
             "FIXME \(whole(fixmeCount)) 个",
-            "源码 \(whole(totalLines)) 行",
+            "总行 \(whole(totalLines))（含空行与注释）",
             deducted > 0 ? "标记扣 \(decimal(deducted)) 分" : ""
         ])
         return CurveResult(score: score, detail: detail, risk: graded(score, 85, 65, 45, 25))

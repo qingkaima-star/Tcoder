@@ -191,6 +191,36 @@ final class FunctionalHonestyGuardTests: XCTestCase {
                        "`markPhase` 回来了但依然没有调用者 —— 那就是第二套口径的起点")
     }
 
+    // MARK: - G7 取证窗口不许把"没拍到"混成"复核通过"
+
+    /// 取证尺寸覆盖点：**没设环境变量必须还是产品默认值**。
+    /// 否则这条"复核通过"的证据可以被人悄悄换成一个刚好把问题裁掉的窗口。
+    func test_captureWindowOverrideDefaultsToTheProductSize() {
+        XCTAssertEqual(CaptureWindow.defaultWidth, 1280)
+        XCTAssertEqual(CaptureWindow.defaultHeight, 820)
+        XCTAssertEqual(CaptureWindow.dimension(from: nil, fallback: CaptureWindow.defaultHeight), 820,
+                       "没给环境变量时改了默认值 —— 取证口径与产品口径分家")
+        // 越界与乱输入一律退回默认，而不是接受一个会产出废图的尺寸。
+        for bad in ["1", "99999", "abc", ""] {
+            XCTAssertEqual(CaptureWindow.dimension(from: bad, fallback: 820), 820,
+                           "非法值 `\(bad)` 被接受了：会拍出一张看起来通过、其实什么都看不见的图")
+        }
+        XCTAssertEqual(CaptureWindow.dimension(from: "1000", fallback: 820), 1000)
+        XCTAssertEqual(CaptureWindow.dimension(from: "680", fallback: 820), 680, "下界必须可达")
+        XCTAssertEqual(CaptureWindow.dimension(from: "4000", fallback: 820), 4000, "上界必须可达")
+    }
+
+    /// 取证滚动开关：不设 = 完全不生效；只有字面量 `bottom` 生效。
+    /// 拼错的值必须按"没设"处理 —— 取证宁可少拍一趟，也不要按猜出来的语义滚动，
+    /// 那会让"拍到的到底是哪一屏"无法复述。
+    func test_captureScrollOnlyHonoursTheExactValue() {
+        XCTAssertFalse(CaptureScroll.isBottom(nil), "没设环境变量时不该滚动")
+        XCTAssertFalse(CaptureScroll.isBottom(""), "空串不等于 bottom")
+        XCTAssertFalse(CaptureScroll.isBottom("Bottom"), "大小写不敏感等于给拼写错误开门")
+        XCTAssertFalse(CaptureScroll.isBottom("top"), "未定义的值不该被当成有效档位")
+        XCTAssertTrue(CaptureScroll.isBottom("bottom"))
+    }
+
     // MARK: - 元测试：每条尺子都必须抓得住合成违规，且不误伤合法写法
 
     // MARK: - G6 三档按钮必须真的不一样（同链两个 buttonStyle，内层赢）

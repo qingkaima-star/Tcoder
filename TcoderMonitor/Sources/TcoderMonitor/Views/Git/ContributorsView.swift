@@ -284,7 +284,8 @@ struct ContributorConcentrationSection: View {
                         label: ContributorAnalysis.displayName(author),
                         detail: "\(NumberFormat.grouped(author.commits)) 次",
                         fraction: Double(author.commits) / Double(base),
-                        tint: Theme.Palette.Surface.ink
+                        // 数据块走基座的唯一取色（批次 P6）；轨道与文字仍是灰墨。
+                        tint: ChartSeries.dataMarkColor
                     )
                 }
             }

@@ -17,16 +17,27 @@ import SwiftUI
 extension Theme {
     enum Chart {
         /// 唯一色值来源。`private` 是刻意的：任何新入口都必须经过 `pair(at:)` 的
-        /// 越界回绕，页面拿不到数组，也就没法"顺手挑一个颜色"。
+        /// 越界回绕，页面拿不到裸色值（也就没法"顺手挑一个颜色"）。
+        ///
+        /// **批次 P6 从"八支色相"改成"一系蓝 + 中性灰收尾"**。依据是对参考图的像素普查：
+        /// 有饱和度的像素里蓝约 11,500 个，而绿/黄/红各自只有 130–180 个 ——
+        /// 那三个是状态小圆点，**不是图表色**；环图里未被强调的那一块是灰。
+        /// 我们原来给分类序列发八支色相（紫/粉/青/棕…），于是"一个小区块里五种颜色"
+        /// 这类判词在图表层一直成立 —— 用户第⑦条主诉「没有主次」的形态之一。
+        ///
+        /// 分档规则：**同色相，靠明度拉开**（0→4 由亮 azure 到深靛再到浅蓝），
+        /// 5→7 是中性灰收尾（"其余/长尾"）。多序列时宁可明度相近，也不要引入第二支色相。
+        /// 号位数量保持 8 不变：`wrapped(_:)`、渐变表长度、以及"按键取色 = 按号取色"
+        /// 那类断言都按 `palette.count` 算，改长度等于同时改一批口径。
         private static let palette: [ColorTokenPair] = [
-            ColorTokenPair(light: ColorToken(hex: 0x0A82FF), dark: ColorToken(hex: 0x0A84FF)), // 主 / 自身数据
-            ColorTokenPair(light: ColorToken(hex: 0x34C759), dark: ColorToken(hex: 0x30D158)), // 正向
-            ColorTokenPair(light: ColorToken(hex: 0xFF9F0A), dark: ColorToken(hex: 0xFFD60A)), // 关注
-            ColorTokenPair(light: ColorToken(hex: 0xFF3B30), dark: ColorToken(hex: 0xFF453A)), // 风险
-            ColorTokenPair(light: ColorToken(hex: 0xAF52DE), dark: ColorToken(hex: 0xBF5AF2)), // 分类 A
-            ColorTokenPair(light: ColorToken(hex: 0xFF2D55), dark: ColorToken(hex: 0xFF375F)), // 分类 B
-            ColorTokenPair(light: ColorToken(hex: 0x64D2FF), dark: ColorToken(hex: 0x64D2FF)), // 分类 C
-            ColorTokenPair(light: ColorToken(hex: 0xA2845E), dark: ColorToken(hex: 0xAC8E68)), // 分类 D
+            ColorTokenPair(light: ColorToken(hex: 0x0A7AF8), dark: ColorToken(hex: 0x0A84FF)), // 0 主 / 自身数据
+            ColorTokenPair(light: ColorToken(hex: 0x0B57C4), dark: ColorToken(hex: 0x64A6FF)), // 1 深一档
+            ColorTokenPair(light: ColorToken(hex: 0x5AA7F7), dark: ColorToken(hex: 0x2E6FD9)), // 2 亮一档
+            ColorTokenPair(light: ColorToken(hex: 0x123E86), dark: ColorToken(hex: 0x9EC5FF)), // 3 最深
+            ColorTokenPair(light: ColorToken(hex: 0x9CCBF5), dark: ColorToken(hex: 0x7FB8FF)), // 4 最浅
+            ColorTokenPair(light: ColorToken(hex: 0x8E8E93), dark: ColorToken(hex: 0x98989D)), // 5 中性：其余/长尾
+            ColorTokenPair(light: ColorToken(hex: 0xAEAEB2), dark: ColorToken(hex: 0x7C7C7F)), // 6 中性
+            ColorTokenPair(light: ColorToken(hex: 0xC6C6CB), dark: ColorToken(hex: 0xAEAEB2)), // 7 中性
         ]
 
         static var count: Int { palette.count }
@@ -156,11 +167,32 @@ extension Theme {
 /// 保留的只有**语义**那一支：严重度 / 风险 / 分数档是有序的，
 /// 走 `Theme.Semantic` 才能保住「崩溃比错误更深」的单调色阶。
 enum ChartSeries {
-    /// 单序列曲线的主线色：纯墨。
+    /// 单序列曲线的主线色：**色板 0 号那一支蓝**。
+    ///
+    /// 批次 P6 从「纯墨」改成「蓝」，理由与上面那段论证**不冲突**，而是补它没管的那一半：
+    /// 上一轮删掉的是"按号位给每条线发一支不同色相"（磁盘紫、网络青 —— 那是假区别），
+    /// 这个论证成立，所以**所有单序列仍然共用同一个号位**。
+    /// 但它没有回答"那这一支该是什么色"。锚点图回答得很清楚：
+    /// 有饱和度的像素里蓝约 11,500 个，而绿/黄/红各只有 130–180 个（那三个是状态圆点），
+    /// 柱状与环图的数据块都是蓝。所以"数据块用蓝、结构用墨"是新语言的既定事实，
+    /// 而纯墨主线让九页里**一个蓝像素都没有**（2026-09-21 实测：五页蓝计数全为 0），
+    /// 与锚点差得最远的就是这一处。
     ///
     /// 曲线加粗到 `Stroke.emphasis`(2pt) 压在面积之上，所以顶色降到 0.16 也不会
-    /// 出现总工截图复核问题 1 里「面积把自己的线糊住、整张图读成纯色矩形」的情况。
-    static let lineColor = Theme.Palette.Surface.ink
+    /// 出现「面积把自己的线糊住、整张图读成纯色矩形」的情况。
+    static let lineColor = Theme.Chart.color(at: 0)
+
+    /// 数据块（占比条 / 量条 / 柱）的取色。**与 `lineColor` 同一个号位、同一个理由**。
+    ///
+    /// 立这条命名是为了终结"每页各自决定一次"：占比条原来在四处里有两处传
+    /// `Theme.Palette.Surface.ink`（语言构成、贡献者时段分布），理由是
+    /// "颜色不携带信息就是装饰" —— 那个论证反对的是**用不同色相区分序列**，
+    /// 不反对"数据块本身是什么颜色"。锚点图对这两件事的回答是一致的：
+    /// 数据块蓝、结构（文字/图标/轨道/分隔线）灰墨。
+    ///
+    /// ⚠ 不要把它用到**数字**上：`MetricTile` / `GroupMetricCell` 的 `tint:`
+    /// 是数字前景色，那里必须继续是纯墨（风格契约 4「最重的墨给最大的数」）。
+    static let dataMarkColor = Theme.Chart.color(at: 0)
 
     /// 面积顶色。**走令牌，不留字面量**。
     ///
