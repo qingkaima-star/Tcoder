@@ -217,7 +217,7 @@ Tests/TcoderMonitorTests/Health*Tests.swift
 
 | 包 | 路径 | 内容 |
 |---|---|---|
-| R 尺子 | `scripts/perf_harness.sh`、`scripts/trace_report.py` + `scripts/perf_trace_xml.py` + `scripts/perf_trace_metrics.py` + `scripts/perf_framepulse.py`、`Sources/TcoderMonitor/Services/Performance/FramePulse.swift`、`Tests/TcoderMonitorTests/Perf*Tests.swift` | xctrace 封装（五档：`idle`/`switch`/`report`/`probe`/`selfcheck`）+ App 内帧探针 + T5 三条主线程禁则守卫（每条配元测试）。尺子自己也被 `selfcheck` 六项反例守着 |
+| R 尺子 | `scripts/perf_harness.sh`、`scripts/trace_report.py` + `scripts/perf_trace_xml.py` + `scripts/perf_trace_metrics.py` + `scripts/perf_framepulse.py`、`Sources/TcoderMonitor/Services/Performance/FramePulse.swift`、`scripts/perf_selfcheck.sh`、`scripts/perf_trace_summary.py`、`scripts/perf_trace_threads.py`、`Tests/TcoderMonitorTests/Perf*Tests.swift` | xctrace 封装（六档：`idle`/`interact`/`switch`/`report`/`probe`/`selfcheck`）+ App 内帧探针 + T5 主线程禁则守卫（每条配元测试）。尺子自己也被 `selfcheck` 十四项反例守着（含 `migration` 收益分级三项：正例算得对、缺料要喊、两侧分叉要报 ⚠）|
 | P 心跳链路 | `Services/Performance/**`（除 `FramePulse.swift`）、`App/AppState.swift`（**本轮解冻，仅限这两处**；`SystemSnapshot` 契约不动） | 一次 publish 的失效面收窄、派生榜单缓存、`sampleNow` 离开主线程、T3 交互期暂停 |
 | C 令牌缓存 | `Design/**`（`ColorToken`/`ThemeTokens`/`ChartTokens`） | 把"每次访问现造 `NSColor`/`Font`/`LinearGradient`"改成缓存，**公开 API 名字与调用形状一字不动** |
 

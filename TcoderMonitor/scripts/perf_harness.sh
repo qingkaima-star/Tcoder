@@ -119,6 +119,10 @@ cmd_idle() {
     "hitches_seconds=$SECONDS_HITCHES" "tp_seconds=$SECONDS_TP" "coexisting_instances=${COEXIST:-1}" \
     "templates=$TEMPLATE_HITCH + $TEMPLATE_TP" "build_flavor=$TARGET_FLAVOR"
   preflight_context "$out" "$PID"
+  # 走到这里说明闸门放行、马上就要真录：清掉**上一次尝试**留下的 REFUSED。
+  # 标记描述的是"最近一次尝试"，不是目录的永久属性；不清的话同名目录复用时，
+  # 一份合法读数会被过期标记挡在对照表外（report 会退 1）。
+  rm -f "$out/REFUSED"
   # 四个步骤各自成函数：录哪张表、导哪张表、什么时候问人手探针，顺序就是口径，
   # 拆完仍是 1/4 → 2/4 → 3/4 → 4/4 这一条直线，一步没重排。
   idle_record_hitches "$out" "$period"
@@ -298,6 +302,10 @@ cmd_switch() {
 cmd_report() {
   local out="${1:-/tmp/tcoder-perf-$REV}"
   [ -d "$out" ] || die "没有这个输出目录：$out"
+  # 被闸门拒掉的那趟**不许被 report 当成一趟数据重打**：
+  # 它只有 context/meta，喂给汇总表会得到"没有 hitch"形状的漂亮空表。
+  [ -f "$out/REFUSED" ] && die "这一趟当时被闸门拒了、没有采数（$out/REFUSED）——
+    它不该出现在任何对照表里；要看当时的拒因就读 $out/measurement-context.txt。"
   echo "==> report 档：重打 $out 的汇总表（不重录）"
   local secs
   secs=$(python3 - "$out/meta.json" <<'PY' 2>/dev/null || echo 20
@@ -311,6 +319,10 @@ PY
   python3 "$TRACE_REPORT" summary "$out" --seconds "$secs"
   [ -s "$out/time-profile.xml" ] && python3 "$TRACE_REPORT" threads "$out/time-profile.xml" --thread "Main Thread"
   [ -d "$out/pages" ] && python3 "$TRACE_REPORT" switches "$out/pages"
+  # 显式收尾：上面两条都是 `[ 测试 ] && 命令` 的形状，没有 pages 目录时（idle 档就是没有）
+  # 最后一条测试自己返回 1，会把"重打成功"报成"档口失败"。
+  # 实测踩过：修尺子那轮 `report` 明明全打出来了，退出码仍是 1，逼得人回头去查 Traceback。
+  return 0
 }
 
 # =============================================================================

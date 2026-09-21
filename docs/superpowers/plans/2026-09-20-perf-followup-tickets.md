@@ -109,7 +109,7 @@ python3 scripts/trace_report.py migration --module-root ../<你的树>/TcoderMon
 |  | 69 | `monitor.processesByMemory` | `monitor.memoryRanking.value` |
 |  | 104 | `monitor.lastSampleAt` | `monitor.pulse.value.sampleAt` |
 |  | 105 | `monitor.history.count` | `monitor.pulse.value.historyCount` |
-| `Views/Shell/ProjectSidebar.swift` | 411 | `state.monitor.latestSnapshot`（喂 `LiveCPUBadge`） | `monitor.cpu.value`（badge 只需 CPU） |
+| `Views/Shell/ProjectSidebar.swift` | 411 | `state.monitor.latestSnapshot`（喂 `LiveCPUBadge`） | **经 `SystemReadings` 读 `cpu.value.usage` + `memory.value`**（徽章要两格；直接渲染 `memory.value.usedBytes` 会把 `--` 变成 `0 B`，见 §0.6 末尾那条更正） |
 
 > 顺带：`isCollectingForDisplay` 也是 **0 读取**（见 W-6）。
 > 这两个 0 是同一件事的两面——**新契约没接，旧入口没撤**。
@@ -262,7 +262,30 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 让派单的人一眼看见"先做哪 10 处"。分级逻辑已经有了（守卫里的 `classifyCoarseWrites`），
 照它读 `coarsePattern` 的写法再读一遍 `tickBody` 就行——**别手抄第二份名单**，那正是 #44 的形状。
 
+> **一条待办（02:41 想到，但故意现在不做）**：`REFUSED` 有个残留缺陷——
+> 如果同一个输出目录被复用（`/tmp/tcoder-perf-<rev>-run1` 先被拒、后来真采到了），
+> 旧的 `REFUSED` 会**留在**那个已经有数据的目录上，于是 `report` 会拒绝一份**合法**读数。
+> 修法是一行：`cmd_idle` 在 preflight 通过、准备录制之前 `rm -f "$out/REFUSED"`
+> （语义 = "REFUSED"只描述最近一次尝试，不是目录的永久属性）。
+> **为什么不当场改**：`perf_wait_window.sh` 正在后台等窗口，它随后会 exec
+> `perf_harness.sh` / `perf_preflight.sh`——bash 是按字节偏移增量读脚本的，
+> **改一个正在运行的脚本可能让对方执行到错位的内容**。所以先记账，等 watcher 收工再改。
+> 同理，这一轮我已经把 run1~3 目录里那三个 `REFUSED` 手工清掉了：
+> 不清的话，watcher 复用同名目录采到真数据时会被那个过期标记误判成"被拒的一趟"。
+> **这两件事是同一个坑**：标记必须是"最近一次尝试"的状态，不能变成残留物。
+
 ### 第 1.5 步（与第 1 步同批、但收益不同期）：渲染路径剩下的 12 处**全在页面侧**
+
+
+> **02:45 一条时效性很强的补充**：接管者**此刻在途的这批**（主树 32 个未提交文件）正好覆盖
+> 10 处排序债里的 **5 处**，包括其中**最贵的那一处**：
+> `Dependencies/DependenciesView.swift`（`dependencies.sorted`，n 可到上千）、
+> `Git/ContributorRows.swift` ×2、`Git/ContributorsView.swift`、`Health/HealthComponentTable.swift`。
+> 判据和第 1 步一样：**这些文件正在被重写，换排序位置是同一次编辑**；
+> 这批过了再单开一趟，就要在同样的行上第二次合并。
+> 未被这批覆盖的 5 处（`Logs/*` 四处 + `Code/CodeMetricsView`）留到 Logs 批次顺手做。
+> **注意别和视觉改动混判**：这批若顺手清了排序，`fullSort` 会从 10 掉下来，
+> 那是**收益**，但复测时不能把帧率变化记给"视觉批次"——所以清哪几处要留在 commit message 里。
 
 01:49 用守卫自己的规则复算了全部命中并落进台账明细（`tcoder-perf-renderpath-debt.txt` 现在带
 `文件:行 + 原文`，不再只报一个数）：`fullSort 10` + `syncFileIO 2` **一处都不在 `Services/`、`Design/`、`App/` 里**
@@ -294,6 +317,21 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 
 ### 第 2 步：帧率复测（分两小步，因为其中一步需要人手）
 
+> **进度（09-21 11:07 更新，接上面那条排程约束）**：闸门修好后**第一趟受控 idle 已经出数**
+> ——`app-update` 0.6~1.0 ms（T2 红线 ≤4.0）、hitch 0 次、HTR 0.00、`potential-hangs` 0 次，
+> 上下文与拒因都落在 `/tmp/tcoder-perf-ab26811-run{1,2,3}/measurement-context.txt`。
+> 但**它只是 N=1**：同一轮第 2、3 趟被闸门拒（前台被 `AiX` 抢走，其余四条闸全合格）⇒
+> 按 §1.3"连测 ≥3 次且取值一致"的规矩，**T2 还不能申报达标**，还差 2 趟。
+> 同批还修了尺子三处口径（跨机制裸比比率 / 未受控对照列冒充 X / 绕开 harness 必崩表），
+> 见 spec §1.6 与 `fd5d06e`。下面那条"顺手 6 处的 skip 率"**仍未量**，别把它当已结案。
+>
+> **一条现在正生效的排程约束（02:29 写下，免得下一位自己把自己挡掉）**：
+> `perf_wait_window.sh` 挂后台等窗口时，**这台机器上不要跑 `swift build` / `swift test`**——
+> `idle` 档的闸门之一正是"`pgrep -x swiftc` 为空"，我自己的编译会让 watcher 一直拒跑。
+> 同理门禁（`premerge_check`）要么等 watcher 结束（默认最长 25 分钟 / `LAUNCH_APP=0` 时更短），
+> 要么先 `kill` 掉 watcher（只有它自己起的那个 pid，它退出时自己 TERM）。
+> **别为了让门禁过而把 watcher 的闸门调松**——那五维就是它存在的理由。
+
 > **顺带要量的一个新数（01:59 立，别让它停在推理上）**：我这轮把 6 处读点判成"顺手"，
 > 依据是它们的宿主属性走 `write(\.x,…)` 等值闸门。但**"有闸门"不等于"闸门真的经常关"**——
 > `measuredProcessCount` 在一台真机器上每 tick 都在变的话，skip 率接近 0，那这 6 处就仍然每 tick 抖。
@@ -307,8 +345,14 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 > `idle` 档的 xctrace app-update 与这里的 stats 管，别拿一个数交两条验收。
 
 ```bash
-./scripts/perf_harness.sh selfcheck          # 11 项，红了所有读数作废——先量尺子再量代码
-./scripts/perf_harness.sh idle   /tmp/tcoder-perf-after-<rev>     # 2a：不需要人，只要机器安静
+./scripts/perf_harness.sh selfcheck          # 14 项（02:00 加了收益分级三项后），红了所有读数作废
+./scripts/perf_harness.sh idle   /tmp/tcoder-perf-after-<rev>     # 2a：不需要人**操作**，但需要人**离开**
+#   （02:51 实测更正：原先写"不需要人"是错的。三趟全被拒：
+#    ① 前台是「微信」——不在前的窗口被 macOS 节流绘制，同一二进制后台 app-update 只有 1.9~3.0 ms，
+#       前台 10.8~24.8 ms，拿后台数交 T2 就是**假性好看**；
+#    ② 人手 0.05~0.19 秒前还在动（要求静默 ≥5 s）。
+#   ⇒ 闸门拒得对：它替我挡下一批会骗人的 T2 读数。T2 的窗口条件是
+#      "Tcoder 停在最前面 + 这 5 分钟没人碰这台 Mac"，不是"无人参与"。）
 ./scripts/perf_harness.sh interact /tmp/tcoder-perf-interact-<rev> # 2b：**这 20 s 要有人持续滚动**
 ./scripts/perf_harness.sh report <目录>       # 表头会写测量期间，idle 那批明说不得交 T1
 ```
@@ -316,6 +360,14 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
   任一不合格脚本直接拒跑（那不是脚本坏，是它在拦第三次"未受控基线"）。
 - **改前对照**只能走 xctrace：`/tmp/tcoder-before.app`（rev `415f0f0`、sha `54005bc4…`）里
   没有 `FramePulse`。`probe` 档只对改后产物有意义，不许左右互比。
+- **测"哪一颗头"必须写在读数旁边。** 我这颗头（`ws/perf-base`）相对 main 的**非文档差异只有
+  3 个测试文件 + `FramePulse` 里两行产物头注释**——都不参与运行时视图行为。
+  所以**用它 build 出来的 release 产物量到的 T2，就是 main 当前行为的 T2**，
+  不必为了"等合完再测"再排一次队；但读数落盘时要照实写"被测头 = ws/perf-base@<sha>，
+  与 main 的行为差异：无"，别让下一位以为量的是迁移之后的状态。
+- 一条已核过的前提：`idle` 档 **attach 已存在的实例**且要求"实例数恰为 1"，
+  所以顺序是 `build_app.sh release` → 启动那一个实例 → `idle`×3 → `report`；
+  跑完**只打印 pid**（按 bundle id 广播退出的老写法已作废，见 §0.0.1）。
 - 合格判据：HTR <5 ms/s（目标 0）、app-update ≤8.33 ms、`potential-hangs` 归 0、
   热点第一名不再是 `_updateViewGraph`。**每次都要 3 个样本，单样本不进结论。**
 
@@ -340,11 +392,34 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 它的价值是**把候选排除了**：持久化不占主线程预算，所以剩下的怀疑对象只有视图图更新，
 也就是第 1 步那 **10 处承重读点**（不是 16 处——见上面的加权表）。
 
+### 第 4 个候选：已定位、**尚未排除**（02:40 读 `AppState` 时发现，记在这里免得重复找）
+
+`AppState.notePointerStreamActivity()` 是**每个滚动事件都跑一次**的入口，形状是：
+
+```swift
+monitor.beginInteractionPause(.pointerStream)   // 走等值闸门，第二次起 skip
+pointerSettleTask?.cancel()                     // 每事件取消上一个
+pointerSettleTask = Task { @MainActor in … }    // 每事件新建一个非结构化 Task
+```
+
+⇒ 120 Hz 滚动下约是**每秒 120 次 Task 分配 + 120 次取消**，全在主 actor 上。
+**我没有据此改代码**：单次 Task 只有微秒量级，"推测它贵"和"推测它不贵"同样没有证据，
+而这里唯一相关的证据是交互期 profile 里它到底占多少。
+**判据写成一条可查的动作**：跑完 `interact` 档后在 `time-profile` 表里搜
+`notePointerStreamActivity` / `swift_task_create`——
+**进热点前 20 名就回来改**（改成记 `lastEventAt` ＋ 复用同一个沉降 Task），
+不出现就把这条划进上面那张"已排除"表。**不许在没量的情况下先动它，
+也不许因为"看起来像问题"就永远挂着不结。**
+
+顺带钉一条反向的：**这里不许"顺手"改成每事件都 publish 一次。**
+暂停/恢复的写入必须继续走等值闸门，否则 T3 会把"交互期不刷新"变成"交互期疯狂失效"，
+那是比 Task churn 大两个数量级的成本。
+
 ## 0.5 交接状态（09-21 00:31）——写给"一个人接两条线"的那位，免考古
 
 **已进 main 的性能侧东西**（`main = f9841ae` 之前的 `3a3381c`）：
 细粒度九格契约 + 交互期引用计数暂停（`Services/Performance/MachSystemMonitor.swift`、`App/AppState.swift`）、
-Design 令牌缓存、尺子五档 + `probe` + `selfcheck`（11 项）、`migration` 命令、
+Design 令牌缓存、尺子六档 + `selfcheck`（14 项）、`migration` 命令（含收益分级）、
 五维 preflight（含**人手静默**）、四条禁则零余量 `1/1 59/59 10/10 2/2`、
 §5.4 与 **T2 两半归因**（主线程九格写入 0.01 ms / 900 进程派生 9.3 ms 在后台）。
 
@@ -443,9 +518,25 @@ WS-X3 把这两条守卫的**宿主文件按行数拆成了 extension**——
 `monitor.latestSnapshot?.processCount` → `monitor.ledger.value.systemWideCount`（`PerformanceView.body`）。
 剩下 3 处要改**接收方**，不是换名：`SampleContext.from`（喂五个子视图）、
 `DashboardLiveReadout.snapshot`（页内 10 处共用的别名）、`SidebarLiveFooter` 递给
-`LiveCPUBadge(snapshot:)` 的那个入参（徽章只要 `cpu.value.usage`）。
+`LiveCPUBadge(snapshot:)` 的那个入参。
 这三处适合作为**单独一小批**，和纯视觉改动混在一起会看不清是谁的效果。
 
+> **02:07 更正我上面这条建议里的一处危险简化（照我原话说会造出假零）。**
+> 我写"徽章只要 `cpu.value.usage`"，但徽章其实吃**两格**：`cpuUsage` 与 `memoryUsedBytes`，
+> 现在靠 `DataAbsence.optional(snapshot.map { … })` 表达"还没采到" ⇒ 显示 `--`。
+> 而 `PerfMemoryLead.usedBytes` / `.totalBytes` 是**非 Optional 的 `UInt64`**，
+> `.empty` 就是 `0 / 0`（`Services/Performance/PerfReadoutCells.swift:83`）——
+> **照直渲染就是"0 B"**，把"没测到"说成"测到 0"，正是本仓 ④⑤ 两类事故的形状。
+>
+> ⇒ 正确路线**不是让页面去读原始格**，而是继续走 `SystemReadings`：
+> 它是三态判定的唯一归属（四条 guard：`snapshot == nil`、`memoryTotalBytes > 0`、
+> `pressure != .unknown`、`usedBytes > 0` 才算有证据），迁移只该改"**上下文怎么来**"，
+> 不该把判据搬进页面、也不该为此改格类型的字段。
+> 所以那 3 处的做法是：**把 `SampleContext.from(_:)` 改成从细粒度格拼**（一个文件、一处），
+> 五个子视图与徽章继续吃 `SystemReadings`，判据一字不改。
+>
+> 顺带一句：`migration` 的提示语对这三处偏简单——**那句是给 7 处 1:1 用的**，
+> 这 3 处请按本节办。
 **验收仍然不认口头**：`python3 scripts/trace_report.py migration` 报 0 → 我把
 `coarseCallSiteCeiling` 拧 0 → 再翻 `consumptionGateOpen`。**这批折进哪一轮做都行，
 但只要它没做，T1（交互期 hitch = 0）就没有可交的证据**，而这是目标里排第一的那条。

@@ -112,13 +112,71 @@ preflight_context() {  # preflight_context <outdir> <pid>
   qline=$(quiescence_probe)
   quiet=$(quietest_seconds "$qline")
 
+  # 取二进制的出身（**不是**工作树 HEAD）：闸门第六维与上下文都要用
+  BUILD_REV=$(preflight_manifest_value TCODER_GIT_REVISION)
+  BUILD_CLEAN=$(preflight_manifest_value TCODER_GIT_CLEAN)
+
   preflight_write_context "$out" "$f"
-  # 四条硬闸各自读上面那几个量（bash 是动态作用域：本函数的 `local` 在被调函数里照样可见，
+  # 六条硬闸各自读上面那几个量（bash 是动态作用域：本函数的 `local` 在被调函数里照样可见，
   # 拆函数没有改变任何取数顺序，也没有引入新的全局量）。
   preflight_gates
-  [ "$hard" = "1" ] && [ "${IGNORE_CONTEXT_GATE:-0}" != "1" ] && die "测量上下文不达标（详见 $f）。IGNORE_CONTEXT_GATE=1 可强行跳过，但那批读数必须标注为『条件不合格』。"
+  if [ "$hard" = "1" ] && [ "${IGNORE_CONTEXT_GATE:-0}" != "1" ]; then
+    # 被拒的一趟**必须在目录上留下自认字样**：否则 `ls /tmp/tcoder-perf-*` 会看见
+    # run1/run2/run3 三个"像样本"的空目录，后来的人很容易把"闸门拒了"读成"量过了"。
+    # （今天就真出现了三个只有 context/meta 的目录。）
+    printf 'REFUSED\n这一趟没有采数：测量上下文不合格，闸门拒跑。原因见同目录 %s。\n' "$(basename "$f")" \
+      > "$out/REFUSED"
+    die "测量上下文不达标（详见 $f）。IGNORE_CONTEXT_GATE=1 可强行跳过，但那批读数必须标注为『条件不合格』。"
+  fi
   [ "$hard" = "1" ] && echo "    ⚠ IGNORE_CONTEXT_GATE=1：条件不合格，这批读数不得进任何对比表。" >&2
   echo "    上下文已落 $f"
+}
+
+preflight_manifest_value() {  # preflight_manifest_value <KEY> → manifest 里的值（取不到=空）
+  # `build_app.sh` 落的 provenance 是 `KEY="value"`；注释行以 # 开头，天然不匹配。
+  local key="$1" line
+  [ -f dist/RELEASE_MANIFEST.env ] || { echo ""; return; }
+  line=$(grep -m1 "^${key}=" dist/RELEASE_MANIFEST.env 2>/dev/null)
+  printf '%s' "${line#*=}" | tr -d '"'
+}
+
+provenance_ok() {  # provenance_ok <manifest 里的完整 sha> <当前 HEAD> <manifest 的 GIT_CLEAN>
+  # → 0=被量的二进制就是这份代码；非 0 时把原因 echo 到 stdout（调用方贴进闸门话术）。
+  #
+  # 为什么闸门要有这一维（2026-09-21 实测）：`measurement-context.txt` 的 `HEAD=`
+  # 记的是**工作树**的头，而我 attach 的 `dist/Tcoder.app` 是两小时前从 `41add9e`
+  # 建的，中间隔了 39 个产物文件（整批 i18n + 我自己的 `PerfReadoutCells` 修复）。
+  # 结果"e991c6d 的 T2 读数"这句话从头到尾是假的——量的是旧二进制，只是恰好在新树上按了回车。
+  # 三个方向都拒：读不到 manifest（手搓的产物）、构建时工作树就脏、rev 对不上。
+  local built head clean
+  built="$1" head="$2" clean="$3"
+  if [ -z "$built" ] || [ "$built" = "unknown" ]; then
+    echo "读不到 dist/RELEASE_MANIFEST.env 的 TCODER_GIT_REVISION（产物不是本仓脚本建出来的？）"; return 1
+  fi
+  if [ "$clean" != "true" ]; then
+    echo "那趟构建**当时工作树就是脏的**（TCODER_GIT_CLEAN=${clean:-未记录}），rev 本身不可信"; return 1
+  fi
+  if [ -z "$head" ]; then
+    echo "取不到当前 HEAD，无法与产物比对"; return 1
+  fi
+  # manifest 存完整 sha、`git rev-parse HEAD` 也是完整 sha；短号只做人读，不参与判定。
+  case "$built" in
+    "$head") return 0 ;;
+    *) echo "产物是 ${built:0:7} 建的，当前代码是 ${head:0:7} —— 不同一份代码"; return 1 ;;
+  esac
+}
+
+front_is_target() {  # front_is_target <前台App名> → 0=就是被测 App
+  # 【今天修掉一个让所有测量永远跑不通的闸门 bug】
+  # 旧写法 `[ "$front" != "TcoderMonitor" ]`，而 `lsappinfo` 给的是**显示名 "Tcoder"**；
+  # 只有 System Events 那条路给进程名 TcoderMonitor，而本机它被权限拒。
+  # 于是三趟全部以「被测窗口不在前台（前台是「Tcoder」）」被拒——**自相矛盾**：
+  # 它一边报出前台是 Tcoder，一边说 Tcoder 不算前台。
+  # 两种名字都认（显示名 / 进程名），但只认这两个：微信、Chrome 照样必须拒。
+  case "$1" in
+    Tcoder|TcoderMonitor) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 preflight_front_app() {  # → 一行前台 App 名；取不到就是「未知」
@@ -151,6 +209,7 @@ preflight_write_context() {  # preflight_write_context <outdir> <context 文件�
   { echo "# 测量上下文（读数只有在这一组条件下才可互比）"
     echo "时间=$(date '+%F %T')  HEAD=$(git rev-parse --short HEAD 2>/dev/null)  工作树改动数=$DIRTY"
     echo "被采pid=$pid  二进制=$TARGET_BINARY  口径=$TARGET_FLAVOR"
+    echo "产物构建rev=${BUILD_REV:-未记录}  构建时树clean=${BUILD_CLEAN:-未记录}  ← 必须与上面 HEAD= 同一份代码，否则读数归错对象"
     echo "实例数=${COEXIST:-1}  前台App=$front  被测进程visible=$visible"
     echo "load1=$load1  核数=$cores  并发swiftc=${others:-无}"
     echo "人输入静默=${quiet:-取不到}s  明细=${qline:-（探针没跑起来）}"
@@ -160,6 +219,15 @@ preflight_write_context() {  # preflight_write_context <outdir> <context 文件�
 }
 
 preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GATE 决定炸还是通报）
+  # 【第六维：被量的到底是不是这份代码】2026-09-21 实测踩到：`measurement-context.txt`
+  # 里的 `HEAD=` 是**工作树**的头，而我 attach 的那个 `dist/Tcoder.app` 是两小时前
+  # `build_app.sh` 从 `41add9e` 建的，中间隔了 39 个产物文件（整批 i18n + 我自己的
+  # `PerfReadoutCells` 修复）。于是"e991c6d 的 T2 读数"这句话从头到尾是假的——
+  # 量的是旧二进制，只是恰好在新树上按了回车。
+  if ! PROVENANCE_WHY=$(provenance_ok "$BUILD_REV" "$(git rev-parse HEAD 2>/dev/null)" "$BUILD_CLEAN"); then
+    echo "!! 二进制与代码不是同一份：${PROVENANCE_WHY} —— 先跑 scripts/build_app.sh release 再量。" >&2
+    hard=1
+  fi
   if [ -n "$others" ]; then
     echo "!! 有 swiftc 在跑（$others）——它会抢满全部核，app-update 相位会被显著抬高。等它跑完再来。" >&2
     hard=1
@@ -170,7 +238,7 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
     echo "   等负载降下来，或显式 LOAD_MAX=<阈值> 重跑（那必须在报告里注明是降级条件）。" >&2
     hard=1
   fi
-  if [ "$front" != "TcoderMonitor" ] && [ "${ALLOW_UNFRONTMOST:-0}" != "1" ]; then
+  if ! front_is_target "$front" && [ "${ALLOW_UNFRONTMOST:-0}" != "1" ]; then
     echo "!! 被测窗口不在前台（前台是「$front」）。macOS 会节流不在前的窗口绘制，" >&2
     echo "   app-update 会**假性地好看**（实测：同二进制前台 10.8~24.8ms、后台 1.9~3.0ms）。" >&2
     echo "   请把 Tcoder 窗口点到最前面并保持不动，再跑一次；" >&2

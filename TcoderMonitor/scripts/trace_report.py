@@ -240,6 +240,110 @@ def swift_source_files(module_root, relative_dirs):
                     yield os.path.join(root, name)
 
 
+WEIGHT_SOURCE = "Tests/TcoderMonitorTests/PerfInvalidationRatchetTests+CoarseWeighting.swift"
+MONITOR_SOURCE = "Sources/TcoderMonitor/Services/Performance/MachSystemMonitor.swift"
+WEIGHT_SETS = ("ungatedCoarseSymbols", "gatedCoarseSymbols",
+               "unobservedCoarseSymbols", "aliasCoarseSymbols")
+LOAD_BUCKETS = ("ungatedCoarseSymbols", "aliasCoarseSymbols")
+MINIMUM_PUBLISH_BODY_LINES = 12
+
+
+def read_declared_weights(root):
+    """守卫里登记的四个集合。**读不到就抛**——退回手抄名单就是造第二把尺子。"""
+    path = os.path.join(root, WEIGHT_SOURCE)
+    try:
+        src = open(path, encoding="utf-8").read()
+    except OSError as exc:
+        raise RuntimeError("读不到收益分级的来源 %s：%s" % (path, exc))
+    sets = {}
+    for name in WEIGHT_SETS:
+        found = re.search(r"static let %s[^=]*= \[(.*?)\]" % name, src, re.S)
+        if found is None:
+            raise RuntimeError("读不到守卫里的 %s——被改名或搬走了，宁可报错也不许用旧名单" % name)
+        sets[name] = set(re.findall(r'"([^"]+)"', found.group(1)))
+    return sets
+
+
+def publish_body_lines(root):
+    """只取 `publish(_:)` 的函数体（每 tick 的写法只由它决定）＋全文件非注释行。
+    边界用"下一行正好四个空格 + }"，不做括号计数——在字符串里数括号越界过一次。"""
+    mon = open(os.path.join(root, MONITOR_SOURCE), encoding="utf-8").read()
+    lines = [l for l in mon.split("\n") if not l.strip().startswith("//")]
+    body, started = [], False
+    for line in lines:
+        if not started:
+            started = "func publish(" in line
+            continue
+        if line == "    }":
+            return body, lines
+        body.append(line)
+    return body, lines
+
+
+def bucket_from_declarations(sym, symbols, lines):
+    """声明层能定性的两种：压根不在观察图里 / 只是别的粗属性的别名。定不出来自 None。"""
+    if any("@ObservationIgnored" in l and ("var %s" % sym) in l for l in lines):
+        return "unobservedCoarseSymbols"
+    others = [o for o in symbols if o != sym]
+    if any(re.match(r"\s*var %s\b[^={]*\{\s*\S" % sym, l)
+           and any(re.search(r"\b%s\b" % o, l) for o in others) for l in lines):
+        return "aliasCoarseSymbols"
+    return None
+
+
+def bucket_from_tick_body(sym, body):
+    """每 tick 那一写的形状：裸写 / 闸门写 / 两者都有（"闸门只加了一半"）/ 都没写。"""
+    bare = re.compile(r"^\s*(?:self\.)?%s\s*=[^=]" % sym)
+    ungated = any(bare.match(l) for l in body)
+    gated = any(re.search(r"write\(\s*\\\.%s\b" % sym, l) for l in body)
+    if ungated and gated:
+        return "冲突"
+    if ungated:
+        return "ungatedCoarseSymbols"
+    if gated:
+        return "gatedCoarseSymbols"
+    return "未归类"
+
+
+def classify_symbol(sym, symbols, lines, body):
+    """单个粗属性归哪一格。顺序有意：**不在观察图 > 别名 > 每 tick 那一写**——
+    `allProcesses` 既被裸写又不在图里，而"不在图里"才是结论（裸写不参与观察的属性不产生失效面）。
+    （拆成两个 bucket_* 是因为本仓对尺子有 CC<16 的棘轮，第一段版本正好踩在 16 上。）"""
+    return bucket_from_declarations(sym, symbols, lines) or bucket_from_tick_body(sym, body)
+
+
+def read_weight_ruler(root):
+    """现读分类，并**与守卫登记的名单对表**：不一致就交出来，两边各说各话会被 cmd_migration 报 ⚠。"""
+    sets = read_declared_weights(root)
+    body, lines = publish_body_lines(root)
+    if len(body) < MINIMUM_PUBLISH_BODY_LINES:
+        raise RuntimeError("只从 publish() 抽到 %d 行，边界判定坏了 → 分级不可信" % len(body))
+    symbols = sorted(set().union(*sets.values()))
+    derived = dict((sym, classify_symbol(sym, symbols, lines, body)) for sym in symbols)
+    declared = dict((sym, name) for name in WEIGHT_SETS for sym in sets[name])
+    disagree = sorted(sym for sym in symbols if derived[sym] != declared[sym])
+    return symbols, derived, disagree, len(body)
+
+
+def weighting_readout(root, hits):
+    """返回（一行分级说明, 每条读点的标签）。分级读不到时**明说不可用**，不许悄悄少打一维。"""
+    try:
+        _symbols, derived, disagree, body_lines = read_weight_ruler(root)
+    except (OSError, RuntimeError) as exc:
+        return "   收益分级**不可用**：%s" % exc, {}
+    tags = dict((sy, "承重" if derived[sy] in LOAD_BUCKETS
+                 else "顺手" if derived[sy] == "gatedCoarseSymbols" else "出图") for sy in derived)
+    load = sum(1 for h in hits if tags.get(h[2]) == "承重")
+    note = ("   收益分级（从 publish() 现读 %d 行）：承重 %d 处 / 顺手 %d 处；"
+            "顺手那几处的宿主属性走等值闸门，单独迁它们在帧率上测不出差异"
+            % (body_lines, load, len(hits) - load))
+    if disagree:
+        note += ("\n   ⚠ 与守卫登记的名单不一致（有人改了闸门写法却没回来改口径）：%s"
+                 % ", ".join("%s=%s" % (d, derived[d]) for d in disagree))
+    return note, tags
+
+
+
 def cmd_migration(args):
     root = args.module_root
     try:
@@ -259,13 +363,18 @@ def cmd_migration(args):
                     hits.append((os.path.relpath(path, root), number, m.group(1),
                                  MIGRATION_HINTS.get(m.group(1), "读对应的细粒度格")))
                 fine_count += len(fine_re.findall(line))
+    weight_note, tag_of = weighting_readout(root, hits)
     print("== 细粒度契约迁移进度（口径直接取自 %s）==" % RATCHET_SOURCE)
     print("   扫描 %d 个文件（%s），粗粒度读点 %d 处 / 登记上限 %d 处 / 目标 0，细粒度读点 %d 处"
           % (scanned, " + ".join(dirs), len(hits), ceiling, fine_count))
+    if weight_note:
+        print(weight_note)
     if hits:
         print("   剩哪几处（符号是稳定的，行号只是当下位置）：")
         for rel, number, symbol, hint in hits:
-            print("     %-46s %-22s → %s" % ("%s:%d" % (rel, number), "monitor." + symbol, hint))
+            print("     %-6s %-46s %-22s → %s"
+                  % ("[%s]" % tag_of.get(symbol, "?"), "%s:%d" % (rel, number),
+                     "monitor." + symbol, hint))
         print("   按文件汇总：%s" % ", ".join("%s×%d" % (k, v) for k, v in
               sorted(collections.Counter(h[0] for h in hits).items())))
     else:

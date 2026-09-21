@@ -29,6 +29,14 @@ extension PerfInvalidationRatchetTests {
         print("【粗 API 棘轮】消费方文件 \(docs.count) 个 / \(lines) 行，粗粒度读点 \(hits.count) 处"
             + "（上限 \(Self.coarseCallSiteCeiling)，目标 0），细粒度读点 "
             + "\(try Self.scanHits(pattern: Self.finePattern, in: docs).count) 处")
+        // 同一行数落一份文件：`swift test` 会丢子进程 stdout 的后半段，
+        // 只靠 print 的话"还剩几处"就进不了机器（迁移验收要的正是这个数）。
+        let fineCount = try Self.scanHits(pattern: Self.finePattern, in: docs).count
+        let ledger = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("tcoder-perf-migration-debt.txt")
+        let ledgerText = "coarse=\(hits.count) ceiling=\(Self.coarseCallSiteCeiling) "
+            + "fine=\(fineCount) files=\(docs.count) lines=\(lines)\n"
+        try? ledgerText.write(to: ledger, atomically: true, encoding: .utf8)
     }
 
     /// 基线本身不许是"假零"：只要上限还大于 0，今天就必须真扫得到东西。
@@ -99,6 +107,89 @@ extension PerfInvalidationRatchetTests {
                                             ceiling: item.ceiling, gateOpen: item.open)
             XCTAssertEqual(got, item.expect, "状态机认错了：\(item.name)")
         }
+    }
+
+
+    // MARK: - 3.5 迁移期专属失效：切好的窗又切一次、排好的榜又排一次
+    /// 这条**不报现量也不会有余量问题**，因为基线从一开始就是 0：
+    /// 今天还没有人迁，所以命中数必然是 0；等迁移开始后它才是防止"迁了个假迁移"的闸。
+    func testPreparedCellsAreNeverReslicedOrResorted() throws {
+        let docs = try scannedConsumerDocs()
+        XCTAssertGreaterThanOrEqual(docs.count, Self.minimumConsumerFiles,
+                                    "只扫到 \(docs.count) 个文件，路径口径坏了——下面那条 0 命中就是永真绿")
+        let hits = try Self.scanHits(pattern: Self.reslicePattern, in: docs)
+        XCTAssertTrue(hits.isEmpty, """
+        页面把采集侧**已经算好**的结果又切了一遍/又排了一遍：
+        \(hits.joined(separator: "\n"))
+        `curve.value` 已经是切好窗口的 90 点、`cpuRanking/memoryRanking` 已经是排好序的榜单
+        （都在后台各算一次）。再 `suffix`/`sorted` 一次，等于把收益留在原地还多拷一份数组——
+        粗 API 棘轮抓不到这种写法（它读的是细格），所以由这条管。
+        """)
+    }
+    /// 元测试（双向）：坏样例必须三种形状都被抓到，合规写法一条都不许被误伤。
+    /// 没这一条，"0 命中"到底是"没人这么写"还是"正则坏了"就分不出来——本仓的老坑。
+    func testResliceScannerCatchesBadAndSparesGood() throws {
+        let bad: [(String, String)] = [
+            ("已切窗的曲线又 suffix", "PerformanceLiveCharts(points: Array(monitor.curve.value.suffix(30)))"),
+            ("已排序的榜单又 sorted", "ForEach(monitor.cpuRanking.value.sorted { $0.cpuUsage > $1.cpuUsage })"),
+            ("内存榜倒序现算", "let rows = monitor.memoryRanking.value.reversed()"),
+        ]
+        for (name, sample) in bad {
+            let hits = try Self.scanHits(pattern: Self.reslicePattern,
+                                        in: [Self.syntheticDoc("合成夹具", sample)])
+            XCTAssertFalse(hits.isEmpty, "规则抓不住「\(name)」，它就是条废守卫：\(sample)")
+        }
+        let good = """
+        PerformanceLiveCharts(points: monitor.curve.value, context: context)
+        if monitor.curve.value.isEmpty { EmptyState() }
+        Text("采样点 \\(monitor.pulse.value.historyCount)")
+        ProcessRow(process: monitor.memoryRanking.value.first)
+        // 注释里写 monitor.curve.value.suffix(90) 不算调用点
+        """
+        let spared = try Self.scanHits(pattern: Self.reslicePattern,
+                                       in: [Self.syntheticDoc("合规夹具", good)])
+        XCTAssertTrue(spared.isEmpty, "合规写法被误伤，逼人家写绕路代码：\n\(spared.joined(separator: "\n"))")
+    }
+
+    // MARK: - 3.7 迁移期假零守卫：内存原始格不许被页面直接渲染
+
+    /// 与"假迁移"同族但后果更糟：那不是变慢，这是**把没测到报成 0**。
+    func testRawMemoryEvidenceIsNeverRenderedDirectly() throws {
+        let docs = try scannedConsumerDocs()
+        XCTAssertGreaterThanOrEqual(docs.count, Self.minimumConsumerFiles,
+                                    "只扫到 \(docs.count) 个文件，路径口径坏了——下面那条 0 命中就是永真绿")
+        let hits = try Self.scanHits(pattern: Self.rawMemoryEvidencePattern, in: docs)
+        XCTAssertTrue(hits.isEmpty, """
+        页面绕过 `SystemReadings` 直接渲染内存原始格：
+        \(hits.joined(separator: "\n"))
+        `PerfMemoryLead.usedBytes` / `.totalBytes` 是非 Optional 的 UInt64，空态就是 0，
+        这样渲染会把"--"变成"0 B"。改法：走 `SystemReadings.memoryUsedBytes(_:)`，
+        只把"`SampleContext` 怎么拼"换成从细粒度格取，**判据本身一字不动**。
+        """)
+    }
+
+    /// 元测试（双向）：坏形状必须抓到，两种合规写法不得误伤——
+    /// 尤其"整格递出去"（`let lead = monitor.memory.value`）必须放行，
+    /// 否则迁移第一步（拼上下文）就会被自己人判红。
+    func testRawMemoryEvidenceScannerCatchesBadAndSparesGood() throws {
+        let bad: [(String, String)] = [
+            ("字节格式直接吃原始格", "Text(ByteFormat.string(monitor.memory.value.usedBytes, precision: 1))"),
+            ("比例直接用原始格相除", "let frac = Double(monitor.memory.value.usedBytes) / Double(monitor.memory.value.totalBytes)"),
+        ]
+        for (name, sample) in bad {
+            let hits = try Self.scanHits(pattern: Self.rawMemoryEvidencePattern,
+                                        in: [Self.syntheticDoc("合成夹具", sample)])
+            XCTAssertFalse(hits.isEmpty, "规则抓不住「\(name)」，它就是条废守卫：\(sample)")
+        }
+        let good = """
+        let lead = monitor.memory.value                       // 整格递出去：空态由判据层管
+        Text(DataAbsence.optional(SystemReadings.memoryUsedBytes(ctx)).display)
+        SampleContext(cpu: monitor.cpu.value, memory: monitor.memory.value)
+        // 注释里写 monitor.memory.value.usedBytes 不算调用点
+        """
+        let spared = try Self.scanHits(pattern: Self.rawMemoryEvidencePattern,
+                                       in: [Self.syntheticDoc("合规夹具", good)])
+        XCTAssertTrue(spared.isEmpty, "合规写法被误伤，逼人家写绕路代码：\n\(spared.joined(separator: "\n"))")
     }
 
 }

@@ -63,7 +63,10 @@ final class PerfHitchGuardTests: XCTestCase {
     ///   → 归 **M1 / WS-W**（spec §5 点名"LogsView.attachedItems 的 body 内 stat() 移出"），终点 0。
     static let knownBaseline: [String: Int] = [
         "directFormatters": 1,
-        "dynamicNSColor": 86,   // 2026-09-20 由 107 拧到实测 86，见下方 ownerNotes
+        "dynamicNSColor": 56,   // 02:26 由 58 拧到本树实测 56（今天第三次：107→86→59→58→56）。
+        // 为什么又拧：台账"现量/上限"一上线就自己报出 `58/59（可拧到 58）`——
+        // 留 1 处余量等于"新增 1 处照样绿"。**只减不增要成立，降下来必须有人拧**。
+        // 没点名是哪一笔还掉的：这条不需要知道，扫描器每次跑都会重算。
         "fullSort": 10,
         "syncFileIO": 2,
     ]
@@ -76,6 +79,8 @@ final class PerfHitchGuardTests: XCTestCase {
             + "但不再等于「每 tick new 多少个 NSColor」。落地前 88（只认 .textColor），"
             + "放宽到四成员后实测 107（+19 处 .graphicColor，全在图表 Mark/循环里）。终点仍由 M1 各流按页面收敛。"
             + "**2026-09-20 拧到 86**：`165faa7`（M1-集成，图表取色上提进 Design/）还掉了 21 处 Views 侧引用，"
+            + "**2026-09-21 再拧到 59**：`c60abbd`（观感·批次 ABC 颜色面积收敛）又还掉 27 处。"
+            + "两次都是同一条『现量/上限』打印＋$TMPDIR 台账抓出来的——不打印就没人知道基线在漏。"
             + "而这条棘轮当时不报现量、没人看得见那 21 处余量——现在它每次跑都打「现量/上限」。",
         "fullSort": "M1 WS-P/WS-W：body 内派生集合缓存或移到 publish 里算（终点 0）",
         "syncFileIO": "M1 WS-W：渲染路径的文件尺寸/存在性检查移到扫描期（终点 0）",
@@ -111,17 +116,34 @@ final class PerfHitchGuardTests: XCTestCase {
         }
         // 防"假零"的第二道：基线本身不许被偷偷清零。
         XCTAssertTrue(Self.knownBaseline.values.reduce(0, +) > 0, "基线全 0 等于没有守卫")
-        // 【每次跑都报现量】"只减不增"有两个方向的失效：涨上去必须红（上面管），
-        // 而**降下来却没人拧基线**同样坏——余量 60 处的闸门等于没有闸门，
-        // 新债可以悄悄长回来还不红。这里不判红（清零是合法终态），
-        // 但把"现量/上限"打进输出，让余量在日志里透明。
-        let debt = Self.knownBaseline.keys.sorted().map { rule -> String in
-            let baseline = Self.knownBaseline[rule] ?? 0
+        Self.recordRenderPathReadout(counts: counts, scan: scan)
+        XCTAssertTrue(problems.isEmpty, problems.joined(separator: "\n"))
+    }
+
+    /// 【每次跑都报现量】"只减不增"有两个方向的失效：涨上去必须红（由调用方管），
+    /// 而**降下来却没人拧基线**同样坏——余量 60 处的闸门等于没有闸门，
+    /// 新债可以悄悄长回来还不红。这里不判红（清零是合法终态），
+    /// 但把"现量/上限"打进输出、并**再落一份文件**，让余量在日志里可被机器读：
+    /// `swift test` 会丢子进程 stdout 的后半段（本仓记过，2026-09-20 的 premerge 日志里
+    /// 就没有这行 print），只靠 print 的话，拧基线的人（包括下一次的我）拿不到余量。
+    /// 台账里要**点得到名字**：只有 `fullSort 10/10` 一行的话，还债的人还得自己
+    /// 把守卫触发成红才知道现场在哪，所以明细逐条带"文件:行 + 原文"。
+    static func recordRenderPathReadout(counts: [String: Int], scan: PerfHitchScan.ScanResult) {
+        let debt = knownBaseline.keys.sorted().map { rule -> String in
+            let baseline = knownBaseline[rule] ?? 0
             let now = counts[rule] ?? -1
             return now < baseline ? "\(rule) \(now)/\(baseline)（可拧到 \(now)）" : "\(rule) \(now)/\(baseline)"
         }.joined(separator: "  ")
         print("【渲染路径禁则】现量/上限 —— \(debt)")
-        XCTAssertTrue(problems.isEmpty, problems.joined(separator: "\n"))
+        let ledger = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("tcoder-perf-renderpath-debt.txt")
+        var detail: [String] = ["HEAD=\(Date()) \(debt)"]
+        for rule in knownBaseline.keys.sorted() {
+            let hits = scan.hits[rule, default: []]
+            detail.append("—— \(rule)：\(hits.count) 处")
+            detail.append(contentsOf: hits.sorted().map { "   \($0)" })
+        }
+        try? (detail.joined(separator: "\n") + "\n").write(to: ledger, atomically: true, encoding: .utf8)
     }
 
     /// 存量必须**可点名**：守卫报出来的每一条都要有"文件:行 + 原文"，
