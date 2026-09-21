@@ -62,7 +62,13 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 新增 `Design/ThemePalette`/`Design/ThemeMetrics`/`Design/DataRows`/
     /// `Views/Shell/SidebarRows`/`Views/Code/CodeMetricsSections`；
     /// 守卫实报「在用 134 · 未用 0 · 零调用清单：无」）。
-    static let censusBaseline = 135
+    /// 135 → 137（WS-X8 实现文件规模闸门落地：`Design/SharedComponents.swift` 426 行、
+    /// `Design/ReadoutKit.swift` 424 行各自越线，按类型整块搬出成
+    /// `Design/ReadoutStripKit.swift`（`ReadoutStrip`/`DataBandSeparator`/`RiskBadge`/
+    /// `SeverityBadge`/`MiniBarGauge`/`SectionEmptyNote`）与
+    /// `Design/LocalizedCopyKit.swift`（`localizedCopy`/`localizedFormat`/`localizedCount`）；
+    /// 守卫实报「实现文件 137 · 在用 136 · 未用 0 · 零调用清单：无」。
+    static let censusBaseline = 137
 
     static let prunedDirectories: Set<String> = [".git", ".build", ".swiftpm", ".worktrees",
                                                         "node_modules", "DerivedData", "dist", "build", "out"]
