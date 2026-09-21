@@ -46,6 +46,7 @@ cmd_selfcheck() {
   selfcheck_gate_matrix "$out"      # 17) 六维闸门合成矩阵：能放行，也会逐维拒
   selfcheck_page_list_shape "$out"    # 18) 九页页名逐条完整（带空格的那条不许被拆）
   selfcheck_launch_ready "$out"       # 19) 首帧要剔除运行期尾巴，不许拿求和冒充
+  selfcheck_probe_sentinel "$out"     # 20) 探针取不到的哨兵不许骗过"有人在动"那条判定
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
@@ -592,4 +593,25 @@ provenance_single_ruler_cases() {  # 【同一件事只许有一把手尺子】�
     || { fail "verify_provenance.sh 不再经过共享判定（大概又手抄了一遍 [ a = b ]）"; bad=1; }
   grep -q 'preflight_manifest_value\|^provenance_ok() {' scripts/perf_preflight.sh \
     && { fail "perf_preflight.sh 里还留着本地副本，删掉、只 source"; bad=1; }
+}
+
+selfcheck_probe_sentinel() {  # selfcheck_probe_sentinel <outdir>
+  # 20) "探针取不到"这个哨兵必须是**一条判据**，而且是**数值之外**的一条。
+  #     交互档的开录条件是"静默 <3s"，而 `quiescence_probe` 失败时打 `静默=-1.00s`——
+  #     -1 在数轴上最小，直接拿它比阈值就等于"量不到 ⇒ 最有人在动 ⇒ 立刻开录"，
+  #     一条恒真的闸门。今天写 cond_someone_active 时就是这么错的，靠这条钉住。
+  local ok=1
+  probe_usable "" && ok=0
+  probe_usable "-1" && ok=0
+  probe_usable "-1.00" && ok=0
+  probe_usable "2.50" || ok=0
+  [ "$ok" = "1" ] || { fail "probe_usable 四类输入判错（空/-1/-1.00 须拒、2.50 须放）"; return; }
+  # 反向钉：承认哨兵确实会骗过阈值。哪天 awk 改了口径，上面那条的必要性就变了，
+  # 这条要一起重写而不是悄悄留一段"防的是不存在的东西"的守卫。
+  [ "$(human_input_in_window -1.00 3)" = "窗口内有人" ] \
+    || { fail "human_input_in_window 不再被 -1 骗过——第 20 项前半段的理由要重写"; return; }
+  # 结构钉：排程器只准 source 尺子，不准自己编一份（两份迟早分叉，这次分叉在开录那一刻）
+  grep -Eq '^[[:space:]]*(xcrun )?swiftc' scripts/perf_wait_window.sh \
+    && { fail "perf_wait_window.sh 里又自己编探针了——删掉，改成 source preflight"; bad=1; }
+  ok "哨兵判定四类都对、且它防的失效真实存在；排程器只剩一把尺子"
 }

@@ -280,12 +280,21 @@ human_input_in_window() {  # human_input_in_window <静默秒> <窗口秒> → �
   awk -v q="$1" -v w="$2" 'BEGIN{ if (q >= w) print "窗口内没人"; else print "窗口内有人" }'
 }
 
+probe_usable() {  # 探针"取不到"必须是**一个词**，两侧档位共用
+  # 哨兵是 -1（`quiescence_probe` 编不出来或跑不起来时打 静默=-1.00s）。
+  # 它在数轴上是**最小**的静默 ⇒ 任何"静默 < 阈值"的判定（交互档开录）都会被它**骗成合格**。
+  # 所以"有没有人在动"之前，先问"这把尺子今天在场吗"。
+  local q="${1:-}"
+  case "$q" in ''|-1|-1.0|-1.00) return 1 ;; esac
+  return 0
+}
+
 post_window_quiescence() {  # post_window_quiescence <outdir> <窗口秒数>；按 PERIOD 决定"什么样的收尾算合格"
   # 收尾**再问一次**探针：若"距离上次人手事件"仍短于刚录的窗口，说明窗口里有人动过手。
   # idle 档要的是"整窗没人动"；interact 档要的正好相反——没人动那批只能退回当 idle 数。
   local out="$1" window="$2" quiet period="${PERIOD:-idle}" verdict
   quiet=$(quietest_seconds "$(quiescence_probe)")
-  [ -n "$quiet" ] && [ "$quiet" != "-1.00" ] || { echo "    （收尾静默探针取不到，污染判定不做）"; return 0; }
+  probe_usable "$quiet" || { echo "    （收尾静默探针取不到，污染判定不做）"; return 0; }
   verdict=$(human_input_in_window "$quiet" "$window")
   meta_write "$out" "quiescence_after_seconds=$quiet" "period=$period" "window_verdict=$verdict"
   if [ "$period" = "interaction" ]; then
