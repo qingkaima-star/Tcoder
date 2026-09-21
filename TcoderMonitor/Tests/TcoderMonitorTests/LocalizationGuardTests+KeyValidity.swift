@@ -35,6 +35,19 @@ extension LocalizationGuardTests {
         return out
     }
 
+    /// 分母自证：扫描面**动态枚举**整个 `Sources/TcoderMonitor`，新增目录会自动进来；
+    /// 反过来，一个目录被改名或整片消失会让存量"假短"。这里钉住已知的六个一级目录，
+    /// 少一个就红 —— 断言读的是 `sourceFiles()` 自己看见的路径，不是另抄一份清单。
+    func test_meta_scanSurfaceCoversEveryTopLevelDirectory() throws {
+        let seen = Set(try Self.sourceFiles().compactMap {
+            $0.path.split(separator: "/").first.map(String.init)
+        })
+        for dir in ["App", "Design", "Models", "Services", "Utilities", "Views"] {
+            XCTAssertTrue(seen.contains(dir),
+                          "扫描面里没有 \(dir)/ —— 这一片的存量被隐形漏掉：\(seen.sorted())")
+        }
+    }
+
     func test_noRegisteredKeyIsOnlyAHalfSentence() throws {
         let source = try Self.walkFiles(in: Self.packageRoot.appendingPathComponent("Sources/TcoderMonitor").path)
             .reduce("") { $0 + ((try? String(contentsOfFile: $1, encoding: .utf8)) ?? "") }

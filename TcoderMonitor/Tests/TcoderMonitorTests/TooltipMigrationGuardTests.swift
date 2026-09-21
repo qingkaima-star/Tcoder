@@ -40,6 +40,55 @@ final class TooltipMigrationGuardTests: XCTestCase {
     private static let literalPattern = "\"((?:[^\"\\\\]|\\\\.)*?)\""
     private static let hanPattern = "[\\u4E00-\\u9FFF]"
 
+    /// 一个字面量在屏上的身份。`skipped` = 这行既看不出槽位也没有任何槽位线索
+    /// （跨行拼接的续行、被塞进变量的中段），不计入任何一份名单 —— 与改造前逐行判定同一条边界。
+    enum LiteralSlot { case visible, tooltip, skipped }
+
+    /// 直接压在引号前面的槽位线索（比逐行判定精确一档）。
+    private static let tooltipPrefixPattern = "(?:\\.help|CopyHelpBadge)\\s*\\(\\s*$|\\bhelp\\s*:\\s*$"
+    private static let visiblePrefixPattern =
+        "(?:subtitle|caption|note|footnote|emptyNote|message|text|label|title)\\s*:\\s*$"
+        + "|(?:GlassSection|NoteLine|DataFootnote|DataCaption|Text|BannerRow|StatLine"
+        + "|SectionEmptyNote|EmptyStateView)\\s*\\(\\s*$"
+
+    /// **逐字面量**判槽位，判不出来才退回整行线索。
+    ///
+    /// 为什么不能按行：本轮「留短藏长」的标准形状就是同一行既有一句常驻短句、
+    /// 又有一个 `help:` 长口径。按行判会把那行里的**常驻句**一起算成"已藏" ——
+    /// S5 的元测试正是这么撞红的（合法样例被误报）。按行判还有一个反方向的老洞：
+    /// 一行里 `.help(` 与常驻长句同时出现时，常驻那份的债会被记成"已经藏好了"。
+    static func literalSlots(in line: String) -> [(text: String, span: Range<String.Index>, slot: LiteralSlot)] {
+        let literal = try! NSRegularExpression(pattern: literalPattern)
+        let tooltipPrefix = try! NSRegularExpression(pattern: tooltipPrefixPattern)
+        let visiblePrefix = try! NSRegularExpression(pattern: visiblePrefixPattern)
+        let carrierOnLine = try! NSRegularExpression(pattern: tooltipCarrierPattern)
+        let visibleOnLine = try! NSRegularExpression(pattern: visibleSlotPattern)
+        let lineRange = NSRange(line.startIndex..., in: line)
+        let lineHasCarrier = carrierOnLine.firstMatch(in: line, options: [], range: lineRange) != nil
+        let lineHasVisible = visibleOnLine.firstMatch(in: line, options: [], range: lineRange) != nil
+        var out: [(text: String, span: Range<String.Index>, slot: LiteralSlot)] = []
+        for match in literal.matches(in: line, options: [], range: lineRange) {
+            guard let whole = Range(match.range, in: line),
+                  let inner = Range(match.range(at: 1), in: line) else { continue }
+            let prefix = String(line[line.startIndex..<whole.lowerBound])
+            let prefixRange = NSRange(prefix.startIndex..., in: prefix)
+            let slot: LiteralSlot
+            if tooltipPrefix.firstMatch(in: prefix, options: [], range: prefixRange) != nil {
+                slot = .tooltip
+            } else if visiblePrefix.firstMatch(in: prefix, options: [], range: prefixRange) != nil {
+                slot = .visible
+            } else if lineHasCarrier {
+                slot = .tooltip
+            } else if lineHasVisible {
+                slot = .visible
+            } else {
+                slot = .skipped
+            }
+            out.append((String(line[inner]), whole, slot))
+        }
+        return out
+    }
+
     static func displayWidth(_ text: String) -> Int {
         text.unicodeScalars.reduce(0) { partial, scalar in
             partial + ((0x4E00...0x9FFF).contains(scalar.value) ? 2 : 1)
@@ -49,9 +98,6 @@ final class TooltipMigrationGuardTests: XCTestCase {
     /// 纯函数：只吃 `[(路径, 内容)]`。元测试因此在内存里造坏样例，
     /// 不往仓库塞临时夹具（那种东西会被下一轮扫描当成真存量）。
     static func scan(_ files: [(path: String, content: String)]) -> (visible: [Caliber], tooltip: [Caliber]) {
-        let visible = try! NSRegularExpression(pattern: visibleSlotPattern)
-        let carrier = try! NSRegularExpression(pattern: tooltipCarrierPattern)
-        let literal = try! NSRegularExpression(pattern: literalPattern)
         let han = try! NSRegularExpression(pattern: hanPattern)
         var visibleHits: [Caliber] = []
         var tooltipHits: [Caliber] = []
@@ -60,17 +106,13 @@ final class TooltipMigrationGuardTests: XCTestCase {
             for (offset, raw) in lines.enumerated() {
                 let line = String(raw)
                 if line.trimmingCharacters(in: .whitespaces).hasPrefix("//") { continue }
-                let range = NSRange(line.startIndex..., in: line)
-                let isTooltip = carrier.firstMatch(in: line, options: [], range: range) != nil
-                let isVisible = visible.firstMatch(in: line, options: [], range: range) != nil
-                guard isTooltip || isVisible else { continue }
-                for match in literal.matches(in: line, options: [], range: range) {
-                    guard let group = Range(match.range(at: 1), in: line) else { continue }
-                    let text = String(line[group])
+                for hit in literalSlots(in: line) {
+                    guard hit.slot != .skipped else { continue }
+                    let text = hit.text
                     guard han.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil,
                           displayWidth(text) > longCaliberWidth else { continue }
                     let caliber = Caliber(path: file.path, line: offset + 1, text: text)
-                    if isTooltip { tooltipHits.append(caliber) } else { visibleHits.append(caliber) }
+                    if hit.slot == .tooltip { tooltipHits.append(caliber) } else { visibleHits.append(caliber) }
                 }
             }
         }
@@ -145,11 +187,33 @@ final class TooltipMigrationGuardTests: XCTestCase {
                 if line.trimmingCharacters(in: .whitespaces).hasPrefix("//") { continue }
                 guard line.contains(fragment) else { continue }
                 let range = NSRange(line.startIndex..., in: line)
-                out.append(Sighting(path: file.path, line: offset + 1,
-                                    inTooltip: carrier.firstMatch(in: line, options: [], range: range) != nil))
+                out.append(Sighting(path: file.path, line: offset + 1, inTooltip: hoverOnly(
+                    fragment, in: line,
+                    lineHasCarrier: carrier.firstMatch(in: line, options: [], range: range) != nil)))
             }
         }
         return out
+    }
+
+    /// 片段在这一行是不是**只**住在 hover 字面量里。
+    ///
+    /// `NoteLine("取不到的一律显示 --，不会补成 0", help: "数值随采样刷新")` 是本轮
+    /// 最标准的形状：承诺句在常驻那半截，hover 那半截是另一回事。按行判会把它
+    /// 报成违规（S5 的元测试就是这么撞红的），所以这里逐个出现位置判。
+    /// 片段落在所有字面量之外时（拼进变量的中段）退回整行线索 —— 与按行判同向。
+    static func hoverOnly(_ fragment: String, in line: String, lineHasCarrier: Bool) -> Bool {
+        let slots = literalSlots(in: line)
+        var sawOccurrence = false
+        var searchFrom = line.startIndex
+        while let found = line.range(of: fragment, range: searchFrom..<line.endIndex) {
+            sawOccurrence = true
+            let enclosing = slots.first {
+                $0.span.lowerBound <= found.lowerBound && found.upperBound <= $0.span.upperBound
+            }
+            guard enclosing?.slot == .tooltip || (enclosing == nil && lineHasCarrier) else { return false }
+            searchFrom = line.index(after: found.lowerBound)
+        }
+        return sawOccurrence
     }
 
     /// C 的判据：每个承诺片段都要**至少有一处不在 tooltip 行上**。返回违规清单。
@@ -213,6 +277,27 @@ final class TooltipMigrationGuardTests: XCTestCase {
         """)]
         XCTAssertEqual(Self.scan(plain).visible.count, 1, "无 help 的常驻句被漏计，A 棘轮就成了摆设")
         XCTAssertTrue(Self.scan(plain).tooltip.isEmpty)
+    }
+
+    /// 同行两句长句：常驻那半截算债、hover 那半截不算。
+    /// 这是「留短藏长」的真实形状，按行判会**两个方向同时错**
+    /// （常驻句被记成已藏 → A 虚降；整行被记成 hover → B 看不见有人删了常驻句）。
+    func test_meta_mixedLineCountsEachLiteralOnItsOwnSlot() {
+        let mixed = [(path: "Views/Fake.swift", content: """
+        NoteLine("这一句常驻上屏，长度过门槛，它欠着一条应该还掉的口径债", help: "这一句已经在 hover 里，长得再长也不该算进常驻量里面去")
+        """)]
+        let (visible, tooltip) = Self.scan(mixed)
+        XCTAssertEqual(visible.count, 1, "常驻那半截被漏计，A 棘轮会虚降：\(visible)")
+        XCTAssertEqual(tooltip.count, 1, "hover 那半截没被认出来")
+        XCTAssertTrue(visible[0].text.contains("常驻上屏"))
+        // C 同理：承诺句在常驻半截时不许报违规，在 hover 半截时必须报。
+        let commitment = ["常驻上屏"]
+        XCTAssertTrue(Self.hiddenCommitments(commitment, files: mixed).isEmpty,
+                      "承诺句住在可见槽位却被报成只剩 hover")
+        let hoverted = [(path: "Views/Fake.swift", content: """
+        NoteLine("短句", help: "常驻上屏这半截被搬进了 hover，它就该被点名")
+        """)]
+        XCTAssertEqual(Self.hiddenCommitments(commitment, files: hoverted).count, 1)
     }
 
     /// A 的扫描器：可见槽位里的长句要算进去；tooltip 里的不算；注释里的不算；短句不算。

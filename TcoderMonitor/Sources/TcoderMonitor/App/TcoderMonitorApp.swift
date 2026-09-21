@@ -130,3 +130,22 @@ private struct CaptureWindowSizer: NSViewRepresentable {
         Self.applied = true
     }
 }
+
+/// 取证滚动开关。**不设环境变量 = 完全不生效**，页面照旧从顶部开始。
+///
+/// 为什么窗口开高还不够：AppKit 会把窗口高度**钳到屏幕可见高**
+/// （实测请求 1600pt 只拿到 1050pt），所以最长那几页的尾部
+/// （错误日志趋势图、贡献者第 3 名之后）仍然在视口之外。
+/// 设成 `bottom` 时页骨架滚到底部，取证脚本再拍一趟就拿到"下半屏"。
+enum CaptureScroll {
+    static let tailID = "tcoder.capture.tail"
+
+    /// 判据本体（纯函数，供单测）：只有字面量 `bottom` 生效。
+    /// 别的值（含拼错、含空串）一律当作"没设"——取证宁可少滚一趟，
+    /// 也不要按一个猜出来的语义滚动，那会让"拍到的那一屏"无法复述。
+    static func isBottom(_ rawValue: String?) -> Bool { rawValue == "bottom" }
+
+    static var scrollToTail: Bool {
+        isBottom(ProcessInfo.processInfo.environment["TCODER_CAPTURE_SCROLL"])
+    }
+}

@@ -616,3 +616,20 @@
 "代码" = "Code";
 "总计" = "Total";
 "总行数" = "Total Lines";
+
+// 批次 ⓘ·双语补账：入口族补上 `CopyHelpBadge(` 与 `help:` / `subtitleHelp:` / `captionHelp:`
+// 之后被扫描面「多看见」的存量（键住在调用点，组件内部替调用方过了 `localizedCopy`）。
+// 11 条一次登记清；余下 19 条里 17 条是内插串（`"…\(x)…"` 进不了目录，必须改写成
+// `localizedFormat` 整句键），2 条是 `Text(变量)` 形状（`Java 服务` / `Node 服务`，
+// 键存在也查不中，得先改渲染点）—— 两条都记在计划文档 §6，不当已还。
+"task_info 返回的线程数" = "Thread count as reported by `task_info`.";
+"单核等价：1.00 = 占满一个核心，可大于 1" = "Single-core equivalent: 1.00 = one core fully busy, so it can exceed 1.";
+"常驻内存 RSS" = "Resident memory (RSS).";
+"得分 × 归一化权重" = "Score × normalised weight.";
+"文件字节数（1024 进制）" = "File size in bytes (base 1024).";
+"该维度 0~100 分，条形按同一比例" = "This dimension is scored 0~100; the bar uses the same scale.";
+"进程号，只读展示" = "Process ID, shown read-only.";
+"进程当前持有的描述符数量" = "How many descriptors the process currently holds.";
+"五路分析并行执行，这个数字是已经返回的路数，不是顺序进度" = "The five analysers run in parallel, so this number counts how many streams have returned — it is not a step in a sequence.";
+"即将" = "in a moment";
+"联网核对会显著变慢" = "Checking vulnerabilities online is noticeably slower.";
