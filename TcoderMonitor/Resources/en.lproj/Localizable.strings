@@ -633,3 +633,9 @@
 "五路分析并行执行，这个数字是已经返回的路数，不是顺序进度" = "The five analysers run in parallel, so this number counts how many streams have returned — it is not a step in a sequence.";
 "即将" = "in a moment";
 "联网核对会显著变慢" = "Checking vulnerabilities online is noticeably slower.";
+
+// 批次 ⓘ·S5 性能与日志：搬字时新落到 `CopyHelpBadge(…)` / `text:` 槽位的 4 条短句。
+"没找到可解析的日志文件" = "No parsable log files were found.";
+"该项目还没有日志分析结果" = "This project has no log analysis results yet.";
+"采样已暂停：最后一次结果" = "Sampling is paused — these are the last results captured.";
+"匹配模式 %@" = "Match pattern %@";
