@@ -176,7 +176,9 @@ struct ContributorsMetricGrid: View {
             .max(by: { ($0.lastCommitAt ?? .distantPast) < ($1.lastCommitAt ?? .distantPast) }) else {
             return "近 30 天无人提交"
         }
-        return "最近：\(ContributorAnalysis.displayName(best)) · \(best.lastActiveDescription)"
+        return localizedFormat("最近：%1$@ · %2$@",
+                           ContributorAnalysis.displayName(best),
+                           localizedCopy(best.lastActiveDescription))
     }
 }
 

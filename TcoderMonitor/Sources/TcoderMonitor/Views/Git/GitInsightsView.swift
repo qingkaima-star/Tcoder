@@ -137,7 +137,7 @@ struct GitInsightsMetricGrid: View {
         guard let latest = git.recentCommits.first else {
             return git.lastCommitAt.map { DateFormat.full.string(from: $0) } ?? "无提交记录"
         }
-        return "最新：\(latest.subject)"
+        return localizedFormat("最新：%@", latest.subject)
     }
 
 }

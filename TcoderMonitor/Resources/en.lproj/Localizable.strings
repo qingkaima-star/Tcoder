@@ -567,3 +567,12 @@
 "%@ 项版本不可比较（「*」、workspace:*、分支/修订号等）已跳过比对" = "%@ entries have incomparable versions (“*”, workspace:*, branch/revision pins, etc.) and were skipped";
 "没有可核对的依赖" = "There are no dependencies to check";
 "；" = "; ";
+
+/* ===== P5-e6：重复代码三条建议 + 最新/最近两条前缀（英文态运行时漏翻的最后几条） ===== */
+"重复率 %1$@（约 %2$@ / %3$@ 行）已达高风险档：最长一处 %4$@ 行，出现在 %5$@（共 %6$@ 处）。把这类块抽成公共工具函数或模板方法，差异部分用参数/闭包传入，只保留一份实现。" = "Duplication %1$@ (about %2$@ of %3$@ lines) is in the high-risk tier: the longest block is %4$@ lines, seen at %5$@ (%6$@ occurrences). Extract such blocks into a shared helper or template method, pass the differences as parameters or closures, and keep a single implementation.";
+"重复率 %1$@（约 %2$@ / %3$@ 行）：最长重复块 %4$@ 行、出现在 %5$@。改动这些文件时顺手合并成一处实现，可把重复率压到 %6$@ 以下。" = "Duplication %1$@ (about %2$@ of %3$@ lines): the longest block is %4$@ lines at %5$@. Merge it into one implementation while touching these files to bring duplication under %6$@.";
+"重复率 %1$@（约 %2$@ / %3$@ 行）仍在低档：%4$@ 个重复块中最长 %5$@ 行，暂不需要专门重构，改到相关代码时顺带去重即可。" = "Duplication %1$@ (about %2$@ of %3$@ lines) is still low: %4$@ blocks, the longest %5$@ lines. No dedicated refactor is warranted; de-duplicate as you touch this code.";
+"最新：%@" = "Latest: %@";
+"最近：%1$@ · %2$@" = "Most recent: %1$@ · %2$@";
+"今天" = "Today";
+"昨天" = "Yesterday";
