@@ -67,7 +67,11 @@ struct LiveNumber: View {
     }
 
     var body: some View {
-        Text(text)
+        // 查表之后才谈得上英文态：`Text(变量)` 走 verbatim 初始化（双语方案 §7.1）。
+        // 本组件收的多半是纯数字，查不到就原样返回，代价是一次字典查找；
+        // 也有带单位的形态（`LogsErrorClusters` 传 `\(…) 次`）—— 那一条要修的是
+        // **调用点的半句键**，不是这里，已记进本轮汇报。
+        Text(localizedCopy(text))
             .font(tier.font)                       // 数字档位自带 monospacedDigit
             .foregroundStyle(Live.tint(text, real: realTint))
             .frame(width: width, alignment: .trailing)
@@ -95,7 +99,10 @@ struct NoteLine: View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
             ThemedIcon(icon, role: .badge)
                 .foregroundStyle(role.textColor)
-            Text(text)
+            // 全仓 15 处 `NoteLine(…)` 调用点都从这一行上屏，此前它一个字都不查
+            // （盘点表 Y 节缺口 1）：`PerformanceMatcherEditor` 那句「匹配模式对进程名…」
+            // 在英文目录里已有键，却因为这里不查而永远是中文。
+            Text(localizedCopy(text))
                 .font(Theme.Typo.label.font)
                 .foregroundStyle(.secondary)
                 .lineSpacing(Theme.Typo.label.lineSpacing)
