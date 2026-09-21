@@ -263,10 +263,24 @@ struct PerformanceGroupCard: View {
     private var memoryCell: some View {
         GroupMetricCell(
             label: "内存合计",
-            value: Live.bytes(group.totalMemoryBytes),
-            caption: ProcessMetric.peakMemory(of: group).map { "单进程峰值 \(Live.bytes($0))" } ?? "无成员进程",
+            value: Live.bytes(ProcessMetric.groupMemory(of: group)),
+            caption: memoryCaption,
             tint: Theme.Palette.Surface.ink
         )
+    }
+
+    /// 这一格的说明句**只留一条**，而且优先留给"读不全"这件事：
+    /// 合计是**下界**时告诉读者它是下界，比顺手报个单进程峰值重要。
+    /// 原来这一格是四格里唯一没有 coverage 说明的（线程、打开文件都有），
+    /// 而 `totalMemoryBytes` 把"没读到"按 0 加进合计 —— 数字本身不会算错，
+    /// 错的是它长得像全量。
+    private var memoryCaption: String {
+        let covered = ProcessMetric.memoryCovered(in: group)
+        if covered < group.processCount {
+            return coverageCaption(covered,
+                                   meaningEmpty: "全部成员进程的内存都没读到（rusage 与 task_info 两路都没给值）")
+        }
+        return ProcessMetric.peakMemory(of: group).map { "单进程峰值 \(Live.bytes($0))" } ?? "无成员进程"
     }
 
     private var threadsCell: some View {

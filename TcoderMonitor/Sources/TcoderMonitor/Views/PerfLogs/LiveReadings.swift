@@ -153,8 +153,12 @@ enum ProcessMetric {
         max(0, process.cpuUsage)
     }
 
-    static func residentBytes(of process: ProcessSnapshot) -> UInt64 {
-        process.memoryBytes
+    /// 常驻内存。**0 只可能是两路都没给值**（`rusage` 无权限、`task_info` 也没回来），
+    /// 不是"这个进程占 0 字节"——真占 0 字节的进程不存在。
+    /// 原来它返回非 Optional，于是同一张表里线程/打开文件都按三态显示 `--`，
+    /// 只有内存这一列会诚实地把"没读到"画成"0 B"（批次 P7-B 余量）。
+    static func residentBytes(of process: ProcessSnapshot) -> UInt64? {
+        process.memoryBytes > 0 ? process.memoryBytes : nil
     }
 
     /// 组内求和只在「至少有一个进程取到」时成立；全组都没取到就返回 nil，
@@ -167,6 +171,14 @@ enum ProcessMetric {
         sum(group.matchedProcesses.map(openFiles(of:)))
     }
 
+    /// 内存合计：与 `groupThreads` 同一条判据。**注意求和本身不会因 0 而算错**，
+    /// 这条 `nil` 的价值在于"一个都没读到"不再长成 `0 B`。
+    static func groupMemory(of group: ProcessGroupSnapshot) -> UInt64? {
+        let present = group.matchedProcesses.compactMap(residentBytes(of:))
+        guard !present.isEmpty else { return nil }
+        return present.reduce(0, +)
+    }
+
     /// 「N/M 个进程取到」里的 N，用于把截断这件事量化到组，不藏进脚注。
     static func threadsCovered(in group: ProcessGroupSnapshot) -> Int {
         group.matchedProcesses.compactMap(threads(of:)).count
@@ -176,9 +188,14 @@ enum ProcessMetric {
         group.matchedProcesses.compactMap(openFiles(of:)).count
     }
 
+    static func memoryCovered(in group: ProcessGroupSnapshot) -> Int {
+        group.matchedProcesses.compactMap(residentBytes(of:)).count
+    }
+
+    /// 单进程峰值同样要走"取到了才算"：全组都没读到时，旧写法会给出一枚
+    /// `0 B` 的峰值，那是关于我们的事实，不是关于进程的。
     static func peakMemory(of group: ProcessGroupSnapshot) -> UInt64? {
-        guard !group.matchedProcesses.isEmpty else { return nil }
-        return group.matchedProcesses.map(\.memoryBytes).max()
+        group.matchedProcesses.compactMap(residentBytes(of:)).max()
     }
 
     private static func sum(_ values: [Int?]) -> Int? {

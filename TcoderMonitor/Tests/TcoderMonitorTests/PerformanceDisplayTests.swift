@@ -54,8 +54,32 @@ final class PerformanceDisplayTests: XCTestCase {
         XCTAssertFalse(Live.forcesNeutral("0"))
     }
 
-    func testRealZeroSurvivesThePlaceholderLayer() {
-        // 真 0 是结论，必须原样显示成 0，不能被 `--` 吞掉。
+    /// 进程内存的三态（批次 P7-B 余量）：`rusage` 与 `task_info` 两路都没给值时是 0，
+    /// 而"占 0 字节的进程"不存在，所以那个 0 必须走 `--`；合计与单进程峰值同理。
+    /// 这条以前测不了：`residentBytes` 返回非 Optional，表里那一列是全表唯一
+    /// 会把"没读到"画成数字的地方（线程、打开文件都已经是三态）。
+    func testProcessMemoryTreatsUnreadAsMissing() {
+        let unread = process(pid: 11, memory: 0, threads: 4, files: 7)
+        let read = process(pid: 12, memory: 4096, threads: 2, files: 3)
+        XCTAssertNil(ProcessMetric.residentBytes(of: unread), "没读到不能画成 0 B")
+        XCTAssertEqual(ProcessMetric.residentBytes(of: read), 4096)
+
+        let mixed = ProcessGroupSnapshot(
+            group: TrackedProcessGroup(title: "混合组", matchPattern: "p"),
+            matchedProcesses: [unread, read])
+        XCTAssertEqual(ProcessMetric.groupMemory(of: mixed), 4096, "合计只加取到的")
+        XCTAssertEqual(ProcessMetric.memoryCovered(in: mixed), 1, "「N/M 个进程取到」里的 N 要数得出来")
+        XCTAssertEqual(ProcessMetric.peakMemory(of: mixed), 4096)
+
+        let allUnread = ProcessGroupSnapshot(
+            group: TrackedProcessGroup(title: "全空组", matchPattern: "p"),
+            matchedProcesses: [unread, process(pid: 13, memory: 0, threads: 1, files: 1)])
+        XCTAssertNil(ProcessMetric.groupMemory(of: allUnread), "一个都没读到不许给 0")
+        XCTAssertNil(ProcessMetric.peakMemory(of: allUnread), "峰值不许把 0 当成测得的最大值")
+        XCTAssertEqual(Live.bytes(ProcessMetric.groupMemory(of: allUnread)), "--")
+    }
+
+    func testRealZeroSurvivesThePlaceholderLayer() {        // 真 0 是结论，必须原样显示成 0，不能被 `--` 吞掉。
         XCTAssertEqual(Live.grouped(0), "0")
         XCTAssertEqual(Live.percent(0, precision: 0), "0%")
         XCTAssertEqual(Live.cores(0), "0.00")

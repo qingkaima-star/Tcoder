@@ -116,11 +116,14 @@ struct PerformanceProcessTableCard: View {
         .help(process.commandLine.isEmpty ? process.name : process.commandLine)
     }
 
-    /// 把「--」的含义写在表旁边：0 不是「没有线程 / 没打开文件」，而是没读到。
+    /// 把「--」的含义写在表旁边：0 不是「没有线程 / 没打开文件 / 不占内存」，而是没读到。
+    /// 内存这一列原本不在名单里 —— 它以前根本不会显示 `--`（`residentBytes` 返回非
+    /// Optional，两路都读不到时画成 `0 B`）。批次 P7-B 余量把它并进同一套三态之后，
+    /// 这句说明必须一起改，否则图例反而成了"内存那一列的 -- 是别的意思"。
     private var honestyLegend: some View {
         NoteLine(isTruncated
-                 ? "线程 / 打开文件显示 -- 表示本轮未取到（内核任务或时间预算已截断），不表示数量为 0。"
-                 : "线程 / 打开文件显示 -- 表示未取到（内核任务或无权限），不表示数量为 0。",
+                 ? "内存 / 线程 / 打开文件显示 -- 表示本轮未取到（内核任务或时间预算已截断），不表示数量为 0。"
+                 : "内存 / 线程 / 打开文件显示 -- 表示未取到（内核任务或无权限），不表示数量为 0。",
                  icon: .unverified)
     }
 

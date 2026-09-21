@@ -301,6 +301,11 @@
 "「其他」合并了占比最低的 %1$@ 种语言" = "\"Other\" merges the %1$@ languages with the smallest share";
 "分析器降级" = "Analyzer Degraded";
 "扫描边界" = "Scan Limits";
+// 进程表图例：这两句住在 `NoteLine(` 的三元分支里，按行判槽位的扫描器看不见它们
+// （前缀既不是 `text:` 也不在同一行），所以它们既不算存量、也一直没有译文。
+// 在这里补上键，是为了让英文态真的读得出这句话，而不是为了把数字做小。
+"内存 / 线程 / 打开文件显示 -- 表示本轮未取到（内核任务或时间预算已截断），不表示数量为 0。" = "A -- under Memory / Threads / Open files means this round did not read it (kernel task, or the time budget ran out) - it does not mean the count is 0.";
+"内存 / 线程 / 打开文件显示 -- 表示未取到（内核任务或无权限），不表示数量为 0。" = "A -- under Memory / Threads / Open files means it was not read (kernel task or no permission) - it does not mean the count is 0.";
 "按有效代码行计" = "Counted by effective code lines";
 "识别规则降级：%1$@ 条正则没能编译，函数数与圈复杂度会偏低。" = "Recognition degraded: %1$@ patterns failed to compile, so function counts and cyclomatic complexity read low.";
 "%1$@ 个文件 · %2$@ 行有效代码" = "%1$@ files · %2$@ effective code lines";
