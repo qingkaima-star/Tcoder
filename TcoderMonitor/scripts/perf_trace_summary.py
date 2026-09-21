@@ -183,14 +183,35 @@ def summary_render_rows(loaded, budget, seconds):
         fmt_row("render 超预算帧", base_over, why, "—")
 
 
+def app_update_verdict(values, budget):
+    """把"哪些迟到帧是主线程算出来的、哪些不是"分开说 —— 只报 max 会把两者混成一锅。
+
+    2026-09-21 的实证：交互期那份读数 `app-update` 打的是 `超 20.2 倍`（max 168.3 ms），
+    而 602 个迟到帧的 update 相位 **p95 只有 3.4 ms** —— 绝大多数迟到跟主线程没关系，
+    是渲染/合成侧的事；那一次 168 ms 才是真的主线程 stall。
+    一行"超 20.2 倍"把这两件事同时盖住了：既夸大了整体，又差点让人漏掉那个孤例。
+    """
+    vals = [v for v in (values or []) if v is not None]
+    if not vals:
+        return "无 app-update 记录", "—"
+    over = [v for v in vals if v > budget]
+    line = "p50 %.2f / p95 %.2f / max %.2f ms（n=%d，超预算 %d 个）" % (
+        percentile(vals, .5), percentile(vals, .95), max(vals), len(vals), len(over))
+    if not over:
+        return line, "达标（没有一个 update 超预算）"
+    share = 100.0 * len(over) / len(vals)
+    return line, ("主线程 stall %d 个（%.1f%%，最长 %.1f ms = %.1f 倍预算）；"
+                  "其余 %d 个迟到与 update 无关（p95 %.2f ms）"
+                  % (len(over), share, max(over), max(over) / budget,
+                     len(vals) - len(over), percentile(vals, .95)))
+
+
 def summary_app_update_row(loaded, budget):
     # 3) app-update 相位（一次 hitch 通常拆成 Brown+Red 两行，同 duration 走 ref）
     upd = dedupe_pairs(loaded["hitches-updates"])
     if upd:
-        cur = " ".join("%.1f" % v for v in sorted(upd))
-        fmt_row("app-update 单次耗时(ms)", base_app_update_line(),
-                (cur[:31] + "…") if len(cur) > 32 else cur,
-                "达标" if max(upd) <= budget else "超 %.1f 倍" % (max(upd) / budget))
+        cur, verdict = app_update_verdict(upd, budget)
+        fmt_row("app-update 单次耗时(ms)", base_app_update_line(), cur, verdict)
     else:
         fmt_row("app-update 单次耗时(ms)", base_app_update_line(),
                 "无 app-update = 无 hitch" if loaded["hitches-updates"]["present"] else "未覆盖", "—")

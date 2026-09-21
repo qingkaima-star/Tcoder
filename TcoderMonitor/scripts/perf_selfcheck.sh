@@ -52,6 +52,7 @@ cmd_selfcheck() {
   selfcheck_perf_root_ignored "$out"    # 23) 样本根必须真的被 git 忽略，且不许有第二处写死 /tmp 默认值
   selfcheck_disk_precondition "$out"    # 24) 前置必须**能失败**：判定要在、且全仓只有一份
   selfcheck_display_regime "$out"       # 25) 120Hz 预算只对 120Hz 档成立：降频档里不许印"危急"
+  selfcheck_app_update_split "$out"         # 26) 一个 max 不许同时盖住"整体很快"和"有个孤例很慢"
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
@@ -789,4 +790,29 @@ print(h(low, 8.333))')
   printf '%s\n' "$words" | tail -1 | grep -q '不判档' \
     || { fail "越档时话术里没有「不判档」——档位词还在乱印"; return; }
   ok "越档读数改口为「不判档，只记形状」；四边界与三态话术全对"
+}
+
+selfcheck_app_update_split() {  # selfcheck_app_update_split <outdir>
+  # 26) `app-update` 那行原来只报 max ⇒ "超 20.2 倍"。同一份数据里 p95 是 3.4 ms：
+  #     整体很快 + 一次 168 ms 孤例，被一个数同时说反两次。
+  #     现在拆成"主线程 stall 几个 / 其余迟到与 update 无关"，三种形状各钉一次。
+  local r
+  r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_trace_summary import app_update_verdict as v
+small = [0.5] * 600 + [3.0] * 40
+outl = [1.0] * 600 + [168.3]
+big = [12.0] * 30 + [30.0] * 10
+print("A|%s" % v(small, 8.333)[1][:6])
+print("B|%s" % v(outl, 8.333)[1][:14])
+print("C|%s" % v(big, 8.333)[1][:12])
+print("D|%s" % v(outl, 8.333)[0])')
+  printf '%s\n' "$r" | grep -q '^A|达标（没有' \
+    || { fail "全是小值时没判成「达标」：$(printf '%s' "$r" | tr '\n' ' ')"; return; }
+  printf '%s\n' "$r" | grep -q '^B|主线程 stall 1 个' \
+    || { fail "单个 168ms 孤例没被单独点出来（其余 600 个不该跟着背锅）"; return; }
+  printf '%s\n' "$r" | grep -q '^C|主线程 stall 40' \
+    || { fail "普遍超预算时没报出 40 个（不许反过来把它说成孤例）"; return; }
+  printf '%s\n' "$r" | grep -q 'p95 1.00' \
+    || { fail "分布里没有 p95（拿到 $(printf '%s' "$r" | grep '^D|' | cut -c3-60)）"; return; }
+  ok "app-update 判定分得清「整体快 + 一个孤例慢」与「普遍慢」"
 }
