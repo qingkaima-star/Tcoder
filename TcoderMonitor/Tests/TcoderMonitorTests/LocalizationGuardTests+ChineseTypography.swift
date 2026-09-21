@@ -200,13 +200,11 @@ extension LocalizationGuardTests {
     /// 分母：界面三目录的源码。`LocalizationGuardTests.sourceFiles()` 是 private，
     /// 跨文件够不着，所以这里走共享的 `SurfaceScanKit`（同一份读盘口径）。
     static func chineseTypographySources() throws -> [(path: String, content: String)] {
-        var out: [(String, String)] = []
-        // 五个目录：**喂给界面的句子多半是在 Services/ 里拼出来的**
-        // （健康页那句"主要拖累来自 协作分布"就住在 `Services/Health/ScoreCurves.swift`）。
+        // **动态枚举整个 `Sources/TcoderMonitor`**（`under: ""`）：这里原本抄了一份
+        // 五个目录名的清单，而 `Utilities/` 是第六个 —— 抄来的清单只会数"想到名字的那几个"。
+        // 喂给界面的句子多半是在 `Services/` 里拼出来的
+        // （那句"主要拖累来自 协作分布"就住在 `Services/Health/ScoreCurves.swift`），
         // 只扫 Views 会得到一份假短的存量清单 —— 那正是"共享盲区"的形状。
-        for sub in ["Views", "Design", "App", "Services", "Models"] {
-            out += try SurfaceScanKit.sourceFiles(under: sub)
-        }
-        return out
+        try SurfaceScanKit.sourceFiles(under: "")
     }
 }
