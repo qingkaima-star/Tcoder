@@ -17,11 +17,14 @@ import SwiftUI
 struct CodeMarkersSection: View {
     let code: CodeMetrics
 
+    // 盘点表 B8（留短藏长 ●）：卡名那句完整读法（「只代表历史备注，不代表当前缺陷」）
+    // 改变的是"这堆标记该怎么读"，正是该进 ⓘ 的那半句；屏上留原句的头「源码里留下的待办标记」。
     var body: some View {
         GlassSection(
             "标记事项与扫描信息",
-            subtitle: "源码里留下的待办标记，只代表历史备注，不代表当前缺陷",
-            icon: .info
+            subtitle: "源码里留下的待办标记",
+            icon: .info,
+            trailing: AnyView(CopyHelpBadge("源码里留下的待办标记，只代表历史备注，不代表当前缺陷"))
         ) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 ReadoutStrip {
@@ -52,7 +55,15 @@ struct CodeMarkersSection: View {
                                  style: .number)
                 }
 
-                DataCaption(text: Self.markerNote(code))
+                // 盘点表 B9 / B10 对同一个槽位判了两支：
+                // 零标记那支整句就是「扫过了、没找到」的诚实凭据（≤22 字，无可再藏），**保持常驻**；
+                // FIXME 那支判的是「藏」——「通常表示已知缺陷 + 建议核对」是对读数的解读，
+                // 屏上只留一枚问号，FIXME 的条数本来就在上面那条读数带里各占一格。
+                if code.fixmeCount > 0 {
+                    CopyHelpBadge(Self.markerNote(code))
+                } else {
+                    DataCaption(text: Self.markerNote(code))
+                }
             }
         }
     }
@@ -151,12 +162,17 @@ struct CodeHotspotSection: View {
 struct CodeDuplicationSummarySection: View {
     let code: CodeMetrics
 
+    // 盘点表 B14（判「藏」的导流句）：这句只说"这里只有概览、明细在别页"，
+    // 卡名「重复与复杂度概览」已经把这件事讲完了一半，所以整句进 ⓘ，
+    // 与风险徽标同排挂在卡名右侧（那一行就是它原来的位置）。
     var body: some View {
         GlassSection(
             "重复与复杂度概览",
-            subtitle: "仅概览数字，明细见「复杂度风险」页",
             icon: .complexity,
-            trailing: AnyView(RiskBadge(risk: code.overallRisk))
+            trailing: AnyView(HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+                CopyHelpBadge("仅概览数字，明细见「复杂度风险」页")
+                RiskBadge(risk: code.overallRisk)
+            })
         ) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 ReadoutStrip {
@@ -179,8 +195,13 @@ struct CodeDuplicationSummarySection: View {
                 MiniBarGauge(fraction: code.duplicationRatio,
                              tint: Theme.Semantic.role(for: code.overallRisk).graphicColor,
                              height: DataGaugeHeight.metric)
-                DataFootnote(text: "重复块 \(NumberFormat.grouped(code.duplicatedBlocks.count)) 个 · "
-                             + "复杂度上榜 \(NumberFormat.grouped(code.topComplexFunctions.count)) 个函数")
+                // 盘点表 B17（判「删」：重复块本卡读数带已占一格，复杂度上榜在
+                // 「复杂度风险」页的读数带占一格）。本轮 B 守恒线不许删，整条进 ⓘ。
+                // 顺带把原来两段 `+` 拼的串改成一条带位置参数的整句键 ——
+                // 拼串在运行时永远查不中（双语方案 §7.1），整句模板才有一条真键可登记。
+                CopyHelpBadge(localizedFormat("重复块 %1$@ 个 · 复杂度上榜 %2$@ 个函数",
+                                              NumberFormat.grouped(code.duplicatedBlocks.count),
+                                              NumberFormat.grouped(code.topComplexFunctions.count)))
             }
         }
     }

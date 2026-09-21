@@ -85,11 +85,16 @@ struct CodeMetricsView: View {
 
 /// 总量构成四读数。**无面**，横向一条读数带，列间竖发丝线。
 /// 旧形态是 `LazyVGrid` 里四块 `.contentInset` 灰盒，各带一份投影。
+///
+/// 2026-09-21 工单 S2（盘点表 B1）：卡名那句「代码 / 注释 / 空行共同构成总行数」与
+/// `CodeInvariantRow` 画在屏上的等式**逐字同义**，盘点表判的是「删」；
+/// B 守恒线本轮不许删，所以整条进 ⓘ —— 卡名右侧只多一枚问号，常驻长句少一条。
 struct CodeMetricsSummaryGrid: View {
     let code: CodeMetrics
 
     var body: some View {
-        GlassSection("总量构成", subtitle: "代码 / 注释 / 空行共同构成总行数", icon: .code) {
+        GlassSection("总量构成", icon: .code,
+                     trailing: AnyView(CopyHelpBadge("代码 / 注释 / 空行共同构成总行数"))) {
             ReadoutStrip {
                 MetricTile(
                     label: "代码文件",
@@ -157,14 +162,29 @@ struct CodeScaleSection: View {
                 icon: .code
             ) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                    DataHeroReadout(value: NumberFormat.grouped(code.totalLines),
-                                    unit: "行",
-                                    note: "总行数（= 空行 + 注释 + 代码）")
+                    // 盘点表 B2（留短藏长 ●）：屏上留「总行数」这半句（它就是原句的头），
+                    // 「= 空行 + 注释 + 代码」这条完整等式口径进 ⓘ；等式本身仍由下面的
+                    // `CodeInvariantRow` 常驻兜底，所以藏掉的只是重复的那半句。
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+                        DataHeroReadout(value: NumberFormat.grouped(code.totalLines),
+                                        unit: "行",
+                                        note: "总行数")
+                        CopyHelpBadge("总行数（= 空行 + 注释 + 代码）")
+                    }
                     CodeInvariantRow(code: code)
                 }
             }
 
-            GlassSection("语言构成", subtitle: Self.subtitle(code), icon: .chartLine) {
+            // 盘点表 B3（留短藏长 ●）：屏上留原句的头「按有效代码行计」——分母口径必须常驻；
+            // 「共 N 种语言、展示前 M 种」那半句连同整句一起进 ⓘ（ⓘ 里必须是完整句，
+            // 不能只放后半，否则英文态语序必坏）。
+            // 一支例外：一门语言占比都不大于 0 时，「尚无语言占比」本身就是那条诚实读数，
+            // 不藏 —— 它留在 subtitle 上，ⓘ 这一支直接不出现。
+            GlassSection("语言构成",
+                         subtitle: Self.subtitleHead(code),
+                         icon: .chartLine,
+                         trailing: code.languages.contains { $0.share > 0 }
+                             ? AnyView(CopyHelpBadge(Self.subtitle(code))) : nil) {
                 languageBlock
             }
         }
@@ -200,6 +220,15 @@ struct CodeScaleSection: View {
         return localizedFormat("按有效代码行计，共 %1$@ 种语言，展示前 %2$@ 种",
                                 NumberFormat.grouped(code.languages.count),
                                 NumberFormat.grouped(head))
+    }
+
+    /// `subtitle(_:)` 的**屏上那一半**（盘点表 B3）：原句的头，一字未改。
+    /// 「尚无语言占比」那一支整条留在屏上 —— 它是诚实读数，不是口径脚注。
+    /// 走 `localizedCopy` 而不是裸字面量：短标签同样是一条要登记的键，
+    /// 藏在 `return` 里双语扫描就读不到（同文件 `CodeDataGate` 顶部记过这个坑）。
+    static func subtitleHead(_ code: CodeMetrics) -> String {
+        guard code.languages.contains(where: { $0.share > 0 }) else { return subtitle(code) }
+        return localizedCopy("按有效代码行计")
     }
 
     /// 平均文件行数 = 总行数 / 文件数。两个分母任期为 0 都是「算不出」，
@@ -244,15 +273,22 @@ struct CodeInvariantRow: View {
             // 识别规则降级（批次 P7-B 2-6/2-7）：没有这句提示时，一个坏掉的正则
             // 会在界面上长成"这个仓库 0 个函数"，而那是关于我们的事实、不是关于仓库的。
             if let failures = code.analyzerRuleFailures, !failures.isEmpty {
-                DataNotice(
-                    // 整句一条字面量。**不能拆成两段再 `+`**：那样运行时查得到、
+                // 盘点表 B7（留短藏长 ●，62 字）：屏上留「降级了 + 会影响哪两个数」——
+                // 认账的那半句必须常驻；「这一屏的 0 该怎么读」那句解释进 ⓘ。
+                // ⓘ 里带的是**整句**（与屏上短句同源、含完整句），不是被劈开的后半。
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
+                    DataNotice(
+                        text: localizedFormat("识别规则降级：%1$@ 条正则没能编译，函数数与圈复杂度会偏低。",
+                                              NumberFormat.grouped(failures.count)),
+                        role: Theme.Semantic.warning, icon: .riskWarning, iconLabel: "分析器降级")
+                    CopyHelpBadge(localizedFormat("识别规则降级：%1$@ 条正则没能编译，函数数与圈复杂度会偏低。这一屏的 0 读作「我们的规则没跑起来」，不读作「这个仓库没有函数」。",
+                                                  NumberFormat.grouped(failures.count)))
+                    // ⓘ 里也是**整句一条字面量**，不拆成两段再 `+`：拆出去的那半句运行时查得到、
                     // 而按字面量比对键的守卫会把它判成"目录里有死键"（本仓既有判据）。
-                    text: localizedFormat("识别规则降级：%1$@ 条正则没能编译，函数数与圈复杂度会偏低。这一屏的 0 读作「我们的规则没跑起来」，不读作「这个仓库没有函数」。",
-                                          NumberFormat.grouped(failures.count)),
-                    role: Theme.Semantic.warning, icon: .riskWarning, iconLabel: "分析器降级")
-                    // 台账内容是"规则片段"，不是文案：不进查表，免得运行时漏翻台账
-                    // 记进一条永远不可能登记的键。
-                    .help(failures.joined(separator: "\n"))
+                }
+                // 台账内容是"规则片段"，不是文案：不进查表，免得运行时漏翻台账
+                // 记进一条永远不可能登记的键。
+                .help(failures.joined(separator: "\n"))
             }
         }
     }
