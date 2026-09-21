@@ -137,6 +137,27 @@ heavy_job_is_live() {  # heavy_job_is_live <pid> <进程名> → 0=真在干活�
   awk -v a="$a" -v b="$b" 'BEGIN{ exit !(b - a > 0.2) }'
 }
 
+disk_free_gib() {  # → 数据卷可用 GiB（整数）；读不到打**空串**（不是 0，也不是 -1）
+  # BSD `df` 没有 `-s`：写成 `df -s -k` 会报错、输出为空，
+  # 于是"余量不足就不许录"这条前置会**永远静默放行**——正是本仓最恨的永真绿。
+  df -k -P /System/Volumes/Data 2>/dev/null | awk 'NR==2 {print int($4/1024/1024)}'
+}
+
+disk_headroom_bad() {  # disk_headroom_bad <可用GiB，空串=读不到> → 0=不合格（话术走 stdout）
+  # 做成**纯函数**：闸门与录制前置都调它，测试可以直接喂 3 / "" / 400 各判一次。
+  # 读不到一律算不合格——拿不到余量就没资格开始一趟 GB 级的录制。
+  local free="${1:-}" min="${TCODER_MIN_FREE_GIB:-20}"
+  case "$free" in
+    ''|*[!0-9]*) printf '读不到 /System/Volumes/Data 的可用空间（df 返回「%s」）' "${free:-空}"
+                 return 0 ;;
+  esac
+  if [ "$free" -lt "$min" ]; then
+    printf '可用仅 %s GiB < %s GiB：先清 $SCRATCH 与孤儿 trace，别硬跑到一半' "$free" "$min"
+    return 0
+  fi
+  return 1
+}
+
 heavy_job_names() {  # 名单**只在这儿列一次**：闸门取 pid、话术取名字，两边不许各抄一份
   # `swift-frontend` 是**真正的编译工人**：`swiftc` 只是驱动，驱动会把活派给
   # 一堆 `swift-frontend` 子进程，且驱动常在子进程干完之前就退场。

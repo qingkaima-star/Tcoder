@@ -39,11 +39,13 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
     /// 又漏了一次、又是我自己造成的：`perf_provenance.sh`（今早自 preflight/verify 搬出）
     /// 与 `perf_probes.sh`（2026-09-21 探针族自 preflight 搬出，为的是还 400 行口径）
     /// 都没点进来。这两把尺子量的是"产物身份"和"有没有人在动"——正好是最不该看不见的那两维。
+    /// 第三次的同一个坑是今晚自己又踩的：`perf_switch.sh`（switch 档为还 400 行口径搬出）。
+    /// ⇒ 规矩写在这里没用，**清单不会自己长大**；搬文件那一笔必须同批改这个集合。
     static let rulerScripts: Set<String> = [
         "perf_harness.sh", "perf_selfcheck.sh", "perf_preflight.sh", "trace_report.py",
         "perf_trace_xml.py", "perf_trace_metrics.py", "perf_trace_threads.py",
         "perf_trace_summary.py", "perf_framepulse.py",
-        "perf_provenance.sh", "perf_probes.sh",
+        "perf_provenance.sh", "perf_probes.sh", "perf_switch.sh",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。

@@ -50,6 +50,7 @@ cmd_selfcheck() {
   selfcheck_period_eligibility "$out" # 21) 档位声明与收尾复核互相矛盾的样本不许拿到 T1 资格
   selfcheck_probe_self_sufficient "$out" # 22) 探针必须能被裸 `set -u` 消费者调用（不靠 harness）
   selfcheck_perf_root_ignored "$out"    # 23) 样本根必须真的被 git 忽略，且不许有第二处写死 /tmp 默认值
+  selfcheck_disk_precondition "$out"    # 24) 前置必须**能失败**：判定要在、且全仓只有一份
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
@@ -722,4 +723,26 @@ selfcheck_perf_root_ignored() {  # selfcheck_perf_root_ignored <outdir>
   # `${bad:-0}`：我自己刚立的规矩——闸门与判据里的量一律兜底，
   # 否则 `set -u` 下"读一个还没被赋过值的全局"就是**静默中止**（今天已经栽过一次）。
   [ "${bad:-0}" = "0" ] && ok "样本根已被 git 忽略，且没有第二处写死默认值"
+}
+
+selfcheck_disk_precondition() {  # selfcheck_disk_precondition <outdir>
+  # 24) 今晚真发生的事：合并时"磁盘余量"这条判据留下了**两份实现**
+  #     （preflight 的第七维 + harness 的 require_disk_headroom），
+  #     我把 harness 那份改成委托时先指向了一个**不存在的函数**——
+  #     `why=$(disk_headroom_bad …) && die` 里命令找不到 ⇒ rc≠0 ⇒ `&&` 不成立 ⇒
+  #     前置**永远放行**，而 selfcheck 一路全绿。一条永真的前置比没有更坏。
+  declare -f disk_headroom_bad >/dev/null \
+    || { fail "disk_headroom_bad 不在场——所有调它的前置都会静默放行（今天就差一点）"; return; }
+  local ok=1
+  disk_headroom_bad 400 >/dev/null && ok=0       # 充足 ⇒ 合格
+  disk_headroom_bad 3 >/dev/null || ok=0         # 不足 ⇒ 不合格
+  disk_headroom_bad "" >/dev/null || ok=0        # 读不到 ⇒ 与不足同等对待
+  [ -n "$(disk_headroom_bad 3)" ] || ok=0       # 不合格时要给出人话
+  [ "$ok" = "1" ] || { fail "磁盘前置的三种输入（充足/不足/读不到）没各判对一次"; return; }
+  # 结构钉：只许有一份实现（两处各写一遍就是这次合并撞出来的分叉）
+  grep -Eq 'df +-k( -P)? +/System/Volumes/Data' scripts/perf_harness.sh \
+    && { fail "perf_harness.sh 里又自己解析 df 了——删掉，改调 disk_headroom_bad"; bad=1; }
+  grep -q 'disk_headroom_bad' scripts/perf_harness.sh \
+    || { fail "录制前置不再经过共享判定（大概又手写了一遍 [ free -lt min ]）"; bad=1; }
+  [ "${bad:-0}" = "0" ] && ok "磁盘前置三种输入各判对、且全仓只有一份判定"
 }

@@ -31,7 +31,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/perf_probes.sh"  # 探针族搬出去了�
 #   ② 每轮收尾固定扫残留 + 确认自己起的采集进程真退了
 #   ③ 可用低于阈值就**拒跑**（与其余六维同形状、同一个 hard 标记）
 SCRATCH="${SCRATCH:-$(git rev-parse --show-toplevel)/.scratch}"
-MIN_FREE_GIB="${MIN_FREE_GIB:-20}"
+# 阈值与判定都在 `disk_headroom_bad`（环境变量 TCODER_MIN_FREE_GIB 可覆盖）
 QUIESCE_MIN="${QUIESCE_MIN:-5}"  # 静默合格线（与 perf_harness.sh 同值）。写在闸门这边，
 # 是因为**阈值**属于判定、不属于取数；排程器单独 source 本文件时也要有默认值可走。
 
@@ -140,6 +140,17 @@ preflight_gates_identity() {
   fi
 }
 
+preflight_gates_disk() {  # 【第七维：磁盘】判定只有一份（probes 的 disk_headroom_bad）
+  # 盘满最坏的后果不是失败退出，而是 xctrace 写不进中间产物、
+  # **样本照样出一份看起来合理的数** ⇒ 读不到余量与余量不足同等对待。
+  local why
+  if why=$(disk_headroom_bad "${free_gib:-}"); then
+    echo "!! $why——一趟 trace 轻则几百 MB、重则十几 GB，" \
+         "且 $TMPDIR 里的 .ktrace 中断不会自己清。先清盘再来，不硬跑。" >&2
+    hard=1
+  fi
+}
+
 preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GATE 决定炸还是通报）
   # 【bash 的坑】调用**不带括号**：写成 `preflight_gates_identity()` 会被解析成
   # "在 preflight_gates 内部再定义一个函数"，于是这两维**一次都没执行**、也不报错——
@@ -153,14 +164,7 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
          "它会抢满全部核，app-update 相位会被显著抬高。等它跑完再来。" >&2
     hard=1
   fi
-  # 【第七维：磁盘】2026-09-21 这台机器被取证吃到只剩 4.4 GiB，
-  # 而且是**崩在录制中途**——盘满时 xctrace 写不进中间产物，样本会静默变形，
-  # 比"量不到"更坏：它会给你一份看起来合理的数。
-  if awk -v f="${free_gib:--1}" -v m="$MIN_FREE_GIB" 'BEGIN{exit !(f < m)}'; then
-    echo "!! 数据卷可用 ${free_gib:-取不到} GiB（要求 ≥${MIN_FREE_GIB}）——一趟 trace 轻则几百 MB、" \
-         "重则十几 GB，且 $TMPDIR 里的 .ktrace 中断不会自己清。先清盘再来，不硬跑。" >&2
-    hard=1
-  fi
+  preflight_gates_disk
   # 负载阈值：默认 1 分钟 load 不超过核数的 1.5 倍（LOAD_MAX=<数> 可覆盖，但覆盖了就要在报告里写）
   if awk -v l="$load1" -v c="$cores" 'BEGIN{exit !(l > c*1.5)}'; then
     echo "!! load1=$load1 已是核数($cores)的 1.5 倍以上：整机排队，任何帧节拍读数都不作数。" >&2
@@ -311,10 +315,6 @@ json.dump({"projects": [{"id": uuid, "name": "Tcoder（性能沙箱）", "path":
            "selectedProjectID": uuid},
           open("%s/projects.json" % support, "w"), indent=2)
 PY
-}
-
-disk_free_gib() {  # → 数据卷可用 GiB（一位小数）；取不到给 -1（调用方按"不可用"处理）
-  df -k /System/Volumes/Data 2>/dev/null | awk 'NR==2{printf "%.1f", $4/1024/1024}'
 }
 
 sweep_orphan_traces() {  # 只删**没有任何进程打开着**的 .ktrace 中间产物
