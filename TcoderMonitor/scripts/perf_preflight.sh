@@ -98,6 +98,10 @@ quietest_seconds() {  # 从探针那一行里抠出"静默=Xs"的 X
   printf '%s' "${1:-}" | sed -n 's/.*静默=\([0-9.-]*\)s.*/\1/p'
 }
 
+# "产物到底是不是这份代码"的判定**不在本文件里**——它归 scripts/perf_provenance.sh，
+# 与 `verify_provenance.sh` 共用同一把手尺子（见那个文件的头注）。
+source "$(dirname "${BASH_SOURCE[0]}")/perf_provenance.sh"
+
 preflight_context() {  # preflight_context <outdir> <pid>
   local out="$1" pid="$2" f="" cores load1 front visible others hard=0
   cores=$(sysctl -n hw.ncpu 2>/dev/null || echo 8)
@@ -113,8 +117,8 @@ preflight_context() {  # preflight_context <outdir> <pid>
   quiet=$(quietest_seconds "$qline")
 
   # 取二进制的出身（**不是**工作树 HEAD）：闸门第六维与上下文都要用
-  BUILD_REV=$(preflight_manifest_value TCODER_GIT_REVISION)
-  BUILD_CLEAN=$(preflight_manifest_value TCODER_GIT_CLEAN)
+  BUILD_REV=$(provenance_manifest_value TCODER_GIT_REVISION)
+  BUILD_CLEAN=$(provenance_manifest_value TCODER_GIT_CLEAN)
 
   preflight_write_context "$out" "$f"
   # 六条硬闸各自读上面那几个量（bash 是动态作用域：本函数的 `local` 在被调函数里照样可见，
@@ -130,40 +134,6 @@ preflight_context() {  # preflight_context <outdir> <pid>
   fi
   [ "$hard" = "1" ] && echo "    ⚠ IGNORE_CONTEXT_GATE=1：条件不合格，这批读数不得进任何对比表。" >&2
   echo "    上下文已落 $f"
-}
-
-preflight_manifest_value() {  # preflight_manifest_value <KEY> → manifest 里的值（取不到=空）
-  # `build_app.sh` 落的 provenance 是 `KEY="value"`；注释行以 # 开头，天然不匹配。
-  local key="$1" line
-  [ -f dist/RELEASE_MANIFEST.env ] || { echo ""; return; }
-  line=$(grep -m1 "^${key}=" dist/RELEASE_MANIFEST.env 2>/dev/null)
-  printf '%s' "${line#*=}" | tr -d '"'
-}
-
-provenance_ok() {  # provenance_ok <manifest 里的完整 sha> <当前 HEAD> <manifest 的 GIT_CLEAN>
-  # → 0=被量的二进制就是这份代码；非 0 时把原因 echo 到 stdout（调用方贴进闸门话术）。
-  #
-  # 为什么闸门要有这一维（2026-09-21 实测）：`measurement-context.txt` 的 `HEAD=`
-  # 记的是**工作树**的头，而我 attach 的 `dist/Tcoder.app` 是两小时前从 `41add9e`
-  # 建的，中间隔了 39 个产物文件（整批 i18n + 我自己的 `PerfReadoutCells` 修复）。
-  # 结果"e991c6d 的 T2 读数"这句话从头到尾是假的——量的是旧二进制，只是恰好在新树上按了回车。
-  # 三个方向都拒：读不到 manifest（手搓的产物）、构建时工作树就脏、rev 对不上。
-  local built head clean
-  built="$1" head="$2" clean="$3"
-  if [ -z "$built" ] || [ "$built" = "unknown" ]; then
-    echo "读不到 dist/RELEASE_MANIFEST.env 的 TCODER_GIT_REVISION（产物不是本仓脚本建出来的？）"; return 1
-  fi
-  if [ "$clean" != "true" ]; then
-    echo "那趟构建**当时工作树就是脏的**（TCODER_GIT_CLEAN=${clean:-未记录}），rev 本身不可信"; return 1
-  fi
-  if [ -z "$head" ]; then
-    echo "取不到当前 HEAD，无法与产物比对"; return 1
-  fi
-  # manifest 存完整 sha、`git rev-parse HEAD` 也是完整 sha；短号只做人读，不参与判定。
-  case "$built" in
-    "$head") return 0 ;;
-    *) echo "产物是 ${built:0:7} 建的，当前代码是 ${head:0:7} —— 不同一份代码"; return 1 ;;
-  esac
 }
 
 front_is_target() {  # front_is_target <前台App名> → 0=就是被测 App

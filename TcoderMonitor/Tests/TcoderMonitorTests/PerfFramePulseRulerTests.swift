@@ -143,4 +143,48 @@ final class PerfFramePulseRulerTests: XCTestCase {
         let (out, code) = try runRuler(on: file, interaction: true)
         XCTAssertEqual(code, 0, "60 Hz 屏的正常节拍被判未达标 = 预算被硬编码成 120 了：\n\(out)")
     }
+
+    // MARK: - 4. 语义边界必须跟着读数走（不许被当成"顺便的注释"删掉）
+
+    /// 纯函数：读数文本里缺哪几条语义提醒。抽出来是为了能被合成样例正反两头钉
+    /// （本仓规矩：扫描型守卫必须配元测试，否则分不清"工具坏了"与"债还上了"）。
+    static func missingPulseCaveats(_ text: String) -> [String] {
+        var missing: [String] = []
+        let required: [(label: String, needle: String)] = [
+            ("心跳间隔不是主线程占用时长", "不是主线程占用时长"),
+            ("T2 只认 xctrace 的 app-update 相位", "app-update 相位"),
+        ]
+        for item in required where !text.contains(item.needle) {
+            missing.append(item.label)
+        }
+        return missing
+    }
+
+    private func pulseSourceText() throws -> (text: String, files: Int) {
+        let dir = Self.moduleRoot.appendingPathComponent("Sources/TcoderMonitor/Services/Performance")
+        let urls = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "swift" }
+        let joined = try urls.map { try String(contentsOf: $0, encoding: .utf8) }.joined(separator: "\n")
+        return (joined, urls.count)
+    }
+
+    func testPulseArtifactHeaderKeepsItsSemanticCaveats() throws {
+        // 为什么要有这条：`心跳最大间隔` 被读成"主线程卡了 1.5 秒"是我自己真犯过的错，
+        // 纠正它的两行只活在 `writeHeaderLocked()` 里。待并的 x6 分支正在重写同一段
+        // （它的行号已经和我这边错开了），**删掉那两行不会有任何测试红**。
+        let (text, files) = try pulseSourceText()
+        XCTAssertGreaterThanOrEqual(files, 3, "扫描面只有 \(files) 个文件——目录被动过，这条已经看不清现场")
+        XCTAssertTrue(text.contains("writeHeaderLocked"), "脉冲产物的表头函数不见了")
+        XCTAssertEqual(missingPulseCaveats(text), [],
+                       "读数旁边少了语义边界说明：产物文件头会重新让人把\u201c唤醒间隔\u201d读成\u201c占用时长\u201d")
+    }
+
+    func testPulseCaveatScannerCatchesBadAndSparesGood() {
+        let good = "# 语义提醒：= runloop 唤醒之间的间隔，不是主线程占用时长\n"
+            + "# 要量主线程占用，用 xctrace 的 app-update 相位\n"
+        XCTAssertEqual(missingPulseCaveats(good), [], "合规写法被误伤")
+        XCTAssertEqual(missingPulseCaveats("").count, 2, "全删了还不报——这条守卫是永真绿")
+        XCTAssertEqual(missingPulseCaveats(good.replacingOccurrences(of: "app-update 相位", with: "别的相位")),
+                       ["T2 只认 xctrace 的 app-update 相位"], "只删一条时没点名那一条")
+    }
 }

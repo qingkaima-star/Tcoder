@@ -403,7 +403,21 @@ selfcheck_binary_provenance() {  # selfcheck_binary_provenance <outdir>
   if provenance_ok "" "$H" true; then fail "读不到 manifest 却放行"; bad=1; fi
   if provenance_ok "$H" "$H" false; then fail "构建时工作树是脏的却放行——那时连 rev 本身都不可信"; bad=1; fi
   if provenance_ok "$H" "" true; then fail "取不到 HEAD 却放行——无法比对就等于没验"; bad=1; fi
-  [ "$bad" = "0" ] && ok "二进制出身判定五向都对（同 rev 放行 / 异 rev、缺 manifest、构建时脏、无 HEAD 一律拒）"
+  # 【同一件事只许有一把手尺子】我补这一维时先是**又写了一份**，才发现
+  # `verify_provenance.sh` 早就在做同一件事。现在判定住在 `perf_provenance.sh`，
+  # 两边都 source 它。下面三条把这个结构钉住：定义处唯一、交付档确实走它、
+  # 测量档不许留本地副本（漏一天就会分叉，而分叉之后错的那份常在喂结论）。
+  local defs
+  # 模式必须锚行首：不锚的话它会把我**写在自检里的这串模式本身**当成一处定义
+  # （第一版就是这么红的——报错报到自己头上，说明它真的在看内容）。
+  defs=$(grep -lr '^provenance_ok() {' scripts/ 2>/dev/null | tr '\n' ' ')
+  [ "$defs" = "scripts/perf_provenance.sh " ] \
+    || { fail "provenance_ok 的定义不止一处（$defs）——同一判定又长出第二份了"; bad=1; }
+  grep -q 'provenance_ok' scripts/verify_provenance.sh \
+    || { fail "verify_provenance.sh 不再经过共享判定（大概又手抄了一遍 [ a = b ]）"; bad=1; }
+  grep -q 'preflight_manifest_value\|^provenance_ok() {' scripts/perf_preflight.sh \
+    && { fail "perf_preflight.sh 里还留着本地副本，删掉、只 source"; bad=1; }
+  [ "$bad" = "0" ] && ok "二进制出身判定五向都对，且定义唯一（verify 与 preflight 共用 perf_provenance.sh）"
 }
 
 selfcheck_baseline_text_is_derived() {  # selfcheck_baseline_text_is_derived <outdir>

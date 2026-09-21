@@ -316,6 +316,15 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 要的话我先在服务端把有序版本准备好（不碰 `Views/**`），你那边只剩删调用。
 
 ### 第 2 步：帧率复测（分两小步，因为其中一步需要人手）
+> **包 2 落地（11:38）后新增的两条工具能力**：
+> ① `MODE=interact ./scripts/perf_wait_window.sh <tag> 3` —— T1 也能"机器等窗口"了：
+>    它会先等人手静默再起 App（不抢正在被人用的焦点），起完之后**要求这 20 秒里有人滚**，
+>    没人滚就被 `human_input_in_window` 拒。产物目录带档名（`-idle-run*` / `-interact-run*`），
+>    两批数不会互相覆盖。
+> ② "被量的二进制是不是这份代码"现在有闸门了（`scripts/perf_provenance.sh` 是唯一判定处，
+>    `verify_provenance.sh` 与测量档都走它）。**后果**：现在 `dist/` 里那个 09:49 建的包
+>    会被两条流水线同时拒——复测与九页取证之前**必须先** `./scripts/build_app.sh release`。
+>
 
 > **进度（09-21 11:07 更新，接上面那条排程约束）**：闸门修好后**第一趟受控 idle 已经出数**
 > ——`app-update` 0.6~1.0 ms（T2 红线 ≤4.0）、hitch 0 次、HTR 0.00、`potential-hangs` 0 次，
