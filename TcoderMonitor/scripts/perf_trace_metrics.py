@@ -55,6 +55,51 @@ BASELINE = {
     "hotspot_top1": "ViewGraphRootValueUpdater._updateViewGraph",
 }
 
+
+# ----------------------------------------------------------------------------
+# 对照列的文字：由 BASELINE **生成**，不许在行里再手抄一遍数字
+# ----------------------------------------------------------------------------
+# 为什么要生成：§1 那一栏的数字被更正过一整轮（4.05→4.06、4.67→4.77、5 帧→10 帧、
+# 0.21%→0.42%，见 spec §1.4），而当时**同一批数字在汇总表里还被手抄成字符串字面量**。
+# 手抄那份不会跟着字典走——下一次 §1 再更正，表上就还是旧数，而且旧数看着完全合理。
+# 每个函数都只吃 BASELINE 的字段、只做格式化，所以能被 selfcheck 逐条对账。
+
+def base_render_line():
+    b = BASELINE
+    return "p50 %.2f / p95 %.2f / p99 %.2f / max %.2f" % (
+        b["render_p50_ms"], b["render_p95_ms"], b["render_p99_ms"], b["render_max_ms"])
+
+
+def base_app_update_line():
+    v = BASELINE["app_update_ms"]
+    return "%.1f~%.1f（%d 次）" % (min(v), max(v), len(v))
+
+
+def base_hitches_line():
+    return "%d 次 / %.2f 每秒" % (BASELINE["hitches"], BASELINE["hitch_per_second"])
+
+
+def base_hitch_frame_line():
+    b = BASELINE
+    return "%.2f~%.2f ms (4~7 帧)" % (b["hitch_frame_ms_min"], b["hitch_frame_ms_max"])
+
+
+def base_hang_line():
+    b = BASELINE
+    return "%d 次 中位 %.1f / 累计 %.0f ms" % (
+        b["potential_hangs"], b["potential_hang_median_ms"], b["potential_hang_total_ms"])
+
+
+def base_main_thread_line():
+    b = BASELINE
+    return "%d/%d = %.1f%%" % (b["main_thread_samples"], b["main_thread_total_samples"],
+                               b["main_thread_share_pct"])
+
+
+def base_hotspot_line():
+    return "%.1f%% %s / UpdateStack::update" % (
+        BASELINE["hotspot_top1_pct"], "_updateViewGraph")
+
 FRAME_BUDGET_MS_DEFAULT = 8.333  # 120 Hz 下单帧预算，实测 Hz 不同时由 --budget-ms 覆盖
 
 

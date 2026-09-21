@@ -112,8 +112,12 @@ preflight_context() {  # preflight_context <outdir> <pid>
   qline=$(quiescence_probe)
   quiet=$(quietest_seconds "$qline")
 
+  # 取二进制的出身（**不是**工作树 HEAD）：闸门第六维与上下文都要用
+  BUILD_REV=$(preflight_manifest_value TCODER_GIT_REVISION)
+  BUILD_CLEAN=$(preflight_manifest_value TCODER_GIT_CLEAN)
+
   preflight_write_context "$out" "$f"
-  # 四条硬闸各自读上面那几个量（bash 是动态作用域：本函数的 `local` 在被调函数里照样可见，
+  # 六条硬闸各自读上面那几个量（bash 是动态作用域：本函数的 `local` 在被调函数里照样可见，
   # 拆函数没有改变任何取数顺序，也没有引入新的全局量）。
   preflight_gates
   if [ "$hard" = "1" ] && [ "${IGNORE_CONTEXT_GATE:-0}" != "1" ]; then
@@ -126,6 +130,40 @@ preflight_context() {  # preflight_context <outdir> <pid>
   fi
   [ "$hard" = "1" ] && echo "    ⚠ IGNORE_CONTEXT_GATE=1：条件不合格，这批读数不得进任何对比表。" >&2
   echo "    上下文已落 $f"
+}
+
+preflight_manifest_value() {  # preflight_manifest_value <KEY> → manifest 里的值（取不到=空）
+  # `build_app.sh` 落的 provenance 是 `KEY="value"`；注释行以 # 开头，天然不匹配。
+  local key="$1" line
+  [ -f dist/RELEASE_MANIFEST.env ] || { echo ""; return; }
+  line=$(grep -m1 "^${key}=" dist/RELEASE_MANIFEST.env 2>/dev/null)
+  printf '%s' "${line#*=}" | tr -d '"'
+}
+
+provenance_ok() {  # provenance_ok <manifest 里的完整 sha> <当前 HEAD> <manifest 的 GIT_CLEAN>
+  # → 0=被量的二进制就是这份代码；非 0 时把原因 echo 到 stdout（调用方贴进闸门话术）。
+  #
+  # 为什么闸门要有这一维（2026-09-21 实测）：`measurement-context.txt` 的 `HEAD=`
+  # 记的是**工作树**的头，而我 attach 的 `dist/Tcoder.app` 是两小时前从 `41add9e`
+  # 建的，中间隔了 39 个产物文件（整批 i18n + 我自己的 `PerfReadoutCells` 修复）。
+  # 结果"e991c6d 的 T2 读数"这句话从头到尾是假的——量的是旧二进制，只是恰好在新树上按了回车。
+  # 三个方向都拒：读不到 manifest（手搓的产物）、构建时工作树就脏、rev 对不上。
+  local built head clean
+  built="$1" head="$2" clean="$3"
+  if [ -z "$built" ] || [ "$built" = "unknown" ]; then
+    echo "读不到 dist/RELEASE_MANIFEST.env 的 TCODER_GIT_REVISION（产物不是本仓脚本建出来的？）"; return 1
+  fi
+  if [ "$clean" != "true" ]; then
+    echo "那趟构建**当时工作树就是脏的**（TCODER_GIT_CLEAN=${clean:-未记录}），rev 本身不可信"; return 1
+  fi
+  if [ -z "$head" ]; then
+    echo "取不到当前 HEAD，无法与产物比对"; return 1
+  fi
+  # manifest 存完整 sha、`git rev-parse HEAD` 也是完整 sha；短号只做人读，不参与判定。
+  case "$built" in
+    "$head") return 0 ;;
+    *) echo "产物是 ${built:0:7} 建的，当前代码是 ${head:0:7} —— 不同一份代码"; return 1 ;;
+  esac
 }
 
 front_is_target() {  # front_is_target <前台App名> → 0=就是被测 App
@@ -171,6 +209,7 @@ preflight_write_context() {  # preflight_write_context <outdir> <context 文件�
   { echo "# 测量上下文（读数只有在这一组条件下才可互比）"
     echo "时间=$(date '+%F %T')  HEAD=$(git rev-parse --short HEAD 2>/dev/null)  工作树改动数=$DIRTY"
     echo "被采pid=$pid  二进制=$TARGET_BINARY  口径=$TARGET_FLAVOR"
+    echo "产物构建rev=${BUILD_REV:-未记录}  构建时树clean=${BUILD_CLEAN:-未记录}  ← 必须与上面 HEAD= 同一份代码，否则读数归错对象"
     echo "实例数=${COEXIST:-1}  前台App=$front  被测进程visible=$visible"
     echo "load1=$load1  核数=$cores  并发swiftc=${others:-无}"
     echo "人输入静默=${quiet:-取不到}s  明细=${qline:-（探针没跑起来）}"
@@ -180,6 +219,15 @@ preflight_write_context() {  # preflight_write_context <outdir> <context 文件�
 }
 
 preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GATE 决定炸还是通报）
+  # 【第六维：被量的到底是不是这份代码】2026-09-21 实测踩到：`measurement-context.txt`
+  # 里的 `HEAD=` 是**工作树**的头，而我 attach 的那个 `dist/Tcoder.app` 是两小时前
+  # `build_app.sh` 从 `41add9e` 建的，中间隔了 39 个产物文件（整批 i18n + 我自己的
+  # `PerfReadoutCells` 修复）。于是"e991c6d 的 T2 读数"这句话从头到尾是假的——
+  # 量的是旧二进制，只是恰好在新树上按了回车。
+  if ! PROVENANCE_WHY=$(provenance_ok "$BUILD_REV" "$(git rev-parse HEAD 2>/dev/null)" "$BUILD_CLEAN"); then
+    echo "!! 二进制与代码不是同一份：${PROVENANCE_WHY} —— 先跑 scripts/build_app.sh release 再量。" >&2
+    hard=1
+  fi
   if [ -n "$others" ]; then
     echo "!! 有 swiftc 在跑（$others）——它会抢满全部核，app-update 相位会被显著抬高。等它跑完再来。" >&2
     hard=1

@@ -40,6 +40,8 @@ cmd_selfcheck() {
   selfcheck_weight_ruler "$out"     # 11) 收益分级：现读、缺料要喊、名单对不上要报⚠
   selfcheck_front_name "$out"       # 12) 前台名判定：显示名/进程名都认，别家一律拒
   selfcheck_render_regime "$out"    # 13) render 比率只在同一种出帧机制下互比
+  selfcheck_binary_provenance "$out" # 14) 被量的二进制必须就是这份代码（rev 对齐）
+  selfcheck_baseline_text_is_derived "$out"  # 15) 对照列文字不许是字典的第二份手抄
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
@@ -378,5 +380,79 @@ PY
     ok "render 机制判定双向都对（同机制放行 / 跨机制拦住并报倍数 / 缺分母不可比）"
   else
     fail "render 机制判定坏了：$(printf '%s' "$r" | tail -2)"
+  fi
+}
+
+selfcheck_binary_provenance() {  # selfcheck_binary_provenance <outdir>
+  # 14) 闸门第六维：**被量的二进制必须就是这份代码**。2026-09-21 实测踩过——
+  #     上下文里写 `HEAD=e991c6d`，而 attach 的 `dist/Tcoder.app` 是两小时前从
+  #     `41add9e` 建的（中间隔 39 个产物文件）。"e991c6d 的 T2 读数"是假的。
+  #     纯函数三个失效方向各钉一次，放行方向也必须钉（不然恒拒的闸门又算白修）。
+  if ! declare -f provenance_ok >/dev/null; then
+    fail "provenance_ok 不在作用域里（preflight 没被 source），这条自检等于没跑"
+    return
+  fi
+  local H=1111111111111111111111111111111111111111 B=2222222222222222222222222222222222222222 bad=0 why
+  # 注意取非的方向：`provenance_ok` 回 0 = "可比"。rev 不同却回 0 才是要防的失效。
+  if why=$(provenance_ok "$B" "$H" true); then
+    fail "rev 不同却放行了（正是要防的那类归错对象）"; bad=1
+  else
+    case "$why" in *"产物是 2222222"*"当前代码是 1111111"*) ;;       *) fail "拒因里没带上两个短号，人拿这话查不到现场：$why"; bad=1 ;; esac
+  fi
+  if provenance_ok "$H" "$H" true; then :; else fail "同一份代码被判不可比——这条闸门会恒拒，量不出任何东西"; bad=1; fi
+  if provenance_ok "" "$H" true; then fail "读不到 manifest 却放行"; bad=1; fi
+  if provenance_ok "$H" "$H" false; then fail "构建时工作树是脏的却放行——那时连 rev 本身都不可信"; bad=1; fi
+  if provenance_ok "$H" "" true; then fail "取不到 HEAD 却放行——无法比对就等于没验"; bad=1; fi
+  [ "$bad" = "0" ] && ok "二进制出身判定五向都对（同 rev 放行 / 异 rev、缺 manifest、构建时脏、无 HEAD 一律拒）"
+}
+
+selfcheck_baseline_text_is_derived() {  # selfcheck_baseline_text_is_derived <outdir>
+  # 15) 对照列的文字必须由 `BASELINE` **生成**，不许在 `fmt_row(...)` 里再抄一份数字。
+  #     为什么单独一条：§1 那批数被更正过一整轮（4.05→4.06、4.67→4.77、5 帧→10 帧、
+  #     0.21%→0.42%，spec §1.4），而当时字典与 `fmt_row` 里的字面量是**两份**。
+  #     下次再更正只会改到一处——表上留着旧数，而旧数看着完全合理，没人会起疑。
+  local out="$1" r
+  cat > "$out/derived_case.py" <<'PYCASE'
+import io, sys
+from perf_trace_metrics import (BASELINE, base_app_update_line, base_hang_line,
+                                base_hitch_frame_line, base_hitches_line, base_hotspot_line,
+                                base_main_thread_line, base_render_line)
+src = io.open(sys.argv[1], encoding="utf-8").read()
+# 扫"除注释行以外的整份文件"，而不是只扫含 fmt_row( 的行：
+# 后者会漏掉**续行**上的字面量（`fmt_row("x", base_line(),` 的下一行才是抄死的那串），
+# 而换行位置是格式化决定的人不会去盯的东西。注释行放过——那里的旧数是历史叙述，不是口径。
+printed = [ln for ln in src.splitlines() if not ln.strip().startswith("#")]
+drift = [x for x in ("2.73", "4.06", "25.12", "10.8~24.8", "684/807", "84.8%", "42.6",
+                     "573 ms", "0.42%", "33.33~58.33", "64.3%", "7 次 / 0.35")
+         if any(x in ln for ln in printed)]
+if drift:
+    print("对照列里还有手抄数字（字典一改就分叉）：%s" % ", ".join(drift)); sys.exit(1)
+cases = (("render_p95_ms", 9.99, base_render_line),
+         ("main_thread_share_pct", 12.5, base_main_thread_line),
+         ("app_update_ms", [1.5, 2.5], base_app_update_line),
+         ("potential_hangs", 77, base_hang_line),
+         ("hitches", 41, base_hitches_line),
+         ("hotspot_top1_pct", 33.3, base_hotspot_line),
+         ("hitch_frame_ms_max", 99.9, base_hitch_frame_line))
+for key, sentinel, fn in cases:
+    old = BASELINE[key]
+    BASELINE[key] = sentinel
+    try:
+        text = fn()
+    finally:
+        BASELINE[key] = old
+    probe = str(sentinel[1] if isinstance(sentinel, list) else sentinel)
+    if probe not in text:
+        print("改 %s 没让对照文字动（它是抄的，不是生成的）：%s" % (key, text)); sys.exit(1)
+    if fn() == text:
+        print("改 %s 前后文字一样（生成器压根没读字典）" % key); sys.exit(1)
+print("ok")
+PYCASE
+  r=$(PYTHONPATH="$(dirname "$TRACE_REPORT")" python3 "$out/derived_case.py" \
+        "$(dirname "$TRACE_REPORT")/perf_trace_summary.py" 2>&1)
+  if [ "$r" = "ok" ]; then
+    ok "对照列文字由 BASELINE 生成（打印行无手抄数，且改字典 7 处字段文字都会跟着动）"
+  else
+    fail "对照列与字典脱钩：$(printf '%s' "$r" | tail -2)"
   fi
 }
