@@ -117,9 +117,31 @@ selfcheck_perf_root_ignored() {  # selfcheck_perf_root_ignored <outdir>
   strays=$(grep -ln ':-/tmp/tcoder-[p]erf' scripts/*.sh 2>/dev/null | tr '\n' ' ')
   [ -z "$strays" ] \
     || { fail "这些文件里又出现写死的 /tmp 样本默认值：$strays（只许走 \$SCRATCH）"; bad=1; }
+  # 反向钉之二（2026-09-21 补）：不许有"建不出来就把样本根退回全局临时目录"的兜底。
+  # 上面那条 grep 抓不到它——形态完全不同，干的却是同一件事（GB 级 trace 落进 $TMPDIR）。
+  # 只看代码行：注释里叙述旧写法是"为什么现在不许"的证据，不是口径（这条我自己刚踩）。
+  #
+  # 【这条差点是永真绿】第一版图案写成 BRE 的 `\$\{?\(TMPDIR\|/tmp\)`，
+  # BSD grep 直接报 `invalid repetition count(s)` ⇒ 命中数永远为 0，
+  # "真文件 0 命中"看着像通过，其实是图案根本没生效。
+  # 现在这条图案是双向验过的：两行旧写法各命中一次、注释与话术行零命中、真文件零命中。
+  local fallback
+  fallback=$(grep -n 'SCRATCH="\$[({]TMPDIR' scripts/perf_harness.sh 2>/dev/null \
+             | grep -v '^[0-9]*:[[:space:]]*#' | tr '\n' ' ')
+  [ -z "$fallback" ] \
+    || { fail "perf_harness.sh 里样本根还能退回全局临时目录：$fallback"; bad=1; }
+  # 光"grep 不到"不够（那是结构钉）：真给一个建不出来的样本根，看它**拒不拒**。
+  # 与第 24 项同一套道理——一条永远不会失败的前置，比没有更坏。
+  local refusal
+  refusal=$(TCODER_SCRATCH=/dev/null/nope-such-dir bash scripts/perf_harness.sh report /nonexistent 2>&1)
+  case "$refusal" in
+    *"拒绝录制"*) : ;;
+    *) fail "样本根建不出来时没有拒绝录制，而是继续跑（拿到：$(printf '%s' "$refusal" | head -1)）"; bad=1 ;;
+  esac
   # `${bad:-0}`：我自己刚立的规矩——闸门与判据里的量一律兜底，
   # 否则 `set -u` 下"读一个还没被赋过值的全局"就是**静默中止**（今天已经栽过一次）。
-  [ "${bad:-0}" = "0" ] && ok "样本根已被 git 忽略，且没有第二处写死默认值"
+  [ "${bad:-0}" = "0" ] \
+    && ok "样本根已被 git 忽略：无第二处写死默认值、无临时目录兜底、建不出来真的拒录"
 }
 
 selfcheck_disk_precondition() {  # selfcheck_disk_precondition <outdir>

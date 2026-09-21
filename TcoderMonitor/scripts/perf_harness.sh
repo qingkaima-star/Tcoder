@@ -55,7 +55,19 @@ cd "$(dirname "$0")/.." || exit 1
 # 我们的 xctrace bundle 同样是 GB 级，规矩必须写进工具而不是写进记忆。
 # 覆盖方式：`TCODER_SCRATCH=/some/dir ./scripts/perf_harness.sh …`。
 SCRATCH="${TCODER_SCRATCH:-$(git rev-parse --show-toplevel)/.scratch}"
-mkdir -p "$SCRATCH" 2>/dev/null || SCRATCH="${TMPDIR:-/tmp}"
+# 建不出来就**拒绝录制**，不许把样本根退回全局临时目录。
+# 原来这里是"mkdir 失败就把 SCRATCH 指到 TMPDIR"的一行兜底 —— 上面那句
+# "不再往 $TMPDIR 倒"立刻被它推翻：一旦 `.scratch` 建不出来（只读挂载、
+# 路径被占、仓库在外置盘上休眠），GB 级 trace 就静默落回全局临时目录，
+# 正是 103 GB 那次的形状。第 23 项反例当时没抓到它，
+# 因为那条只认"绝对临时目录 + 样本名前缀"这种写死形态，不认变量兜底这种形态
+# （同一个失效的两副面孔）。这行注释本身也不许把那种字面量抄回来——
+# 抄回来就会被那条 grep 命中，判据被自己的说明文字绊倒，今晚已经第三次。
+if ! mkdir -p "$SCRATCH" 2>/dev/null || [ ! -w "$SCRATCH" ]; then
+  echo "!! 样本根 \$SCRATCH=$SCRATCH 建不出来或不可写 ⇒ 拒绝录制（不退回 \$TMPDIR）。" >&2
+  echo "   要么修这个目录，要么显式给一个可写且被 git 忽略的位置：TCODER_SCRATCH=/path/to/dir $0 …" >&2
+  exit 2
+fi
 
 # 录一档 xctrace 是 GB 级的事。2026-09-21 这台机被一次没自清的取证吃掉 103 GB、
 # 可用只剩 4.4 GiB，那种情况下录到一半会**留下半份 trace 且报告读起来像真的**。
