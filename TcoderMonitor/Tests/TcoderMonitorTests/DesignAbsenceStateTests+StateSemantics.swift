@@ -155,9 +155,12 @@ extension DesignAbsenceStateTests {
                           GitRepositoryInfoSection.firstCommitCaption(GitInsights()),
                           "两态撞回同一个字面，就是本轮要修的毛病")
         let stamp = Date(timeIntervalSince1970: 1_700_000_000)
-        XCTAssertEqual(GitRepositoryInfoSection.firstCommitCaption(
-                           GitInsights(isRepository: true, totalCommits: 3, firstCommitAt: stamp)),
-                       DateFormat.full.string(from: stamp))
+        let caption = GitRepositoryInfoSection.firstCommitCaption(
+            GitInsights(isRepository: true, totalCommits: 3, firstCommitAt: stamp))
+        XCTAssertEqual(caption, DateFormat.day.string(from: stamp),
+                       "读数格里的那一格走日期档，不是分钟档")
+        XCTAssertEqual(caption.count, 10,
+                       "「首次提交」又长回 `yyyy-MM-dd HH:mm` —— 28pt 读数格放不下 16 个字符，页尾实拍里它被截成 `17:…`")
     }
 
 }

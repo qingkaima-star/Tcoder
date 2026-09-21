@@ -210,7 +210,7 @@ struct GitRepositoryInfoSection: View {
     /// 压根不是仓库 / 没跑过分析 → 「没查」（`notAnalysed`，给 `--`）。
     /// 两者以前共用一个 `--`，用户就没法分辨「这仓库是空的」和「我们没看」。
     static func firstCommitCaption(_ git: GitInsights) -> String {
-        if let first = git.firstCommitAt { return DateFormat.full.string(from: first) }
+        if let first = git.firstCommitAt { return DateFormat.day.string(from: first) }
         return (git.isRepository && git.totalCommits == 0)
             ? DataAbsence.measuredEmpty.textDisplay
             : DataAbsence.notAnalysed.display

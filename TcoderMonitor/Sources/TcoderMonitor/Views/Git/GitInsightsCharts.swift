@@ -253,16 +253,22 @@ struct GitCommitRow: View {
 
             Text(NumberFormat.signed(commit.additions))
                 .font(CodeGitType.number(Theme.Typo.monoSmall))
-                .foregroundStyle(Theme.Semantic.success.textColor)
+                // 0 行不是"有动作"：一提交只改文件不增行时，绿 0 / 红 0 会把"没做这件事"
+                // 说成"做了这件事且量是 0"。语义色只给真有增删的那两档，0 退回弱墨。
+                // 页尾实拍（.scratch/evidence-8de2d17/light-tail/Git 洞察.png）里
+                // `e01e5fb` 那行的删除列就是一枚红 0。
+                .foregroundStyle(commit.additions == 0 ? Self.quietNumber : Theme.Semantic.success.textColor)
                 .tableCell(DataColumns.column(columns, 3))
 
             Text(NumberFormat.signed(-commit.deletions))
                 .font(CodeGitType.number(Theme.Typo.monoSmall))
-                .foregroundStyle(Theme.Semantic.danger.textColor)
+                .foregroundStyle(commit.deletions == 0 ? Self.quietNumber : Theme.Semantic.danger.textColor)
                 .tableCell(DataColumns.column(columns, 4))
         }
         .dataTableRow()
     }
+
+    private static let quietNumber = Color.secondary
 }
 
 // MARK: - 候选仓库行
