@@ -60,7 +60,68 @@ def live_help_dirs(argv):
     return sorted(p for p in base.glob("*") if p.is_dir() and not p.name.startswith("sandbox-"))
 
 
+def read_help_entries(path):
+    """从一份读数文件里还原 help 值，**两种格式都吃**：
+
+    - 新版（`ax_dump` 已改）：一条 help 一行，值里的换行写成 " ⏎ "；
+    - 旧版：help 原样多行打印，于是第 2 行起没有 `HELP` 前缀 —— 那正是
+      "扫描边界"整本台账被读成不存在的原因（行式解析吃多行载荷）。
+      不回头解析旧文件，就等于让历史那批数一直少报。
+    """
+    entries = []
+    current = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("HELP\t"):
+            if current is not None:
+                entries.append(current)
+            current = line.split("\t", 1)[1]
+        elif line.startswith("SUMMARY") or not line.strip():
+            if current is not None:
+                entries.append(current)
+                current = None
+        elif current is not None:
+            current += " ⏎ " + line
+    if current is not None:
+        entries.append(current)
+    return entries
+
+
+def selfcheck() -> int:
+    """正对照：造一份"两种格式混在一起"的读数，逐条还原必须完全一致。
+
+    为什么必须有：`ax_dump` 早先原样打印多行 help，下游按 `^HELP` 逐行读，
+    于是每条多行 tooltip **只有第一行进了覆盖率** —— 而 359 vs 236 这个差
+    是修完才看见的。行式解析吃多行载荷，本仓已经撞过三次（awk 列位那次是同族）。
+    """
+    import tempfile
+    payload = [
+        "HELP\t第一行单条",
+        "HELP\t本次扫描有 6 条边界生效 ⏎ 隐藏条目 · 9 个条目 · 行数不适用 ⏎ 语言表未收录的后缀 · 行数未统计",
+        "HELP\t旧格式第一条的前半",
+        "旧格式第一条的后半（没有 HELP 前缀）",
+        "SUMMARY windows=1 visited=3 withHelp=3",
+    ]
+    want = {"第一行单条",
+            "本次扫描有 6 条边界生效", "隐藏条目 · 9 个条目 · 行数不适用",
+            "语言表未收录的后缀 · 行数未统计",
+            # 这两段就是那个 bug 的显形处：只认 `^HELP` 的解析会把它们整个丢掉
+            "旧格式第一条的前半", "旧格式第一条的后半（没有 HELP 前缀）"}
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "probe.txt"
+        path.write_text("\n".join(payload) + "\n", encoding="utf-8")
+        got = {piece.strip() for entry in read_help_entries(path)
+               for piece in entry.split(" ⏎ ") if piece.strip()}
+    missing, extra = want - got, got - want
+    if missing or extra:
+        print(f"!! 解析器 selfcheck 失败：少还原 {missing}，多出 {extra}")
+        return 1
+    print(f"✅ 解析器 selfcheck 通过：{len(want)} 段多行/单行 help 全部原样还原")
+    return 0
+
+
 def main(argv):
+    if argv and argv[0] == "--selfcheck":
+        return selfcheck()
     root = repo_root()
     dirs = live_help_dirs(argv)
     evidence = [p for d in dirs for p in sorted(d.glob("*.txt"))]
@@ -69,9 +130,10 @@ def main(argv):
         return 1
     live = set()
     for path in evidence:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if line.startswith("HELP\t"):
-                live.add(line.split("\t", 1)[1])
+        for entry in read_help_entries(path):
+            for piece in entry.split(" ⏎ "):
+                if piece.strip():
+                    live.add(piece.strip())
 
     sites = static_sites(root / "TcoderMonitor/Sources/TcoderMonitor")
     hit, missed, unmatched = 0, [], []

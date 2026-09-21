@@ -65,7 +65,11 @@ func walk(_ element: AXUIElement, _ depth: Int) {
 
 for window in windows { walk(window, 0) }
 
-for text in helpTexts { print("HELP\t\(text)") }
+// ⚠ 输出格式：一条 help **占一行**，值里的换行折成 " ⏎ "。
+// 早先按原样打印，多行 tooltip（`.help(limits.joined("\\n"))` 这类）会拆成好几行，
+// 而下游按 `^HELP` 逐行读 —— 于是**只有第一行被算进覆盖率**，
+// "扫描边界"那整本台账一度被读成不存在。行式解析吃多行载荷，又是一次 awk 列位那族。
+for text in helpTexts { print("HELP\t" + text.replacingOccurrences(of: "\n", with: " ⏎ ")) }
 var summary = "SUMMARY windows=\(windows.count) visited=\(visited) withHelp=\(helpTexts.count)"
 if depthTruncated { summary += " DEPTH_TRUNCATED=1" }
 print(summary)
