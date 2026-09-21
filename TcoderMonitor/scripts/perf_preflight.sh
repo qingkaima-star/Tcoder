@@ -332,8 +332,13 @@ sweep_orphan_traces() {  # 只删**没有任何进程打开着**的 .ktrace 中�
 
 post_run_disk_hygiene() {  # 每轮收尾固定两件事：进程真退了没 + $TMPDIR 残骸
   local left
-  left=$(pgrep -x xctrace 2>/dev/null | tr '\n' ' ')
+  # `|| true` 不是装饰：`pgrep` 在"没有 xctrace"时退出码是 1，
+  # 而 `set -e` 会让整个收尾**在那一行中止** —— 于是"机器干净"这种最好的情况
+  # 反而跳过了扫残骸。新加的第 22 项收尾检查就是把它抓出来的东西。
+  left=$(pgrep -x xctrace 2>/dev/null | tr '\n' ' ' || true)
   [ -n "$left" ] && echo "    ⚠ 还有 xctrace 在场（pid ${left% }）——先别开下一趟" >&2
   printf '    %s\n' "$(sweep_orphan_traces "${1:-${TMPDIR:-/tmp}}")"
-  echo "    磁盘可用 $(disk_free_gib) GiB（低于 ${MIN_FREE_GIB} 就不开新趟）"
+  # 阈值名收敛到 TCODER_MIN_FREE_GIB 时漏改了这行：`set -u` 下它直接**中止收尾**，
+  # 于是"录成功的一趟"被上层记成失败（今晚就是这样丢了一份合格的心跳期读数）。
+  echo "    磁盘可用 $(disk_free_gib) GiB（低于 ${TCODER_MIN_FREE_GIB:-20} 就不开新趟）"
 }

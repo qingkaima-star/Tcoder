@@ -690,6 +690,17 @@ selfcheck_probe_self_sufficient() {  # selfcheck_probe_self_sufficient <outdir>
   raw=$(bash -c 'set -euo pipefail
                  source scripts/perf_probes.sh 2>/dev/null
                  quiescence_probe' 2>&1)
+  # 收尾那一串也一样要能在裸 `set -u` 下调通：今晚 `post_run_disk_hygiene` 引用了一个
+  # 已被改名收掉的 `$MIN_FREE_GIB` ⇒ 录制**成功**的一趟被上层记成失败（丢了一份合格读数）。
+  local hygiene
+  hygiene=$(bash -c 'set -euo pipefail
+                     source scripts/perf_preflight.sh 2>/dev/null
+                     post_run_disk_hygiene /nonexistent-tcoder-sweep 2>&1' 2>&1)
+  case "$hygiene" in
+    *"unbound variable"*) fail "收尾磁盘卫生在裸 set -u 下有未初始化量：$hygiene"; return ;;
+  esac
+  printf '%s\n' "$hygiene" | grep -q '孤儿 trace' \
+    || { fail "收尾磁盘卫生没真的跑起来（拿到「$hygiene」）——它不在场就等于每轮都没扫"; return; }
   case "$raw" in
     *"unbound variable"*) fail "探针族在裸 set -u 消费者下仍有未初始化量：$raw"; return ;;
   esac
