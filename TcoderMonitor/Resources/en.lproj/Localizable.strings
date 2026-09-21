@@ -594,4 +594,4 @@
 "分析完成" = "Analysis complete";
 "五路分析全部失败" = "All five analysers failed";
 "已完成 %1$@/%2$@ 路" = "%1$@/%2$@ streams done";
-"识别规则降级：%1$@ 条正则没能编译，函数数与圈复杂度会偏低。这一屏的 0 读作「我们的规则没跑起来」，不读作「这个仓库没有函数」。" = "Analyser degradation: %1$@ regular expression(s) failed to compile, so function counts and cyclomatic complexity will read LOW. A 0 on this page means "our rules did not run", not "this repository has no functions".";
+"识别规则降级：%1$@ 条正则没能编译，函数数与圈复杂度会偏低。这一屏的 0 读作「我们的规则没跑起来」，不读作「这个仓库没有函数」。" = "Analyser degradation: %1$@ regular expression(s) failed to compile, so function counts and cyclomatic complexity will read LOW. A 0 on this page means \"our rules did not run\", not \"this repository has no functions\".";

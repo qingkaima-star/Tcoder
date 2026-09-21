@@ -242,8 +242,9 @@ struct CodeInvariantRow: View {
             // 会在界面上长成"这个仓库 0 个函数"，而那是关于我们的事实、不是关于仓库的。
             if let failures = code.analyzerRuleFailures, !failures.isEmpty {
                 DataNotice(
-                    text: localizedFormat("识别规则降级：%1$@ 条正则没能编译，函数数与圈复杂度会偏低。"
-                                          + "这一屏的 0 读作「我们的规则没跑起来」，不读作「这个仓库没有函数」。",
+                    // 整句一条字面量。**不能拆成两段再 `+`**：那样运行时查得到、
+                    // 而按字面量比对键的守卫会把它判成"目录里有死键"（本仓既有判据）。
+                    text: localizedFormat("识别规则降级：%1$@ 条正则没能编译，函数数与圈复杂度会偏低。这一屏的 0 读作「我们的规则没跑起来」，不读作「这个仓库没有函数」。",
                                           NumberFormat.grouped(failures.count)),
                     role: Theme.Semantic.warning, icon: .riskWarning, iconLabel: "分析器降级")
                     // 台账内容是"规则片段"，不是文案：不进查表，免得运行时漏翻台账
