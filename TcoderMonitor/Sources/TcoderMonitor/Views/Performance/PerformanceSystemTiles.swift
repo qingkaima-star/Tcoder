@@ -161,7 +161,7 @@ struct PerformanceSystemTiles: View {
             // 后者在窄窗口下按弹性比例压缩每段，`·` 会单独留在行尾（清单 2.14）。
             // 同页 `sampleStats` 本来就是拼成单串的写法 —— 两种写法并存就是"不规整"本身。
             Text(localizedFormat("机身 %1$@ · 已运行 %2$@ · 全系统 %3$@ 个进程",
-                                 context.snapshot?.thermalState.rawValue ?? Live.missing,
+                                 SystemReadings.thermalText(context),
                                  Self.uptimeText(context.snapshot?.uptimeSeconds),
                                  Live.grouped(context.snapshot?.processCount)))
             Spacer(minLength: 0)
