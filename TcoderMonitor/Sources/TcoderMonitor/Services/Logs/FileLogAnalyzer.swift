@@ -60,6 +60,13 @@ final class FileLogAnalyzer: LogAnalysisProviding {
         summary.crashCount = ledger.countedCrashCount
         summary.fatalCount = aggregate.fatalCount
         summary.infoLineCount = aggregate.infoLineCount
+        // 分母 = **真日志行**（RD-46b）：崩溃报告的正文已经在 `crashCount` 那一路扣过分，
+        // 不许再拿它去稀释「每千行日志错误数」。被移出的那些行没有消失，
+        // 它们在 `aggregate.crashReportLineCount` / `crashReportFileCount` 两格里，
+        // 落盘侧也仍然逐份留在 `scannedFiles`（role == 崩溃报告，各带自己的行数）。
+        // ⚠️ 这条边有个后果要总工拍：一个**只有崩溃报告、没有真日志**的项目，
+        //    现在分母是 0，`stabilityOutcome` 会让整维缺席 ⇒ 那几次崩溃也就不扣分了。
+        //    正确解法是 Health 侧把"有崩溃证据但零日志行"当第三种输入，不在本流可写范围内。
         summary.totalLinesScanned = aggregate.totalLinesScanned
         summary.topErrors = aggregate.topErrors
         summary.trend = aggregate.trend

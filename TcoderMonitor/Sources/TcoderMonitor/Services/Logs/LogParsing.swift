@@ -84,7 +84,17 @@ struct LogAggregate: Sendable {
     var crashCount: Int = 0
     var fatalCount: Int = 0
     var infoLineCount: Int = 0
+    /// 密度分母：**真日志文件**读到的行数。`role == .crash` 的那些一律不在里面（RD-46b）。
     var totalLinesScanned: Int = 0
+    /// 被移出分母的那些行去了哪儿：崩溃报告（读成功的那些）贡献的**正文行数**。
+    /// 开这两格是为了"移出分母"不等于"消失"——行数仍然要能点名，否则只是把一次灌大
+    /// 换成一次静默丢弃。落盘字段由总工统一开（`crashReportLineCount: Int?`），
+    /// 现在的落盘侧替代读者是 `LogSummary.scannedFiles` 里 role == .crash 的那几份各自行数。
+    var crashReportLineCount: Int = 0
+    /// 崩溃报告的**份数**（读成功的）。它与 `crashCount`（**确认崩溃次数**）不是一回事：
+    /// 一份报告可以含多次崩溃事件，也可以一份都没确认（疑似 / 解析失败 / 无事件时间）。
+    /// 总工预备落的字段名：`crashReportCount: Int?`。
+    var crashReportFileCount: Int = 0
     var topErrors: [ErrorCluster] = []
     var trend: [LogBucket] = []
     var affectedFiles: [String: Int] = [:]
