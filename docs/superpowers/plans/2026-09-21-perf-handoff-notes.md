@@ -536,3 +536,22 @@ Views/Shell/SidebarRows.swift:89      ? Color(nsColor: .quaternaryLabelColor)
 是现成的、语义相同的一份）。终点 0；棘轮今天起会拦新增。
 顺带这也是设计一致性：这两处是 `Views/**` 里**仅有**的直接取系统 `NSColor` 的写法
 （`grep -rn 'Color(nsColor:' Views/` 只出这两条；裸 `Color.gray` 那类另一条轴，归颜色面积收敛）。
+
+## §O（2026-09-22 15:35）一次性红：`CoverageAnalyzerTests` 报 0.0 ≠ 78.0 —— 报了，没动它
+
+15:14 那轮全量门禁在 `testUnitAndIntegrationKindsAreSeparated` 判红
+（`XCTAssertEqualWithAccuracy ("0.0") != ("78.0")`）。**不是我的改动**（那三笔只动尺子/文档），
+而**先怀疑自己的取数**是对的：我第一反应是"我的 `--filter` 跑污染了覆盖率产物"，
+读了 `CoverageAnalyzerTests.swift:5-30` 才发现夹具根是
+`NSTemporaryDirectory()/tcoder-cov-<UUID>/`、每个用例新建、tearDown 删除
+⇒ **跨次污染这个解释不成立**，写下来免得下一个人白查一遍。
+
+15:20 原样重跑（代码一字未改）⇒ `Executed 1050 tests, with 12 skipped and 0 failures`、
+回执按头钉死（`0bd7643`）。所以这是一次性红，最可能的原因是负载
+（同一次 wall 508 s vs cpu 262 s，机器上同时有别人的 `swift-test` 与 release 构建）。
+
+**按红线处理：不改那个文件、不拧阈值、不给自己的分支加豁免。** 但留一条**建议**给尺子主人
+（不是要求）：这条用例断言的是"分析器把 unit/integration 两类报告分开"，
+高负载下若真存在超时/并发读目录的路径，值得看一眼 `CoverageAnalyzer` 的目录扫描是否有
+时间预算——`metrics.unreadableDirectoryCount` 这个字段的存在说明它已经在容忍读不到的目录，
+那么"读不到"与"读到 0"在数值上是不是同一个形状，是可查的一问。
