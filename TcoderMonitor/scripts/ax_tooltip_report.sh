@@ -27,8 +27,13 @@ SCRATCH="${TCODER_SCRATCH:-$(git rev-parse --show-toplevel)/.scratch}"
 mkdir -p "$SCRATCH" 2>/dev/null || SCRATCH="${TMPDIR:-/tmp}"
 
 BIN="$PWD/dist/Tcoder.app/Contents/MacOS/TcoderMonitor"
-AXSRC="$PWD/scripts/ax_dump.swift"
-AXBIN="$SCRATCH/ax_dump"
+# AX_TOOL / AX_COUNT_PATTERN 是**默认不变**的两个口子（2026-09-22 由 WS-CL 加）：
+# 换一把读数器（如 `ax_body_text`：同一趟既出 HELP 又出正文 TEXT）时，
+# 不必复制这 100 行起停逻辑 —— 复制一份起停就是"同一职责的第二份实现"，必然漂。
+AX_TOOL="${AX_TOOL:-ax_dump}"
+AX_COUNT_PATTERN="${AX_COUNT_PATTERN:-^HELP}"
+AXBIN="$SCRATCH/$AX_TOOL"
+AXSRC="$PWD/scripts/$AX_TOOL.swift"
 AX_SET="${AX_SET:-full}"
 OUT="$SCRATCH/tcoder-ax-tooltip/$AX_SET"
 SANDBOX="$SCRATCH/tcoder-ax-tooltip/sandbox-$AX_SET"
@@ -128,7 +133,7 @@ dump_one() {  # dump_one <页名> <top|bottom> ；条数写进全局 LAST_COUNT�
   if [ $code -ne 0 ]; then
     echo "   !! $name/$scroll 读数失败 exit=$code：$(tail -2 "$file" | tr '\n' ' ')"
   else
-    LAST_COUNT=$(grep -c '^HELP' "$file" || true)
+    LAST_COUNT=$(grep -c "$AX_COUNT_PATTERN" "$file" || true)
     echo "   $name/$scroll → $(tail -1 "$file")"
     [ "$LAST_COUNT" -gt 0 ] || echo "   ⚠ $name/$scroll 一个 help 都没有（visited 非 0 时这才是产品问题）"
   fi

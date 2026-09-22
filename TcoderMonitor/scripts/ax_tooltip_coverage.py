@@ -120,6 +120,29 @@ def selfcheck() -> int:
     return 0
 
 
+def catalog_keys() -> set:
+    """英文目录里所有键。**唯一一份**：正文台账（`ax_body_audit.py`）也从这里取，
+    免得两处各写一遍解析正则然后漂掉。"""
+    catalog = repo_root() / "TcoderMonitor/Resources/en.lproj/Localizable.strings"
+    text = catalog.read_text(encoding="utf-8") if catalog.exists() else ""
+    return set(re.findall(r'^"((?:[^"\\]|\\.)+)"\s*=', text, re.M))
+
+
+def hits_key(fragment: str, keys) -> bool:
+    """A 类判据要严：整句等于键，或键带 %N$@ 占位符且片段以键的"首个占位符之前"开头。
+    上一版用前 14 字互相比对，结果 "相似度" 这种**列名短键**把所有以它开头的整句
+    都算成"有键没查"—— 那是测量假象，不是缺陷（本仓第三次"分母自己骗人"）。"""
+    for key in keys:
+        if fragment == key:
+            return True
+        if "%1$" not in key and "%@" not in key:
+            continue
+        head = re.split(r"%[0-9]*\$?[@ds]", key)[0]
+        if len(head) >= 6 and fragment.startswith(head):
+            return True
+    return False
+
+
 def language_audit(argv) -> int:
     """英文态双语残留台账：把每个 help 片段分成三类，**逐条列出来给人判**。
 
@@ -138,9 +161,7 @@ def language_audit(argv) -> int:
     if not evidence:
         print("!! 没有取证产物（英文态那趟：AX_LANG=en AX_SET=en ./scripts/ax_tooltip_report.sh）")
         return 1
-    catalog = repo_root() / "TcoderMonitor/Resources/en.lproj/Localizable.strings"
-    text = catalog.read_text(encoding="utf-8") if catalog.exists() else ""
-    keys = set(re.findall(r'^"((?:[^"\\]|\\.)+)"\s*=', text, re.M))
+    keys = catalog_keys()
     han = re.compile(r"[一-鿿]")
     counts: dict[str, int] = {}
     for path in evidence:
@@ -149,21 +170,7 @@ def language_audit(argv) -> int:
                 piece = piece.strip()
                 if piece and han.search(piece):
                     counts[piece] = counts.get(piece, 0) + 1
-    # A 类判据要严：整句等于键，或键带 %N$@ 占位符且片段以键的"首个占位符之前"开头。
-    # 上一版用前 14 字互相比对，结果 "相似度" 这种**列名短键**把所有以它开头的整句
-    # 都算成"有键没查"—— 那是测量假象，不是缺陷（本仓第三次"分母自己骗人"）。
-    def hits_key(fragment: str) -> bool:
-        for key in keys:
-            if fragment == key:
-                return True
-            if "%1$" not in key and "%@" not in key:
-                continue
-            head = re.split(r"%[0-9]*\$?[@ds]", key)[0]
-            if len(head) >= 6 and fragment.startswith(head):
-                return True
-        return False
-
-    a = [k for k in counts if hits_key(k)]
+    a = [k for k in counts if hits_key(k, keys)]
     data = [k for k in counts
             if k not in a and ("/" in k or re.search(r"^(Latest|最新)[：:]", k) or "Tcoder（" in k)]
     b = [k for k in counts if k not in a and k not in data]
