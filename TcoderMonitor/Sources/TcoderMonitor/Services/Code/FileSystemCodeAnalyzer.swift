@@ -152,7 +152,10 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         )
         // 契约接入（P7-C 3-2）：判据用 `limitationSummary` 非空而不是 `isPartial` —— 前者还含
         // 「按规则排除了多少条目」这类**范围**事实，读者要知道数字是在什么范围内测出来的。
-        let limits = coverage.limitationSummary
+        // R1（RD-04）再拼一段**识别覆盖面**：Java 走轻量正则，认不出的形状必须在这里出声，
+        // 否则「没识别出来」会在界面上长成「这个文件没有复杂函数」。零命中时返回空数组，
+        // 提示条不常驻 —— 与上面「没被切过不许带边界字段」同一条纪律。
+        let limits = coverage.limitationSummary + ComplexityEngine.JavaSignatureDeclines.notes(for: files)
         metrics.scanLimitations = limits.isEmpty ? nil : limits
         return AnalysisOutcome(metrics: metrics, coverage: coverage)
     }
