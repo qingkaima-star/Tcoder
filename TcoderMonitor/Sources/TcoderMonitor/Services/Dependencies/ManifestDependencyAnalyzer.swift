@@ -14,16 +14,30 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
     private let options: ScanOptions
     private let maxDepth: Int
     private let maxManifestBytes: Int
-    private let fileManager: FileManager
+    let fileManager: FileManager   // 跨文件可见：版本证据分片（本类型 extension）要用
+    /// 在线核对的数据源。默认是真源（OSV + npm registry）；测试里换成假源，
+    /// 于是「npm 成功 + OSV 失败」「预算截断」「部分失败」都能在**不打的网**的前提下钉住。
+    /// 协议形状按 AGENTS §3：不动 `ServiceContracts` 的冻结协议，只给具体类型加带默认值的参数。
+    let onlineSource: any DependencyOnlineSource
+
+    /// 本轮从**已解析产物**（effective-POM / 依赖树 / SBOM）里读到的证据（RD-13b 的披露面）：
+    /// 文件 -> 它给出确切版本的条数。存在这里是为了让"依据哪份文件"能随报告一起说出口
+    /// （台账 §4 第 1 条：重要结论要能追溯）。存储属性必须住在类本体（扩展不许带存储），
+    /// 而写它的是同类型在另一文件里的 extension（400 行口径拆的），故只能是 internal。
+    var resolvedArtifactEvidence: [(file: String, entries: Int)] = []
+    /// 每份锁文件/产物解析出的条数与歧义数（歧义 = 同名多版本，一律不回填、不猜）。
+    var resolutionProvenance: [String: (entries: Int, ambiguous: Int)] = [:]
 
     init(options: ScanOptions = .default,
          maxDepth: Int = ManifestDependencyAnalyzer.defaultMaxDepth,
          maxManifestBytes: Int = 4_000_000,
-         fileManager: FileManager = .default) {
+         fileManager: FileManager = .default,
+         onlineSource: any DependencyOnlineSource = LiveDependencyOnlineSource()) {
         self.options = options
         self.maxDepth = max(1, maxDepth)
         self.maxManifestBytes = maxManifestBytes
         self.fileManager = fileManager
+        self.onlineSource = onlineSource
     }
 
     // MARK: - Entry point
@@ -63,12 +77,18 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
         ecosystems.sort(by: Self.manifestOrder)
 
         var report = DependencyReport(analyzedAt: Date(), ecosystems: ecosystems)
+        applyLockResolutions(&report, root: projectRoot)
         applyBundledKnowledge(&report)
         if allowNetwork {
             await applyNetworkKnowledge(&report)
         } else {
             report.networkLookupPerformed = false
-            report.networkLookupNote = Self.offlineCaveat(for: report)
+            report.networkLookupNote = Self.offlineCaveat(
+                for: report, resolvedArtifacts: resolvedArtifactEvidence.map(\.file))
+            // 离线也要落账：逐条状态 + 报告级账本 + 分 scope 统计一次写完。
+            // 不写的话消费端只能读到 nil，而 nil 在账本里就是"没测过"——
+            // 那正是"未查"该有的形状，但总览与评分需要拿到**为什么**未查的分档计数。
+            applyCheckStates(&report, online: nil)
         }
         return report
     }
@@ -186,7 +206,7 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
         (try? fileManager.contentsOfDirectory(atPath: hit.url.deletingLastPathComponent().path)) ?? []
     }
 
-    private func readText(at url: URL) -> String? {
+    func readText(at url: URL) -> String? {
         guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
               size <= maxManifestBytes else { return nil }
         guard let data = try? Data(contentsOf: url) else { return nil }
@@ -213,161 +233,29 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
 
     private func applyBundledKnowledge(_ report: inout DependencyReport) {
         Self.mutateRecords(&report.ecosystems) { record in
-            // 只有声明版本能收敛成数字（`^1.2`、`5.6`）才回填，否则 "未声明"、"*"、"latest"
-            // 会被冻结契约的 isProbablyOutdated 当成 0.0.0 一律判成过旧。
-            guard KnownVulnerability.comparableCore(record.version) != nil else { return }
+            // 查询用的是**版本身份**给出的那个数（锁文件解析值优先，其次精确声明，
+            // 最后才是范围下界）；三样都没有就不比对，否则 "未声明"、"*"、"latest"
+            // 会被当成 0.0.0 一律判成过旧 —— 旧实现这里是 `comparableCore(version)`，
+            // 与在线侧的取数口径不是一套，两处各自解释同一个 `^1.2.3`。
+            let identity = DependencyVersionIdentity.of(record)
+            guard let queryVersion = identity.query?.version else { return }
             record = DependencySnapshot.applySnapshotInfo(to: record)
             let hits = VulnerabilitySource.matches(ecosystem: record.ecosystem,
                                                    name: record.name,
-                                                   version: record.version)
+                                                   version: queryVersion)
             guard !hits.isEmpty else { return }
             record.knownVulnerabilities = Self.deduped(hits.map { $0.cveIdentifiers.first ?? $0.id })
         }
         report.offlineVulnerabilities = VulnerabilitySource.offlineVulnerabilities(for: allRecords(report))
     }
 
-    /// 离线时的「我们没做什么」说明，与在线路径同等直白（在线侧在
-    /// `DependencyNetworkLookup` 里会把失败与未覆盖生态写进 note，离线侧原先什么都没有，
-    /// 于是 `vulnerableCount = 0` 读起来像"查过、干净"）。
-    static func offlineCaveat(for report: DependencyReport) -> String {
-        let records = report.ecosystems.flatMap(\.dependencies)
-        let skipped = records.filter { KnownVulnerability.comparableCore($0.version) == nil }.count
-        // 四段各自是整句键、分隔符也查表：`parts.joined(separator: "；")`
-        // 拼出来的整串在英文态会一半中文一半英文（运行时漏翻台账点名的就是这条）。
-        var parts = [localizedFormat("未联网核对：漏洞判定只依据内置快照（覆盖 npm / Maven / Python），%@",
-                                      DependencySnapshot.asOfText)]
-        let uncovered = ecosystemsWithoutOfflineRules(in: report)
-        if !uncovered.isEmpty {
-            parts.append(localizedFormat("本次未覆盖生态：%@",
-                                          uncovered.joined(separator: localizedCopy("、"))))
-        }
-        if skipped > 0 {
-            parts.append(localizedFormat("%@ 项版本不可比较（「*」、workspace:*、分支/修订号等）已跳过比对",
-                                          NumberFormat.grouped(skipped)))
-        }
-        if report.totalDependencies == 0 { parts.append(localizedCopy("没有可核对的依赖")) }
-        return parts.joined(separator: localizedCopy("；"))
-    }
-
-    /// 该生态有没有内置离线漏洞规则。从规则表与坐标互通表**推导**，不另抄一份清单，
-    /// 免得规则增删后口径漂移（`DependencyReport.uncoveredEcosystemNames` 就是抄了
-    /// `displayName` 清单，结果把 npm 误报成"未覆盖"）。
-    static func hasOfflineRules(for ecosystem: DependencyEcosystem) -> Bool {
-        let scopes = Set(DependencySnapshot.lookupScopes(for: ecosystem))
-        return VulnerabilitySource.bundled.contains { scopes.contains($0.ecosystem.rawValue) }
-    }
-
-    /// 报告里存在、但内置规则不覆盖的生态（去重、保持首次出现顺序）。
-    static func ecosystemsWithoutOfflineRules(in report: DependencyReport) -> [String] {
-        var seen = Set<DependencyEcosystem>()
-        var names: [String] = []
-        for ecosystem in report.ecosystems.map(\.ecosystem) {
-            guard !hasOfflineRules(for: ecosystem), seen.insert(ecosystem).inserted else { continue }
-            names.append(ecosystem.displayName)
-        }
-        return names
-    }
-
-    // MARK: - Optional online enrichment
-
-    private func applyNetworkKnowledge(_ report: inout DependencyReport) async {
-        let records = allRecords(report)
-        var notes: [String] = []
-        var attempted = 0
-
-        let npmNames = records.filter { $0.ecosystem == .npm }.map(\.name)
-        if !npmNames.isEmpty {
-            attempted += 1
-            let registry = await DependencyNetworkLookup.npmLatestVersions(npmNames)
-            if !registry.latestVersions.isEmpty {
-                Self.applyRegistryVersions(registry, to: &report.ecosystems)
-            }
-            if registry.failedRequests > 0 {
-                notes.append("npm registry：\(registry.packagesChecked) 个包中 \(registry.failedRequests) 个查询失败")
-            }
-            if !registry.note.isEmpty { notes.append(registry.note) }
-        }
-
-        let osv = await DependencyNetworkLookup.osvBatch(for: records)
-        if osv.packagesChecked > 0 {
-            attempted += 1
-            let covered = Self.coveredIdentifiers(in: records)
-            let fresh = osv.advisories.filter { advisory in
-                !Self.intersects(covered, with: [advisory.id] + advisory.aliases)
-            }
-            report.advisories = VulnerabilitySource.sortedAdvisories(fresh)
-            Self.merge(advisories: fresh, into: &report.ecosystems)
-            if osv.failedRequests > 0 {
-                notes.append("OSV：\(osv.packagesChecked) 个包中 \(osv.failedRequests) 个查询失败")
-            }
-        }
-        if !osv.note.isEmpty { notes.append(osv.note) }
-
-        report.networkLookupPerformed = attempted > 0
-        // 在线路径同样要靠内置快照兜底（`applyBundledKnowledge` 是无条件跑的：内置 CVE 命中
-        // 与 registry 没答的包的版本数据都来自它），所以这里也必须说清快照是哪天的。
-        // 补句只加信息：`noteAppended` 不含「失败」，不动 `VulnerabilityEvidence.classify` 的判据。
-        report.networkLookupNote = DependencySnapshot.noteAppended(to: notes.isEmpty
-            ? (attempted > 0 ? "在线查询已完成（OSV + npm registry）" : "本项目没有可在线查询的生态（SwiftPM / CocoaPods 不在 OSV 覆盖范围内）")
-            : notes.joined(separator: "；"))
-    }
-
-    /// 把 registry 取回的最新版本写回记录，并把来源**一并**归因为在线源。
-    ///
-    /// 版本值和来源字段必须成对写：只写值不改来源，UI 会把"实现在线核对过"读成"没核对"；
-    /// 反过来把来源改掉却不落值，就是凭空声称。registry 没答的包一律原样保留
-    /// （内置快照或 `.none`），这样"其实没查到"仍然读起来像"没查到"。
-    /// 抽成静态纯函数是为了让这条归因链路能被不打公网的用例钉住。
-    static func applyRegistryVersions(_ registry: RegistryLookupResult,
-                                      to ecosystems: inout [EcosystemReport]) {
-        mutateRecords(&ecosystems) { record in
-            guard record.ecosystem == .npm,
-                  KnownVulnerability.comparableCore(record.version) != nil,
-                  let latest = registry.latestVersions[record.name] else { return }
-            record.latestKnownVersion = latest
-            record.versionCheckSource = .onlineRegistry
-        }
-    }
-
-    /// 已被内置规则覆盖的标识（CVE + 规则 id），用于避免在线结果重复计入。
-    private static func coveredIdentifiers(in records: [DependencyRecord]) -> Set<String> {
-        var covered = Set<String>()
-        for record in records {
-            covered.formUnion(VulnerabilitySource.coveredIdentifiers(ecosystem: record.ecosystem,
-                                                                     name: record.name,
-                                                                     version: record.version))
-        }
-        return covered
-    }
-
-    private static func intersects(_ set: Set<String>, with values: [String]) -> Bool {
-        values.contains { set.contains($0) }
-    }
-
-    /// 把在线公告的 CVE 编号并回受影响依赖的 `knownVulnerabilities`。
-    private static func merge(advisories: [SecurityAdvisory], into ecosystems: inout [EcosystemReport]) {
-        guard !advisories.isEmpty else { return }
-        var cvesByCoordinate: [String: [String]] = [:]
-        for advisory in advisories {
-            let payload = advisory.aliases.filter { $0.hasPrefix("CVE-") }
-            let identifiers = payload.isEmpty ? [advisory.id] : payload
-            for package in advisory.affectedPackages {
-                cvesByCoordinate[package, default: []].append(contentsOf: identifiers)
-            }
-        }
-        mutateRecords(&ecosystems) { record in
-            guard let extra = cvesByCoordinate["\(record.name)@\(record.version)"] else { return }
-            record.knownVulnerabilities = deduped(record.knownVulnerabilities + extra)
-        }
-    }
-
     // MARK: - Shared plumbing
 
-    private func allRecords(_ report: DependencyReport) -> [DependencyRecord] {
+    func allRecords(_ report: DependencyReport) -> [DependencyRecord] {
         report.ecosystems.flatMap(\.dependencies)
     }
 
-    private static func mutateRecords(_ ecosystems: inout [EcosystemReport],
+    static func mutateRecords(_ ecosystems: inout [EcosystemReport],
                                       _ transform: (inout DependencyRecord) -> Void) {
         for ecosystemIndex in ecosystems.indices {
             for recordIndex in ecosystems[ecosystemIndex].dependencies.indices {
@@ -376,7 +264,7 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
         }
     }
 
-    private static func deduped(_ values: [String]) -> [String] {
+    static func deduped(_ values: [String]) -> [String] {
         var seen = Set<String>()
         return values.filter { seen.insert($0).inserted }
     }
