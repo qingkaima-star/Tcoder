@@ -58,6 +58,9 @@ enum CodeScanSurfaceFixture {
         "nested/inner-repo/.git/config": .prunedAway(lines: 1),
         "node_modules/left-pad": .prunedAway(lines: 0),
         "node_modules/left-pad/index.js": .prunedAway(lines: 2),
+        // ⚠️ 这一格是**盘上量出来的**，不是推的：我们的名单把 `en.lproj` 记了一格
+        // "包状目录不下潜"，但 Foundation 的 `.skipsPackageDescendants` 只剪"住着 Info.plist 的目录"
+        // ⇒ 它的内容照样交给判定链，`.strings` 语言表没收录 ⇒ 另落一条 `unsupportedExtension`。
         "Resources/en.lproj/Main.strings": .ledgerFile(.unsupportedExtension, lines: 1),
         "Tool.app/Info.plist": .prunedAway(lines: 1),
         "Archive.xcarchive/Info.plist": .prunedAway(lines: 1),
