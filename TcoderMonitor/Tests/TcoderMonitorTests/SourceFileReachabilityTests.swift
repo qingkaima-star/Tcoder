@@ -127,7 +127,9 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 150 → 151（集成分支修复人把 `CodeScanCoverage` 整块搬出 `FileSystemCodeAnalyzer.swift`
     ///   以守 400 行闸门，新增 `FileSystemCodeAnalyzerLimits.swift` 一枚）。
     /// 151 → 152（RD-30/31 溯源块新增 `Models/ScanProvenance.swift`，四处在引用它）。
-    static let censusBaseline = 152
+    /// 152 → 164：依赖链一条流带来 12 枚新实现文件（枚数与引用证据逐条见台账卷二 §27，
+    /// 全部由守卫 `testEveryImplementationFileHasExternalCallEvidence` 实跑判过在用）。
+    static let censusBaseline = 164
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
