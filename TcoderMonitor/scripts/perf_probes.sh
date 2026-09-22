@@ -325,22 +325,45 @@ raise_to_front() {  # raise_to_front <pid> ⇒ 只负责"发出请求"，成不�
 #   · 用**本树的 release 二进制**起一个实例，`TCODER_PERF_OUT` 指进样本目录、
 #     `TCODER_SUPPORT_DIR` 指进样本目录下的沙箱（不污染用户真实数据，也不会与别人互写全局态）；
 #   · 只 TERM 自己起的那一个 pid（有 trap；绝不按 bundle id 广播 —— 工单 §K 那条）。
+wait_for_seed_scanned() {  # wait_for_seed_scanned <沙箱> [最长秒] ⇒ 验"这个 App 真有内容可滚"
+  # 为什么不是固定 sleep：`bootstrapIfNeeded` 从今天起**故意不自动扫描**（批次 P7-A，
+  # 用户口径「不能有假数据」）——种一个 `projects.json` 进去，App 只会显示"未扫描"的空态，
+  # 永远不会自己扫出报告（实测等 150 s 无产物）。所以"有内容"只能来自**复制真实支持目录**，
+  # 而复制完就必须当场验：验不过就是没内容，宁可不录。
+  local sb="$1" lim="${2:-${MEASURE_SETTLE:-60}}" waited=0
+  while :; do
+    if [ -n "$(find "$sb/reports" -maxdepth 1 -name '*.json' -size +200c 2>/dev/null | head -1)" ]; then
+      echo "    沙箱里有 $(find "$sb/reports" -maxdepth 1 -name '*.json' -size +200c 2>/dev/null | wc -l | tr -d ' ') 份真报告 ⇒ 被测对象是有内容的 App"
+      return 0
+    fi
+    [ "$waited" -ge "$lim" ] && { echo "!! ${lim}s 内沙箱里没有真报告 ⇒ 不开录（空页的『交互期』不是证据）" >&2; return 1; }
+    sleep 5; waited=$((waited + 5))
+  done
+}
+
+seed_sandbox() {  # seed_sandbox <沙箱> ⇒ 按 MEASURE_SEED_DIR（一个支持目录路径）复制真实数据；不设就是不种
+  local sb="$1" src="${MEASURE_SEED_DIR:-}"
+  [ -n "$src" ] || return 0
+  [ -d "$src" ] || { echo "!! MEASURE_SEED_DIR=$src 不是目录 ⇒ 不起实例（宁可没数，也不要一份空页的『交互期』）" >&2; return 1; }
+  mkdir -p "$sb" || return 1
+  cp -R "$src/." "$sb/" || { echo "!! 复制真实支持目录失败：$src" >&2; return 1; }
+  echo "    已把真实支持目录种进沙箱：$src"
+  MEASURED_SEED="$src"
+}
+
 launch_measured_instance() {  # launch_measured_instance <样本目录> <二进制>
   local out="$1" bin="$2"
   [ -x "$bin" ] || { echo "!! 二进制不可执行：$bin（先跑 scripts/build_app.sh release）" >&2; return 1; }
   mkdir -p "$out/sandbox" || return 1
+  # 被测对象必须是**有内容的 App**：空沙箱里那个页面没有东西可滚（详见 `seed_sandbox` 那段）。
+  seed_sandbox "$out/sandbox" || return 1
   MEASURED_PULSE="$out/pulse.txt"
   TCODER_PERF_PROBE=1 TCODER_PERF_OUT="$MEASURED_PULSE" TCODER_SUPPORT_DIR="$out/sandbox" \
     "$bin" -ApplePersistenceIgnoreState YES >/dev/null 2>&1 &
   MEASURED_PID=$!
-  # 只清自己起的那个 pid；EXIT/INT/TERM 三条都挂，中断不留孤儿（留了就压死所有人的闸门）
-  # 收尾分两条：EXIT 只负责清；INT/TERM 必须**清完真的退**。
-  # 原来三条共用一个 handler 且里面写的是 `return` —— 两条失效都实测到了：
-  #   ① `return` 在脚本顶层触发 ⇒ 每次跑完在日志尾巴溅一行
-  #      `return: can only \`return' from a function or sourced script`（读日志的人在找红因，先看见它）；
-  #   ② handler 不 exit ⇒ bash 执行完接着等，`kill -TERM` 杀不掉它
-  #      （perf_wait_window.sh 的 on_signal 那段注释记的就是同一个坑，那边已经修了）。
-  # 只清自己起的那两个 pid；被中断也不留孤儿实例——漏一个就压死所有人"实例数恰为 1"那道闸。
+  # 收尾两条：EXIT 只清；INT/TERM 清完必须真的退（原来三条共用一个写 `return` 的 handler，
+  # 两条失效都实测过：日志尾巴溅错误 + TERM 杀不掉它 ⇒ 漏一个孤儿实例压死所有人的闸）。
+  # 只清自己起的那两个 pid，绝不按 bundle id 广播（AGENTS -1.3）。
   trap 'measured_cleanup' EXIT
   trap 'measured_cleanup; exit 130' INT TERM
   sleep 4
@@ -350,6 +373,8 @@ launch_measured_instance() {  # launch_measured_instance <样本目录> <二进�
     # 带不动也**不装绿**：preflight 的前台硬闸会照原样拒，这里只负责别让它白拒一场。
     raise_to_front "$MEASURED_PID" || echo "    ⚠ 带前台没成功（交给 preflight 的前台闸判，不绕）"
     sleep 1
+    # 种了真实数据就要当场验"确有报告可看"，否则开录那一刻量的还是空态。
+    [ -z "${MEASURE_SEED_DIR:-}" ] || wait_for_seed_scanned "$out/sandbox" || return 1
     return 0
   fi
   echo "!! 起的实例 4 秒内就退了 ⇒ 不继续（宁可没数，也不要一份 attach 到别人实例上的假配对）" >&2
