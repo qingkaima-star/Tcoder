@@ -331,4 +331,34 @@ final class FunctionalHonestyGuardTests: XCTestCase {
         XCTAssertEqual(Self.enumCaseNames(enum: "E", in: withValues), ["idle", "scanning", "done"])
         XCTAssertTrue(Self.enumCaseNames(enum: "Missing", in: "struct S {}").isEmpty)
     }
+
+    // MARK: - 交付包自己的文案里不许留模板占位（P25 抓到的一条）
+
+    /// 模板残留的词。命中即视为"这份包在对外说一件不成立的事"。
+    static let bundlePlaceholderWords = ["示例项目", "示例数据", "YourCompany", "TEMPLATE", "TODO"]
+
+    static func bundlePlaceholderHits(_ text: String, words: [String] = bundlePlaceholderWords) -> [String] {
+        words.filter { text.localizedCaseInsensitiveContains($0) }
+    }
+
+    /// `NSHumanReadableCopyright` 一度是模板留下的 `Tcoder 示例项目` ——
+    /// 它在「关于 Tcoder」面板里当着用户的面写"示例项目"，而本批刚把示例数据整条退役（P7-A）。
+    /// 这条守卫钉的是**交付包自己的元数据**，不在九页取证面里，所以只能这样钉。
+    func test_shippedInfoPlistHasNoTemplatePlaceholder() throws {
+        let path = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // TcoderMonitorTests
+            .deletingLastPathComponent()   // Tests
+            .deletingLastPathComponent()   // TcoderMonitor
+            .appendingPathComponent("Resources/Info.plist").path
+        let text = try XCTUnwrap(String(contentsOfFile: path, encoding: .utf8), "读不到 Info.plist")
+        XCTAssertTrue(text.count > 200, "Info.plist 只读到 \(text.count) 字符，八成是路径变了 ⇒ 这条守卫数不出东西")
+        let hits = Self.bundlePlaceholderHits(text)
+        XCTAssertTrue(hits.isEmpty, "交付包元数据里留着模板占位词 \(hits)——关于面板会当着用户说假话")
+    }
+
+    func test_bundlePlaceholderScannerCatchesSyntheticLeftover() {
+        XCTAssertEqual(Self.bundlePlaceholderHits("<string>Tcoder 示例项目</string>"), ["示例项目"],
+                       "模板残留没被抓到 ⇒ 上面那条守卫是永真绿")
+        XCTAssertTrue(Self.bundlePlaceholderHits("<string>© 2026 Tcoder</string>").isEmpty, "正常文案被误伤")
+    }
 }

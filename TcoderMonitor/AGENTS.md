@@ -624,3 +624,18 @@ dist/Tcoder.app/Contents/MacOS/TcoderMonitor doctor [<path>]
    （本轮第一轮复核就报了三个不存在的名字），引用前先核。
 6. 每条修复要交四件：复现夹具 + 独立真值、正例/反例/未知态/失败态、CLI 与 GUI 对表、
    新守卫 sabotage 一次证明有牙。缺件按未完成处理。
+
+### 8.1 冻结区窄口径豁免（2026-09-22 07:44 由总工登记，一条链路一个负责人 ⇒ 必须放行）
+
+| 流 | 放行范围 | 为什么必须在冻结区里 | 判据来源 |
+|---|---|---|---|
+| **R3** | `Sources/TcoderMonitor/Models/DependencyReport.swift` 里的 **`DependencyVersion` 一族**（`normalize` / `compare` / `isOlder`）+ 该文件新增 **Optional** 字段 | 版本范围判 0 的根因本身就在 `DependencyVersion.normalize`（首字符即截断符 ⇒ `^1.2.3`→`[0]`），而用户 §十一 明令"依赖模型 → 查询 → 回填 → 行状态 → 总览 → 评分"这条链**不许拆给两个人各修一段**。把根因留在总工手里、消费端交给 R3，会得到两套版本口径长期并存 | 台账 RD-10、§7.2 |
+| **R3** | 允许**改**三条把错误行为当契约的旧测试：`DependencySnapshotTests.testVersionIsOlderEdgeCases`、`ManifestLabDependencyTests`（默认期望按 HEAD 实测、`TCODER_F_STRICT_CONTRACT` 才是设计真值）、`HonestyP1SnapshotDateTests`（钉"补句不改 `classify` 判据"） | 用户原话"修正错误测试，而不是继续维护错误兼容" | RD-10 / RD-13 |
+
+**豁免的边界**：只许动上面列出的类型与那三条测试；`Models/**` 其余成员、`App/**`、`Design/**`、
+`Package.swift` 仍然冻结。新增字段一律 Optional 且在交回汇报里逐条写"字段 / 谁写谁读 / 为什么不能放别处"，
+由总工补进 §3 的 additive 登记表 —— **没登记的冻结区改动视为越界**。
+
+**预算提醒（别撞闸门）**：`SourcesSizeAuditTests` 400 行口径下 Sources 侧超限名额为 **0**；
+`Views/DashboardView.swift` 余 2 行、`Services/Dependencies/OsvClient.swift` 余 6 行、
+`Services/Code/CodeLineNormalization.swift` 余 13 行 ⇒ 新增实现**整块另起新文件**。
