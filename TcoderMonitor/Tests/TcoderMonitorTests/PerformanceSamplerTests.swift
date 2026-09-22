@@ -75,12 +75,12 @@ final class PerformanceSamplerTests: XCTestCase {
         memory: UInt64 = 0,
         threads: Int = 1,
         openFiles: Int = 1,
-        commandLine: String = "",
+        executablePath: String? = nil,
         parentPID: Int32 = 1
     ) -> ProcessSnapshot {
         ProcessSnapshot(pid: pid, name: name, cpuUsage: cpu, memoryBytes: memory,
                         threadCount: threads, openFileCount: openFiles,
-                        startTime: nil, commandLine: commandLine, parentPID: parentPID)
+                        startTime: nil, executablePath: executablePath, parentPID: parentPID)
     }
 
     func systemSnapshot(atSecond second: Double) -> SystemSnapshot {
@@ -102,13 +102,13 @@ final class PerformanceSamplerTests: XCTestCase {
     func fixtureProcesses() -> [ProcessSnapshot] {
         [
             process(pid: 900_011, name: "java", cpu: 1.5, memory: 200, threads: 20, openFiles: 300,
-                    commandLine: "/usr/bin/java -jar app.jar"),
+                    executablePath: "/usr/bin/java"),
             process(pid: 900_012, name: "com.example.JavaWrapper", cpu: 0.5, memory: 100, threads: 5, openFiles: 12,
-                    commandLine: "/opt/homebrew/bin/java -version"),
+                    executablePath: "/opt/homebrew/bin/java"),
             process(pid: 900_013, name: "node", cpu: 2.0, memory: 400, threads: 8, openFiles: 40,
-                    commandLine: "/usr/local/bin/node server.js"),
+                    executablePath: "/usr/local/bin/node"),
             process(pid: 900_014, name: "nginx", cpu: 0.1, memory: 50, threads: 1, openFiles: 4,
-                    commandLine: "/usr/sbin/nginx"),
+                    executablePath: "/usr/sbin/nginx"),
         ]
     }
 

@@ -349,7 +349,7 @@ struct SidebarLiveFooter: View {
                 }
                 Spacer(minLength: Theme.Spacing.xs)
             }
-            LiveCPUBadge(snapshot: state.monitor.latestSnapshot)
+            LiveCPUBadge(context: SampleContext.from(state.monitor))
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, Theme.Spacing.sm)
@@ -357,21 +357,24 @@ struct SidebarLiveFooter: View {
     }
 }
 
+/// 侧栏底栏的本机实时读数（CPU / 已用内存）。两枚都走 `SystemReadings` 那一份三态判据：
+/// 旧写法直接读 `snapshot.cpuUsage` / `.memoryUsedBytes`，于是首帧画成 `0%`、
+/// 内核没给内存页计数时画成 `0 B`，而同一份快照在性能页画的是 `--`（第九节 + RD-34 同族）。
 struct LiveCPUBadge: View {
-    var snapshot: SystemSnapshot?
+    var context: SampleContext
 
     var body: some View {
         HStack(spacing: Theme.Spacing.xxs) {
             ThemedIcon(.cpu, role: .badge)
                 .foregroundStyle(.secondary)
             Text(DataAbsence.optional(
-                    snapshot.map { "\(Int(($0.cpuUsage * 100).rounded()))%" }).display)
+                    SystemReadings.cpuFraction(context).map { NumberFormat.percent($0, precision: 0) }).display)
                 .font(Theme.Typo.monoSmall.font)
                 .frame(width: ShellLayout.liveReadoutColumnWidth, alignment: .trailing)
             Text("·")
                 .foregroundStyle(.tertiary)
             Text(DataAbsence.optional(
-                    snapshot.map { ByteFormat.string($0.memoryUsedBytes, precision: 1) }).display)
+                    SystemReadings.memoryUsedBytes(context).map { ByteFormat.string($0, precision: 1) }).display)
                 .font(Theme.Typo.monoSmall.font)
         }
         .foregroundStyle(.secondary)

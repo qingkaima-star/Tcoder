@@ -42,14 +42,22 @@ final class ManifestLabDependencyTests: ManifestLabTestCase {
         if !strictContract {
             print("【已知缺陷】vulnerableCount 把跨清单的同一坐标并成 1 条：设计 8 / 实得 7")
         }
-        // 设计期望 24。实测 25 的差额来自 express：声明 "^5.2.1" 已经就是快照里的最新版，
-        // 但 DependencyVersion.normalize(:165) 在 `^` 处截断成空串 -> [0]，于是任何 caret
-        // 形式的依赖都被判成过旧（KnownVulnerability.comparableCore 却能吃掉 ^，两处口径不一致）。
-        XCTAssertEqual(report.outdatedCount, strictContract ? 24 : 25,
-                       "过旧计数多出的 1 个来自 ^5.2.1 被当成 0.0.0")
-        if !strictContract {
-            print("【已知缺陷】caret 版本被虚报过旧：设计 24 / 实得 25，见 DependencyReport.swift:165-172")
-        }
+        // RD-10（2026-09-22 由 R3 按 AGENTS §8.1 豁免改正这条用例）。
+        // 它原来默认断言 25、并在 `TCODER_F_STRICT_CONTRACT=1` 时断言"设计期望 24"。
+        // **两个数都是错的**：25 里含 5 条 caret 声明被 `DependencyVersion.normalize` 在 `^`
+        // 处截成 `[0]` 而虚报的"过旧"；24 是 WS-F 手算时把 `^18.2.0` 的下界当成安装版本 ——
+        // 那正是 RD-10 明令禁止的口径（"去掉 ^ 就把下界当安装版本"）。
+        // 现在断言 20：本夹具的 `package-lock.json` 是 `"packages": {}`（空），
+        // 所以 `^18.2.0` / `^18.2.0` / `^5.3.3` / `^5.2.1` / `[3.8,4.0)` / `~> 7.1.2` 这类
+        // **只有范围、没有解析值**的条目一律落「未定」，既不计过旧也不计正常；
+        // 而 `Package.swift` 的 `swift-log from:"1.5.0"` 被同目录 `Package.resolved`
+        // 解析成 1.6.1 = 快照最新 ⇒ 也不过旧（这一步是锁文件替我们把"装的是哪个版本"量出来了）。
+        // 手核的 20 条（每条都是"解析值/精确声明 < 最新已知"）：
+        // okhttp 4.9.0、grpc-netty-shaded 1.60.0、lombok 1.18.30×2、guava 33.0.0-jre、
+        // serde 1.0.190、tokio 1.37.0、gin 1.9.1、axios 0.21.1、lodash 4.17.20、GRDB 6.23.0、
+        // requests 2.28.1、pydantic 2.4、vue 3.4.0、vite 5.0.0、flask 3.0.0、pandas 2.1.4、
+        // jackson-databind 2.13.2、log4j-core 2.14.1、commons-collections 3.2.1。
+        XCTAssertEqual(report.outdatedCount, 20, "过旧 = 手核 20 条（范围未解析的条目不计入，见上方推导）")
 
         // 逐份清单的依赖数：数量错 = 解析器漏读或多读
         let counts = Dictionary(uniqueKeysWithValues: report.ecosystems.map { ($0.manifestPath, $0.dependencies.count) })
@@ -83,11 +91,19 @@ final class ManifestLabDependencyTests: ManifestLabTestCase {
         XCTAssertTrue(npm.frameworkMarkers.contains("React"))
         XCTAssertTrue(npm.frameworkMarkers.contains("Lodash"))
         XCTAssertEqual(npm.frameworkMarkers.count, 8, "frameworkMarkers 上限 8，超出被截断")
-        XCTAssertTrue(npm.dependencies.first { $0.name == "react" }!.isProbablyOutdated,
-                      "react 18.2.0 低于快照 19.3.0 必须算过旧")
-        let expressOutdated = npm.dependencies.first { $0.name == "express" }!.isProbablyOutdated
-        XCTAssertEqual(expressOutdated, strictContract ? false : true,
-                       "express 声明 ^5.2.1 就是快照最新版 5.2.1，不该被判过旧")
+        // RD-10：`react = ^18.2.0` 这一条**原来断言"必须算过旧"**，那是拿范围下界当安装版本。
+        // 本夹具的 package-lock.json 是空的 ⇒ 装的是哪个版本没量到 ⇒ 只能判「未定」。
+        // 量得到的东西一个不少：声明范围原样在 `version` 里，最新已知版本在 `latestKnownVersion` 里。
+        let react = try require(npm.dependencies.first { $0.name == "react" })
+        XCTAssertEqual(react.version, "^18.2.0", "声明范围不许被剥成 18.2.0")
+        XCTAssertEqual(react.latestKnownVersion, "19.3.0")
+        XCTAssertNil(react.resolvedVersion, "空锁文件里解析不出东西，不许编一个")
+        XCTAssertFalse(react.isProbablyOutdated, "安装版本未解析 ⇒ 不许报过旧")
+        XCTAssertEqual(DependencyVersionIdentity.of(react).outdatedness, .undetermined(.rangeNotResolved),
+                       "「未定」要带原因，行状态与评分读的就是这个原因")
+        let express = try require(npm.dependencies.first { $0.name == "express" })
+        XCTAssertFalse(express.isProbablyOutdated,
+                       "express 声明 ^5.2.1 而快照最新就是 5.2.1：旧实现把它判成过旧是纯错")
 
         // Maven：${property} 与 ${project.version} 代入、dependencyManagement 继承、provided/test/plugin scope
         let parent = try require(report.ecosystems.first { $0.manifestPath == "pom.xml" })
@@ -151,6 +167,15 @@ final class ManifestLabDependencyTests: ManifestLabTestCase {
         XCTAssertFalse(swpm.dependencies.contains { $0.name == "acme-local-kit" },
                        ".package(path:) 是本地模块，不得算外部依赖")
         expect(swpm, "palette", "stable", .runtime)
+        // RD-10 的实际收益（本夹具独立真值）：`Package.swift` 写 `from: "1.5.0"` 是**请求**，
+        // 同目录 `Package.resolved` 把实际检出的版本锁在 **1.6.1**（真值来自那 3 行 pin，
+        // 不是从实现输出抄的）。装的是 1.6.1，而内置快照最新也是 1.6.1 ⇒ 不过旧。
+        // 旧实现在这里既读不到 1.6.1、也解释不了"为什么 1.5.0 与 1.6.1 同时出现"。
+        let swiftLog = try require(swpm.dependencies.first { $0.name == "swift-log" })
+        XCTAssertEqual(swiftLog.version, "1.5.0", "声明范围原样保留")
+        XCTAssertEqual(swiftLog.resolvedVersion, "1.6.1", "实际检出版本来自 Package.resolved")
+        XCTAssertEqual(swiftLog.resolvedVersionSource, "Package.resolved", "结论要能追到是哪份文件给的")
+        XCTAssertFalse(swiftLog.isProbablyOutdated, "按安装版本 1.6.1 比，已经就是最新")
         // 口径缺口（已报总工）：`.branch("main")` 与 `branch: "main"` 在 SwiftPM 里等价，
         // 但 ManifestParsers.swift:728-729 只认 `branch:` 关键字形式，
         // 方法形式取不到版本 -> 记成「未声明」，依赖实际锁在一个分支上却看不出来。

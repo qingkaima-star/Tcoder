@@ -18,19 +18,18 @@ final class ManifestLabHealthTests: ManifestLabTestCase {
                                   dependencies: deps, coverage: coverage, previousScore: 80)
 
         let score = WeightedHealthScorer().score(inputs)
-        print("=== WS-F 夹具 · 健康评分实测 ===")
-        print("总分 \(score.overall) 等级 \(score.grade.rawValue) 趋势 \(score.trendDelta.map(String.init) ?? "无")")
-        for component in score.components {
-            print("  \(component.name) \(component.score) ×\(String(format: "%.3f", component.weight))"
-                + " = \(String(format: "%.1f", component.weightedContribution)) [\(component.risk.rawValue)] \(component.detail)")
-        }
-        print("优点 \(score.strengths)")
-        print("问题 \(score.issues)")
-        print("建议 \(score.recommendations)")
-        print("总评 \(score.narrative)")
+        logLabScoreCard(score)
 
-        XCTAssertEqual(inputs.availableDimensions.count, 9, "五类输入齐备时应覆盖 9 个维度")
-        XCTAssertEqual(score.components.count, 9, "实得 \(score.components.map(\.name))")
+        // R5b 更正一处**把旧行为当契约**的期望（不是放宽判据，理由逐条写在下面）：
+        // 这棵 WS-F 夹具的 5 份报告跨格式、跨模块、彼此无法核对重叠，而唯一带文件粒度的那份
+        // lcov 又与自己正文对不上账（`DA:` 只列 2 行却报 `LF:100`）⇒ 按 RD-25 的判据
+        // **不给伪精确总数**（修前那句 840/1070 = 78.5% 正是本轮要消灭的形状；
+        // `ManifestLabCoverageTests` 在 `b7ff42d` 已按新判据更新，本文件当时漏改，红在整套跑里）。
+        // 后果：覆盖率这一维**按缺证据缺席**（不是按 0 分计分）⇒ 可评维度从 9 变 8。
+        XCTAssertFalse(coverage.hasData, "互相核对不上的五份报告不许合成一个总数")
+        XCTAssertNil(coverage.overallLinePercent, "拿不出可信总数时不许留一个百分比")
+        XCTAssertEqual(inputs.availableDimensions.count, 8, "覆盖率缺席 ⇒ 8 个维度（修前 9）")
+        XCTAssertEqual(score.components.count, 8, "实得 \(score.components.map(\.name))")
         XCTAssertEqual(score.components.reduce(0.0) { $0 + $1.weight }, 1.0, accuracy: 1e-9,
                        "对外权重必须归一到 1.0")
         let recomputed = score.components.reduce(0.0) { $0 + Double($1.score) * $1.weight }
@@ -38,12 +37,17 @@ final class ManifestLabHealthTests: ManifestLabTestCase {
         XCTAssertTrue((0...100).contains(score.overall))
         XCTAssertEqual(score.trendDelta, score.overall - 80)
         XCTAssertFalse(score.narrative.isEmpty)
-        XCTAssertTrue(score.components.contains { $0.name == "测试覆盖" },
-                      "coverage.hasData 为真时测试覆盖维度必须进入评分")
+        XCTAssertFalse(score.components.contains { $0.name == "测试覆盖" },
+                       "拿不出可信总数 ⇒ 这一维必须缺席，不许拿 78.5% 那种双计出来的数进分")
+        // 缺席必须可解释（RD-34 钉的是"有写无读"，这里钉的是"少了维度却不说为什么"）。
+        let absence = MissingDimensionReason.testingAbsence(coverage: coverage)
+        XCTAssertNotNil(absence, "覆盖率缺席时必须给出一句原因，不许静默少一维")
+        XCTAssertTrue(absence?.contains("覆盖率报告") == true || absence?.contains("行覆盖") == true,
+                      "原因要说清是哪一路：\(absence ?? "nil")")
         XCTAssertTrue(score.components.contains { $0.name == "依赖健康" })
         XCTAssertTrue(score.components.contains { $0.name == "运行稳定性" })
         XCTAssertFalse(score.components.contains { $0.score == 0 && $0.name == "测试覆盖" },
-                       "覆盖率 78.5% 不该被打成 0 分")
+                       "缺证据不许被打成 0 分（修前那句说的是 78.5% 不该变 0 分，判据不变）")
         // 排序契约：升序
         XCTAssertEqual(score.components.map(\.score), score.components.map(\.score).sorted())
     }
@@ -66,4 +70,21 @@ final class ManifestLabHealthTests: ManifestLabTestCase {
         print("持久夹具 = \(destination.path)（\(built.files.count) 个文件）")
     }
 
+}
+
+extension ManifestLabHealthTests {
+    /// 把整张评分卡打到测试日志里（取证用）。搬成独立方法只为让上面那条用例留在 50 行口径内，
+    /// 逐字未改 —— 打印不参与判定，判定仍全在用例里。
+    func logLabScoreCard(_ score: HealthScore) {
+        print("=== WS-F 夹具 · 健康评分实测 ===")
+        print("总分 \(score.overall) 等级 \(score.grade.rawValue) 趋势 \(score.trendDelta.map(String.init) ?? "无")")
+        for component in score.components {
+            print("  \(component.name) \(component.score) ×\(String(format: "%.3f", component.weight))"
+                + " = \(String(format: "%.1f", component.weightedContribution)) [\(component.risk.rawValue)] \(component.detail)")
+        }
+        print("优点 \(score.strengths)")
+        print("问题 \(score.issues)")
+        print("建议 \(score.recommendations)")
+        print("总评 \(score.narrative)")
+    }
 }

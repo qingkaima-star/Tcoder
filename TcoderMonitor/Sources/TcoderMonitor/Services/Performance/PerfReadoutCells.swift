@@ -64,12 +64,14 @@ nonisolated struct PerfCPULead: Equatable, Sendable {
     var load1: Double
     var load5: Double
     var load15: Double
-    /// `nil` = **还没有帧**。`ThermalState` 没有 unknown case（`Models` 冻结，
-    /// `init(processInfoValue:)` 的 `default` 落到 `.nominal`），所以"取不到"在这个类型里
-    /// 表达不出来。留成非 Optional 的话 `.empty` 只能填 `.nominal`，而它的字面就是"正常"——
-    /// **一帧都没采到时界面会显示"温度状态 正常"**，把"没测到"渲染成"没问题"。
-    /// 只闭掉"没有帧"这一半：有帧但 `process_info` 读失败仍会是 `.nominal`，
-    /// 那是 `Models.ThermalState` 的既记录缺口，要修得动 Models，不在这里假装已修。
+    /// 两格两层缺席，**互不替代**（RD-34 之后 `ThermalState` 有了显式缺席档）：
+    /// - `nil` = **这一格还没有帧**（`PerfCPULead.empty`），上屏走 `--`；
+    /// - `.unknown`（中文原字面「未量到」）= **有帧，但这一项没量到 / 量到的值不认识**。
+    /// 旧写法只有前一半可表达：`ThermalState` 没有缺席档、`init(processInfoValue:)` 的
+    /// `default` 落到 `.nominal`（字面就是"正常"），于是"读不到"在上屏这一格长成一句安心话。
+    /// 现在 `Models.ThermalState` 已补 `.unknown`，`SystemSampler` 的探针问不到时落它。
+    /// ⚠️ 仍然判不了的一种：不支持热压力上报的机器上 `ProcessInfo.thermalState` **恒回 nominal**，
+    /// 系统没有受支持 API 能问出"这台机器会不会报"，所以那种机器上"正常"仍可能是"没这回事"。
     var thermal: ThermalState?
     var uptimeSeconds: TimeInterval
 

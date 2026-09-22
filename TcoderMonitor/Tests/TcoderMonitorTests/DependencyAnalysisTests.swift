@@ -109,180 +109,132 @@ final class DependencySnapshotTests: XCTestCase {
         XCTAssertTrue(advisories[0].affectedPackages.contains { $0.contains("lodash") }, "受影响包含 lodash")
     }
 
+    /// RD-10：这条用例**原来是在给一个缺陷发合格证**，2026-09-22 由 R3 按 AGENTS §8.1 豁免改正。
+    ///
+    /// 它原来断言（逐条）：
+    ///   · `isOlder("^1.2.3", "1.2.4") == true`，注释写"`^1.2.3` 归一化为 0 视为落后"；
+    ///   · `isOlder("1.2.3", "^1.2.4") == false`，注释写"latest 归一化为 0 时不得判落后"；
+    ///   · `isOlder("", "1.0.0") == true` / `isOlder("abc", "1.0.0") == true`，注释"归一化为 [0]"；
+    ///   · `normalize("2.0") == [2, 0]` 且隐含"解析不出就是 `[0]`"。
+    /// 为什么那是错的：`normalize` 的截断符集合里写着 `^~<>`，所以 caret 在**第一个字符**就断成
+    /// 空前缀 → `[0]` → "0.0.0 落后于任何版本"。后果有两个方向都错：
+    ///   ① 任何 `^x.y.z` 声明被虚报成"版本过旧"（本仓自扫时 express `^5.2.1` 就是受害者，
+    ///      而 `KnownVulnerability.comparableCore` 会吃掉 `^` ⇒ 同一份数据两套口径）；
+    ///   ② `""` / `abc` / `*` 被折成 0.0.0 去和真版本比，于是"没量到"长成了"量出来很旧"。
+    /// 现在断言什么：解析不出的一方一律 **`.unknown`**，`isOlder` 对未知返回 false（不宣称过旧），
+    /// 而 caret 的比较按**它写的下界**（与 `comparableCore` 同一把尺子）；
+    /// "下界不等于安装版本"这条语义由 `DependencyVersionIdentity` 负责，见同文件新用例。
     func testVersionIsOlderEdgeCases() {
-        XCTAssertFalse(DependencyVersion.isOlder(current: "1.0.0-SNAPSHOT", than: "1.0.0"), "-SNAPSHOT 后缀要截掉")
-        XCTAssertTrue(DependencyVersion.isOlder(current: "^1.2.3", than: "1.2.4"), "^1.2.3 归一化为 0 视为落后")
-        XCTAssertFalse(DependencyVersion.isOlder(current: "1.2.3", than: "^1.2.4"), "latest 归一化为 0 时不得判落后")
-        XCTAssertTrue(DependencyVersion.isOlder(current: "", than: "1.0.0"), "空串归一化为 [0]")
-        XCTAssertTrue(DependencyVersion.isOlder(current: "abc", than: "1.0.0"), "纯字母归一化为 [0]")
+        XCTAssertEqual(DependencyVersion.normalize("2.0"), [2, 0], "数字芯解析")
+        XCTAssertEqual(DependencyVersion.normalize("^1.2.3"), [1, 2, 3],
+                       "caret 的下界是它写着的那个数 —— 与 comparableCore 同一口径，不再折成 [0]")
+        XCTAssertEqual(DependencyVersion.normalize("*"), [], "通配解析不出就是空，不许伪造 [0]")
+        XCTAssertEqual(DependencyVersion.normalize(""), [], "空串同上")
+        XCTAssertEqual(DependencyVersion.normalize(ManifestParsers.undeclaredVersion), [], "「未声明」同上")
+        XCTAssertEqual(DependencyVersion.normalize("[1.0,2.0)"), [], "Maven 区间不是一个版本号")
+
+        XCTAssertEqual(DependencyVersion.outcome(current: "^1.2.3", than: "1.2.4"), .older,
+                       "比较的是串里写着的 1.2.3；这条依赖**装的是哪个版本**由版本身份那一层判")
+        XCTAssertEqual(DependencyVersion.outcome(current: "1.2.3", than: "^1.2.4"), .older)
+        XCTAssertEqual(DependencyVersion.outcome(current: "", than: "1.0.0"), .unknown,
+                       "旧实现此处判『更旧』，那是把没量到说成量出来很旧")
+        XCTAssertEqual(DependencyVersion.outcome(current: "abc", than: "1.0.0"), .unknown)
+        XCTAssertEqual(DependencyVersion.outcome(current: "*", than: "1.0.0"), .unknown)
+        XCTAssertFalse(DependencyVersion.isOlder(current: "*", than: "1.0.0"),
+                       "不可比较 ⇒ 不得产出『过旧』这个结论")
+
         XCTAssertFalse(DependencyVersion.isOlder(current: "1.0.0.0.0.0.0", than: "1.0.0"), "多出的零段不得判落后")
         XCTAssertTrue(DependencyVersion.isOlder(current: "1.0.0.0.0.0.2", than: "1.0.0.0.0.0.3"), "超长段数逐位比较")
-        XCTAssertEqual(DependencyVersion.normalize("2.0"), [2, 0], "normalize 行为冻结")
+        XCTAssertTrue(DependencyVersion.isOlder(current: "1.0.0-SNAPSHOT", than: "1.0.0"),
+                      "预发布低于正式版（semver）。旧实现把 `-SNAPSHOT` 整个截掉 ⇒ 与正式版判等，"
+                      + "于是快照过期的包永远判不出落后")
+        XCTAssertFalse(DependencyVersion.isOlder(current: "33.3.1-jre", than: "33.3.1"),
+                       "发行限定（-jre / -android）不是预发布，与正式版同档")
+        XCTAssertFalse(DependencyVersion.isOlder(current: "1.2.3+build7", than: "1.2.3"),
+                       "构建元数据不参与先后")
+    }
+
+    /// `compare` 那颗地雷：**解析不出来的两个版本曾被判"相等"**（`.orderedSame`）。
+    ///
+    /// 现场（改前原文，`DependencyVersionRuler.swift`）：
+    /// `guard let left = Self.core(lhs), let right = Self.core(rhs) else { return .orderedSame }`
+    /// —— 三态在 `outcome()` 里是有的（`.unknown`），这一支却是它的失真副本：
+    /// 谁拿它去排序 / 去重 / 分组，`*`、`latest`、`未声明`、`[1.0,2.0)` 就会互相"相等"。
+    /// 本仓当时**零调用方**（Sources + Tests 逐条 grep，只有注释提到它）⇒ 不是活 bug，是地雷。
+    ///
+    /// 期望全部手写（semver 定义 + "认不出就不是相等"这条语义），不是从实现输出回填的：
+    ///   · 可比较的样本给确定的升/降/等；
+    ///   · 认不出的样本给 **nil**，且 nil **永远不许**被读成 `.orderedSame`；
+    ///   · 同一个样本集上 `compare` 与 `outcome` 必须一个答案都不差（同一把尺子的两条出口）；
+    ///   · `isComparable` 与「compare 有没有值」必须同真同假。
+    func testCompareRefusesToCallUnknownEqual() {
+        // (左, 右, 手写的 compare 期望, 手写的 outcome 期望)
+        let table: [(String, String, ComparisonResult?, DependencyVersion.Outcome)] = [
+            ("^1.2.3", "1.2.4", .orderedAscending, .older),       // 比的是写着的那个下界
+            ("1.2.4", "^1.2.3", .orderedDescending, .newer),
+            ("1.2.3", "1.2.3.0", .orderedSame, .same),           // 缺段按 0 补 ⇒ 这才是真的"相等"
+            ("1.2.3-beta", "1.2.3", .orderedAscending, .older),   // 预发布低于正式版
+            ("1.2.3+build7", "1.2.3", .orderedSame, .same),       // 构建元数据不参与先后
+            ("1.0.0-jre-SNAPSHOT", "1.0.0", .orderedAscending, .older),
+            ("2.14.1", "2.0.0", .orderedDescending, .newer),
+            ("*", "1.0.0", nil, .unknown),                        // ↓ 这四支就是地雷本体
+            ("1.0.0", "*", nil, .unknown),
+            ("latest", "1.0.0", nil, .unknown),
+            ("", "1.0.0", nil, .unknown),
+            ("abc", "def", nil, .unknown),                        // 两侧都认不出：旧实现判 .orderedSame
+            ("[1.0,2.0)", "1.5", nil, .unknown),
+            (ManifestParsers.undeclaredVersion, "1.0.0", nil, .unknown),
+        ]
+        XCTAssertFalse(table.isEmpty)
+        var comparableSamples = 0
+        var unknownSamples = 0
+        for (left, right, expectedComparison, expectedOutcome) in table {
+            XCTAssertEqual(DependencyVersion.compare(left, right), expectedComparison,
+                           "compare 判错：\(left) vs \(right)")
+            if expectedComparison == nil {
+                // 地雷本体：认不出的一侧**永远不许**长成 `.orderedSame`（那是谎称相等）。
+                XCTAssertNil(DependencyVersion.compare(left, right),
+                             "不可比较被折成了相等语义：\(left) vs \(right)")
+            }
+            XCTAssertEqual(DependencyVersion.outcome(current: left, than: right), expectedOutcome,
+                           "同一把尺子的两条出口分叉：\(left) vs \(right)")
+            // compare 有没有值 ⟺ **两侧**都能解析（一侧认不出就整体不可比）。
+            XCTAssertEqual(DependencyVersion.isComparable(left) && DependencyVersion.isComparable(right),
+                           DependencyVersion.compare(left, right) != nil,
+                           "「能不能比」与「compare 有没有值」必须同真同假：\(left) vs \(right)")
+            if expectedComparison == nil { unknownSamples += 1 } else { comparableSamples += 1 }
+        }
+        XCTAssertGreaterThanOrEqual(comparableSamples, 6, "可比较样本不足，上面的对照是空跑")
+        XCTAssertGreaterThanOrEqual(unknownSamples, 6, "认不出的样本不足，地雷等于没被踩过")
+    }
+
+    /// 逐条依赖的"这条到底过没过旧"必须走版本身份，而不是直接拿清单原文去比。
+    /// 这里是那条链的入口守卫：`isProbablyOutdated` 读 `resolvedVersion`，
+    /// 没有解析值时**范围声明判未定**（既不报过旧、也不报正常）。
+    func testIsProbablyOutdatedUsesResolvedVersionNotDeclaredRange() {
+        func record(_ version: String, resolved: String?, latest: String?) -> DependencyRecord {
+            DependencyRecord(name: "acme", version: version, ecosystem: .npm, scope: .runtime,
+                             manifestPath: "package.json", latestKnownVersion: latest,
+                             versionCheckSource: latest == nil ? .none : .bundledSnapshot,
+                             knownVulnerabilities: [], resolvedVersion: resolved)
+        }
+        XCTAssertTrue(record("^1.2.3", resolved: "1.2.3", latest: "1.2.4").isProbablyOutdated,
+                      "锁文件说装的是 1.2.3，最新是 1.2.4 ⇒ 过旧")
+        XCTAssertFalse(record("^1.2.3", resolved: nil, latest: "1.2.4").isProbablyOutdated,
+                       "只有范围、没有解析值 ⇒ 安装版本未知，不许报过旧")
+        XCTAssertFalse(record("^5.2.1", resolved: "5.2.1", latest: "5.2.1").isProbablyOutdated,
+                       "已是最新，不得判过旧（旧实现在这里判 true）")
+        XCTAssertFalse(record("*", resolved: nil, latest: "1.9.0").isProbablyOutdated, "通配不折成 0")
+        XCTAssertFalse(record("workspace:*", resolved: nil, latest: "1.9.0").isProbablyOutdated)
+        XCTAssertFalse(record("1.9.0", resolved: nil, latest: nil).isProbablyOutdated,
+                       "没有『最新』这一侧的证据时不得判过旧")
+        XCTAssertFalse(record("2.0.0", resolved: nil, latest: "1.9.0").isProbablyOutdated,
+                       "当前高于最新 ⇒ 快照过期，不是过旧")
+        XCTAssertEqual(DependencyVersionIdentity.of(record("2.0.0", resolved: nil, latest: "1.9.0")).outdatedness,
+                       .aheadOfLatest, "『高于最新』要能单独读出来，不能被压进『不过旧』这一格")
     }
 }
 
-// MARK: - 契约 F：漏洞核对覆盖度（WS-D 审计 P0#1/#2/#4 的回归门）
-//
-// 根因：默认 allowNetworkLookups = false → vulnerableCount 恒为 0，
-// 而 riskLevel 只看 vulnerableCount，于是任何项目都能拿到绿色「风险 无」+ 每行「正常」。
-// 现在视图与单测共用 DependencySafetyVerdict / DependencyRowStatus 这一份判定。
+// 契约 F（漏洞核对覆盖度三态）已于 2026-09-22 整块搬到同目录的
+// `DependencySafetyVerdictTests.swift` —— 400 行口径下按**类型**整块搬，判据一字未动。
 
-final class DependencySafetyVerdictTests: XCTestCase {
-    func report(networkPerformed: Bool,
-                        versions: [VersionCheckSource],
-                        advisories: [SecurityAdvisory] = [],
-                        offlineVulns: [DependencyVulnerability] = []) -> DependencyReport {
-        let records = versions.enumerated().map { index, source -> DependencyRecord in
-            DependencyRecord(name: "pkg\(index)", version: "1.0.0", ecosystem: .npm, scope: .runtime,
-                             manifestPath: "package.json", latestKnownVersion: source == .none ? nil : "9.9.9",
-                             versionCheckSource: source, knownVulnerabilities: [])
-        }
-        var result = DependencyReport(analyzedAt: Fixture.commit(sha: Fixture.shaA, date: Date()).date)
-        result.ecosystems = [EcosystemReport(ecosystem: .npm, manifestPath: "package.json",
-                                            lockfileName: nil, dependencies: records, frameworkMarkers: [])]
-        result.advisories = advisories
-        result.offlineVulnerabilities = offlineVulns
-        result.networkLookupPerformed = networkPerformed
-        return result
-    }
-
-    /// 同一份「零命中」数据，联网与否必须给出**不同**的可见结论。
-    func testOfflineAndOnlineZeroFindingsDifferVisibly() {
-        let offline = DependencySafetyVerdict(report(networkPerformed: false, versions: [.bundledSnapshot]))
-        let online = DependencySafetyVerdict(report(networkPerformed: true, versions: [.onlineRegistry]))
-
-        XCTAssertEqual(offline, .unchecked(coveredCount: 1, total: 1, uncoveredEcosystems: []))
-        XCTAssertEqual(online, .clean(coveredCount: 1, total: 1))
-        XCTAssertFalse(offline.mayClaimSafe, "没联网就不许声称安全")
-        XCTAssertTrue(online.mayClaimSafe)
-        XCTAssertNotEqual(offline.badgeText, online.badgeText)
-        XCTAssertEqual(offline.badgeText, "未核对")
-        XCTAssertEqual(online.badgeText, "已核对")
-        XCTAssertTrue(offline.summaryCaption.contains("未联网核对"), offline.summaryCaption)
-        XCTAssertTrue(online.summaryCaption.contains("未发现已知漏洞"), online.summaryCaption)
-        XCTAssertFalse(offline.summaryCaption.contains("未发现已知漏洞"),
-                       "离线文案里不能出现「未发现已知漏洞」这种 all-clear")
-    }
-
-    /// 读数带格子里的短脚注：**压缩重复，但状态词一个不许少**。
-    /// 清单 3.16 要求"每屏一处权威落点"，`summaryCaption` 的全文留在口径条那一处；
-    /// 这一格只许留下核对状态 —— 少了它，`0 条` 就会被读成"查过、没有病"。
-    func testVerdictTileCaptionKeepsTheHonestyStateAndPointsAtTheAuthority() {
-        let offline = DependencySafetyVerdict(report(networkPerformed: false, versions: []))
-        let online = DependencySafetyVerdict(report(networkPerformed: true, versions: [.onlineRegistry]))
-        XCTAssertTrue(offline.tileCaption.contains("未联网核对"), offline.tileCaption)
-        XCTAssertFalse(online.tileCaption.contains("未联网"), online.tileCaption)
-        XCTAssertFalse(offline.tileCaption.contains("未发现已知漏洞"),
-                       "短脚注里更不许出现 all-clear：" + offline.tileCaption)
-        for verdict in [offline, online] {
-            XCTAssertLessThanOrEqual(verdict.tileCaption.count, 24,
-                                     "脚注超过一行就会把四格读数带撑成高低不齐：" + verdict.tileCaption)
-            XCTAssertTrue(verdict.tileCaption.contains("见上方") || verdict.tileCaption.contains("见下方"),
-                          "短脚注必须指出全口径的权威落点：" + verdict.tileCaption)
-        }
-    }
-
-    /// 契约层 `uncoveredEcosystemNames` 拿 displayName 去比 ["npm","maven","python"]，
-    /// 于是 npm（displayName 是 "npm / Node.js"）被误报成"未覆盖生态"。
-    /// 服务层改成从规则表推导，这里把两边差异钉住。
-    func testUncoveredEcosystemListFollowsTheRuleTableNotADuplicatedNameSet() {
-        var npmOnly = DependencyReport()
-        npmOnly.ecosystems = [EcosystemReport(ecosystem: .npm, manifestPath: "package.json",
-                                             lockfileName: nil, dependencies: [], frameworkMarkers: [])]
-        XCTAssertEqual(ManifestDependencyAnalyzer.ecosystemsWithoutOfflineRules(in: npmOnly), [],
-                       "npm 有内置规则，不该被点名为未覆盖")
-
-        var goAndCargo = DependencyReport()
-        goAndCargo.ecosystems = [
-            EcosystemReport(ecosystem: .go, manifestPath: "go.mod", lockfileName: nil,
-                            dependencies: [], frameworkMarkers: []),
-            EcosystemReport(ecosystem: .cargo, manifestPath: "Cargo.toml", lockfileName: nil,
-                            dependencies: [], frameworkMarkers: []),
-        ]
-        XCTAssertEqual(ManifestDependencyAnalyzer.ecosystemsWithoutOfflineRules(in: goAndCargo), ["Go", "Cargo"],
-                       "无内置规则的生态必须被点名")
-        XCTAssertTrue(goAndCargo.uncoveredEcosystemNames.count >= 2,
-                      "契约层同样会点名这两个，只是它连 npm 也一起误点名")
-    }
-
-    func testVerdictKeepsFindingsAndTreatsAdvisoriesAsCoverage() {
-        let hit = DependencyVulnerability(id: "V1", package: "lodash", ecosystem: .npm,
-                                          vulnerableRange: "< 4.17.21", fixedVersion: "4.17.21",
-                                          summary: "命令注入", severity: .high,
-                                          cveIdentifiers: ["CVE-2021-23337"], affectedDependencies: ["lodash@4.17.15"])
-        let found = DependencySafetyVerdict(report(networkPerformed: false, versions: [.bundledSnapshot],
-                                                  offlineVulns: [hit]))
-        guard case .findings(let count, _) = found else { return XCTFail("有命中必须是 findings，实得 \(found)") }
-        XCTAssertEqual(count, 1)
-        XCTAssertFalse(found.mayClaimSafe)
-
-        // 带回过在线公告＝确实联网查过；但公告非空必然也计入 vulnerableCount，所以走 findings 分支
-        let advisory = SecurityAdvisory(id: "A1", aliases: ["CVE-1"], summary: "s", details: "d",
-                                        severity: .medium, cvssScore: nil, affectedPackages: ["pkg0@1.0.0"],
-                                        ecosystem: .npm, publishedAt: nil, source: "OSV")
-        let covered = DependencySafetyVerdict(report(networkPerformed: false, versions: [.onlineRegistry],
-                                                    advisories: [advisory]))
-        guard case .findings(let coveredCount, _) = covered else {
-            return XCTFail("有在线公告就是命中，必须走 findings，实得 \(covered)")
-        }
-        XCTAssertEqual(coveredCount, 1)
-    }
-
-    func testRowStatusOnlyTurnsGreenOnOnlineSource() {
-        func row(_ source: VersionCheckSource, vulns: [String] = [], latest: String? = "1.0.0") -> DependencyRowStatus {
-            DependencyRowStatus.of(DependencyRecord(name: "pkg", version: "1.0.0", ecosystem: .npm, scope: .runtime,
-                                                    manifestPath: "package.json", latestKnownVersion: latest,
-                                                    versionCheckSource: source, knownVulnerabilities: vulns))
-        }
-        XCTAssertEqual(row(.onlineRegistry), .verifiedSafe)
-        XCTAssertEqual(row(.onlineRegistry).text, "正常")
-        XCTAssertEqual(row(.bundledSnapshot), .versionOnly, "只有内置快照比过版本 → 漏洞层面仍未核对")
-        XCTAssertNotEqual(row(.bundledSnapshot).text, "正常")
-        XCTAssertEqual(row(.none, latest: nil), .unchecked)
-        XCTAssertNotEqual(row(.none, latest: nil).text, "正常")
-        XCTAssertEqual(row(.none, vulns: ["CVE-1"]).text, "有漏洞")
-        XCTAssertEqual(row(.bundledSnapshot, latest: "9.9.9"), .outdated, "版本落后是版本结论，可保留")
-        XCTAssertTrue(row(.bundledSnapshot).tooltip(record: DependencyRecord(
-            name: "pkg", version: "1.0.0", ecosystem: .npm, scope: .runtime, manifestPath: "package.json",
-            latestKnownVersion: "1.0.0", versionCheckSource: .bundledSnapshot,
-            knownVulnerabilities: [])).contains("未联网核对"))
-    }
-
-    func testOfflineCaveatNamesSkippedIncomparableVersions() {
-        let records: [DependencyRecord] = [
-            DependencyRecord(name: "lodash", version: "4.17.21", ecosystem: .npm, scope: .runtime,
-                             manifestPath: "package.json", latestKnownVersion: nil,
-                             versionCheckSource: .none, knownVulnerabilities: []),
-            DependencyRecord(name: "@tcoder/local", version: "workspace:*", ecosystem: .npm, scope: .unknown,
-                             manifestPath: "package.json", latestKnownVersion: nil,
-                             versionCheckSource: .none, knownVulnerabilities: []),
-            DependencyRecord(name: "ghost", version: "*", ecosystem: .npm, scope: .runtime,
-                             manifestPath: "package.json", latestKnownVersion: nil,
-                             versionCheckSource: .none, knownVulnerabilities: []),
-        ]
-        var report = DependencyReport()
-        report.ecosystems = [EcosystemReport(ecosystem: .npm, manifestPath: "package.json",
-                                            lockfileName: nil, dependencies: records, frameworkMarkers: [])]
-        let note = ManifestDependencyAnalyzer.offlineCaveat(for: report)
-        XCTAssertTrue(note.contains("未联网核对"), note)
-        XCTAssertTrue(note.contains("2 项版本不可比较"), "workspace:* 与 * 两个要按数量说出来：\(note)")
-    }
-
-    func testOfflineAnalysisWritesCaveatIntoReportEndToEnd() async throws {
-        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("tcoder-wsb-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
-        try #"{"name":"tcoder-lab","dependencies":{"lodash":"4.17.21","@tcoder/local":"workspace:*"}}"#
-            .write(to: root.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
-
-        let result = try await ManifestDependencyAnalyzer().analyze(projectRoot: root, allowNetwork: false)
-        XCTAssertEqual(result.totalDependencies, 2)
-        XCTAssertEqual(result.vulnerableCount, 0, "内置规则没有 lodash 4.17.21 的命中")
-        XCTAssertFalse(result.networkLookupPerformed)
-        XCTAssertFalse(DependencySafetyVerdict(result).mayClaimSafe, "这份报告不得被渲染成安全")
-        XCTAssertTrue(result.networkLookupNote.contains("未联网核对"),
-                     "离线也要说清我们没做什么，实得：\(result.networkLookupNote)")
-        XCTAssertTrue(result.networkLookupNote.contains("1 项版本不可比较"), result.networkLookupNote)
-    }
-}

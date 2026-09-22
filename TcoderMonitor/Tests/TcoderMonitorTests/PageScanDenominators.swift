@@ -14,16 +14,21 @@ import Foundation
 /// 所以文案里的分母一律插值，不再手写第二遍。
 enum PageScanDenominators {
     /// WS-L / WS-P 名下 `Views/{Code,Git,Dependencies,CodeGit}` 的 `.swift` 文件数。
-    /// Code 6 / Git 5 / Dependencies 3 / CodeGit 2（WS-X8 把 401 行的
-    /// `DependenciesView.swift` 里的 `NetworkOptionsCard` 搬成同目录分片，本处 +1）。
-    static let codeGitPageFiles = 16
+    /// Code 6 / Git 5 / Dependencies 5 / CodeGit 2。
+    /// · 15 → 16（WS-X8）：`DependenciesView.swift` 里的 `NetworkOptionsCard` 搬成同目录分片。
+    /// · 16 → 18（R3 B 组）：`DependencyVerdictRows.swift` 被拆到 429 行，按 400 口径整块搬出
+    ///   `DependencyAdvisoryRows.swift`（c789b2a）；RD-13c 的六档 scope 另起
+    ///   `DependencyScopeBreakdown.swift`。**改的是文件归属，不是判定阈值** ——
+    ///   两笔都在 `Views/Dependencies/` 名下，页面数与"每页拥有哪些文件"的 roster
+    ///   （`CodeGitRestyleTests.pageFiles`）都没动，所以只有这个总数要跟着认。
+    static let codeGitPageFiles = 18
 
     /// 外壳层扫描集：3 个页面文件（`RootView` / `ProjectDetailView` / `DashboardView`）
     /// 加 `Views/Shell/` 下的 6 个分件。
     static let shellLayerFiles = 9
 
     static var codeGitRosterText: String {
-        "WS-L/WS-P 名下应有 \(codeGitPageFiles) 个视图文件（Code 6 / Git 5 / Dependencies 3 / CodeGit 2）"
+        "WS-L/WS-P 名下应有 \(codeGitPageFiles) 个视图文件（Code 6 / Git 5 / Dependencies 5 / CodeGit 2）"
     }
 
     static var shellRosterText: String {
