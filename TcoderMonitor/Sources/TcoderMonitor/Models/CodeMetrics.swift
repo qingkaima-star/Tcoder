@@ -27,6 +27,19 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     /// 占比分子的唯一取法，两处消费方（评分器与界面）都走它，免得各写一份口径。
     var reportedHugeFileCount: Int { hugeFileCount ?? hugeFiles.count }
     var topComplexFunctions: [FunctionHotspot] = []
+    /// **全体**函数里判档达到"高"或更高的个数。
+    ///
+    /// ⚠️ 为什么没有一并加一枚"热点总数"：读实现才确认 `FileSystemCodeAnalyzer.hotspots(…)`
+    /// **根本不做筛选** —— 它把每一个被识别的函数都映射成 `FunctionHotspot`，
+    /// 所以它的 `count` 等于函数总数（本仓 3358），拿它当"热点总数"上屏就是一句谎话。
+    /// 榜就是榜：`topComplexFunctions` 的读数以"复杂度**上榜**"命名是诚实的，
+    /// 需要"多少个函数真的偏复杂"这一格时，用下面这个按判档算出来的个数。
+    var highRiskHotspotCount: Int? = nil
+    /// 取法只留一处：消费方不许各自再写一遍 `?? 榜内 filter`（那会得到第二个口径）。
+    /// 旧报告没有这一格时才退回榜内算法，那是**偏小**的口径（榜只留 20）。
+    var reportedHighRiskHotspotCount: Int {
+        highRiskHotspotCount ?? topComplexFunctions.filter { $0.risk.rank >= RiskLevel.high.rank }.count
+    }
     var longFunctions: Int = 0
     var averageFunctionLength: Int = 0
 

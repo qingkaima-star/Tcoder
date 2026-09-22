@@ -114,6 +114,11 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         metrics.hugeFiles = Array(huge.prefix(20))
 
         let hotspots = hotspots(files: files, functionsPerFile: functionsPerFile)
+        // 高档个数必须从**全体**函数算，不能事后在榜上 filter：
+        // 榜只留前 20，仓库越大越会把"高复杂度 N 个"报小（与"榜长冒充总数"同一条病）。
+        // ⚠️ 这里的 `hotspots` 名字有误导性：它**不做筛选**，条数 = 被识别函数总数，
+        //    所以不要把它当"热点总数"落任何字段（详见 `CodeMetrics.highRiskHotspotCount` 的说明）。
+        metrics.highRiskHotspotCount = hotspots.filter { $0.risk.rank >= RiskLevel.high.rank }.count
         metrics.topComplexFunctions = Self.rankedHotspots(hotspots)
         applyFunctionMetrics(functionsPerFile.flatMap { $0 }, to: &metrics)
 
