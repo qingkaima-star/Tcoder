@@ -32,7 +32,11 @@ final class WeightedHealthScorer: HealthScoringProviding {
         let overall = WeightedHealthScorer.clamped(
             normalized.reduce(0.0) { $0 + Double($1.score) * $1.weight })
         if texts.recommendations.isEmpty {
-            texts.recommendations.append("当前无明显短板，保持提交节奏并持续监控新增高复杂度函数。")
+            // 这句垫白以前写「保持提交节奏」—— 一条**没有任何维度报出来的**节奏建议，
+            // 与曲线对同一个日均频率的折算各说一次（台账 RD-29 的双计形态）。
+            // 现在只说能证实的部分：没有建议 = 在场分量都在可接受区间，且没人被额外加分。
+            texts.recommendations.append("当前无明显短板：在场维度都落在可接受区间，"
+                + "综合分只由这些分量按权重算出，没有额外加分项。")
         }
 
         return HealthScore(
