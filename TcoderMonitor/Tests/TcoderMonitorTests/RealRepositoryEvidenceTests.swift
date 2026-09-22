@@ -242,4 +242,69 @@ final class RealRepositoryEvidenceTests: XCTestCase {
             "总评=\(score.narrative)",
         ].joined(separator: " · "))
     }
+
+    // MARK: - 批次 P38：独立取数必须和被测数据同一快照（结构钉）
+
+    /// 复核型断言（"分析器数到多少 vs 独立走一遍树数到多少"）**只许在快照里取一次数**。
+    /// 共享主树每 1~2 分钟被并发合流推进一次，两次走树之间只要动过，比的就是两棵不同的树——
+    /// 2026-09-22 这条门就是这么假红过 3 条（`analyzedFunctionCount` 4174 vs 普查 4230），
+    /// 而单跑该文件 7 例 0 失败。P29 已给 git 真值做过同一处理，这条是同一机制的另一个落点。
+    ///
+    /// 钉的是形状：`complexityCensus()` 必须**转发**到 `selfScan().census`，
+    /// 自己**不许**再走一遍树；真正取数的 `measureComplexityCensus()` 只许被 `make()` 调一次。
+    static func censusIsTakenInsideTheScanSnapshot(_ harness: String)
+        -> (forwards: Bool, walksAgain: Bool, takes: Int) {
+        let lines = SurfaceScanKit.codeLines(harness)
+        let code = lines.joined(separator: "\n")
+        let forwards = code.contains("try await selfScan().census")
+        // 取树那一行只要出现在 `complexityCensus()` 的头两行体内，就是断言在第二次走树。
+        var walksAgain = false
+        if let head = lines.firstIndex(where: { $0.contains("func complexityCensus()") }),
+           head + 1 < lines.count {
+            let body = lines[(head + 1)..<min(head + 3, lines.count)]
+            walksAgain = body.contains { $0.contains("SourceTreeScanner(") }
+        }
+        let takes = code.components(separatedBy: "measureComplexityCensus()").count - 1
+        return (forwards, walksAgain, takes)
+    }
+
+    func test_independentCensusIsTakenInsideTheScanSnapshot() throws {
+        let harness = try XCTUnwrap(SurfaceScanKit.testSource("SelfScanHarness.swift"),
+                                    "读不到测试基座 ⇒ 这条结构钉在空转")
+        let shape = Self.censusIsTakenInsideTheScanSnapshot(harness)
+        XCTAssertTrue(shape.forwards,
+                      "`complexityCensus()` 不再转发到快照 ⇒ 断言会第二次走树，共享主树上必然漂红")
+        XCTAssertFalse(shape.walksAgain,
+                       "取树逻辑又写回 `complexityCensus()` 里了：那正是两棵树比大小的形状")
+        XCTAssertEqual(shape.takes, 2,
+                       "`measureComplexityCensus()` 出现 \(shape.takes) 次（定义 1 + 快照里调 1）；"
+                       + "多了就是有人另开一处取数")
+    }
+
+    func test_censusSnapshotRulerCatchesSyntheticRegression() {
+        let good = """
+            func complexityCensus() async throws -> ComplexityCensus {
+                try await selfScan().census
+            }
+            static func measureComplexityCensus() async throws -> ComplexityCensus {
+                let files = await SourceTreeScanner(options: .default).scan(root: Self.repoRoot).files
+            }
+            let census = try await Self.measureComplexityCensus()
+            """
+        let shape = Self.censusIsTakenInsideTheScanSnapshot(good)
+        XCTAssertTrue(shape.forwards); XCTAssertFalse(shape.walksAgain)
+        XCTAssertEqual(shape.takes, 2, "合法形状被误判 ⇒ 下次没人敢动这块")
+
+        let bad = """
+            func complexityCensus() async throws -> ComplexityCensus {
+                let files = await SourceTreeScanner(options: .default).scan(root: Self.repoRoot).files
+            }
+            static func measureComplexityCensus() async throws -> ComplexityCensus {
+                let files = await SourceTreeScanner(options: .default).scan(root: Self.repoRoot).files
+            }
+            """
+        let broken = Self.censusIsTakenInsideTheScanSnapshot(bad)
+        XCTAssertFalse(broken.forwards, "丢掉快照转发的写法没抓到 → 这条守卫是摆设")
+        XCTAssertTrue(broken.walksAgain, "断言里重新走树没抓到 → 假红会回来")
+    }
 }

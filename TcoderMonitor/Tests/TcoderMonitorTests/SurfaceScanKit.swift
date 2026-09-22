@@ -38,6 +38,19 @@ enum SurfaceScanKit {
         }
     }
 
+    /// 读 `Tests/TcoderMonitorTests/<name>`。少数判据要钉的是**测试基座自己的形状**
+    /// （例：复核型断言必须从同一份快照取数），所以 Tests 侧也要有出口。
+    /// 与 `sourceFiles` 同一个根、同一套失败口径：**读不到就 XCTFail**，
+    /// 不许返回空串让下面的字符串断言变成空转。
+    static func testSource(_ name: String) -> String? {
+        let url = packageRoot.appendingPathComponent("Tests/TcoderMonitorTests/\(name)")
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            XCTFail("读不到 \(url.path) —— 测试基座改了名字或位置，钉它形状的守卫会假绿")
+            return nil
+        }
+        return text
+    }
+
     /// 这一行是不是代码。所有「扫源码文本」的判据都必须先过这一道：
     /// 文档注释里**必须**能写被禁的写法本身（否则没人知道旧写法是什么），
     /// 不豁免注释的扫描器第一次跑就会判自己违规。
