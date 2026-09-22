@@ -162,6 +162,76 @@ final class ScoreWordingTests: HealthScoreTestCase {
                        "这条元测试坏了（改坏样例改不出红），上面的守卫就是永真绿")
     }
 
+    // MARK: - 靶子 2：`stability` 的 `totalLinesScanned == 0 → 85 分` 是死支，先钉"不可达"
+
+    /// 反例（生产形状）：日志一行都没读到 ⇒ 整维缺席 + 出声，**不是** 85 分。
+    /// 真子进程同形状实测：`score <夹具> --log=<0 字节文件>` 打的是
+    /// 「运行稳定性 — 未发现可读的日志文件。」且综合分与"完全没日志"一字不差（都是 66）。
+    func test_zeroLineLogs_absentRatherThanADefaultEightyFive() throws {
+        let inputs = HealthInputs(code: healthyCode(),
+                                  logs: LogSummary(errorCount: 0, exceptionCount: 0, warningCount: 0,
+                                                   crashCount: 0, fatalCount: 0, totalLinesScanned: 0))
+        let score = WeightedHealthScorer().score(inputs)
+        XCTAssertFalse(score.components.contains { $0.name == HealthDimension.stability.rawValue },
+                       "没有一行日志证据时不许出现一个默认分")
+        XCTAssertTrue(score.components.allSatisfy { !$0.detail.contains("按默认值计") },
+                      "任何分量都不许带着「按默认值计」上屏：\(score.components.map(\.detail))")
+        XCTAssertTrue(HealthBreakdown.missingDimensions(of: score).contains(.stability))
+        XCTAssertTrue(score.recommendations.contains { $0.contains("运行稳定性不参与本次评分") },
+                      "缺席必须出声，实得 \(score.recommendations)")
+        // 综合分只由在场维度算出来（默认分没有混进来）
+        let rows = HealthBreakdown.rows(for: score)
+        XCTAssertTrue(HealthBreakdown.isSumConsistent(HealthBreakdown.sumOfContributions(rows),
+                                                     with: score.overall))
+    }
+
+    /// 可达性钉子：曲线里那一支只活在单测的直接调用下，生产调用点必须先判总行数。
+    /// 一旦有人删掉那道 guard（或加一个不判行数的第二调用点），这条立刻红 ——
+    /// 这就是"它当前不可达"这件事的机器记录，比在注释里写一句"这里是死支"可靠。
+    func test_stabilityCurveCallSiteStillGuardsBeforeAskingTheCurve() throws {
+        let path = Self.packageRoot.appendingPathComponent(
+            "Sources/TcoderMonitor/Services/Health/HealthRuntimeDimensions.swift").path
+        let source = Self.strippingComments(try String(contentsOfFile: path, encoding: .utf8))
+        let callAt = try XCTUnwrap(source.range(of: "HealthCurves.stability("),
+                                   "调用点没了 —— 本条判据的对象变了，请连本流结论一起更新")
+        let beforeCall = String(source[source.startIndex..<callAt.lowerBound])
+        XCTAssertTrue(beforeCall.contains("logs.totalLinesScanned > 0"),
+                      "调用曲线之前那道 `totalLinesScanned > 0` 守卫不见了 ⇒ 85 那个默认分又能进加权")
+    }
+
+    /// 分母自证：上面那条读源码的判据扫的确实是代码而不是空气。
+    func test_stabilityReachabilityGuardIsNotPermanentlyGreen() throws {
+        let sample = Self.strippingComments("""
+        // guard logs.totalLinesScanned > 0 else { }   <- 注释里的假守卫，不许算数
+        let curve = HealthCurves.stability(errorsPerKiloLogLines: 0, totalLinesScanned: 0)
+        """)
+        XCTAssertFalse(sample.contains("guard logs.totalLinesScanned > 0"),
+                       "注释没剥掉：真守卫与写在注释里的假守卫分不开")
+        XCTAssertFalse(sample.contains("logs.totalLinesScanned > 0"), "剥得太狠，把真代码也剥掉了")
+    }
+
+    /// 三档缺席原因：`nil` / 一行没读到 / 列到文件却一行没读出来，三句不许合成一句。
+    func test_stabilityMissingReasonHasThreeDistinctStates() {
+        let report = ProjectReport(project: MonitoredProject(name: "r9", path: "/tmp/r9"))
+        let none = MissingDimensionReason.text(for: .stability, report: report)
+        XCTAssertTrue(none.contains("尚未分析日志"), "实得 \(none)")
+
+        var unreadable = report
+        unreadable.logs = LogSummary(scannedFiles: [], totalLinesScanned: 0)
+        let noFile = MissingDimensionReason.text(for: .stability, report: unreadable)
+        XCTAssertTrue(noFile.contains("未发现可读的日志文件"), "实得 \(noFile)")
+
+        var listedButEmpty = report
+        listedButEmpty.logs = LogSummary(scannedFiles: [ScannedLogFile(path: "/tmp/a.log", sizeBytes: 0,
+                                                                       lineCount: 0, modifiedAt: Date(),
+                                                                       role: .application)],
+                                         totalLinesScanned: 0)
+        let listed = MissingDimensionReason.text(for: .stability, report: listedButEmpty)
+        XCTAssertTrue(listed.contains("一行都没读出来") && listed.contains("1 个日志文件"),
+                      "hasData 说「有文件」、评分器说「没证据」，这一档必须单独说一句：\(listed)")
+        XCTAssertFalse(listed.contains("未发现可读的日志文件"), "第三档不许退化成第二档那句")
+    }
+
     // MARK: - 夹具
 
     static var packageRoot: URL {

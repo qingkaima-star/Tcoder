@@ -269,11 +269,19 @@ enum MissingDimensionReason {
         return nil
     }
 
-    /// 唯一要分两档的一维：`logs == nil`（没分析过）与「分析了但一行没读到」是两件事，
-    /// 合成一句就把输入状态弄丢了。
+    /// 唯一要分**三档**的一维：`logs == nil`（没分析过）、分析了但一行没读到、
+    /// 以及"列到了文件却一行都没读出来"是三件事，合成一句就把输入状态弄丢了。
+    /// ⚠ `hasData` 自己只看"有没有文件"（`totalLinesScanned > 0 || !scannedFiles.isEmpty`），
+    /// 所以第三种形状下它会说"有数据"，而评分器按 `totalLinesScanned > 0` 判的是"没有证据"——
+    /// 这一档要是落到兜底句，界面就变成"扫过了但没说为什么没分"。
     private static func stabilityAbsence(logs: LogSummary?) -> String? {
         guard let logs else { return "尚未分析日志。" }
-        return logs.hasData ? nil : "未发现可读的日志文件。"
+        guard logs.hasData else { return "未发现可读的日志文件。" }
+        guard logs.totalLinesScanned > 0 else {
+            return "列到 \(NumberFormat.grouped(logs.scannedFiles.count)) 个日志文件，"
+                + "但一行都没读出来（空文件 / 编码不认识 / 读取失败），本维度不参与计分。"
+        }
+        return nil
     }
 
     private static func dependencyAbsence(dependencies: DependencyReport?) -> String? {

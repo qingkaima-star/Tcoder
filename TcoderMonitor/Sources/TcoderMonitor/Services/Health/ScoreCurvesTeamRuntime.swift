@@ -105,10 +105,22 @@ extension HealthCurves {
     /// 已登记在 Obsidian `110` 的契约缺口一节。
     /// `detail` 由 `HealthCurves.joined` 限到 60 字（评分卡那一行放不下长句），
     /// 所以**"证据不足"那几句不在这里**，在 `WeightedHealthScorer` 的 recommendations 里。
+    ///
+    /// ⚠️ **`totalLinesScanned == 0` 那一支（85 分 + 「按默认值计」）在生产路径上不可达**
+    /// （WS-R9 实测，工单靶子 2 的结案）：唯一调用方 `HealthRuntimeDimensions.stabilityOutcome`
+    /// 先判 `logs.totalLinesScanned > 0`，不满足就整维缺席并把原因写进建议；
+    /// 真子进程同形状实测 —— `score <夹具> --log=<0 字节文件>` 打的是
+    /// 「缺席维度… 运行稳定性 — 未发现可读的日志文件。」，综合分与"完全没日志"一字不差（66）。
+    /// ⇒ **它是死支，不是一个已修掉的扣分缺陷**；建议下一轮整块删除或改成断言级。
+    /// 本流没有自己删它，两个理由：① 别的流的单测
+    /// （`HealthScoreCurvesTests+ActivityAndNarrative.testStabilityNeverFakesUnscannedLogsAsPerfect`）
+    /// 直接拿 `totalLinesScanned: 0` 敲这一支并断言 detail 措辞，改成 `assertionFailure`
+    /// 等于把别人的用例改成崩溃；② 判死代码要先查 stash 与重复实现（AGENTS §7），删归总工。
+    /// 取而代之留了一条**可达性守卫**（`ScoreWordingTests`）：guard 一变没、第二调用点一出现就红。
     static func stability(errorsPerKiloLogLines: Double, crashCount: Int, fatalCount: Int,
                           exceptionCount: Int, totalLinesScanned: Int) -> CurveResult {
         if totalLinesScanned == 0 {
-            // 没扫到日志就不假装满分：给偏高的默认分，并在文案里标明是默认值。
+            // 死支（见上面那段）：没扫到日志就不假装满分，也不假装零分。
             return CurveResult(score: 85, detail: "未扫描到运行日志，本维度按默认值计", risk: .low)
         }
         let base = ScoreCurve.piecewise(Swift.max(0, errorsPerKiloLogLines), through: [
