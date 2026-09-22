@@ -106,6 +106,11 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
     }
 
     /// 与 `analyze` 同一次遍历、同一批数据，额外带回覆盖度；不重复扫描。
+    ///
+    /// `scanLimitations` 在这里拼两段：`limitationSummary`（**扫描范围**：哪些上限真的生效过）
+    /// 加 `JavaSignatureDeclines.notes`（**识别覆盖面**：轻量正则认不出的 Java 形状）。
+    /// 两段共用同一条纪律——零命中不出声，否则「没测到」会长成「这个文件没有复杂函数」。
+    /// 本函数体停在 50 行口径内（`CodeComplexityDebtTests`），要补理由请补到上面的文档注释里。
     func analyzeWithCoverage(root: URL, options: ScanOptions) async throws -> AnalysisOutcome {
         let startedAt = Date()
 
@@ -152,7 +157,7 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         )
         // 契约接入（P7-C 3-2）：判据用 `limitationSummary` 非空而不是 `isPartial` —— 前者还含
         // 「按规则排除了多少条目」这类**范围**事实，读者要知道数字是在什么范围内测出来的。
-        let limits = coverage.limitationSummary
+        let limits = coverage.limitationSummary + ComplexityEngine.JavaSignatureDeclines.notes(for: files)
         metrics.scanLimitations = limits.isEmpty ? nil : limits
         return AnalysisOutcome(metrics: metrics, coverage: coverage)
     }
