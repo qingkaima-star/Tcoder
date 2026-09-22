@@ -79,6 +79,10 @@ final class CoverageMergeTests: XCTestCase {
         XCTAssertEqual(CoverageLegacyArithmetic.summed(from: [
             (covered: 120, total: 200), (covered: 120, total: 200)]), 240.0 / 400.0 * 100,
             "修前形状：同一份证据被累加成 240/400")
+        XCTAssertTrue(result.merge.statement.contains("同一次运行的另一种落法"),
+                      "上屏那句必须说出为什么丢了这份，否则与静默截断无异：\(result.merge.statement)")
+        XCTAssertTrue(result.merge.statement.contains("丢弃 1"),
+                      "丢弃数要上屏：\(result.merge.statement)")
         // 留哪一份不是随便留：留**能参与合并**的那一份（lcov 带文件粒度），
         // 汇总粒度的一份虽然被丢出总数，但读数仍留在 separateReadings 里可查。
         XCTAssertEqual(result.metrics.reports.first?.toolName, "lcov")
@@ -203,6 +207,7 @@ final class CoverageMergeTests: XCTestCase {
         let truncated = result.merge.dropped.filter { ($0.detail ?? "").contains("逐行预算") }
         XCTAssertEqual(truncated.count, 1, "被截断的那一份要点名：\(result.merge.statement)")
         XCTAssertTrue(result.merge.statement.contains("内存预算截断"), result.merge.statement)
+        XCTAssertTrue(result.merge.statement.contains("逐行账本不可信"), result.merge.statement)
         XCTAssertEqual(result.merge.mergeConfident, false, "有一份没并进总数 ⇒ 不许声称可信合并")
         XCTAssertNotNil(result.metrics.overallLinePercent, "另一份仍然给出它自己的读数")
     }
@@ -322,6 +327,7 @@ final class CoverageMergeTests: XCTestCase {
                        [.emptyFile, .noUsableNumbers],
                        "空文件与'读到但没数字'要分得开：\(result.merge.parseFailures)")
         XCTAssertTrue(result.merge.statement.contains("空文件"), result.merge.statement)
+        XCTAssertTrue(result.merge.statement.contains("读取失败"), result.merge.statement)
     }
 
     /// 目录数上限命中时也要出声（旧实现命中 40 份后剩下的目录**静默不下潜**）。
