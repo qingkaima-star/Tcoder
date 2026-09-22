@@ -26,13 +26,19 @@ extension JavaRecognitionTruthTests {
         let outcome = try await FileSystemCodeAnalyzer().analyzeWithCoverage(root: root, options: .default)
         let limits = outcome.metrics.scanLimitations ?? []
         let text = limits.joined(separator: "\n")
-        XCTAssertTrue(limits.contains { $0.contains("Java") && $0.contains("接口") },
-                      "接口无体声明未出声：\(text)")
-        XCTAssertTrue(limits.contains { $0.contains("Java") && $0.contains("构造器") },
-                      "无修饰符裸签名（构造器/调用不可分）未出声：\(text)")
-        XCTAssertTrue(limits.contains { $0.contains("Java") && $0.contains("匿名") },
-                      "lambda / 匿名类体口径未出声：\(text)")
+        // 三个数字是我逐份夹具数出来的，不是从实现输出反抄的：
+        //   接口无体 = UserRepository 的 `List<User> findByTenant(String tenant);` + `void purge(String tenant);`
+        //   裸签名   = Lane 的 `Lane(int limit) {`（`DOMESTIC(40), CROSS(120);` 不是声明，不许被数进来）
+        //   lambda/匿名 = ReportingJob 的 `new ClickHandler() {` + `() -> {`
+        XCTAssertTrue(limits.contains { $0.contains("Java") && $0.contains("2 处接口") },
+                      "接口无体声明计数不对：\(text)")
+        XCTAssertTrue(limits.contains { $0.contains("Java") && $0.contains("1 处「名字+参数表+{」") },
+                      "裸签名计数不对：\(text)")
+        XCTAssertTrue(limits.contains { $0.contains("Java") && $0.contains("2 处 lambda") },
+                      "lambda / 匿名类体计数不对：\(text)")
         XCTAssertFalse(text.contains("没有复杂函数"), "限制通道不许写成「没有问题」：\(text)")
+        // 分母守卫：这四份 Java 必须真的进了扫描面，否则上面三条是空转出来的永真绿。
+        XCTAssertEqual(outcome.metrics.totalFiles, 4, "夹具四份文件必须都扫到：\(outcome.metrics.totalFiles)")
     }
 
     /// 反向判据：一个未覆盖形状都没有时，Java 限制条必须缺席（不是写成空串占位）。
