@@ -81,12 +81,14 @@ final class BoardLengthReadoutRatchetTests: XCTestCase {
     }
 
     func test_meta_sparesGateAndDisclosureShapes() {
-        // 反向样本：这两类写法**必须不被计入**，否则逼人写绕路代码。
-        let legal = """
-            if code.duplicatedBlocks.count > Self.rowLimit {
-                let curve = hugeCount > code.hugeFiles.count
-                          detail: raw.detail + "（榜内只列 \\(code.hugeFiles.count) 个，实际 \\(hugeCount) 个）",
-            """
+        // 反向样本：这三类写法**必须不被计入**，否则逼人写绕路代码。
+        // 注意每行花括号都要配平 —— 本仓 `X3TestSizeAuditTests` 按花括号切函数，
+        // 字符串里留一个不闭合的 `{` 会让这个用例被数成 67 行长函数（2026-09-22 实测踩过）。
+        let legal = [
+            "if code.duplicatedBlocks.count > Self.rowLimit { expanded.toggle() }",
+            "let curve = hugeCount > code.hugeFiles.count",
+            "detail: raw.detail + \"（榜内只列 \\(code.hugeFiles.count) 个，实际 \\(hugeCount) 个）\",",
+        ].joined(separator: "\n")
         XCTAssertEqual(countHits(in: legal, path: "Synthetic.swift"), 0,
                        "合法形状被误判 —— 守卫开始咬自己人")
     }
