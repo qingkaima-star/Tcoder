@@ -128,8 +128,18 @@ final class SourceFileReachabilityTests: XCTestCase {
     ///   以守 400 行闸门，新增 `FileSystemCodeAnalyzerLimits.swift` 一枚）。
     /// 151 → 152（RD-30/31 溯源块新增 `Models/ScanProvenance.swift`，四处在引用它）。
     /// 152 → 164：依赖链一条流带来 12 枚新实现文件（枚数与引用证据逐条见台账卷二 §27，
-    /// 全部由守卫 `testEveryImplementationFileHasExternalCallEvidence` 实跑判过在用）。
-    static let censusBaseline = 164
+    ///   全部由守卫 `testEveryImplementationFileHasExternalCallEvidence` 实跑判过在用）。
+    /// 164 → 173（R5/R5b 覆盖率链整块拆出的九枚，全在 `Services/Coverage/`：
+    ///   `CoverageDisplayShape` / `CoverageLineLedger` / `CoverageMergeConfidence` / `CoverageMergeLedger` /
+    ///   `CoverageMergePlanner` / `CoverageReportDiscovery` / `CoverageReportIdentity` /
+    ///   `CoverageRunIdentity` / `CoverageSourceBinding`。
+    ///   引用证据是同一次守卫跑出的「零调用清单：空」（`testZeroCallListIsEmpty` 未红），
+    ///   九枚都是 `CoverageAnalyzer` 那条链为守 400 行闸门按类型整块搬出去的，不是空壳。）
+    /// 173 → 174（R10 台账一枚 `Models/AnalyzerLedger.swift`：CLI 与 GUI 两个装配点各调一次
+    ///   `AnalyzerLedger.records(from:)`，五路路名也只住这一份）。
+    /// ⚠️ 174 是**三条流各自实报拼出来的 provisional 值**，合并后必须由守卫在同一棵树上重跑一次核对；
+    ///   对不上以守卫实报为准（这条旋钮的历史就是"算的数"和"跑的数"分叉）。
+    static let censusBaseline = 174
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
