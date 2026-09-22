@@ -310,14 +310,14 @@ enum MissingDimensionReason {
     /// 原来三档共用一句「该项目没有产出覆盖率报告」，等于拿"没读到"冒充"没有"
     /// （功能真实性清单 §S2：缺证据不得冒充结论）。
     static func testingAbsence(coverage: CoverageMetrics?) -> String? {
-        guard let coverage else { return "尚未分析覆盖率报告，不参与计分。" }
+        guard let coverage else { return localizedCopy("尚未分析覆盖率报告，不参与计分。") }
         if coverage.hasData { return nil }
         let base: String
         if coverage.scannedFileCount > 0 {
             base = "扫到 \(NumberFormat.grouped(coverage.scannedFileCount)) 个覆盖率报告文件，"
                 + "但里面没有可用的行覆盖数字，不参与计分。"
         } else {
-            base = "该项目没有产出覆盖率报告，不参与计分。"
+            base = localizedCopy("该项目没有产出覆盖率报告，不参与计分。")
         }
         // 「没找到」与「没看到」是两件事：有目录读不动时，"没有产出报告"这句站不住，
         // 必须把扫描面不完整这件事一起说出来（`unreadableDirectoryCount == 0` 才是一句真话，

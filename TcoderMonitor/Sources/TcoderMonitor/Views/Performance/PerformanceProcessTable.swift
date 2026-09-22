@@ -9,7 +9,7 @@ enum ProcessSortKey: String, CaseIterable, Identifiable {
     case memory
 
     var id: String { rawValue }
-    var title: String { self == .cpuCores ? "按 CPU 核当量" : "按内存" }
+    var title: String { localizedCopy(self == .cpuCores ? "按 CPU 核当量" : "按内存") }
 }
 
 /// 对标活动监视器的进程表：列名固定、数值列右对齐等宽、只读、不给行内操作。

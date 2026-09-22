@@ -44,8 +44,8 @@ struct NetworkOptionsCard: View {
     }
 
     static func statusCaption(allowNetwork: Bool) -> String {
-        allowNetwork
-            ? "开启后需要重新执行分析才会生效。"
-            : "当前为离线模式，版本与漏洞结论来自内置快照。"
+        localizedCopy(allowNetwork
+                     ? "开启后需要重新执行分析才会生效。"
+                     : "当前为离线模式，版本与漏洞结论来自内置快照。")
     }
 }

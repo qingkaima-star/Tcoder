@@ -351,7 +351,9 @@ struct SeriesLegend: View {
         // 而最先被吃掉的一定是口径那一段 —— 截完之后恰好把用户要核对的「已用 X GB」截掉。
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
-                Text(name)
+                // 图例名走查表：它是文案不是数据（`CPU 占用率` 这类），
+                // 以前只在这里漏一次，英文态就少一句译文（台账 §6.50）。
+                Text(localizedCopy(name))
                     .font(Theme.Typo.label.font)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
