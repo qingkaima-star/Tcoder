@@ -173,4 +173,46 @@ extension PerformanceDisplayTests {
             XCTAssertTrue(axis.maxValue.isFinite)
         }
     }
+
+    // MARK: - 批次 P24：秒轴只许有一把尺子
+
+    /// 裸档位 `secondsStride` 与带下界的 `boundedSecondsStride` 是**两把尺子**，
+    /// 差别只在"步长不许超过窗口的一半"那一条。总览那张一开始就用带下界的，
+    /// 性能页两张用了裸的 —— 复拍 `53f9b1c` 量到性能页横轴各只有 1 枚标签
+    /// （27 秒跨度选到 15 秒档，一根刻度落不进左半边）。
+    /// 规则收成一条：**档位定义之外，全站调用点一律走带下界的那把**。
+    static func unboundedSecondsStrideCalls(in files: [(path: String, content: String)]) -> [String] {
+        files.flatMap { file -> [String] in
+            guard file.path != "Views/PerfLogs/ChartChrome.swift" else { return [] }   // 定义所在
+            return file.content.split(separator: "\n", omittingEmptySubsequences: false)
+                .enumerated()
+                .compactMap { index, raw -> String? in
+                    let line = String(raw)
+                    guard SurfaceScanKit.isCode(line),
+                          line.contains("secondsStride("),
+                          !line.contains("boundedSecondsStride(") else { return nil }
+                    return "\(file.path):\(index + 1)"
+                }
+        }
+    }
+
+    func test_noCallSiteUsesTheUnboundedSecondsStride() throws {
+        let offenders = Self.unboundedSecondsStrideCalls(
+            in: try SurfaceScanKit.sourceFiles(under: "Views") + SurfaceScanKit.sourceFiles(under: "Design"))
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些调用点用的是裸档位，短窗口下横轴会只剩一两枚标签：\(offenders)")
+    }
+
+    /// 元测试：该抓的抓到、带下界的不误伤、定义文件本身不算调用点。
+    func test_strideScannerSeparatesBoundedFromUnbounded() {
+        let bare = [(path: "Views/Fake.swift", content: "TimeAxis.seconds(ChartScale.secondsStride(windowSeconds: 27))")]
+        XCTAssertEqual(Self.unboundedSecondsStrideCalls(in: bare), ["Views/Fake.swift:1"],
+                       "裸档位没被抓到 ⇒ 这条守卫数不出东西")
+        let bounded = [(path: "Views/Fake.swift",
+                        content: "TimeAxis.seconds(ChartScale.boundedSecondsStride(windowSeconds: 27))")]
+        XCTAssertTrue(Self.unboundedSecondsStrideCalls(in: bounded).isEmpty, "走了带下界那把尺的被误判")
+        let definition = [(path: "Views/PerfLogs/ChartChrome.swift",
+                           content: "static func secondsStride(windowSeconds: TimeInterval) -> Int {")]
+        XCTAssertTrue(Self.unboundedSecondsStrideCalls(in: definition).isEmpty, "定义本身被当成调用点")
+    }
 }

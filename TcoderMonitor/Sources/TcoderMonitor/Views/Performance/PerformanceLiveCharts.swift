@@ -69,8 +69,17 @@ struct PerformanceLiveCharts: View {
         ChartScale.usesRelativeAxis(windowSeconds: actualSpanSeconds, pointCount: points.count)
     }
 
+    /// 这一张图的横轴档位。**必须走 `boundedSecondsStride` 而不是裸档位**：
+    /// 候选档之间是 1→2→5→15 的跳变，27 秒的跨度会选到 15 秒，一根刻度落不进左半边
+    /// （复拍 `53f9b1c` 量到性能页两张曲线各只有 1 枚标签）。
+    /// 总览那张一开始就走了带下界的版本，这一张漏了 —— 同一个规则两处各用一把尺子。
+    /// 屏上「每 N 秒一格」那句读的也必须是这同一个数。
+    private var axisStrideSeconds: Int {
+        ChartScale.boundedSecondsStride(windowSeconds: actualSpanSeconds)
+    }
+
     private var timeAxis: TimeAxis {
-        .seconds(ChartScale.secondsStride(windowSeconds: actualSpanSeconds))
+        .seconds(axisStrideSeconds)
     }
 
     private var referenceDate: Date { points.last?.timestamp ?? Date() }
@@ -153,7 +162,7 @@ struct PerformanceLiveCharts: View {
     /// 横轴那一格怎么读（屏上只留这一小截，理由在 ⓘ 里）。
     private var axisStrideReading: String {
         usesRelativeAxis ? "距今秒数"
-            : "每 \(ChartScale.secondsStride(windowSeconds: actualSpanSeconds)) 秒一格"
+            : "每 \(axisStrideSeconds) 秒一格"
     }
 
     /// 进 ⓘ 的轴口径：**必须是完整句**（半句键在英文态语序必坏），
