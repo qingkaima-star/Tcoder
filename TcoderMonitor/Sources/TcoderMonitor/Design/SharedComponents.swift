@@ -92,6 +92,14 @@ struct MetricTile: View {
         case value(Double, Color)
     }
 
+    /// 窄态下读数与单位允许等比缩到的下限。
+    ///
+    /// 只有一个数、且写在**基座**里：散在各调用点的缩放系数会变成"每页缩得不一样"，
+    /// 而那正是这轮要修的"同一档两种色"的横向版本。
+    /// 0.8 的取法：`metricNumber` 那档缩到 0.8 之后仍明显大于脚注字号，
+    /// 主次不丢；再低就开始与脚注糊成一片。
+    static let metricNumberMinimumScale = 0.8
+
     init(
         label: String,
         value: String?,
@@ -133,10 +141,18 @@ struct MetricTile: View {
                     .font(Theme.Typo.metricNumber.font)
                     .foregroundStyle(Self.tint(value: value, fallback: tint))
                     .contentTransition(.numericText())
+                    // **数字与单位不许从中间折行**。窄态（本 App 自己的 `minWidth` 1080）
+                    // 实拍性能页：磁盘那格折成「128 MB/」+「s」，单位被劈开读起来像坏版，
+                    // 内存那格把「GB」整块挤到第二行、与旁边的「/ 48.0 GB」错位。
+                    // 装不下时**等比缩一档**而不是折行——缩了仍是一个数，劈开就是两个错。
+                    .lineLimit(1)
+                    .minimumScaleFactor(Self.metricNumberMinimumScale)
                 if let unit {
                     Text(localizedCopy(unit))
                         .font(Theme.Typo.label.font)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(Self.metricNumberMinimumScale)
                 }
             }
             // 量条钉在**值与脚注之间**，四格才共一条基线（见 `MetricGauge` 那段注释）。
