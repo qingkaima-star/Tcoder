@@ -59,11 +59,16 @@ final class DependencyEvidenceTests: ManifestLabTestCase {
         return report.networkLookupNote.contains("失败") ? .degraded : .verified
     }
 
-    /// 方向表：每一条都写清"旧判据给什么 / 新判据必须给什么"，
-    /// 并机器断言**旧→新只许往保守那侧走**（degraded/unchecked 永远不许变 verified）。
-    func testStructuredStatesKeepTheConservativeDirection() {
-        let offlineNote = "未联网核对，漏洞判定只依据内置快照（覆盖 npm / Maven / Python），快照截至 2026-09-19"
-        let cases: [(name: String, report: DependencyReport, new: VulnerabilityEvidence)] = [
+    /// 方向表的一条样本：报告 + **新判据必须给出的状态**。
+    private typealias DirectionCase = (name: String, report: DependencyReport, new: VulnerabilityEvidence)
+
+    /// 离线那句说明（旧判据读的就是这种 note，改判据后它对判定必须**完全无影响**）。
+    private static let offlineNote
+        = "未联网核对，漏洞判定只依据内置快照（覆盖 npm / Maven / Python），快照截至 2026-09-19"
+
+    /// 方向表前半：旧判据给 `.degraded` 的那六支 —— 用户点名的红线管的就是它们。
+    private func degradedDirectionCases() -> [DirectionCase] {
+        return [
             // 旧判据 = .degraded 的四支：改完必须仍是 .degraded（或更保守）
             ("在线但部分失败", report([rec("a", "1.0.0", vulnerabilityState: .failed)],
                                       performed: true, note: "OSV：52 个包中 3 个查询失败"), .degraded),
@@ -83,10 +88,17 @@ final class DependencyEvidenceTests: ManifestLabTestCase {
             ("部分核对成功、部分没查完", report([rec("a", "1.0.0", vulnerabilityState: .checked),
                                                  rec("b", "2.0.0", vulnerabilityState: .failed)],
                                                 performed: true, note: "在线查询已完成（OSV + npm registry）"), .degraded),
+        ]
+    }
+
+    /// 方向表后半：旧判据给 `.unchecked` / `.verified` 的那些。
+    private func remainingDirectionCases() -> [DirectionCase] {
+        let offline = Self.offlineNote
+        return [
             // 旧判据 = .unchecked 的三支：改完仍不许是 verified
-            ("默认离线", report([rec("a", "1.0.0")], note: offlineNote), .unchecked),
+            ("默认离线", report([rec("a", "1.0.0")], note: offline), .unchecked),
             ("离线且一条依赖都没有", report([]), .unchecked),
-            ("离线、note 里带日期那一句", report([rec("a", "1.0.0")], note: offlineNote), .unchecked),
+            ("离线、note 里带日期那一句", report([rec("a", "1.0.0")], note: offline), .unchecked),
             // 旧判据 = .verified 的两支：正向发现永远保留（不许为了保守把维度摘掉）
             ("内置规则有命中（离线也算查过）", report(
                 [rec("a", "4.17.15", vulns: ["CVE-2021-23337"])],
@@ -101,15 +113,16 @@ final class DependencyEvidenceTests: ManifestLabTestCase {
              report([rec("a", "^1.0.0", vulnerabilityState: .versionUnresolved)],
                     performed: true, note: "在线查询已完成（OSV + npm registry）"), .unchecked),
         ]
+    }
 
-        var legacyDegradedOrUnchecked = 0
-        var legacyDegraded = 0
-        for entry in cases {
+    private func directionCases() -> [DirectionCase] { degradedDirectionCases() + remainingDirectionCases() }
+
+    /// 逐条判"新判据给的状态"与"旧→新只许往保守那侧走"。
+    func testStructuredStatesKeepTheConservativeDirection() {
+        for entry in directionCases() {
             let judged = VulnerabilityEvidence.classify(entry.report)
             XCTAssertEqual(judged, entry.new, entry.name)
             let legacy = legacyClassify(entry.report)
-            if legacy == .degraded || legacy == .unchecked { legacyDegradedOrUnchecked += 1 }
-            if legacy == .degraded { legacyDegraded += 1 }
             // **用户点名的那条红线**：原来判"试了没查完"的样本，改完一律不许升成 verified。
             if legacy == .degraded {
                 XCTAssertNotEqual(judged, .verified, "保守方向被放松（旧判降级、新判 verified）：\(entry.name)")
@@ -121,10 +134,17 @@ final class DependencyEvidenceTests: ManifestLabTestCase {
                                      "没有任何正向发现就把未核对翻成已核对：\(entry.name)")
             }
         }
-        XCTAssertGreaterThanOrEqual(legacyDegradedOrUnchecked, 6,
+    }
+
+    /// 分母与"收回了哪些绿灯"单独一条：表变小了要在这里红，而不是被上一条的循环吞掉。
+    func testDirectionTableCoversTheLegacyBranchesAndTakesBackWrongGreens() {
+        let cases = directionCases()
+        let legacy = cases.map { legacyClassify($0.report) }
+        XCTAssertGreaterThanOrEqual(legacy.filter { $0 == .degraded || $0 == .unchecked }.count, 6,
                                     "方向表里旧判降级/未核对的样本不足，守卫管不到东西")
         // 单独再数一遍"旧判降级"那一支：它才是用户点名的那条红线所管的样本，不能只靠总数。
-        XCTAssertGreaterThanOrEqual(legacyDegraded, 3, "旧判降级的样本不足 3 条 ⇒ 方向线是空跑的")
+        XCTAssertGreaterThanOrEqual(legacy.filter { $0 == .degraded }.count, 3,
+                                    "旧判降级的样本不足 3 条 ⇒ 方向线是空跑的")
         // 台账 §RD-13 第 ③ 条：旧判据把"不该给绿灯"的结局一律读成 verified，新判据必须收回来。
         let takenBackGreen: Set<String> = Set(cases.filter { legacyClassify($0.report) == .verified
             && VulnerabilityEvidence.classify($0.report) != .verified }.map(\.name))
