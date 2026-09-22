@@ -43,15 +43,11 @@ struct DashboardView: View {
 
     /// 代码规模这一段（实时读数已单独成 `DashboardLiveReadout`，见其注释的失效域理由）。
     ///
-    /// **单列**。旧写法是 `LazyVGrid(pairColumns)` 摆两列，量出来两条病灶
-    /// （`7b4ec25` 那批 36 张页尾，`scripts/card_edges.swift` 逐带量的，不是看着像）：
-    /// ① 没有覆盖率可摆时 `coverageStrip` 整格不渲染，栅格**照样给它留槽位**
-    ///   ⇒「文件构成」右边空出 594px = **297pt 画布洞**（视口三成）；
-    /// ② 同一行两张卡**不共顶线**：「最近提交」顶在 1065px、「高频错误」顶在 1593px，差 264pt。
-    /// 而"两列并排"本身也不是免费的：两张卡的内容最小宽各 > 463pt，
-    /// `.adaptive(minimum: 420)` 只按容器宽算列数、不看内容 ⇒ 它是**把卡压到内容之下**
-    /// 才挤出两列的，那正是「溢出/挤压」这一类。收成单列同时了结三件事，
-    /// 并且与其余八页早已收敛的形状一致（健康建议卡、日志读数格、进程分组…各自注释里都写着理由）。
+    /// **页面级单列**。旧的 `LazyVGrid(pairColumns)` 两列量出三条病灶（`7b4ec25` 那批 36 张页尾
+    /// 配 `card_edges` 逐带量）：不渲染的那格照样占栅格槽位 ⇒ 297pt 画布洞；同一行两张卡
+    /// 不共顶线（1065px vs 1593px）；而两列本身是把卡**压到内容最小宽之下**才挤出来的
+    /// （两张各需 > 463pt，容器只有 951pt），那属「溢出/挤压」而不是排版问题。
+    /// 守卫 `ShellBorderlessTests.test_dashboardIsSingleColumnWithNoCardPairGrid`。
     private var scaleSegment: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.group) {
             codeScaleGroup
@@ -128,14 +124,22 @@ struct DashboardView: View {
         }
     }
 
-    /// 文件构成：从「代码规模」那张卡里分出来的第二组。
+    /// 文件构成：从「代码规模」那张卡里分出来的第二组。三格**横排**——
+    /// 单列化之后这张卡有 951pt 宽，竖排三行会把右侧四分之三留空（乱清单 §5 那一行）。
+    /// 刻意不升格成 `MetricTile`：这三格是次级读数，最重的字号要留给页顶那条读数带
+    /// （风格契约 4），所以沿用 `StatLine` 那一档，只把每格撑成等宽三栏。
     private var fileCompositionGroup: some View {
         GlassSection("文件构成") {
             if let code = report?.code {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                HStack(spacing: Theme.Spacing.lg) {
                     StatLine(label: "文件", value: NumberFormat.grouped(code.totalFiles))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    DataBandSeparator()
                     StatLine(label: "注释行", value: NumberFormat.grouped(code.commentLines))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    DataBandSeparator()
                     StatLine(label: "空行", value: NumberFormat.grouped(code.blankLines))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
                 Text(ShellCopy.notAnalyzed(.codeSize))
