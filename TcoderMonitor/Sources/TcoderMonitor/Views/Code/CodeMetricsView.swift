@@ -170,13 +170,15 @@ struct CodeScaleSection: View {
                 icon: .code
             ) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                    // 盘点表 B2（留短藏长 ●）：屏上留「总行数」这半句（它就是原句的头），
-                    // 「= 空行 + 注释 + 代码」这条完整等式口径进 ⓘ；等式本身仍由下面的
-                    // `CodeInvariantRow` 常驻兜底，所以藏掉的只是重复的那半句。
+                    // 盘点表 B2（留短藏长 ●）：屏上留一句短口径，完整等式进 ⓘ 与下面的
+                    // `CodeInvariantRow`。但屏上那句**不许就是卡名本身**——
+                    // 卡名已经叫「总行数」，note 再写「总行数」就是同一屏把一个词念两遍
+                    // （上面 162 行刚为「卡名 vs 页名撞车」修过一次，这是同一个问题的下一层）。
+                    // 所以 note 说的是卡名没交代的那件事：**这个数含不含空行与注释**。
                     HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
                         DataHeroReadout(value: NumberFormat.grouped(code.totalLines),
                                         unit: "行",
-                                        note: "总行数")
+                                        note: "含空行与注释")
                         CopyHelpBadge("总行数（= 空行 + 注释 + 代码）")
                     }
                     CodeInvariantRow(code: code)
