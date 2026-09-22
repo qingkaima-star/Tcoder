@@ -87,7 +87,11 @@ preflight_context() {  # preflight_context <outdir> <pid>
   BUILD_REV=$(provenance_manifest_value TCODER_GIT_REVISION)
   BUILD_CLEAN=$(provenance_manifest_value TCODER_GIT_CLEAN)
   BUILD_TREE=$(provenance_manifest_value TCODER_PRODUCT_TREE)
-  HEAD_TREE=$(provenance_product_tree HEAD)
+  # 【"被测内容"可以是别的 rev —— 但归属必须照样算清楚】包 5 的前置。
+  # 为什么需要：§Q 那 14 处还掉之后，要回答"从多少降到多少"，就必须能再量一次**改动前**那份内容；
+  # 而 `MEASURE_REV` 未设时一切照旧（比 HEAD），设了就必须比它——**这条覆盖不许变成跳过判定**。
+  TARGET_REV=$(provenance_target_rev)
+  HEAD_TREE=$(provenance_product_tree "${MEASURE_REV:-HEAD}")
 
   preflight_write_context "$out" "$f"
   # 六条硬闸各自读上面那几个量（bash 是动态作用域：本函数的 `local` 在被调函数里照样可见，
@@ -115,7 +119,7 @@ preflight_write_context() {  # preflight_write_context <outdir> <context 文件�
   { echo "# 测量上下文（读数只有在这一组条件下才可互比）"
     echo "时间=$(date '+%F %T')  HEAD=$(git rev-parse --short HEAD 2>/dev/null)  工作树改动数=$DIRTY"
     echo "被采pid=$pid  二进制=$TARGET_BINARY  口径=$TARGET_FLAVOR"
-    echo "   产物码 tree=${BUILD_TREE:-未记录}  当前=${HEAD_TREE:-未记录}"
+    echo "   产物码 tree=${BUILD_TREE:-未记录}  被测内容(${MEASURE_REV:-HEAD})=${HEAD_TREE:-未记录}"
     echo "产物构建rev=${BUILD_REV:-未记录}  构建时树clean=${BUILD_CLEAN:-未记录}  ← 必须与上面 HEAD= 同一份代码，否则读数归错对象"
     [ -n "${PROVENANCE_NOTE:-}" ] && echo "   ※ 归属靠产物码 tree 放行（rev 不同）：${PROVENANCE_NOTE}"
     echo "实例数=${COEXIST:-1}  前台App=$front  被测进程visible=$visible"
@@ -135,13 +139,18 @@ preflight_gates_identity() {
   # 而我 attach 的那个 `dist/Tcoder.app` 是两小时前 `build_app.sh` 从 `41add9e` 建的，
   # 中间隔了 39 个产物文件（整批 i18n + 我自己的 `PerfReadoutCells` 修复）。
   # 于是"e991c6d 的 T2 读数"这句话从头到尾是假的——量的是旧二进制，只是恰好在新树上按了回车。
-  if ! PROVENANCE_WHY=$(provenance_ok "$BUILD_REV" "$(git rev-parse HEAD 2>/dev/null)" "$BUILD_CLEAN" "${BUILD_TREE:-}" "${HEAD_TREE:-}"); then
+  # `${TARGET_REV:-…}` 的兜底不是洁癖：自测里 `preflight_gates` 是**被单独调用**的，
+  # 那时"收集上下文"那一步没跑过 ⇒ 现场再派生一次。宁可算两遍，也不拿空值当"取不到 HEAD"。
+  if ! PROVENANCE_WHY=$(provenance_ok "$BUILD_REV" "${TARGET_REV:-$(provenance_target_rev)}" "$BUILD_CLEAN" "${BUILD_TREE:-}" "${HEAD_TREE:-}"); then
     echo "!! 二进制与代码不是同一份：${PROVENANCE_WHY} —— 先跑 scripts/build_app.sh release 再量。" >&2
     hard=1
   else
     # 放行也可能带话——那就是"靠 tree 归属"的留痕，必须印进上下文，不许悄悄过。
     PROVENANCE_NOTE="$PROVENANCE_WHY"
   fi
+  # 归属是谁的就必须写出来：不设 `MEASURE_REV` 时这一行等于"HEAD"，设了则一眼能看出
+  # "这一批读数算在另一个 rev 头上"（旧形状里这句话是**隐形的**，读上下文的人只能猜）。
+  echo "    归属内容：${MEASURE_REV:-HEAD} → ${TARGET_REV:-取不到（rev 写错了？）}"
   if [ -n "${i18n_ledger:-}" ]; then
     echo "!! 设了 TCODER_I18N_RUNTIME_LEDGER（=$i18n_ledger）——渲染路径在记漏翻台账并节流写盘；
    这批读数量的是台账的开销，不是 App 的心跳。取消该变量再测。" >&2

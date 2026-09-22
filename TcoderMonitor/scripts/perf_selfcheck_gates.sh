@@ -407,6 +407,49 @@ selfcheck_launcher_inventory() {  # selfcheck_launcher_inventory <outdir>
   ok "实例清单分得清『真起 / 会收尾 / 只是讲』（三夹具双向都验，含漏真凶的反例）"
 }
 
+selfcheck_measure_rev_attribution() {  # selfcheck_measure_rev_attribution <outdir>
+  # 38) `MEASURE_REV`（工单包 5）只允许改"**归属比的是谁**"，不许改成"不比"。
+  #     为什么单独钉：还掉 §Q 那 14 处之后，交付要回答"从 X 降到 Y"，
+  #     而 X 只能是**重新量出来的**（spec §1.3 明令旧日志里的数不许当 X）。
+  #     一旦"补测改动前基线"这条路只能靠绕开归属闸门，那它一定会被绕——
+  #     所以这条路必须是"**照样判、只是判另一个 rev**"。
+  local pf=scripts/perf_preflight.sh bad=0 other
+  grep -qF 'TARGET_REV=$(provenance_target_rev)' "$pf" \
+    || { fail "$pf 不再从 `provenance_target_rev` 取被测 rev ⇒ 派生又长出第二份"; bad=1; }
+  grep -qF 'provenance_ok "$BUILD_REV" "${TARGET_REV:-$(provenance_target_rev)}"' "$pf" \
+    || { fail "归属又拿 raw HEAD 比 ⇒ 拿别的 rev 的读数会算到 HEAD 头上（那是假归属）"; bad=1; }
+  dn=$(grep -c '^provenance_target_rev() {' scripts/*.sh | awk -F: '{s+=$NF} END{print s+0}')
+  [ "$dn" = "1" ] || { fail "被测 rev 的派生有 $dn 处定义（应为 1）⇒ 两处迟早分叉"; bad=1; }
+  grep -qF 'provenance_product_tree "${MEASURE_REV:-HEAD}"' "$pf" \
+    || { fail "tree 那一侧没跟着换 ⇒ 两半比的是不同对象，比谁都可能假放行"; bad=1; }
+  source scripts/perf_provenance.sh
+  if provenance_ok "abc1234" "" true "t1" "t2"; then
+    fail "被测 rev 取不到（空串）却放行 ⇒ rev 写错就等于免检"; bad=1
+  fi
+  if provenance_ok "abc1234" "$(git rev-parse HEAD)" true ""; then
+    fail "产物与被测 rev 不同、又没给 tree，却放行"; bad=1
+  fi
+  other=$(git rev-parse HEAD~1 2>/dev/null)
+  if [ -n "$other" ] && provenance_ok "${other:0:7}" "$(git rev-parse HEAD)" true; then
+    fail "相邻两个提交被判成同一份代码（比 sha 那条路宽了）"; bad=1
+  fi
+  # rev 不存在 ⇒ 必须空值（调用方按 fail-closed 处理）。
+  # 【这里原来还写过一条"HEAD 与 HEAD~1 的 tree 必须不同"，那是**我判错的判据**】
+  # HEAD~1 是 `b66ea39`，只动 docs ⇒ 两棵子树逐字节相同，而"tree 相同就放行"正是包 4
+  # 立这条规则的目的（免得一行文档逼一次 46 秒重建 + 一整轮假拒）。
+  # 把设计当缺陷钉下去，红得很响，但错在我这边——留在这里防止有人再加回同一条。
+  local a
+  a=$(provenance_product_tree HEAD)
+  [ -n "$a" ] || { fail "HEAD 的产物码 tree 指纹取不到（Sources/Resources 布局改了？）"; bad=1; }
+  [ -z "$(provenance_product_tree 没有这个rev 2>/dev/null)" ] \
+    || { fail "不存在的 rev 竟然给出 tree 指纹 ⇒ 拼出来的路径会像真有一个产物"; bad=1; }
+  # `perf_measure_rev.sh` 取不到 rev 必须**非零且不印 env 行**（第一版死在子 shell 里，rc=0）
+  local out; out=$(bash scripts/perf_measure_rev.sh env 没有这个rev 2>/dev/null); rc=$?
+  { [ "$rc" != "0" ] && [ -z "$out" ]; } \
+    || { fail "perf_measure_rev.sh 取不到 rev 还是出了货（rc=$rc 输出「$out」）⇒ 空串会拼出一个看起来存在的产物路径"; bad=1; }
+  [ "$bad" = "0" ] && ok "补测改动前基线这条路照样判归属：MEASURE_REV 只改比谁、不改比不比（含空值判败与子 shell 反例）"
+}
+
 selfcheck_cleanup_opt_in_state() {  # selfcheck_cleanup_opt_in_state <outdir>
   # 37) 实例清单的「kill」那一格必须分得清**三种**收尾形状：无条件 / 躲在默认关掉的开关后面 / 没有。
   #     为什么单独一条：09-23 凌晨那一串孤儿就是这么来的 —— `capture_pages_isolated.sh`

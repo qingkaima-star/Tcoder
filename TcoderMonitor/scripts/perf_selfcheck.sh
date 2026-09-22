@@ -100,6 +100,7 @@ items_gates() {          # items_gates <outdir> —— 14..19 前置与开录闸
   item selfcheck_launcher_inventory "$out"  # 31) 实例清单要分得清"真起 / 会收尾 / 只是讲"（三夹具双向）
   item selfcheck_synth_launch_pairing "$out"  # 32) 谁起实例/谁投滚动/什么时候投，三者必须配套
   item selfcheck_py_rulers_compile "$out"       # 36) 每支 .py 尺子都要能被 compile() 读懂（ASCII 引号第 6 次）
+  item selfcheck_measure_rev_attribution "$out"  # 38) 补测改动前基线：归属照样判，只是判另一个 rev
   item selfcheck_cleanup_opt_in_state "$out"   # 37) 收尾形状三分：无条件 kill / 躲在开关后面 / 没有（三夹具双向）
 }
 

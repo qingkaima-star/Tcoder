@@ -55,6 +55,9 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // 2026-09-22：新增的"谁可能漏下孤儿实例"清单（只读、不判别家）。
         // 新尺子必须一进门就被量 —— 否则"新建文件"本身就是免检通道（同一族的教训见上面那段）。
         "perf_launcher_audit.sh",
+        // 2026-09-23：包 5（补测改动前基线）新写的 rev 树准备器。新建的尺子必须当场被量，
+        // 否则"新建文件"本身就是免检通道（同一族教训见上面 09-21/09-22 那两段）。
+        "perf_measure_rev.sh",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。
