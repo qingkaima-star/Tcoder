@@ -137,4 +137,50 @@ extension FunctionalHonestyGuardTests {
         XCTAssertTrue(Self.relocationRulers(in: commented).secondRulers.isEmpty,
                       "注释里交代为什么不用它就被判红")
     }
+
+    /// `repositoryScoped` 必须和**喂它的那两路生产者**对齐，而不是和文案对齐。
+    ///
+    /// 为什么不钉"文案 vs 名单"：句子那份名单本来就是从 `repositoryScoped` 拼出来的，
+    /// 拿它比它自己是永真绿（本项目已吃过六次）。真正会各走各的是
+    /// `HealthInputs.availableDimensions`（哪一路点亮哪几个维度）与 `repositoryScoped`
+    /// 这两份名单——比如哪天新增一个"由 Git 算出来"的维度却没进 `repositoryScoped`，
+    /// 健康页那句偏离告示就会**漏报一个来源**，而这正是本条缺陷原本的形状。
+    ///
+    /// 判据：单独喂某一路输入，它点亮的维度必须整部落进或整落不出 `repositoryScoped`。
+    func test_repositoryScopedMatchesTheInputsThatFeedIt() {
+        let git = Set(HealthInputs(git: GitInsights()).availableDimensions)
+        let logs = Set(HealthInputs(logs: LogSummary()).availableDimensions)
+        let code = Set(HealthInputs(code: CodeMetrics()).availableDimensions)
+        let deps = Set(HealthInputs(dependencies: DependencyReport()).availableDimensions)
+        let coverage = Set(HealthInputs(coverage: CoverageMetrics()).availableDimensions)
+        // 分母自证：这五路各自真的点亮了东西（空集比空集也会"通过"）。
+        XCTAssertEqual(git, [.activity, .busFactor], "Git 那一路点亮的维度变了，下面的判定要重读")
+        XCTAssertEqual(logs, [.stability], "日志那一路点亮的维度变了，下面的判定要重读")
+        XCTAssertFalse(code.isEmpty); XCTAssertFalse(deps.isEmpty)
+
+        let scoped = Set(HealthDimension.repositoryScoped)
+        XCTAssertEqual(git.union(logs), scoped,
+                       "按仓库/项目身份定位输入的维度 ≠ `repositoryScoped`"
+                       + "⇒ 健康页那句偏离告示会漏报或多报来源")
+        let treeScoped = code.union(deps).union(coverage)
+        XCTAssertTrue(treeScoped.isDisjoint(with: scoped),
+                      "只读所选目录的维度被算成了仓库归属：\(treeScoped.intersection(scoped))")
+    }
+
+    /// 句子必须**真的**把 `repositoryScoped` 每一个成员念出来。
+    /// 正向那半只在"有人把拼名单换成手写死串"时才红（拼出来的天然相等），
+    /// 反向那半才是日常会咬人的：把只读所选目录的维度塞进这句就是虚报来源。
+    func test_relocationNoticeNamesExactlyRepositoryScopedDimensions() {
+        let notice = HealthHero.relocationNotice(root: "/outer/repo")
+        XCTAssertTrue(notice.contains("/outer/repo"), "外层仓库路径没进句子 ⇒ 这句没法核对")
+        for dimension in HealthDimension.repositoryScoped {
+            XCTAssertTrue(notice.contains(localizedCopy(dimension.rawValue)),
+                          "告示漏了「\(dimension.rawValue)」——它按仓库归属算，读者必须看得见")
+        }
+        for dimension in HealthDimension.allCases
+        where !HealthDimension.repositoryScoped.contains(dimension) {
+            XCTAssertFalse(notice.contains(localizedCopy(dimension.rawValue)),
+                           "「\(dimension.rawValue)」只读所选目录，写进这句就是虚报来源")
+        }
+    }
 }

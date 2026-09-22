@@ -153,6 +153,14 @@ struct DashboardLiveReadout: View {
 
     private var report: ProjectReport? { state.selectedReport }
     private var snapshot: SystemSnapshot? { state.monitor.latestSnapshot }
+    /// 三态判定的**唯一入口**是 `Views/PerfLogs/LiveReadings.swift` 的 `SystemReadings`。
+    /// 这一页那两枚整机格子以前直接 `snapshot.map { $0.cpuUsage }` / `.memoryUsedBytes`，
+    /// 于是同一个数在总览页是 `0%` / `0 B`、在性能页是 `--`（首帧没有差分、
+    /// 内核没给页计数时也没有内存读数），"没量到"就这样在总览页长成了
+    /// "这台机器很闲 / 内存没怎么用"（整改意见第九节同族）。
+    /// 刻意不做成计算属性：`ShellReadoutTooltipTests` 按原文钉着 `captionHelp:` 那一行，
+    /// 换个形状就要去改别人的守卫；`@Observable` 是按属性记账的，
+    /// 同一个 body 里多构造两次这个三元组零成本。
 
     /// 顺序是**实时性能在前、读数带在后**（设计复核第 2 条的结构解）。
     ///
@@ -198,10 +206,16 @@ struct DashboardLiveReadout: View {
     }
 
     private var cpuTile: some View {
-        MetricTile(
-            label: "CPU",
-            value: snapshot.map { String(Int(($0.cpuUsage * 100).rounded())) },
-            unit: "%",
+        // 标签写「本机 CPU」而不是「CPU」：这一排四枚里前两枚量的是整台机器、
+        // 后两枚量的是这个项目，只写「CPU」等于让读者以为前两枚也在说这个项目（第九节）。
+        // 读数走 `SystemReadings`：首帧没有差分就不给百分比（传 nil ⇒ `--`），不给 0。
+        // 旧写法是 `snapshot.map { Int($0.cpuUsage * 100) }` —— 冷启动第一帧那是个真的 0，
+        // 而同一份快照在性能页那一格写的是「差分帧未到，不给百分比」。两页两种说法，
+        // 错的总是把"还没法算"报成"机器很闲"的那个。
+        let fraction = SystemReadings.cpuFraction(SampleContext.from(state.monitor))
+        return MetricTile(
+            label: "本机 CPU",
+            value: fraction.map { NumberFormat.percent($0, precision: 0) },
             caption: snapshot.map {
                 localizedFormat("%1$@ 核 · 负载 %2$@",
                                 NumberFormat.grouped($0.cpuCoreCount),
@@ -214,15 +228,21 @@ struct DashboardLiveReadout: View {
     }
 
     private var memoryTile: some View {
-        MetricTile(
-            // 「Memory」→「内存」：WS-H §7.1 点名的必修项
-            label: "内存",
-            value: snapshot.map { ByteFormat.string($0.memoryUsedBytes, precision: 1) },
-            caption: snapshot.map {
-                localizedFormat("共 %1$@ · %2$@",
-                                ByteFormat.string($0.memoryTotalBytes, precision: 1),
-                                NumberFormat.percent($0.memoryFraction, precision: 0))
-            },
+        // 「本机」二字是第九节要的边界；三态判据与性能页共用 `SystemReadings` 那一份。
+        // `memoryUsedBytes(context) == nil` = 内核没给页计数，此时这一格必须是 `--`，
+        // 不是旧写法的「0 B · 共 64 GB · 占 0%」——那把一次失败读成了「这台机器内存很空」。
+        let live = SampleContext.from(state.monitor)
+        let used = SystemReadings.memoryUsedBytes(live)
+        return MetricTile(
+            label: "本机内存",
+            value: used.map { ByteFormat.string($0, precision: 1) },
+            unit: (used != nil && SystemReadings.memoryTotalBytes(live) != nil)
+                ? "/ \(Live.bytes(SystemReadings.memoryTotalBytes(live), precision: 1))" : nil,
+            caption: used == nil
+                ? SystemReadings.memoryGapReason(live)
+                : localizedFormat("共 %1$@ · %2$@",
+                                  Live.bytes(SystemReadings.memoryTotalBytes(live), precision: 1),
+                                  Live.percent(SystemReadings.memoryFraction(live), precision: 0)),
             // 「在用」≠「剩余可用」是这一格唯一会被读反的地方，整句走 `SystemReadings` 那一份。
             captionHelp: SystemReadings.memoryCaliber,
             systemImage: IconName.memory.rawValue
@@ -338,5 +358,42 @@ struct DashboardLiveReadout: View {
                               rate: (UInt64) -> String) -> String {
         guard let read, let write else { return DataAbsence.notAnalysed.display }
         return rate(read + write)
+    }
+}
+
+// MARK: - 两列一段（总览专用）
+
+extension DashboardView {
+    /// **两列一段**：两张卡共同一条顶线、窄窗口自动折成单列。
+    ///
+    /// 替掉 `LazyVGrid(pairColumns)`。交付头 `7b4ec25` 那批 36 张页尾实拍量出两条病灶：
+    /// ① 同一行两张卡**不共顶线**——「最近提交」顶在 1065px、「高频错误」顶在 1593px，
+    ///    差 264pt，两列读起来不像同一层；
+    /// ② 栅格给**不渲染的那一格照样留槽位**，于是「文件构成」右边拖出约 297pt 的画布洞
+    ///    （这一条由 `scaleSegment` 那侧的 `hasCoverageStrip` 分支堵掉）。
+    /// 这是全仓**最后一处"两张不相干的卡并排"的 `LazyVGrid`**：其余八页（健康建议卡、日志读数格、
+    /// 贡献者、Git 洞察、代码规模…）的注释里都写着离开它的理由，收掉它不是新立一种排版，
+    /// 是把最后一格并回去。性能页进程展开行里还剩一处 `LazyVGrid`，那是 4 枚**等宽 KPI 格**
+    /// （cpu/内存/线程/fd），不是两张内容无关的卡，不归这条判据管——守卫里逐条留了名。
+    /// 守卫 `ShellBorderlessTests.test_dashboardPairsHaveNoLazyGridAndShareTheirTopLine`。
+    ///
+    /// 列宽下限仍走基座锚点 `twoColumnMinWidth`：两列各要 420pt，装不下时 `ViewThatFits`
+    /// 退成单列——与原来 `.adaptive(minimum:)` 同一个语义，但**顶线由 `HStack(alignment: .top)` 保证**。
+    /// 列间距 `pageMargin`(24)：无界面里两列之间没有盒体边界，12pt 会被读成「两列挤成一坨」。
+    @ViewBuilder
+    func pairSegment<Left: View, Right: View>(
+        @ViewBuilder left: () -> Left,
+        @ViewBuilder right: () -> Right
+    ) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: Theme.Spacing.pageMargin) {
+                left().frame(minWidth: Theme.Layout.twoColumnMinWidth)
+                right().frame(minWidth: Theme.Layout.twoColumnMinWidth)
+            }
+            VStack(alignment: .leading, spacing: Theme.Spacing.group) {
+                left()
+                right()
+            }
+        }
     }
 }

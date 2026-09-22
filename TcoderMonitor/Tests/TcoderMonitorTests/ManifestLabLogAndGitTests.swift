@@ -138,7 +138,9 @@ final class ManifestLabLogAndGitTests: ManifestLabTestCase {
         XCTAssertTrue(git.isRepository)
         XCTAssertEqual(git.branch, "main")
         XCTAssertEqual(git.remoteURL, "https://git.acme.example/orders/acme-orders-lab.git")
-        XCTAssertEqual(git.headSHA.count, 7)
+        // 钉的是「走那一把缩短尺子」而不是某个宽度：写死 7 会把 `--short=7` 这个旧行为当契约，
+        // 而它与覆盖率那一路的 12 位并存过一整天（同一份报告两个串）。
+        XCTAssertEqual(git.headSHA.count, CommitIdentity.abbreviatedLength)
 
         XCTAssertEqual(git.totalCommits, 9)
         XCTAssertEqual(git.authors.count, 3)

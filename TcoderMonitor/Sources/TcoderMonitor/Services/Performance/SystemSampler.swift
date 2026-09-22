@@ -57,7 +57,23 @@ struct SystemCounters: Sendable, Equatable {
 
 /// OWNER: Workstream C（系统计数器采样）。nonisolated、无状态，可在后台线程反复调用。
 struct SystemSampler: Sendable {
-    init() {}
+    /// 热压力探针。**默认就是就地问 `ProcessInfo`**（行为一字未改）。
+    ///
+    /// 为什么要做成可注入（RD-34）：这一档的诚实性要靠"喂一份问不到的输入"来证伪，
+    /// 如果探针是硬编码的一次系统调用，那条缺席路就只在注释里存在、永远测不到。
+    /// 返回 `nil` = 探针没给值；给了个四档之外的数同样落 `.unknown`（折在
+    /// `ThermalState.from(processInfoValue:)` 一处，这里不再抄一遍 0...3）。
+    private let thermalReading: @Sendable () -> Int?
+
+    init(thermalReading: @escaping @Sendable () -> Int? = SystemSampler.processInfoThermalReading) {
+        self.thermalReading = thermalReading
+    }
+
+    /// 默认探针：`ProcessInfo.thermalState` 的原始值。它在 macOS 上不会失败，
+    /// 所以这条**永远给得出数**——"永远给得出数"本身才是问题，见下面的残余边界。
+    static func processInfoThermalReading() -> Int? {
+        ProcessInfo.processInfo.thermalState.rawValue
+    }
 
     /// 一次性原始读取；系统调用失败退化为 0 / 空数组 / `nil`，不抛错、不 crash。
     /// 内存是唯一以 `nil`（而不是 0）表达失败的字段——0 页计数会被下游算成「内存全占满」。
@@ -83,7 +99,8 @@ struct SystemSampler: Sendable {
         snapshot.cpuCoreCount = ProcessInfo.processInfo.activeProcessorCount
         snapshot.processCount = processCount
         snapshot.uptimeSeconds = ProcessInfo.processInfo.systemUptime
-        snapshot.thermalState = ThermalState(processInfoValue: ProcessInfo.processInfo.thermalState.rawValue)
+        // 探针没给值 / 给的值不认识 → `.unknown`（"未量到"），**不再默认成"正常"**（RD-34）。
+        snapshot.thermalState = ThermalState.from(processInfoValue: thermalReading())
 
         snapshot.cpuUsage = Self.cpuUsage(previous: previous?.cores ?? [], current: current.cores)
         // `memoryTotalBytes` 来自 ProcessInfo，是另一次独立的读取，成功就该保留真值。

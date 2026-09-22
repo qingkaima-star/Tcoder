@@ -1,0 +1,167 @@
+// OWNER: R3 依赖证据链 · 在线核对的注入缝与回执（RD-11 / RD-12）
+//
+// 为什么要有这一层：`applyNetworkKnowledge` 原先直接写死
+// `DependencyNetworkLookup.npmLatestVersions(...)` / `.osvBatch(for:)` 两个静态调用，
+// 于是"npm 成功 + OSV 失败"、"预算截断"、"部分失败"这些结局**只能靠真打公网去凑**，
+// 而本轮的硬要求是这些状态必须能在不打网的用例里被钉住。
+// 协议形状按 AGENTS §3 的做法：不动 `ServiceContracts` 里的冻结协议，只给自己那个
+// 具体类型加**带默认值的参数**（`ManifestDependencyAnalyzer(onlineSource:)`）。
+import Foundation
+
+/// 一条 OSV 查询的结局。**逐条**记，是为了让"这条依赖没查成"能长成依赖行上的一个字。
+enum DependencyOsvOutcome: Equatable, Sendable {
+    /// 批量端点答上了（空数组 = 答上了且没有公告）。
+    case answered(advisories: [SecurityAdvisory])
+    /// 发了请求但失败 / 超时 / 响应解不出来。
+    case failed
+    /// 生态不支持或版本没解析出来 ⇒ 压根没发请求（调用方负责落原因）。
+    case skipped
+}
+
+/// 一次在线核对的回执，按**查询身份**回传（RD-12：查询用的 key 与回填用的 key 同源）。
+struct DependencyOnlineReceipt: Sendable {
+    /// registry 答上的包：包名 -> 最新版本。
+    var latestVersions: [String: String] = [:]
+    /// registry 明确失败的包名。
+    var failedRegistryPackages: [String] = []
+    /// OSV 逐条结局，key 是 `DependencyVersionIdentity.coordinate(...)`。
+    var osvOutcomes: [String: DependencyOsvOutcome] = [:]
+    /// 两路各自自述的补充说明（网络/截断等），只用于人读的那句，**不参与任何判定**。
+    var registryNote: String = ""
+    var osvNote: String = ""
+    /// OSV 整体失败（超时 / 批量端点不可用且回退也失败）：此时未答上的那批一律记 `.failed`。
+    var osvPathUnavailable = false
+}
+
+/// 这一轮**实际发出去**了哪些查询身份（与 `DependencyOnlineReceipt` 是一对：
+/// 一个记"发了谁"、一个记"谁答了"）。
+///
+/// 为什么单独一格：`.budgetExcluded` 的语义是"这一条我们根本没发"，只能按**身份**落。
+/// 接手时这里传的是条数，于是"被上限切掉 7 条"会让同一批里**发出去并且答了**的 100 条
+/// 也一起长成"未进批次"（实测 107 条全落此态），反向的谎也成立 —— 都是账本与事实分叉。
+struct DependencyOnlineDispatch: Sendable {
+    static let empty = DependencyOnlineDispatch()
+
+    /// 发给 npm registry 的包名。
+    var registrySent: Set<String> = []
+    /// 被单次上限挡在门外的 npm 包名。
+    var registryDeferred: Set<String> = []
+    /// 发给 OSV 的查询坐标（`DependencyVersionIdentity.coordinate`）。
+    var osvSent: Set<String> = []
+    /// 被单次上限挡在门外的 OSV 坐标。
+    var osvDeferred: Set<String> = []
+}
+
+/// 在线数据源。生产实现就是现有那两个静态入口的薄壳。
+protocol DependencyOnlineSource: Sendable {
+    func registryLatestVersions(for packages: [String]) async -> DependencyOnlineReceipt
+    func osvAdvisories(for queries: [OsvPackageQuery]) async -> DependencyOnlineReceipt
+}
+
+/// 真打公网的那一路（默认实现）。**不新增任何网络行为**：只是把已有的两个入口
+/// 收成一个可替换的缝，并把它们已经知道的成败信息按查询身份回传。
+struct LiveDependencyOnlineSource: DependencyOnlineSource {
+    func registryLatestVersions(for packages: [String]) async -> DependencyOnlineReceipt {
+        let result = await DependencyNetworkLookup.npmLatestVersions(packages)
+        var receipt = DependencyOnlineReceipt()
+        receipt.latestVersions = result.latestVersions
+        // registry 的账本是"每包一次 GET"：没答上的名字即失败（数量口径由下面这行对齐）。
+        receipt.failedRegistryPackages = packages.filter { !result.latestVersions.keys.contains($0) }
+        receipt.registryNote = result.note
+        return receipt
+    }
+
+    func osvAdvisories(for queries: [OsvPackageQuery]) async -> DependencyOnlineReceipt {
+        let result = await DependencyNetworkLookup.osvBatch(queries)
+        var receipt = DependencyOnlineReceipt()
+        receipt.osvOutcomes = Self.osvOutcomes(for: queries, result: result)
+        receipt.osvPathUnavailable = Self.osvPathUnavailable(result)
+        receipt.osvNote = result.note
+        return receipt
+    }
+
+    /// 把一次 OSV 批量结果**按查询身份**归因成逐条结局。
+    ///
+    /// 单独抽出来只为一件事：这条归因是全链路上唯一一处"把批量端点的整体计数摊到逐条状态"
+    /// 的地方，它一旦偏向乐观，下面的行状态、总览、评分会一起发绿，而假源用例全绿也抓不到。
+    /// 判据（与 `DependencyEvidenceTests.testLiveSourceIsNotLessConservativeThanTheStub` 同源）：
+    ///   · 公告的 `affectedPackages` 里出现过的那条查询身份 = 确实答上了；
+    ///   · **`incompleteCoordinates` 里点名的那条 = 发出去了、也答了、却没查到底**
+    ///     （批量响应短于请求 / 详情拉取失败 / 被 `maxOsvDetailRequests` 截断 / 预算用尽）
+    ///     ⇒ 一律 `.failed`。这一支是 RD-11 的第四态："没查到"绝不许长成"没有漏洞"；
+    ///   · `failedRequests == 0` ⇒ 批量端点按顺序把每条查询都答过了，空结果就是干净；
+    ///   · `failedRequests > 0` 而本条没有命中 ⇒ **无法归因到具体哪几条，保守记 `.failed`**
+    ///     （宁可少说"核对过"，也不把没答上的包说成答上了）。
+    static func osvOutcomes(for queries: [OsvPackageQuery],
+                            result: OsvLookupResult) -> [String: DependencyOsvOutcome] {
+        var hitsByCoordinate: [String: [SecurityAdvisory]] = [:]
+        for advisory in result.advisories {
+            for coordinate in advisory.affectedPackages {
+                hitsByCoordinate[coordinate, default: []].append(advisory)
+            }
+        }
+        var outcomes: [String: DependencyOsvOutcome] = [:]
+        for query in queries {
+            let coordinate = query.coordinate
+            if let advisories = hitsByCoordinate[coordinate] {
+                outcomes[coordinate] = .answered(advisories: advisories)
+            }
+        }
+        let partialFailure = result.failedRequests > 0
+        let unresolved = Set(result.incompleteCoordinates)
+        for query in queries where outcomes[query.coordinate] == nil {
+            if unresolved.contains(query.coordinate) {
+                outcomes[query.coordinate] = .failed      // 看见过公告 id，只是没展开成 ⇒ 不算核对过
+            } else {
+                outcomes[query.coordinate] = partialFailure ? .failed : .answered(advisories: [])
+            }
+        }
+        return outcomes
+    }
+
+    /// 整路失败（超时 / 批量端点不可用且回退也失败）：此时未答上的那批一律记 `.failed`。
+    /// 取义与搬动前逐字一致（整路超时由 `OsvLookupResult` 自己保证 `failedRequests == packagesChecked`）。
+    static func osvPathUnavailable(_ result: OsvLookupResult) -> Bool {
+        result.failedRequests >= max(1, result.packagesChecked)
+    }
+}
+
+extension OsvPackageQuery {
+    /// **查询与回填共用的那一个 key**：由版本身份算出，禁止任何一侧自己拼 `name@version`。
+    ///
+    /// 生态段一律走 `advisoryCoordinateEcosystem`（下面那个归一函数）：`build.gradle` 里的
+    /// junit 与 `pom.xml` 里的 junit 在 OSV 那边是**同一张 Maven 公告表**，两侧不归一到
+    /// 同一个值就会出现"查询发出去了、公告回到 `maven|…`、依赖行却查 `gradle|…`"——
+    /// 在线公告永远落不到 gradle 的行上（RD-12 的另一张脸，2026-09-22 接手时实测到）。
+    var coordinate: String {
+        DependencyVersionIdentity.coordinate(ecosystem: dependencyEcosystem.advisoryCoordinateEcosystem,
+                                             name: package, queryVersion: version)
+    }
+
+    /// OSV 查询用的生态（回指成依赖生态，坐标 key 必须与记录侧同源）。
+    var dependencyEcosystem: DependencyEcosystem {
+        OsvPackageQuery.dependencyEcosystem(for: ecosystem) ?? .unknown
+    }
+
+    /// 由依赖记录构造查询：版本用**解析身份**（锁文件优先），不解析就不查。
+    static func query(from record: DependencyRecord) -> (query: OsvPackageQuery, coordinate: String)? {
+        guard let ecosystem = OsvPackageQuery.osvEcosystem(for: record.ecosystem) else { return nil }
+        guard let queryVersion = DependencyVersionIdentity.of(record).query?.version else { return nil }
+        let name = record.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return nil }
+        let built = OsvPackageQuery(ecosystem: ecosystem, package: name, version: queryVersion)
+        return (built, built.coordinate)
+    }
+}
+
+extension DependencyEcosystem {
+    /// 公告坐标里那一段用的**规范生态**：OSV 把 Gradle 的坐标收在 Maven 那张表里
+    /// （本仓 `DependencySnapshot.lookupScopes` 同样让 maven/gradle 互通），
+    /// 所以 gradle 记录必须归一成 `.maven` 才能和查询侧对上；
+    /// OSV 根本不收的生态（SwiftPM / CocoaPods / unknown）原样返回 —— 它们一条查询都发不出去。
+    /// 幂等：已经归一过的值再过一次不变，所以两侧各自调用不会分叉。
+    var advisoryCoordinateEcosystem: DependencyEcosystem {
+        guard let osv = OsvPackageQuery.osvEcosystem(for: self) else { return self }
+        return OsvPackageQuery.dependencyEcosystem(for: osv) ?? self
+    }
+}

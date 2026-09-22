@@ -144,7 +144,7 @@ enum ProcessInspector {
         /// 一个 pid 的展示快照 + 下一轮要用的累计值。拿不到 bsd 信息（无权限 / 刚退出）就不算这个进程。
         mutating func snapshot(for pid: Int32) -> (process: ProcessSnapshot, state: ProcessCPUState)? {
             guard var bsd = ProcessInspector.bsdInfo(for: pid) else { return nil }
-            let commandLinePath = ProcessInspector.executablePath(for: pid, buffer: &pathBuffer)
+            let path = ProcessInspector.executablePath(for: pid, buffer: &pathBuffer)
             let usage = ProcessInspector.rusageInfo(for: pid)
             let task = ProcessInspector.taskInfo(for: pid)
 
@@ -152,7 +152,7 @@ enum ProcessInspector {
             var resident = usage?.residentBytes ?? 0
             if resident == 0, let task { resident = task.pti_resident_size }
             let openFiles = openFileCountIfAffordable(pid)
-            let name = ProcessInspector.processName(bsd: &bsd, pid: pid, commandLinePath: commandLinePath)
+            let name = ProcessInspector.processName(bsd: &bsd, pid: pid, executablePath: path)
 
             // 没见过的 pid（新进程 / 上一轮没采到）不能瞎算，CPU 记 0。
             let cpu: Double
@@ -171,7 +171,10 @@ enum ProcessInspector {
                 threadCount: task.map { Int($0.pti_threadnum) } ?? 0,
                 openFileCount: openFiles,
                 startTime: ProcessInspector.startTime(of: bsd),
-                commandLine: commandLinePath ?? name,
+                // 这里以前写 `commandLine: commandLinePath ?? name` —— 路径取不到时把进程名
+                // 塞进一个叫"命令行"的字段，下游就分不清"命令行里有这个词"和"只是名字相同"。
+                // 现在取不到就是 nil，缺席由消费方各自显式表态（匹配 / 展示见 `matches` 与 `identityTooltip`）。
+                executablePath: path,
                 parentPID: Int32(bitPattern: bsd.pbi_ppid)
             ), ProcessCPUState(pid: pid, cpuNano: cpuNano, residentBytes: resident))
         }
@@ -187,10 +190,10 @@ enum ProcessInspector {
     }
 
     /// 进程名的逐级退回：libproc 的 pbi_name → pbi_comm → 可执行路径末段 → `pid N`。
-    static func processName(bsd: inout proc_bsdinfo, pid: Int32, commandLinePath: String?) -> String {
+    static func processName(bsd: inout proc_bsdinfo, pid: Int32, executablePath: String?) -> String {
         var name = cString(&bsd.pbi_name)
         if name.isEmpty { name = cString(&bsd.pbi_comm) }
-        if name.isEmpty, let commandLinePath { name = (commandLinePath as NSString).lastPathComponent }
+        if name.isEmpty, let executablePath { name = (executablePath as NSString).lastPathComponent }
         if name.isEmpty { name = "pid \(pid)" }
         return name
     }
@@ -213,12 +216,39 @@ enum ProcessInspector {
         }
     }
 
-    /// 不区分大小写的子串匹配：命中进程名或完整可执行路径。
+    /// 命中判定：**两路各自显式**，一条是进程名、一条是可执行路径。
+    ///
+    /// 旧写法是 `name` 与 `commandLine` 两条，而 `commandLine` 在 `proc_pidpath` 失败时
+    /// 装的其实就是 `name`（`commandLinePath ?? name`）—— 那第二条路既没有增加任何证据，
+    /// 又把"只是名字相同"伪装成"命令行里出现过这个词"。拆成 `executablePath: String?` 之后
+    /// 这里读得清清楚楚：路径没取到就只判名字那一条，**不拿名字去冒充路径**。
+    ///
+    /// ⚠️ 这条判据的强度上限（保留的边界）：子串匹配只看名字/路径，
+    /// 所以它**永远证明不了"这个进程属于这个项目"**——同名的 java 进程可以来自任何目录。
+    /// 界面上这一组一律按"全系统命中了多少个"来读，措辞见 `PerformanceProcessGroupsCard`。
     static func matches(_ process: ProcessSnapshot, pattern: String) -> Bool {
-        let needle = pattern.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let needle = normalized(pattern)
         guard !needle.isEmpty else { return false }
-        if process.name.lowercased().contains(needle) { return true }
-        return process.commandLine.lowercased().contains(needle)
+        if contains(needle, in: normalized(process.name)) { return true }
+        guard let path = process.executablePath else { return false }
+        return contains(needle, in: normalized(path))
+    }
+
+    /// 归一化：去空白 + 转小写。两个消费点共用，免得"匹配用的口径"与"展示用的口径"分叉。
+    static func normalized(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    static func contains(_ needle: String, in haystack: String) -> Bool { haystack.contains(needle) }
+
+    /// 进程行 hover 的唯一文案出口：**取到路径就说路径，取不到就明说自己取不到**。
+    /// 旧写法 `.help(commandLine.isEmpty ? name : commandLine)` 在路径缺席时会上屏一个
+    /// 看起来像"这就是它的命令行"的进程名 —— 那正是名字兜底最容易被读错的地方。
+    static func identityTooltip(for process: ProcessSnapshot) -> String {
+        guard let path = process.executablePath, !path.isEmpty else {
+            return localizedFormat("可执行路径未取到（无权限或进程已退出），只能给出进程名 %@", process.name)
+        }
+        return localizedFormat("可执行路径 %@（本工具不读任何进程的命令行参数）", path)
     }
 
     /// 多核可以 >1，不做 0...1 截断（ProcessSnapshot.cpuUsage 的契约）。

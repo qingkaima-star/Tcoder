@@ -543,6 +543,7 @@ WS-A/WS-B/WS-C 此刻在**主树里有未提交在途改动**。不允许直接�
 | `Models/GitInsights.swift` | 加 `workingTreeDirty: Bool?` / `dirtyEntryCount: Int?` / `dirtyProbeNote: String`（既有成员一字未动） | 工作区状态只有 Git 那一路量得到：`ShellGitAnalyzer` 已经在同一次分析里起进程，**再开第二个 git 进程就是第二把尺子**（一处看仓库根、一处看用户选的子目录，今天真踩过） | `ShellGitAnalyzer.workingTree(from:)` 三态 + `testStatusProbeDistinguishesCleanDirtyAndUnmeasured` 四分支 |
 | `App/AppState.swift` | 扫描收尾处加 **1 行**：`merged.provenance = ScanProvenance(…producedBy: "gui")` | 装配点只有两个（GUI 与 CLI），少一个就产出一半"无溯源"的报告，而 `producedBy` 正是 CLI↔GUI 对表要用的那格 | `testProvenanceHasBothWritersAndReaders`（**两个写者点名相等**，且必须有读者） |
 | `Services/CLI/CLIOutput.swift` | `buildConfiguration` / `bundleIdentity` 改成**转发**到 `ScanProvenance`，输出逐字未变 | 同一件事不许有两把尺子：`--version` 与报告溯源必须给同一个串 | `testCLIIdentityAndProvenanceShareOneRuler` |
+| `Models/HealthScore.swift` | `HealthDimension` 加 **1 个静态成员** `repositoryScoped`（既有成员一字未动） | "哪几维的输入是按仓库/项目身份定位的"这件事，两个生产者（`ShellGitAnalyzer` 向上找 `.git`、`LogProjectIdentity.resolve` 取锚点）各算各的，只有契约里放得下这份汇总；放文案里就是手写第二份名单，加第四个成员时句子会静默漏报 | `test_repositoryScopedMatchesTheInputsThatFeedIt`（钉**生产者**：单独喂 Git/日志/代码/依赖四路，落进与落不出必须各自成立；已在真源码上破坏验证——把 `dependencies` 塞进名单判两条红）+ `test_relocationNoticeNamesExactlyRepositoryScopedDimensions` |
 
 不在这张表里的冻结区改动一律视为越界。历史批次（P7-A 退役示例数据动过
 `Models/Project.swift`、`Models/HealthScore.swift`、`App/AppState.swift`、
