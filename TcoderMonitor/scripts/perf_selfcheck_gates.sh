@@ -240,3 +240,30 @@ provenance_single_ruler_cases() {  # 【同一件事只许有一把手尺子】�
     && { fail "perf_preflight.sh 里还留着本地副本，删掉、只 source"; bad=1; }
 }
 
+
+selfcheck_launcher_hygiene() {  # selfcheck_launcher_hygiene <outdir>
+  # 29) 会 `open` 起 App 实例的 perf_ 脚本必须同时做到两件事：
+  #     ① 有 trap 收尾 —— 脚本被中断而没收尾，就会留下一个 ppid=1 的实例，
+  #        而"实例数恰为 1"那道闸会被它一路押死（2026-09-22 实测：主树因此漏下 6 个，
+  #        所有人的帧率测量从夜里拒到上午）；
+  #     ② 收尾只针对自己起的那个 pid，**不许按 bundle id 广播退出**（AGENTS -1.3；
+  #        多实例在场时"退掉一个"根本不含"退掉我起的那个"）。
+  # 范围只扫 `scripts/perf_*`：并行多流时各家只守自己名下目录，别家的红由别家自己修
+  # （§K 已把主树那两个 offender 连同证据报出去了，那才是正确的动作）。
+  local f bad=0
+  for f in scripts/perf_*.sh; do
+    grep -Eq '(^|[[:space:]])open "[^"]*\$\{?(APP|START_BIN)' "$f" || continue
+    grep -q 'trap ' "$f" || { fail "$f 起实例却没有 trap 收尾 ⇒ 中断就漏一个实例"; bad=1; }
+    grep -q 'application id' "$f" && { fail "$f 按 bundle id 广播退出 ⇒ 只许 TERM 自己那个 pid"; bad=1; }
+  done
+  # 反向：坏形状必须被这两条 grep 抓住，否则这条守卫是永真绿
+  local fx="$out/launcher-fixture.sh"
+  printf '%s\n' 'open "$START_BIN/Tcoder.app"' \
+    'osascript -e "tell application id \"com.tcoder.monitor\" to quit"' > "$fx"
+  grep -Eq '(^|[[:space:]])open "[^"]*\$\{?(APP|START_BIN)' "$fx" \
+    || { fail "反向失败：夹具里的 open 没被认出，上面那个循环等于没扫"; return; }
+  grep -q 'application id' "$fx" \
+    || { fail "反向失败：广播退出的形状认不出来"; return; }
+  rm -f "$fx"
+  [ "$bad" = "0" ] && ok "起实例的 perf_ 脚本都有 trap，且不按 bundle id 广播（反向夹具也认得出坏形状）"
+}

@@ -74,6 +74,7 @@ cmd_selfcheck() {
   item selfcheck_app_update_split "$out"         # 26) 一个 max 不许同时盖住"整体很快"和"有个孤例很慢"
   item selfcheck_phase_blame "$out"              # 27) 迟到帧要说清该怪主线程还是合成侧，三种形状各判一次
   item selfcheck_input_rate_qualification "$out"  # 28) meta 里的输入节奏必须有读者
+  item selfcheck_launcher_hygiene "$out"       # 29) 起实例的脚本必须有 trap、不许按 bundle id 广播
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"

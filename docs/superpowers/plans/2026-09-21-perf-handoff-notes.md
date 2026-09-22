@@ -303,6 +303,19 @@ pid=67534 11:02:30  孤儿（工作树 .worktrees/verify-main 已删除）
 ```
 
 **这 6 个的 `ppid` 全是 1（launchd）** ⇒ 起它们的那个脚本早就退出了，却没有收尾。
+全仓审计（一条 grep，三个会起实例的脚本，2026-09-22 11:10）：
+
+| 脚本 | trap 收尾 | 按 bundle id 广播退出 |
+|---|---|---|
+| `scripts/perf_wait_window.sh` | ✅ 有（今早刚修，见下） | 否 |
+| `scripts/e2e_check.sh` | ❌ 0 | ✅ 2 处 |
+| `scripts/verify_pages.sh` | ❌ 0 | ✅ 2 处 |
+
+⇒ 不是"可能有泄漏"，是**只有排程器一家做对了**。性能侧顺手把这条立成守卫
+（selfcheck 第 29 项：会起实例的 `perf_*` 脚本必须有 trap、不许按 bundle id 广播，
+反向夹具也认得出坏形状），但**只扫自己名下目录**——并行多流时别家的红由别家自己修，
+那才是 §K 这种报告存在的意义。
+
 按 cwd 追到 `TcoderMonitor/`，能起实例的只有 `scripts/e2e_check.sh` 与
 `scripts/verify_pages.sh`（AGENTS 名册里 `verify_pages.sh` 归 **WS-E 发布工程**，
 所以我只报不改）。两家的收尾形状都是：
