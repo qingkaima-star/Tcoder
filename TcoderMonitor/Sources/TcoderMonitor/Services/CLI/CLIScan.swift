@@ -80,6 +80,9 @@ final class CLIScan {
         report.generatedAt = Date()
         report.attemptedAt = Date()
         report.failedSections = failures
+        // 溯源块最后装配：它要读 Git 那一路已经拿到的提交号与工作区状态，
+        // 自己不再起第二个 git 进程（两处各查一次迟早分叉）。
+        report.provenance = ScanProvenance(report: report, scannedRoot: root.path, producedBy: "cli")
 
         return CLIScanOutcome(report: report,
                               exit: CLIExit.failedSections(failures.count),
