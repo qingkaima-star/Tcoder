@@ -54,6 +54,14 @@ extension FileSystemCodeAnalyzer {
         /// `.vue` 分区认不出来、退回旧 `<script` 粗判掩码的文件数
         var vueRegionFallbackFileCount: Int = 0
         var skipLedger: SourceSkipLedger = SourceSkipLedger()
+        // MARK: R6（RD-14~17）新增的三格 —— 全部走 `limitationSummary` 同一个出口，
+        // 因此**天生有两个读者**：界面 `CodeMetricsView` 的扫描边界 ⓘ 与 CLI `score` 的「未量准」段。
+        // 声明顺序必须在最后：`coverage(from:duplication:options:lex:)` 用的是合成出的
+        // 逐参数初始化器，插在中途会把既有调用点的实参顺序打乱。
+        /// 文件角色分档累计（RD-14）。判据在 `SourceFileRoleRules.swift`。
+        var roleTally: SourceRoleTally = SourceRoleTally()
+        /// 遍历「跟不跟」的现场计数（RD-15）：软链接 / 嵌套仓库 / 包状目录 / 名单外被剪的目录。
+        var treeFollowing: SourceTreeFollowingLedger = SourceTreeFollowingLedger()
 
         /// 有任一**上限**真的生效过 ⇒ 这份数字是部分测量，UI 不得当成全量展示。
         /// 注意不含「按规则主动排除」：跳过 vendor/二进制是范围定义，不是被截断。
@@ -73,6 +81,29 @@ extension FileSystemCodeAnalyzer {
         /// 如实标注行数未统计，不会把 0 当成「这些文件没有行」。
         func skipClearing() -> [String] {
             skipLedger.clearing(linesCounted: skipLedger.linesCounted)
+        }
+
+        /// §6 统一形状的**扫描范围**读数（RD-15 第二件）。产品路径永远 `observed = true`；
+        /// `notObserved` 那一支留给没有台账的报告（旧 JSON / 只拿到 `CodeMetrics` 的下游），
+        /// 它渲染出的句子与「排除了 0 个」必须不同 —— 这条由 `SourceScanScopeTests` 钉住。
+        var scopeReadout: SourceScanScopeReadout {
+            SourceScanScopeReadout.build(ledger: skipLedger,
+                                         encounteredEntryTotal: visitedEntryCount + skipLedger.skippedFileTotal,
+                                         cappedRemaining: truncatedByMaxFiles,
+                                         unreadableDirectoryCount: unreadableDirectoryCount,
+                                         following: treeFollowing)
+        }
+
+        /// R6 那三条读数走的是**另一个出口**而不是挤进 `limitationSummary`：
+        /// 后者已经有 48 行，本包的 `CodeComplexityDebtTests` 管 50 行/函数这条线。
+        /// 与它同一条纪律：零命中不出声；同一次装配里由 `analyzeWithCoverage` 拼进
+        /// `CodeMetrics.scanLimitations` ⇒ 界面与 CLI 同时拿到，不留只有一个读者的读数。
+        var surfaceNotes: [String] {
+            var lines: [String] = []
+            lines.append(contentsOf: roleTally.notes)
+            lines.append(contentsOf: treeFollowing.notes)
+            lines.append(contentsOf: scopeReadout.notes)
+            return lines
         }
 
         /// 逐条带真实数字的限制说明，供横幅/脚注直接展示。
