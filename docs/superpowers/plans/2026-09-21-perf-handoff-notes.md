@@ -298,11 +298,43 @@ pid=67534 11:02:30  孤儿（工作树 .worktrees/verify-main 已删除）
 | `scripts/perf_wait_window.sh` | ✅ 有（今早刚修，见下） | 否 |
 | `scripts/e2e_check.sh` | ❌ 0 | ✅ 2 处 |
 | `scripts/verify_pages.sh` | ❌ 0 | ✅ 2 处 |
+| `scripts/ax_tooltip_report.sh` | ❌ 0（**2026-09-22 13:04 抓到现行**，见下） | 否 |
+| `scripts/ax_disclosure_liveness.sh` | ❌ 0（同一形状，尚未抓到现行） | 否 |
 
 ⇒ 不是"可能有泄漏"，是**只有排程器一家做对了**。性能侧顺手把这条立成守卫
 （selfcheck 第 29 项：会起实例的 `perf_*` 脚本必须有 trap、不许按 bundle id 广播，
 反向夹具也认得出坏形状），但**只扫自己名下目录**——并行多流时别家的红由别家自己修，
 那才是 §K 这种报告存在的意义。
+
+**13:04 抓到现行（这一次不是推断，是看见父进程）**：需求方授权我把当时在场的那 8 个
+实例按 pid 逐个 `TERM`（**只那 8 个 pid**，没有按 bundle id 广播）。退完立刻剩下 5 个，
+其中一个的父进程**还活着**：
+
+```
+pid=74946  ppid=72286  起于 12:54…13:04:03（我看到它时 elapsed=00:00）
+ppid=72286 → /bin/bash ./scripts/ax_tooltip_report.sh   （cwd = .worktrees/empty2）
+```
+
+另外 4 个是 `ppid=1`、起于 12:52:57 / 12:53:43 / 12:54:31 / 12:55:18 —— **每 46 秒一个**，
+和九页循环"一页起一个实例"的节奏完全吻合。⇒ 结论要说准：
+
+- **泄漏源已经点名**：`ax_tooltip_report.sh`（`ax_disclosure_liveness.sh` 同形状）。
+  它 `BIN="$PWD/dist/Tcoder.app/…"` 直接起进程，第 108 行确实有 `kill -TERM "$pid"`，
+  但**没有 trap** ⇒ 一旦这一趟中途被打断（或被外部终止），已起的那些就全成 `ppid=1` 的孤儿。
+  所以这不是"完全没收尾"，是"**收尾只覆盖正常路径**"——和 `e2e_check.sh` 那两家还不一样，
+  修法更小：给它已有的那行 `kill` 补一个 `trap '… 只 TERM 自己那个 pid …' EXIT INT TERM`。
+- **我不代它改**：这文件不在性能侧名下（第 29 项守卫故意只扫 `scripts/perf_*`）。
+- **也不继续退别人的实例**：授权范围是"那 8 个 pid"，13:04 那一个是**别人此刻正在跑的活**，
+  不是残迹。⇒ 帧率测量的窗口前提在这一点上仍然是**不满足**，我只报不动。
+
+**这条对测量口径的直接后果**：`preflight` 的"实例数恰为 1"在有循环在跑的时候是**不可满足条件**
+（我起一个就变两个）。所以 12:52 之后我这一支的 T2/T1/T4/九页**一律还没重测**——
+`Sources` 树已经从 `7be93868` 变成 `36c70a8f`（并 main 的 101 个提交动了 29 个 Views 文件），
+⇒ **T2 那句"3/3 达标"现在是旧内容的读数，按 §1.3 不许交当次结论**。
+要重量的清单（顺序即优先级，全部要先 `build_app.sh release` 把 dist 换到当前树）：
+① T2 心跳期 ×3（`idle` 档，不需要人动手，需要人离开）；② T1 交互期 ×3（`interact` 档，
+每趟 20 秒真人连续滚动）；③ `pulse` 档 p95 与 `displayed-surfaces-per-second` 的交叉核对
+（定 p95 那半句的论）；④ T4 逐页冷启动；⑤ 九页取证重拍。
 
 按 cwd 追到 `TcoderMonitor/`，能起实例的只有 `scripts/e2e_check.sh` 与
 `scripts/verify_pages.sh`（AGENTS 名册里 `verify_pages.sh` 归 **WS-E 发布工程**，
