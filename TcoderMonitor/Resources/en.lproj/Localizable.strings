@@ -705,3 +705,8 @@
 "读到已解析产物 %1$@ 份（%2$@），按其解析出实际版本" = "Read %1$@ resolved artifact(s) (%2$@) and took the installed versions from them";
 "声明范围按 scope 分开汇总，不并成一个数" = "Declarations are tallied per scope, never merged into a single number";
 "没有可统计的依赖声明" = "No dependency declarations to tally";
+
+// 批次 P30：健康评分页补上「提交号来自外层仓库」这句真话（乱清单 §6 第 12 条）。
+// 整句键 + 位置参数：路径是数据不是文案，而 `"...\(root)..."` 那种拼法查不到键、
+// 英文态必然吐中文（`LocalizationGuardTests+InterpolatedCopy` 数的就是它）。
+"提交活跃度与协作分布按外层仓库 %1$@ 的历史统计，不是所选目录本身。" = "Commit Activity and Collaboration Spread are counted from the outer repository %1$@, not from the selected directory itself.";
