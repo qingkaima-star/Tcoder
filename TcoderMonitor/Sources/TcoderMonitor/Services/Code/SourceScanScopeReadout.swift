@@ -204,12 +204,23 @@ struct SourceScanScopeReadout: Sendable, Equatable {
                                 unreadableDirectoryCount: Int,
                                 following: SourceTreeFollowingLedger) -> [String] {
         var lines: [String] = []
-        // 只收「**范围本身**没量到」的那几条。`limitationSummary` 已经逐条说了
-        // 文件上限、读不动的目录、行数没统计，这里重复一遍就是噪声。
+        // 只收「**范围本身**没量到」的那几条。文件上限、行数没统计这些 `limitationSummary`
+        // 已经逐条说过，这里重复一遍就是噪声；唯一两边都在的是「读不动的目录」——
+        // 那一格必须同时进 `unmeasuredScope`，因为它是 `blocksAbsenceClaims` 的门，
+        // 而不只是一句提示（见下面那段的注释）。
         let pruned = following.prunedSubtreeRootCount
         if pruned > 0 {
             lines.append("\(NumberFormat.grouped(pruned)) 棵被剪枝的目录子树内部文件数未统计"
                 + "（枚举器交出目录后就止步；审计模式才会逐个进去数）。")
+        }
+        // 读不动的目录是**第三种**没看完：既不是"排除了"（有规则、有条数），也不是"没数行数"
+        // （范围看到了、只是没读内容），而是**这一片子树根本没见过**。
+        // 不把它收进来的后果很具体：`blocksAbsenceClaims` 会为假，于是「这个项目没有测试码」
+        // 在一棵被权限挡住一半的树上读起来像真结论（RD-15 未知态，`SourceScopeTruthTests` 钉）。
+        if unreadableDirectoryCount > 0 {
+            lines.append("\(NumberFormat.grouped(unreadableDirectoryCount)) 个目录本次读不动，"
+                + "其内部的文件一个都没有看到 —— 这一份是**没看完**，"
+                + "不是「那些子树里没有源码」。")
         }
         if ledger.skippedFileTotal > 0 && ledger.linesCounted == false {
             lines.append("\(NumberFormat.grouped(ledger.skippedFileTotal)) 个被剔除条目的行数未统计"

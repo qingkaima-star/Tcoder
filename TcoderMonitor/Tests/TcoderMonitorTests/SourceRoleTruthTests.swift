@@ -32,6 +32,11 @@ final class SourceRoleTruthTests: XCTestCase {
         assertRole("__tests__/login.test.js", "JavaScript", role: .test, criterion: .testPathSegment)
         assertRole("it/ping.py", "Python", role: .test, criterion: .testPathSegment)
         assertRole("e2e/checkout.spec.ts", "TypeScript", role: .test, criterion: .testPathSegment)
+        // 工单原文点名的两枚后缀形状：`*IT.ts`（Maven/Gradle 的集成测试）与 `*E2E.spec.ts`
+        // （同一文件上既像 E2E 又像 spec）—— 两枚都不靠目录名，只靠文件名形状，
+        // 所以判据表里 `testStemTails` 少一个 "IT" 就会掉进生产码档，这条会当场红。
+        assertRole("src/PaymentIT.ts", "TypeScript", role: .test, criterion: .testFileNameShape)
+        assertRole("ui/CheckoutE2E.spec.ts", "TypeScript", role: .test, criterion: .testFileNameShape)
         assertRole("src/test_upload.py", "Python", role: .test, criterion: .testFileNameShape)
         assertRole("Tests/RunnerTests.swift", "Swift", role: .test, criterion: .testPathSegment)
         assertRole("MyAppTests/LoginTests.swift", "Swift", role: .test, criterion: .testPathSegment)
@@ -77,6 +82,10 @@ final class SourceRoleTruthTests: XCTestCase {
         assertRole("src/Attic.swift", "Swift", role: .production, criterion: .productionPathSegment)
         assertRole("app/protest_handler.py", "Python", role: .production, criterion: .productionPathSegment)
         assertRole("src/MyTestBed.swift", "Swift", role: .production, criterion: .productionPathSegment)
+        // 词尾 `IT` 只在**大写词边界**上算集成测试：`Wait.ts`、`Exit.ts` 这类英文词
+        // 尾巴上确实挂着 "it"，把它们判成测试码就是把生产码的行数凭空搬走。
+        assertRole("src/Wait.ts", "TypeScript", role: .production, criterion: .productionPathSegment)
+        assertRole("src/Exit.ts", "TypeScript", role: .production, criterion: .productionPathSegment)
         assertRole("assets/notice.css", "CSS", role: .production, criterion: .productionLanguageOnly)
         // 生成物后缀必须**整串**比：`.swift` 单独看不该被当成 protobuf 产物
         assertRole("src/Widget.swift", "Swift", role: .production, criterion: .productionPathSegment)
