@@ -348,14 +348,9 @@ private struct CommitRow: View {
                 // spec §0 根因 ④ 点名的 36 处里就有它。
                 .foregroundStyle(.primary)
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                Text(commit.subject)
+                Text(commit.subject)   // 冻结区 additive（AGENTS §3 的 P54 行）：长标题裁得掉，
                     .font(Theme.Typo.narrative.font)
-                    .lineLimit(1)
-                    // 冻结区 additive（AGENTS §3 登记表 P54 那一行）：hero 里这条
-                    // 最近提交标题在 1280 宽下英文态实测单行需 1,183pt / 格宽 805pt，
-                    // 一定会被裁。裁可以，**被裁的那一半必须有去处** ⇒ 补 `.help`，
-                    // 与侧栏项目名、Git 页提交榜同一条画法。
-                    .help(commit.subject)
+                    .lineLimit(1).help(commit.subject)   // 但被裁的那一半必须有去处
                 Text("\(commit.author) · \(DateFormat.sinceDescription(commit.date))")
                     .font(Theme.Typo.microLabel.font.monospacedDigit())
                     .foregroundStyle(.secondary)
