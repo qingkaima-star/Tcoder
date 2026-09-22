@@ -128,15 +128,7 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         applyFunctionMetrics(functionsPerFile.flatMap { $0 }, to: &metrics)
 
         metrics.duplicationRatio = duplication.ratio
-        metrics.duplicatedBlocks = duplication.blocks
-        // RD-48：把引擎早就算好的"榜外那一半"直传进契约（**逐枚原样赋值，不做任何加减**）。
-        // 之前这四个数只进 `scanLimitations` 的中文句子，界面上"上限 20 块"那格其实是
-        // 在按句式认领一句散文；落成字段之后，页尾句改成由数字装配，读 JSON 的人也不必再解析句子。
-        metrics.duplicatedBlockLimit = DuplicationEngine.maxBlocks
-        metrics.duplicatedBlocksDroppedByCap = duplication.blocksDroppedByCap
-        metrics.duplicatedLinesOutsideReportedBlocks = duplication.linesOutsideReportedBlocks
-        metrics.duplicateFragmentsNotExpandedCount = duplication.fragmentsDroppedByBudget
-        metrics.duplicateFilesHittingLineCap = duplication.filesHittingLineCap
+        Self.applyDuplicationBoardTruth(duplication, to: &metrics)
         metrics.overallRisk = overallRisk(
             metrics: metrics,
             hotspotCount: hotspots.count,
@@ -174,6 +166,26 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         )
     }
 
+
+    /// 重复明细榜那一组读数的装配：全部**直传**引擎值，逐枚原样赋值、不做任何加减。
+    ///
+    /// 抽出来的唯一理由是长度：这一组连注释 11 行，留在 `apply` 里就把本包的
+    /// 50 行函数闸门顶破了（`CodeComplexityDebtTests`）。
+    /// 红了的正确反应是**搬**，不是抬闸门 —— 抬闸门等于把这条判据作废。
+    /// RD-48 那四枚与 RD-52 那一枚同批进来：它们原先只活在 `scanLimitations` 的中文句里，
+    /// 界面"上限 20 块"那格其实是在按句式认领一句散文；落成字段之后页尾改由数字装配，
+    /// 读 JSON 的人也不必再解析句子。**故意不给「总块数」**：`rankedBlocks` 撞 id 削掉的块
+    /// 无读数，「榜内 + 榜外 == 总数」天然不平。
+    private static func applyDuplicationBoardTruth(_ duplication: DuplicationResult,
+                                                   to metrics: inout CodeMetrics) {
+        metrics.duplicatedBlocks = duplication.blocks
+        metrics.duplicatedBlockLimit = DuplicationEngine.maxBlocks
+        metrics.duplicatedBlocksDroppedByCap = duplication.blocksDroppedByCap
+        metrics.duplicatedLinesOutsideReportedBlocks = duplication.linesOutsideReportedBlocks
+        metrics.duplicateFragmentsNotExpandedCount = duplication.fragmentsDroppedByBudget
+        metrics.duplicateFilesHittingLineCap = duplication.filesHittingLineCap
+        metrics.duplicateBlockCoordinatesOutsideBoard = duplication.blocksOutsideBoard
+    }
     /// 六项行计数的逐文件累加。抽出来只为了让 `apply` 只剩「摆字段」这一件事。
     private static func lineTotals(_ files: [ScannedSourceFile])
         -> (blank: Int, comment: Int, code: Int, total: Int, todo: Int, fixme: Int) {
