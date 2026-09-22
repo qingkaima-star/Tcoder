@@ -100,6 +100,24 @@ struct MetricTile: View {
     /// 主次不丢；再低就开始与脚注糊成一片。
     static let metricNumberMinimumScale = 0.8
 
+    /// 让「MB/s」这类单位成为**不可断开**的整体：在每个 `/` 前插一个 U+2060 WORD JOINER。
+    ///
+    /// 窄态（1080）实测「201 MB/s」会断成「201 MB/」+「s」—— 断点在斜杠之后，
+    /// 那是 Unicode 换行规则给 `/` 的合法机会，**不是字符串写错了**，
+    /// 所以光靠"只断在空格上"的假设修不掉（P49b 就是这么修了一半、重拍才看出来）。
+    /// 插连接符只挪断行位置、**不改任何一个可见字符**，
+    /// 于是断行只剩数字与单位之间那个空格可断（「201」/「MB/s」）。
+    /// 只在**渲染处**做：数据、日志、目录键里的原字符串一个字都不动。
+    static func unbreakUnits(_ text: String) -> AttributedString {
+        var joined = ""
+        joined.reserveCapacity(text.count + text.lazy.filter { $0 == "/" }.count)
+        for character in text {
+            if character == "/" { joined.append("\u{2060}") }
+            joined.append(character)
+        }
+        return AttributedString(joined)
+    }
+
     init(
         label: String,
         value: String?,
@@ -137,7 +155,7 @@ struct MetricTile: View {
                     .lineLimit(1)
             }
             HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
-                Text(Self.displayValue(value))
+                Text(Self.unbreakUnits(Self.displayValue(value)))
                     .font(Theme.Typo.metricNumber.font)
                     .foregroundStyle(Self.tint(value: value, fallback: tint))
                     .contentTransition(.numericText())
@@ -153,7 +171,7 @@ struct MetricTile: View {
                     .minimumScaleFactor(Self.metricNumberMinimumScale)
                     .fixedSize(horizontal: false, vertical: true)
                 if let unit {
-                    Text(localizedCopy(unit))
+                    Text(Self.unbreakUnits(localizedCopy(unit)))
                         .font(Theme.Typo.label.font)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
