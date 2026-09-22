@@ -139,7 +139,13 @@ final class SourceFileReachabilityTests: XCTestCase {
     ///   `AnalyzerLedger.records(from:)`，五路路名也只住这一份）。
     /// ✅ 174 已由守卫在同一棵合流树上实跑核对过：打印「实现文件 174 个（普查基线 174）」，
     ///   且零调用清单为空。拼接值不自证，跑过才算数（这条旋钮的历史就是"算的数"与"跑的数"分叉）。
-    static let censusBaseline = 174
+    /// 174 → 177（R10b 追溯三件事各起一枚，全在新目录 `Services/Trace/`：
+    ///   `AnalyzerLedgerText`（把四态台账打成 CLI 文本，装在「未量准」之后、分数之前）、
+    ///   `MeasurementLedger`（甲栏量出来的 / 乙栏算出来的分栏，乙栏每行带「← 由…算来」，
+    ///     并用 `danglingSources` + `upstreamInputs` 把「只从既有类型算、不许重扫源码」做成机器判据）、
+    ///   `EvidenceCoordinates`（文件 ⇑ 符号 ⇑ 判据名的稳定坐标，key 不含行号、路径按 scannedRoot 相对化）。
+    ///   引用证据：同一次守卫跑出「零调用清单：空」；177 是它实报的数，不是 174+3 算出来的。）
+    static let censusBaseline = 177
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
