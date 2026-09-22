@@ -223,7 +223,11 @@ post_window_quiescence() {  # post_window_quiescence <outdir> <窗口秒数>；�
       echo "    ⚠ 整个 ${window}s 窗口里**没有一次人手事件**（距上次 ${quiet}s）——" >&2
       echo "      这批量的是心跳期，不是交互期。要判 T1 必须重跑并真的持续滚动。" >&2
     else
-      echo "    复核通过：窗口内确有真人输入（距上次 ${quiet}s < ${window}s），可当交互期样本"
+      # 这里**不许说"真人"**：探针读的是 `.combinedSessionState`，本来就不区分手与 CGEvent 投递
+      # （09-22 实测：合成滚动整窗在投时这行印成了"确有真人输入"，而 meta 写的是 synth@8ms
+      #  ——假归属会被引用成"这批是用户亲手滚出来的"）。来源让给 meta 去说。
+      echo "    复核通过：窗口内确有输入事件（距上次 ${quiet}s < ${window}s；" \
+           "来源见 meta.input_source=${INPUT_SOURCE:-未记录}），可当交互期样本"
     fi
   elif [ "$verdict" = "窗口内有人" ]; then
     meta_write "$out" "contaminated_by_human_input=1"

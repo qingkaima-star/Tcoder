@@ -48,6 +48,29 @@ from perf_trace_xml import Doc, find_tag
 # 时长分布（hitches / hitches-updates / potential-hangs / hitches-renders）
 # ----------------------------------------------------------------------------
 
+INTERVAL_SHAPED_TABLES = ("hitches-updates",)
+
+
+def caveat_for(label, values, budget_ms):
+    """这张表的读数**能不能当成"主线程忙了多久"** —— 2026-09-22 22:16 我就是这么误读一次的。
+
+    实测形状（一趟合格的交互档样本，`d73bea4-interact-run1`）：
+    `n=1113 p50=10.22 ms`、**逐值下限 9.31 ms**、事件间隔成串是 `8.3, 8.3, 8.3`
+    ⇒ 分布不是从 0 铺开的，而是**贴着一帧的基线**；而同一趟的 time-profile 里
+    Main Thread 5765 个采样有 99.9% 栈顶是 `TcoderEntry.main()` 事件循环本体（在等，不在忙），
+    上屏又是满 120 帧/秒 —— 三者只有在"这行的单位不是占用时长"时才互相自洽。
+    所以这里只说**能说的**：这种形状下不许当占用引用；至于它到底是回调间隔还是别的什么，
+    留给仪器定义去定（不要靠猜给表贴标签——那正是我这次犯的错的反面）。
+    """
+    if label not in INTERVAL_SHAPED_TABLES or not values:
+        return None
+    if min(values) < 0.8 * budget_ms:          # 分布从 0 铺开 ⇒ 就是普通的时长，不用提示
+        return None
+    return ("⚠ 该表逐值下限 %.2f ms（≈%.1f 帧）且分布极窄 ⇒ **不许当\"主线程忙了多久\"引用**；"
+            "主线程占用请看 time-profile 的 Main Thread 忙样本（或明确标注口径待核）"
+            % (min(values), min(values) / budget_ms))
+
+
 def cmd_durations(args):
     doc = Doc(args.xml)
     spans = doc.spans()
@@ -57,6 +80,9 @@ def cmd_durations(args):
         bad, pct = over_budget(values, args.budget_ms)
         print("%22s 累计=%.0f ms 超预算(>%.3f ms)=%d (%.2f%%)"
               % ("", sum(values), args.budget_ms, bad, pct))
+        caveat = caveat_for(args.label, values, args.budget_ms)
+        if caveat:
+            print("%22s %s" % ("", caveat))
         ordered = sorted(round(v, 2) for v in values)
         head = ordered[:20]
         print("%22s 逐值=%s%s" % ("", head, " …（共 %d 个）" % len(ordered) if len(ordered) > 20 else ""))

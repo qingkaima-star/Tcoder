@@ -301,6 +301,34 @@ print(" ".join(crosscheck({"expected_interval_ms": 8.33, "frame_p50_ms": 8.33,
   ok "p95 那半句由两把尺子合判：七种形状各判一次，缺件/不适用/矛盾都不许给结论"
 }
 
+selfcheck_update_table_caveat() {  # selfcheck_update_table_caveat <outdir>
+  # 34) 那张"update 表"在交互档里的形状**不许被读成主线程忙时**——2026-09-22 22:16 我就是这么误读的，
+  #     22:22 被同趟样本里第三把仪器（time-profile：主线程 99.9% 在等事件）推翻。
+  #     这条守卫守的是**误读的形状**：逐值贴着一条基线下限、不从现在值铺开。
+  #     两个方向都要验：交互档那种必须出提示；空闲档那种（下限 0.76 ms、超预算 0）不许出，
+  #     否则就是一遇到这张表就恒报警的懒守卫——那玩意活不过第二次响。
+  local both
+  both=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from trace_report import caveat_for
+tight = [9.31, 9.41, 9.41, 9.6, 10.22, 10.64, 35.12]      # 交互档真样本的形状
+wide  = [0.76, 0.86, 1.12, 1.25, 1.27, 1.37, 1.63]        # 空闲档真样本的形状
+a = caveat_for("hitches-updates", tight, 8.333)
+b = caveat_for("hitches-updates", wide, 8.333)
+c = caveat_for("hitches-renders", tight, 8.333)
+d = caveat_for("hitches-updates", [], 8.333)
+print("%s|%s|%s|%s" % ("Y" if a else "N", "Y" if b else "N", "Y" if c else "N", "Y" if d else "N"))')
+  [ "$both" = "Y|N|N|N" ] \
+    || { fail "update 表的误读提示判错（拿到 ${both:-解析失败}；要求：窄分布出提示、宽分布/别的表/空表都不出）"; return; }
+  # 反向钉：提示必须说清"该去看哪把仪器"，光说"这个数不对"等于没指路。
+  local line
+  line=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from trace_report import caveat_for
+print(caveat_for("hitches-updates", [9.31, 10.22, 10.64], 8.333))')
+  case "$line" in *"time-profile"*) ;; *) fail "提示没指出该用哪把仪器（拿到：$line）" ;; esac
+  case "$line" in *"9.31"*) ;; *) fail "提示没把\"下限\"这个可复核的数带出来，别人无从复核（拿到：$line）" ;; esac
+  ok "update 表的读数形状双向判对：窄分布出提示并指路 time-profile，宽分布/他表/空表都不惊动"
+}
+
 selfcheck_input_rate_qualification() {  # selfcheck_input_rate_qualification <outdir>
 
   # 28) 【标记要有读者】`meta.input_source` 从今晚起带投递节奏（`synth@8ms`），

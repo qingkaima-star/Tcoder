@@ -177,7 +177,10 @@ idle 档判"够静默"是 `q >= 8`；我照同一把尺子做交互档"有人在
 cd TcoderMonitor
 ./scripts/build_app.sh release                                   # 必须：新闸门要求产物 rev == 树头
 ./scripts/perf_wait_window.sh $(git rev-parse --short HEAD) 3    # T2 心跳期 ×3（只等窗口、不绕闸）
-MODE=interact ./scripts/perf_wait_window.sh $(git rev-parse --short HEAD) 3   # T1 交互期：需要真人滚
+MODE=interact INPUT=synth MEASURE_LAUNCH=1 ./scripts/perf_wait_window.sh $(git rev-parse --short HEAD) 3
+# T1 交互档：真人滚 **或** 合成滚动都行（09-22 实测 CGEvent 送达有效）；
+# MEASURE_LAUNCH=1 让录制档自己起实例并朝它 attach 的那个 pid 投滚动，
+# MEASURE_SEED_DIR 指真实支持目录 ⇒ 被测的是**有内容的页面**（空沙箱量出来是空页滚动）
 ./scripts/perf_harness.sh switch /tmp/tcoder-perf-$(git rev-parse --short HEAD)-switch  # T4 逐页冷启动
 ./scripts/perf_harness.sh report <上面任一目录>                   # 表头会写明期间与产物 rev
 ```
@@ -190,7 +193,8 @@ MODE=interact ./scripts/perf_wait_window.sh $(git rev-parse --short HEAD) 3   # 
 
 ### F. 性能侧欠大家的（我在做，不用你动）
 
-1. **T1 仍未举证**：交互期 hitch=0 / p95≤8.4ms 需要真人滚动，已排好命令，等用户配合。
+1. **T1 已能无人值守**（09-22 推翻旧撤因）：真人滚或 `INPUT=synth` 共用同一道开录闸与同一道收尾复核。
+   当晚已拿到第一趟四条件齐的交互样本（见 §R）。
 2. **§1"改动前基线"这条我降级了，理由要说清**（2026-09-22 02:26 现查）：
    封存的对照组 `/tmp/tcoder-before.app`（rev `415f0f0`、sha `54005bc4…`）**已经不在了**
    ——`/tmp` 被清过一次（就是那次 103 GB 之后），所以"补测改动前"要先在 detached 树
@@ -588,7 +592,7 @@ Views/Shell/SidebarRows.swift:89      ? Color(nsColor: .quaternaryLabelColor)
 | `fullSort` 9/9 | 9 | `ContributorRows`×2、`LogsFileTables`×2、`CodeMetricsView`、`DependenciesView`、`ContributorsView`、`LogsMetricGrid`、`LogsTrendCard` |
 | `syncFileIO` 2/2 | 2 | `Views/Logs/LogsView.swift`×2（`attachedItems` → `fileSize(of:)` 两跳进 body） |
 | `dynamicColorConstruction` 2/2 | 2 | `Views/Shell/SidebarRows.swift`、`Views/Shell/ProjectSidebar.swift` |
-| `directFormatters` 1/1 | 1 | `Views/PerfLogs/ChartChrome.swift:268`（`DateFormatter()` 提 `static let`） |
+| `directFormatters` 1/1 | 1 | `Views/PerfLogs/ChartChrome.swift`（`DateFormatter()` 提 `static let`；**行号以台账为准**，本文这格从 :268 已漂到 :293） |
 
 ```bash
 ./scripts/locked_build.sh test --filter PerfHitchGuardTests    # 每次跑都打「现量/上限」
@@ -647,3 +651,47 @@ for t in .worktrees/*/; do git -C "$t" status --porcelain \
 这批全部发生在滚动/切页期。今晚 `MEASURE_LAUNCH=1` 已经打通，一个窗口能同时拿到
 hitch 计数与 `p95` 交叉核对（`perf_framepulse.py --sample-dir <目录>` 会直接印合判），
 所以**每还一批复测一趟 20 秒交互档**就够了，不必重跑全套。
+
+
+## §R（2026-09-22 22:52）第一趟"四个条件齐"的交互档样本——以及我自己误读又自纠的那一条
+
+样本 `.scratch/tcoder-perf-d73bea4-interact-run1`（头 `d73bea4`，产物 Sources 与 main 同一份）。
+四个条件第一次同时成立：被测对象**有真实数据**（沙箱按授权复制真实支持目录，5 份真报告）✓、
+`前台=Tcoder` 且 `visible=有在屏窗口` ✓、`pid == scroll_target`（滚动落在被 attach 的那个进程上）✓、
+收尾复核判"窗口内确有输入事件" ✓、七维上下文合格（并发重活=无）✓。
+
+### 只有三条结论可以说（每条都有互相独立的仪器点头）
+
+1. **呈现侧没有掉帧**：`displayed-surfaces-per-second` p50 **120.00** / p95 120.00（42 秒，设备 120 Hz）。
+   这是 WindowServer 侧的数，与 App 内的两把尺子都独立。
+2. **确有少量晚到帧**：xctrace `hitches` n=10（p50 8.33 / p95 25.00 / max 25.00 ms），
+   FramePulse `hitch(>1.5×)` 17 次 / 20 秒 ⇒ 两把仪器同向。
+   ⇒ **「交互期 hitch 帧 = 0」这一半句目前不成立**；但量级是 ~0.5 帧每秒，不是"普遍卡顿"。
+3. **p95 那 0.84 ms 的尾巴在回调时序上**（合判结论，见 §Q 那条工具）：
+   上屏跟满而 `FramePulse` p95 9.17 ms > 预算 8.41 ms。
+   ⚠ 标定之前**两种结论都不许写**：既不许说"p95 达标"，也不许把 9.17 ms 当成掉帧面积。
+
+### 我误读过的一条（写下来，因为它长得太像证据了）
+
+同一行里 `hitches-updates n=1113 p50=10.22 ms 超预算 100%`，我当场写成
+"交互期主线程 update 每帧超过一帧预算 ⇒ 瓶颈钉死在主线程"。**错了**，两处：
+
+· 反证用错：我配的算术"1113 × 10.22 ms = 11.5 s 塞不进 20 秒"本身是假的（11.4 s 塞得进）。
+· 真反证来自**同一趟样本的第三把仪器**：`time-profile` 的 Main Thread 5765 个采样里
+  **99.9% 栈顶是 `static TcoderEntry.main()` 事件循环本体**（报表原话："主线程绝大部分样本是在等事件，不是算不动"）
+  ⇒ 主线程在等，就不在忙；配合上屏 120/s 与帧间隔 p50 8.33 才自洽。
+
+⇒ 现在工具会自己提醒（`trace_report.py caveat_for` + selfcheck 第 34 项，双向夹具）：
+逐值贴着一条基线下限、分布极窄的那种形状，**不许当"主线程忙了多久"引用**。
+至于这张表的官方单位是什么，仍未定——**没定就写"待核"，不要靠猜贴标签**。
+
+### 这批债的验收窗口
+
+§Q 那 14 处与 16 处粗读点全部在滚动/切页期起作用 ⇒ **还完之后复测的是这一档**（`interact`），
+一条命令即可（含 p95 合判）：
+```bash
+MEASURE_SEED_DIR="$HOME/Library/Application Support/TcoderMonitor" \
+MODE=interact INPUT=synth MEASURE_LAUNCH=1 ./scripts/perf_wait_window.sh $(git rev-parse --short HEAD) 3 900
+```
+判据还是那三条：`hitches` 计数、FramePulse `hitch(>1.5×)`、上屏 p50/p95。
+**别拿 `hitches-updates` 那格当"主线程占用"交差**（见上）。

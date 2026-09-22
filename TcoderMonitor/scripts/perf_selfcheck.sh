@@ -111,6 +111,7 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_input_rate_qualification "$out"  # 28) meta 里的输入节奏必须有读者
   item selfcheck_launcher_hygiene "$out"       # 29) 起实例的脚本必须有 trap、不许按 bundle id 广播
   item selfcheck_p95_crosscheck_shapes "$out"  # 33) p95 那半句由两把尺子合判，七种形状各判一次
+  item selfcheck_update_table_caveat "$out"    # 34) update 表窄分布形状不许被当成主线程忙时
   item selfcheck_md_tables_unbroken "$out"     # 30) markdown 表格不许有夹在行中间的裸续行
 }
 

@@ -642,7 +642,7 @@ pgrep -f 'swift-frontend|swift-build' | wc -l  # 必须是 0
 ls -d /tmp/tcoder-capture.lock 2>/dev/null     # 取证锁必须空闲
 ```
 
-四条都满足才跑 `./scripts/perf_harness.sh idle <目录>`（或 `interact`，需要真人持续滚动）。
+四条都满足才跑 `./scripts/perf_harness.sh idle <目录>`（或 `interact`：真人滚 **或** `INPUT=synth` 合成滚动，09-22 实测送达有效）。
 不满足时脚本自己的 `preflight_context` 会**直接拒跑**并写明缺哪一条——那不是脚本坏，
 是它在拦第三次"未受控基线"（spec §1.3 已经作废过两批这样的数）。
 一次完整前后对比约 **5 分钟**（`idle`×3 + `interact`×3，各含导出与解析）。

@@ -11,7 +11,10 @@
 #     只对自己 `open` 起来的那一个 pid 在收尾时发 TERM。
 #   · 不用 `IGNORE_CONTEXT_GATE` / `ALLOW_UNQUIESCENT` 绕闸门——绕过去的读数本来就不要。
 #     这里只有"等"，没有"放行"。
-#   · 不采交互期：T1 必须真人滚 20 秒（`interact` 档），合成滚动两条撤因见规范 §4。
+#   · 交互档（MODE=interact）两种输入都行：`INPUT=human` 等真人滚；`INPUT=synth` 由**录制档**
+#     朝它自己 attach 的那个 pid 投 CGEvent 滚动（14px/8ms ≈ 125 Hz）。
+#     规范 §4 原来那两条撤因已被 09-22 实测推翻一条（CGEvent 不会被静默丢弃）、
+#     另一条只适用于"让 App 自己滚"那种进程内方案，与本档无关。
 set -u
 cd "$(dirname "$0")/.." || exit 1
 # 排程器要等的所有条件，必须和录制档闸门**用同一把尺子**——所以直接 source preflight。
