@@ -33,13 +33,35 @@ extension JavaRecognitionTruthTests {
                        "泛型方法的参数表不能被类型参数表吃掉")
     }
 
-    /// 普通调用行 / 字段声明 / try-with-resources 资源声明 / lambda 与匿名类体：
-    /// 全都不许独立上榜。体内的 `onClick` 按本引擎口径**归入外层方法体**（限制通道必须说出这条）。
+    /// 普通调用行 / 字段声明 / try-with-resources 资源声明 / lambda：一条都不许独立上榜。
+    /// 匿名类里**声明出来的具名方法** `onClick` 各出一条条目、各算自己的体 ⇒ 它在 expected 里，
+    /// 不在 forbidden 里。
+    ///
+    /// ① **这条口径从哪来**：RD-08 + 台账 §13（2026-09-22 由总工在集成分支统一裁定）——
+    ///    全仓一条口径：**具名嵌套函数（含匿名类里声明的方法）一律各出一条条目、各算自己的体**，
+    ///    外层条目的复杂度按行挖掉直接子条目的跨度。落在 `FunctionScanning.Scan`
+    ///    （`ownLines(of:)` + `nestedFunctionCount`）上，**不分语言**：Java 与 TS 走同一份实现。
+    ///    本条原先写的是 R1 的「保留边界③」（匿名类体内的 `onClick` 归入外层方法体），
+    ///    现在按 RD-08 改掉。
+    ///
+    /// ② **为什么"归入外层"不能留**：就在同一份文件下面那条
+    ///    `testAnonymousClassOnAFieldIsNotAMethodButItsBodyMethodSurvives` 钉的是
+    ///    「字段初始化式上挂的匿名类，其体内的 `onClick` **能**单独上榜」（伪函数不再吞整类之后）。
+    ///    两处的构造是同一个 `new ClickHandler() { @Override public void onClick() {…} }`，
+    ///    差别只是外层是方法体还是字段 —— 如果这里折进 `run` 而那里允许单列，
+    ///    同一个形状在本文件里就有了两套答案，那正是 AGENTS §8 拦的"两套尺子"，
+    ///    也是这次合并三条红里的一条（两条流各自门禁都绿，合起来必有一条被打红）。
+    ///
+    /// ③ **双计风险不由"不列子条目"来挡**：父条目 `run` 的复杂度只算 `ownLines(of:)` ——
+    ///    整个跨度里按行挖掉直接子条目的跨度，`run` 少算的那几行恰好是 `onClick` 多算的那几行，
+    ///    一个 `if` 不会被算两遍；对账口径「全文件条目的判定分支之和 == 源码真实分支数」
+    ///    由 `TsNestedComplexityCaliberTests` 钉在同一份 `Scan` 上。
+    ///    `lineCount` 仍是整段跨度（"这个函数写多长"的口径），所以边界真值照 `// R1!` / `// R1/` 标。
     func testCallsFieldsResourcesAndLambdaBodiesStayOffTheList() {
         JavaTruth.assertTruth(
             JavaRecognitionTruthTests.callsAndResources,
-            expected: ["run", "after"],
-            forbidden: ["onClick", "ClickHandler", "handler", "worker", "handle", "request",
+            expected: ["run", "onClick", "after"],
+            forbidden: ["ClickHandler", "handler", "worker", "handle", "request",
                         "LIMIT", "compute", "transferTo", "newInputStream", "newOutputStream",
                         "info", "log", "reset", "ReportingJob", "Job", "Override", "Runnable"]
         )
@@ -122,9 +144,9 @@ extension JavaRecognitionTruthTests {
             service.handle(request);
             ClickHandler handler = new ClickHandler() {
                 @Override
-                public void onClick() {
+                public void onClick() { // R1!onClick
                     pressed = true;
-                }
+                } // R1/onClick
             };
             Runnable worker = () -> {
                 if (ok) {
