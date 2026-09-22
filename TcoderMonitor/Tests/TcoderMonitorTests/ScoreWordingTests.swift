@@ -255,19 +255,38 @@ final class ScoreWordingTests: HealthScoreTestCase {
     }
 
     /// 副标题与 `rows` 的键必须同源：把「按拖累程度排序」写回界面 ⇒ 这条立刻红。
+    ///
+    /// ⚠️ 2026-09-22 总工改法：这里**不再钉某一条具体文案**。R7 与 R9 修过同一句假话
+    /// （我派单时让 §十 的归属重叠了），而常驻长句棘轮只减不增 ⇒ 界面留 R7 的短句、
+    /// 「拖累不是第一行」这件事实进 ⓘ。钉死某一版句子会把这种"两版都合格"的取舍变成必然冲突。
+    /// 于是这条改钉**不变式**：① 副标题点名它排的是「贡献」；② 不许出现「按拖累程度排序」；
+    /// ③ 源码里那串字面量必须在目录里有逐字相等的键（守卫 3 同一条理由，提前拦）。
     func test_componentTableSubtitleNamesTheActualSortKey() throws {
         let path = Self.packageRoot.appendingPathComponent(
             "Sources/TcoderMonitor/Views/Health/HealthComponentTable.swift").path
         let source = Self.strippingComments(try String(contentsOfFile: path, encoding: .utf8))
-        XCTAssertTrue(source.contains("按加权贡献升序"), "副标题没写出真的排序键")
+        let literal = try XCTUnwrap(Self.firstStringLiteral(after: "subtitle:", in: source),
+                                    "副标题字面量找不到 ⇒ 形状变了，这条不作数")
+        XCTAssertTrue(literal.contains("贡献") && literal.contains("升序"),
+                      "副标题必须写出真的排序键（现在是按贡献升序）：\(literal)")
         XCTAssertFalse(source.contains("按拖累程度排序"),
                        "「拖累」这个词只能留给 lostPoints，别把它安到一个不是它的键上")
-        // 目录里那条键必须与源码字面量逐字相等（守卫 3 的同一条理由，这里提前拦住）
         let catalog = try String(contentsOfFile: Self.packageRoot
             .appendingPathComponent("Resources/en.lproj/Localizable.strings").path, encoding: .utf8)
-        XCTAssertTrue(catalog.contains("\"按加权贡献升序（得分 × 本次乘数），最小者在前\" ="))
-        XCTAssertFalse(catalog.contains("\"按拖累程度排序，贡献最低者在前\""),
+        XCTAssertTrue(catalog.contains("\"\(literal)\" ="),
+                      "源码字面量与目录键必须逐字相等，缺了英文态就整句掉中文：\(literal)")
+        XCTAssertFalse(catalog.contains("按拖累程度排序，贡献最低者在前"),
                        "旧键还留在目录里 = 译文烂尾，守卫 3 会红")
+    }
+
+    /// 取 `标签:` 后面那一条 Swift 字符串字面量的内容（不处理转义，页面文案里没有）。
+    static func firstStringLiteral(after label: String, in source: String) -> String? {
+        guard let at = source.range(of: label) else { return nil }
+        let rest = source[at.upperBound...]
+        guard let open = rest.firstIndex(of: "\"") else { return nil }
+        let afterOpen = rest[rest.index(after: open)...]
+        guard let close = afterOpen.firstIndex(of: "\"") else { return nil }
+        return String(afterOpen[..<close])
     }
 
     // MARK: - 靶子 3b：同一个日均频率不许声称两次贡献（台账 RD-29）
