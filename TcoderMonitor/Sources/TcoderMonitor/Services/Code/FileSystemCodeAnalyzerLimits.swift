@@ -62,6 +62,10 @@ extension FileSystemCodeAnalyzer {
         var roleTally: SourceRoleTally = SourceRoleTally()
         /// 遍历「跟不跟」的现场计数（RD-15）：软链接 / 嵌套仓库 / 包状目录 / 名单外被剪的目录。
         var treeFollowing: SourceTreeFollowingLedger = SourceTreeFollowingLedger()
+        /// 榜外未列重复块的稳定坐标（RD-17）。空 = 没有榜外块。
+        var duplicateBlockCoordinatesOutsideBoard: [String] = []
+        /// 重复率那一格的口径自述，仅在榜内/榜外两个数真的分叉时才非空。
+        var duplicationBoardCaliber: String = ""
 
         /// 有任一**上限**真的生效过 ⇒ 这份数字是部分测量，UI 不得当成全量展示。
         /// 注意不含「按规则主动排除」：跳过 vendor/二进制是范围定义，不是被截断。
@@ -103,6 +107,11 @@ extension FileSystemCodeAnalyzer {
             lines.append(contentsOf: roleTally.notes)
             lines.append(contentsOf: treeFollowing.notes)
             lines.append(contentsOf: scopeReadout.notes)
+            if duplicateBlockCoordinatesOutsideBoard.isEmpty == false {
+                lines.append("榜外未列重复块坐标：" + duplicateBlockCoordinatesOutsideBoard
+                    .joined(separator: " ; "))
+            }
+            if duplicationBoardCaliber.isEmpty == false { lines.append(duplicationBoardCaliber) }
             return lines
         }
 

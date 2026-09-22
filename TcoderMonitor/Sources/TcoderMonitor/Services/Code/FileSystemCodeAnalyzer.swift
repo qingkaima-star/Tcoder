@@ -150,7 +150,9 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             vueRegionFallbackFileCount: lex.vueRegionFallbackFileCount,
             skipLedger: scan.skipLedger,
             roleTally: SourceRoleTally(of: scan.files),
-            treeFollowing: scan.treeFollowing
+            treeFollowing: scan.treeFollowing,
+            duplicateBlockCoordinatesOutsideBoard: duplication.blocksOutsideBoard,
+            duplicationBoardCaliber: duplication.blocksDroppedByCap > 0 ? duplication.boardCaliberNote : ""
         )
     }
 
