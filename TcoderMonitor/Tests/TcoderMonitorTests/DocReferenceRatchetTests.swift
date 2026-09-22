@@ -58,7 +58,12 @@ final class DocReferenceRatchetTests: XCTestCase {
     /// `*.py` 走 `exampleManifestExtensions` 豁免、`*.txt` 不是文件锚点，也一并改了措辞。
     static let docs: [String] = ["README.md", "docs/使用说明.md",
                                        "docs/口径与已知限制.md", "docs/九页实拍读数.md",
-                                       "docs/界面-乱的清单.md", "docs/界面语言-对齐AiX.md"]
+                                       "docs/界面-乱的清单.md", "docs/界面语言-对齐AiX.md",
+                                       // 2026-09-22：`界面语言-对齐AiX.md` 涨到 832 行撞上全仓 800 行棘轮，
+                                       // §6.15 起的批次台账**整块搬出**成这份文件。
+                                       // 必须登记进来 —— 否则几百条锚点随着搬家脱离判活，
+                                       // 正好制造 §6 第 8 条点名过的那个"扫描面外看不见 rot"的洞。
+                                       "docs/界面语言-批次台账.md"]
 
     /// 我们自己的文件类型：这类锚点必须能在仓库里找到实体文件。
     static let repoFileExtensions: Set<String> = ["swift", "md", "sh"]
