@@ -139,7 +139,12 @@ final class SourceFileReachabilityTests: XCTestCase {
     ///   `AnalyzerLedger.records(from:)`，五路路名也只住这一份）。
     /// ✅ 174 已由守卫在同一棵合流树上实跑核对过：打印「实现文件 174 个（普查基线 174）」，
     ///   且零调用清单为空。拼接值不自证，跑过才算数（这条旋钮的历史就是"算的数"与"跑的数"分叉）。
-    static let censusBaseline = 174
+    /// 174 → 178（R6 流扫描范围/文件角色那一格拆出的四枚，全在 `Services/Code/`：
+    ///   `SourceFileRoleRules`（角色判据）/ `SourceFileRoleSignals`（信号采集）/
+    ///   `SourceRoleTally`（逐条计数）/ `SourceScanScopeReadout`（范围读数与「跟不跟」句子的装配）。
+    ///   同一次守卫跑出「零调用清单：空」⇒ 四枚都有 `Sources/**` 内的调用点，不是空壳。
+    ///   178 由守卫实报（它打印「实现文件 178 个」），不是 174+4 算出来的。
+    static let censusBaseline = 178
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames

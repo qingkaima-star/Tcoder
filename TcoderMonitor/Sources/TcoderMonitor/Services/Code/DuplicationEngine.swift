@@ -16,6 +16,29 @@ struct DuplicationResult: Sendable {
     /// 按行数降序截断到 `maxBlocks` 时被丢掉的克隆块数，以及它们覆盖的代码行数。
     var blocksDroppedByCap: Int = 0
     var linesOutsideReportedBlocks: Int = 0
+    /// 榜外未列块的**稳定坐标**（`DuplicatedBlock.id` = 涉及路径排序后拼接 + 行数）。
+    /// RD-17 工单点名要的东西：只留一个总数 = 读的人无法反驳、也无法去核对那 181 处在哪。
+    /// 顺序 = 榜单自己的排序（行数降序 → id 升序），因此同一份输入永远给出同一串。
+    var blocksOutsideBoard: [String] = []
+
+    /// 「这一格的重复率是按什么算的」——必须**这一格自己说**，不许只靠 `scanLimitations` 里
+    /// 别处的一句（看重复率的人不会先翻边界列表）。两个口径的差别是真实的：
+    /// `ratio` 的分子是**全量命中的并集**，`blocks` 只是按行数取前 `maxBlocks` 块的明细。
+    /// **没有任何阈值在这里被改动**：`maxBlocks = 20` 与判档门限都是冻结口径。
+    var boardCaliberNote: String {
+        let listed = blocks.map(\.lineCount).reduce(0, +)
+        var line = "重复率 \(NumberFormat.percent(ratio, precision: 1)) 的口径是**全量命中**："
+            + "\(NumberFormat.grouped(duplicatedCodeLines)) 个代码行落在重复块内 / 共 "
+            + "\(NumberFormat.grouped(totalCodeLines)) 代码行（并集口径，同一行被多块覆盖只算一次）。"
+        line += "明细榜单只列前 \(DuplicationEngine.maxBlocks) 块（合计 \(NumberFormat.grouped(listed)) 行，"
+            + "榜单行数是各块行数相加、与并集不同尺），榜外未列 \(NumberFormat.grouped(blocksDroppedByCap)) 块 / "
+            + "\(NumberFormat.grouped(linesOutsideReportedBlocks)) 行。"
+        line += blocksOutsideBoard.isEmpty
+            ? "榜外没有剩余块。"
+            : "榜外坐标（可点名）：\(blocksOutsideBoard.joined(separator: " ; "))"
+                + "。这些块参与分子、不参与明细。"
+        return line
+    }
 }
 
 enum DuplicationEngine {
@@ -105,6 +128,7 @@ enum DuplicationEngine {
                                  fragmentsDroppedByBudget: scan.droppedFragments,
                                  filesHittingLineCap: indexed.filesHittingLineCap,
                                  blocksDroppedByCap: ranked.droppedByCap,
-                                 linesOutsideReportedBlocks: ranked.linesOutsideReportedBlocks)
+                                 linesOutsideReportedBlocks: ranked.linesOutsideReportedBlocks,
+                                 blocksOutsideBoard: Array(ranked.outsideBoardCoordinates))
     }
 }

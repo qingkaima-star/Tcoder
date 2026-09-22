@@ -73,6 +73,29 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     /// 0...1 — share of code lines that fall inside a duplicated block.
     var duplicationRatio: Double = 0
     var duplicatedBlocks: [DuplicatedBlock] = []
+
+    // MARK: 重复明细榜的"榜外那一半"（RD-48 · 台账卷二 §27 之续）
+    //
+    // 存在理由：`DuplicationEngine` 早就算清了"被上限切掉多少"（下面这几枚全是它的字段直传），
+    // 但契约里没有承接格 ⇒ 那四个数**只活在 `scanLimitations` 那句中文里**。
+    // 后果有两层：① 消费方要"榜外还有几块"只能去解析句子（等于造第二把尺子）；
+    // ② 界面页尾那句"明细榜上限 20 块"是**数**，却来自一条按句式认领的字符串
+    // （`CodeBoardTruth.outsideBoardNote`），改文案不改认领标记就会静默失去披露。
+    // ⚠️ **故意不给"重复块总数"**：`rankedBlocks` 在撞 id 时还会削掉若干块而无处计数
+    // （R6b 交回时点名），所以"榜内 + 榜外 == 总数"这个等式天然不平，
+    // 造一枚看似精确的总数就是把不平藏起来。
+    /// 明细榜的封顶长度（引擎那份 `maxBlocks` 的直传，不是界面自己抄的 20）。
+    /// `nil` = 本次没跑到重复分析（旧报告与"依赖/日志缺席"同一种处理）。
+    var duplicatedBlockLimit: Int? = nil
+    /// 按行数降序截断到上限时**被丢掉的克隆块数**（它们参与了 ratio，只是没进明细）。
+    var duplicatedBlocksDroppedByCap: Int? = nil
+    /// 上面那些被丢掉的块覆盖的代码行数。
+    var duplicatedLinesOutsideReportedBlocks: Int? = nil
+    /// 因每指纹片段的展开预算而**没展开成片段**的拷贝窗口数（ratio 已含它们）。
+    var duplicateFragmentsNotExpandedCount: Int? = nil
+    /// 归一化行数触到窗口上限、后半段克隆不参与检测的文件数。
+    var duplicateFilesHittingLineCap: Int? = nil
+
     var largestFileLineCount: Int = 0
 
     var overallRisk: RiskLevel = .none

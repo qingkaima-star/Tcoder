@@ -244,7 +244,8 @@ extension DuplicationScan {
     /// 不同克隆会撞同一个 id（SwiftUI ForEach 会报 duplicate identifiers 并错乱 diff）。
     /// 契约缺口不能改 Models，这里按 id 去重后再截断到 20：**只削明细榜单，不动 ratio**。
     static func rankedBlocks(_ input: [DuplicatedBlock])
-        -> (blocks: [DuplicatedBlock], droppedByCap: Int, linesOutsideReportedBlocks: Int) {
+        -> (blocks: [DuplicatedBlock], droppedByCap: Int, linesOutsideReportedBlocks: Int,
+                 outsideBoardCoordinates: [String]) {
         var blocks = input
         if blocks.count > 1 {
             blocks.sort { lhs, rhs in
@@ -254,12 +255,19 @@ extension DuplicationScan {
         }
         var seenIDs = Set<String>()
         blocks = blocks.filter { seenIDs.insert($0.id).inserted }
-        guard blocks.count > DuplicationEngine.maxBlocks else { return (blocks, 0, 0) }
+        guard blocks.count > DuplicationEngine.maxBlocks else { return (blocks, 0, 0, []) }
         let dropped = blocks[DuplicationEngine.maxBlocks...]
         return (Array(blocks.prefix(DuplicationEngine.maxBlocks)),
                 dropped.count,
-                dropped.map(\.lineCount).reduce(0, +))   // 明细外的行数（ratio 已含，只是不列明细）
+                dropped.map(\.lineCount).reduce(0, +),   // 明细外的行数（ratio 已含，只是不列明细）
+                // 榜外块的稳定坐标：`id` 由「涉及路径排序拼接 + 行数」构成，与榜单同一把排序键，
+                // 所以同一份输入永远给出同一串（RD-17：不许只留一个总数）。
+                dropped.prefix(DuplicationScan.outsideBoardSampleLimit).map(\.id))
     }
+
+    /// 榜外坐标最多点这几个名字。再多就把一行限制说明撑成一段散文；
+    /// 未点名的数量仍在 `droppedByCap` 里，不会因此消失。
+    static let outsideBoardSampleLimit = 6
 
     /// 相似度口径：归一化后同一指纹的行，其**原始文本**（忽略缩进）有多少是一样的 ——
     /// 逐字拷贝得 1.0，改名拷贝得 0.x，视图上的「相似度」因此不会永远显示 100%。

@@ -42,28 +42,27 @@ struct DashboardView: View {
     }
 
     /// 代码规模这一段（实时读数已单独成 `DashboardLiveReadout`，见其注释的失效域理由）。
+    ///
+    /// **页面级单列**。旧的 `LazyVGrid(pairColumns)` 两列量出三条病灶（`7b4ec25` 那批 36 张页尾
+    /// 配 `card_edges` 逐带量）：不渲染的那格照样占栅格槽位 ⇒ 297pt 画布洞；同一行两张卡
+    /// 不共顶线（1065px vs 1593px）；而两列本身是把卡**压到内容最小宽之下**才挤出来的
+    /// （两张各需 > 463pt，容器只有 951pt），那属「溢出/挤压」而不是排版问题。
+    /// 守卫 `ShellBorderlessTests.test_dashboardIsSingleColumnWithNoCardPairGrid`。
     private var scaleSegment: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.group) {
             codeScaleGroup
-            if hasCoverageStrip {
-                pairSegment { fileCompositionGroup } right: { coverageStrip }
-            } else {
-                // 没有覆盖率可摆时，「文件构成」**独占整行**。
-                // 旧写法让不渲染的那一格继续占一个栅格槽位，右边就拖出约 297pt 的画布洞。
-                fileCompositionGroup
-            }
+            fileCompositionGroup
+            coverageStrip
         }
     }
 
-    /// 底部两块清单（最近提交 / 高频错误）。
+    /// 底部两块清单（最近提交 / 高频错误）。同上，单列。
     private var listSegment: some View {
-        pairSegment { recentCommitsGroup } right: { topErrorsCard }
+        VStack(alignment: .leading, spacing: Theme.Spacing.group) {
+            recentCommitsGroup
+            topErrorsCard
+        }
     }
-
-    /// 「这一页有没有覆盖率可摆」——**唯一一处**判这件事的谓词。
-    /// `coverageStrip` 用它决定渲染不渲染，`scaleSegment` 用它决定摆两列还是让「文件构成」独占整行。
-    /// 两处各判各的（或干脆没人判第二处）就是那个半页空洞的成因。
-    private var hasCoverageStrip: Bool { report?.coverage?.hasData == true }
 
     // MARK: 今日错误的着色（语义色只留给真有危险的那一态）
 
@@ -125,14 +124,22 @@ struct DashboardView: View {
         }
     }
 
-    /// 文件构成：从「代码规模」那张卡里分出来的第二组。
+    /// 文件构成：从「代码规模」那张卡里分出来的第二组。三格**横排**——
+    /// 单列化之后这张卡有 951pt 宽，竖排三行会把右侧四分之三留空（乱清单 §5 那一行）。
+    /// 刻意不升格成 `MetricTile`：这三格是次级读数，最重的字号要留给页顶那条读数带
+    /// （风格契约 4），所以沿用 `StatLine` 那一档，只把每格撑成等宽三栏。
     private var fileCompositionGroup: some View {
         GlassSection("文件构成") {
             if let code = report?.code {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                HStack(spacing: Theme.Spacing.lg) {
                     StatLine(label: "文件", value: NumberFormat.grouped(code.totalFiles))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    DataBandSeparator()
                     StatLine(label: "注释行", value: NumberFormat.grouped(code.commentLines))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    DataBandSeparator()
                     StatLine(label: "空行", value: NumberFormat.grouped(code.blankLines))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
                 Text(ShellCopy.notAnalyzed(.codeSize))
@@ -216,7 +223,7 @@ struct DashboardView: View {
     /// **字一个没删**，只是不再和读数抢注意力。
     @ViewBuilder
     private var coverageStrip: some View {
-        if hasCoverageStrip, let coverage = report?.coverage {
+        if let coverage = report?.coverage, coverage.hasData {
             GlassSection("测试覆盖率") {
                 // 风险徽标原挂在 `GlassSection.trailing`（需 `AnyView`，O-3 清零），
                 // 现作为分组首行放进内容区，信息不丢、只降排版层级。

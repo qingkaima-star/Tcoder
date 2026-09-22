@@ -735,3 +735,9 @@
 "当前列出 %1$@ / %2$@ 个。" = "Showing %1$@ of %2$@ on this page.";
 "共 %1$@ 个重复块，已全部列出（榜未触顶，上限 %2$@ 块）。" = "%1$@ duplicate blocks in total, all listed (the board is below its cap of %2$@, so this count is the total).";
 "榜内只列 %1$@ 个（明细榜上限 %2$@ 块）· 本页当前列出 %3$@ 个。" = "The board lists only %1$@ blocks (detail cap %2$@) · this page shows %3$@ of them.";
+
+// ── RD-48（重复明细榜"榜外那一半"落成字段）：页尾那句改由数装配，两条新键 ──────────
+// 之前这四个数只活在 `scanLimitations` 的中文句子里，界面靠"按句式认领"去抓它
+// （`CodeBoardTruth.outsideBoardNote`）—— 引擎改文案而标记没改，披露会静默消失。
+"另有 %1$@ 个块 / %2$@ 行未列入榜内。" = "A further %1$@ blocks / %2$@ lines sit outside the reported board.";
+"另有 %1$@ 处拷贝因指纹预算未展开。" = "A further %1$@ clone windows were not expanded because of the fingerprint budget.";

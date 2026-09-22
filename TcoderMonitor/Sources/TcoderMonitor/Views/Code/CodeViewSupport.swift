@@ -143,8 +143,28 @@ enum CodeBoardTruth {
             base = localizedFormat("共 %1$@ 个重复块，已全部列出（榜未触顶，上限 %2$@ 块）。",
                                    NumberFormat.grouped(listed), NumberFormat.grouped(cap))
         }
-        guard let outside = outsideBoardNote(code) else { return base }
-        return base + " " + localizedCopy(outside)
+        guard let outside = outsideBoardNoteFromFields(code) ?? outsideBoardNote(code).map({ localizedCopy($0) })
+        else { return base }
+        return base + " " + outside
+    }
+
+    /// 由**字段**装配的榜外说明（RD-48）。
+    ///
+    /// 为什么优先走这条：`outsideBoardNote` 是"按句式去中文台账里认领一句话"，
+    /// 引擎改了文案而这里没改标记，披露就静默消失（R7 交回时自己点明了这个耦合，并对账钉住它）。
+    /// 字段落地后数字有了直传通道，页尾这句改由数装配；**旧报告没有这些格** ⇒ 返回 `nil`，
+    /// 调用方退回认领句子那条路，两种来源都不许让榜外那一半看不见。
+    /// ⚠️ 不做加法：不合成"总块数"（`rankedBlocks` 撞 id 削掉的块没有读数，等式天然不平）。
+    static func outsideBoardNoteFromFields(_ code: CodeMetrics) -> String? {
+        guard let dropped = code.duplicatedBlocksDroppedByCap,
+              let outsideLines = code.duplicatedLinesOutsideReportedBlocks,
+              dropped > 0 || outsideLines > 0 else { return nil }
+        var note = localizedFormat("另有 %1$@ 个块 / %2$@ 行未列入榜内。",
+                                   NumberFormat.grouped(dropped), NumberFormat.grouped(outsideLines))
+        if let fragments = code.duplicateFragmentsNotExpandedCount, fragments > 0 {
+            note += " " + localizedFormat("另有 %1$@ 处拷贝因指纹预算未展开。", NumberFormat.grouped(fragments))
+        }
+        return note
     }
 }
 
