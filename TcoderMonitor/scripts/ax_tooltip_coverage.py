@@ -13,6 +13,7 @@
 
 用法: ./scripts/ax_tooltip_coverage.py [取证目录...]
      不传参数 = `$SCRATCH/tcoder-ax-tooltip/*`（有哪个批次算哪个）。
+     `--selfcheck` = 解析器正对照；`--language-audit [--all] [目录...]` = 英文态残留三分类。
 """
 import os
 import re
@@ -129,7 +130,10 @@ def language_audit(argv) -> int:
       C 像数据 —— 路径 / 项目名 / 提交标题 / 纯计数，不翻。
     只报数不判败（报告器）。
     """
-    dirs = live_help_dirs(argv)
+    # `--all`：默认每组只列前 12 条够看清形势，但**改文档要逐条点名**，
+    # 少了这条就得在代码里再实现一遍分类逻辑（两份尺子必然漂）。
+    show_all = "--all" in argv
+    dirs = live_help_dirs([a for a in argv if a != "--all"])
     evidence = [p for d in dirs for p in sorted(d.glob("*.txt"))]
     if not evidence:
         print("!! 没有取证产物（英文态那趟：AX_LANG=en AX_SET=en ./scripts/ax_tooltip_report.sh）")
@@ -169,7 +173,7 @@ def language_audit(argv) -> int:
     print(f"   B 未登记话术: {len(b)} 句 ← 要登记键 + 包查表（或确认是数据后归 C）")
     print(f"   C 像数据   : {len(data)} 句 ← 项目名 / 路径 / 提交标题，不翻是对的")
     for label, group in (("A", a), ("B", b)):
-        for k in sorted(group, key=lambda x: -counts[x])[:12]:
+        for k in sorted(group, key=lambda x: -counts[x])[:None if show_all else 12]:
             print(f"   {label} {counts[k]:3d}× {k[:76]}")
     return 0
 

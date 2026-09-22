@@ -173,6 +173,5 @@ extension CodeRiskAnalysis {
         }
 
         return items
-        return items
     }
 }
