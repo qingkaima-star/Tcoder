@@ -262,7 +262,7 @@ struct ContributorConcentrationSection: View {
                 DataTableHeader(columns: DataColumns.shareBar)
                 DataShareBarRow(
                     label: "前 3 名合计",
-                    detail: "\(NumberFormat.grouped(topCommits)) 次",
+                    detail: localizedCount("%lld 次", topCommits),
                     fraction: Double(topCommits) / Double(base),
                     // 合计 = 「自身/主体数据」，新规则下它就是纯墨。
                     // 旧写法取 `Theme.Chart` 的 0 号位 —— 与总览那两处「182,430 涂成
@@ -276,7 +276,7 @@ struct ContributorConcentrationSection: View {
                 ForEach(top) { author in
                     DataShareBarRow(
                         label: ContributorAnalysis.displayName(author),
-                        detail: "\(NumberFormat.grouped(author.commits)) 次",
+                        detail: localizedCount("%lld 次", author.commits),
                         fraction: Double(author.commits) / Double(base),
                         // 数据块走基座的唯一取色（批次 P6）；轨道与文字仍是灰墨。
                         tint: ChartSeries.dataMarkColor
