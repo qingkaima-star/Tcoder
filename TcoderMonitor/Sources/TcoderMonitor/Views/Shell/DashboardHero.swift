@@ -240,8 +240,13 @@ struct CPUHistoryChart: View {
             }
         }
         .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 3)) { value in
-                // 尾刻度原来 `centered: false` → 半个标签掉出右边界，被卡片切成 `08:27…`。
+            // 步长走**与性能页同一把档位**（`ChartScale`），不再用 `.automatic(desiredCount: 3)`：
+            // 自动档在首启那种十几秒的短窗口里只给两枚标签，且都挤在右半边
+            // （交付头实拍量到中心在 47% 与 92%），左半段没有任何时间参照。
+            AxisMarks(values: .stride(by: .second,
+                                      count: ChartScale.boundedSecondsStride(windowSeconds: windowSpan),
+                                      roundLowerBound: false)) { value in
+                AxisGridLine().foregroundStyle(Theme.Palette.Surface.separator)
                 AxisValueLabel(format: Self.axisTimeFormat(span: windowSpan),
                                anchor: ChartAxisEdge.anchor(for: value.as(Date.self), in: timeDomain))
                     .font(Theme.Typo.microLabel.font.monospacedDigit())

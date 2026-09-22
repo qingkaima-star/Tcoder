@@ -352,6 +352,21 @@ final class PerformanceDisplayTests: XCTestCase {
         XCTAssertEqual(ChartScale.dayStride(spanDays: -3), 1)
     }
 
+    /// 短窗口必须**至少落得下两格**。
+    /// 档位本身按"窗口 ~135 秒"标定，但候选档之间是 1→2→5→15 的跳变：
+    /// 26 秒的窗口会选到 15 秒（比半个窗口还大），左半边就一根刻度都没有
+    /// —— 交付头实拍「总览」曲线量到标签中心在 47% 与 92%，正是这个形状。
+    func testShortWindowsStillGetAtLeastTwoTicks() {
+        XCTAssertEqual(ChartScale.boundedSecondsStride(windowSeconds: 26), 13, "15 秒的档必须被下界压回 13")
+        XCTAssertEqual(ChartScale.boundedSecondsStride(windowSeconds: 135), 30, "长窗口不受下界影响")
+        XCTAssertEqual(ChartScale.boundedSecondsStride(windowSeconds: 0), 1, "退化窗口也要给得出步长")
+        for span in 2...600 {
+            let stride = ChartScale.boundedSecondsStride(windowSeconds: Double(span))
+            XCTAssertGreaterThanOrEqual(Double(span) / Double(stride), 2.0,
+                                        "窗口 \(span) 秒 / 步长 \(stride) 秒 ⇒ 落不下两格")
+        }
+    }
+
     func testDegeneratePeaksStillProduceADrawableAxis() {
         for peak in [0, -5, Double.infinity, Double.nan] {
             let axis = ChartScale.axis(peak: peak)
