@@ -169,7 +169,7 @@ final class PerfMainThreadBudgetTests: XCTestCase {
             let command = "/usr/bin/proc-" + String(i) + " --flag " + String(i)
             processes.append(ProcessSnapshot(pid: pid, name: name, cpuUsage: cpu, memoryBytes: memory,
                                              threadCount: 1 + (i % 64), openFileCount: i % 256,
-                                             startTime: start, commandLine: command, parentPID: 1))
+                                             startTime: start, executablePath: command, parentPID: 1))
         }
         return ProcessSweep(processes: processes, states: [:], elapsed: 1.5,
                             truncated: false, visiblePIDCount: count)

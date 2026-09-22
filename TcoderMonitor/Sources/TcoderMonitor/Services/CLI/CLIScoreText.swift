@@ -135,10 +135,44 @@ enum CLIScoreText {
 
     /// "没查 ≠ 没有病"这句在界面上是常驻提示，CLI 里以前只把
     /// `networkLookupPerformed=false` 埋在 JSON 里 —— AI 不翻那个键就会把"0 条漏洞"当结论。
-    /// 文案沿用分析器自己产出的那句，不在这里另写一份。
+    ///
+    /// RD-11 之后这一行还要把**状态**说出来：逐条核对结果的六态分档、已成功核对的条数、
+    /// 数据源，一次讲清；没核对成时明确写"这不是没有漏洞"。
+    ///
+    /// 两个落点各管一件事，顺序固定：
+    ///   1. 分析器自述的那句中文**原样**跟在 `漏洞核对：` 后面（界面上常驻的就是它，
+    ///      WS-CL 的契约是"CLI 必须带上分析器那句话"，不在这里另写一份口径）；
+    ///   2. 结构化账本另起一行 `漏洞核对状态：` / `版本核对状态：`，给 AI 与脚本读。
+    /// 分析器这一路什么都没产出（既没有说明也没有任何一条依赖）时**一行都不打** ——
+    /// 凭空造一句"没查"就是把 CLI 写成第二个真值来源。
     private static func networkCaveat(_ report: ProjectReport) -> [String] {
-        guard let note = report.dependencies?.networkLookupNote, !note.isEmpty else { return [] }
-        return ["漏洞核对：\(note)"]
+        guard let deps = report.dependencies else { return ["漏洞核对：无（依赖分析这一路没有产出）"] }
+        let ledger = DependencyEvidence.ledger(for: deps)
+        guard !deps.networkLookupNote.isEmpty || ledger.totalCount > 0 else { return [] }
+        var lines: [String] = []
+        if !deps.networkLookupNote.isEmpty { lines.append("漏洞核对：\(deps.networkLookupNote)") }
+        guard ledger.totalCount > 0 else { return lines }
+
+        var status = "漏洞核对状态：已核对 \(NumberFormat.grouped(ledger.vulnerabilityCheckedCount))"
+            + "/\(NumberFormat.grouped(ledger.totalCount))"
+        let tail = DependencyEvidence.tailPieces(ledger)
+        if !tail.isEmpty { status += "，未覆盖：\(tail.joined(separator: localizedCopy("、")))" }
+        let source = DependencyEvidence.sourcesPhrase(ledger)
+        if !source.isEmpty { status += "；数据源：\(source)" }
+        status += DependencyEvidence.mayClaimNoKnownVulnerabilities(ledger)
+            ? "（全量覆盖且零命中）"
+            : (ledger.vulnerabilityCheckedCount == ledger.totalCount
+                ? "（全量覆盖）" : " —— 这是「没查全」，不是「没有漏洞」")
+        lines.append(status)
+        lines.append("版本核对状态：已核对 \(NumberFormat.grouped(ledger.versionCheckedCount))"
+            + "/\(NumberFormat.grouped(ledger.totalCount))"
+            + "，未覆盖：\(DependencyEvidence.tailOfVersionStates(for: ledger))")
+        if ledger.lowerBoundQueryCount > 0 {
+            lines.append("其中 \(NumberFormat.grouped(ledger.lowerBoundQueryCount)) 条按**声明范围的下界**查询"
+                + "（实际安装版本没量到，结论只到「这一版有公告」，不到「你装的这版」）")
+        }
+        lines.append(contentsOf: DependencyScopeLines.lines(deps))
+        return lines
     }
 
     private static func codeScopeLines(_ scope: HealthSubScore?) -> [String] {

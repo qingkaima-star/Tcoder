@@ -127,11 +127,19 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 150 → 151（集成分支修复人把 `CodeScanCoverage` 整块搬出 `FileSystemCodeAnalyzer.swift`
     ///   以守 400 行闸门，新增 `FileSystemCodeAnalyzerLimits.swift` 一枚）。
     /// 151 → 152（RD-30/31 溯源块新增 `Models/ScanProvenance.swift`，四处在引用它）。
-    /// 152 → 153（R10 台账新增 `Models/AnalyzerLedger.swift`：CLI 的 `CLIScan.outcome` 与 GUI 的
-    ///   `AppState.scan` 收尾两个装配点各调一次 `AnalyzerLedger.records(from:)`，
-    ///   同文件里的 `AnalyzerLedger.sectionLabels` 又是五路路名的唯一一份
-    ///   （`CLIScan.sectionLabels` 改为转发它）—— 由总工按守卫实报填，不是算出来的）。
-    static let censusBaseline = 153
+    /// 152 → 164：依赖链一条流带来 12 枚新实现文件（枚数与引用证据逐条见台账卷二 §27，
+    ///   全部由守卫 `testEveryImplementationFileHasExternalCallEvidence` 实跑判过在用）。
+    /// 164 → 173（R5/R5b 覆盖率链整块拆出的九枚，全在 `Services/Coverage/`：
+    ///   `CoverageDisplayShape` / `CoverageLineLedger` / `CoverageMergeConfidence` / `CoverageMergeLedger` /
+    ///   `CoverageMergePlanner` / `CoverageReportDiscovery` / `CoverageReportIdentity` /
+    ///   `CoverageRunIdentity` / `CoverageSourceBinding`。
+    ///   引用证据是同一次守卫跑出的「零调用清单：空」（`testZeroCallListIsEmpty` 未红），
+    ///   九枚都是 `CoverageAnalyzer` 那条链为守 400 行闸门按类型整块搬出去的，不是空壳。）
+    /// 173 → 174（R10 台账一枚 `Models/AnalyzerLedger.swift`：CLI 与 GUI 两个装配点各调一次
+    ///   `AnalyzerLedger.records(from:)`，五路路名也只住这一份）。
+    /// ✅ 174 已由守卫在同一棵合流树上实跑核对过：打印「实现文件 174 个（普查基线 174）」，
+    ///   且零调用清单为空。拼接值不自证，跑过才算数（这条旋钮的历史就是"算的数"与"跑的数"分叉）。
+    static let censusBaseline = 174
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames

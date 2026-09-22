@@ -130,6 +130,22 @@ enum SystemReadings {
         return snapshot.networkOutBytesPerSecond
     }
 
+    /// 机身热压力（RD-34）。**两层缺席互不替代**，判据只在这里这一份：
+    /// - `nil` = 这一帧还没到（`SampleContext.snapshot == nil`）→ 上屏 `--`；
+    /// - 非 nil 且 `isMeasured == false` = 有帧但**没量到 / 量到的值不认识** → 上屏「未量到」。
+    /// 页面里再写一次 `snapshot?.thermalState ?? .nominal` 就是第二把尺子，而这把尺子会把
+    /// "没量到"量成"正常"——那正是 RD-34 的成因。
+    static func thermalState(_ ctx: SampleContext) -> ThermalState? { ctx.snapshot?.thermalState }
+
+    /// 热压力的上屏文案，**全仓唯一出口**（`PerformanceSystemTiles.statusStrip` 与单测读同一个函数）。
+    /// 写成静态纯函数，是为了让"量不到"这一态能被真喂进来到屏上那一串字，
+    /// 不必真把 App 起来等一次热压力读失败（本机造不出那种帧：不支持上报的机器恒回 nominal）。
+    /// `unknown` 的原字面就是「未量到」，所以这一句**永远给不出"正常"**，除非真的量到了 nominal。
+    static func thermalText(_ ctx: SampleContext) -> String {
+        guard let state = thermalState(ctx) else { return Live.missing }
+        return localizedCopy(state.rawValue)
+    }
+
     /// 内存口径声明。活动监视器只画一个百分比，用户会读成「还剩多少可用」——
     /// 这一行把口径写在数旁边（WS-M 验收点 3）。
     static let memoryCaliber = "口径 = 总量 −（空闲 + 推测 + 可清除），与活动监视器一致；这是「在用」，不是「剩余可用」。"

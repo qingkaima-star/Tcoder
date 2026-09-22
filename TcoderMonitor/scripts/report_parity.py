@@ -23,10 +23,22 @@ import subprocess
 import sys
 
 IGNORE_PREFIXES = ("project.",)
-# 逐条点名的"每次运行必然不同"字段。**只有这一条不是时间戳**：
-# `code.durationMs` 是这次扫描自己用了多少毫秒 —— 它是计时读数，不是判定，
-# 拿它当"两条路不一致"来报，等于把机器负载报成缺陷（本轮 load average 10）。
-TOLERATED_NAMES = {"durationMs"}
+# 逐条点名的"每次运行必然不同"字段。**每条必须写清为什么天然不同** ——
+# 不加理由的容忍项等于把对表尺子锯短（`ProvenanceParityToleranceTests` 机器拦这条）。
+# 键 = 叶子字段名，值 = 理由（理由里点出"谁来正向钉住它"）。
+TOLERATED_NAMES = {
+    # `code.durationMs` 是这次扫描自己用了多少毫秒 —— 它是计时读数，不是判定，
+    # 拿它当"两条路不一致"来报，等于把机器负载报成缺陷（本轮 load average 10）。
+    "durationMs": "本次扫描耗时，每次运行必然不同（读数而非判定）",
+    # R5c（2026-09-22）：溯源块落盘后 GUI↔CLI 必然不同的两格。
+    # `provenance.producedBy` 这一格**记的就是"哪个入口产的"**，两边相同反倒是对表假绿。
+    "producedBy": "字段语义即「哪个入口产的」：gui 与 cli 必然不同（写它的两处各有一条点名用例）",
+    # `provenance.toolVersion` = 构建配置 + 宿主 bundle。GUI 侧那份在测试里由 xctest 宿主装配
+    # （`Bundle.main` 是测试运行器），CLI 侧那份是 SwiftPM 直跑的二进制 —— bundle 段天然不同。
+    # ⚠️ 保留的边界：构建口径段（" · " 之前）**不许**不同，混 debug/release 是真缺陷，
+    #    但该断言只能起在装配处，本脚本不重复实现（避免第三把尺子）。
+    "toolVersion": "构建配置 + 宿主 bundle：两侧宿主不同是事实而非分叉（bundle 段之外由装配侧用例钉）",
+}
 
 
 def is_tolerated(path):

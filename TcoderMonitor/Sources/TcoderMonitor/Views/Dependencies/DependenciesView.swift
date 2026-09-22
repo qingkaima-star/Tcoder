@@ -39,6 +39,9 @@ struct DependenciesView: View {
                     GroupStack {
                         DependencyOverviewSection(deps: deps)
                         DependencySummaryGrid(deps: deps)
+                        // RD-13c：六档 scope 分开汇总。此前页面只有一对「运行时 / 开发」，
+                        // 测试与构建依赖被并进"运行时"，那句"开发依赖不随产物发布"就没有依据。
+                        DependencyScopeBreakdown(deps: deps)
                     }
                     ForEach(deps.ecosystems) { eco in
                         DependencyEcosystemSection(

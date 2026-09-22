@@ -80,6 +80,10 @@ final class CoverageAnalyzerTests: XCTestCase {
         XCTAssertEqual(metrics.overallLinePercent ?? 0, 70, accuracy: 0.01)
     }
 
+    /// RD-25 改判：这个夹具**正是**"带文件粒度的 lcov + 只有汇总桶的 istanbul 摘要"混在一起扫。
+    /// 旧期望 78% = (50+340)/(100+400) —— 两份报告的覆盖范围无从核对，相加得到的是伪精确数
+    /// （台账 RD-25 点名的形状）。现在的判据：**只按可核对的那份给数，另一份分开留档并点名**。
+    /// 断言里同时钉住"修前那个数"，防止有人把它当回归改回去。
     func testIstanbulSummaryAndMixedTools() async throws {
         try write("web/coverage/coverage-summary.json", """
         {"total":{
@@ -96,20 +100,54 @@ final class CoverageAnalyzerTests: XCTestCase {
         end_of_record
         """)
 
-        let metrics = try await CoverageAnalyzer().analyze(projectRoot: root, options: .default)
-        XCTAssertEqual(metrics.reports.count, 2)
-        // 390 covered of 500 lines across both tools.
-        XCTAssertEqual(metrics.overallLinePercent ?? 0, 78, accuracy: 0.01)
-        XCTAssertNotNil(metrics.overallBranchPercent)
+        let result = try await CoverageAnalyzer().analyzeWithLedger(projectRoot: root, options: .default)
+        let metrics = result.metrics
+        XCTAssertEqual(metrics.reports.count, 1, "只有带文件粒度、可核对的那份进总数")
+        XCTAssertEqual(metrics.overallLinePercent ?? 0, 50, accuracy: 0.01, "真值 = lcov 那份 50/100")
+        XCTAssertNil(metrics.overallBranchPercent, "汇总粒度那份的分支数不许再并进总分")
+        XCTAssertEqual(result.merge.dropped.first?.reason, .aggregateOnlyCannotCrossCheck)
+        XCTAssertTrue(result.merge.separateReadings.contains { $0.toolName == "istanbul / nyc" },
+                      "被拒合并的那份读数要留着可查，不许当成「没扫到」")
+        XCTAssertEqual(CoverageLegacyArithmetic.summed(from: [(50, 100), (340, 400)]), 78, accuracy: 0.01,
+                       "修前读数就是这句：两份直接累加 = 390/500 = 78%")
+        XCTAssertTrue(result.merge.statement.contains("总数未覆盖全部报告"), result.merge.statement)
     }
 
-    func testUnitAndIntegrationKindsAreSeparated() async throws {
+    /// 同一批源码、unit 与 integration 各报一个命中率、且**都没有逐行记录** ⇒
+    /// 两份说的是同一批行还是不同行，报告本身没写。相加(132/200=66%)与取一份都不是联合覆盖。
+    /// RD-25 的判据：按行能并就并（下面那条用例），不能并就**分开呈现、不给总数**。
+    func testUnitAndIntegrationWithoutLineRecordsProduceNoFakeUnion() async throws {
         try write("coverage/unit/lcov.info", "SF:a.ts\nLF:100\nLH:78\nend_of_record\n")
         try write("coverage/integration/lcov.info", "SF:a.ts\nLF:100\nLH:54\nend_of_record\n")
 
+        let result = try await CoverageAnalyzer().analyzeWithLedger(projectRoot: root, options: .default)
+        XCTAssertNil(result.metrics.overallLinePercent, "拿不出行集合就不许给联合覆盖率")
+        XCTAssertEqual(result.merge.basis, .nothingMergeable)
+        XCTAssertEqual(result.merge.conflictingFileCount, 1)
+        XCTAssertEqual(result.merge.separateReadings.count, 2, "两份读数都要留着（分开呈现的数据源）")
+        XCTAssertEqual(CoverageLegacyArithmetic.summed(from: [(78, 100), (54, 100)]), 66, accuracy: 0.01,
+                       "修前读数：两份直接累加 = 132/200 = 66%")
+    }
+
+    /// 同一个夹具换成**带 `DA:` 逐行记录**的形状 ⇒ 联合覆盖率算得出来，且必须给数。
+    /// unit 命中 1..78、integration 命中 25..100 ⇒ 并集 1..100 = **100/100**；
+    /// 相加得到的是 (78+76)/200 = 77%（旧读数）。
+    func testUnitAndIntegrationWithLineRecordsAreUnioned() async throws {
+        var unit = "SF:a.ts\n", integration = "SF:a.ts\n"
+        for line in 1...100 {
+            unit += "DA:\(line),\(line <= 78 ? 1 : 0)\n"
+            integration += "DA:\(line),\(line >= 25 ? 1 : 0)\n"
+        }
+        unit += "LF:100\nLH:78\nend_of_record\n"
+        integration += "LF:100\nLH:76\nend_of_record\n"
+        try write("coverage/unit/lcov.info", unit)
+        try write("coverage/integration/lcov.info", integration)
+
         let metrics = try await CoverageAnalyzer().analyze(projectRoot: root, options: .default)
-        XCTAssertEqual(metrics.unit?.linePercent ?? 0, 78, accuracy: 0.01)
-        XCTAssertEqual(metrics.integration?.linePercent ?? 0, 54, accuracy: 0.01)
+        let report = try XCTUnwrap(metrics.reports.first)
+        XCTAssertEqual(report.linesTotal, 100, "同一个文件的两份报告只算一次分母")
+        XCTAssertEqual(report.linesCovered, 100, "命中集合求并：1..78 ∪ 25..100 = 全部 100 行")
+        XCTAssertEqual(metrics.overallLinePercent ?? 0, 100, accuracy: 0.01)
     }
 
     func testMissingReportsYieldNoDataRatherThanZero() async throws {
@@ -141,7 +179,13 @@ final class CoverageAnalyzerTests: XCTestCase {
         XCTAssertFalse(metrics.hasData, "被挡住的那份报告不该被算成扫到了数据")
 
         let note = MissingDimensionReason.testingAbsence(coverage: metrics) ?? ""
-        XCTAssertTrue(note.contains("个目录没能读取"), "扫描面不完整必须一起上屏：\(note)")
+        // 判据没变（**扫描面不完整必须一起上屏**），只是那句话现在由 §6.1 一个形状生产：
+        // 口径从"另有 N 个目录没能读取"合并成"…N 个目录读不动（权限或已消失）"，
+        // 两类截断（深度 / 40 份上限 / 读不动）不再各造一套说法。
+        XCTAssertTrue(note.contains("读不动"), "扫描面不完整必须一起上屏（§6.1 那句现在真有读者）：\(note)")
+        XCTAssertEqual(metrics.unexaminedDirectories, ["locked"],
+                       "没看的目录要逐条给稳定坐标，一行摘要不算台账")
+        XCTAssertFalse(metrics.absenceClaimIsSound, "有目录没看 ⇒ \"该项目没有报告\"这句不成立")
         XCTAssertTrue(note.hasPrefix("该项目没有产出覆盖率报告"),
                       "前半句仍是那句结论，后半句才补上我们没看完：\(note)")
     }
@@ -178,12 +222,20 @@ final class CoverageAnalyzerTests: XCTestCase {
         </coverage>
         """)
 
-        let metrics = try await CoverageAnalyzer().analyze(projectRoot: root, options: .default)
-        XCTAssertEqual(metrics.reports.count, 2)
-        let tools = Set(metrics.reports.map(\.toolName))
-        XCTAssertEqual(tools, ["coverage.py", "clover"])
-        let clover = try XCTUnwrap(metrics.reports.first { $0.toolName == "clover" })
+        let result = try await CoverageAnalyzer().analyzeWithLedger(projectRoot: root, options: .default)
+        // RD-25：两份都只有汇总桶，彼此覆盖范围无从核对 ⇒ 解析照常、**总分不给**。
+        XCTAssertNil(result.metrics.overallLinePercent)
+        XCTAssertEqual(result.merge.basis, .nothingMergeable)
+        let readings = result.merge.separateReadings
+        XCTAssertEqual(Set(readings.map(\.toolName)), ["coverage.py", "clover"],
+                       "五格式解析能力不许因为「不给总数」而退化，读数要一份不落地留着")
+        let clover = try XCTUnwrap(readings.first { $0.toolName == "clover" })
         XCTAssertEqual(clover.linesCovered, 425)
         XCTAssertEqual(clover.linesTotal, 500)
+        let python = try XCTUnwrap(readings.first { $0.toolName == "coverage.py" })
+        XCTAssertEqual(python.linesCovered, 620)
+        XCTAssertEqual(python.linesTotal, 1000)
+        XCTAssertEqual(CoverageLegacyArithmetic.summed(from: [(620, 1000), (425, 500)]),
+                       1045.0 / 1500.0 * 100, accuracy: 0.01, "修前读数：两份汇总直接累加相除 = 69.67%")
     }
 }

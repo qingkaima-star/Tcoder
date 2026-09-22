@@ -42,32 +42,30 @@ struct DashboardView: View {
     }
 
     /// 代码规模这一段（实时读数已单独成 `DashboardLiveReadout`，见其注释的失效域理由）。
+    ///
+    /// **单列**。旧写法是 `LazyVGrid(pairColumns)` 摆两列，量出来两条病灶
+    /// （`7b4ec25` 那批 36 张页尾，`scripts/card_edges.swift` 逐带量的，不是看着像）：
+    /// ① 没有覆盖率可摆时 `coverageStrip` 整格不渲染，栅格**照样给它留槽位**
+    ///   ⇒「文件构成」右边空出 594px = **297pt 画布洞**（视口三成）；
+    /// ② 同一行两张卡**不共顶线**：「最近提交」顶在 1065px、「高频错误」顶在 1593px，差 264pt。
+    /// 而"两列并排"本身也不是免费的：两张卡的内容最小宽各 > 463pt，
+    /// `.adaptive(minimum: 420)` 只按容器宽算列数、不看内容 ⇒ 它是**把卡压到内容之下**
+    /// 才挤出两列的，那正是「溢出/挤压」这一类。收成单列同时了结三件事，
+    /// 并且与其余八页早已收敛的形状一致（健康建议卡、日志读数格、进程分组…各自注释里都写着理由）。
     private var scaleSegment: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.group) {
             codeScaleGroup
-            LazyVGrid(columns: pairColumns, alignment: .leading,
-                      spacing: Theme.Spacing.group) {
-                fileCompositionGroup
-                coverageStrip
-            }
+            fileCompositionGroup
+            coverageStrip
         }
     }
 
-    /// 底部两块清单（最近提交 / 高频错误）。窄窗口自动折成单列。
+    /// 底部两块清单（最近提交 / 高频错误）。同上，单列。
     private var listSegment: some View {
-        LazyVGrid(columns: pairColumns, alignment: .leading,
-                  spacing: Theme.Spacing.group) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.group) {
             recentCommitsGroup
             topErrorsCard
         }
-    }
-
-    /// 栅格列宽全部走基座锚点，不再写死「一行四列」：窗口收窄时自动折行（WS-H §3.2）。
-    /// 列间距从 `gutter`(12) 抬到 `pageMargin`(24)：无界面里两列之间没有盒体边界，
-    /// 12pt 会被读成「两列挤成一坨」。
-    private var pairColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: Theme.Layout.twoColumnMinWidth),
-                  spacing: Theme.Spacing.pageMargin)]
     }
 
     // MARK: 今日错误的着色（语义色只留给真有危险的那一态）
