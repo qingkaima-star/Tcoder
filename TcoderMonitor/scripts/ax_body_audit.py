@@ -49,8 +49,17 @@ def read_text_rows(path):
 
 
 def code_sites(fragment, sources):
-    """把一句屏上文本回指到源码落点：拿最长的一段连续汉字去 grep 静态字面量。"""
-    runs = [r for r in re.findall(r"[一-鿿]{6,}", fragment) if not r.startswith("Tcoder")]
+    """把一句屏上文本回指到源码落点：拿一段连续汉字去 grep 静态字面量。
+
+    门槛是 **4 个字**而不是 6 个：维度名与列头（"协作分布"、"重复代码率"、"磁盘"）
+    恰恰是 2–5 字的短标签，而它们正是 A 类"有键没查"的主体。
+    第一版拿 6 字门槛去 grep，于是这 12 句全被打成"静态里 grep 不到：运行时拼的" ——
+    那是**仪器的分辨率不够**，不是句子的性质。短标签命中多处时按文件序取前几处，
+    并在表里注明"多处"，不含糊成一处。
+    """
+    runs = [r for r in re.findall(r"[一-鿿]{4,}", fragment) if not r.startswith("Tcoder")]
+    if not runs:
+        runs = [fragment.strip()] if HAN.search(fragment) else []
     if not runs:
         return []
     needle = max(runs, key=len)
@@ -60,7 +69,12 @@ def code_sites(fragment, sources):
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        if needle in text:
+        # 注释里出现的中文是**讲给维护者听的话**，不是屏上文案。
+        # 第一版整文件 grep，于是 `App/TcoderEntry.swift`、`App/TcoderMonitorApp.swift`
+        # 各被算成"有 1 句上屏" —— 那两句都在注释里。同族老坑："守卫扫到讲代码的话"。
+        body = "\n".join(l for l in text.split("\n")
+                         if not l.strip().startswith(("//", "///", "/*", "*")))
+        if needle in body:
             hits.append(str(path.relative_to(repo_root())))
     return hits
 
@@ -95,7 +109,8 @@ def main(argv):
     for label, group in (("A", a), ("B", b)):
         for k in sorted(group, key=lambda x: -counts[x])[:None if show_all else 12]:
             sites = code_sites(k, sources)
-            tag = sites[0] if sites else "（静态里 grep 不到：运行时拼的）"
+            extra = f"（另有 {len(sites) - 1} 处）" if len(sites) > 1 else ""
+            tag = f"{sites[0]} {extra}" if sites else "（静态里 grep 不到：运行时拼的）"
             for s in sites[:1]:
                 by_file[s] += 1
             print(f"   {label} {counts[k]:3d}× {k[:60]}\n        ↳ {tag}")
@@ -103,6 +118,11 @@ def main(argv):
         print("-- 按落点文件汇总（A/B 两类，只统计 grep 得到落点的）")
         for f, n in sorted(by_file.items(), key=lambda x: -x[1]):
             print(f"   {n:3d} 句  {f}")
+        # 这一条要覆盖**全部** A/B，不能被上面默认 12 条的切片带着走 ——
+        # 只数切片会得到一个"看着像总数、其实是前 12 条里没落点的"假数。
+        unmatched = sum(1 for k in a + b if not code_sites(k, sources))
+        print(f"   另有 {unmatched} 句在源码里 grep 不到整段静态字面量"
+              f" —— 它们是**运行时拼出来的**（内插 + 常量拼接），只能顺着生产者函数找")
     return 0
 
 

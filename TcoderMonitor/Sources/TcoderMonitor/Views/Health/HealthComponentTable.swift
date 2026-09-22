@@ -53,7 +53,9 @@ struct HealthComponentTable: View {
         let role = Theme.Semantic.role(forScore: row.score)
         return HStack(alignment: .top, spacing: DataRowMetrics.cellGap) {
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                Text(row.name).font(Theme.Typo.label.font).lineLimit(1)
+                // 维度名住在契约里（`HealthScore` 的中文 `name`），`Text(String)` 不查表，
+                // 所以英文态这一列整片是中文 —— 键其实早就登记好了（协作分布 = Collaboration Spread…）。
+                Text(localizedCopy(row.name)).font(Theme.Typo.label.font).lineLimit(1)
                 RiskBadge(risk: row.component.risk, showIcon: false)
             }
             .tableCell(DataColumns.column(DataColumns.healthComponents, 0))
