@@ -110,14 +110,22 @@ extension PerformanceDisplayTests {
     /// 档位本身按"窗口 ~135 秒"标定，但候选档之间是 1→2→5→15 的跳变：
     /// 26 秒的窗口会选到 15 秒（比半个窗口还大），左半边就一根刻度都没有
     /// —— 交付头实拍「总览」曲线量到标签中心在 47% 与 92%，正是这个形状。
-    func testShortWindowsStillGetAtLeastTwoTicks() {
-        XCTAssertEqual(ChartScale.boundedSecondsStride(windowSeconds: 26), 13, "15 秒的档必须被下界压回 13")
+    func testShortWindowsStillGetAtLeastFourTicks() {
+        XCTAssertEqual(ChartScale.boundedSecondsStride(windowSeconds: 26), 6, "15 秒的档必须被下界压回 6")
         XCTAssertEqual(ChartScale.boundedSecondsStride(windowSeconds: 135), 30, "长窗口不受下界影响")
         XCTAssertEqual(ChartScale.boundedSecondsStride(windowSeconds: 0), 1, "退化窗口也要给得出步长")
+        // 复拍 `53f9b1c` 那一档：27 秒跨度按旧的"两格"下界算出 13 秒 ⇒ 三枚刻度首尾各掉一枚，
+        // 屏上只剩「−13s」。按四格是 6 秒 ⇒ 五枚，掉两枚还剩三枚。
+        XCTAssertEqual(ChartScale.boundedSecondsStride(windowSeconds: 27), 6,
+                       "27 秒的窗口必须落得下四格，否则域两端掉完之后轴上只剩一枚标签")
         for span in 2...600 {
             let stride = ChartScale.boundedSecondsStride(windowSeconds: Double(span))
-            XCTAssertGreaterThanOrEqual(Double(span) / Double(stride), 2.0,
-                                        "窗口 \(span) 秒 / 步长 \(stride) 秒 ⇒ 落不下两格")
+            XCTAssertGreaterThanOrEqual(stride, 1, "步长必须 ≥1 秒")
+            // 已经细到 1 秒的短窗口不再强求四格（4 秒以下的窗口本来就装不下四个 1 秒格）。
+            if stride > 1 {
+                XCTAssertGreaterThanOrEqual(Double(span) / Double(stride), 4.0,
+                                            "窗口 \(span) 秒 / 步长 \(stride) 秒 ⇒ 落不下四格")
+            }
         }
     }
 
