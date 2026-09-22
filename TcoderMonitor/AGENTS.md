@@ -624,3 +624,32 @@ dist/Tcoder.app/Contents/MacOS/TcoderMonitor doctor [<path>]
    （本轮第一轮复核就报了三个不存在的名字），引用前先核。
 6. 每条修复要交四件：复现夹具 + 独立真值、正例/反例/未知态/失败态、CLI 与 GUI 对表、
    新守卫 sabotage 一次证明有牙。缺件按未完成处理。
+
+### 8.1 冻结区窄口径豁免（2026-09-22 07:44 由总工登记，一条链路一个负责人 ⇒ 必须放行）
+
+| 流 | 放行范围 | 为什么必须在冻结区里 | 判据来源 |
+|---|---|---|---|
+| **R3** | `Sources/TcoderMonitor/Models/DependencyReport.swift` 里的 **`DependencyVersion` 一族**（`normalize` / `compare` / `isOlder`）+ 该文件新增 **Optional** 字段 | 版本范围判 0 的根因本身就在 `DependencyVersion.normalize`（首字符即截断符 ⇒ `^1.2.3`→`[0]`），而用户 §十一 明令"依赖模型 → 查询 → 回填 → 行状态 → 总览 → 评分"这条链**不许拆给两个人各修一段**。把根因留在总工手里、消费端交给 R3，会得到两套版本口径长期并存 | 台账 RD-10、§7.2 |
+| **R3** | 允许**改**三条把错误行为当契约的旧测试：`DependencySnapshotTests.testVersionIsOlderEdgeCases`、`ManifestLabDependencyTests`（默认期望按 HEAD 实测、`TCODER_F_STRICT_CONTRACT` 才是设计真值）、`HonestyP1SnapshotDateTests`（钉"补句不改 `classify` 判据"） | 用户原话"修正错误测试，而不是继续维护错误兼容" | RD-10 / RD-13 |
+
+**豁免的边界**：只许动上面列出的类型与那三条测试；`Models/**` 其余成员、`App/**`、`Design/**`、
+`Package.swift` 仍然冻结。新增字段一律 Optional 且在交回汇报里逐条写"字段 / 谁写谁读 / 为什么不能放别处"，
+由总工补进 §3 的 additive 登记表 —— **没登记的冻结区改动视为越界**。
+
+**预算提醒（别撞闸门）**：`SourcesSizeAuditTests` 400 行口径下 Sources 侧超限名额为 **0**；
+`Views/DashboardView.swift` 余 2 行、`Services/Dependencies/OsvClient.swift` 余 6 行、
+`Services/Code/CodeLineNormalization.swift` 余 13 行 ⇒ 新增实现**整块另起新文件**。
+
+### 8.2 台账只由总工写（2026-09-22 09:12 起，因连续两次合并冲突而改）
+
+`docs/检测正确性整改清单.md` 是**一条共享时间线**：多个流各自往里追加小节，必然在合入时撞车
+（今天 `ws/r1-java` 一连两次因为它冲突，每次都要人工把两侧拼回去）。
+⇒ 从今天起：
+
+1. **负责人不要改这份文件**。你的证据、状态变更请求、契约缺口，一律写进**你自己那一份 Obsidian 笔记**
+   （`104` / `106` / `108` / `110` / `112` …），标题里带上你要改的条目号（例：`RD-06 已修，证据如下`）。
+2. 我在合入你那笔之前，把证据**由我录进台账**（含你的头 hash 与真实数字），条目状态列也由我翻。
+3. 你要是在台账里已经写了自己的小节（本轮的 R1/R2 就写了），**合并时按"取 main 全文 + 你那节原样接回"解**
+   —— 内容一字不删，只让它落在我的节之后；下一轮起就不要再写了。
+4. 唯一允许负责人直接改的代码性文档是**自己名下**的那份；`README.md` / `docs/使用说明.md` 的符号锚点
+   仍受 `DocReferenceRatchetTests` 管（只写符号、不写行号）。

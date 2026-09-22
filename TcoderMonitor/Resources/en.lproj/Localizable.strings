@@ -267,6 +267,8 @@
 "B 级线" = "Grade B Line";
 "优点" = "Strengths";
 "历史点不足 · 少于两个点时这里不画线。" = "Not enough history points · with fewer than two points no line is drawn here.";
+"只有 %1$@ 个历史点" = "Only %1$@ history point";
+"共 %1$@ 个历史点 · 全部来自本机落盘的评分记录" = "%1$@ history points in total · all from score records stored on this machine";
 "已完成计算，未识别到突出项。" = "Computation finished; no standout items identified.";
 "已完成计算，未识别到风险项。" = "Computation finished; no risk items identified.";
 "建议" = "Suggestions";
