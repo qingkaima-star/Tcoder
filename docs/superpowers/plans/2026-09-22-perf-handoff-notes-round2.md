@@ -371,3 +371,37 @@ scripts/perf_measure_rev.sh clean 465f5a6
   混档一律不判。第 39 项把这七种形状各钉一次。
 - 排程器侧（`measure17/18`）**当时正在跑，没改**；下一棒起在数完 `可用 N/3` 之后
   必须再跑一次 `perf_trio_agreement.py`，`rc≠0` 就不许写"3/3 达标"。
+
+## §Y 交互档此前**没控制页**——§Q 那 14 处里有 11 处不在我量的那一页上（2026-09-23 02:50）
+
+`launch_measured_instance` 起实例时只传 `-ApplePersistenceIgnoreState YES`，
+所以 `@AppStorage("selectedDetailSection")` 取默认值 `.overview` ——
+**今天与昨天所有交互档读数量的都是「总览」页**，而 `meta.json` 里没有 `section` 字段，
+报表也没印这一维（我直到刚才都没有把它当成一个变量）。
+
+把 §Q 移交的 14 处按页摊开：
+
+| 在总览页会被渲染 | 不在这页上（我量不到） |
+|---|---|
+| `SidebarRows.swift:89` 动态色（侧栏常驻） | `CodeMetricsView.swift:56` 排序 |
+| `ProjectSidebar.swift:231` 动态色（侧栏常驻） | `DependenciesView.swift:317`、`DependencyVerdictRows` 相关排序 |
+| `ChartChrome.swift:293` formatter（被 `DashboardHero` 引用） | `ContributorRows.swift:11/62`、`ContributorsView.swift:22` 排序（Git 洞察页） |
+| | `LogsFileTables.swift:74/122`、`LogsMetricGrid.swift:110`、`LogsTrendCard.swift:39` 排序 + `LogsView.swift:181/214` 同步 I/O（日志页） |
+
+⇒ **两个方向都会错**：拿"总览页 render p50 4.10 ms"去验收"日志页的排序"是盲尺（还完了也不动）；
+反过来若那条曲线动了，也可能与那 11 处无关。所以对 §Q 的验收口径改成：
+
+1. **页内靶子**：`MEASURE_SECTION=<页名>` 起实例（补丁已备好、等链让位再应用：
+   `.scratch/per-page-section.patch`，同时把 `meta.section` 落盘、报表印「测量页面」）；
+2. 每处还完之后，验收看的是**它所在那一页**滚动期的 render 相位 p50（现量/上限印出来），
+   不再看总览页的那条曲线；
+3. 台账四格照旧（`fullSort` / `syncFileIO` / `dynamicColorConstruction` / `directFormatters` 的现量掉了多少），
+   但**"这处在哪一页"要跟着报**，谁还完一处就在回执里带上该页的页内读数。
+
+总览页的读数不作废——它是"常驻外壳（侧栏 + hero）"这一档的证据，只是**不能拿来判那 11 处**。
+
+§Y 的落法也留一条教训：往 spec §6.1 那张表**插行**时我把下一行的行首吃进了上一行
+（`0d0904f` 带着这张 7~8 格的连体表落库），当时的守卫只查"表中间夹裸续行"，查不出这种形状。
+已在 `ddd53df` 拆开、补齐表头缺的那一列，并把「每行列数必须等于表头」加进 selfcheck 第 30 项
+（反例验过：造一张表头 2 格、某行 3 格的夹具，当场点行号）。⇒ 插表行的正确形状是
+**整行含首尾竖线一起写**，别拿"上一行的结尾"当锚点做拼接。
