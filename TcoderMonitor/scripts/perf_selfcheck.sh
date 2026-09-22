@@ -5,7 +5,8 @@
 # 宿主的 $REV / $TRACE_REPORT / $PULSE_REPORT / $QUIESCE_SRC 与 quiescence_probe /
 # quietest_seconds / human_input_in_window / die 这些同进程的量。
 #
-# 现在只剩 `cmd_selfcheck` 一个函数：27 项反例按主题住在同目录三块文件里
+# 本文件现在只有 `cmd_selfcheck` + 三段 `items_*`（29 项 `item` 调用按主题分三段）；
+# 29 项反例的**判据本体**按主题住在同目录三块文件里
 # （`_ruler_shapes` 形状与三态话术 / `_gates` 前置与闸门 / `_eligibility` 样本资格），
 # 由下面三行 source 进来。**为什么要拆**：`SelfScanDogfoodTests` 的 ≤800 行棘轮
 # **分母含 `.sh`** 且 ceiling=0（`SourceLanguageCatalog` 认 Shell），2026-09-21 本文件
@@ -47,6 +48,30 @@ cmd_selfcheck() {
       || fail "项 $1 一声不吭（既没 ok 也没 fail）——被跳过的判据比红的更危险"
   }
 
+  items_ruler_shapes "$out"
+  items_gates "$out"
+  items_sample_eligibility "$out"
+
+  echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
+  [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
+}
+
+# -----------------------------------------------------------------------------
+# 29 项 `item` 调用按主题分成三段。
+#
+# **为什么还要再拆一次**（2026-09-22）：这段以前是一串直白写在 `cmd_selfcheck` 里的
+# `item …`，加到第 30 项之后函数体 53 行，被**尺子自己的**「函数 ≤50 行 / CC<16」棘轮判红。
+# 而它此前一直没红，原因是量它的引擎变好了：main 在这批合并里动了
+# `Services/Code/SourceFileClassifier.swift` 与 `FileSystemCodeAnalyzer.swift`，
+# 于是 `.sh` 里这个函数的行数**第一次被数对**。
+# ⇒ 这不是"守卫突然苛刻"，是**这把尺子以前瞎**。（正解仍是拆开它，不是抬 50 这条线。）
+#
+# 拆法刻意**保持调用顺序逐字不变**：这样"拆前后行为一致"可以用 selfcheck 自己的
+# 输出逐字 diff 来证，而不是靠"应该没影响"。三段各自只用 `item` / `$out`，
+# 而 `item` 是编排器里的嵌套函数、`out`/`checked`/`fails` 是它的 `local`
+# —— bash 是**动态作用域**，被调函数照样看得见（这一条是本文件头就验过的老事实）。
+# -----------------------------------------------------------------------------
+items_ruler_shapes() {   # items_ruler_shapes <outdir> —— 1..13 形状、三态话术、分级与前台
   item selfcheck_ruler_files "$out"      # 1) 三层文件齐全 / 编译得过 / 没撞 ≤800 行棘轮
   item selfcheck_switch_fixture "$out"   # 2) switch 档逐页表的三态（读数 / 缺 meta / 缺 life-cycle）
   item selfcheck_empty_table "$out"      # 3) 空表要报"未采到"，而不是报"n=0 达标"
@@ -59,12 +84,18 @@ cmd_selfcheck() {
   item selfcheck_weight_ruler "$out"     # 11) 收益分级：现读、缺料要喊、名单对不上要报⚠
   item selfcheck_front_name "$out"       # 12) 前台名判定：显示名/进程名都认，别家一律拒
   item selfcheck_render_regime "$out"    # 13) render 比率只在同一种出帧机制下互比
+}
+
+items_gates() {          # items_gates <outdir> —— 14..19 前置与开录闸门
   item selfcheck_binary_provenance "$out" # 14) 被量的二进制必须就是这份代码（rev 对齐）
   item selfcheck_baseline_text_is_derived "$out"  # 15) 对照列文字不许是字典的第二份手抄
   item selfcheck_heavy_jobs_probe "$out"  # 16) 并发重活：三个名字都要认，输出必须是 pid 清单
   item selfcheck_gate_matrix "$out"      # 17) 七维闸门合成矩阵：能放行，也会逐维拒
   item selfcheck_page_list_shape "$out"    # 18) 九页页名逐条完整（带空格的那条不许被拆）
   item selfcheck_launch_ready "$out"       # 19) 首帧要剔除运行期尾巴，不许拿求和冒充
+}
+
+items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 样本资格与留痕
   item selfcheck_probe_sentinel "$out"     # 20) 探针取不到的哨兵不许骗过"有人在动"那条判定
   item selfcheck_period_eligibility "$out" # 21) 档位声明与收尾复核互相矛盾的样本不许拿到 T1 资格
   item selfcheck_probe_self_sufficient "$out" # 22) 探针必须能被裸 `set -u` 消费者调用（不靠 harness）
@@ -76,9 +107,6 @@ cmd_selfcheck() {
   item selfcheck_input_rate_qualification "$out"  # 28) meta 里的输入节奏必须有读者
   item selfcheck_launcher_hygiene "$out"       # 29) 起实例的脚本必须有 trap、不许按 bundle id 广播
   item selfcheck_md_tables_unbroken "$out"     # 30) markdown 表格不许有夹在行中间的裸续行
-
-  echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
-  [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：这三行必须在 cmd_selfcheck 之前，
