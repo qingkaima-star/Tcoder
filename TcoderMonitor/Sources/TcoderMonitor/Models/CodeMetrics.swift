@@ -81,9 +81,18 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     // 后果有两层：① 消费方要"榜外还有几块"只能去解析句子（等于造第二把尺子）；
     // ② 界面页尾那句"明细榜上限 20 块"是**数**，却来自一条按句式认领的字符串
     // （`CodeBoardTruth.outsideBoardNote`），改文案不改认领标记就会静默失去披露。
-    // ⚠️ **故意不给"重复块总数"**：`rankedBlocks` 在撞 id 时还会削掉若干块而无处计数
-    // （R6b 交回时点名），所以"榜内 + 榜外 == 总数"这个等式天然不平，
+    // ⚠️ **当年故意不给"重复块总数"**：`rankedBlocks` 在撞 id 时还会削掉若干块而无处计数
+    // （R6b 交回时点名），所以"榜内 + 榜外 == 引擎见过的原始命中数"这个等式天然不平，
     // 造一枚看似精确的总数就是把不平藏起来。
+    // ↪ **2026-09-23 由总工改判**（台账卷三 §49，施工 R18）：同一枚加法其实等于另一个
+    //   **定义良好**的量 —— 先去重、再截断之后的"去重后重复块总数"（看 `rankedBlocks` 的次序）。
+    //   所以藏起来的不是数，是**没说出口的口径**。现在给这枚数（本文件末尾的
+    //   `reportedDuplicatedBlockTotalCount`），但口径必须跟着数一起说：
+    //   任何"共 N 处重复块"的句子必须带「去重后」或「明细已全部列出」，
+    //   且这枚加法只许有一个家 —— 两条都由 `DuplicateBoardAccountingTests`
+    //   的 `testTheSumHasExactlyOneHomeAndEveryTotalNamesItsCaliber` 钉住（含元测试）。
+    //   仍未解决的那格是 `blocksDroppedByIdCollision`（撞 id 被合并掉几处，`Services/Code/**` 里
+    //   目前没有这个读数）⇒ 在它落地前，"引擎见过多少处原始命中"这句话**依然不许说**。
     /// 明细榜的封顶长度（引擎那份 `maxBlocks` 的直传，不是界面自己抄的 20）。
     /// `nil` = 本次没跑到重复分析（旧报告与"依赖/日志缺席"同一种处理）。
     var duplicatedBlockLimit: Int? = nil
