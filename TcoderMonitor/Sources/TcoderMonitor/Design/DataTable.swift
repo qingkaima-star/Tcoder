@@ -42,13 +42,25 @@ enum DataGridColumnAlignment: Equatable {
 struct DataGridColumn: Equatable {
     let title: String
     let width: CGFloat?
+    /// 英文态的列宽。**默认 nil = 沿用中文宽度**，只有量出来装不下的列才写。
+    ///
+    /// 为什么要有这一档：本文件的定宽规矩是"按该列最宽**可信读数**实测"，
+    /// 而中文与英文的最宽读数不是同一个串 ——
+    /// 「维度」126pt 装得下「注释与可维护性」，装不下 "Comments and Maintainability"（实测 158pt）。
+    /// 出处：`scripts/ax_truncation_sweep.sh` 在英文态九页扫描（`918e23c`）。
+    let widthEnglish: CGFloat?
     let alignment: DataGridColumnAlignment
     let help: String?
 
+    /// 当前语言下真正生效的宽度。单元格只许读这一条，不许各自挑 `width`。
+    var resolvedWidth: CGFloat? { Theme.Layout.isChineseUI ? width : (widthEnglish ?? width) }
+
     init(_ title: String, _ width: CGFloat? = nil,
-         _ alignment: DataGridColumnAlignment? = nil, help: String? = nil) {
+         _ alignment: DataGridColumnAlignment? = nil,
+         help: String? = nil, widthEnglish: CGFloat? = nil) {
         self.title = title
         self.width = width
+        self.widthEnglish = widthEnglish
         // **弹性列（无定宽）= 名称列 = 一律左对齐**，这个规则收在构造点。
         // 原来默认对齐是尾对齐（数字列占多数），名称列漏写 `.leading` 就会把表头拉到
         // 列右边 —— 代码规模页「来源」、贡献者页「来源」、Git 洞察页「目录」三张表
@@ -152,7 +164,7 @@ enum DataColumns {
     static let healthScoreNumber: CGFloat = 30
     static let healthScoreColumn: CGFloat = healthScoreGauge + Theme.Spacing.xxs + healthScoreNumber
     static let healthComponents: [DataGridColumn] = [
-        DataGridColumn("维度", 126, .leading),
+        DataGridColumn("维度", 126, .leading, widthEnglish: 160),
         DataGridColumn("得分", healthScoreColumn,
                        help: "该维度 0~100 分，条形按同一比例"),
         DataGridColumn("权重", 50, help: HealthBreakdown.weightColumnHelp),
@@ -184,7 +196,7 @@ extension View {
     /// 读数器：`scripts/ax_truncation_sweep.sh`，判据见 `DataTableHeader` 的守卫。
     @ViewBuilder
     func tableHeaderCell(_ column: DataGridColumn) -> some View {
-        if let width = column.width {
+        if let width = column.resolvedWidth {
             frame(width: width, alignment: column.alignment.frameAlignment)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -196,7 +208,7 @@ extension View {
     /// 把视图钉到某一列的布局上。表头与数据行都走这里，对齐不可能再各写各的。
     @ViewBuilder
     func tableCell(_ column: DataGridColumn) -> some View {
-        if let width = column.width {
+        if let width = column.resolvedWidth {
             frame(width: width, alignment: column.alignment.frameAlignment)
                 // **定宽格不许折行**，这条收在这里而不是逐格写 `lineLimit`：
                 // 一个数字在 56pt 的格里换成两行，就把整行抬高、五列基线全断
