@@ -602,3 +602,48 @@ sed -n '1,200p' .scratch/tcoder-perf-renderpath-debt.txt        # 逐条带 文�
 3. 这 14 处里 `DependenciesView`（n 可到上千）与 `ContributorRows`、`CodeMetricsView`
    是**滚动/切页期**成本 ⇒ 影响 **T1**，不影响心跳期 T2；
    别和 §H 那 16 处粗读点混成一句"清完渲染路径"——两批的验收窗口不是同一个。
+
+
+## §Q（2026-09-22 20:09）§P 那 14 处**正式移交 UI 轮**：验收口径是台账四格，不是"门禁全绿"
+
+性能轮不动手写 `Views/**`（用户 09-20 21:15 裁定，仍然有效），所以这批**只能派**。
+此前一直挂在我这边没派出去，是我欠的账；这一节把它变成可执行移交。
+
+**① 唯一事实来源是台账，不是本文件**
+```bash
+./scripts/locked_build.sh test --filter PerfHitchGuardTests
+sed -n '1,200p' .scratch/tcoder-perf-renderpath-debt.txt
+```
+行号会漂，漂是静默的：本文件 §P 表里写 `ChartChrome.swift:268`，19:50 那一份台账已经是 `:293`。
+⇒ 派活前重跑一次并**从台账里抄 `文件:行 + 原文`**，别抄本表。
+
+**② 冲突面：19:58 实测零重叠**（11 个文件在其他任何一条流的树里都不 dirty）⇒ 不必排队，可整批派。
+这条是**点测量**，动手前在**仓库根**重核（在别的目录跑那个 glob 会空匹配，zsh 还会直接报错退出）：
+```bash
+for t in .worktrees/*/; do git -C "$t" status --porcelain \
+  | grep -oE '(ChartChrome|ProjectSidebar|SidebarRows|CodeMetricsView|DependenciesView|ContributorRows|ContributorsView|LogsFileTables|LogsMetricGrid|LogsTrendCard|LogsView)\.swift' \
+  | sort -u | sed "s|^|$(basename $t) · |"; done
+```
+
+**③ 建议批次（按文件互不重叠，一批一个负责人，别跨批共享文件）**
+- **A · Logs 系（6 处 / 4 文件）**：`LogsFileTables`×2 排序、`LogsMetricGrid` 排序、`LogsTrendCard` 排序、
+  `LogsView`×2 同步 I/O（`attachedItems` → `fileSize(of:)` 两跳进 body，所以要连模型一起改）。
+- **B · Git/Code/依赖（5 处 / 5 文件）**：`ContributorRows`×2、`ContributorsView`、`CodeMetricsView`、`DependenciesView`。
+  这批是**滚动/切页期**成本 ⇒ 直接影响 T1，是三批里收益最大的。
+- **C · 侧边栏（2 处现造动态色）**：`ProjectSidebar:231`、`SidebarRows:89` ⇒ 换成 `Theme` 里已有的令牌 `let`。
+- **D · 一个 formatter**：`ChartChrome` 的 `DateFormatter()`。提 `static let` 前先确认只在主线程用，
+  否则改无状态路径——**不要为了还债引入数据竞争**。
+
+**④ 四条硬约定**（都是我这边踩过或量过的，不是仪式）
+1. 不许抬上限、不许加豁免、也不许把代码挪成"守卫扫不到但仍在渲染路径上"的形状——
+   那是躲尺子，债务一分没还。判据只有一个：**每还一处，那一格 `现量` 掉一格**。
+2. 排序债的正解在模型/服务层（publish 之前排好、页面只读）。反面教训见 §N：
+   在 `body` 里"再算一份缓存"会把分配挪进渲染路径，现量降了而实际更慢。
+3. 视觉改动与性能改动**分开提交、各过各的门禁**；牵动文案或键就要过 i18n 棘轮。
+4. 回执请写成「四格现量从 9/9、2/2、2/2、1/1 掉到 X/X…」并附台账那一行，
+   **不要写"全绿"**——全绿只说明门禁没拦住，不说明债少了。
+
+**⑤ 还完之后要复测的是 T1，不是 T2**：心跳期那 1.5 s 一次的主线程占用与这批排序无关；
+这批全部发生在滚动/切页期。今晚 `MEASURE_LAUNCH=1` 已经打通，一个窗口能同时拿到
+hitch 计数与 `p95` 交叉核对（`perf_framepulse.py --sample-dir <目录>` 会直接印合判），
+所以**每还一批复测一趟 20 秒交互档**就够了，不必重跑全套。
