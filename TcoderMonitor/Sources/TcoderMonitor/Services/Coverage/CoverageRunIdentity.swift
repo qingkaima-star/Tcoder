@@ -143,53 +143,57 @@ enum CoverageRunIdentity {
     /// 核不起来的成员一律 `nil`（未知 ⇒ 不参与去重）。
     /// 定序：先按路径排，保证**与输入顺序无关**（本仓对复现性的要求）。
     ///
+    /// ⚠️ **实现形状的血泪账**（接手第一跑就红的那条用例钉着它）：早期版本按**输入下标**
+    /// 遍历、锚点分支里无条件写 `runKey = nil`，于是"谁先被处理"决定了锚点保不保得住
+    /// 成员回灌给它的键 —— 同一批候选换顺序喂进去会分出两个结果
+    /// （`[lcov, summary]` ⇒ 两份都有键；`[summary, lcov]` ⇒ summary 先被回灌、
+    /// 随后自己走到锚点分支又被抹成 nil）。**改成按目录分组整体结算**：
+    /// 一个目录内先定出锚点（该目录里路径最小那份），成员逐个与锚点互证，
+    /// 锚点自己的键与证据档由**第一个互证成功的成员**（按路径序）决定，
+    /// 全程只读 `report.path` 与目录坐标 ⇒ 与输入顺序无关。
+    ///
     /// 边界（保守方向写死）：**不跨目录合并运行归属**。同一次运行往两个目录各写一份
     /// （pytest 根目录 `coverage.xml` + 插件写的 `sub/lcov.info`）在本判据下认不出来，
     /// 后果是"分开呈现、不给总数"，不是"双计" —— 认错来源的代价比不认更大。
     static func assignRunKeys(to candidates: [CoverageCandidate]) -> [CoverageCandidate] {
         let facts = candidates.map { fact(of: $0) }
-        // 每个目录的锚点 = 该目录里路径最小的那份。
-        var anchors: [String: Int] = [:]
-        for index in (0..<candidates.count).sorted(by: {
-            candidates[$0].report.path < candidates[$1].report.path
-        }) {
+        // 按目录分组：组成员是**下标**，锚点 = 该目录里路径最小那份（与输入顺序无关）。
+        var groups: [String: [Int]] = [:]
+        for index in candidates.indices {
             guard let directory = candidates[index].identity.directoryKey else { continue }
-            if anchors[directory] == nil { anchors[directory] = index }
+            groups[directory, default: []].append(index)
         }
+
         var outcome = candidates
-        for index in 0..<candidates.count {
-            guard let directory = candidates[index].identity.directoryKey,
-                  let anchor = anchors[directory] else {
-                outcome[index].identity.runKey = nil          // 在被扫目录之外 ⇒ 未知
-                outcome[index].identity.runEvidence = .none
-                continue
-            }
-            if anchor == index {
-                // 锚点只在自己正文写着运行时刻时才认得出（其余证据都是**两两之间**的，
-                // 由下面的成员把键回灌给锚点）。
-                if let stamp = facts[index].runStamp {
-                    outcome[index].identity.runKey = "dir=\(directory)"
-                    outcome[index].identity.runEvidence = .contentStamp
-                } else {
-                    outcome[index].identity.runKey = nil
-                    outcome[index].identity.runEvidence = .none
+        for (directory, members) in groups {
+            let key = "dir=\(directory)"
+            let ordered = members.sorted { candidates[$0].report.path < candidates[$1].report.path }
+            guard let anchor = ordered.first else { continue }
+            // ① 锚点自己正文写着运行时刻 ⇒ 它单独也认得出自己（目录里只有它一份时同理）。
+            var anchorEvidence: CoverageRunEvidence? =
+                facts[anchor].runStamp == nil ? nil : .contentStamp
+            // ② 其余成员逐个与锚点互证。证据档取**路径序里第一个互证成功的成员**，
+            //    所以换输入顺序既不会换键、也不会换"凭的是哪条证据"。
+            for member in ordered.dropFirst() {
+                let evidence = corroborate(facts[anchor], facts[member])
+                guard evidence.attestsSameRun else {
+                    outcome[member].identity.runKey = nil
+                    outcome[member].identity.runEvidence = .none
+                    continue
                 }
-                continue
+                outcome[member].identity.runKey = key
+                outcome[member].identity.runEvidence = evidence
+                if anchorEvidence == nil { anchorEvidence = evidence }
             }
-            let evidence = corroborate(facts[anchor], facts[index])
-            guard evidence.attestsSameRun else {
-                outcome[index].identity.runKey = nil
-                outcome[index].identity.runEvidence = .none
-                continue
-            }
-            outcome[index].identity.runKey = "dir=\(directory)"
-            outcome[index].identity.runEvidence = evidence
-            // 锚点拿不到键时（它自己没写运行时刻）由互证成功的成员把同一个键回灌给它，
-            // 否则"两份是同一来源"这件事只有半边知道，去重就无从发生。
-            if outcome[anchor].identity.runKey == nil {
-                outcome[anchor].identity.runKey = "dir=\(directory)"
-                outcome[anchor].identity.runEvidence = evidence
-            }
+            // ③ 锚点在**这里一次性结算**：没有成员互证、正文又没有时刻 ⇒ 未知。
+            //    （旧实现把这句写在按输入序遍历的分支里，才会抹掉已经回灌好的键。）
+            outcome[anchor].identity.runKey = anchorEvidence == nil ? nil : key
+            outcome[anchor].identity.runEvidence = anchorEvidence ?? .none
+        }
+        // 在被扫目录之外（切不出目录坐标）⇒ 未知，不参与任何去重。
+        for index in candidates.indices where candidates[index].identity.directoryKey == nil {
+            outcome[index].identity.runKey = nil
+            outcome[index].identity.runEvidence = .none
         }
         return outcome
     }

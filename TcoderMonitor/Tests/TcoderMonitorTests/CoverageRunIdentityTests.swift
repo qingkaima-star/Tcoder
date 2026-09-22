@@ -160,6 +160,46 @@ final class CoverageRunIdentityTests: XCTestCase {
         XCTAssertEqual(forward, backward, "同一批候选换个输入顺序就分出两个键 ⇒ 读数不可复现")
     }
 
+    /// 上一那条只试了**两个**顺序，而抹键的形状是"锚点何时被结算"，三个元素才有三种落点
+    /// ⇒ 这里把 3! = 6 个排列全试一遍，并且**逐个断言键与证据档**（不只比相等）。
+    /// 钉住的病：`assignRunKeys` 早期按输入下标遍历、锚点分支无条件写 `nil`，
+    /// 于是同一批夹具换个临时目录名/换个读盘顺序就能从"合并成 1 份"变成"两份都算"（双计）。
+    func testRunKeyAssignmentStaysIdenticalAcrossAllSixPermutations() {
+        let lcov = candidate(path: "/repo/web/coverage/lcov.info", covered: 120, total: 200,
+                             lcovBody: "SF:src/a.ts\nLF:200\nLH:120\nend_of_record\n")
+        let summary = candidate(path: "/repo/web/coverage/coverage-summary.json",
+                                format: .istanbulSummary, covered: 120, total: 200)
+        let other = candidate(path: "/repo/pkg-b/coverage/lcov.info", covered: 50, total: 100,
+                              lcovBody: "SF:src/b.ts\nLF:100\nLH:50\nend_of_record\n")
+        let expected: [String: String?] = [
+            "/repo/web/coverage/lcov.info": "dir=web/coverage",
+            "/repo/web/coverage/coverage-summary.json": "dir=web/coverage",
+            "/repo/pkg-b/coverage/lcov.info": nil,
+        ]
+        for permutation in permutations([lcov, summary, other]) {
+            let keyed = CoverageRunIdentity.assignRunKeys(to: permutation)
+            XCTAssertEqual(Dictionary(uniqueKeysWithValues: keyed.map { ($0.report.path, $0.identity.runKey) }),
+                           expected, "排列 \(keyed.map { ($0.report.path as NSString).lastPathComponent }) 走出了别的键")
+            // 证据档也要稳定：同一份报告在任何输入顺序里都必须"凭同一条证据"被认出来。
+            XCTAssertEqual(Set(keyed.compactMap { entry -> String? in
+                entry.identity.runKey.map { "\($0)|\(entry.identity.runEvidence?.rawValue ?? "-")" } }),
+                           Set(["dir=web/coverage|coPublishedPair"]),
+                           "互证成功的两份应共享同一个键与同一条证据档")
+        }
+    }
+
+    /// 三个元素的全部排列（不引第三方库：手写递归，只在这条用例里用一次）。
+    private func permutations<T>(_ items: [T]) -> [[T]] {
+        guard !items.isEmpty else { return [[]] }
+        var out: [[T]] = []
+        for index in items.indices {
+            var rest = items
+            let head = rest.remove(at: index)
+            out.append(contentsOf: permutations(rest).map { [head] + $0 })
+        }
+        return out
+    }
+
     /// unit 与 integration 在两个目录里 ⇒ **绝不共用运行键**（R5 用"猜来的归类"挡住这件事，
     /// R5b 换成"目录坐标"挡住：同一批夹具换个临时目录名也不该变）。
     func testUnitAndIntegrationRunsAreNeverCollapsed() {
