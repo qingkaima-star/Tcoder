@@ -18,6 +18,35 @@ extension CrashReportParser {
         var sawCrashedThread = false
         var inCrashedBlock = false
         var segmentDate: Date?
+        /// 整份文本报告自报的身份与事件号。缺哪一维就留 nil，不许用文件名或目录名补。
+        var identity = AppBuildIdentity()
+        var incidentID: String?
+    }
+
+    /// 从纯文本报告的头部字段读归属身份（`Process:` / `Version:` / `OS Version:` / `Identifier:`）
+    /// 与 `Incident Identifier:`。RD-23 要的是"报告自己说是谁"，不是"目录说它是谁"。
+    static func reportIdentity(from lines: [String]) -> (identity: AppBuildIdentity, incidentID: String?) {
+        var identity = AppBuildIdentity()
+        var incident: String?
+        for line in lines {
+            if incident == nil, let value = incidentIDPattern.firstGroup(in: line, 1) { incident = value }
+            if identity.processName == nil, let value = processNamePattern.firstGroup(in: line, 1) {
+                identity.processName = emptyToNil(normalize(value))
+            }
+            if identity.appVersion == nil, let value = reportVersionPattern.firstGroup(in: line, 1) {
+                let cleaned = trimmed(value)
+                identity.appVersion = cleaned.isEmpty ? nil : cleaned
+                identity.buildVersion = buildNumber(of: cleaned)
+            }
+            if identity.osVersion == nil, let value = reportOSVersionPattern.firstGroup(in: line, 1) {
+                let cleaned = trimmed(value)
+                identity.osVersion = cleaned.isEmpty ? nil : cleaned
+            }
+            if identity.bundleID == nil, let value = reportIdentifierPattern.firstGroup(in: line, 1) {
+                identity.bundleID = trimmed(value).isEmpty ? nil : trimmed(value)
+            }
+        }
+        return (identity, incident)
     }
 
     /// 段内规则（与拆分前逐字一致）：
@@ -34,6 +63,9 @@ extension CrashReportParser {
                                  modifiedAt: Date,
                                  singleReport: Bool) -> [LogEvent] {
         var state = CrashSegmentState()
+        let head = reportIdentity(from: lines)
+        state.identity = head.identity
+        state.incidentID = head.incidentID
         for (offset, line) in lines.enumerated() {
             guard !line.isEmpty else { continue }
             let number = lineNumberOffset + offset + 1
@@ -93,7 +125,10 @@ extension CrashReportParser {
             stackFrames: [frame],
             sourceFiles: sourceFiles(in: line),
             isCrash: true,
-            isContinuation: true
+            isContinuation: true,
+            eventTimeSource: state.events[anchor].eventTimeSource,
+            appIdentity: state.identity,
+            incidentID: state.incidentID
         ))
         return true
     }
@@ -106,8 +141,13 @@ extension CrashReportParser {
         if state.currentPrimary == nil || (!singleReport && cue.startsReport) {
             flushCrashDetails(in: &state)
             let parsed = LogLineParser.parseLine(line, number: number, sourcePath: path, referenceDate: modifiedAt)
+            // 事件时间只认「行内时间戳」与「报告头的 Date/Time」两种。
+            // 原先还回落到 `modifiedAt` ⇒ 一份没有时间的老报告会被算进"最近 N 天"（RD-22）。
+            let eventDate = parsed.date ?? state.segmentDate
+            let timeSource: CrashEventTimeSource = parsed.date != nil ? .logLineTimestamp
+                : (state.segmentDate != nil ? .reportField : .unavailable)
             state.events.append(LogEvent(
-                date: parsed.date ?? state.segmentDate ?? modifiedAt,
+                date: eventDate,
                 severity: .crash,
                 rawLine: line,
                 message: baseMessage(for: parsed),
@@ -116,7 +156,10 @@ extension CrashReportParser {
                 stackFrames: [],
                 sourceFiles: sourceFiles(in: line),
                 isCrash: true,
-                isContinuation: false
+                isContinuation: false,
+                eventTimeSource: timeSource,
+                appIdentity: state.identity,
+                incidentID: state.incidentID
             ))
             let anchor = state.events.count - 1
             state.currentPrimary = anchor
@@ -141,9 +184,17 @@ extension CrashReportParser {
     }
 
     /// 单报告段：段里那次崩溃的时间以 `Date/Time:` 为准（比文件 mtime 可信）。
+    ///
+    /// ⚠️ 补日期的同时**必须一起补 `eventTimeSource`**：主事件是在 `Incident Identifier:`
+    /// 那一行起的，那时 `Date/Time:` 还没读到，所以它的来源是 `.unavailable`。
+    /// 只改 `date` 不改来源，下游的窗口切分会认为这个时间是伪造的，
+    /// 把一次真崩溃归进「无事件时间」——现场实测 crashCount 因此从 1 掉回 0。
     static func applySegmentDate(singleReport: Bool, in state: inout CrashSegmentState) {
         guard singleReport, let segmentDate = state.segmentDate else { return }
-        for index in state.events.indices { state.events[index].date = segmentDate }
+        for index in state.events.indices {
+            state.events[index].date = segmentDate
+            state.events[index].eventTimeSource = .reportField
+        }
     }
 
     /// 主事件的 sourceFiles 补上它自己帧里出现过的文件（每事件最多 8 个）。
@@ -233,20 +284,10 @@ extension CrashReportParser {
         for match in sourceFilePattern.allMatches(in: line) { add(match) }
         return Array(files.prefix(4))
     }
-
-    static func synthesizedEvent(path: String, modifiedAt: Date) -> LogEvent {
-        let name = (path as NSString).lastPathComponent
-        return LogEvent(
-            date: modifiedAt,
-            severity: .crash,
-            rawLine: "崩溃报告 \(path)（未能解析出细节）",
-            message: normalize("崩溃报告 \(name)（未能解析出细节）"),
-            sourceLogPath: path,
-            lineNumber: 1,
-            stackFrames: [],
-            sourceFiles: [],
-            isCrash: true,
-            isContinuation: false
-        )
-    }
 }
+
+// 整改前这里还有一个 `synthesizedEvent(path:modifiedAt:)`：任何一份进过崩溃通道
+// 又读不出证据的文件，都由它合成一条 `isCrash = true` 的事件（"崩溃报告 X（未能解析出细节）"），
+// 于是 9 次"崩溃"里 7 次是它造的，`crashPenalty` 因此直接扣满 48 分。
+// 现在这条兜底**没有替代物**：取不出证据就是没证据，交回空事件，
+// 由 `CrashEvidenceClassification` 判成 `.parseFailed` / `.suspected` / `.readFailed` 三态之一。

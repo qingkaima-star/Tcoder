@@ -69,21 +69,65 @@ enum LogFixture {
         ].joined(separator: "\n") + "\n"
     }
 
+    /// 报告头 `Date/Time:` 用的"一小时前"，格式与 Apple 文本报告一致。
+    static func recentReportDate(now: Date = Date()) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss ZZZZ"
+        return formatter.string(from: now.addingTimeInterval(-3_600))
+    }
+
     /// crash.log 全文（纯文本崩溃报告，形态对齐 macOS 老式 .crash 报告）。
-    static let crashLogText = [
-        "Incident Identifier: 7B1D9F3E-4A55-4C8D-9E2F-1A2B3C4D5E6F",
-        "Crash Reporter Key:  0000000000000000000000000000000000000000",
-        "Exception Type:      EXC_BAD_ACCESS (SIGSEGV)",
-        "Exception Codes:     0x0000000000000001, 0x0000000000000000",
-        "Termination Reason:  SIGNAL 11",
-        "Thread 3 Crashed:",
-        "0   libsystem_kernel.dylib        0x00000001a2b3c4d5 __pthread_kill + 8",
-        "1   AppKit                        0x000000018f9e8d7c _NSViewDrawRect + 124",
-        "2   TcoderSample                  0x0000000100a2b3c4 com.example.shop.Cache.flush() + 68 (Cache.swift:210)",
-        "3   TcoderSample                  0x0000000100a2d110 com.example.shop.App.main() + 316 (main.swift:12)",
-        "Fatal error: Unexpectedly found nil while implicitly unwrapping an Optional value: file TcoderSample/Cache.swift, line 210",
-        "Swift runtime failure: Unexpectedly found nil",
-    ].joined(separator: "\n") + "\n"
+    ///
+    /// `Date/Time` / `Process` / `Version` / `OS Version` 四行是 Apple 文本报告**本来就有**的头部字段，
+    /// 原来这份夹具没写 —— 于是它既测不到"事件时间从报告字段来"（RD-22），
+    /// 也测不到"应用与构建归属从报告自报字段来"（RD-23）。
+    /// 日期用「一天前」而不是硬编码常量：窗口类用例（`withinDays: 30 / 365`）不会随日历翻页而失真。
+    static let crashLogText = LogFixture.crashLogText(dated: Date().addingTimeInterval(-86_400))
+
+    static func crashLogText(dated date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss ZZZZ"
+        return [
+            "Incident Identifier: 7B1D9F3E-4A55-4C8D-9E2F-1A2B3C4D5E6F",
+            "Crash Reporter Key:  0000000000000000000000000000000000000000",
+            "Process:             TcoderSample [12345]",
+            "Version:             9 (1.0)",
+            "OS Version:          macOS 26.5.1 (25F80)",
+            "Date/Time:           " + formatter.string(from: date),
+            "Exception Type:      EXC_BAD_ACCESS (SIGSEGV)",
+            "Exception Codes:     0x0000000000000001, 0x0000000000000000",
+            "Termination Reason:  SIGNAL 11",
+            "Thread 3 Crashed:",
+            "0   libsystem_kernel.dylib        0x00000001a2b3c4d5 __pthread_kill + 8",
+            "1   AppKit                        0x000000018f9e8d7c _NSViewDrawRect + 124",
+            "2   TcoderSample                  0x0000000100a2b3c4 com.example.shop.Cache.flush() + 68 (Cache.swift:210)",
+            "3   TcoderSample                  0x0000000100a2d110 com.example.shop.App.main() + 316 (main.swift:12)",
+            "Fatal error: Unexpectedly found nil while implicitly unwrapping an Optional value: file TcoderSample/Cache.swift, line 210",
+            "Swift runtime failure: Unexpectedly found nil",
+        ].joined(separator: "\n") + "\n"
+    }
+
+    /// 另一份纯文本崩溃报告（`Store.swift` 那一版），供按天聚类的用例用。
+    ///
+    /// `Date/Time` / `Process` / `Version` 三行是真报告本来就有的一段：缺了它们，
+    /// 夹具既测不到"事件时间从报告字段来"（RD-22），也测不到"归属从报告自报字段来"（RD-23）。
+    /// 时间写成"一小时前"而不是常量，`withinDays: 30` 的用例才不会随日历翻页失真。
+    static var storeCrashReportText: String {
+        """
+        Incident Identifier: AAAAAAAA-1111-2222-3333-444444444444
+        Process:             TcoderSample [4242]
+        Version:             9 (1.0)
+        Date/Time:           \(recentReportDate())
+        Exception Type:      EXC_BAD_ACCESS (SIGSEGV)
+        Exception Codes:     0x000000000000000d, 0x0000000000000000
+        Thread 5 Crashed:
+        0   TcoderSample   0x0000000100004a40 com.example.shop.Store.write(_:) + 128 (Store.swift:77)
+        1   TcoderSample   0x0000000100004b80 com.example.shop.Store.flush() + 64 (Store.swift:90)
+        Fatal error: Unexpectedly found nil while implicitly unwrapping an Optional value: file TcoderSample/Store.swift, line 77
+        """
+    }
 
     /// 最小合法 .ips：首行 header JSON + 其余 body JSON（字段名对齐真实 CrashReporter 报告）。
     static let ipsText = """
@@ -237,7 +281,28 @@ func makeEvent(_ severity: LogSeverity,
              stackFrames: frames,
              sourceFiles: files,
              isCrash: isCrash,
-             isContinuation: isContinuation)
+             isContinuation: isContinuation,
+             // 测试工厂的口径：**调用方交出 date 就等于声明"这个时间来自日志行内时间戳"**。
+             // 不交 date 就是 `.unavailable`，会被窗口切分归到「无事件时间」那一本账里。
+             // 这条不是形式：`LogEvent.eventTimeSource` 的新默认值是 `.unavailable`，
+             // 少了这一行，所有"给了日期"的既有用例都会静默变成"没有日期"。
+             eventTimeSource: date == nil ? .unavailable : .logLineTimestamp)
+}
+
+extension String {
+    /// 给夹具日志的**每一行**前面加一个"刚才"的 ISO 时间戳。
+    ///
+    /// R4 之后「最近 N 天」按**事件时间**裁剪，行内没有时间戳的事件会归进
+    /// 「无事件时间」那一本账、不进窗口计数 —— 只想测别的属性的用例
+    /// （比如"读失败不能牵连读成功的内容"）不该被这条口径悄悄改掉结论，
+    /// 所以给它们一个显式的、可读的加戳写法。
+    func stampToday(offsetSeconds: Int = -60) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        let stamp = formatter.string(from: Date().addingTimeInterval(TimeInterval(offsetSeconds)))
+        return split(whereSeparator: \.isNewline).map { "\(stamp) \($0)" }.joined(separator: "\n") + "\n"
+    }
 }
 
 /// 以 `base` 为基准整体平移 `days` 天（整天偏移，任何时区下都落在同一天内），用于按天分桶的用例。

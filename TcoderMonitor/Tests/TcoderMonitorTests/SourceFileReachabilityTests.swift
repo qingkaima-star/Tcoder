@@ -108,7 +108,17 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 新增的 `CLIProcessTests` 真子进程一把堵上）。
     /// 同时 `frameworkWhitelist` 从 `TcoderMonitorApp.swift` 换成 `TcoderEntry.swift`
     /// —— 白名单只留"真正写着 `@main` 的那一个"，`TcoderMonitorApp` 改由 `TcoderEntry` 点名调用。
-    static let censusBaseline = 144
+    /// 144 → 147（2026-09-22 检测正确性整改轮 · R4 日志与崩溃证据链，三枚全在 `Services/Logs/`；
+    /// **2026-09-22 09:36 由总工按守卫实报填**（守卫跑出 147，不是算出来的）：
+    /// `CrashEvidence.swift`（四态类型 `CrashEvidenceState` / `CrashEvidenceRecord` / `CrashEvidenceLedger`
+    ///   + `AppBuildIdentity` / `CrashEventTimeSource` / `LogEventWindowSplit`）—— 被
+    ///   `FileLogAnalyzer`、`LogParsing`、`CrashTextParsing`、`CrashIpsValueReading`、`CrashReportParser`、
+    ///   `CrashEvidenceClassification`、`LogClustering` 共同引用；
+    /// `CrashEvidenceClassification.swift`（把"文件名像崩溃报告"与"真的拿到事件证据"分开的那一步）——
+    ///   被 `CrashTextParsing` 与 `FileLogAnalyzer` 引用；
+    /// `LogProjectIdentity.swift`（应用归属不再靠目录名猜）—— 被 `FileLogAnalyzer` 与 `LogDiscovery` 引用。
+    /// 三枚都不是死文件：同一次守卫跑出「零调用清单：空」（`testZeroCallListIsEmpty` 未红）。
+    static let censusBaseline = 147
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
