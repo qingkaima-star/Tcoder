@@ -126,6 +126,8 @@ private final class PomDocumentModel: NSObject, XMLParserDelegate {
         var artifact = ""
         var version = ""
         var scope = ""
+        /// `<type>pom</type>` —— 与 `<scope>import</scope>` 同时出现就是**导入的 BOM**。
+        var type = ""
         var fromPlugin = false
     }
 
@@ -135,6 +137,10 @@ private final class PomDocumentModel: NSObject, XMLParserDelegate {
     private var rootVersion = ""
     private var parentGroup = ""
     private var parentVersion = ""
+    /// RD-13b 的两条事实：**这份 pom 有没有父级**、**dependencyManagement 里导入了哪些 BOM**。
+    /// 没有这两条，"这一栏没写版本"就只能被读成"项目没管理版本" —— 那是把好事报成坏事。
+    private var hasParent = false
+    private var importedBOMs = 0
     private var entries: [Entry] = []
     private var managedEntries: [Entry] = []
     private var stack: [String] = []
@@ -193,8 +199,8 @@ private final class PomDocumentModel: NSObject, XMLParserDelegate {
             return
         }
         if parent == "parent" {
-            if name == "groupId" { parentGroup = value }
-            if name == "version" { parentVersion = value }
+            if name == "groupId" { parentGroup = value; hasParent = true }
+            if name == "version" { parentVersion = value; hasParent = true }
             return
         }
         if stack.count == 2 {
@@ -213,6 +219,7 @@ private final class PomDocumentModel: NSObject, XMLParserDelegate {
         case "artifactId": entry.artifact = value
         case "version": entry.version = value
         case "scope": entry.scope = value
+        case "type": entry.type = value
         default: return
         }
         list.append(entry)
@@ -284,12 +291,29 @@ private final class PomDocumentModel: NSObject, XMLParserDelegate {
 
     // MARK: 出结果
 
+    /// 一个写出来的版本栏到底"算不算读出了确切版本"。
+    /// `${...}` 代不出来 ⇒ `.undeterminable`（**不许**当没写，也不许拿占位原文去比较）；
+    /// 读得出 ⇒ `.explicit`。"整栏为空"这一支不在这里判 —— 那是调用方分三态的地方。
+    private func declaredVersionState(for resolved: String, raw: String) -> DependencyDeclaredVersionState {
+        if resolved.isEmpty && raw.isEmpty { return .notDeclared }
+        return resolved.contains("${") ? .undeterminable : .explicit
+    }
+
+    /// 已看到的 BOM 导入数（测试与说明文案都读它，不再各数一遍 XML）。
+    var importedBOMCount: Int { importedBOMs }
+    var declaresParent: Bool { hasParent }
+
     func dependencyRecords(manifestPath: String) -> [DependencyRecord] {
         var managedVersions: [String: String] = [:]
         for item in managedEntries {
             let group = resolve(item.group.isEmpty ? rootGroup : item.group)
             let artifact = resolve(item.artifact)
             let version = resolve(item.version)
+            // 导入型 BOM 要在**代入之前**数：它自己有条目，但它给的是"别的包的版本从哪来"，
+            // 不是这条依赖自己的版本 —— 于是它下面的 guard 会不会 skip 都要先数到。
+            if item.type.lowercased() == "pom", item.scope.lowercased() == "import" {
+                importedBOMs += 1        // 版本在 BOM 里，不在这份 pom 里（RD-13b 的第二条来路）
+            }
             guard !group.isEmpty, !artifact.isEmpty, !version.isEmpty else { continue }
             managedVersions["\(group):\(artifact)"] = version
         }
@@ -299,9 +323,19 @@ private final class PomDocumentModel: NSObject, XMLParserDelegate {
             let group = resolve(item.group.isEmpty ? rootGroup : item.group)
             let artifact = resolve(item.artifact)
             guard !artifact.isEmpty else { continue }
+            // 顺序：清单自己写的 <version> → 本份 pom 的 dependencyManagement → 占位串。
+            let rawVersion = item.version
             var version = resolve(item.version)
-            if version.isEmpty { version = resolve(managedVersions["\(group):\(artifact)"] ?? "") }
-            if version.isEmpty { version = ManifestParsers.undeclaredVersion }
+            var state = declaredVersionState(for: version, raw: rawVersion)
+            if version.isEmpty, let managed = managedVersions["\(group):\(artifact)"] {
+                version = resolve(managed)
+                state = declaredVersionState(for: version, raw: managed)
+            }
+            if version.isEmpty {
+                version = ManifestParsers.undeclaredVersion
+                // 三态分岔（RD-13b）：没写版本 ≠ 没管理版本。
+                state = hasParent || importedBOMs > 0 ? .managedByParent : .notDeclared
+            }
             let scope: DependencyScope
             if item.fromPlugin && item.scope.isEmpty {
                 scope = .build
@@ -313,7 +347,9 @@ private final class PomDocumentModel: NSObject, XMLParserDelegate {
                 }
             }
             let name = group.isEmpty ? artifact : "\(group):\(artifact)"
-            records.append(ManifestParsers.record(name, version, .maven, scope, manifestPath))
+            var record = ManifestParsers.record(name, version, .maven, scope, manifestPath)
+            record.declaredVersionState = state
+            records.append(record)
         }
         return ManifestParsers.dedupe(records)
     }

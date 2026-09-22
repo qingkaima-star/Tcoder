@@ -28,6 +28,8 @@ struct DependencyRecordEvidence: Equatable, Sendable {
     let findings: [String]
     /// 查询用的是解析版本还是范围下界（"按下界查的"必须能在出口里说出来）。
     let queriedByLowerBound: Bool
+    /// 这一栏"为什么没有确切版本"的三态（RD-13b）。nil = 该生态本轮不下这个结论。
+    let declaredVersionState: DependencyDeclaredVersionState?
 
     /// 这条依赖有没有被**任何**一路覆盖到。false 时"无漏洞"这句话对它不成立。
     var isCheckedOnBothAxes: Bool { versionState.isCovered && vulnerabilityState.isCovered }
@@ -65,6 +67,11 @@ struct DependencyEvidenceLedger: Sendable {
         var table: [DependencyCheckState: Int] = [:]
         for record in records { table[record[keyPath: keyPath], default: 0] += 1 }
         return table
+    }
+
+    /// 三态各多少条（RD-13b）。**没下结论的那些不计数**，也不许并进任何一个桶。
+    func declaredVersionCounts(_ state: DependencyDeclaredVersionState) -> Int {
+        records.filter { $0.declaredVersionState == state }.count
     }
 
     var versionStateCounts: [DependencyCheckState: Int] { counts(of: \.versionState) }
@@ -170,6 +177,46 @@ enum DependencyEvidence {
         return pieces
     }
 
+    /// 三态各说一句人话（RD-13b）。顺序固定：**最容易被误会的那条排在最前**。
+    /// "由父级管理但未解析"绝不写成"没给版本" —— 那是把集中管理报成漏写，
+    /// 也是整改意见点名的"逼项目为消提示手工补东西"的起点。
+    static func declarationPhrases(_ ledger: DependencyEvidenceLedger) -> [String] {
+        let order: [(DependencyDeclaredVersionState, String)] = [
+            (.managedByParent, "%1$@ 条版本由父 POM / 导入 BOM 管理，本轮未解析"),
+            (.undeterminable, "%1$@ 条写了版本但属性占位代不出来"),
+            (.notDeclared, "%1$@ 条清单确实没写版本"),
+            (.explicit, "%1$@ 条已显式声明"),
+        ]
+        var phrases: [String] = []
+        for (state, template) in order {
+            let value = ledger.declaredVersionCounts(state)
+            guard value > 0, state != .explicit else { continue }   // explicit 是正常态，不占说明
+            phrases.append(localizedFormat(template, NumberFormat.grouped(value)))
+        }
+        return phrases
+    }
+
+    /// 一条依赖"为什么没有可比对的版本"那一句（tooltip 与出口共用，禁止各写一份）。
+    static func declarationExplain(for record: DependencyRecord) -> String {
+        switch record.declaredVersionState {
+        case .managedByParent?:
+            return "这一栏没写版本，但这份清单有父 POM / 导入的 BOM ⇒ 版本由父级集中管理，"
+                + "本轮没把它解析出来（能读到的已解析产物见「解析依据」）。"
+                + "不要求你为了消提示去手工补版本号。"
+        case .undeterminable?:
+            return "这一栏写了版本，但它是一个代不出来的属性占位（属性没定义、或由外部注入）⇒ 确实无法确定。"
+        case .notDeclared?:
+            return "这份清单既没写版本，也没有父级或 BOM 可指望 ⇒ 项目确实没给它定版本。"
+        case .explicit?:
+            if let source = record.resolvedVersionSource {
+                return "安装版本由已解析产物给出：\(record.resolvedVersion ?? "")（依据 \(source)）。"
+            }
+            return "清单直接声明了确切版本，可直接参与比较。"
+        case nil:
+            return "该生态本轮不判「版本声明形态」（没下结论与「没写版本」是两件事）。"
+        }
+    }
+
     static func sourcesPhrase(_ ledger: DependencyEvidenceLedger) -> String {
         [ledger.vulnerabilityLookup?.source, ledger.versionLookup?.source]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: localizedCopy("、"))
@@ -199,7 +246,8 @@ enum DependencyLedgerReader {
                     versionState: DependencyEvidence.versionState(of: record),
                     vulnerabilityState: DependencyEvidence.vulnerabilityState(of: record),
                     findings: record.knownVulnerabilities,
-                    queriedByLowerBound: identity.query?.basis == .rangeLowerBound
+                    queriedByLowerBound: identity.query?.basis == .rangeLowerBound,
+                    declaredVersionState: record.declaredVersionState
                 ))
             }
         }
@@ -263,9 +311,15 @@ enum DependencyScopeLines {
 // MARK: - 生态可跟踪性（版本核对这一路的"支持"判据）
 
 enum DependencyLockSupport {
-    /// 这个生态有没有"最新版本"这条路：内置快照收录表里有条目，或 OSV/registry 覆盖它。
-    /// 判据从表里**推导**，不另抄一份清单（抄一份就会在规则增删后腐烂）。
+    /// 这个生态**有没有办法量到"装的到底是哪个版本"**：
+    /// ① 有锁文件候选、② 有已解析产物候选（effective-POM / 依赖树 / SBOM，RD-13b）、
+    /// ③ 内置快照收录过它、④ OSV/registry 覆盖它。四条从同一批表里**推导**，
+    /// 不另抄清单（抄一份就会在增删后腐烂）。
+    /// 判据落空的后果很具体：`versionState` 会说"结构性测不到"，而那句话会变成
+    /// 事实上的"请你去补个文件" —— 本轮不背这个债。
     static func isEcosystemTrackable(_ ecosystem: DependencyEcosystem) -> Bool {
+        if !ManifestParsers.lockfileCandidates[ecosystem, default: []].isEmpty { return true }
+        if !ManifestParsers.resolvedArtifactCandidates[ecosystem, default: []].isEmpty { return true }
         if OsvPackageQuery.osvEcosystem(for: ecosystem) != nil { return true }
         let scopes = DependencySnapshot.lookupScopes(for: ecosystem)
         return scopes.contains { scope in DependencySnapshot.table.keys.contains { $0.hasPrefix(scope + "|") } }

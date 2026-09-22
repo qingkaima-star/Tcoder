@@ -20,6 +20,14 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
     /// 协议形状按 AGENTS §3：不动 `ServiceContracts` 的冻结协议，只给具体类型加带默认值的参数。
     let onlineSource: any DependencyOnlineSource
 
+    /// 本轮从**已解析产物**（effective-POM / 依赖树 / SBOM）里读到的证据（RD-13b 的披露面）：
+    /// 文件 -> 它给出确切版本的条数。存在这里是为了让"依据哪份文件"能随报告一起说出口
+    /// （台账 §4 第 1 条：重要结论要能追溯）。存储属性必须住在类本体（扩展不许带存储），
+    /// 而写它的是同类型在另一文件里的 extension（400 行口径拆的），故只能是 internal。
+    var resolvedArtifactEvidence: [(file: String, entries: Int)] = []
+    /// 每份锁文件/产物解析出的条数与歧义数（歧义 = 同名多版本，一律不回填、不猜）。
+    var resolutionProvenance: [String: (entries: Int, ambiguous: Int)] = [:]
+
     init(options: ScanOptions = .default,
          maxDepth: Int = ManifestDependencyAnalyzer.defaultMaxDepth,
          maxManifestBytes: Int = 4_000_000,
@@ -75,7 +83,8 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
             await applyNetworkKnowledge(&report)
         } else {
             report.networkLookupPerformed = false
-            report.networkLookupNote = Self.offlineCaveat(for: report)
+            report.networkLookupNote = Self.offlineCaveat(
+                for: report, resolvedArtifacts: resolvedArtifactEvidence.map(\.file))
             // 离线也要落账：逐条状态 + 报告级账本 + 分 scope 统计一次写完。
             // 不写的话消费端只能读到 nil，而 nil 在账本里就是"没测过"——
             // 那正是"未查"该有的形状，但总览与评分需要拿到**为什么**未查的分档计数。

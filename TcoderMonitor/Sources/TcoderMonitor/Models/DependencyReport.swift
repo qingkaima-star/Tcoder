@@ -169,6 +169,15 @@ struct DependencyRecord: Codable, Equatable, Hashable, Identifiable, Sendable {
     /// "npm 版本查成功"不等于"OSV 查过这条"（RD-11 点名的冒充关系）。
     var vulnerabilityCheckState: DependencyCheckState?
 
+    /// 这一栏**为什么没有确切版本**（RD-13b 三态：未显式声明 / 由父级管理但未解析 / 确实无法确定）。
+    /// 谁写：Maven 与 Gradle 解析器（只有它们看得见 `<parent>`、`<scope>import</scope>`、
+    /// `platform(...)` 与代不出来的 `${...}` 占位）。
+    /// 谁读：依赖行的 tooltip、离线说明里"版本没读出来"那一段、无头出口。
+    /// 为什么不能放别处：这是**读清单那一刻**的事实，放不进视图派生类型（视图只拿到字符串），
+    /// 而"由父级管理"与"没写"在界面上必须是一句话之差而不是同一句话。
+    /// 为什么 Optional：其余生态（npm 的范围、Python 的裸包名）语义不同，本轮不下结论 ⇒ 整键缺席。
+    var declaredVersionState: DependencyDeclaredVersionState?
+
     var id: String { "\(ecosystem.rawValue):\(manifestPath):\(name)" }
 
     var isDevDependency: Bool { scope == .dev }
@@ -213,6 +222,36 @@ enum VersionCheckSource: String, Codable, Sendable {
     case none = "无数据"
     case bundledSnapshot = "内置快照"
     case onlineRegistry = "在线源"
+}
+
+// MARK: - 版本声明三态（RD-13b：父 POM / 导入 BOM 未解析 ≠ 项目没管理版本）
+
+/// 清单里那一栏**为什么没有确切版本**——三种含义完全不同的事，旧实现一律写成"未声明"。
+///
+/// 为什么必须分开（台账 RD-13b）：Maven 子模块里一条 `<dependency>` 不写 `<version>`
+/// 通常**不是**"项目没管理版本"，而是版本由父 POM 的 `dependencyManagement`
+/// 或导入的 BOM 决定 —— 那是"这个项目把版本集中管理了"，是**好**的形状。
+/// 把它说成"未声明"会有两个坏结局：① 用户被暗示去手工补版本号来消提示（正是整改意见点名的
+/// 那种"为消提示改被扫对象"），② 真忘了管的清单和集中管理的清单在界面上分不开。
+///
+/// 为什么住在契约里而不是视图的派生类型：这个事实由**解析清单那一刻**才知道
+/// （只有 `PomDocumentModel` 看得见 `<parent>` 与 `<scope>import</scope>`），
+/// 而消费者是依赖行、总览、评分、无头出口四方 —— 与 `DependencyCheckState` 同一条理由。
+/// 为什么 Optional：旧报告没有这一格，非 Optional 会让整份解码失败（AGENTS §5.9 第 2 条）。
+enum DependencyDeclaredVersionState: String, Codable, CaseIterable, Sendable {
+    /// 这一栏写得出确切版本（或已解析产物把它补上了）—— 三态之外的正常态。
+    case explicit = "已显式声明"
+    /// 没写版本，且这份清单**没有**父级 / 导入 BOM 可指望 ⇒ 项目确实没给它定版本。
+    case notDeclared = "未显式声明"
+    /// 没写版本，但同份清单里有 `<parent>` 或 `<scope>import</scope>` 的 BOM ⇒ 版本由父级管理，
+    /// 我们没把它解析出来（要读 effective-POM / 依赖树 / SBOM 才知道是哪个版本）。
+    case managedByParent = "由父级管理但未解析"
+    /// 写了版本，但那是一个我们代不出来的占位（`${unknown.property}`、`{env:VAR}` 之类）
+    /// ⇒ 确实无法确定。**不许**把它当"没写"，也不许拿占位原文去比较。
+    case undeterminable = "确实无法确定"
+
+    /// 这个状态算不算"清单自己给出了可比对的版本"。
+    var hasConcreteVersion: Bool { self == .explicit }
 }
 
 // MARK: - 核对状态（RD-11：版本核对与漏洞核对是两件事，逐条各记一份）

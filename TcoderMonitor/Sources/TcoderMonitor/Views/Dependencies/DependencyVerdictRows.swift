@@ -121,7 +121,8 @@ enum DependencyRowStatus: Equatable {
         case .checkFailed:
             return "\(base)；核对请求发出后失败或超时（版本路：\(version.rawValue)／漏洞路：\(vulnerability.rawValue)）"
         case .versionUnresolved:
-            return "\(base)；声明的是范围且无锁文件解析值 ⇒ 安装版本没量到，不比对也不查询"
+            // 三态分开讲（RD-13b）：同一个"没量到"背后可能是父级管理 / 占位代不出来 / 真没写。
+            return "\(base)；\(DependencyEvidence.declarationExplain(for: record))"
         case .unsupported:
             return "\(base)；该生态不在数据源覆盖范围内（\((record.ecosystem.displayName))）"
         case .budgetExcluded:

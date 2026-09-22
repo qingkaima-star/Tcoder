@@ -11,6 +11,9 @@
 //   2. **按声明符匹配，不按包名匹配**：yarn.lock / pnpm 的键本身就带声明符
 //      （`lodash@^4.17.15`），这是唯一能把"同包多版本"分开的证据。
 //   3. 解析器是纯函数：给文本、返回 `包名|声明符 -> 确切版本`，坏数据返回空，绝不抛。
+//
+// 已解析产物（effective-POM / 依赖树 / SBOM）的解析器在同目录
+// `DependencyResolvedArtifacts.swift`（RD-13b），复用本类型的同一个形状与同一套 ambiguous 规矩。
 import Foundation
 
 /// 一份锁文件的解析结果。
@@ -36,14 +39,21 @@ struct DependencyLockResolution: Equatable, Sendable {
     let versionsBySpecifier: [String: String]
     /// 同名多版本被丢弃的包名（"为什么不回填"也要留证据）。
     let ambiguousNames: [String]
+    /// 这份文件**自己就是已解析产物**（effective-POM / 依赖树 / SBOM），而不是锁文件。
+    /// 为什么单列一格：`DependencyLockSupport.isEcosystemTrackable` 是"能不能量到安装版本"的
+    /// 唯一判据。Maven 没有 lock 文件这一族，但只要有这些产物就不该再被判成"结构性测不到"——
+    /// 那正是 RD-13b 点名的"要求被扫项目为消提示手工补东西"。判据从这张表**推导**，不另抄清单。
+    let originIsResolvedArtifact: Bool
 
     init(kind: Kind, path: String, versionsByName: [String: String],
-         versionsBySpecifier: [String: String] = [:], ambiguousNames: [String] = []) {
+         versionsBySpecifier: [String: String] = [:], ambiguousNames: [String] = [],
+         originIsResolvedArtifact: Bool = false) {
         self.kind = kind
         self.path = path
         self.versionsByName = versionsByName
         self.versionsBySpecifier = versionsBySpecifier
         self.ambiguousNames = ambiguousNames
+        self.originIsResolvedArtifact = originIsResolvedArtifact
     }
 
     /// 这条依赖在锁里解析成了哪个版本。顺序：先按声明符精确匹配，再按包名（仅在无歧义时）。
