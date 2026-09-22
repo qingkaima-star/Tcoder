@@ -26,6 +26,7 @@ import Foundation
 ///      （`Services/Dependencies/DependencyVersionIdentity.swift`），本类型不再自带第二套解析；
 ///      预发布（`-beta` / `-SNAPSHOT`）低于正式版，构建元数据（`+build`）不参与先后。
 ///   2. **认不出就是认不出**：`normalize` 返回空数组（旧返回 `[0]`），`outcome` 返回 `.unknown`，
+///      `compare` 返回 **nil**（旧返回 `.orderedSame`，那是在谎称"这两个版本相等"），
 ///      `isOlder` 对不可比较的一侧返回 false —— 但**上层必须出声**，
 ///      逐条依赖的"为什么判不了"由 `DependencyVersionBlocker` 承载，不靠沉默。
 ///
@@ -41,8 +42,26 @@ enum DependencyVersion {
     /// 这个串能不能收敛成一个版本号。
     static func isComparable(_ raw: String) -> Bool { Self.core(raw) != nil }
 
-    static func compare(_ lhs: String, _ rhs: String) -> ComparisonResult {
-        guard let left = Self.core(lhs), let right = Self.core(rhs) else { return .orderedSame }
+    /// 两个串的先后。**返回 Optional：认不出就是"不可比较"，不许折成 `.orderedSame`。**
+    ///
+    /// 2026-09-22 由 R3 收口（这颗地雷当时不是活 bug —— 全仓零调用方，但它随时会被捡起来用）：
+    /// 旧签名是 `(String, String) -> ComparisonResult`，而 body 第一行就写着
+    /// `guard let left = Self.core(lhs), let right = Self.core(rhs) else { return .orderedSame }`
+    /// —— 把"不知道"表达成了"相等"。三态本来就在 `outcome()` 里，这一支是它的失真副本。
+    /// 失真的形状特别适合做排序/去重/分组的输入：`*` / `latest` / `未声明` / `[1.0,2.0)`
+    /// 会互相"相等"，于是 `.sorted(by:)` 给出假稳定序、`Set`/`Dictionary(grouping:)` 把
+    /// 不同的包并成一格（RD-10 的"未知折成 0"换个地方复发）。
+    ///
+    /// 为什么选"改返回类型"而不是"保留签名 + 加一条扫描守卫"（工单二选一，理由写在这里）：
+    ///   1. **便宜**：全仓 `DependencyVersion.compare` 的调用点是 **0 处**（Sources + Tests 逐条
+    ///      grep 过，只有本文件与 `Models/DependencyReport.swift` 的注释提到它），改签名零改动面；
+    ///   2. **挡得住**：假"相等"这个**值**从表达里消失了 —— 无论调用方是直接拿函数引用
+    ///      （`.sorted(by: DependencyVersion.compare)` 当场编译不过，`ComparisonResult?` 不是 `Bool`）
+    ///      还是自己写包一层闭包，都不可能再把"认不出"读成"这两个版本一样"。
+    ///      扫描守卫只能管 textual 形状，包一层就漏，且必须配白名单；这里不需要。
+    ///   3. 语义要回来只有一个合法出口：**`outcome(current:than:)`，它有 `.unknown` 这一态**。
+    static func compare(_ lhs: String, _ rhs: String) -> ComparisonResult? {
+        guard let left = Self.core(lhs), let right = Self.core(rhs) else { return nil }
         return DependencySemver.compare(left, right)
     }
 

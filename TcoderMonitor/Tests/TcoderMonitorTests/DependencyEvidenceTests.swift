@@ -4,7 +4,8 @@
 //   ① **保守方向不许松**（用户点名的红线）：原来判 `.degraded` 的样本，改完仍不许变 `.verified`；
 //   ② "未发现漏洞"这句话必须同时给出**已成功核对的范围与条数**，
 //      总览 / 依赖行 / 评分三处必须消费同一份证据（不许各自再推一遍）；
-//   ③ 手写坐标字符串 = RD-12 的病根，扫描守卫 + 分母 + 反向元测试。
+//   ③ 手写坐标字符串 = RD-12 的病根，扫描守卫 + 分母 + 反向元测试 ——
+//      这一族已整块搬至 `DependencyCoordinateGuardTests.swift`（本文件曾被 400 行口径点名超限）。
 // 真值全部来自本文件内联夹具与手写推导，**没有一条期望是从实现输出回填的**。
 import XCTest
 @testable import TcoderMonitor
@@ -296,54 +297,11 @@ final class DependencyEvidenceTests: ManifestLabTestCase {
                                  "假源把没点名的失败说成答上了 ⇒ 用例会比线上乐观")
     }
 
-    // MARK: - ③ 手写坐标串 = RD-12 的病根，扫描守卫要有牙
-
-    /// 生产代码里**不许**再手写 `"\(name)@\(version)"` 这种 key：
-    /// 一侧用声明原文、一侧用查询身份，两边永不相等 ⇒ 总览有公告而依赖行不标记。
-    /// 唯一合法出口是 `DependencyVersionIdentity.coordinate(ecosystem:name:queryVersion:)`。
-    static let coordinateNeedleParts = ["@\\(", "@\" +"]
-    static func handBuiltCoordinateFindings(in files: [(path: String, text: String)]) -> [String] {
-        files.filter { $0.path.contains("/Services/Dependencies/") || $0.path.contains("/Views/Dependencies/") }
-            .compactMap { file in
-                let hit = file.text.split(separator: "\n").contains { rawLine in
-                    let line = rawLine.trimmingCharacters(in: .whitespaces)
-                    if line.hasPrefix("//") || line.hasPrefix("///") { return false }
-                    guard coordinateNeedleParts.contains(where: { line.contains($0) }) else { return false }
-                    // 只有"拿**记录里的版本原文**拼 key"才算分叉；展示层把已存好的坐标
-                    // 三段还原成 `lodash@4.17.15` 是合法的（它不生成 key，只还原文案）。
-                    return line.contains("record.version") || line.contains(".$0.version")
-                        || line.contains("record.resolvedVersion")
-                }
-                return hit ? file.path : nil
-            }
-    }
-
-    func testNoHandBuiltCoordinateStringsRemain() throws {
-        let files = try dependencyViewAndServiceSources()
-        XCTAssertGreaterThan(files.count, 20, "扫描面小到这个程度说明扫描坏了，不是代码干净")
-        XCTAssertTrue(Self.handBuiltCoordinateFindings(in: files).isEmpty,
-                      "出现手写坐标串：\(Self.handBuiltCoordinateFindings(in: files))")
-    }
-
-    /// 元测试①：坏样例必须抓到。
-    func testCoordinateGuardCatchesHandBuiltKey() {
-        let bad = [(path: "Sources/TcoderMonitor/Services/Dependencies/X.swift",
-                    text: #"let key = \(record.name)@\(record.version)"#)]
-        XCTAssertEqual(Self.handBuiltCoordinateFindings(in: bad).count, 1)
-    }
-
-    /// 元测试②：合法形状不误伤（展示层还原文案、注释里提到旧拼法）。
-    func testCoordinateGuardIgnoresLegalShapes() {
-        let legal = [
-            (path: "Sources/TcoderMonitor/Services/Dependencies/DependencyVersionIdentity.swift",
-             text: ##"return "\(pieces[1])@\(pieces[2])""##),
-            (path: "Sources/TcoderMonitor/Services/Dependencies/Y.swift",
-             text: "// 旧实现一侧是 pkg@\\(version)，另一侧是 record.version —— 已删"),
-            (path: "Sources/TcoderMonitor/Services/Code/Z.swift",
-             text: #"let key = \(record.name)@\(record.version)"#),   // 域外，不归这条管
-        ]
-        XCTAssertTrue(Self.handBuiltCoordinateFindings(in: legal).isEmpty, "合法形状被误伤")
-    }
+    // MARK: - ③ → 已整块搬至 `DependencyCoordinateGuardTests.swift`
+    //
+    // 那一族「手写坐标串」扫描守卫（含它的两个反向元测试与 `dependencyViewAndServiceSources()`）
+    // 2026-09-22 逐字节搬去同目录的新文件 —— 本文件被 `X3TestSizeAuditTests` 的 400 行口径
+    // 点名超限，搬动不改任何判据与期望。编号 ③ 仍归它，只是不住在这里。
 
     // MARK: - ④ 分析器账本 vs 手写独立真值（不拿实现输出反推）
 
@@ -397,23 +355,5 @@ final class DependencyEvidenceTests: ManifestLabTestCase {
             ?? DependencyRecord(name: name, version: "0", ecosystem: .npm, scope: .runtime,
                                 manifestPath: "package.json", latestKnownVersion: nil,
                                 versionCheckSource: .none, knownVulnerabilities: [])
-    }
-
-    private func dependencyViewAndServiceSources() throws -> [(path: String, text: String)] {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/TcoderMonitor", isDirectory: true)
-        let manager = FileManager.default
-        var files: [(String, String)] = []
-        for directory in ["Services/Dependencies", "Views/Dependencies"] {
-            let url = root.appendingPathComponent(directory, isDirectory: true)
-            for name in try manager.contentsOfDirectory(atPath: url.path).sorted() where name.hasSuffix(".swift") {
-                let path = url.appendingPathComponent(name).path
-                guard let data = manager.contents(atPath: path), let text = String(data: data, encoding: .utf8)
-                else { continue }
-                files.append((path: path, text: text))
-            }
-        }
-        return files
     }
 }

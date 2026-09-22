@@ -154,6 +154,59 @@ final class DependencySnapshotTests: XCTestCase {
                        "构建元数据不参与先后")
     }
 
+    /// `compare` 那颗地雷：**解析不出来的两个版本曾被判"相等"**（`.orderedSame`）。
+    ///
+    /// 现场（改前原文，`DependencyVersionRuler.swift`）：
+    /// `guard let left = Self.core(lhs), let right = Self.core(rhs) else { return .orderedSame }`
+    /// —— 三态在 `outcome()` 里是有的（`.unknown`），这一支却是它的失真副本：
+    /// 谁拿它去排序 / 去重 / 分组，`*`、`latest`、`未声明`、`[1.0,2.0)` 就会互相"相等"。
+    /// 本仓当时**零调用方**（Sources + Tests 逐条 grep，只有注释提到它）⇒ 不是活 bug，是地雷。
+    ///
+    /// 期望全部手写（semver 定义 + "认不出就不是相等"这条语义），不是从实现输出回填的：
+    ///   · 可比较的样本给确定的升/降/等；
+    ///   · 认不出的样本给 **nil**，且 nil **永远不许**被读成 `.orderedSame`；
+    ///   · 同一个样本集上 `compare` 与 `outcome` 必须一个答案都不差（同一把尺子的两条出口）；
+    ///   · `isComparable` 与「compare 有没有值」必须同真同假。
+    func testCompareRefusesToCallUnknownEqual() {
+        // (左, 右, 手写的 compare 期望, 手写的 outcome 期望)
+        let table: [(String, String, ComparisonResult?, DependencyVersion.Outcome)] = [
+            ("^1.2.3", "1.2.4", .orderedAscending, .older),       // 比的是写着的那个下界
+            ("1.2.4", "^1.2.3", .orderedDescending, .newer),
+            ("1.2.3", "1.2.3.0", .orderedSame, .same),           // 缺段按 0 补 ⇒ 这才是真的"相等"
+            ("1.2.3-beta", "1.2.3", .orderedAscending, .older),   // 预发布低于正式版
+            ("1.2.3+build7", "1.2.3", .orderedSame, .same),       // 构建元数据不参与先后
+            ("1.0.0-jre-SNAPSHOT", "1.0.0", .orderedAscending, .older),
+            ("2.14.1", "2.0.0", .orderedDescending, .newer),
+            ("*", "1.0.0", nil, .unknown),                        // ↓ 这四支就是地雷本体
+            ("1.0.0", "*", nil, .unknown),
+            ("latest", "1.0.0", nil, .unknown),
+            ("", "1.0.0", nil, .unknown),
+            ("abc", "def", nil, .unknown),                        // 两侧都认不出：旧实现判 .orderedSame
+            ("[1.0,2.0)", "1.5", nil, .unknown),
+            (ManifestParsers.undeclaredVersion, "1.0.0", nil, .unknown),
+        ]
+        XCTAssertFalse(table.isEmpty)
+        var comparableSamples = 0
+        var unknownSamples = 0
+        for (left, right, expectedComparison, expectedOutcome) in table {
+            XCTAssertEqual(DependencyVersion.compare(left, right), expectedComparison,
+                           "compare 判错：\(left) vs \(right)")
+            if expectedComparison == nil {
+                // 地雷本体：认不出的一侧**永远不许**长成 `.orderedSame`（那是谎称相等）。
+                XCTAssertNil(DependencyVersion.compare(left, right),
+                             "不可比较被折成了相等语义：\(left) vs \(right)")
+            }
+            XCTAssertEqual(DependencyVersion.outcome(current: left, than: right), expectedOutcome,
+                           "同一把尺子的两条出口分叉：\(left) vs \(right)")
+            XCTAssertEqual(DependencyVersion.isComparable(left),
+                           DependencyVersion.compare(left, right) != nil,
+                           "「能不能比」与「compare 有没有值」必须同真同假：\(left)")
+            if expectedComparison == nil { unknownSamples += 1 } else { comparableSamples += 1 }
+        }
+        XCTAssertGreaterThanOrEqual(comparableSamples, 6, "可比较样本不足，上面的对照是空跑")
+        XCTAssertGreaterThanOrEqual(unknownSamples, 6, "认不出的样本不足，地雷等于没被踩过")
+    }
+
     /// 逐条依赖的"这条到底过没过旧"必须走版本身份，而不是直接拿清单原文去比。
     /// 这里是那条链的入口守卫：`isProbablyOutdated` 读 `resolvedVersion`，
     /// 没有解析值时**范围声明判未定**（既不报过旧、也不报正常）。
