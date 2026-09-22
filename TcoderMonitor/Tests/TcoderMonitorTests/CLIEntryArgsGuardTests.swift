@@ -246,15 +246,20 @@ final class CLIEntryArgsProcessGuardTests: XCTestCase {
         XCTAssertTrue(r.stderr.contains("scanx"), "要回话里点名是哪个词不认识")
     }
 
-    /// 反例钉「不许起 GUI」：两次误用调用**必须不产生新进程**，而且必须自己就退了。
+    /// 反例钉「不许起 GUI」：误用调用**必须不产生新进程**，而且必须自己就退了。
     ///
-    /// 判据形状是「调用前后各数一次 `TcoderMonitor` 进程数 + 期间逐拍取样」，
-    /// 断言峰值增量为 0 —— 这样正常路径下根本不需要杀任何进程（AGENTS §-1 第 3 条）。
-    /// 万一守卫被摘掉，那次调用会真的起一个 GUI：`stillRunningAtLimit` 与
-    /// `extraProcessPeak` 两条同时红，此时才由 `launch` 收掉**它自己 spawn 的那一个 pid**。
+    /// 两条读数（一次跑齐，正常路径下**不需要杀任何进程**，AGENTS §-1 第 3 条）：
+    /// ① `stillRunningAtLimit` —— 我自己 spawn 的那个 pid 必须在时限内自己退；
+    ///    GUI 不会自己退，所以这条就是「被静默交给了 AppKit」的直接读数。
+    ///    （sabotage 实测：摘掉判据后红在这里，rc 读回来是 15 = 我收掉它时的 SIGTERM。）
+    /// ② `extraProcessPeak` —— 期间**除我自己那一个之外**不得多出任何 `TcoderMonitor` 进程，
+    ///    读数来自 `pgrep`，测试不持有那个 pid。它管的是「另起一格窗口」这种形状；
+    ///    单纯把当前进程变成 GUI 由第①条负责，两条一起才钉得住。
     func test_realProcess_misuseStartsNoGuiProcess() throws {
         let barePath = try tinyFixture().path
-        let misuses: [[String]] = [[barePath], ["scanx", "/tmp"], ["--out=/tmp/x.json"]]
+        let out = r19Scratch().appendingPathComponent("misuse-\(UUID().uuidString).json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: out) }
+        let misuses: [[String]] = [[barePath], ["scanx", "/tmp"], ["--out=\(out.path)"]]
         for args in misuses {
             let r = try launch(args, limit: Self.misuseLimit)
             XCTAssertFalse(r.stillRunningAtLimit,
@@ -263,6 +268,8 @@ final class CLIEntryArgsProcessGuardTests: XCTestCase {
                            "误用调用 \(args) 期间全机多出了 TcoderMonitor 进程（占窗口）")
             XCTAssertEqual(r.rc, 64, "误用调用 \(args) 的退出码不是 64，实得 \(r.rc)")
             XCTAssertLessThan(r.seconds, Self.misuseLimit, "用法错应当即时返回，实测 \(r.seconds) 秒")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: out.path),
+                           "误用调用不许把任何东西写到盘上（参数都没解析完就该退）")
         }
     }
 }
