@@ -348,9 +348,9 @@ private struct CommitRow: View {
                 // spec §0 根因 ④ 点名的 36 处里就有它。
                 .foregroundStyle(.primary)
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                Text(commit.subject)   // 冻结区 additive（AGENTS §3 的 P54 行）：长标题裁得掉，
-                    .font(Theme.Typo.narrative.font)
-                    .lineLimit(1).help(commit.subject)   // 但被裁的那一半必须有去处
+                // 冻结区 additive（AGENTS §3 的 P54 行）：长标题裁得掉，但被裁的那一半必须有去处
+                Text(commit.subject)
+                    .font(Theme.Typo.narrative.font).lineLimit(1).help(commit.subject)
                 Text("\(commit.author) · \(DateFormat.sinceDescription(commit.date))")
                     .font(Theme.Typo.microLabel.font.monospacedDigit())
                     .foregroundStyle(.secondary)
