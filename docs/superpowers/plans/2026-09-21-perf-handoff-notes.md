@@ -238,7 +238,7 @@ MODE=interact ./scripts/perf_wait_window.sh $(git rev-parse --short HEAD) 3   # 
 |---|---|---|---|
 | A. 换名·承重（每 tick 必然换值，收益真实） | **7** | `LiveReadings.body` 的 `history`；`DashboardReadouts` 两处 `history`；`PerformanceView` 两处 `history` + `latestSnapshot` + `lastSampleAt` | `history → monitor.curve.value`；`latestSnapshot → monitor.pulse.value`；`lastSampleAt → monitor.pulse.value.sampleAt` |
 | B. 换名·顺手（宿主走等值闸门，单独迁它在帧率上测不出差异） | **6** | 全在 `PerformanceView`：`trackedGroups`、`processMetricsTruncated`×2、`measuredProcessCount`、`topProcesses`、`processesByMemory` | → `groupRanking.value` / `ledger.value.metricsTruncated` / `ledger.value.measuredCount` / `cpuRanking.value` / `memoryRanking.value` |
-| C. 不是换名，是**把整份快照递给接收方** | **3** | `SampleContext.from(snapshot:)`、`DashboardLiveReadout.snapshot`（别名属性）、`SidebarLiveFooter → LiveCPUBadge` | 三处都在 `latestSnapshot` 的读点上；**原地换写法等于没迁**——只要参数类型还是整份快照，接收方仍每次发布重建。正确做法是把入参换成它真正读的那几个格 |
+| C. 不是换名，是**把整份快照递给接收方** | **3** | ① `LiveReadings.body` 里 `SampleContext(snapshot: monitor.latestSnapshot, …)`；② `DashboardReadouts` 的别名属性 `private var snapshot: SystemSnapshot? { state.monitor.latestSnapshot … }`（下游按整份读）；③ `ProjectSidebar` 里 `LiveCPUBadge(snapshot: state.monitor.latestSnapshot …)`（子视图收整份快照） | 三处都在 `latestSnapshot` 的读点上；**原地换写法等于没迁**——只要参数类型还是整份快照，接收方仍每次发布重建。正确做法是把入参换成它真正读的那几个格 |
 
 A + B = 13 处换名（守卫现扫里报的"承重 10 / 顺手 6"= A7+C3 = 10 承重，B6 顺手，总数 16）。
 
