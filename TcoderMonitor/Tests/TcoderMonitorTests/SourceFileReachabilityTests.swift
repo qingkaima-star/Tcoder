@@ -118,7 +118,13 @@ final class SourceFileReachabilityTests: XCTestCase {
     ///   被 `CrashTextParsing` 与 `FileLogAnalyzer` 引用；
     /// `LogProjectIdentity.swift`（应用归属不再靠目录名猜）—— 被 `FileLogAnalyzer` 与 `LogDiscovery` 引用。
     /// 三枚都不是死文件：同一次守卫跑出「零调用清单：空」（`testZeroCallListIsEmpty` 未红）。
-    static let censusBaseline = 147
+    /// 147 → 150（R2 Vue/TS 识别流三枚，2026-09-22 09:46 由总工按**集成分支上守卫实报**填）：
+    /// `ComplexityLexMachine.swift`（模板串/插值的帧栈状态机，被 `ComplexitySanitizer` 与
+    ///   `ComplexityEngine` 引用）；`VueSourceRegions.swift`（SFC 三分区归位，被 `SourceFileClassifier`
+    ///   与 `FunctionRecognition.computeScriptMask` 那条路引用）；
+    /// `FunctionScanning.swift`（为回到 400 行口径从 `ComplexityEngine.swift` 整块搬出的扫描端，
+    ///   被 `ComplexityEngine` 调用 —— 同批把 `ComplexityEngine.swift` 从 475 行降到闸门内）。
+    static let censusBaseline = 150
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
