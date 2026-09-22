@@ -405,3 +405,26 @@ scripts/perf_measure_rev.sh clean 465f5a6
 已在 `ddd53df` 拆开、补齐表头缺的那一列，并把「每行列数必须等于表头」加进 selfcheck 第 30 项
 （反例验过：造一张表头 2 格、某行 3 格的夹具，当场点行号）。⇒ 插表行的正确形状是
 **整行含首尾竖线一起写**，别拿"上一行的结尾"当锚点做拼接。
+
+## §Z §Q 那 14 处**按页路由**（2026-09-23 03:04）——每处该看哪一页的读数
+
+页名就是 `MEASURE_SECTION` 的取值（`DetailSection` 的 rawValue，含空格的那个要整体加引号）。
+这一张表把"还哪一处 ⇒ 验哪一页"钉死，避免再拿总览页的曲线去判别的页（§Y）。
+
+| 页（`MEASURE_SECTION`） | 处数 | 具体点（符号稳定，行号只是当下位置） | 该页的验收读数 |
+|---|---|---|---|
+| `总览` | 3 | `SidebarRows.swift:89` 动态色、`ProjectSidebar.swift:231` 动态色、`ChartChrome.swift:293` formatter（被 `DashboardHero` 引用） | **今天所有交互档量的就是这页** ⇒ 现量 render p50 4.10 / 3.93 / 4.35 ms（三趟）、呈现侧 p95 8.34/8.35/8.34 ms |
+| `错误日志` | 6 | 排序 `LogsFileTables.swift:74`、`:122`、`LogsMetricGrid.swift:110`、`LogsTrendCard.swift:39`；同步 I/O `LogsView.swift:181`、`:214` | **未测过**——要 `MEASURE_SECTION=错误日志` 起一趟（§Q 里 14 处的一半在这页） |
+| `Git 洞察` | 3 | `ContributorRows.swift:11`、`:62`、`ContributorsView.swift:22` | 未测过 |
+| `代码规模` | 1 | `CodeMetricsView.swift:56` | 未测过 |
+| `依赖分析` | 1 | `DependenciesView.swift:317` | 未测过 |
+
+规矩两条：
+1. 还完一处，回执里写**它所在那一页**滚动期的 render p50 现量（外加台账四格的现量掉了多少）；
+   只报"门禁全绿"或只报总览页的数，都算未验收。
+2. 我这侧的前置是任务 #25（`MEASURE_SECTION` 补丁，已备好未应用）。
+   应用之前，那四页的读数**一律记"未覆盖"**，不许拿总览页的数冒充（spec §6.6 的规矩）。
+
+顺带一条真进展（同一把尺现扫）：粗粒度读点 **15 处 / 上限 16**（此前是 16/16）
+⇒ §A 那批迁移**已经还掉一处**，但细粒度读点仍是 **0**，
+所以基座 `publish()` 拆粒度的收益还是没进任何一屏。
