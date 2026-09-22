@@ -803,3 +803,7 @@
 "数据源只有边际分布%1$@" = "The data source provides marginals only%1$@";
 "最活跃时段：%1$@:00 · 按各作者本地时区合并，未做时区归一" = "Busiest hour: %1$@:00 · merged by each author's local timezone, with no timezone normalisation";
 "小时分布为空，只有星期分布可用" = "The hour distribution is empty, so only the weekday distribution is available";
+
+// 批次 P55（窄态读数带）：内存的分母从值槽挪进脚注那一行，于是脚注多一条整句键。
+// 挪的原因写在 `PerformanceSystemTiles` 的切分助手上面——单位与数字同字号是在抢宽度。
+"总量 %1$@ · 在用 %2$@ · 压力 %3$@" = "Total %1$@ · in use %2$@ · pressure %3$@";
