@@ -173,6 +173,26 @@ enum DataColumns {
 }
 
 extension View {
+    /// 表头专用的那一格：**允许折两行**。
+    ///
+    /// 为什么表头不能沿用 `tableCell` 的"宁可截，不可撑"：那条规矩的理由是
+    /// **一个数字在 56pt 的格里换成两行会把整行抬高、五列基线全断**，它管的是数据行。
+    /// 表头在分隔线之上、自己一行，折两行不会碰任何数据基线；
+    /// 反过来不折的代价是**英文态列名被裁成「Occurren…」**
+    /// （`DataGridColumn("出现", 56)` 中文够、英文 "Occurrences" 要 67pt；
+    /// 「圈复杂度」62pt 对 "Cyclomatic Complexity" 119pt 更装不下）。
+    /// 读数器：`scripts/ax_truncation_sweep.sh`，判据见 `DataTableHeader` 的守卫。
+    @ViewBuilder
+    func tableHeaderCell(_ column: DataGridColumn) -> some View {
+        if let width = column.width {
+            frame(width: width, alignment: column.alignment.frameAlignment)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            frame(maxWidth: .infinity, alignment: column.alignment.frameAlignment)
+        }
+    }
+
     /// 把视图钉到某一列的布局上。表头与数据行都走这里，对齐不可能再各写各的。
     @ViewBuilder
     func tableCell(_ column: DataGridColumn) -> some View {
@@ -200,12 +220,14 @@ struct DataTableHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            HStack(spacing: DataRowMetrics.cellGap) {
+            // `.bottom`：某一列的英文名折成两行时，其余列名仍站在同一条底线上，
+            // 分隔线到列名的距离在整表里保持一个数。
+            HStack(alignment: .bottom, spacing: DataRowMetrics.cellGap) {
                 ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
                     Text(localizedCopy(column.title))
                         .font(CodeGitType.prose(Theme.Typo.microLabel))
                         .foregroundStyle(.secondary)
-                        .tableCell(DataColumns.column(columns, index))
+                        .tableHeaderCell(DataColumns.column(columns, index))
                         .modifier(DataOptionalHelp(help: column.help))
                 }
             }
