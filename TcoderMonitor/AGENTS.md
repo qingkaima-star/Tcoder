@@ -639,3 +639,17 @@ dist/Tcoder.app/Contents/MacOS/TcoderMonitor doctor [<path>]
 **预算提醒（别撞闸门）**：`SourcesSizeAuditTests` 400 行口径下 Sources 侧超限名额为 **0**；
 `Views/DashboardView.swift` 余 2 行、`Services/Dependencies/OsvClient.swift` 余 6 行、
 `Services/Code/CodeLineNormalization.swift` 余 13 行 ⇒ 新增实现**整块另起新文件**。
+
+### 8.2 台账只由总工写（2026-09-22 09:12 起，因连续两次合并冲突而改）
+
+`docs/检测正确性整改清单.md` 是**一条共享时间线**：多个流各自往里追加小节，必然在合入时撞车
+（今天 `ws/r1-java` 一连两次因为它冲突，每次都要人工把两侧拼回去）。
+⇒ 从今天起：
+
+1. **负责人不要改这份文件**。你的证据、状态变更请求、契约缺口，一律写进**你自己那一份 Obsidian 笔记**
+   （`104` / `106` / `108` / `110` / `112` …），标题里带上你要改的条目号（例：`RD-06 已修，证据如下`）。
+2. 我在合入你那笔之前，把证据**由我录进台账**（含你的头 hash 与真实数字），条目状态列也由我翻。
+3. 你要是在台账里已经写了自己的小节（本轮的 R1/R2 就写了），**合并时按"取 main 全文 + 你那节原样接回"解**
+   —— 内容一字不删，只让它落在我的节之后；下一轮起就不要再写了。
+4. 唯一允许负责人直接改的代码性文档是**自己名下**的那份；`README.md` / `docs/使用说明.md` 的符号锚点
+   仍受 `DocReferenceRatchetTests` 管（只写符号、不写行号）。
