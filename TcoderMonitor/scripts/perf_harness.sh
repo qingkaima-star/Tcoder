@@ -150,9 +150,15 @@ arm_synth_input() {  # 闸门**之前**把输入器编好（编译落在录制�
   export INPUT_SOURCE
 }
 
-start_synth_input() {  # 闸门之后、开录之前才投；时长盖住 hitches + time-profile + 换档空档
+start_synth_input() {  # 闸门之后、开录之前才投；投递必须盖住**整趟**（含导表与收尾复核那一次问话）
   synth_wired || return 0
-  start_synth_scroller "$SYNTH_TARGET" $((SECONDS_HITCHES + SECONDS_TP + 20)) \
+  # 09-22 20:44 那趟的教训：时长原来按 `hitches+tp+20` 估，以为"两次录制加起来 45 秒"就够。
+  # 实测 `xctrace record` 停表后还要 finalize，六张表导出（其中一张 815 KB）吃掉几十秒，
+  # 于是**收尾复核问"这 20 秒里有人动过吗"的那一刻，输入器已经停了 180 秒** ⇒
+  # 复核判"窗口内没人"、样本作废（判得对），而整趟 45 秒的录制白烧在稀缺窗口里。
+  # 正解不是把估算调准，而是**别用估算当终点**：给一个宽到不可能跑不完的上限，
+  # 真正的边界由 `stop_synth_scroller` 在录制结束时收（被测实例若先死，输入器自己退）。
+  start_synth_scroller "$SYNTH_TARGET" "${SYNTH_SPAN:-$((SECONDS_HITCHES + SECONDS_TP + 240))}" \
     || die "合成输入器起不来 ⇒ 不录（这一档的『有人在动』没有别人来补）"
 }
 
