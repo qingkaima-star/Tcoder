@@ -167,7 +167,7 @@ struct CodeDuplicationSection: View {
                     if code.duplicatedBlocks.count > Self.rowLimit {
                         DataDisclosureButton(expanded: expanded,
                                              hiddenCount: CodeBoardTruth.duplicationBoardCount(code) - Self.rowLimit,
-                                             noun: CodeBoardTruth.duplicationHiddenRowsNoun()) {
+                                             noun: CodeBoardTruth.duplicationHiddenRowsNoun(code)) {
                             expanded.toggle()
                         }
                     }
@@ -232,7 +232,7 @@ struct CodeComplexitySection: View {
                         DataBandSeparator()
                         // 标签里的「榜内」不是修饰词：`duplicatedBlocks` 被
                         // `DuplicationEngine.maxBlocks` 截过，这个数**就是**榜长（RD-17）。
-                        DataReadout(label: CodeBoardTruth.duplicationSlotLabel(),
+                        DataReadout(label: CodeBoardTruth.duplicationSlotLabel(code),
                                     value: NumberFormat.grouped(CodeBoardTruth.duplicationBoardCount(code)),
                                     unit: "个",
                                     role: Theme.Semantic.role(for: code.overallRisk))

@@ -690,5 +690,5 @@
 // 守卫：`AdviceWordingBoardTests`（三态各一条 + 引擎句式对账）。
 "重复块（榜内）" = "Duplicate Blocks (board only)";
 "当前列出 %1$@ / %2$@ 个。" = "Showing %1$@ of %2$@ on this page.";
-"共 %1$@ 个重复块，已全部列出（榜没被截断，这一串就是总数）。" = "%1$@ duplicate blocks in total, all listed (the board was never truncated, so this count is the total).";
-"榜内只列 %1$@ 个（明细榜上限 %2$@ 块）· 本页当前列出 %3$@ 个。%4$@" = "The board lists only %1$@ blocks (detail cap %2$@) · this page shows %3$@ of them. %4$@";
+"共 %1$@ 个重复块，已全部列出（榜未触顶，上限 %2$@ 块）。" = "%1$@ duplicate blocks in total, all listed (the board is below its cap of %2$@, so this count is the total).";
+"榜内只列 %1$@ 个（明细榜上限 %2$@ 块）· 本页当前列出 %3$@ 个。" = "The board lists only %1$@ blocks (detail cap %2$@) · this page shows %3$@ of them.";

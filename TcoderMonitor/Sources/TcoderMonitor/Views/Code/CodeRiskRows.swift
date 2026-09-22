@@ -29,11 +29,12 @@ enum CodeRiskAnalysis {
 
     /// 重复率那一格的口径说明。**分子分母是全仓，块数只是榜内条数**——两件事必须分开说
     /// （RD-17）：`duplicationRatio` 按全量命中算，而 `duplicatedBlocks` 被
-    /// `DuplicationEngine.maxBlocks` 截过，读它的条数当"这个仓库有多少重复块"会报小。
+    /// `DuplicationEngine.maxBlocks` 截过；榜满了就不许再把它的条数念成"这个仓库有多少重复块"。
     static func duplicationCaption(_ code: CodeMetrics) -> String {
         let duplicatedLines = Int((code.duplicationRatio * Double(code.codeLines)).rounded())
         return "约 \(NumberFormat.grouped(duplicatedLines)) 行 / 有效代码 "
-            + "\(NumberFormat.grouped(code.codeLines)) 行 · 榜内重复块 "
+            + "\(NumberFormat.grouped(code.codeLines)) 行 · "
+            + CodeBoardTruth.duplicationBlockWord(code) + " "
             + "\(NumberFormat.grouped(CodeBoardTruth.duplicationBoardCount(code))) 个"
     }
 

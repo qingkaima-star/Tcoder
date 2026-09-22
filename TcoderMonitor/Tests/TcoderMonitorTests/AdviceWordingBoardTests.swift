@@ -24,8 +24,10 @@ import XCTest
 //
 // ## 四态
 //
-// 正例（榜外确有 → 说榜内并报出账）、反例（榜没满 → 才允许说"已全部列出"）、
-// 未知（旧报告 `scanLimitations == nil` → 按契约读作"未截断"，且理由必须写在句子里）、
+// 正例（榜满且有台账 → 说榜内、点名上限、把引擎那笔账带出来）、
+// 反例（榜没满 → 才允许说"已全部列出"）、
+// 未知（榜满而台账缺席 → 取保守边，仍说榜内；以及**只有片段预算生效**那种
+// 　"有句子但榜没满"的形态 —— CLI 实跑抓到的，见 `test_unfilledBoardWithFragmentOnlyLedger…`）、
 // 失败（`shown > listed`、空榜、以及元测试：判据对坏样例必须报）。
 
 final class AdviceWordingBoardTests: XCTestCase {
@@ -113,15 +115,35 @@ final class AdviceWordingBoardTests: XCTestCase {
         XCTAssertFalse(text.contains("榜内"), "没截断时把「榜内」写进句子是制造新的读不懂：\(text)")
     }
 
-    /// 未知态：`scanLimitations == nil` 按契约读作"一条上限都没生效"（Models 注释写死了这个语义）。
-    /// 这里把它钉下来：谁改契约语义，这条会红，而不是让页面悄悄换含义。
-    func test_absentLedgerReadsAsUntruncatedByContract() {
+    /// 未知态：榜**满了**而台账缺席（旧报告、或只有片段预算生效的报告会走到这儿）。
+    /// 取保守的那一边：满榜时一律说"榜内"，不许因为"没看见截断记录"就念出"已全部列出"。
+    func test_fullBoardNeverClaimsTotalityEvenWithoutLedger() {
         let code = Self.metrics(listed: Self.capProbe, limitations: nil)
         let text = CodeBoardTruth.duplicationTruncationNote(code, shown: 8)
-        XCTAssertTrue(text.contains("当前列出 8 / 20 个"), text)
-        let full = CodeBoardTruth.duplicationTruncationNote(code, shown: Self.capProbe)
-        XCTAssertTrue(full.contains("榜没被截断，这一串就是总数"),
-                      "说「全部列出」时必须同时交代凭什么（台账缺席=未截断）：\(full)")
+        XCTAssertTrue(text.contains("榜内只列 20 个"), text)
+        XCTAssertTrue(text.contains("明细榜上限 20 块"), text)
+        XCTAssertFalse(text.contains("已全部列出"),
+                       "满榜 + 无台账时说「已全部列出」就是把没量到读成没有：\(text)")
+    }
+
+    /// CLI 实跑抓到的反方向偏差（`.scratch/r7-cli`：409 行的 .ts + .swift，
+    /// 榜内 **4** 块 / `blocksDroppedByCap = 0`，但片段预算切掉了 1066 处拷贝，
+    /// 于是 `scanLimitations` 里照样有一句"明细榜单截断…"）。
+    /// ⇒ **只按台账判"榜被截了"会把没满的榜说成满了**：那是在渲染一件没发生的事。
+    /// 现在判据只看「榜长 ≥ 上限」，那句话仍然原样追加（它是真账，只是不决定标签）。
+    func test_unfilledBoardWithFragmentOnlyLedgerIsNotCalledCapped() throws {
+        let note = try XCTUnwrap(Self.engineNote(blocksDropped: 0, linesOutside: 0, fragments: 1_066))
+        let code = Self.metrics(listed: 4, limitations: [note])
+        XCTAssertFalse(CodeBoardTruth.boardAtCap(code), "4 块 / 上限 20 被判成满榜 —— 标签会假紧")
+        let text = CodeBoardTruth.duplicationTruncationNote(code, shown: 4)
+        XCTAssertFalse(text.contains("榜内只列"), "没满的榜被说成截断了：\(text)")
+        XCTAssertTrue(text.contains("已全部列出"), text)
+        XCTAssertTrue(text.contains("未展开 1,066 处拷贝"), "片段那一笔账必须仍然看得见：\(text)")
+        XCTAssertEqual(CodeBoardTruth.duplicationSlotLabel(code), "重复块", "读数标签跟着假紧")
+        let capped = Self.metrics(listed: Self.capProbe, limitations: [note])
+        XCTAssertEqual(CodeBoardTruth.duplicationSlotLabel(capped), "重复块（榜内）")
+        XCTAssertTrue(CodeBoardTruth.duplicationHiddenRowsNoun(capped).contains("榜内"))
+        XCTAssertEqual(CodeBoardTruth.duplicationHiddenRowsNoun(code), "个重复块")
     }
 
     /// 失败态：`shown > listed`（展开态与行数不同步时会出现）只能读成"已全部列出"，不许报负数。
@@ -142,11 +164,13 @@ final class AdviceWordingBoardTests: XCTestCase {
     // MARK: - ③ 标签与量词：读 `count` 的那几格必须自带「榜内」
 
     func test_slotLabelCarriesBoardQualifier() {
-        XCTAssertEqual(CodeBoardTruth.duplicationSlotLabel(), "重复块（榜内）")
-        XCTAssertTrue(CodeBoardTruth.duplicationHiddenRowsNoun().contains("榜内"),
-                      "展开按钮的量词没限定，读起来像「仓库里还剩这么多块」")
+        let capped = Self.metrics(listed: Self.capProbe, limitations: nil)
+        XCTAssertEqual(CodeBoardTruth.duplicationSlotLabel(capped), "重复块（榜内）")
+        XCTAssertEqual(CodeBoardTruth.duplicationBlockWord(capped), "榜内重复块")
         XCTAssertEqual(CodeBoardTruth.duplicationBoardCount(Self.metrics(listed: 5, limitations: nil)), 5,
                        "取法本身读错了对象")
+        XCTAssertFalse(CodeBoardTruth.duplicationHiddenRowsNoun(capped).isEmpty,
+                       "展开按钮的量词空了 —— 读起来就像「仓库里还剩这么多块」")
     }
 
     /// 重复率的分母是全仓、块数只是榜内 —— 同一句里这两件事必须被区分开（RD-17 的原话）。

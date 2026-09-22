@@ -94,32 +94,57 @@ enum CodeBoardTruth {
         code.duplicatedBlocks.count
     }
 
-    /// 「重复块」这一格读数的标签。榜被截过 ⇒ 数字是榜长，标签必须带「榜内」。
-    static func duplicationSlotLabel() -> String {
-        localizedCopy("重复块（榜内）")
+    /// 榜长能不能被读成"这个仓库的重复块总数"：**榜满了就不能**。
+    ///
+    /// 判据只取「榜长 ≥ 上限」这一条，刻意**不**依赖台账里有没有那句话——
+    /// CLI 实跑（`.scratch/r7-cli`，409 行的 .ts + .swift）抓到过这个形状：
+    /// 榜内 4 块、`blocksDroppedByCap = 0`，但 `fragmentsDroppedByBudget = 1066`，
+    /// 于是台账照样产出一句"明细榜单截断…"。按句判"榜被截了"会把**没满的榜说成满了**，
+    /// 那是把一件没发生的事渲染出来（与"把没量到渲染成没有问题"对称的另一头）。
+    /// 反向偏差只有一格：恰好 20 块时多说一句"榜内"，那句话依旧是真话（它确实在榜内）。
+    static func boardAtCap(_ code: CodeMetrics) -> Bool {
+        duplicationBoardCount(code) >= duplicationBlockCap
+    }
+
+    /// 「重复块」这一格读数的标签：只有榜满了才需要「榜内」这个限定，
+    /// 榜没满时"榜内"反而是一句让人找下文的话。
+    static func duplicationSlotLabel(_ code: CodeMetrics) -> String {
+        localizedCopy(boardAtCap(code) ? "重复块（榜内）" : "重复块")
     }
 
     /// 展开按钮的量词（`noun:` 不是查表入口，所以这里给的是上屏原文，与"个重复块"同性质）。
-    static func duplicationHiddenRowsNoun() -> String {
-        "个榜内重复块"
+    static func duplicationHiddenRowsNoun(_ code: CodeMetrics) -> String {
+        boardAtCap(code) ? "个榜内重复块" : "个重复块"
     }
 
-    /// 页尾那句：榜外有东西时**绝不**说"已全部列出"，并且必须点名上限。
+    /// 重复率口径句里的那个词（同一句里"约 X 行 / 有效代码 Y 行"是**全仓**口径，两件事要分开）。
+    static func duplicationBlockWord(_ code: CodeMetrics) -> String {
+        boardAtCap(code) ? "榜内重复块" : "重复块"
+    }
+
+    /// 页尾那句。三态：
+    /// ① 榜满 ⇒ 只说"榜内只列"，并点名上限，**绝不**说"已全部列出"；
+    /// ② 榜没满但本页折叠了 ⇒ 说"列出多少 / 一共多少"；
+    /// ③ 榜没满且全展示了 ⇒ 这时"已全部列出"才是真话（并把上限一起写出来，让人看得见尺子）。
+    /// 台账那句（榜外还有多少块/行、多少处拷贝没展开）**原样追加**：它是引擎产出的数据，
+    /// 不是这里造的文案 —— 也从没把它抠成数字参与算术，那是第二把尺子。
     static func duplicationTruncationNote(_ code: CodeMetrics, shown: Int) -> String {
         let listed = duplicationBoardCount(code)
-        if let outside = outsideBoardNote(code) {
-            return localizedFormat("榜内只列 %1$@ 个（明细榜上限 %2$@ 块）· 本页当前列出 %3$@ 个。%4$@",
-                                   NumberFormat.grouped(listed),
-                                   NumberFormat.grouped(duplicationBlockCap),
-                                   NumberFormat.grouped(shown),
-                                   localizedCopy(outside))
+        let cap = duplicationBlockCap
+        let base: String
+        if listed >= cap {
+            base = localizedFormat("榜内只列 %1$@ 个（明细榜上限 %2$@ 块）· 本页当前列出 %3$@ 个。",
+                                   NumberFormat.grouped(listed), NumberFormat.grouped(cap),
+                                   NumberFormat.grouped(shown))
+        } else if listed > shown {
+            base = localizedFormat("当前列出 %1$@ / %2$@ 个。",
+                                   NumberFormat.grouped(shown), NumberFormat.grouped(listed))
+        } else {
+            base = localizedFormat("共 %1$@ 个重复块，已全部列出（榜未触顶，上限 %2$@ 块）。",
+                                   NumberFormat.grouped(listed), NumberFormat.grouped(cap))
         }
-        guard listed > shown else {
-            return localizedFormat("共 %1$@ 个重复块，已全部列出（榜没被截断，这一串就是总数）。",
-                                   NumberFormat.grouped(listed))
-        }
-        return localizedFormat("当前列出 %1$@ / %2$@ 个。",
-                               NumberFormat.grouped(shown), NumberFormat.grouped(listed))
+        guard let outside = outsideBoardNote(code) else { return base }
+        return base + " " + localizedCopy(outside)
     }
 }
 
