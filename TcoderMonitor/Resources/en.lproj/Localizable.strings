@@ -751,3 +751,27 @@
 // 换成卡名没交代的那件事（这个数含不含空行与注释）。守卫见
 // `PageTitleCollisionGuardTests.test_heroNoteNeverRepeatsItsOwnCardTitle`。
 "含空行与注释" = "blank lines and comments included";
+
+// 批次 P50（英文态 B 类收口·第一批 14 句）：这些句子**屏上一直是中文**，
+// 原因是目录里根本没键 —— 不是查了没查到。基座（`GlassSection` / `MetricTile` /
+// `NoteLine`）本来就会走 `localizedCopy`，所以补上键即生效；
+// 少数没走查表的落点由 LocalizationGuardTests 的「有键没查」那一半继续盯。
+"窗口内累计" = "Cumulative in window";
+"所选目录本身就是仓库根" = "The selected folder is the repository root itself";
+"数据源只有边际分布" = "Data source provides marginals only";
+"当前为离线模式，版本与漏洞结论来自内置快照。" = "Offline mode: version and vulnerability conclusions come from the built-in snapshot.";
+"分用途统计" = "Breakdown by usage";
+"该项目没有产出覆盖率报告，不参与计分。" = "This project produced no coverage report, so it is not scored.";
+"这是「在用」" = "This is in-use, not free";
+"CPU 占用率" = "CPU utilization";
+"内存在用率" = "Memory utilization";
+"命中数为 0 只说明「这一帧没有匹配的进程」" = "A hit count of 0 only means no process matched this frame";
+"命中数为 0 只说明「这一帧没有匹配的进程」，不说明服务出了问题。" = "A hit count of 0 only means no process matched this frame; it does not mean the service is broken.";
+"按 CPU 核当量" = "In CPU core equivalents";
+"规则本身不改变任何进程" = "The rules themselves never change any process";
+"错误 + 异常 + 崩溃，按代码规模归一见下" = "Errors + exceptions + crashes, normalized by code size (see below)";
+
+// P50 追加：与上面那批同一次落点改动配套（缺一条就会半英半中）。
+"按内存" = "By memory";
+"开启后需要重新执行分析才会生效。" = "Re-run the analysis for this setting to take effect.";
+"尚未分析覆盖率报告，不参与计分。" = "No coverage report has been analyzed, so it is not scored.";

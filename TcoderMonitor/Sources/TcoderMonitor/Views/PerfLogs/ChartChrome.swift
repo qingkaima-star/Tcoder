@@ -152,6 +152,31 @@ enum ChartScale {
         return min(ladder, atLeastFourTicks)
     }
 
+    /// 秒级实时轴的**显式**刻度表：从**域起点**开始，按 `strideSeconds` 一格一格排到域尾。
+    ///
+    /// 为什么不再交给 `.stride(by: .second, count:)`：Swift Charts 会**丢掉正好压在
+    /// 域下界那一枚**刻度（乱清单 §6 第 7 条记的"仍然开着"那半条）。
+    /// 复拍性能页 27 秒跨度时按档位算出 13 秒步长，三枚里首尾各掉一枚，屏上只剩一枚
+    /// 「−13s」—— 一枚标签等于这条轴没有时间参照。
+    /// 自己给值就不存在"掉"：首枚恒等于窗口起点，尾枚不超过域尾。
+    ///
+    /// 刻度因此**不再对齐整十整六十秒**，而是"起点 + N 格"。这是有意的取舍：
+    /// 这套轴要么走相对标签（「−9s」，本来就以窗口为参照），要么在长窗口里给绝对时钟
+    /// ——两种情况下"这一格是几点几分几秒"都读得出，而"左半段一片空"读不出任何东西。
+    /// 上限 64 格：域退化或步长过小时兜住，不许一次造出上千枚标签。
+    static func secondsTicks(domain: ClosedRange<Date>?, strideSeconds: Int) -> [Date] {
+        guard let domain, strideSeconds > 0 else { return [] }
+        let span = domain.upperBound.timeIntervalSince(domain.lowerBound)
+        guard span > 0 else { return [domain.lowerBound] }
+        var ticks: [Date] = []
+        for index in 0...64 {
+            let date = domain.lowerBound.addingTimeInterval(Double(index * strideSeconds))
+            if date > domain.upperBound { break }
+            ticks.append(date)
+        }
+        return ticks
+    }
+
     /// 窗口短于这个长度时，绝对时钟标签（`22:22`）在一分钟内没有区分度，
     /// 改用「距今 N 秒」的相对轴（总工截图复核问题 2）。
     static let relativeAxisLimitSeconds = 60.0
@@ -252,7 +277,9 @@ struct LiveSeriesChart<Point: Identifiable>: View {
         }
         .chartXAxis {
             if case .seconds(let stride) = timeAxis {
-                AxisMarks(values: .stride(by: .second, count: stride)) { value in
+                // 显式给刻度，首枚压在域起点上（`.stride` 会被 Charts 丢掉那一枚）。
+                AxisMarks(values: ChartScale.secondsTicks(domain: timeDomain,
+                                                          strideSeconds: stride)) { value in
                     AxisGridLine().foregroundStyle(Theme.Palette.Surface.separator)
                     // 尾刻度贴右边界往左长（`centered: false` 会把它切成 `08:27…`，
                     // 规则见 `ChartAxisEdge`）。
@@ -324,7 +351,9 @@ struct SeriesLegend: View {
         // 而最先被吃掉的一定是口径那一段 —— 截完之后恰好把用户要核对的「已用 X GB」截掉。
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
-                Text(name)
+                // 图例名走查表：它是文案不是数据（`CPU 占用率` 这类），
+                // 以前只在这里漏一次，英文态就少一句译文（台账 §6.50）。
+                Text(localizedCopy(name))
                     .font(Theme.Typo.label.font)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

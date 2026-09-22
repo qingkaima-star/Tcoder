@@ -70,6 +70,10 @@ class SelfScanHarnessCase: XCTestCase {
         var health: HealthScore
         /// **与上面六个分析器同一时刻**取到的 git 真值；断言只许读这一份。
         var gitTruth: GitTruth
+        /// 同上：独立普查（自己走一遍树数函数）也必须在**同一份快照**里取。
+        /// 晚一步取，就是拿两棵不同时刻的树比大小——共享主树每 1~2 分钟被合流推进一次，
+        /// 这条门 2026-09-22 就是这么假红过 3 条（4174 vs 4230），见批次台账 §6.30 / §6.39。
+        var census: ComplexityCensus
     }
 
     static let cacheStore = ScanCacheStore()
@@ -90,6 +94,9 @@ class SelfScanHarnessCase: XCTestCase {
         try await Self.cacheStore.value {
             let root = Self.repoRoot
             let code = try await FileSystemCodeAnalyzer().analyze(root: root, options: .default)
+            // 独立普查与 `code` 贴在一起取：这条门比的是"分析器数到多少函数 vs 自己走一遍树
+            // 数到多少函数"，两次走树之间只要有一次并发合流推进了 main，比的就是两棵不同的树。
+            let census = try await Self.measureComplexityCensus()
             let git = try await ShellGitAnalyzer().analyze(repositoryURL: root)
             // 紧贴 git 分析取真值：晚一步取，就等于拿两个 HEAD 比大小。
             let truth = try Self.measureGitTruth()
@@ -104,7 +111,7 @@ class SelfScanHarnessCase: XCTestCase {
 
             return SelfScan(code: code, git: git, logs: logs,
                             dependencies: dependencies, coverage: coverage, health: health,
-                            gitTruth: truth)
+                            gitTruth: truth, census: census)
         }
     }
 
@@ -213,7 +220,13 @@ class SelfScanHarnessCase: XCTestCase {
     /// 这是为了复核一句要进汇报的话："20 个函数圈复杂度 ≥ 16"。
     /// `topComplexFunctions` 被 `prefix(20)` 截断过，所以它的条数既可能是巧合，
     /// 也可能是"只数了榜单"——只有去截断之外数才知道。
+    /// 断言用的入口：**返回快照里那份普查**，不再自己走第二遍树。
     func complexityCensus() async throws -> ComplexityCensus {
+        try await selfScan().census
+    }
+
+    /// 真正取数的那一个。只许被 `make()` 在快照里调一次。
+    static func measureComplexityCensus() async throws -> ComplexityCensus {
         let files = await SourceTreeScanner(options: .default).scan(root: Self.repoRoot).files
         let all = files.map { ComplexityEngine.functions(in: $0) }.flatMap { $0 }
         let complexities = all.map(\.complexity)

@@ -96,6 +96,18 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     /// 归一化行数触到窗口上限、后半段克隆不参与检测的文件数。
     var duplicateFilesHittingLineCap: Int? = nil
 
+    /// 榜外（被明细榜单的 20 块上限切掉、但**参与重复率分子**）那些块的**可点名坐标**（RD-52）。
+    ///
+    /// 存在理由：这些坐标原先只活在 `scanLimitations` 的中文句子里，而且**同一串在一份报告里
+    /// 印两遍**（口径句一遍、扫描边界句一遍），单条实测长达 2,407 个字符。
+    /// 读 JSON 的人（含 AI 调用方）要定位"到底是哪几块"仍然得解析散文 ——
+    /// 这正是 RD-48 刚消灭过的形状，在坐标这一格复活了。
+    /// 现在引擎那份**原样**落在这里（原始测量，不做加工），句子只点名前几条并指回本字段。
+    /// `nil` = 这份报告没有这一读数（旧报告 / 这一路没跑）；**空数组 = 榜外确实没有剩余块** ——
+    /// 两件事不许混，后者是"量过了、为零"。
+    /// **Optional 是落盘兼容要求**：非 Optional 带默认值会让旧报告整份解码失败。
+    var duplicateBlockCoordinatesOutsideBoard: [String]? = nil
+
     // MARK: 混合语言文件的分区归位读数（RD-42 · 台账卷二 §23「有写无读」那一条）
     //
     // 存在理由：`ComplexityEngine.LexIntegrity.nonCodeRegionLineCount` 从 R2 起就在算

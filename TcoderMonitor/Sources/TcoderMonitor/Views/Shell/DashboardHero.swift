@@ -243,9 +243,11 @@ struct CPUHistoryChart: View {
             // 步长走**与性能页同一把档位**（`ChartScale`），不再用 `.automatic(desiredCount: 3)`：
             // 自动档在首启那种十几秒的短窗口里只给两枚标签，且都挤在右半边
             // （交付头实拍量到中心在 47% 与 92%），左半段没有任何时间参照。
-            AxisMarks(values: .stride(by: .second,
-                                      count: ChartScale.boundedSecondsStride(windowSeconds: windowSpan),
-                                      roundLowerBound: false)) { value in
+            // 刻度表也自己给（同一个 `ChartScale`）：`.stride` 会被 Charts 丢掉域下界那一枚。
+            AxisMarks(values: ChartScale.secondsTicks(
+                            domain: timeDomain,
+                            strideSeconds: ChartScale.boundedSecondsStride(windowSeconds: windowSpan))
+                      ) { value in
                 AxisGridLine().foregroundStyle(Theme.Palette.Surface.separator)
                 AxisValueLabel(format: Self.axisTimeFormat(span: windowSpan),
                                anchor: ChartAxisEdge.anchor(for: value.as(Date.self), in: timeDomain))

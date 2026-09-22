@@ -34,6 +34,63 @@ COMMIT_TITLE = re.compile(r"^(feat|fix|docs|chore|refactor|test|perf|build|style
                           r"(\([^)]*\))?!?:")
 DATAISH = re.compile(r"(lines, Risk:|· [0-9.]+ (?:minutes|hours|days) ago ·|"
                      r"^(Latest|最新)[：:]|^[^,]*\.(swift|md|sh|py), )")
+# 第三类"是数据"：**崩溃签名**。错误日志页把崩溃报告的机器行原样铺上屏
+# （`EXC_BAD_ACCESS (SIGSEGV) · 崩溃于 …`），那是被扫仓库的日志内容，不是我们的文案。
+# 英文态不翻是对的；第一版把它算进 B，于是"要登记的句子"里混进了根本不该登记的东西。
+CRASHISH = re.compile(r"^[A-Z][A-Z_]{3,} \(")
+
+
+def commit_subjects():
+    """本仓最近的提交标题（归一化后当"数据字典"用）。
+
+    为什么查 git 而不是继续加正则：`COMMIT_TITLE` 只认 `feat|fix|docs…` 那套英文前缀，
+    而本仓有大量中文署名标题（`总工: RD-55 —— …`），它们同样是**用户数据**。
+    形状规则追不完，改问真源头：这句话是不是就是仓库里某条提交标题？
+    """
+    try:
+        out = subprocess.run(["git", "log", "-n", "800", "--format=%s"],
+                             cwd=str(repo_root()), capture_output=True, text=True, timeout=20)
+    except Exception:
+        return set()
+    if out.returncode != 0:
+        return set()
+    return {re.sub(r"[0-9]+", "#", line).strip().lower()
+            for line in out.stdout.splitlines() if len(line.strip()) >= 12}
+
+
+def looks_like_user_data(shown: str, subjects) -> bool:
+    if CRASHISH.search(shown):
+        return True
+    norm = re.sub(r"[0-9]+", "#", shown).strip().lower()
+    return any(norm == s or s in norm or (len(norm) >= 16 and norm in s) for s in subjects)
+
+
+
+def selfcheck():
+    """分类器自己的正对照 / 反对照（**已知答案的夹具**，不是跑一遍看看顺不顺眼）。
+
+    判据改了却不带夹具，就等于把"少算几句 B"变成一件没人能证伪的事。
+    """
+    empty = set()
+    cases = [
+        # (句子, 该被判成数据吗, 为什么这条值得钉)
+        ("EXC_BAD_ACCESS (SIGSEGV) · 崩溃于 objc_opt_respondsToSelector", True, "崩溃签名是日志内容"),
+        ("重复代码率低（2.3%）", False, "这是我们自己写的健康维度话术"),
+        ("窗口内累计", False, "列头是我们的文案，不是数据"),
+        ("总工: RD-55 —— 取证新鲜度守卫不许要求每棵树都自己拍过图", True, "提交标题＝用户数据"),
+    ]
+    # 归一化把连续数字压成**一个** `#`（`RD-55` → `rd-#`），夹具要按尺子的口径写，不是按肉眼看到的写。
+    subjects = {"总工: rd-# —— 取证新鲜度守卫不许要求每棵树都自己拍过图".lower()}
+    failed = 0
+    for text, want, why in cases:
+        got = bool(DATA_SHAPE.search(text) or COMMIT_TITLE.match(text)
+                   or DATAISH.search(text) or looks_like_user_data(text, subjects))
+        flag = "ok " if got == want else "FAIL"
+        if got != want:
+            failed += 1
+        print(f"   [{flag}] 判数据={got}（应为 {want}）{why} :: {text[:44]}")
+    print("== 自证：" + ("全部符合预期" if failed == 0 else f"{failed} 条不符 —— 分类器改了，数不许进台账"))
+    return 1 if failed else 0
 
 
 def live_dirs(argv):
@@ -88,6 +145,8 @@ def code_sites(fragment, sources):
 
 
 def main(argv):
+    if argv and argv[0] == "--selfcheck":
+        return selfcheck()
     show_all = "--all" in argv
     dirs = live_dirs([a for a in argv if a != "--all"])
     evidence = [p for d in dirs for p in sorted(d.glob("*.txt"))]
@@ -112,9 +171,11 @@ def main(argv):
                     counts[norm] += 1
                     shown.setdefault(norm, piece)
     a = [k for k in counts if hits_key(shown[k], keys)]
+    subjects = commit_subjects()
     data = [k for k in counts if k not in a
             and (DATA_SHAPE.search(shown[k]) or "/" in shown[k] or len(shown[k]) <= 4
-                 or COMMIT_TITLE.match(shown[k]) or DATAISH.search(shown[k]))]
+                 or COMMIT_TITLE.match(shown[k]) or DATAISH.search(shown[k])
+                 or looks_like_user_data(shown[k], subjects))]
     b = [k for k in counts if k not in a and k not in data]
     print(f"== 屏上正文含中文片段 {sum(counts.values())} 次 / 去重 {len(counts)} 句"
           f"（{len(evidence)} 趟，来自 {len(dirs)} 个批次）")

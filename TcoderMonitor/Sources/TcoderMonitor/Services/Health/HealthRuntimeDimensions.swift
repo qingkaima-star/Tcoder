@@ -117,8 +117,11 @@ extension WeightedHealthScorer {
 
         /// 第③态：崩溃报告读不动 ⇒ 证据**不确定**。
         /// 它既不许冒充"有崩溃证据"（那是第②态），也不许被说成"没有可扫描的日志"（那是第①态）。
+        /// ⚠ 括号里只列 `readFailedFiles` 这一本账**真的**装得下的原因（读失败的具体原因
+        /// 逐份存在 `ScannedLogFile.readFailure` 里）；"内容损坏 / 只有文件名像"是
+        /// **读成功但没产出事件证据**的那些，走 `stabilityEvidenceGaps` 另一句，两本账不许互串。
         static func unreadableCrashAdvice(reports: Int) -> String {
-            "有 \(reports) 份崩溃报告没能读出来（打不开 / 内容损坏 / 只有文件名像），"
+            "有 \(reports) 份崩溃报告没能读出来（权限不足 / 文件已消失 / 读取失败），"
                 + "崩溃证据不确定：本维度不参与本次评分，也不得读成「没有崩溃」。"
         }
 

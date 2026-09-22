@@ -224,4 +224,28 @@ extension CodeGitBorderlessTests {
                       "基座里已经没有井了 —— wellsOutsideKit 变成永真")
     }
 
+
+    /// 上面那条建议列角色扫描器的双向元测试（扫描型判据没有元测试 = 没在扫）。
+    /// 两个方向都要红过一次才算数：脏写法必须被抓、状态行与注释必须不被误判。
+    func test_scannerCatchesRawRiskRoleInAdviceButNotInStatusRows() {
+        let dirty = [(path: "Code/CodeRiskAdvice.swift", content: """
+            items.append(Item(id: "huge-file",
+                              role: Theme.Semantic.role(for: largest.risk),
+                              text: "按领域或路由拆成多个文件"))
+            // role: Theme.Semantic.role(for: legacy.risk) —— 注释里的旧写法不该被抓
+            """
+        )]
+        let hits = Self.adviceItemsWithRawRiskRole(in: dirty)
+        XCTAssertEqual(hits.count, 1, "脏写法没被抓到 ⇒ 这条判据是摆设（注释行不算命中）")
+        XCTAssertTrue(hits[0].contains("Code/CodeRiskAdvice.swift"), "命中要报得出文件：\(hits)")
+
+        let clean = [
+            (path: "Code/CodeRiskAdvice.swift", content: "role: Self.adviceRole(for: largest.risk),"),
+            (path: "Code/CodeRiskRows.swift",
+             content: "private var role: Theme.SemanticRole { Theme.Semantic.role(for: hotspot.risk) }"),
+        ]
+        XCTAssertTrue(Self.adviceItemsWithRawRiskRole(in: clean).isEmpty,
+                      "状态行与改好的建议行被一起抓 ⇒ 判据越界，下次有人就把整条删掉")
+    }
+
 }
