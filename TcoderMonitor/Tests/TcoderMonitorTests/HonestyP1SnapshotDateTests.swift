@@ -8,9 +8,15 @@ import XCTest
 ///
 /// 本文件钉两件事：
 /// ① 离线判据与「未核对」磁贴副标题必须带上**快照日期 + 距今时长**；
-/// ② 这句话只是加信息，**不得动任何判定**——尤其 `VulnerabilityEvidence.classify`
-///    是拿 `networkLookupNote.contains("失败")` 当降级判据的，新文案里混进「失败」
-///    就会把一次成功的在线核对读成降级（阈值与判据属冻结区）。
+/// ② 这句话只是加信息，**不得动任何判定**。
+///
+/// ⚠ ②的写法在 2026-09-22 被 R3 整条改过（AGENTS §8.1 给的窄口径豁免，台账 §7.2 末行点名）：
+/// 原来这里钉的是"note 里不许出现『失败』两个字，否则 `classify` 会把成功的在线核对读成降级"
+/// —— 那句**本身就是**被删掉的文案判据（`networkLookupNote.contains("失败")`），
+/// 于是每条中文都得先问它撞不撞词，方向是反的。
+/// 现在钉的是同一件事的合法形状：**补句前后 `classify` 的三个状态一个都不许动**，
+/// 而措辞含不含"失败"与状态**无关**（`testClassificationIsImmuneToWording`）。
+/// 语义一条没丢：只是"凭什么不变"从措辞换成了账本。
 final class HonestyP1SnapshotDateTests: XCTestCase {
 
     // MARK: - ① 日期必须出现在用户看到的两句离线文案里
@@ -159,8 +165,17 @@ final class HonestyP1SnapshotDateTests: XCTestCase {
         XCTAssertTrue(report.networkLookupNote.contains("未联网核对"), report.networkLookupNote)
         XCTAssertTrue(report.networkLookupNote.contains(DependencySnapshot.asOfText),
                       "报告里的离线说明必须带上快照日期那一句：\(report.networkLookupNote)")
-        XCTAssertFalse(report.networkLookupNote.contains("失败"),
-                      "补进去的句子不许触发降级判据：\(report.networkLookupNote)")
+        // 这一行原来钉的是「补进去的句子不许出现『失败』，否则触发降级判据」——
+        // 那句判据（读中文里有没有"失败"）已随 RD-13 删除，约束本身换成**状态不许被措辞改动**：
+        XCTAssertEqual(VulnerabilityEvidence.classify(report), .unchecked,
+                       "离线一条都没核对成 ⇒ 只能是未核对")
+        var withExtraWording = report
+        withExtraWording.networkLookupNote += "；OSV：本次有包查询失败"
+        XCTAssertEqual(VulnerabilityEvidence.classify(withExtraWording), .unchecked,
+                       "措辞里出现「失败」也不再授权任何状态（这自由度是删掉文案判据之后才有的）："
+                    + withExtraWording.networkLookupNote)
+        XCTAssertEqual(VulnerabilityEvidence.classify(notePatched(report)),
+                       VulnerabilityEvidence.classify(report), "补句（再追加一次日期）不许改状态")
     }
 
     // MARK: - 夹具
