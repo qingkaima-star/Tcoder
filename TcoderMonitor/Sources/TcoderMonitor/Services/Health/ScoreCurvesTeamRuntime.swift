@@ -111,23 +111,23 @@ extension HealthCurves {
     /// `detail` 由 `HealthCurves.joined` 限到 60 字（评分卡那一行放不下长句），
     /// 所以**"证据不足"那几句不在这里**，在 `WeightedHealthScorer` 的 recommendations 里。
     ///
-    /// ⚠️ **`totalLinesScanned == 0` 那一支（85 分 + 「按默认值计」）在生产路径上不可达**
-    /// （WS-R9 实测，工单靶子 2 的结案）：唯一调用方 `HealthRuntimeDimensions.stabilityOutcome`
-    /// 先判 `logs.totalLinesScanned > 0`，不满足就整维缺席并把原因写进建议；
-    /// 真子进程同形状实测 —— `score <夹具> --log=<0 字节文件>` 打的是
-    /// 「缺席维度… 运行稳定性 — 未发现可读的日志文件。」，综合分与"完全没日志"一字不差（66）。
-    /// ⇒ **它是死支，不是一个已修掉的扣分缺陷**；建议下一轮整块删除或改成断言级。
-    /// 本流没有自己删它，两个理由：① 别的流的单测
-    /// （`HealthScoreCurvesTests+ActivityAndNarrative.testStabilityNeverFakesUnscannedLogsAsPerfect`）
-    /// 直接拿 `totalLinesScanned: 0` 敲这一支并断言 detail 措辞，改成 `assertionFailure`
-    /// 等于把别人的用例改成崩溃；② 判死代码要先查 stash 与重复实现（AGENTS §7），删归总工。
-    /// 取而代之留了一条**可达性守卫**（`ScoreWordingTests`）：guard 一变没、第二调用点一出现就红。
+    /// ⚠️ **原先那一支（`totalLinesScanned == 0 → 85 分 + 「未扫描到运行日志，本维度按默认值计」`）
+    /// 已在 R9b §1 整块删除**（台账 RD-29 靶子 2 的结案，工单 §1「删归 R9b」）：
+    /// 唯一调用方 `HealthRuntimeDimensions.stabilityOutcome` 在**问曲线之前**就判
+    /// `logs.totalLinesScanned > 0`，零行时整维缺席并把原因写进建议，压根不进来这里。
+    /// R9 那一轮只是把它钉成"不可达"（`ScoreWordingTests` 的可达性守卫 + 真子进程实测），
+    /// 因为那时还查不清"有没有第二处实现 / 那条不变式还有别人测吗"（AGENTS §7 判死代码的规矩）。
+    /// 现在两件事都查过了：`git stash list` 无相关条目、全仓无第二处 `totalLinesScanned == 0` 的
+    /// 占位实现、断言它的那条用例（`HealthScoreCurvesTests+ActivityAndNarrative`）
+    /// 已改成**断言级**（零行 ⇒ 打分器整维缺席 + 曲线本体不许再有默认分），不是删掉了事。
+    ///
+    /// ⚠️ 删掉之后**这里不再有任何"没扫到日志"的兜底**：拿 `totalLinesScanned: 0` 直接敲曲线
+    /// 会得到"每千行日志 0 个错误 = 100 分"那种更坏的东西。所以"不许凭空给分"这条不变式
+    /// 的全部承重都压在调用点那两道 guard 上（`totalLinesScanned > 0` 与证据下限），
+    /// 由 `ScoreWordingTests` 与 `ScoreEvidenceFloorTests` 两边一起钉着 ——
+    /// 动了 guard、加了第二个调用点、或把「按默认值计」那句写回来，都会当场红。
     static func stability(errorsPerKiloLogLines: Double, crashCount: Int, fatalCount: Int,
                           exceptionCount: Int, totalLinesScanned: Int) -> CurveResult {
-        if totalLinesScanned == 0 {
-            // 死支（见上面那段）：没扫到日志就不假装满分，也不假装零分。
-            return CurveResult(score: 85, detail: "未扫描到运行日志，本维度按默认值计", risk: .low)
-        }
         let base = ScoreCurve.piecewise(Swift.max(0, errorsPerKiloLogLines), through: [
             (x: 0, score: 100), (x: 0.5, score: 92), (x: 1.5, score: 78), (x: 3, score: 58),
             (x: 6, score: 32), (x: 12, score: 12), (x: 25, score: 0)
