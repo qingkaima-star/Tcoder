@@ -216,7 +216,8 @@ final class VueTsRecognitionGuardTests: XCTestCase {
         "unbalancedExpressions", "endsInsideString", "endsInsideExpression",
         "untrustedDepthLineCount", "nestedDepthTruncatedCount", "vueRegionFallback",
         "nestedFunctionCount", "scriptCommentRatio", "isControlFlowPosition",
-        "isReservedAfterPrefix", "detectVueRegions",
+        "isReservedSignatureName",   // RD-38：原 `isReservedAfterPrefix` 是第二处入口，已并入唯一入口
+        "detectVueRegions",
     ]
 
     /// 扫 `Tests/**` 全部 Swift 文件，剥掉注释与字符串后收"作为代码出现的符号"多重集。

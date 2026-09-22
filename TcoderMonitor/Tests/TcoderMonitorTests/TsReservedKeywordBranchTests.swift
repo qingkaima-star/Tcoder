@@ -156,9 +156,47 @@ final class TsReservedKeywordBranchTests: XCTestCase {
         XCTAssertEqual(positions("  box.if == other.if", "if"), [false, false], "点号后的 if 一个都不许算")
         XCTAssertEqual(positions("  guardElse(if: x)", "if"), [false], "标签位的 if 不许算")
         XCTAssertEqual(positions("  case .a:", "case"), [true], "case 后跟模式不是冒号标签")
-        XCTAssertTrue(ComplexityEngine.Scan.isReservedAfterPrefix(".if"), ".if 必须被认成保留字")
-        XCTAssertTrue(ComplexityEngine.Scan.isReservedAfterPrefix("if"))
-        XCTAssertFalse(ComplexityEngine.Scan.isReservedAfterPrefix(".render"), "正常方法名不许被挡")
-        XCTAssertFalse(ComplexityEngine.Scan.isReservedAfterPrefix("ifLet"), "关键字前缀的标识符不许被挡")
+        // RD-38：这道过滤原来有两处（这里曾叫 `Scan.isReservedAfterPrefix`），
+        // 现在唯一入口是 `FunctionRecognition.swift` 里的 `ComplexityEngine.isReservedSignatureName`，
+        // 四条断言原样搬过来 —— 语义一字未改：含"只剥一个前导点"与"关键字前缀不许被挡"两条反例。
+        XCTAssertTrue(ComplexityEngine.isReservedSignatureName(".if"), ".if 必须被认成保留字")
+        XCTAssertTrue(ComplexityEngine.isReservedSignatureName("if"))
+        XCTAssertFalse(ComplexityEngine.isReservedSignatureName(".render"), "正常方法名不许被挡")
+        XCTAssertFalse(ComplexityEngine.isReservedSignatureName("ifLet"), "关键字前缀的标识符不许被挡")
+        // 反例补一条：内部点不许剥（`obj.if` 是成员链的一部分，不是 `.if`）
+        XCTAssertFalse(ComplexityEngine.isReservedSignatureName("obj.if"),
+                       "只剥**前导**一个点；把内部点也剥掉就会误杀真实成员名")
+    }
+
+    /// RD-38 的结构钉：**"签名名字能不能收下"这件事只许有一个入口文件**。
+    ///
+    /// 为什么钉"文件"而不是钉"次数"：`isReservedName(` 在唯一入口内部本来就要被调两次
+    /// （原样一次、剥点一次），数次数会得到 3 而让人以为没收干净。
+    /// 真正的病是**第二个文件里再长出一个包装**（R2 那次就是因为不能改 R1 的文件才就地补的），
+    /// 所以断言是：`Sources/**` 里凡出现 `isReservedName(` 的行，**必须全部**在
+    /// `FunctionRecognition.swift` 里。少一条 = 判据空转，多一个文件 = 当场点名是谁。
+    func testReservedNameFilterLivesInExactlyOneFile() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let sources = packageRoot.appendingPathComponent("Sources")
+        let enumerator = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)
+        let swiftFiles = (enumerator?.compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" } ?? [])
+        XCTAssertFalse(swiftFiles.isEmpty, "扫描面为空 —— 这条断言不作数")
+
+        var hitsByFile: [String: Int] = [:]
+        for url in swiftFiles {
+            guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            // 只数**代码行**：讲这段历史的注释里出现了四次那个旧名字，剥注释才有牙。
+            let codeLines = text.components(separatedBy: "\n")
+                .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            let count = codeLines.filter { $0.contains("isReservedName(") }.count
+            if count > 0 { hitsByFile[url.lastPathComponent] = count }
+        }
+        // 钉的是"**只有一个文件**"，不是次数：定义那一行自己也含 `isReservedName(`，
+        // 所以次数天然要 +1（第一版按 2 写就被真实值 3 判红了一次 —— 那是我算错，不是有人长出来）。
+        XCTAssertEqual(Set(hitsByFile.keys), ["FunctionRecognition.swift"],
+                       "保留字过滤又长出第二个入口文件了：\(hitsByFile) —— 只许 `isReservedSignatureName` 调它")
+        XCTAssertGreaterThanOrEqual(hitsByFile.values.reduce(0, +), 2,
+                                    "一处都没扫到 ⇒ 扫描面坏了，这条不算通过")
     }
 }

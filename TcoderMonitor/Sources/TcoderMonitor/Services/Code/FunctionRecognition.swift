@@ -38,7 +38,11 @@ extension ComplexityEngine {
         let name = functionName(from: match, text: text, pattern: pattern)
         // 原实现在这里 `continue`：带 namePrefix 的 pattern 捕获组为空就不是命中
         if name.isEmpty { return nil }
-        if isReservedName(name) { return nil }
+        // RD-09 + RD-38：**这里曾经有两处过滤**（这一处看不到 `.` 前缀，
+        // `FunctionScanning` 那头自己补了一处 `isReservedAfterPrefix`），
+        // 合流之后同一件事有两个入口 —— 第三个改的人只会看到其中一个。
+        // 现在收成一处：签名名字的"能不能收下"只由本函数判（RD-38 的落点）。
+        if isReservedSignatureName(name) { return nil }
         // 名字之前必须真的有什么：注解、修饰符或返回类型。
         // cStyle 的返回类型组是 (?:…) 非捕获的，拿不到「组 2」，所以这里直接用
         // 「组 1 之前的前缀」判定：前缀为空说明这是 `foo(bar)` 之类的裸调用行。
@@ -127,6 +131,18 @@ extension ComplexityEngine {
             if typeDeclarationKeywords.contains(word) { sawDeclaration = true }
         }
         return sawDeclaration && !sawDefinition
+    }
+
+    /// 签名命中之后、正式收下之前的**唯一**一道名字过滤（RD-38 收口点）。
+    ///
+    /// 为什么要剥一个 `.`：`jsMethod` / `jsObjectMethod` 用 `namePrefix: "."` 把成员名拼成
+    /// `.name`，于是 `if (x) {` 会被读成一个名叫 `.if` 的"函数"。
+    /// 只剥**一个**前导点（不碰 `@`、不碰内部点）：`obj.if` 这种成员链上的 `if`
+    /// 是合法名字的一部分，历史上 R2 的那处副本也只剥一个点 —— 语义一字未动，只是搬回唯一入口。
+    static func isReservedSignatureName(_ name: String) -> Bool {
+        if isReservedName(name) { return true }
+        guard name.hasPrefix(".") else { return false }
+        return isReservedName(String(name.dropFirst()))
     }
 
     static func isReservedName(_ name: String) -> Bool {
