@@ -124,9 +124,12 @@ enum CLIScoreText {
     /// `CoverageDisplayShape.statementParts`）：CLI 不另写一份中文 —— 那是第二把尺子，
     /// 与上面 `regionCaliberLines` 复用 `MixedLanguageRegionCaliber.note` 同一条纪律。
     /// 三态由那个装配口负责：字段缺席 ⇒ 只说「未统计」；统计过且没切 ⇒ **一行都不打**。
+    /// 这里刻意**不加任何前缀字面量**：`LocalizationGuardTests` 有一条「未登记中文串 19」的
+    /// 只减不增棘轮，再造一个前缀标签就是给它添债（连注释里都不抄那个串，防的是尺子按引号配对）；
+    /// 而那两句自己开头就写着「另有 N 份未合并…」「⚠ 扫描面不完整…」，不需要第二个标签。
     static func coverageAccountingLines(_ report: ProjectReport) -> [String] {
         guard let coverage = report.coverage, let note = coverage.boardAccountingNote else { return [] }
-        return ["覆盖率账：\(note)"]
+        return [note]
     }
 
     // MARK: - 首行：总体
