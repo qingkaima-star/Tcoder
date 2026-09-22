@@ -179,7 +179,13 @@ final class CoverageAnalyzerTests: XCTestCase {
         XCTAssertFalse(metrics.hasData, "被挡住的那份报告不该被算成扫到了数据")
 
         let note = MissingDimensionReason.testingAbsence(coverage: metrics) ?? ""
-        XCTAssertTrue(note.contains("个目录没能读取"), "扫描面不完整必须一起上屏：\(note)")
+        // 判据没变（**扫描面不完整必须一起上屏**），只是那句话现在由 §6.1 一个形状生产：
+        // 口径从"另有 N 个目录没能读取"合并成"…N 个目录读不动（权限或已消失）"，
+        // 两类截断（深度 / 40 份上限 / 读不动）不再各造一套说法。
+        XCTAssertTrue(note.contains("读不动"), "扫描面不完整必须一起上屏（§6.1 那句现在真有读者）：\(note)")
+        XCTAssertEqual(metrics.unexaminedDirectories, ["locked"],
+                       "没看的目录要逐条给稳定坐标，一行摘要不算台账")
+        XCTAssertFalse(metrics.absenceClaimIsSound, "有目录没看 ⇒ \"该项目没有报告\"这句不成立")
         XCTAssertTrue(note.hasPrefix("该项目没有产出覆盖率报告"),
                       "前半句仍是那句结论，后半句才补上我们没看完：\(note)")
     }

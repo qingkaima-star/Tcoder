@@ -115,6 +115,16 @@ extension CoverageMetrics {
         return "另有 \(droppedByCap) 份未合并（逐条点名见 undisplayedReports）"
     }
 
+    /// §6.1 那几格合起来的那句**产品侧披露**（唯一生产者）：
+    /// 健康分的"这一维为什么缺"那句就拼在它后面 —— 有了它，`unmeasuredScope` /
+    /// `droppedByCap` / `undisplayedReports` 三格才算**有读者**（RD-34 钉的是"有写无读"）。
+    var displayDisclosureText: String? {
+        var parts: [String] = []
+        if let unmeasuredScope { parts.append(unmeasuredScope) }
+        if let droppedByCap, droppedByCap > 0 { parts.append(capDisclosureText) }
+        return parts.isEmpty ? nil : parts.joined(separator: "；") + "。"
+    }
+
     /// "这个项目到底有没有覆盖率报告"这句话成不成立。
     /// **上限/深度/读不动任一命中时不成立** —— RD-26 的病根就是把"我没看"说成"这里没有"。
     var absenceClaimIsSound: Bool {
