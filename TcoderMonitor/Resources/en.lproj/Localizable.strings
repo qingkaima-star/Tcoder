@@ -745,3 +745,9 @@
 // ── RD-42（混合语言分区归位落成字段）：口径句由数装配，一条新键 ─────────────────────
 // 这句**不进** `scanLimitations`（那条在 CLI 打成「未量准 N 条」），所以它自己必须有键。
 "另有 %1$@ 行落在混合语言文件的非代码分区（template / style 与 SFC 标签行），按分区归位、不计入代码统计。" = "A further %1$@ lines sit in the non-code regions of mixed-language files (template / style and SFC tag lines); they are classified by region and left out of the code counts.";
+
+// 批次 P37：代码规模页主角读数的口径短句。
+// 它原来写的是「总行数」——和这张卡的名字一模一样，同一屏念两遍；
+// 换成卡名没交代的那件事（这个数含不含空行与注释）。守卫见
+// `PageTitleCollisionGuardTests.test_heroNoteNeverRepeatsItsOwnCardTitle`。
+"含空行与注释" = "blank lines and comments included";
