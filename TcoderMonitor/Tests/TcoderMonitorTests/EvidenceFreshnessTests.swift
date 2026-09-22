@@ -39,9 +39,30 @@ final class EvidenceFreshnessTests: XCTestCase {
 
     struct Row {
         var pages: [String]
+        var batch: String
         var head: String
         var paths: [String]
     }
+
+    /// 一行**实际要查哪些页的图**。
+    /// "全九页 · 外壳与主题"那种行管的是公共基座：它自己没有单独成图的页，
+    /// 于是反过来要求它引用的那一批**九页齐全** —— 这是更强的说法，也才是它真正的意思。
+    /// 抽成函数是因为**打印的格数必须与实际查的格数同源**：
+    /// 上一版直接拿 `row.pages.count` 去乘 4，公共基座那一行就少报了 8 格。
+    static func expectedShots(for row: Row) -> [String] {
+        row.pages.contains(where: { $0.contains("全九页") })
+            ? ninePages
+            : row.pages.filter { ninePages.contains($0) }
+    }
+
+    /// 一套实拍要齐四格：深浅 × 顶尾。缺哪一格就报哪一格。
+    struct EvidenceGap: Equatable {
+        var page: String
+        var batch: String
+        var what: String
+    }
+
+    static let evidenceModes = ["light-top", "light-tail", "dark-top", "dark-tail"]
 
     // MARK: - 解析（纯函数，元测试直接喂合成 markdown）
 
@@ -76,7 +97,10 @@ final class EvidenceFreshnessTests: XCTestCase {
                 .map(String.init)
                 .filter { !$0.isEmpty && !$0.contains("\u{2026}") }
             guard !paths.isEmpty else { continue }
-            out.append(Row(pages: pages, head: String(line[headRange]), paths: paths))
+            let batch = cells.count >= 2
+                ? cells[1].replacingOccurrences(of: "`", with: "").trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+                : ""
+            out.append(Row(pages: pages, batch: batch, head: String(line[headRange]), paths: paths))
         }
         return out
     }
@@ -148,39 +172,108 @@ final class EvidenceFreshnessTests: XCTestCase {
         print("【实拍新鲜度】表里 \(found.count) 行、覆盖 \(Set(found.flatMap(\.pages)).count) 页 → 过期 0 行")
     }
 
+    /// 表里每行说的"实拍过"到底成不成立：四格图都在、且每格的 `PROVENANCE` 里
+    /// 记的 rev 就是表里写的那个头。
+    ///
+    /// 立它的理由：口径写的是"**深浅两态**九页全部实拍复核通过"，
+    /// 而"某批只拍了顶拍"或"表里的头抄错了"这两种情况**都不体现在行数上**——
+    /// 数得出 9 行、数不出 36 格。注入 `exists` / `provenanceRev` 是为了让这条判据
+    /// 自己能被合成输入双向测到（不然它只能靠真盘上恰好有什么）。
+    static func evidenceGaps(in rows: [Row],
+                             root: URL,
+                             exists: (URL) -> Bool,
+                             provenanceRev: (URL) -> String?) -> [EvidenceGap] {
+        var gaps: [EvidenceGap] = []
+        for row in rows {
+            // 只点名九页：像"全九页 · 外壳与主题"那种行管的是**公共基座**，
+            // 它自己没有单独成图的页，证据就是它所引用的那批九页图。
+            let shots = expectedShots(for: row)
+            if shots.isEmpty {
+                gaps.append(EvidenceGap(page: row.pages.joined(separator: "/"), batch: row.batch,
+                                        what: "这一行的页名都不在九页名册里 ⇒ 它其实一格也没在查"))
+                continue
+            }
+            for page in shots {
+                for mode in evidenceModes {
+                    let dir = root.appendingPathComponent(row.batch).appendingPathComponent(mode)
+                    let shot = dir.appendingPathComponent("\(page).png")
+                    if !exists(shot) {
+                        gaps.append(EvidenceGap(page: page, batch: row.batch,
+                                                what: "缺 \(mode)/\(page).png"))
+                    }
+                    let recorded = provenanceRev(dir.appendingPathComponent("PROVENANCE"))
+                    if let recorded, recorded != row.head {
+                        gaps.append(EvidenceGap(page: page, batch: row.batch,
+                                                what: "\(mode) 的 PROVENANCE rev=\(recorded) 与表里的头 \(row.head) 不符"))
+                    } else if recorded == nil, exists(dir) {
+                        gaps.append(EvidenceGap(page: page, batch: row.batch,
+                                                what: "\(mode) 没有 PROVENANCE —— 无从证明这一格是在哪个头上拍的"))
+                    }
+                }
+            }
+        }
+        return gaps
+    }
+
+    func test_everyRowActuallyHasAllFourShotsAtTheHeadItClaims() throws {
+        let url = Self.repoRoot.appendingPathComponent(Self.catalogPath)
+        let rows = Self.rows(in: try String(contentsOf: url, encoding: .utf8))
+        XCTAssertFalse(rows.isEmpty, "表读不出行 ⇒ 下面这条会空转")
+        let evidenceRoot = Self.repoRoot.appendingPathComponent(".scratch")
+        let gaps = Self.evidenceGaps(in: rows, root: evidenceRoot,
+                                     exists: { FileManager.default.fileExists(atPath: $0.path) },
+                                     provenanceRev: { file in
+            guard let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+            for line in text.split(separator: "\n") {
+                if line.hasPrefix("rev=") { return String(String(line.dropFirst(4)).prefix(7)) }
+            }
+            return nil
+        })
+        XCTAssertTrue(gaps.isEmpty,
+                      "逐页账里有 \(gaps.count) 格证据不成立（口径是深浅 × 顶尾四格齐全，且 rev 对得上）：\n"
+                        + gaps.map { "\($0.page) @ \($0.batch)：\($0.what)" }.joined(separator: "\n"))
+        let shots = rows.reduce(0) { $0 + Self.expectedShots(for: $1).count } * Self.evidenceModes.count
+        print("【实拍格数】表里 \(rows.count) 行 → 实际查 \(shots) 格，全在、rev 全对")
+    }
+
     // MARK: - 元测试：两个方向都要红过一次
 
-    func test_freshnessRulerCatchesStaleRowsAndMissingPages() {
-        let table = """
+    /// 合成表：两行、第二行管两页。拆成两条元测试共用（50 行的函数上限在这儿）。
+    static let syntheticTable = """
         | 页 | 最近一次实拍 | 此后依赖面 |
         |---|---|---|
         | 总览 | `evidence-abc1234-x/` | 无（`git log abc1234..HEAD -- TcoderMonitor/Sources/TcoderMonitor/Views/DashboardView.swift` 空）|
         | Git 洞察 / 贡献者 | `evidence-def5678-y/` | 无（`git log def5678..HEAD -- TcoderMonitor/Sources/TcoderMonitor/Design/ChartTokens.swift` 空）|
         """
-        let found = Self.rows(in: table)
+
+    /// 解析器自己：行、页名拆分、以及**省略号写法整行不作数**。
+    func test_tableParserReadsRowsAndRefusesAbbreviatedPaths() {
+        let found = Self.rows(in: Self.syntheticTable)
         XCTAssertEqual(found.count, 2, "两行都该解析出来（第二行管两页）")
         XCTAssertEqual(found[1].pages, ["Git 洞察", "贡献者"], "一行管多页时页名要拆开")
         XCTAssertEqual(found[1].paths,
                        ["TcoderMonitor/Sources/TcoderMonitor/Design/ChartTokens.swift"])
+        XCTAssertEqual(found[1].batch, "evidence-def5678-y", "批次名要留着，查格数靠它")
 
-        // ① 依赖面动过 ⇒ 必须判过期。
+        // 省略号写法不成判据：留着它，判据会去查一个不存在的路径（永远为空、永远绿）；
+        // 整行不作数，那一页就从名册里消失、当场判红。
+        let abbreviated = Self.rows(
+            in: "| 总览 | x | 无（`git log 1f3ac55..HEAD -- …DashboardHero.swift` 空）|")
+        XCTAssertTrue(abbreviated.isEmpty, "省略号路径必须让整行不作数：\(abbreviated)")
+        XCTAssertFalse(Self.pagesWithoutRows(in: found).isEmpty,
+                       "合成表只覆盖 3 页，名册必须报出缺的那些页")
+    }
+
+    /// 过期判据两个方向：动了的必须抓到，谁都没动的不许乱咬。
+    func test_staleRulerFlagsOnlyRowsWhoseDependenciesMoved() {
+        let found = Self.rows(in: Self.syntheticTable)
         let touched: (String, [String]) -> [String] = { head, paths in
-            head == "def5678" ? ["\(paths.first ?? "?") 改了"] : []
+            head == "def5678" ? [paths.first ?? "?"] : []
         }
         let expired = Self.stale(found, log: touched)
-        XCTAssertEqual(expired.count, 1, "只有那一行该被判过期")
+        XCTAssertEqual(expired.count, 1, "只有那一行该被判过期：\(expired)")
         XCTAssertTrue(expired[0].contains("Git 洞察"), "报的要能指到页：\(expired)")
-
-        // ② 谁都没动 ⇒ 不许误报。
         XCTAssertTrue(Self.stale(found, log: { _, _ in [] }).isEmpty,
                       "全绿的仓库被判过期 ⇒ 这条判据会逼人删掉它")
-
-        // ③ 省略号写法不成锚：那行必须**不被解析**，于是那一页在名册里消失 ⇒ 判红。
-        let abbreviated = Self.rows(in: "| 总览 | x | 无（`git log 1f3ac55..HEAD -- …DashboardHero.swift` 空）|")
-        XCTAssertTrue(abbreviated.isEmpty,
-                      "省略号写法必须**整行不作数**：留着它，判据会去查一个不存在的路径"
-                    + "（永远为空、永远绿）；整行不作数，那一页就从名册里消失、当场判红")
-        XCTAssertFalse(Self.pagesWithoutRows(in: Self.rows(in: table)).isEmpty,
-                       "合成表只覆盖 3 页，名册必须报出缺的那些页")
     }
 }
