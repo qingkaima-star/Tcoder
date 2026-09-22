@@ -193,7 +193,9 @@ struct CodeDuplicationSummarySection: View {
                                 caption: "的代码行落在重复块内",
                                 role: Theme.Semantic.role(for: code.overallRisk))
                     DataBandSeparator()
-                    DataReadout(label: "重复块", value: NumberFormat.grouped(code.duplicatedBlocks.count),
+                    // 标签里的「榜内」与这串数字同源：`duplicatedBlocks` 是封顶榜，不是总数（RD-17）。
+                    DataReadout(label: CodeBoardTruth.duplicationSlotLabel(code),
+                                value: NumberFormat.grouped(CodeBoardTruth.duplicationBoardCount(code)),
                                 unit: "个")
                     DataBandSeparator()
                     DataReadout(label: "超长函数", value: NumberFormat.grouped(code.longFunctions),

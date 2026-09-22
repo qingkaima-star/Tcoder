@@ -44,11 +44,13 @@ extension CodeRiskAnalysis {
         } else if code.duplicationRatio > 0 {
             items.append(Item(
                 id: "duplication-low", label: "重复代码", icon: .duplicate, role: Theme.Semantic.neutral,
-                text: localizedFormat("重复率 %1$@（约 %2$@ / %3$@ 行）仍在低档：%4$@ 个重复块中最长 %5$@ 行，暂不需要专门重构，改到相关代码时顺带去重即可。",
+                // 「榜内 %4$@ 个」是刻意写出来的限定词：这一串是**封顶榜的条数**，
+                // 不是"这个仓库有这么多重复块"（RD-17）。
+                text: localizedFormat("重复率 %1$@（约 %2$@ / %3$@ 行）仍在低档：榜内 %4$@ 个重复块中最长 %5$@ 行，暂不需要专门重构，改到相关代码时顺带去重即可。",
                                       NumberFormat.percent(code.duplicationRatio, precision: 1),
                                       NumberFormat.grouped(duplicatedLines),
                                       NumberFormat.grouped(code.codeLines),
-                                      NumberFormat.grouped(code.duplicatedBlocks.count),
+                                      NumberFormat.grouped(CodeBoardTruth.duplicationBoardCount(code)),
                                       NumberFormat.grouped(longestBlock))
             ))
         }
@@ -67,13 +69,16 @@ extension CodeRiskAnalysis {
                     + "\(CodeViewFormat.fileName($0.filePath)):\(NumberFormat.grouped($0.startLine))）"
             }
             let highest = critical.map(\.cyclomaticComplexity).max() ?? 0
-            let lowestOnBoard = code.topComplexFunctions.map(\.cyclomaticComplexity).min() ?? 0
             items.append(Item(
                 id: "complexity-critical", label: "严重复杂度", icon: .riskSevere, role: Theme.Semantic.critical,
                 text: "\(NumberFormat.grouped(critical.count)) 个函数被判为严重复杂度，"
                     + "最高圈复杂度 \(NumberFormat.grouped(highest))：" + named.joined(separator: "、")
                     + "。先去掉嵌套：校验与异常分支改成提前返回，再把成组的分支换成策略表/多态；"
-                    + "先把分支数压到上榜函数的最低水位 CC \(NumberFormat.grouped(lowestOnBoard)) 以下。"
+                    // 「压到上榜函数的最低水位以下」是一枚**从榜里长出来的目标**：榜只留前 20 条，
+                    // 第 20 名在大仓库上可能是 CC 40 —— 照它做既出不了榜也没修掉任何东西。
+                    // 换成引擎判档的那条线（冻结常量，本处**只读不改**）：低于它就是离开高档。
+                    + "先把分支数压到 CC \(NumberFormat.grouped(FileSystemCodeAnalyzer.highFunctionComplexity)) 以下"
+                    + "（那是本工具判「高」的那条线，与榜位无关）。"
             ))
         }
 
