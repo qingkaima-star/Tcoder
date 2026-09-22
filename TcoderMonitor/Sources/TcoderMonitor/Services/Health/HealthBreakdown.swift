@@ -286,6 +286,12 @@ enum MissingDimensionReason {
         // 「没找到」与「没看到」是两件事：有目录读不动时，"没有产出报告"这句站不住，
         // 必须把扫描面不完整这件事一起说出来（`unreadableDirectoryCount == 0` 才是一句真话，
         // 而 `nil` = 那次分析根本没统计过，也不许替它下结论）。
+        // 披露口径只有一套：§6.1 那几格（`unmeasuredScope` / `droppedByCap`）由
+        // `CoverageDisplayShape` 一处生产，这里只负责接在结论后面。
+        // 旧报告没有那几格（`nil` = 没统计过，**不许**替它下结论）⇒ 退回 `unreadableDirectoryCount` 那句。
+        if let disclosure = coverage.displayDisclosureText {
+            return base + disclosure + "上面的结论只覆盖看得见的部分。"
+        }
         guard let unreadable = coverage.unreadableDirectoryCount, unreadable > 0 else { return base }
         return base + "另有 \(NumberFormat.grouped(unreadable)) 个目录没能读取（权限或已消失），"
             + "上面的结论只覆盖读得动的部分。"

@@ -18,9 +18,13 @@ final class DependencyNetworkLiveTests: XCTestCase {
     /// 所以「有一个包拿到了」并不等于「网络给力」，早停条件写成「全都拿到」。
     ///
     /// 收尾把两种结局分开，二者绝不混为一谈：
-    ///   · registry 自己都没答上（`npmShortfallDisclosed`）→ XCTSkip，并留下实测数字；
+    ///   · registry 自己都没答上（账本里 `.failed` 条数 > 0）→ XCTSkip，并留下实测数字；
     ///   · registry 自述答上了、记录里却没有在线源归因 → 归因链路断了，必须失败。
     /// 不放宽任何断言，也不放宽超时预算。
+    ///
+    /// 分界读的是**逐条状态账本**（`DependencyEvidence.ledger`），不再是那句中文说明 ——
+    /// 这里曾经是 `DependencyNetworkLookup.npmShortfallDisclosed(in: note)`，
+    /// 拿 `note.contains("npm registry 查询超过")` 一类清单判"该跳还是该红"（RD-13 的形状，已删）。
     func testOnlineRegistryLookupReturnsRealLatestVersionsForPackagesMissingFromSnapshot() async throws {
         let root = try makeDependencyProject("live-registry",
                                              files: ["package.json": DepFixture.registryPackageJSON])
@@ -69,24 +73,27 @@ final class DependencyNetworkLiveTests: XCTestCase {
                     + "数据取回来了却没写来源，属归因缺陷，不是网络抖动")
                 continue
             }
-            guard DependencyNetworkLookup.npmShortfallDisclosed(in: report.networkLookupNote) else {
-                XCTFail("\(name) 既无版本又无在线源归因，而 registry 自述没有任何包查询失败："
-                    + "说明结果被取回却没写回记录 —— 归因链路断了。最后一次 note=\(report.networkLookupNote)")
+            guard registryFailedCount(report) > 0 else {
+                XCTFail("\(name) 既无版本又无在线源归因，而账本自述没有任何一条查询失败："
+                    + "说明结果被取回却没写回记录 —— 归因链路断了。"
+                    + "最后一次 note=\(report.networkLookupNote)／失败 \(registryFailedCount(report)) 条")
                 continue
             }
             starved.append(name)
         }
         XCTAssertTrue(report.networkLookupPerformed)
 
-        // 预检可达 ≠ 现场每次都在预算内：被 registry 自述为「有包没答上」的那些，
+        // 预检可达 ≠ 现场每次都在预算内：账本里落了失败条数的那些，
         // 是网络状况而非产品缺陷 —— 跳过并留下实测痕迹，而不是留成一条会自行翻红的断言。
         if !starved.isEmpty {
             throw XCTSkip("预检可达，但 \(starved.joined(separator: "、")) 在 \(attempts) 次尝试里都没从 registry "
-                + "取回版本（registry 自述有包未答上）：\(report.networkLookupNote)")
-        }
-        if report.networkLookupNote.contains("超时") {
-            throw XCTSkip("预检可达但现场有请求超出 \(Int(DependencyNetworkLookup.requestTimeout)) 秒预算："
+                + "取回版本（账本：版本核对失败 \(registryFailedCount(report)) 条／共 \(report.totalDependencies) 条）："
                 + "\(report.networkLookupNote)")
+        }
+        // 这一分支以前靠"那句中文里有没有『超时』两个字"，现在读账本里那两个数。
+        if let lookup = report.versionLookup, lookup.attempted > lookup.checked {
+            throw XCTSkip("预检可达但有 \(lookup.attempted - lookup.checked) 次请求没拿到可用结果"
+                + "（单次预算 \(Int(DependencyNetworkLookup.requestTimeout)) 秒）：\(report.networkLookupNote)")
         }
     }
 
@@ -117,20 +124,28 @@ final class DependencyNetworkLiveTests: XCTestCase {
                        "\(secondsText(seconds)) 在线公告 \(osv.count) 条：\(listing.joined(separator: " "))")
 
         if osv.isEmpty {
-            // 空公告 + OSV 自述没查成 = 网络状况；空公告 + OSV 自述查成功了 = 结果被丢，是缺陷。
-            XCTAssertTrue(DependencyNetworkLookup.osvShortfallDisclosed(in: report.networkLookupNote),
+            // 空公告 + 账本说明确实有失败 = 网络状况；空公告 + 账本一条失败都没记 = 结果被丢，是缺陷。
+            // （旧写法读 `osvShortfallDisclosed(in: note)` 那句中文，已随 RD-13 的收尾删掉。）
+            let failures = osvFailedCount(report)
+            XCTAssertTrue(failures > 0,
                           "OSV 自述在线查询已完成，却一条公告都没给出（\(attempts) 次尝试）："
-                          + "结果被取回却没落进报告，属归因/聚合缺陷。note=\(report.networkLookupNote)")
+                          + "结果被取回却没落进报告，属归因/聚合缺陷。"
+                          + "note=\(report.networkLookupNote)／漏洞核对失败 \(failures) 条")
             throw XCTSkip("预检可达，但 OSV 在 \(attempts) 次尝试里都有请求没答上："
-                + "\(report.networkLookupNote)")
+                + "漏洞核对失败 \(failures) 条／共 \(report.totalDependencies) 条 · \(report.networkLookupNote)")
         }
         for advisory in osv {
             XCTAssertTrue(["GHSA-", "PYSEC-", "CVE-", "RSEC-", "GO-", "META-"].contains { advisory.id.hasPrefix($0) },
                           "公告编号要像真实 OSV id：\(advisory.id)")
             XCTAssertFalse(advisory.affectedPackages.isEmpty, "\(advisory.id) 必须点名受影响坐标")
             XCTAssertFalse(advisory.summary.isEmpty, "\(advisory.id) 摘要不得为空")
-            XCTAssertTrue(advisory.affectedPackages.allSatisfy { $0.contains("@") },
-                          "受影响坐标要带版本：\(advisory.affectedPackages)")
+            // 坐标自 R3 起是**规范形状** `生态|包名|版本`（存储层用它回填，展示层才还原成
+            // `lodash@4.17.15`）。这条用例管的是"受影响坐标必须点到具体版本"，
+            // 与分隔符无关 ⇒ 判据改成"三段且第三段非空"。
+            XCTAssertTrue(advisory.affectedPackages.allSatisfy { coordinate in
+                let pieces = coordinate.split(separator: "|")
+                return pieces.count == 3 && !pieces[2].isEmpty && pieces[1].contains(where: { $0.isLetter })
+            }, "受影响坐标必须是 生态|包名|版本 且带版本：\(advisory.affectedPackages)")
         }
         XCTAssertTrue(osv.contains { $0.aliases.contains { $0.hasPrefix("CVE-") } },
                       "至少一条在线公告要带真实 CVE 编号")
@@ -166,5 +181,19 @@ final class DependencyNetworkLiveTests: XCTestCase {
         if report.advisories.isEmpty {
             XCTAssertFalse(report.networkLookupNote.isEmpty, "空在线结果必须注明原因：\(report.networkLookupNote)")
         }
+    }
+
+    // MARK: - 「这次红是网络状况还是产品缺陷」的结构化判据（取代已删的中文措辞清单）
+
+    /// registry 那一路失败的条数：逐条状态里 `.failed` 的条目数。
+    /// `> 0` = 数据源确实有包没答上（网络状况）；`== 0` 而记录里仍没有在线归因 = 产品缺陷。
+    private func registryFailedCount(_ report: DependencyReport) -> Int {
+        DependencyEvidence.ledger(for: report).versionStateCounts[.failed] ?? 0
+    }
+
+    /// OSV 那一路同一条判据。**包含**"发出去了、公告 id 也看见了、但详情没能展开成"的那批
+    /// （它们由 `OsvAnswerAccounting.unresolvedOsvCoordinates` 结构化地落成 `.failed`）。
+    private func osvFailedCount(_ report: DependencyReport) -> Int {
+        DependencyEvidence.ledger(for: report).vulnerabilityStateCounts[.failed] ?? 0
     }
 }

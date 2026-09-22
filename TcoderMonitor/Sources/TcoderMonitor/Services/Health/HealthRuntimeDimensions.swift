@@ -92,8 +92,12 @@ extension WeightedHealthScorer {
         switch VulnerabilityEvidence.classify(deps) {
         case .unchecked: return DimensionOutcome(curve: nil, recommendations: [uncheckedAdvice(deps)])
         case .degraded:
+            // 原因逐条点名（旧文案写死"部分包查询失败"，可"版本没解析出来"和"生态不支持"
+            // 根本不该被说成"查询失败" —— 那是另一种口径混用）。
+            let reasons = VulnerabilityEvidence.degradationReasons(deps).joined(separator: "、")
             return DimensionOutcome(curve: nil,
-                                    recommendations: ["漏洞核对未完成（部分包查询失败），依赖健康本维度暂不计分；重跑联网核对后再计。"])
+                                    recommendations: ["漏洞核对未完成（\(reasons.isEmpty ? "存在未覆盖项" : reasons)），"
+                                        + "依赖健康本维度暂不计分；补齐锁文件或重跑联网核对后再计。"])
         case .verified:
             let curve = HealthCurves.dependencyHealth(vulnerableCount: deps.vulnerableCount,
                                                       outdatedCount: deps.outdatedCount,
@@ -114,7 +118,13 @@ extension WeightedHealthScorer {
 
     private func dependencyStrengths(_ deps: DependencyReport) -> [String] {
         // 走到这里说明确实核对过，这句安全背书才有依据。
-        deps.vulnerableCount == 0 ? ["已完成漏洞核对，\(deps.totalDependencies) 个依赖零命中"] : []
+        // 背书必须带**已成功核对的条数与数据源**（RD-11）：只说"N 个依赖零命中"
+        // 与只说"没查到漏洞"是同一种懒惰 —— 读的人分不清"查过干净"和"没查"。
+        guard deps.vulnerableCount == 0 else { return [] }
+        let ledger = DependencyEvidence.ledger(for: deps)
+        let source = DependencyEvidence.sourcesPhrase(ledger)
+        return ["已完成漏洞核对，\(ledger.vulnerabilityCheckedCount)/\(ledger.totalCount) 个依赖零命中"
+            + (source.isEmpty ? "" : "（数据源：\(source)）")]
     }
 
     private func dependencyIssues(_ deps: DependencyReport) -> [String] {

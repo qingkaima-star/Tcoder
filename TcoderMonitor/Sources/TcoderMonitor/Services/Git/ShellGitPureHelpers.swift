@@ -91,7 +91,8 @@ extension ShellGitAnalyzer {
             insights.nestedCandidates = resolution.nestedCandidates
         }
         insights.branch = branch
-        insights.headSHA = headSHA
+        // 缩短只在这一处发生：上游 `rev-parse HEAD` 给全长，落盘/上屏给 `CommitIdentity` 那一把尺子的宽度。
+        insights.headSHA = CommitIdentity.abbreviated(headSHA)
         insights.remoteURL = remoteURL
         switch workingTree {
         case .dirty(let entries):

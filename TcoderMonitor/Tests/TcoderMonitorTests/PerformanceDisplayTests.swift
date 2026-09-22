@@ -37,7 +37,7 @@ final class PerformanceDisplayTests: XCTestCase {
                          threads: Int, files: Int) -> ProcessSnapshot {
         ProcessSnapshot(pid: pid, name: "p\(pid)", cpuUsage: cpu, memoryBytes: memory,
                         threadCount: threads, openFileCount: files, startTime: nil,
-                        commandLine: "/usr/bin/p\(pid)", parentPID: 1)
+                        executablePath: "/usr/bin/p\(pid)", parentPID: 1)
     }
 
     // MARK: - 三态：缺证据不给数字
