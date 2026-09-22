@@ -53,6 +53,9 @@ enum CLIScoreText {
         // 「未量准 N 条」（那条的分母就是 `scanLimitations.count`，塞进去等于把"没量准"灌虚高）。
         // 顺序由总工定：先"这一路做了什么"（台账），再"这一路的某个口径"（分区归位）。
         lines.append(contentsOf: regionCaliberLines(report))
+        // RD-50：覆盖率那本账（总数 vs 被上限切掉的）在界面上有读者之前，
+        // CLI 先用**同一个装配口**读一遍 —— 不许在这里另写一份中文。
+        lines.append(contentsOf: coverageAccountingLines(report))
 
         guard let health = report.health else {
             lines.append("没有评分结果：五路都没给出可评的输入。")
@@ -110,6 +113,20 @@ enum CLIScoreText {
     static func regionCaliberLines(_ report: ProjectReport) -> [String] {
         guard let code = report.code, let note = MixedLanguageRegionCaliber.note(code) else { return [] }
         return ["口径：\(note)"]
+    }
+
+    /// 覆盖率那本账（RD-50）：`scan` 落的 JSON 里那六格（`truncationTotalCount` /
+    /// `displayedCount` / `undisplayedCount` / `droppedByCap` / `undisplayedReports` /
+    /// `unexaminedDirectories`）在文本读数里也得有一行，否则"榜内多少 / 总多少"
+    /// 只有打开界面或解析 JSON 的人才知道。
+    ///
+    /// **复用界面那一个装配口** `CoverageMetrics.boardAccountingNote`（它自己又只逐字引
+    /// `CoverageDisplayShape.statementParts`）：CLI 不另写一份中文 —— 那是第二把尺子，
+    /// 与上面 `regionCaliberLines` 复用 `MixedLanguageRegionCaliber.note` 同一条纪律。
+    /// 三态由那个装配口负责：字段缺席 ⇒ 只说「未统计」；统计过且没切 ⇒ **一行都不打**。
+    static func coverageAccountingLines(_ report: ProjectReport) -> [String] {
+        guard let coverage = report.coverage, let note = coverage.boardAccountingNote else { return [] }
+        return ["覆盖率账：\(note)"]
     }
 
     // MARK: - 首行：总体

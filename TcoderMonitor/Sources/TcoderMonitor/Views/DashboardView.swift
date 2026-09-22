@@ -247,7 +247,7 @@ struct DashboardView: View {
                             // 原来是 `.tertiary`：这一行里是**测得值**（含测试代码占比、差值），
                             // 测得值不得用 tertiary。降到 10pt 已经足够安静了。
                             .foregroundStyle(.secondary)
-                        CopyHelpBadge(Self.coverageCaliberLine(coverage))
+                        CopyHelpBadge(DashboardCoverageHelp.text(coverage))
                     }
                     // #38：这些读数是把几份本地报告合起来算的，而报告本身是 .gitignore 挡着的
                     // 本地产物——不写「哪天生成的」，一份几天前的 lcov 就能长期冒充新鲜数据进健康分。

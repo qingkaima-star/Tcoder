@@ -361,3 +361,24 @@ struct DashboardLiveReadout: View {
     }
 }
 
+// MARK: - 覆盖率格子的 ⓘ 内容（RD-50）
+
+/// 测试覆盖率那一格 ⓘ 里的完整内容 = **口径句** + （只有真被摘掉东西时）**那本账那句**。
+///
+/// 两句都来自**既有生产者**：
+/// · 口径句 `DashboardView.coverageCaliberLine(_:)`（屏上短标签是它的前缀子串，那条判据不动）；
+/// · 账句 `CoverageMetrics.boardAccountingNote`（它自己逐字引
+///   `CoverageDisplayShape.statementParts` —— 全站唯一的披露装配口）。
+///
+/// 为什么必须有本文件这一层：`Views/DashboardView.swift` 已经**正好 400 行**
+/// （`SourcesSizeAuditTests` 的口径是「超过 400」），加不进任何一行；而把句子写在视图里
+/// 更不行 —— 那等于给同一本账造第二把尺子（工单硬线 2）。
+/// 这里只做**串接**：一个汉字的修辞都不写，`nil` 时原样返回口径句（干净扫描 ⇒ 一个字都不许多）。
+enum DashboardCoverageHelp {
+    static func text(_ coverage: CoverageMetrics) -> String {
+        let caliber = DashboardView.coverageCaliberLine(coverage)
+        guard let note = coverage.boardAccountingNote else { return caliber }
+        return caliber + "\n" + note
+    }
+}
+
