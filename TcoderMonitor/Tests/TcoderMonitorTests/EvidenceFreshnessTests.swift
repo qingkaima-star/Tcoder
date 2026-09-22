@@ -220,6 +220,18 @@ final class EvidenceFreshnessTests: XCTestCase {
         let rows = Self.rows(in: try String(contentsOf: url, encoding: .utf8))
         XCTAssertFalse(rows.isEmpty, "表读不出行 ⇒ 下面这条会空转")
         let evidenceRoot = Self.repoRoot.appendingPathComponent(".scratch")
+        // RD-55（总工改）：`.scratch/` 是 gitignore 的 ⇒ 取证产物只存在于**拍图的那棵树**。
+        // 这一格的职责是「账里声称有证据，证据就得齐、rev 就得对」，不是「每棵树都得自己拍过一遍」；
+        // 后者让任何非拍图树（别人的工作树、CI、另一台机器）门禁必红，而红的原因与当次改动无关 ——
+        // 那既不证明证据存在，也不证明它不存在，只是把一条好守卫变成落地路障。
+        // 所以：**一棵树里一份 evidence-* 都没有 ⇒ 显式跳过并点名路径**；
+        // 目录只要在，就照原样逐格钉（少一张图、rev 不符、缺 PROVENANCE 都仍然红）。
+        let hasAnyEvidence = ((try? FileManager.default.contentsOfDirectory(atPath: evidenceRoot.path)) ?? [])
+            .contains { $0.hasPrefix("evidence-") }
+        if hasAnyEvidence == false {
+            throw XCTSkip("这棵树没有取证产物（\(evidenceRoot.path) 下无 evidence-*）"
+                + " ⇒ 本条只钉「有产物就要齐」，产物生成在哪棵树不归它管")
+        }
         let gaps = Self.evidenceGaps(in: rows, root: evidenceRoot,
                                      exists: { FileManager.default.fileExists(atPath: $0.path) },
                                      provenanceRev: { file in
