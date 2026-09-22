@@ -41,6 +41,8 @@ extension ComplexityEngine {
         var codeRegionLineCount: Int = 0
         /// SFC 分区识别失败、退回旧的 `<script` 粗判掩码（RD-07 的未知态）
         var vueRegionFallback: Bool = false
+        /// 嵌套超过 `maxNestedFunctionScanDepth` 而没继续下钻的函数体数（RD-08 的边界）
+        var nestedDepthTruncatedCount: Int = 0
 
         /// 单文件口径的限制说明（聚合口径见 `CodeScanCoverage.limitationSummary`）。
         var limitations: [String] {
@@ -52,6 +54,11 @@ extension ComplexityEngine {
             if vueRegionFallback {
                 lines.append("有 .vue 文件没被识别出任何顶格 SFC 区块（`<script` 不顶格？），"
                     + "函数识别退回旧的 `<script` 粗判掩码 —— 该文件的模板区可能混进了代码统计。")
+            }
+            if nestedDepthTruncatedCount > 0 {
+                lines.append("\(nestedDepthTruncatedCount) 处函数体的嵌套深度超过 "
+                    + "\(ComplexityEngine.maxNestedFunctionScanDepth) 层，更里层的具名函数不再单列，"
+                    + "其判定并入直接外层（口径：外层那条的 CC 因此是**含嵌套累计**）。")
             }
             return lines
         }
