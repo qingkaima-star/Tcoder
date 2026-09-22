@@ -131,6 +131,46 @@ extension CoverageMetrics {
         reports.isEmpty && (unmeasuredScope?.isEmpty ?? true)
             && (droppedByCap ?? 0) == 0 && (undisplayedCount ?? 0) == 0
     }
+
+    /// 从**落盘的那几格**原样还原 §6.1 显示形状（RD-50 的接线前提）。
+    ///
+    /// 为什么能还原、也算不上第二把尺子：`CoverageDisplayShape` 由 `evaluate` 一次算出，
+    /// 再由 `CoverageAnalyzer` 逐格抄进契约（`metrics.truncationTotalCount = shape.…` 那几行），
+    /// 两侧本来同源。而上屏那一句的唯一装配口 `statementParts` 住在形状上，
+    /// 视图与 CLI 手里只有 `CoverageMetrics`（`CoverageMergeLedger` 不落盘）
+    /// ⇒ 这里把抄出去的格子**按名字接回来**，一个数都不重算、不换算、不取 `reports.count`。
+    /// ⚠️ 六格（除 `unmeasuredScope`）任一缺席 ⇒ `nil`：那一版根本没统计过。
+    ///    `unmeasuredScope` 刻意不参与缺席判定 —— 它 `nil` 的意思是「扫描面完整」，
+    ///    和「没统计」是两件事，混用就是把三态压回两态（本轮要修的那件事）。
+    var displayShapeFromFields: CoverageDisplayShape? {
+        guard let total = truncationTotalCount,
+              let displayed = displayedCount,
+              let undisplayed = undisplayedCount,
+              let dropped = droppedByCap,
+              let reportCoordinates = undisplayedReports,
+              let directories = unexaminedDirectories else { return nil }
+        return CoverageDisplayShape(
+            truncationTotalCount: total,
+            displayedCount: displayed,
+            undisplayedCount: undisplayed,
+            undisplayedReports: reportCoordinates,
+            unexaminedDirectories: directories,
+            droppedByCap: dropped,
+            unmeasuredScope: unmeasuredScope)
+    }
+
+    /// 覆盖率页页尾那一句**账**（RD-50：字段全都落了盘、装配口也早就有，缺的是最后一步读者）。
+    /// 三态各说各话，谁也不许冒充谁：
+    /// · **字段缺席**（旧报告没统计过）⇒ 走 `capDisclosureText` 的既有修辞
+    ///   「未统计是否有报告被上限丢弃」—— 绝不渲染成「没被切掉」，也不新造第二套说法；
+    /// · **统计过、真的没切**（六格齐且各为 0）⇒ `nil`，**一个字都不许多**；
+    /// · **有东西被摘掉** ⇒ 点名份数 + 已有的相对路径坐标，句子**逐字**来自
+    ///   `CoverageDisplayShape.statementParts`（本函数只做串接，不拼一个汉字的修辞）。
+    var boardAccountingNote: String? {
+        guard let shape = displayShapeFromFields else { return capDisclosureText }
+        let parts = shape.statementParts
+        return parts.isEmpty ? nil : parts.joined(separator: "；") + "。"
+    }
 }
 
 extension CoverageReport {
