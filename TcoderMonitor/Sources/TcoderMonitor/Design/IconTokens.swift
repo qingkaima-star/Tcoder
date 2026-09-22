@@ -275,7 +275,9 @@ struct ThemedIcon: View {
             .font(role.font)
             .symbolRenderingMode(.hierarchical)
         if let label {
-            image.accessibilityLabel(label).help(label)
+            // 图标标签同样**在这里过一次查表**：它既进读屏也进 `.help`，
+            // 而 `.help` 自己不查目录（英文态里「选择目录」这类 tooltip 一直是中文的根因）。
+            image.accessibilityLabel(localizedCopy(label)).help(localizedCopy(label))
         } else {
             image.accessibilityHidden(true)
         }

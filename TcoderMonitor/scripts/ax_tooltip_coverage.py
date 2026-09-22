@@ -145,7 +145,21 @@ def language_audit(argv) -> int:
                 piece = piece.strip()
                 if piece and han.search(piece):
                     counts[piece] = counts.get(piece, 0) + 1
-    a = [k for k in counts if any(k.startswith(key[:12]) or key.startswith(k[:12]) for key in keys)]
+    # A 类判据要严：整句等于键，或键带 %N$@ 占位符且片段以键的"首个占位符之前"开头。
+    # 上一版用前 14 字互相比对，结果 "相似度" 这种**列名短键**把所有以它开头的整句
+    # 都算成"有键没查"—— 那是测量假象，不是缺陷（本仓第三次"分母自己骗人"）。
+    def hits_key(fragment: str) -> bool:
+        for key in keys:
+            if fragment == key:
+                return True
+            if "%1$" not in key and "%@" not in key:
+                continue
+            head = re.split(r"%[0-9]*\$?[@ds]", key)[0]
+            if len(head) >= 6 and fragment.startswith(head):
+                return True
+        return False
+
+    a = [k for k in counts if hits_key(k)]
     data = [k for k in counts
             if k not in a and ("/" in k or re.search(r"^(Latest|最新)[：:]", k) or "Tcoder（" in k)]
     b = [k for k in counts if k not in a and k not in data]
