@@ -205,7 +205,67 @@ final class CoverageAccountingReadoutTests: SelfScanHarnessCase {
         XCTAssertEqual(hits, ["份未合并"], "写进代码的那份必须抓到、只写在注释里的那份不许算")
     }
 
-    // MARK: - 反例守卫 ②：调用点真的存在（GUI 与 CLI 读同一把尺子）
+    // MARK: - 反例守卫 ②：两个读者**行为上**必须带上那句（文本断言会被死代码骗过去）
+    //
+    // 这条是写着写着发现的：只断言"文件里含有 `boardAccountingNote` 字样"，
+    // 那么把读者改成 `return caliber` 之后原来那行留在死代码里，守卫照样绿。
+    // 所以这里直接**调**那两个纯函数（`DashboardCoverageHelp.text` 与 `CLIScoreText.render`），
+    // 让"界面/CLI 上那句"和"字段里那本账"在同一次调用里对账。
+
+    /// 超上限那棵树（43 份）：`boardAccountingNote` / ⓘ / CLI 三个出口都从这**同一次扫描**取数，
+    /// 于是"界面上那句里的数 == 字段里的数"是同一趟读数的对账，而不是我抄三份常量。
+    /// 独立真值：43 = 我写的份数，40 = 产品侧上限，3 = 两者之差；`reports.count` 只有 1，
+    /// 所以"榜内长度"与"丢弃份数"在这里天然是两个数 —— 谁拿榜长冒充总数当场分叉。
+    private func overCapMetrics() async throws -> CoverageMetrics {
+        for index in 0..<(cap + 3) { try writeModule(index) }
+        let metrics = try await scanned()
+        XCTAssertEqual(metrics.droppedByCap, 3)
+        XCTAssertEqual(metrics.truncationTotalCount, cap + 3)
+        XCTAssertEqual(metrics.reports.count, 1)
+        return metrics
+    }
+
+    func testGUIReadoutCarriesExactlyTheProducerSentence() async throws {
+        let metrics = try await overCapMetrics()
+        let note = try XCTUnwrap(metrics.boardAccountingNote)
+        let readout = DashboardCoverageHelp.text(metrics)
+        // ⓘ 的内容 = 口径句 + 装配口那句，逐字（多写一个字、或绕过装配口自己拼，都当场红）
+        XCTAssertEqual(readout, DashboardView.coverageCaliberLine(metrics) + "\n" + note)
+        // 界面上那句里的数 == 字段里的数（同一次扫描，两个来源）
+        XCTAssertEqual(numberInSentence(readout), metrics.droppedByCap)
+        XCTAssertEqual(numberInSentence(readout), 3, "夹具里我写的是 43 - 40 = 3 份")
+        XCTAssertTrue(readout.contains("m9/coverage/lcov.info"), "坐标要点名：\(readout)")
+        // 榜内长度（`reports.count == 1`）绝不许冒充"丢了几份"
+        XCTAssertFalse(readout.contains("另有 1 份"), "数从榜内长度来的分叉：\(readout)")
+    }
+
+    func testGUIReadoutStaysByteIdenticalWhenNothingWasCut() async throws {
+        for index in 0..<cap { try writeModule(index) }              // 正好 40 份
+        let clean = try await scanned()
+        XCTAssertNil(clean.boardAccountingNote)
+        XCTAssertEqual(DashboardCoverageHelp.text(clean), DashboardView.coverageCaliberLine(clean),
+                       "量过了、真的没切 ⇒ ⓘ 里一个字都不许多")
+    }
+
+    func testScoreTextAndGUIReadoutPrintTheSameAccount() async throws {
+        let metrics = try await overCapMetrics()
+        let note = try XCTUnwrap(metrics.boardAccountingNote)
+        var report = ProjectReport(project: MonitoredProject(name: "夹具", path: "/tmp/r13-accounting"))
+        report.coverage = metrics
+        let scoreText = CLIScoreText.render(report, exit: .ok)
+        XCTAssertTrue(scoreText.contains(note),
+                      "CLI 没原样打装配口那句（另写一份、或干脆不打）：\n\(scoreText)")
+        XCTAssertEqual(numberInSentence(scoreText), metrics.droppedByCap,
+                       "CLI 上那句里的数与字段分叉")
+        XCTAssertFalse(scoreText.contains("另有 1 份"), "CLI 那侧也不许拿榜内长度当丢弃份数")
+        // 干净台账 ⇒ CLI 也不许多出一行（与界面同一条判据）
+        for index in 0..<cap { try writeModule(index) }
+        var cleanReport = ProjectReport(project: MonitoredProject(name: "夹具", path: "/tmp/r13-clean"))
+        cleanReport.coverage = try await scanned()
+        XCTAssertFalse(CLIScoreText.render(cleanReport, exit: .ok).contains("未合并"))
+    }
+
+    // MARK: - 反例守卫 ③：调用点还在（结构断言，作为行为断言的第二层网）
 
     func testBothReadoutsGoThroughTheOneProducer() throws {
         // GUI：页尾 ⓘ 的内容由 `DashboardCoverageHelp` 串，而它只许调既有生产者。
