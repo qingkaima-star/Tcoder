@@ -351,6 +351,11 @@ private struct CommitRow: View {
                 Text(commit.subject)
                     .font(Theme.Typo.narrative.font)
                     .lineLimit(1)
+                    // 冻结区 additive（AGENTS §3 登记表 P54 那一行）：hero 里这条
+                    // 最近提交标题在 1280 宽下英文态实测单行需 1,183pt / 格宽 805pt，
+                    // 一定会被裁。裁可以，**被裁的那一半必须有去处** ⇒ 补 `.help`，
+                    // 与侧栏项目名、Git 页提交榜同一条画法。
+                    .help(commit.subject)
                 Text("\(commit.author) · \(DateFormat.sinceDescription(commit.date))")
                     .font(Theme.Typo.microLabel.font.monospacedDigit())
                     .foregroundStyle(.secondary)

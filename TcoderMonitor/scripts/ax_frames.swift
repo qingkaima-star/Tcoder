@@ -23,6 +23,18 @@ import ApplicationServices
 //   * 因此**正对照必须自带**：夹具那条长名字一定要被报出来，报不出来就是尺子坏了。
 //
 // 用法: ax_frames <pid> [正文字号pt]
+//
+// **第 9 列（P54 加的）= 这一格有没有 `AXHelp`**：`H` 有、`-` 没有。
+// 加这一列之前先量过两条通道，都是一条答案（2026-09-23，已知答案的夹具 = 侧栏那条
+// 51 字长项目名，像素上必然被裁）：
+//   * `AXTruncated` —— 每个 `AXStaticText` 都返回 err -25212（属性不支持），SwiftUI 根本没实现；
+//   * `AXVisibleCharacterRange` —— 那一格回 `0+50 / 全长 50`，**全文长**，
+//     也就是说它报的是"值有多长"而不是"看得见多少"，拿它分不出裁没裁。
+// ⇒ 无障碍层没有"被截断"这条通道（这句以前只写在头注里当猜测，现在是量过的）。
+// 于是换一个**能问出答案**的问题：被裁的那一半**有没有去处**。
+// `AXHelp` 正是这个去处（侧栏名字那格就是靠 `.help(project.name)` 把全名还给用户的），
+// 而它本来就已经被本读数器读了一次（剥 help 拼进 AXValue 的那一段）。
+// 分档规则因此是：**有 help 的装不下 = 有意裁短（信息），没 help 的装不下 = 字丢了（缺陷）**。
 
 guard CommandLine.arguments.count > 1, let pid = Int32(CommandLine.arguments[1]) else {
     FileHandle.standardError.write("用法: ax_frames <pid> [字号pt]\n".data(using: .utf8)!)
@@ -52,12 +64,13 @@ func walk(_ element: AXUIElement, depth: Int) {
     // 可它屏上只有「没找到可解析的日志文件」，长的那半在 ⓘ 里（`AXDescription` 装的就是它）。
     // 拿 tooltip 的字数去比可见格子的宽度，报出来的"溢出"是判据自己造的。
     var value = (attr(element, kAXValueAttribute) as? String) ?? ""
+    // 第 9 列要用它：**这一格到底挂没挂 help**（判"有没有去处"，与下面剥不剥无关）。
+    let help = (attr(element, kAXHelpAttribute) as? String) ?? ""
     // **SwiftUI 会把可见文本与 ⓘ 的 help 拼成同一个 `AXValue`**（中间用「、」连）——
     // 错误日志页那条 banner 就被量成 716pt：屏上只有「没找到可解析的日志文件」，
     // 后半截是 ⓘ 里的「项目目录与 ~/Library/Logs 里都没有找到…」。
     // 判据：元素带 `AXHelp`，且它的值里含这段 help ⇒ 把 help 剥掉再量剩下的。
-    if let help = attr(element, kAXHelpAttribute) as? String, !help.isEmpty,
-       let cut = value.range(of: help) {
+    if !help.isEmpty, let cut = value.range(of: help) {
         let stripped = (String(value[..<cut.lowerBound]) + String(value[cut.upperBound...]))
             .trimmingCharacters(in: CharacterSet(charactersIn: "、, ，"))
         // **剥空了就不剥**：侧栏那一格的 help 常常就是名字本身（悬停要看全名），
@@ -85,7 +98,10 @@ func walk(_ element: AXUIElement, depth: Int) {
             rows.append("FRAME\t\(Int(sizeValue.width))\t\(Int(sizeValue.height))"
                 + "\t\(Int(needed))\t\(linesNeeded)\t\(linesAvailable)"
                 + "\t\(Int(slack))"
-                + "\t" + value.replacingOccurrences(of: "\n", with: " ⏎ "))
+                + "\t" + value.replacingOccurrences(of: "\n", with: " ⏎ ")
+                // 第 9 列放在值的**后面**：分析器按 `parts[1:8]` 取前八段，
+                // 追加不会把已有列挪位（挪位=悄悄改口径，最难查的那种）。
+                + "\t" + (help.isEmpty ? "-" : "H"))
         }
     }
     if let kids = attr(element, kAXChildrenAttribute) as? [AXUIElement] {
