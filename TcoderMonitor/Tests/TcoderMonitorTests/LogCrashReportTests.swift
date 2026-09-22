@@ -216,7 +216,15 @@ final class LogCrashReportTests: LogAnalysisTestCase {
         XCTAssertGreaterThanOrEqual(summary.crashCount, 1, "崩溃报告")
         XCTAssertGreaterThanOrEqual(summary.fatalCount, 1, "FATAL 行")
         XCTAssertGreaterThanOrEqual(summary.warningCount, 1)
-        XCTAssertGreaterThanOrEqual(summary.totalLinesScanned, 20)
+        // RD-46b 之后分母只数真日志行。这一格原本断言的是「两份夹具一共读到 ≥20 行」= **读取覆盖**，
+        // 直接把它改成新读数（16）等于把那条不变式废掉 ⇒ 拆成三条：
+        // 分母至少要有真日志那份的行数、崩溃正文另有一格、两者相加仍撑得住原来那个地板。
+        let errorFixtureLines = try R11DenominatorFixture.newlineCount(of: errorLog)
+        XCTAssertGreaterThanOrEqual(summary.totalLinesScanned, errorFixtureLines,
+                                    "分母至少要有 error.log 的行数（独立真值：盘上换行数）")
+        XCTAssertGreaterThan(summary.crashReportLineCount ?? 0, 0, "崩溃正文的行数必须留在自己那一格，不许消失")
+        XCTAssertGreaterThanOrEqual(summary.totalLinesScanned + (summary.crashReportLineCount ?? 0), 20,
+                                    "读取覆盖：两份夹具一共 ≥ 20 行，一个字都不许丢")
         XCTAssertGreaterThanOrEqual(summary.topErrors.first?.count ?? 0, 2, "同类的两行 ERROR（只差 orderId/UUID）要聚成一簇")
         let scannedPaths = summary.scannedFiles.map { $0.path }
         XCTAssertTrue(scannedPaths.contains(errorLog.path) || scannedPaths.contains { $0.hasSuffix("Logs/error.log") },

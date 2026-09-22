@@ -185,21 +185,12 @@ extension ComplexityEngine {
             // 廉价预筛：绝大多数语言的签名都必须带 `(`，先挡掉就不必为每行进 NSString/正则循环
             if profile.parenOnEveryPattern, cleanedLine.contains("(") == false { return nil }
             guard let name = ComplexityEngine.matchSignature(cleanedLine, profile) else { return nil }
-            // RD-09 的识别侧：`jsMethod` / `jsObjectMethod` 给名字加了 `.` 前缀之后，
-            // `FunctionRecognition.isReservedName` 看到的是 `.if` 而不是 `if` ⇒
-            // 一行 `if (x) {` 会被认成名叫 `.if` 的函数（本流实测：R2 递归进函数体之后
-            // 每一层 `if` 都产出一条伪函数，HEAD 因为"命中签名就跳过整个函数体"而没暴露它）。
-            // 根因在 `FunctionRecognition.signatureName`（**R1 名下文件，本流不得改**），
-            // 这里先在自己的扫描入口上做等价过滤，缺口已列进交回汇报。
-            guard Self.isReservedAfterPrefix(name) == false else { return nil }
+            // RD-38：这里原先有**第二处**名字过滤（`isReservedAfterPrefix`，
+            // 由 R2 在"根因文件归 R1 名下、本流不得改"的处境下就地补的等价副本）。
+            // 两份各自的绿会让人以为两种口径都对，而第三个改识别的人只会看到其中一个入口。
+            // 现在唯一入口是 `FunctionRecognition.signatureName` → `isReservedSignatureName`，
+            // 副本连同这句 guard 一起删除，语义（含"只剥一个前导点"）一字未改地搬了过去。
             return name
-        }
-
-        /// 名字带着 `.` 前缀时也要能被保留字表认出来（`obj.if` / `.if` / `.case`）。
-        static func isReservedAfterPrefix(_ name: String) -> Bool {
-            if isReservedName(name) { return true }
-            guard name.hasPrefix(".") else { return false }
-            return isReservedName(String(name.dropFirst()))
         }
 
         /// 签名命中之后定函数边界：花括号族 / 缩进族 / Ruby `end` 族各走各的。

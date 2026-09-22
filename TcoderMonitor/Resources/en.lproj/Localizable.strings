@@ -290,8 +290,9 @@
 "至少完成两次分析后可以看到趋势。" = "The trend becomes available after at least two analyses.";
 "选择项目目录后点「重新分析」。" = "Choose a project directory, then click Re-analyse.";
 "评分综合代码规模、复杂度、重复代码率、Git 活跃度、运行日志与依赖状况，给出 0~100 分。" = "The score combines code size, complexity, duplicate-code rate, Git activity, runtime logs and dependency status into a 0~100 value.";
-"按拖累程度排序，贡献最低者在前" = "Sorted by how much each dimension drags the score down; the smallest contribution comes first.";
-"综合分 = Σ（得分 × 归一化权重）。" = "Overall score = Σ (dimension score × normalized weight).";
+"按「贡献」列升序，最低在前" = "Ascending by the Contribution column (score × normalized weight); the smallest comes first.";
+"综合分 = Σ（得分 × 归一化权重）。「这一维拖了多少分」看贡献列的提示（乘数 ×（100 − 得分）），它不必是本页第一行 —— 两个键在低权重维度上会分叉。" = "Overall score = Σ (score × normalised weight). For how much a dimension drags the score down, see the tooltip in the contribution column (weight × (100 − score)) — it is not necessarily the first row here, because the two keys diverge for low-weight dimensions.";
+
 "评分器没有可算的输入。" = "The scorer had no inputs it could compute from.";
 "纵轴固定 0…100 分 · 不做任何外推。" = "Y axis fixed at 0~100 · nothing is extrapolated.";
 "出入通常来自评分器的归一化或取整口径不同，界面以评分器发布值为准。" = "The difference usually comes from how the scorer normalises or rounds weights; the UI shows the published value.";
@@ -592,7 +593,7 @@
 /* ===== P5-e6：重复代码三条建议 + 最新/最近两条前缀（英文态运行时漏翻的最后几条） ===== */
 "重复率 %1$@（约 %2$@ / %3$@ 行）已达高风险档：最长一处 %4$@ 行，出现在 %5$@（共 %6$@ 处）。把这类块抽成公共工具函数或模板方法，差异部分用参数/闭包传入，只保留一份实现。" = "Duplication %1$@ (about %2$@ of %3$@ lines) is in the high-risk tier: the longest block is %4$@ lines, seen at %5$@ (%6$@ occurrences). Extract such blocks into a shared helper or template method, pass the differences as parameters or closures, and keep a single implementation.";
 "重复率 %1$@（约 %2$@ / %3$@ 行）：最长重复块 %4$@ 行、出现在 %5$@。改动这些文件时顺手合并成一处实现，可把重复率压到 %6$@ 以下。" = "Duplication %1$@ (about %2$@ of %3$@ lines): the longest block is %4$@ lines at %5$@. Merge it into one implementation while touching these files to bring duplication under %6$@.";
-"重复率 %1$@（约 %2$@ / %3$@ 行）仍在低档：%4$@ 个重复块中最长 %5$@ 行，暂不需要专门重构，改到相关代码时顺带去重即可。" = "Duplication %1$@ (about %2$@ of %3$@ lines) is still low: %4$@ blocks, the longest %5$@ lines. No dedicated refactor is warranted; de-duplicate as you touch this code.";
+"重复率 %1$@（约 %2$@ / %3$@ 行）仍在低档：榜内 %4$@ 个重复块中最长 %5$@ 行，暂不需要专门重构，改到相关代码时顺带去重即可。" = "Duplication %1$@ (about %2$@ of %3$@ lines) is still low: %4$@ blocks on the board, the longest %5$@ lines. No dedicated refactor is warranted; de-duplicate as you touch this code.";
 "最新：%@" = "Latest: %@";
 "最近：%1$@ · %2$@" = "Most recent: %1$@ · %2$@";
 "今天" = "Today";
@@ -602,7 +603,7 @@
 "最大文件 %1$@ 共 %2$@ 行（项目行数峰值 %3$@ 行）：%4$@" = "Largest file %1$@ has %2$@ lines (project peak: %3$@): %4$@";
 "%1$@ 文件 %2$@ 行，几乎全是注释或文档：精简历史说明、把示例迁出源码目录，只保留必要的接口注释。" = "%1$@ file has %2$@ lines, almost all of them comments or documentation: trim historical notes, move examples out of the source tree, and keep only the interface comments you need.";
 "%1$@ 文件 %2$@ 行且未被识别出函数（多为配置、模板或数据表）：按领域或路由拆成多个文件，或改为外部数据资源加载。" = "%1$@ file has %2$@ lines with no functions recognised (usually config, templates or data tables): split it by domain or route, or load it as an external data resource.";
-"%1$@ 文件 %2$@ 行、含 %3$@ 个超过 %4$@ 行的函数（最长 %5$@ 行，如 %6$@）：先把这些函数按职责抽成独立类型或同类型的 extension，再把跨函数共享的状态收进构造注入的依赖，目标单文件 400 行以内。" = "%1$@ file has %2$@ lines with %3$@ functions longer than %4$@ lines (longest %5$@, e.g. %6$@): first extract those functions into separate types or extensions by responsibility, then move state they share into constructor-injected dependencies; target under 400 lines per file.";
+"%1$@ 文件 %2$@ 行、含 %3$@ 个超过 %4$@ 行的函数（最长 %5$@ 行，如 %6$@）：先把这些函数按职责抽成独立类型或%7$@，再把跨函数共享的状态收进构造注入的依赖，目标单文件 %8$@ 行以内。" = "%1$@ file has %2$@ lines with %3$@ functions longer than %4$@ lines (longest %5$@, e.g. %6$@): first extract those functions by responsibility into a separate type or %7$@, then move the state they share into constructor-injected dependencies; target under %8$@ lines per file.";
 "%1$@ 文件 %2$@ 行但函数都不长（%3$@ 个，最长 %4$@ 行）：按能力域横向切分成多个文件或子类型（例如解析/渲染/IO 分开），%5$@ 所在的这段职责适合第一个搬出去。" = "%1$@ file has %2$@ lines but no long functions (%3$@ of them, longest %4$@): split it horizontally by capability (parsing / rendering / IO apart); the responsibility around %5$@ is the first candidate to move out.";
 "未知函数" = "unknown function";
 "%1$@ · 一人完成 · %2$@ 次" = "%1$@ alone made %2$@ commits";
@@ -684,3 +685,69 @@
 // 批次 P16：重复块 tooltip 的两段（原先是三段拼出来的裸中文）
 "相似度 %1$@ · %2$@ 行 · 出现 %3$@ 处" = "Similarity %1$@ · %2$@ lines · %3$@ occurrences";
 "（另有 %1$@ 处）" = "(%1$@ more)";
+
+// 批次 P30：健康评分页补上「提交号其实来自外层仓库」这句真话（乱清单 §6 第 12 条）。
+// 两个位置参数：`%1$@` 是 `HealthDimension.repositoryScoped` 拼出来的维度名单，
+// `%2$@` 是那个仓库的路径。**名单不在文案里手写**——手写就是给一条判定造第二份，
+// 第四个仓库归属维度出现时这句话会静默变假（守卫拿 `repositoryScoped` 当比对对象）。
+// 路径是数据不是文案，而 `"...\(root)..."` 那种拼法查不到键、英文态必然吐中文
+// （`LocalizationGuardTests+InterpolatedCopy` 数的就是它）。
+"仓库归属类维度（%1$@）按外层仓库 %2$@ 计算，不是所选目录本身。" = "Repository-attributed dimensions (%1$@) are computed from the outer repository %2$@, not from the selected directory itself.";
+
+// ── R8（整机与项目边界，整改意见第九节）：新加的五条 ─────────────────────────
+// 这一批全部是"边界要写在数旁边"的短句：读数一枚都没删，删读数等于藏问题。
+// 双语存量棘轮现量保持 17 / 上限 19 —— 这五条一次都没花那两格余量（全登记）。
+"本机 CPU" = "This Mac · CPU";
+"本机内存" = "This Mac · memory";
+"以上是整机读数：含其它项目与系统服务的开销，不构成本项目的性能结论。" = "The readings above are machine-wide: they include other projects and system services, and are not a performance verdict about this project.";
+"可执行路径未取到（无权限或进程已退出），只能给出进程名 %@" = "Executable path unavailable (no permission, or the process already exited) — only the process name can be given: %@";
+"可执行路径 %@（本工具不读任何进程的命令行参数）" = "Executable path: %@ (this tool never reads any process's command-line arguments)";
+
+// ── 第五轮 R3·B 组（RD-11 / RD-13 / RD-13b·c）：依赖证据链新增的那 11 句 ──────────
+// 这批不是"存量没翻"，是 B 组自己新写的产品散文 —— 写的时候进了 `localizedCopy` /
+// `localizedFormat` / `Text(...)` 的口子却漏登记，等于英文态会在依赖页整段掉中文。
+// 落点逐条：`DependencyEvidence`（那句"未发现已知漏洞"的三种说法）、
+// `ManifestDependencyAnalyzerLookup`（两本账各自的数据源标签）、
+// `ManifestDependencyAnalyzerVersionEvidence`（读到已解析产物那句）、
+// `DependencyScopeBreakdown`（分用途统计卡的副标题与空态）。
+// 守卫：`LocalizationGuardTests.test_unregisteredLiteralInventoryPrintsAndShrinks`
+// （只减不增棘轮；本批登记后现量 28 → 17，上限仍是 19）。
+"命中 %1$@ 条（%2$@ 个依赖带已知漏洞），另有 %3$@ 条未覆盖，见「安全公告」" = "%1$@ matched (%2$@ dependencies with known vulnerabilities); %3$@ more went unchecked — see “Advisories”";
+"已核对 %1$@ / %2$@ 个依赖，未发现已知漏洞" = "Checked %1$@ / %2$@ dependencies — no known vulnerabilities found";
+"漏洞核对未覆盖任何依赖（共 %1$@ 个）：" = "Vulnerability checking covered none of the %1$@ dependencies:";
+"；另有 %1$@ 个未覆盖：" = "; %1$@ more uncovered:";
+"内置快照 + npm registry" = "Built-in snapshot + npm registry";
+"内置快照" = "Built-in snapshot";
+"内置规则 + OSV" = "Built-in rules + OSV";
+"内置规则" = "Built-in rules";
+"读到已解析产物 %1$@ 份（%2$@），按其解析出实际版本" = "Read %1$@ resolved artifact(s) (%2$@) and took the installed versions from them";
+"声明范围按 scope 分开汇总，不并成一个数" = "Declarations are tallied per scope, never merged into a single number";
+"没有可统计的依赖声明" = "No dependency declarations to tally";
+
+// 批次 P30：健康评分页补上「提交号来自外层仓库」这句真话（乱清单 §6 第 12 条）。
+// 整句键 + 位置参数：路径是数据不是文案，而 `"...\(root)..."` 那种拼法查不到键、
+// 英文态必然吐中文（`LocalizationGuardTests+InterpolatedCopy` 数的就是它）。
+
+// 批次 R7（RD-17 ·「榜长冒充总数」/「重复代码的解释」）：重复明细榜是**封顶榜**
+// （`DuplicationEngine.maxBlocks`，本仓实扫 2026-09-22：榜内 20 块、榜外还有 71 块 / 474 行）。
+// 屏上每一格都要能读出"这是榜内的数"。守卫：`AdviceWordingBoardTests`（三态 + 常量对账）。
+"重复块（榜内）" = "Duplicate Blocks (board only)";
+"当前列出 %1$@ / %2$@ 个。" = "Showing %1$@ of %2$@ on this page.";
+"共 %1$@ 个重复块，已全部列出（榜未触顶，上限 %2$@ 块）。" = "%1$@ duplicate blocks in total, all listed (the board is below its cap of %2$@, so this count is the total).";
+"榜内只列 %1$@ 个（明细榜上限 %2$@ 块）· 本页当前列出 %3$@ 个。" = "The board lists only %1$@ blocks (detail cap %2$@) · this page shows %3$@ of them.";
+
+// ── RD-48（重复明细榜"榜外那一半"落成字段）：页尾那句改由数装配，两条新键 ──────────
+// 之前这四个数只活在 `scanLimitations` 的中文句子里，界面靠"按句式认领"去抓它
+// （`CodeBoardTruth.outsideBoardNote`）—— 引擎改文案而标记没改，披露会静默消失。
+"另有 %1$@ 个块 / %2$@ 行未列入榜内。" = "A further %1$@ blocks / %2$@ lines sit outside the reported board.";
+"另有 %1$@ 处拷贝因指纹预算未展开。" = "A further %1$@ clone windows were not expanded because of the fingerprint budget.";
+
+// ── RD-42（混合语言分区归位落成字段）：口径句由数装配，一条新键 ─────────────────────
+// 这句**不进** `scanLimitations`（那条在 CLI 打成「未量准 N 条」），所以它自己必须有键。
+"另有 %1$@ 行落在混合语言文件的非代码分区（template / style 与 SFC 标签行），按分区归位、不计入代码统计。" = "A further %1$@ lines sit in the non-code regions of mixed-language files (template / style and SFC tag lines); they are classified by region and left out of the code counts.";
+
+// 批次 P37：代码规模页主角读数的口径短句。
+// 它原来写的是「总行数」——和这张卡的名字一模一样，同一屏念两遍；
+// 换成卡名没交代的那件事（这个数含不含空行与注释）。守卫见
+// `PageTitleCollisionGuardTests.test_heroNoteNeverRepeatsItsOwnCardTitle`。
+"含空行与注释" = "blank lines and comments included";

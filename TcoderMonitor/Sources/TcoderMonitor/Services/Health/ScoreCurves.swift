@@ -27,22 +27,63 @@ import Foundation
 /// 但只有后者配计分。与 `.testing` 的 `coverage.hasData`、
 /// `.complexity` 的「无函数证据不参与评分」是同一条原则：**没有证据 ≠ 好证据**。
 ///
-/// 判据一律走契约里的派生态 `DependencyReport.hasVulnerabilityCoverage`，
-/// 不去猜 `networkLookupNote` 的文案。
+/// ## RD-13（2026-09-22，R3）：判据从中文文案换成结构化账本
+///
+/// 旧实现最后一行是 `report.networkLookupNote.contains("失败") ? .degraded : .verified`
+/// —— 用一句**给人看的中文里有没有"失败"两个字**决定业务状态。它有三个必然的坏结局：
+///   ① 文案改一个字（或被补进别的句子）判定就翻；`DependencySnapshot.asOfText` 的注释
+///      早就承认"这句话会被拼进那个 note，所以措辞里刻意不出现「失败」" —— 那是让文案
+///      给判定让路，方向完全反了；
+///   ② 英文态整句换词，判定直接失效；
+///   ③ "OSV 不支持该生态 / 版本没解析出来 / 预算没覆盖到"这些**同样不该给绿灯**的结局
+///      句子里不含"失败"，于是全被判成 `.verified`。
+/// 现在只读 `DependencyEvidence` 的结构化状态。**保守方向一条不许松**：
+/// 原来判 `.degraded` 的样本改完仍不许变 `.verified`（由
+/// `DependencyEvidenceTests.testStructuredStatesKeepTheConservativeDirection` 钉住）。
 enum VulnerabilityEvidence: String, Sendable, Equatable {
     /// 已核对且零命中，或内置规则已有命中 —— 结论可信，参与评分。
     case verified
     /// 压根没核对（未联网且内置规则无命中）—— 本维度不参与评分。
     case unchecked
-    /// 尝试过但没查完（部分包查询失败）—— 零命中时不敢说干净，不参与评分。
+    /// 尝试过但没查完（失败 / 版本未解析 / 生态不支持 / 预算未覆盖，任意一种）——
+    /// 零命中时不敢说干净，不参与评分。
     case degraded
 
-    /// 从服务层产出判定证据状态。纯函数，便于单测钉住三种输入。
+    /// 从服务层产出判定证据状态。判据是**逐条落账后的核对状态**，不是任何一句中文说明。
     static func classify(_ report: DependencyReport) -> VulnerabilityEvidence {
         // 已有正向发现时绝不缺席：把已知漏洞整个维度摘掉会让带 CVE 的仓库分数反而变高。
         if report.vulnerableCount > 0 { return .verified }
-        guard report.hasVulnerabilityCoverage else { return .unchecked }
-        return report.networkLookupNote.contains("失败") ? .degraded : .verified
+        let ledger = DependencyEvidence.ledger(for: report)
+        guard ledger.totalCount > 0 else { return .unchecked }
+        let counts = ledger.vulnerabilityStateCounts
+        let checked = counts[.checked] ?? 0
+        if checked == ledger.totalCount { return .verified }
+        // `.degraded` 与 `.unchecked` 的分界是"这一路发没发起过"：
+        // 有失败、有被预算挡在门外的 ⇒ 发起了但没走到底 ⇒ degraded（旧文案判据正是这一支，
+        // 保守方向不许松）；一条都没发起（全 notAttempted / 版本未解析 / 生态不支持）才是 unchecked。
+        let attemptedButIncomplete = (counts[.failed] ?? 0) + (counts[.budgetExcluded] ?? 0) > 0
+        // 旧报告（R3 之前落盘的那些，没有逐条状态可解）只留了一句 `networkLookupPerformed = true`：
+        // 它**发起过**却收不齐账 ⇒ 只能说"没查完"，永远不许升成 `.verified`。
+        // 这一支比被删掉的文案判据更保守：旧实现在这里读 note 有没有"失败"两个字，
+        // note 不含就发绿；现在不含也只到 degraded。
+        let attemptedWithoutAccounting = report.networkLookupPerformed
+            && ledger.records.allSatisfy { $0.vulnerabilityState == .notAttempted }
+        return checked > 0 || attemptedButIncomplete || attemptedWithoutAccounting ? .degraded : .unchecked
+    }
+
+    /// `.degraded` 到底是哪一种"没查完"——给建议文案用，同样只读结构化计数。
+    static func degradationReasons(_ report: DependencyReport) -> [String] {
+        let ledger = DependencyEvidence.ledger(for: report)
+        let counts = ledger.vulnerabilityStateCounts
+        var reasons: [String] = []
+        for (state, label) in [(DependencyCheckState.failed, "查询失败"),
+                               (.versionUnresolved, "版本未解析"),
+                               (.ecosystemUnsupported, "生态不支持"),
+                               (.budgetExcluded, "未进查询批次"),
+                               (.notAttempted, "未发起核对")] {
+            if let value = counts[state], value > 0 { reasons.append("\(label) \(value) 条") }
+        }
+        return reasons
     }
 }
 

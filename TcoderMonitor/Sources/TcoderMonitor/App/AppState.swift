@@ -200,11 +200,11 @@ final class AppState {
         let coverageAnalyzer = self.coverageAnalyzer
 
         Task.detached(priority: .userInitiated) { [weak self] in
-            async let code = Self.attempt("代码扫描") { try await codeAnalyzer.analyze(root: root, options: .default) }
-            async let git = Self.attempt("Git 分析") { try await gitAnalyzer.analyze(repositoryURL: root) }
-            async let logs = Self.attempt("日志分析") { try await logAnalyzer.analyze(projectRoot: root, extraLogURLs: logURLs, withinDays: windowDays) }
-            async let deps = Self.attempt("依赖分析") { try await dependencyAnalyzer.analyze(projectRoot: root, allowNetwork: network) }
-            async let coverage = Self.attempt("覆盖率读取") { try await coverageAnalyzer.analyze(projectRoot: root, options: .default) }
+            async let code = AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[0]) { try await codeAnalyzer.analyze(root: root, options: .default) }
+            async let git = AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[1]) { try await gitAnalyzer.analyze(repositoryURL: root) }
+            async let logs = AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[2]) { try await logAnalyzer.analyze(projectRoot: root, extraLogURLs: logURLs, withinDays: windowDays) }
+            async let deps = AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[3]) { try await dependencyAnalyzer.analyze(projectRoot: root, allowNetwork: network) }
+            async let coverage = AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[4]) { try await coverageAnalyzer.analyze(projectRoot: root, options: .default) }
 
             // 五路并行，所以能如实报的只有"回来几路"。每回来一路跳一次主线程，
             // 一轮扫描总共 5 次跳转 —— 不在渲染路径上，与逐 tick 写入是两回事。
@@ -248,13 +248,16 @@ final class AppState {
                 merged.generatedAt = Date()
                 merged.attemptedAt = Date()
 
-                let failures = Self.sectionFailures([
-                    (codeResult.error, "代码扫描"),
-                    (gitResult.error, "Git 分析"),
-                    (logResult.error, "错误日志"),
-                    (depsResult.error, "依赖分析"),
-                    (coverageResult.error, "测试覆盖率"),
-                ])
+                // 台账与缺席清单纯同源：同一批 `AnalyzerAttempt` 既产 `analyzerLedger`，
+                // 也产 `failedSections`。原来两处各写一份路名（`attempt("日志分析")` 与
+                // `("错误日志")`），于是同一次失败在界面叫一个名、在报告里叫另一个名。
+                var attempts = [codeResult.attempt, gitResult.attempt, logResult.attempt,
+                                depsResult.attempt, coverageResult.attempt]
+                attempts[0].limitsHit = codeResult.value?.scanLimitations ?? []
+                merged.analyzerLedger = AnalyzerLedger.records(from: attempts)
+                let failures = Self.sectionFailures(attempts.map { attempt in
+                    (attempt.failureReason.map { "\(attempt.label)失败：\($0)" }, attempt.label)
+                })
                 merged.failedSections = failures.sections
                 // 与 CLI 同一把尺子：同一项目同一次扫描，GUI 与 CLI 的溯源块必须能对上号。
                 merged.provenance = ScanProvenance(report: merged, scannedRoot: project.path, producedBy: "gui")
@@ -286,17 +289,6 @@ final class AppState {
             guard let error = item.error else { return }
             acc.0.append(error)
             acc.1.append(item.section)
-        }
-    }
-
-    private static func attempt<T: Sendable>(
-        _ name: String,
-        _ work: @Sendable () async throws -> T
-    ) async -> (value: T?, error: String?) {
-        do {
-            return (try await work(), nil)
-        } catch {
-            return (nil, "\(name)失败：\(error.localizedDescription)")
         }
     }
 }

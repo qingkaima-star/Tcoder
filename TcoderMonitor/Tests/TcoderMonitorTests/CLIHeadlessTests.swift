@@ -341,52 +341,6 @@ final class CLIHeadlessTests: XCTestCase {
                       "「源码 N 行」和首行的「码行 M」并排出现时会被读成同一个量：" + curve.detail)
     }
 
-    // MARK: - 一路名只许有一份真值
-
-    private static let appStateURL = URL(fileURLWithPath: #filePath)   // …/Tests/TcoderMonitorTests/本文件.swift
-        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .appendingPathComponent("Sources/TcoderMonitor/App/AppState.swift")
-
-    /// CLI 与 GUI 各自硬编码一套中文路名，早晚分叉 —— 而 `failedSections` 是要被
-    /// 人和机器一起读的字段，分叉之后"新老两条路对表"这句话就是空的。
-    func test_sectionLabelsAreTheOnlyOnesAppStateUses() throws {
-        let src = try String(contentsOf: Self.appStateURL, encoding: .utf8)
-        let inApp = Self.chineseLiteralsPassedToSectionFailures(src)
-        XCTAssertEqual(Set(inApp), Set(CLIScan.sectionLabels),
-                       "AppState 里的路名是 \(inApp)，CLI 声明的是 \(CLIScan.sectionLabels)")
-    }
-
-    /// 元测试：上面那条扫描器必须真能抓到分叉，否则它是永真绿。
-    func test_sectionLabelScannerCatchesADivergedLabel() {
-        let dirty = """
-        let failures = Self.sectionFailures([
-            (codeResult.error, "代码扫描"),
-            (gitResult.error, "Git 分析"),
-            (logResult.error, "日志分析"),
-            (depsResult.error, "依赖分析"),
-            (coverageResult.error, "测试覆盖率"),
-        ])
-        """
-        XCTAssertEqual(Self.chineseLiteralsPassedToSectionFailures(dirty).count, 5)
-        XCTAssertTrue(Self.chineseLiteralsPassedToSectionFailures("let x = 1").isEmpty)
-    }
-
-    private static func chineseLiteralsPassedToSectionFailures(_ src: String) -> [String] {
-        // 只认 `<expr>.error, "含汉字的串"` 这一种形状：它就是 AppState 调用点的原样。
-        let re = try! NSRegularExpression(
-            pattern: "\\([\\w.]+\\.error,\\s*\"([^\"]*[\\u4e00-\\u9fff][^\"]*)\"\\)")
-        var out: [String] = []
-        for line in src.split(separator: "\n") {
-            let l = String(line)
-            let range = NSRange(l.startIndex..., in: l)
-            for m in re.matches(in: l, options: [], range: range) {
-                guard let r = Range(m.range(at: 1), in: l) else { continue }
-                out.append(String(l[r]))
-            }
-        }
-        return out
-    }
-
     /// CLI 与 GUI 落盘共用同一套 coder 配置（`.iso8601`），否则两侧的 JSON 互读不回来。
     func test_datesUseTheSameISO8601StrategyAsProjectStore() async throws {
         let outcome = await scan().outcome(path: fixtureDir, allowNetwork: false)

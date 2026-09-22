@@ -177,11 +177,28 @@ class HealthScoreTestCase: XCTestCase {
     }
 
     /// 已联网核对且零命中的依赖报告 —— 这是唯一能让依赖维度参与评分并拿高分的形态。
+    ///
+    /// R3（RD-11）之后"已核对"这句话必须由**逐条结构化状态**说出来，
+    /// 只写 `networkLookupPerformed = true` 的报告读起来是"发起过、账没收齐"（degraded，不计分）。
+    /// 本夹具的语义本来就是"每条都查过了且零命中"，所以把那两个维度各落一格 `.checked` ——
+    /// 只补夹具的事实，不动任何判据、也不动其它维度的口径。
     func cleanDependencies() -> DependencyReport {
         var deps = DependencyReport(ecosystems: [mavenEcosystem(total: 140, outdated: 0)])
+        markAllChecked(&deps)
         deps.networkLookupPerformed = true
         deps.networkLookupNote = "在线查询已完成（OSV + npm registry）"
         return deps
+    }
+
+    /// 把"每条都核对过了"这件事**逐条**落进两个维度的状态里。
+    /// 只补夹具事实，不动任何判据：R3（RD-11）之后"已核对"只能由结构化状态说出来。
+    func markAllChecked(_ deps: inout DependencyReport) {
+        for ecoIndex in deps.ecosystems.indices {
+            for index in deps.ecosystems[ecoIndex].dependencies.indices {
+                deps.ecosystems[ecoIndex].dependencies[index].versionCheckState = .checked
+                deps.ecosystems[ecoIndex].dependencies[index].vulnerabilityCheckState = .checked
+            }
+        }
     }
 
     /// 默认离线形态：没联网、内置规则也没命中 —— 依赖健康不得计分。

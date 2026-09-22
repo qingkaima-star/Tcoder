@@ -15,12 +15,30 @@ final class BoardLengthReadoutRatchetTests: XCTestCase {
     private static let boards = ["hugeFiles", "topComplexFunctions", "duplicatedBlocks"]
 
     /// 08:30 由总工本人实测填的基线（**只减不增**；还完一条就把这里划掉一条）。
+    ///
+    /// 22:0x 由 R7（建议与榜长真修）按 `--filter BoardLengthReadoutRatchetTests` 的**实扫现量**
+    /// 往下拧了一格，数字就是从那次打印来的（同一趟：`榜长冒充总数：全仓现量 7 / 上限 12`）：
+    ///   CodeRiskView 5→2 · CodeMetricsSections 3→2 · CodeRiskRows 2→1 · CodeRiskAdvice 1→0
+    ///   新增一格 `CodeViewSupport.swift: 1` —— **不是漏网，是收口**：重复块榜长的取法
+    ///   从四页各自 `code.duplicatedBlocks.count` 改成只读 `CodeBoardTruth.duplicationBoardCount`，
+    ///   那一处原始读数因此搬了家；上限总和跟着它记，别让它变成隐形余量。
+    /// **还剩下的 6 处是什么**（逐条点名，免得下一位去"修"一句诚实的话）：
+    /// - `CodeRiskView.swift` 2 处 + `CodeRiskRows.swift` 的 `complexitySubtitle` 那处，读的是
+    ///   **复杂度榜**，标签/句式已写明「复杂度上榜」「上榜 N 个」——按 §五 的裁定（`0a2e474`）
+    ///   "榜的读数标签本身是诚实的，不动"，真总数走 `reportedHighRiskHotspotCount` 那一格；
+    /// - `CodeMetricsSections.swift` 的 ⓘ（`重复块 %1$@ 个 · 复杂度上榜 %2$@ 个函数`）：
+    ///   这条键被 `CodeGitTooltipTests` 逐字钉着，改文案要连那份账一起改，两家不同名 ⇒ 报总工；
+    /// - `HealthCodeDimensions.swift` 1 处：`Services/Health/**` 不归 R7（工单的可写面只有
+    ///   `Views/Code`、`Views/Health`、`Services/Code/CodeRisk*`），已列进 R7 的交回汇报。
+    /// 重复块那一族真正还债的是 `AdviceWordingBoardTests`：它断言的是**页尾那句话**在
+    /// 截断/未截断/台账缺席三态下各说什么，比"数原始读数"更接近这件事的本体。
     private static let budget: [String: Int] = [
-        "Views/Code/CodeRiskView.swift": 5,           // 复杂度榜 / 重复块榜的读数、未展示数、"共 N 处"
-        "Views/Code/CodeMetricsSections.swift": 3,    // 重复块读数与其页尾句
-        "Views/Code/CodeRiskRows.swift": 2,           // 两枚 tooltip 里的"共 N 个"
-        "Views/Code/CodeRiskAdvice.swift":  1,         // 建议句里的重复块数
-        "Services/Health/HealthCodeDimensions.swift": 1,  // 评分 detail「共 %d 处重复块」
+        "Views/Code/CodeRiskView.swift": 2,           // 复杂度榜的读数与展开算术（标签已写明「上榜」）
+        "Views/Code/CodeMetricsSections.swift": 2,    // ⓘ 里那句「重复块 N 个 · 复杂度上榜 M 个函数」
+        "Views/Code/CodeRiskRows.swift": 1,           // complexitySubtitle 的「上榜 N 个」
+        "Views/Code/CodeRiskAdvice.swift":  0,        // 已还：低档那句改成「榜内 N 个重复块」
+        "Views/Code/CodeViewSupport.swift": 1,        // 榜长的唯一取法 `duplicationBoardCount` 本体
+        "Services/Health/HealthCodeDimensions.swift": 1,  // 评分 detail「共 %d 处重复块」（归 WS-C）
     ]
 
     /// 两种**合法形状**，不许被算成违例（各配一条反向元测试钉着，见下）。

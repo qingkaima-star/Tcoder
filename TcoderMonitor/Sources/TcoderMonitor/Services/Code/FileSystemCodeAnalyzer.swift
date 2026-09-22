@@ -59,9 +59,15 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             to: &metrics
         )
         let coverage = Self.coverage(from: scan, duplication: duplication, options: options, lex: lex)
+        // RD-42：词法台账里那枚"按分区归位为非代码的行数"**直传**进契约 ——
+        // 不在这里重算、也不在界面侧从中文句子里抠回来（那都是第二把尺子）。
+        // ⚠️ 故意**不**并进下面那条 `scanLimitations`：那是"没量准"的账，
+        // 而分区归位是已经量到了、只是分类不同（口径）。读者见 `MixedLanguageRegionCaliber`。
+        metrics.nonCodeRegionLineCount = lex.integrity.nonCodeRegionLineCount
         // 契约接入（P7-C 3-2）：判据用 `limitationSummary` 非空而不是 `isPartial` —— 前者还含
         // 「按规则排除了多少条目」这类**范围**事实，读者要知道数字是在什么范围内测出来的。
-        let limits = coverage.limitationSummary + ComplexityEngine.JavaSignatureDeclines.notes(for: files)
+        let limits = coverage.limitationSummary + coverage.surfaceNotes
+            + ComplexityEngine.JavaSignatureDeclines.notes(for: files)
         metrics.scanLimitations = limits.isEmpty ? nil : limits
         return AnalysisOutcome(metrics: metrics, coverage: coverage)
     }
@@ -113,11 +119,24 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         metrics.hugeFiles = Array(huge.prefix(20))
 
         let hotspots = hotspots(files: files, functionsPerFile: functionsPerFile)
+        // 高档个数必须从**全体**函数算，不能事后在榜上 filter：
+        // 榜只留前 20，仓库越大越会把"高复杂度 N 个"报小（与"榜长冒充总数"同一条病）。
+        // ⚠️ 这里的 `hotspots` 名字有误导性：它**不做筛选**，条数 = 被识别函数总数，
+        //    所以不要把它当"热点总数"落任何字段（详见 `CodeMetrics.highRiskHotspotCount` 的说明）。
+        metrics.highRiskHotspotCount = hotspots.filter { $0.risk.rank >= RiskLevel.high.rank }.count
         metrics.topComplexFunctions = Self.rankedHotspots(hotspots)
         applyFunctionMetrics(functionsPerFile.flatMap { $0 }, to: &metrics)
 
         metrics.duplicationRatio = duplication.ratio
         metrics.duplicatedBlocks = duplication.blocks
+        // RD-48：把引擎早就算好的"榜外那一半"直传进契约（**逐枚原样赋值，不做任何加减**）。
+        // 之前这四个数只进 `scanLimitations` 的中文句子，界面上"上限 20 块"那格其实是
+        // 在按句式认领一句散文；落成字段之后，页尾句改成由数字装配，读 JSON 的人也不必再解析句子。
+        metrics.duplicatedBlockLimit = DuplicationEngine.maxBlocks
+        metrics.duplicatedBlocksDroppedByCap = duplication.blocksDroppedByCap
+        metrics.duplicatedLinesOutsideReportedBlocks = duplication.linesOutsideReportedBlocks
+        metrics.duplicateFragmentsNotExpandedCount = duplication.fragmentsDroppedByBudget
+        metrics.duplicateFilesHittingLineCap = duplication.filesHittingLineCap
         metrics.overallRisk = overallRisk(
             metrics: metrics,
             hotspotCount: hotspots.count,
@@ -147,7 +166,11 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             lexAnomalousFileCount: lex.anomalousFileCount,
             unboundedFunctionSignatureCount: lex.unboundedSignatureCount,
             vueRegionFallbackFileCount: lex.vueRegionFallbackFileCount,
-            skipLedger: scan.skipLedger
+            skipLedger: scan.skipLedger,
+            roleTally: SourceRoleTally(of: scan.files),
+            treeFollowing: scan.treeFollowing,
+            duplicateBlockCoordinatesOutsideBoard: duplication.blocksOutsideBoard,
+            duplicationBoardCaliber: duplication.blocksDroppedByCap > 0 ? duplication.boardCaliberNote : ""
         )
     }
 

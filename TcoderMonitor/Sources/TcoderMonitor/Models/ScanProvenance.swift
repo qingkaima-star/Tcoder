@@ -1,5 +1,21 @@
 import Foundation
 
+/// 提交号的**唯一一把缩短尺子**：凡「给人看 / 落盘的提交号」都从 `abbreviated` 出。
+///
+/// 为什么立在这里而不是各分析器自己 `prefix(n)`：2026-09-22 R5c 用一条对表用例抓到
+/// Git 那一路走 `git rev-parse --short=7`（存 7 位）而覆盖率那一路自己 `prefix(12)`（存 12 位），
+/// 于是**同一份报告里两个格子把同一个提交写成两个串** —— 读的人只会得出"两把尺子有一把是错的"。
+/// 缩短宽度取 12：`--short=7` 在大仓会撞歧义（git 自己的 `--abbrev` 不够用时会长），
+/// 而 40 位全长既占版面也没人逐字读。
+enum CommitIdentity {
+    static let abbreviatedLength = 12
+
+    /// 传进来是全长还是已经短过都安全：只取前缀，不猜长度。
+    static func abbreviated(_ sha: String) -> String {
+        String(sha.prefix(abbreviatedLength))
+    }
+}
+
 /// 一份报告的**来源与版本**：谁产的、用哪个版本的工具与判据、在被扫项目的哪个提交上、当时工作区干不干净。
 ///
 /// 为什么单独立一个结构：报告里每条结论（「这个函数 CC 41」「依赖 X 有 CVE」「覆盖率 44%」）

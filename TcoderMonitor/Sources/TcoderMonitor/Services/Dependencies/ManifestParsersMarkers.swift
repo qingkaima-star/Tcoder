@@ -267,4 +267,19 @@ extension ManifestParsers {
         .nuget: ["packages.lock.json"],
         .unknown: [],
     ]
+
+    /// **已解析产物**候选（RD-13b）：这些不是锁文件，是工具已经替我们把版本算出来的东西
+    /// —— Maven 根本没有 lock 文件这一族，逼项目"补一个"正是整改意见禁止的那种修法。
+    /// 因此单列一表：`lockfileName`（界面与"这是不是一份锁文件"的口径）仍只读上面那张表。
+    static let resolvedArtifactCandidates: [DependencyEcosystem: [String]] = [
+        .maven: ["effective-pom.xml", ".flattened-pom.xml", "flattened-pom.xml",
+                 "dependency-reduced-pom.xml", "dependency-tree.txt", "dependencies.txt",
+                 "mvn-dependency-tree.txt", "bom.json", "sbom.json", "spdx.json", "sbom.cdx.json"],
+        .gradle: ["dependencies.txt", "gradle-dependencies.txt", "bom.json", "sbom.json", "spdx.json"],
+    ]
+
+    /// 这个文件名是不是"已解析产物"候选。
+    static func isResolvedArtifactCandidate(_ name: String, ecosystem: DependencyEcosystem) -> Bool {
+        (resolvedArtifactCandidates[ecosystem] ?? []).contains(name)
+    }
 }

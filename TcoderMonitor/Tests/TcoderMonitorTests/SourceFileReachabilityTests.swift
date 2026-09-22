@@ -127,7 +127,23 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 150 → 151（集成分支修复人把 `CodeScanCoverage` 整块搬出 `FileSystemCodeAnalyzer.swift`
     ///   以守 400 行闸门，新增 `FileSystemCodeAnalyzerLimits.swift` 一枚）。
     /// 151 → 152（RD-30/31 溯源块新增 `Models/ScanProvenance.swift`，四处在引用它）。
-    static let censusBaseline = 152
+    /// 152 → 164：依赖链一条流带来 12 枚新实现文件（枚数与引用证据逐条见台账卷二 §27，
+    ///   全部由守卫 `testEveryImplementationFileHasExternalCallEvidence` 实跑判过在用）。
+    /// 164 → 173（R5/R5b 覆盖率链整块拆出的九枚，全在 `Services/Coverage/`：
+    ///   `CoverageDisplayShape` / `CoverageLineLedger` / `CoverageMergeConfidence` / `CoverageMergeLedger` /
+    ///   `CoverageMergePlanner` / `CoverageReportDiscovery` / `CoverageReportIdentity` /
+    ///   `CoverageRunIdentity` / `CoverageSourceBinding`。
+    ///   引用证据是同一次守卫跑出的「零调用清单：空」（`testZeroCallListIsEmpty` 未红），
+    ///   九枚都是 `CoverageAnalyzer` 那条链为守 400 行闸门按类型整块搬出去的，不是空壳。）
+    /// 173 → 174（R10 台账一枚 `Models/AnalyzerLedger.swift`：CLI 与 GUI 两个装配点各调一次
+    ///   `AnalyzerLedger.records(from:)`，五路路名也只住这一份）。
+    /// ✅ 174 已由守卫在同一棵合流树上实跑核对过：打印「实现文件 174 个（普查基线 174）」，
+    ///   且零调用清单为空。拼接值不自证，跑过才算数（这条旋钮的历史就是"算的数"与"跑的数"分叉）。
+    /// 174 → 181（**两批新增都在同一棵树里了**，说明逐条并排留着）：
+    /// - main 侧 R6 流 174 → 178，四枚在 `Services/Code/`：`SourceFileRoleRules`（角色判据）/ `SourceFileRoleSignals`（信号采集）/`SourceRoleTally`（逐条计数）/ `SourceScanScopeReadout`（范围读数与「跟不跟」句子的装配）。同一次守卫跑出「零调用清单：空」⇒ 四枚都有 `Sources/**` 内的调用点，不是空壳。
+    /// - 本流 R10b 174 → 177，三枚全在新目录 `Services/Trace/`：`AnalyzerLedgerText`（把四态台账打成 CLI 文本，装在「未量准」之后、分数之前）、`MeasurementLedger`（甲栏量出来的 / 乙栏算出来的分栏，乙栏每行带「← 由…算来」，并用 `danglingSources` + `upstreamInputs` 把「只从既有类型算、不许重扫源码」做成机器判据）、`EvidenceCoordinates`（文件 ⇑ 符号 ⇑ 判据名的稳定坐标，key 不含行号、路径按 scannedRoot 相对化）。
+    /// ⚠️ 181 = 178 + 3 是**推的**，不是守卫实报的：合完 main 之后必须重跑一次，以它打印的现量为准（这条常量只由总工拧，且只按实报拧）。
+    static let censusBaseline = 181
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames

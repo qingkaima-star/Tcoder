@@ -86,4 +86,71 @@ final class PageTitleCollisionGuardTests: XCTestCase {
         XCTAssertTrue(Self.collisions(in: legal, owners: Self.pageOwners).isEmpty,
                       "总览页引用别的页名是路标，误伤会把人逼去删守卫")
     }
+
+    // MARK: - 卡名与同卡主角读数的 note 不许重名（批次 P37）
+
+    /// 「页名不许当卡名」的**下一层**：同一张卡里，卡名与主角读数旁边那句 `note` 也不许是同一个字面量。
+    ///
+    /// 实拍来源：`fb94e88` 那批 36 张·代码规模页头。卡名已经叫「总行数」，
+    /// 56pt 的 `101,856` 后面又跟着 `行` + note「总行数」—— 同一屏把这个词念两遍。
+    /// 而 `DataHeroReadout.note` 的契约写着"一句话口径，不许省"，
+    /// 所以正解不是删掉它，是让它说卡名没交代的那件事（这里改成「含空行与注释」）。
+    ///
+    /// 粒度是**文件级**（一个视图文件通常就是一张卡），不是作用域级：
+    /// 同文件里另一张卡恰好同名也会被算进来。这里偏严是故意的——
+    /// 它只会逼人换一个说法，不会诱使人删守卫。
+    static func heroNotesRepeatingACardTitle(in files: [(path: String, content: String)]) -> [String] {
+        // 正则一律 `try!`：构造失败被 `try?` 吞成 nil 时，"0 命中"看起来像通过（本项目踩过）。
+        let titleRE = try! NSRegularExpression(pattern: "GlassSection\\(\\s*\"([^\"]+)\"")
+        let noteRE = try! NSRegularExpression(pattern: "note:\\s*\"([^\"]+)\"")
+        func literals(_ re: NSRegularExpression, _ text: String) -> [String] {
+            let whole = NSRange(text.startIndex..., in: text)
+            return re.matches(in: text, options: [], range: whole).compactMap { match in
+                guard let inner = Range(match.range(at: 1), in: text) else { return nil }
+                return String(text[inner])
+            }
+        }
+        return files.compactMap { file in
+            // 先剥注释再配：全站这些视图的注释里大量在交代"旧写法是什么"，
+            // 不剥就会把"讲代码的话"当成界面文案（这一族已经绊倒守卫多次）。
+            let code = SurfaceScanKit.codeLines(file.content).joined(separator: "\n")
+            let titles = Set(literals(titleRE, code))
+            let repeats = Set(literals(noteRE, code).filter { titles.contains($0) })
+            return repeats.isEmpty ? nil : "\(file.path): \(repeats.sorted().joined(separator: "、"))"
+        }
+    }
+
+    func test_heroNoteNeverRepeatsItsOwnCardTitle() throws {
+        let views = try SurfaceScanKit.sourceFiles(under: "Views")
+        XCTAssertFalse(views.isEmpty, "扫不到 Views 面 ⇒ 分母坏了，下面的绿是假零")
+        let hits = Self.heroNotesRepeatingACardTitle(in: views)
+        XCTAssertTrue(hits.isEmpty,
+                      "这些卡的主角读数把卡名又念了一遍；note 要说卡名没交代的事（口径/分母/范围）：\(hits)")
+    }
+
+    func test_heroNoteRulerCatchesSyntheticAndSparesADifferentCaliber() {
+        let dirty = [(path: "Views/Code/Fake.swift", content: """
+            GlassSection(
+                "总行数",
+                subtitle: nil
+            ) {
+                DataHeroReadout(value: "101,856", unit: "行", note: "总行数")
+            }
+            """)]
+        XCTAssertEqual(Self.heroNotesRepeatingACardTitle(in: dirty).count, 1,
+                       "note 重复卡名没抓到 → 这条守卫数不出东西")
+        let legal = [(path: "Views/Code/Fake2.swift", content: """
+            GlassSection(
+                "总行数",
+                subtitle: nil
+            ) {
+                DataHeroReadout(value: "101,856", unit: "行", note: "含空行与注释")
+            }
+            """)]
+        XCTAssertTrue(Self.heroNotesRepeatingACardTitle(in: legal).isEmpty, "说了新信息的 note 被误伤")
+        let commented = [(path: "Views/Code/Fake3.swift",
+                          content: "  // 旧写法是 note: \"总行数\"，与卡名重复，已改成口径\n")]
+        XCTAssertTrue(Self.heroNotesRepeatingACardTitle(in: commented).isEmpty,
+                      "注释里交代旧写法就被判红（讲代码的话绊倒守卫，已记过多次）")
+    }
 }

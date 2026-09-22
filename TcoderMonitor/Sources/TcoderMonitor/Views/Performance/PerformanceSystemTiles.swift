@@ -42,6 +42,13 @@ struct PerformanceSystemTiles: View {
                 networkTile
             }
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                // **边界（整改意见第九节）**：这一页住在项目详情里、页头挂着项目名，
+                // 所以四枚整机读数的正下方第一句必须写清"这不是本项目的开销"。
+                // 只加说明、**不删任何读数**——删读数才是藏问题。
+                // 这一句与 `PerformanceProcessGroupsCard` 的「与所选项目无关」是一对：
+                // 系统级读数与按模式归因的进程读数各说各的边界，没有一份在替另一份背书。
+                NoteLine("以上是整机读数：含其它项目与系统服务的开销，不构成本项目的性能结论。",
+                         icon: .unverified)
                 // **留短藏长**（盘点表 F 组）：屏上只留最容易被读错的那半句
                 // （「在用」≠「剩余可用」），44 字的完整口径进 ⓘ 的 hover。
                 // 长句走 `SystemReadings.memoryCaliber` 那一份唯一真值，不在这里重抄一遍。
@@ -161,7 +168,7 @@ struct PerformanceSystemTiles: View {
             // 后者在窄窗口下按弹性比例压缩每段，`·` 会单独留在行尾（清单 2.14）。
             // 同页 `sampleStats` 本来就是拼成单串的写法 —— 两种写法并存就是"不规整"本身。
             Text(localizedFormat("机身 %1$@ · 已运行 %2$@ · 全系统 %3$@ 个进程",
-                                 context.snapshot?.thermalState.rawValue ?? Live.missing,
+                                 SystemReadings.thermalText(context),
                                  Self.uptimeText(context.snapshot?.uptimeSeconds),
                                  Live.grouped(context.snapshot?.processCount)))
             Spacer(minLength: 0)

@@ -45,7 +45,14 @@ enum HealthBreakdown {
         component.weight > 0 ? component.weight : (baseWeight(of: component) ?? 0)
     }
 
-    /// 按拖累程度升序：贡献最低者在前，和 Xcode / Instruments 的排序习惯一致。
+    /// 排序键 = `contribution`（得分 × 本次归一乘数）**升序**，贡献最低者在前。
+    ///
+    /// ⚠ 这条**不是**按 `lostPoints`（乘数 ×（100 − 得分））排的，两个键在低权重维度上会分叉：
+    /// 权重 0.05 / 得分 20 只拖 4 分，权重 0.30 / 得分 60 拖 12 分，前者却排在前面。
+    /// 上一轮这里与页面上的副标题都写成"按拖累程度排序"，等于给一个不是拖累的键起了拖累的名字
+    /// （台账 RD-28）。修法选的是**改名字**而不是改键：换键会同时改到这张表的既有读法，
+    /// 而"哪一维拖得最多"本来就在贡献列的提示里逐行给着，不需要靠行序去暗示。
+    /// 界面副标题与这里必须由同一条守卫盯着（`ScoreWordingTests`）。
     static func rows(for health: HealthScore) -> [ScoreRow] {
         let present = health.components.reduce(0) { $0 + effectiveWeight($1) }
         guard present > 0 else { return [] }
@@ -252,15 +259,44 @@ enum MissingDimensionReason {
         code == nil ? "「\(analyzer)」没有产出代码指标。" : nil
     }
 
+    /// Git 那一路的缺席要分**四档**，合成一句就把输入状态弄丢了：
+    /// ① `git == nil` = 不是仓库 / 没取到历史；② 是仓库但一笔提交都没有；
+    /// ③ 有提交，但非合并口径一笔都没有 ⇒ 作者分布没有总体；
+    /// ④ 有总体，但总体太小 ⇒ 占比无定义（`BusFactorEvidence`，工单 R9b §4）。
+    /// 第③④两档以前落到兜底句「「Git 分析」完成但该分量未产出」，读分的人看不出
+    /// "这一维为什么不参与计分"（工单 R9 靶子 1 要求上屏能看出这件事）。
+    /// ⚠ 这两句只对「协作分布」成立：活跃度那一维的缺席条件是 `totalCommits == 0`，
+    /// 走到第③④档时它已经在计分、不会来问原因（`WeightedHealthScorer.busFactorOutcome`）。
     private static func gitAbsence(git: GitInsights?) -> String? {
-        git == nil ? "该目录不是 Git 仓库，或未取到提交历史。" : nil
+        guard let git else { return "该目录不是 Git 仓库，或未取到提交历史。" }
+        guard git.totalCommits > 0 else { return "该仓库没有任何提交，Git 两维都没有输入。" }
+        guard git.authorBasisCommits > 0 else {
+            return "含合并共 \(NumberFormat.grouped(git.totalCommits)) 笔提交里没有一笔非合并提交，"
+                + "作者分布没有可算的总体，本维度不参与计分。"
+        }
+        guard BusFactorEvidence.isShareUndefined(git) == false else {
+            return BusFactorEvidence.absenceReason(git)
+        }
+        return nil
     }
 
-    /// 唯一要分两档的一维：`logs == nil`（没分析过）与「分析了但一行没读到」是两件事，
-    /// 合成一句就把输入状态弄丢了。
+    /// 唯一要分**三档**的一维：`logs == nil`（没分析过）、分析了但一行没读到、
+    /// 以及"列到了文件却一行都没读出来"是三件事，合成一句就把输入状态弄丢了。
+    /// ⚠ `hasData` 自己只看"有没有文件"（`totalLinesScanned > 0 || !scannedFiles.isEmpty`），
+    /// 所以第三种形状下它会说"有数据"，而评分器按 `totalLinesScanned > 0` 判的是"没有证据"——
+    /// 这一档要是落到兜底句，界面就变成"扫过了但没说为什么没分"。
+    ///
+    /// RD-49：第三档内部还要再分**三态**（真的什么都没有 / 有崩溃证据但零真日志行 /
+    /// 崩溃报告读不动），三句各说各的。判据与三句文案都住在
+    /// `StabilityZeroDenominatorShape`，这里只是它的一个读者 ——
+    /// 缺席原因在界面与 CLI 共用，评分器那边的建议句也共用，不留第二把尺子。
     private static func stabilityAbsence(logs: LogSummary?) -> String? {
         guard let logs else { return "尚未分析日志。" }
-        return logs.hasData ? nil : "未发现可读的日志文件。"
+        guard logs.hasData else { return "未发现可读的日志文件。" }
+        guard logs.totalLinesScanned > 0 else {
+            return StabilityZeroDenominatorShape.absenceReason(logs: logs)
+        }
+        return nil
     }
 
     private static func dependencyAbsence(dependencies: DependencyReport?) -> String? {
@@ -286,6 +322,12 @@ enum MissingDimensionReason {
         // 「没找到」与「没看到」是两件事：有目录读不动时，"没有产出报告"这句站不住，
         // 必须把扫描面不完整这件事一起说出来（`unreadableDirectoryCount == 0` 才是一句真话，
         // 而 `nil` = 那次分析根本没统计过，也不许替它下结论）。
+        // 披露口径只有一套：§6.1 那几格（`unmeasuredScope` / `droppedByCap`）由
+        // `CoverageDisplayShape` 一处生产，这里只负责接在结论后面。
+        // 旧报告没有那几格（`nil` = 没统计过，**不许**替它下结论）⇒ 退回 `unreadableDirectoryCount` 那句。
+        if let disclosure = coverage.displayDisclosureText {
+            return base + disclosure + "上面的结论只覆盖看得见的部分。"
+        }
         guard let unreadable = coverage.unreadableDirectoryCount, unreadable > 0 else { return base }
         return base + "另有 \(NumberFormat.grouped(unreadable)) 个目录没能读取（权限或已消失），"
             + "上面的结论只覆盖读得动的部分。"
