@@ -278,19 +278,24 @@ selfcheck_trio_agreement() {  # selfcheck_trio_agreement <outdir>
   local r
   r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
 from perf_trio_agreement import verdict
-def R(n, fps=119.0, secs=20.0, rend=4.1):
-    return {"dir": "run%d" % n, "seconds": secs, "hitch_n": int(round(n * secs)),
-            "hitch_per_s": n, "period": "interaction", "render_p50_ms": rend,
-            "surfaces_p50_fps": fps}
-a = verdict([R(1.2), R(1.3), R(1.5)], ["a", "b", "c"])[1]
-b = verdict([R(1.2), R(1.3), R(18.8)], ["a", "b", "c"])[1]
-c = verdict([R(1.2), R(1.3), None], ["a", "b", "x"])[1]
-d = verdict([R(1.2), R(1.3)], ["a", "b"])[1]
-e = verdict([R(1.2), R(1.3, fps=88.0), R(1.5)], ["a", "b", "c"])[1]
-print("%s|%s|%s|%s|%s" % (a, b, c, d, e))')
-  [ "$r" = "0|1|2|2|1" ] \
-    || { fail "一致性判定五种形状没各判对（拿到 $r，应为 0|1|2|2|1）⇒ 这条尺会把「3/3」放行"; return; }
-  ok "同档连测的一致性有尺子了：一致=0 / hitch 散布与出帧分歧=1 / 缺件与样本不足=2（都不许报 3/3 达标）"
+def R(n, fps=119.0, secs=20.0, rend=4.1, per="interaction", upd=None):
+    return {"dir": "run", "seconds": secs, "hitch_n": int(round(n * secs)),
+            "hitch_per_s": n, "period": per, "render_p50_ms": rend,
+            "update_max_ms": upd, "surfaces_p50_fps": fps}
+a = verdict([R(1.2), R(1.3), R(1.5)], ["a", "b", "c"])[1]                 # 交互档：一致
+b = verdict([R(1.2), R(1.3), R(18.8)], ["a", "b", "c"])[1]                # 09-23 真形状：不一致
+c = verdict([R(1.2), R(1.3), None], ["a", "b", "x"])[1]                   # 缺件 ⇒ 不判
+d = verdict([R(1.2), R(1.3)], ["a", "b"])[1]                              # 不足 ⇒ 不判
+e = verdict([R(1.2), R(1.3, fps=88.0), R(1.5)], ["a", "b", "c"])[1]       # hitch 一致但出帧分歧
+f = verdict([R(1.2), R(1.3), R(1.5, per="idle")], ["a", "b", "c"])[1]     # 混档 ⇒ 不判
+g = verdict([R(0.0, per="idle", upd=1.8), R(0.95, per="idle", upd=2.3),   # idle 档：hitch 0~0.95 是
+             R(0.0, per="idle", upd=2.0)], ["a", "b", "c"])[1]            # 正常散布，比 T2 判据量
+print("%s|%s|%s|%s|%s|%s|%s" % (a, b, c, d, e, f, g))')
+  [ "$r" = "0|1|2|2|1|2|0" ] \
+    || { fail "一致性判定七种形状没各判对（拿到 $r，应为 0|1|2|2|1|2|0）⇒ 这条尺会把「3/3」放行"; return; }
+  # 第 7 条是**我自己第一版被自己的尺子抓到的**那条：idle 档的 hitch 真值≈0，
+  # 拿它做除法散布会把 0.00~0.95 判成"19.0× ⇒ 严重不一致"。判据量必须跟着档位走。
+  ok "同档连测的一致性有尺子了：按档取判据量（交互比 hitch/s、idle 比 app-update 最大值），七形状各判一次"
 }
 
 selfcheck_p95_crosscheck_shapes() {  # selfcheck_p95_crosscheck_shapes <outdir>

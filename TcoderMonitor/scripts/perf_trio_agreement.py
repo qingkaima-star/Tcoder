@@ -37,7 +37,7 @@ import json
 import os
 import sys
 
-from perf_trace_metrics import disp_values, fps_counts, percentile
+from perf_trace_metrics import dedupe_pairs, disp_values, fps_counts, percentile
 from perf_trace_summary import period_eligibility, summary_load
 
 SPREAD_BAR = 2.0          # hitch/s 极差比上限（保守）
@@ -76,51 +76,84 @@ def read_run(d):
         return None
     late = [v for v in disp_values(loaded["hitches"]) if v is not None]
     rends = [v for v in disp_values(loaded["hitches-renders"]) if v is not None]
+    upd = [v for v in dedupe_pairs(loaded["hitches-updates"]) if v is not None]
     fps = loaded["displayed-surfaces-per-second"]["json"] or fps_counts(loaded["displayed-surfaces-per-second"])
     return {"dir": os.path.basename(d.rstrip("/")), "seconds": secs,
             "hitch_n": len(late), "hitch_per_s": len(late) / secs,
             "period": str(meta.get("period") or "?"),
             "render_p50_ms": percentile(rends, .5) if rends else None,
+            "update_max_ms": max(upd) if upd else None,
             "surfaces_p50_fps": (float(fps["fps_p50"]) if fps and fps.get("fps_p50") else None)}
 
 
+def _spread(vals, unit, bar):
+    """极差比 + 一句人话。返回 (比值, 超没超)。"""
+    lo, hi = min(vals), max(vals)
+    floor = lo if lo > 0 else max(1.0 / 20.0, 1e-6)   # 下界为 0 时不除零：按"一趟一个事件"兜
+    ratio = hi / floor
+    return ratio, (ratio > bar), "%s 现量 %.2f ~ %.2f ⇒ 极差比 %.1f×（上限 %.1f×）" % (
+        unit, lo, hi, ratio, bar)
+
+
 def verdict(runs, dirs):
-    """→ (逐行文字, 退出码)。缺件与不足都**不许**伪装成"一致"。"""
+    """→ (逐行文字, 退出码)。缺件与不足都**不许**伪装成"一致"。
+
+    【判据量按档位分】这是第一版被我自己的尺子抓出来的错：拿 hitch/s 的极差比去量
+    **idle 档**，得到"0.00 ~ 0.95 ⇒ 19.0× ⇒ 不一致"——而 idle 档的 hitch 本来就该在 0 附近
+    （静止窗口 ProMotion 还会降频，spec §6.2 明写那一档只记形状不判档）。
+    一个真值≈0 的量做除法散布，任何噪声都是"严重不一致"。
+    ⇒ 每个档位只比**该档的判据量**：`interaction` 比 hitch/s，`idle` 比 `app-update` 的最大值
+    （T2 的既有判据），出帧那一维两档都看。混档一律不判。
+    """
     if not runs:
         return ["!! 一个 run 目录都没给 ⇒ 这支尺子没被喂过数据，别把「没输出」当「通过」"], 2
     got = [r for r in runs if r]
     missing = [os.path.basename(str(d).rstrip("/")) for d, r in zip(dirs, runs) if not r]
     lines = ["== 同档连测的一致性（协议：≥3 趟 **且取值一致**）=="]
     for r in got:
-        lines.append("   %-44s 档=%-11s %5.1fs  hitch %4d ⇒ %5.2f /s   render p50 %s  出帧 p50 %s"
+        lines.append("   %-44s 档=%-11s %5.1fs  hitch %4d ⇒ %5.2f /s   render p50 %s  update max %s  出帧 p50 %s"
                      % (r["dir"], r["period"], r["seconds"], r["hitch_n"], r["hitch_per_s"],
                         ("%.2f ms" % r["render_p50_ms"]) if r.get("render_p50_ms") else "—",
+                        ("%.2f ms" % r["update_max_ms"]) if r.get("update_max_ms") else "—",
                         ("%.0f/s" % r["surfaces_p50_fps"]) if r.get("surfaces_p50_fps") else "—"))
     if missing:
-        lines.append("   缺件/读不出：%s ⇒ **不判**（缺的那趟不许当 hitch=0）" % ", ".join(missing))
+        lines.append("   缺件/读不出/被复核打回：%s ⇒ **不参与**散布（缺的那趟不许当 hitch=0）"
+                     % ", ".join(missing))
     if len(got) < 3:
         lines.append("   判定：**样本不足**（只有 %d 趟可用，协议要 ≥3）⇒ 不许报「3/3 达标」" % len(got))
         return lines, 2
-    rates = [r["hitch_per_s"] for r in got]
-    lo, hi = min(rates), max(rates)
-    floor = max(lo, 1.0 / max(r["seconds"] for r in got))   # 0/0：下界兜到"一趟里连一个事件都没有"
-    spread = hi / floor
-    lines.append("   hitch/s 现量 %.2f ~ %.2f ⇒ 极差比 %.1f×（上限 %.1f×）"
-                 % (lo, hi, spread, SPREAD_BAR))
-    bad = [] if spread <= SPREAD_BAR else ["hitch/s 极差比 %.1f× > %.1f×" % (spread, SPREAD_BAR)]
+    periods = set(r["period"] for r in got)
+    if len(periods) > 1:
+        lines.append("   判定：**不判**——这些趟的档位不同（%s），混档比散布没有意义"
+                     % " / ".join(sorted(periods)))
+        return lines, 2
+    period = periods.pop()
+    bad = []
+    if period == "idle":
+        q = [r["update_max_ms"] for r in got if r.get("update_max_ms") is not None]
+        name, bar = "app-update 最大值(ms)", 2.0
+    else:
+        q = [r["hitch_per_s"] for r in got]
+        name, bar = "hitch/s", SPREAD_BAR
+    if len(q) < len(got):
+        bad.append("有 %d 趟没采到该档判据量（%s）⇒ 尺子没对齐，不许只凭另一半报一致"
+                   % (len(got) - len(q), name))
+    if q:
+        ratio, over, text = _spread(q, name, bar)
+        lines.append("   " + text + ("（idle 档按 T2 判据量比，不比 hitch：那量真值≈0，除法散布无意义）"
+                                     if period == "idle" else ""))
+        if over:
+            bad.append("%s 极差比 %.1f× > %.1f×" % (name, ratio, bar))
     fps = [r["surfaces_p50_fps"] for r in got if r.get("surfaces_p50_fps")]
     if len(fps) >= 2 and (max(fps) - min(fps)) > FPS_SPREAD_BAR:
         bad.append("出帧 p50 极差 %.0f 帧/s > %.0f" % (max(fps) - min(fps), FPS_SPREAD_BAR))
-    if len(got) > len(fps):
-        bad.append("有 %d 趟没采到出帧表 ⇒ 第二把尺子没对齐，不许只凭 hitch 数判一致"
-                   % (len(got) - len(fps)))
     if bad:
         lines.append("   判定：**不一致** —— " + "；".join(bad))
         lines.append("   ⇒ 这一档**不能**报「3/3 达标」。要么继续加趟直到有一组取值一致，"
                      "要么按 spec §1.3 明写「受控重复未满足」。")
         return lines, 1
-    lines.append("   判定：一致（两把尺子都在带宽内）。中位 hitch/s %.2f ⇒ 报数时**报中位与范围**，不报均值"
-                 % sorted(rates)[len(rates) // 2])
+    lines.append("   判定：一致（两把尺子都在带宽内）。中位 %s %.2f ⇒ 报数时**报中位与范围**，不报均值"
+                 % (name, sorted(q)[len(q) // 2]))
     return lines, 0
 
 
