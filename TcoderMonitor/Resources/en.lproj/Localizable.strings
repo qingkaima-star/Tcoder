@@ -761,7 +761,8 @@
 // 少数没走查表的落点由 LocalizationGuardTests 的「有键没查」那一半继续盯。
 "窗口内累计" = "Cumulative in window";
 "所选目录本身就是仓库根" = "The selected folder is the repository root itself";
-"数据源只有边际分布" = "Data source provides marginals only";
+// P53：这条裸句键已并进整句键 `"数据源只有边际分布%1$@"`（见下），短语本身一字未删，
+// 留着它 `test_noStaleKeysInCatalog` 会报"代码里已经不存在的键"。
 "当前为离线模式，版本与漏洞结论来自内置快照。" = "Offline mode: version and vulnerability conclusions come from the built-in snapshot.";
 "分用途统计" = "Breakdown by usage";
 "该项目没有产出覆盖率报告，不参与计分。" = "This project produced no coverage report, so it is not scored.";
@@ -786,3 +787,19 @@
 "重复代码 %1$@，共 %2$@ 处重复块" = "Duplicated code %1$@ across %2$@ duplicate blocks";
 "贡献分布合理（%1$@ 个署名，头号署名占 %2$@；署名按工作流计，不等于 %1$@ 个人）" = "Contribution is well spread (%1$@ identities, the top one holds %2$@; identities are workflows, not %1$@ people)";
 "「%1$@」这个署名占 %2$@ 提交，单点风险高（署名按工作流计，不等同于一个人头）" = "Identity \u201c%1$@\u201d holds %2$@ of commits \u2014 single-point risk (identities are workflows, not people)";
+
+// 批次 P53（Git 洞察口径句·先拼再上屏的那一族）：这一族的毛病不是"没键"，
+// 而是**先把带测得值的中文片段拼成串、再交给渲染层查表** —— 拼出来的整串里嵌着
+// 「279」「606」这样的测得值，目录里不可能有对应的键，于是英文态永远出中文；
+// 更糟的是 `windowSuffix` 被当 `%3$@` 插进**已经翻好**的整句模板，
+// 同一行前半英文后半中文。八条键：模板整句化，测得值走位置参数。
+"含 %1$@ 次合并 · 非合并 %2$@ 次" = "Including %1$@ merges · %2$@ non-merge commits";
+"无合并提交 · 已覆盖全部历史" = "No merge commits · the full history is covered";
+"含合并 · 非合并窗口 %1$@ 次" = "Merges included · non-merge window covers %1$@ commits";
+"旧报告未记录窗口口径" = "This older report does not record the window basis";
+"近 %1$@ 次提交窗口内 · %2$@ 人" = "Within the last %1$@ commits · %2$@ authors";
+" · 近 %1$@ 次提交窗口内" = " · within the last %1$@-commit window";
+"%1$@。趋势、时段分布与作者占比都只是这段窗口的分布，不代表全部历史。" = "%1$@. The trend, hour-of-day distribution and author shares describe only this window, not the whole history.";
+"数据源只有边际分布%1$@" = "The data source provides marginals only%1$@";
+"最活跃时段：%1$@:00 · 按各作者本地时区合并，未做时区归一" = "Busiest hour: %1$@:00 · merged by each author's local timezone, with no timezone normalisation";
+"小时分布为空，只有星期分布可用" = "The hour distribution is empty, so only the weekday distribution is available";
