@@ -277,6 +277,12 @@ stop_synth_scroller() {  # 只停**自己起的那个** pid（绝不按名字 pk
   SYNTH_PID=""
 }
 
+measured_cleanup() {  # 收尾：只清**自己起的那两个** pid（合成输入器 + 被测实例），绝不按名字/bundle id 广播
+  stop_synth_scroller
+  [ -n "${MEASURED_PID:-}" ] && kill -TERM "$MEASURED_PID" 2>/dev/null
+  return 0
+}
+
 # -----------------------------------------------------------------------------
 # 把**自己起的**那个实例带到前台：按 pid，绝不遍历、绝不按 bundle id 广播（AGENTS -1.3）。
 # 09-22 从 perf_wait_window.sh 搬进来，因为 `MEASURE_LAUNCH=1` 那条路是 harness 自己起实例的，
@@ -328,7 +334,15 @@ launch_measured_instance() {  # launch_measured_instance <样本目录> <二进�
     "$bin" -ApplePersistenceIgnoreState YES >/dev/null 2>&1 &
   MEASURED_PID=$!
   # 只清自己起的那个 pid；EXIT/INT/TERM 三条都挂，中断不留孤儿（留了就压死所有人的闸门）
-  trap '[ -n "${MEASURED_PID:-}" ] && kill -TERM "$MEASURED_PID" 2>/dev/null; return' EXIT INT TERM
+  # 收尾分两条：EXIT 只负责清；INT/TERM 必须**清完真的退**。
+  # 原来三条共用一个 handler 且里面写的是 `return` —— 两条失效都实测到了：
+  #   ① `return` 在脚本顶层触发 ⇒ 每次跑完在日志尾巴溅一行
+  #      `return: can only \`return' from a function or sourced script`（读日志的人在找红因，先看见它）；
+  #   ② handler 不 exit ⇒ bash 执行完接着等，`kill -TERM` 杀不掉它
+  #      （perf_wait_window.sh 的 on_signal 那段注释记的就是同一个坑，那边已经修了）。
+  # 只清自己起的那两个 pid；被中断也不留孤儿实例——漏一个就压死所有人"实例数恰为 1"那道闸。
+  trap 'measured_cleanup' EXIT
+  trap 'measured_cleanup; exit 130' INT TERM
   sleep 4
   if kill -0 "$MEASURED_PID" 2>/dev/null; then
     echo "    自己起的被测实例 pid=$MEASURED_PID（脉冲写 $MEASURED_PULSE，沙箱 $out/sandbox）"
