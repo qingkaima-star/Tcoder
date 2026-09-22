@@ -160,8 +160,9 @@ struct CodeHotspotSection: View {
 
     static func subtitle(_ code: CodeMetrics) -> String {
         if code.hugeFiles.isEmpty { return "行数是单文件总行数（含空行与注释）" }
+        // 「共 N 个」是**总数**口径，读真总数：榜单被 `prefix(20)` 截过，直读榜长会把 552 写成 20。
         return localizedFormat("共 %1$@ 个 · 最大 %2$@ 行 · 点击条目在 Finder 中显示",
-                                NumberFormat.grouped(code.hugeFiles.count),
+                                NumberFormat.grouped(code.reportedHugeFileCount),
                                 NumberFormat.grouped(largestLineCount(code)))
     }
 }
