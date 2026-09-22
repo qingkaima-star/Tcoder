@@ -34,7 +34,7 @@ struct AnalysisSectionRow: View {
         label
             .buttonStyle(.plain)
             .disabled(!isEnabled)
-            .help(isEnabled ? section.title : ShellCopy.notAnalyzed(.thisProject))
+            .help(isEnabled ? localizedCopy(section.title) : ShellCopy.notAnalyzed(.thisProject))
     }
 
     /// 选中态必须能被读屏说出来。视觉上它是一枚淡底行，

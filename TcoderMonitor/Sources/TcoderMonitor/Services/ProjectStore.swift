@@ -56,15 +56,6 @@ final class ProjectStore {
 
     // MARK: Registry
 
-    var sortedProjects: [MonitoredProject] {
-        projects.sorted { lhs, rhs in
-            let l = reports[lhs.id]?.health?.overall ?? -1
-            let r = reports[rhs.id]?.health?.overall ?? -1
-            if l != r { return l > r }
-            return lhs.name < rhs.name
-        }
-    }
-
     func report(for project: MonitoredProject?) -> ProjectReport? {
         guard let project else { return nil }
         return reports[project.id]
@@ -91,6 +82,10 @@ final class ProjectStore {
         persist()
     }
 
+    /// 改名。**UI 里目前没有入口**（右键菜单只有「在 Finder 中显示」与「移除」），
+    /// 但它是「注册表与报告里的 `project` 必须同步」这条不变式唯一的 exerciser
+    /// （`ProjectStoreRoundTripTests` 的生命周期用例靠它断言"两处显示不同名字"），
+    /// 所以留着；要做「重命名项目」这个功能时，入口 + 输入框 + 双语键一起补。
     func rename(_ project: MonitoredProject, to newName: String) {
         guard let index = projects.firstIndex(where: { $0.id == project.id }) else { return }
         projects[index].name = newName

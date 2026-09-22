@@ -9,7 +9,7 @@ HEAD `9c28245`），构建口径 = debug，文件 335 / 有效码行 50 542 / �
 判据分三档：**已落地**（本轮改完并过门禁）／**可修待排**（改法明确，等窗口）／
 **记账不动**（登记但不改判据，避免"为了自己好看改尺子"）。
 
-## F1 缺席维度的"为什么"只活在 View 层 —— 已落地
+## F1 缺席维度的"为什么"只活在 View 层 —— 已落地（`d1bb9ae`，随 `ddf535a` 合入）
 
 `HealthBreakdown`（挑出哪些维度缺席）、`DimensionDisplay`（显示名映射）、
 `MissingDimensionReason`（缺席原因）**全部住在 `Views/Health/HealthComponentTable.swift`**，
@@ -45,7 +45,7 @@ CLI 侧的新读数形状（失败路 → **缺席维度 + 原因** → 综合�
 缺席维度 3 项：运行稳定性 — 未发现可读的日志文件。 · 依赖健康 — … · 测试覆盖 — 该项目没有产出覆盖率报告，不参与计分。
 ```
 
-## F2 同一屏两个行数分母不打招呼 —— 已落地
+## F2 同一屏两个行数分母不打招呼 —— 已落地（`b24f15f`）
 
 CLI 首行「码行 50 542」与注释维度的依据句「…源码 69,199 行，标记扣 2 分」**同一屏并存**，
 差的那 19k 行是空行与注释。两个数各自都对，但并排出现而不标口径，读的人（人和 AI 一样）
@@ -89,7 +89,7 @@ CLI 首行「码行 50 542」与注释维度的依据句「…源码 69,199 行�
 棘轮按实扫现量从 28 收到 19。剩下 19 条的构成（17 内插串 + 2 处 `Text(变量)`）记在
 `docs/superpowers/plans/2026-09-21-copy-into-tooltips.md` §6，不当已还。
 
-## F4 CLI 复现不了 GUI 的「手动附加日志」—— 已落地
+## F4 CLI 复现不了 GUI 的「手动附加日志」—— 已落地（`fa0ba9c`）
 
 `AppState.extraLogURLs` 让界面用户手动指日志文件，CLI 只能吃 `[]`。
 于是一个日志不放在 `Logs/error.log`、`crash.log`、`~/Library/Logs` 约定位置的项目，
@@ -111,7 +111,7 @@ CLI 首行「码行 50 542」与注释维度的依据句「…源码 69,199 行�
 所以要写的不是"补一条测试"，而是**把"现在由谁量"落到纸面**，别留下"看起来有人管"的空档。
 → README 的自扫段与 `docs/口径与已知限制.md` 各加一句指明接手者。
 
-## F6 默认不联网时，CLI 读数不提醒"没查 ≠ 没有病" —— 已落地
+## F6 默认不联网时，CLI 读数不提醒"没查 ≠ 没有病" —— 已落地（`d1bb9ae`）
 
 界面依赖页早有那句「默认不联网时漏洞判定恒为 0 条，这是「没有查」，不是「没有病」」，
 而 CLI 的 `score` 只把 `networkLookupPerformed=false` 埋在 JSON 里。
@@ -135,8 +135,205 @@ CLI 就更必须把它打在文本读数里 —— 两边的诚实性得一起�
 登记为提案不落地：动 `Models/**` 落盘契约要连带界面、评分器、旧报告兼容三处，
 不是一轮 CLI 的账。**不许**为此改用"从 components 反推"的派生口径 —— 那是第二把尺子。
 
+## F8 本轮新造的 ⓘ 落点整片躲着双语棘轮 —— 已落地（`846fe84` + `7fc37a7`）
+
+「碎文案收进 ⓘ」这一轮把长句搬进 `CopyHelpBadge(整句)` 与 `help:` / `subtitleHelp:` /
+`captionHelp:` 这些槽位，而这些**标签与位置参数一个都不在双语守卫的入口族里**。
+组件内部确实替调用方过了 `localizedCopy`（`Design/CopyHelp.swift` 的规矩 2），
+所以调用点那句中文**就是键** —— 但扫不到它就等于：**本轮搬进 ⓘ 的字的英文译文有没有登记，
+没有任何一把尺子知道**。把入口族补全之后实扫现量 17 → 30（多看见 12 条一直在盲区的存量），
+同日登记 11 条落到 **19**；S5 合流涨回 21，补账轮登记「Java 服务」「Node 服务」两条
+（它们本来就在台账里，只是被 `title:` 入口扫到）又落回 **19**（`unregisteredLiteralCeiling`，
+只由总工改；中间那次 19 → 21 是 S5 搬字新造 2 条内插短句，属**新增债显形**，不是放宽）。
+
+**判据留一条**：扩扫描面/入口族会让存量涨。涨的数字必须是**某次实扫的现量**、
+必须在提交说明与注释里写清"多看见的"还是"新造的"，两者都不是"闸门坏了"。
+
+## F9 「登记了键却查不中」的 `Text(变量)` 形状 —— 已落地（`7fc37a7`）
+
+`PerformanceProcessGroups.swift` 四处是变量喂进 `Text`：内置分组名（常量住在
+`Models/Performance.swift`）、分组三态短标题（纯函数返回的元组）、`GroupMetricCell`
+的 `label` / `caption`。这些位置**登记键也没用**（双语方案 §7.1：`Text(变量)` 走 verbatim，
+不查表），英文态就是中文。全部改成 `Text(localizedCopy(…))` 并登记 3 条键。
+
+防回归**没有新写守卫**：`LocalizationGuardTests` 名下本来就有
+`test_designRenderPointsActuallyLookUpTheCatalog`（专抓 `Text(变量)`），
+只是它按文件点名纳管，这个文件不在名单里。把文件加进 `renderPointHosts` 即可 ——
+判据本体一字未动。**"仓库里已经有这把尺子"不等于"它量到了你这儿"**，
+这是本仓"按名字点名的清单不会自动长大"缺陷类的又一次实测。
+
+## F10 "四档退出码"只有 in-process 证据；真二进制里第 3 档挂死 —— 已修（本轮 P0）
+
+交付时我写过两句"已验证"：`CLIHeadlessTests` 20 条全绿覆盖四档退出码，
+以及设计文档 §2 说"CLI 生命周期挂在 `App.init()` 上"这个风险**已由 §1 的 spike 证伪**。
+两句都不成立。2026-09-21 深夜对 release 二进制（`provenance: rev=e929a47 clean=true`）
+做完成度审计时实测：
+
+```
+$ dist/Tcoder.app/Contents/MacOS/TcoderMonitor score /Users/one/does-not-exist
+（16 分钟不出声；0.6 秒 CPU；无子进程；
+ fd 上开着 /private/var/folders/…/T/com.tcoder.monitor.savedState/{data.data,windows.plist}）
+```
+
+连我自己写的 600 秒 `CLIConfig.hardTimeout` 都没出声 —— 说明卡点不在信号量，
+而在 `exit()` 与 AppKit 窗口状态恢复互等：`App.init()` 被调到的那一刻启动流程还没走完。
+20 条单测全绿的原因很简单：**它们在同一进程里直接调 `CLIRouter.main`，从不经过 `@main` 那条路**。
+而 spike 跑的是"真干了 1 秒活的那一档"，没跑**即时返回**的那几档（rc3 / rc64 / `--version`）——
+**"我验过一条"被我写成了"这个机制没问题"**，这是本条真正的病灶。
+
+**修法（`f7bd835`，一处治因一处治果）**：① 新增 `App/TcoderEntry.swift` 持有 `@main`，
+命中子命令词就在**任何 AppKit 之前**跑完退出，否则原样把控制权交给 `TcoderMonitorApp.main()`
+（GUI 一字不动）；② `CLIRouter.runReport` 把路径校验提到**装信号量之前**同步回 3，
+"根本没开跑"这一档不许依赖并发池。普查分母 143 → 144、`frameworkWhitelist` 随之换名。
+
+**新增的尺子（本仓第一次真把交付二进制起来测）**：`Tests/TcoderMonitorTests/CLIProcessTests.swift`
+6 条真·子进程断言，每条带**墙钟上限**（超时即判败）：rc3 用时 0.123 秒、rc64 0.124 秒、
+`--version` 0.119 秒、`doctor` 0.599 秒、自建临时小仓库 `score` ⇒ rc2 且读数在（0.607 秒）、
+以及"无头调用前后 `savedState` 目录 mtime 一字不动"。拿不到被测产物**判败不许跳过**。
+
+## F11 热点榜的**尾部**不可复现：并列项只听输入顺序 —— 已修（`1c6668d`）
+
+新老两条路逐项对表（GUI 落盘那份 vs `tcoder scan --out`）时，唯一对不上的一项是
+`code.topComplexFunctions[19]`：一次是 `parseTarget`(31 行 · 3 参)，一次是
+`gradleDependencies`(60 行 · 2 参)。同一条 CLI 连扫三次互相一致，但对上 GUI 那一趟就差这一项。
+
+根因不在这条路上，在**排序本身**：`rankedHotspots` 只有「复杂度、行数」两把键，
+CC=14 的一大群函数正好挤在 20 名的截断线上，而 **Swift 的 `sorted` 不是稳定排序**、
+五路并发扫完的合并顺序也不固定。于是"谁在第 20 名"由输入顺序决定 ——
+而界面上那 20 行是**指名道姓列出来的**，读的人以为那是一份确定的榜。
+
+**修法**：并列时按 路径 → 起始行 → 函数名 定序（**阈值与上限一字未动**，
+还是前 20、还是 CC 判级）。补 `HotspotRankingDeterminismTests` 两条，并做了一次 A/B：
+旧写法下它**红 2 条**并点名那对并列项（`perf_trace_xml.py:159` / `ShellGitAnalyzer.swift:187`），
+补键之后绿；榜里实有 3 对并列由 tie-break 定序 ⇒ 判据不是永真。
+
+**推广（这条比修 itself 更值钱）**：任何"截断 + 展示前 N 名"的读数，
+比较器必须构成**全序**。只写主键的排序在单测里几乎总能过（同一份输入顺序固定），
+只有在并发采集或换一条入口路径时才露馅 —— 所以"两条路对同一总体逐项一致"这种对表
+本身就是抓这类缺陷的尺子，值得为它留一条常驻脚本。
+
+## F12 存在但读不了的目录，被四路当成"空仓库"报成功 —— 已修（`835557b`）
+
+这条是**为了写"第 4 档在真二进制里也得验"而探夹具时撞出来的**，不是读代码读出来的。
+
+`fileExists(atPath:)` 对 `chmod 000` 的目录返回 `true`，所以 `CLIScan.validatedURL` 只查
+"存在 + 是目录"就把这个路径放行了。后果不是"报错不够准"，而是：
+
+```
+$ TcoderMonitor scan <一个读不了的目录> --compact
+code: 键在 · totalFiles 0 · codeLines 0 · scannedAt 有值
+failedSections: ["Git 分析"]        # 只有 Git 那路真的喊了失败
+logs / dependencies / coverage: 全部存在，全部是零
+退出码 2
+```
+
+也就是说**四路各自交出"成功但全零"的读数**。界面拿到这份报告会画出一页
+"0 个文件 · 0 行"——那是一副"这个仓库是空的"的样子，而不是"我没读到"的样子。
+本仓为「空态伪装成健康值」记过一整条账（`--` 而不是 0、缺证据不给满分），
+这是它的**入口版本**：缺陷不在渲染层，在"谁替'读不到'说了句话"。
+
+**修法只一行判据**：`validatedURL` 在存在性之外再单独问一次 `isReadableFile`，
+不可读就地走第 3 档（消息原本就写着"不存在、不是目录或不可读"）。
+**没动任何阈值、上限或评分判据。** 两层各补一条测试（单元层 + 真进程层），
+并做 A/B：撤掉那一行，真进程那条当场红。修复后 `score <chmod 000 目录>` ⇒ rc=3、
+stderr 含「不可读」，0.1 秒内返回。
+
+**没修的那一半（记账，别当成已了结）**：单个文件读不了时各分析器仍然"跳过并继续"，
+所以"部分可读"的仓库还是会少报文件数而不吭声。那属于
+`CodeMetrics.scanLimitations`（P7-C 刚开的字段）该管的事 ——
+**要连着界面与评分一起接，不是 CLI 一轮的账**。这里写清楚，是为了不让 F12 的
+"已修"被读成"零读数问题全解决了"。
+
+> **这一半已落地（`e6bcbac` 之后同批，UI/诚实性流）**：`SourceTreeScanner` 的
+> `enumerator(errorHandler:)` 原本 `{ _, _ in true }` —— 读不动的目录与"那里没有源码"
+> 在结果里同一个形状。现在它计数（`SourceScanResult.unreadableDirectoryCount`）、
+> 计入 `isPartial`、并作为一条 `limitationSummary` 走
+> `CodeMetrics.scanLimitations` 上到代码规模页那条「部分测量」提示里；
+> 覆盖率那一路同批接上（`CoverageMetrics.unreadableDirectoryCount`）。
+> 测试各造一个 0o000 目录，本机实测是**通过**、不是 skip。
+> 仍然开着的下一档：`skipLedger` 的行数审计默认不开，所以"排除了多少**行**"还是未知。
+
+## F13（新发现，**未落地，已开方案等拍板**）：Service 层拼出来的整句直接上屏，却在双语尺子之外
+
+**怎么被发现的**：不是看代码看出的，是把 F12 合进 main 之后做一次"渲染面差量"复核时撞出来的 ——
+我要用「`Views/` `Design/` `Resources/` 差量为空」把九页取证的覆盖面扩到最终头，
+而 `git diff baee37c..64b8828 -- TcoderMonitor/Sources` 里 `Services/Health/HealthBreakdown.swift`
+那几行**新增了会印到屏幕上的中文整句**，渲染面差量看不见它。
+
+**证据（全部可复查）**：
+
+| 判据 | 实测 |
+|---|---|
+| 这些句子真的上屏 | `MissingDimensionReason.testingAbsence(coverage:)`（`Services/Health/HealthBreakdown.swift`）由同文件 `:247` 取用，产出健康评分页「缺席维度」那行解释；CLI `score` 打的是同一句 |
+| 尺子看不见 | 守卫的入口模式（`LocalizationGuardTests.uiLiteralsNeedingKeys`）四个分支都要求**前缀**：视图入口 `Text(` / 修饰符 `.help(` / 查表口 `localizedCopy(` / 参数标签 `captionHelp:`。而这里是 `base = "该项目没有产出覆盖率报告，不参与计分。"` —— 没有任何前缀，一个分支都不命中 |
+| 扫描面其实是覆盖到的 | 同文件 `:128` 起早就动态枚举整个 `Sources/TcoderMonitor`，注释里明写着「Services/ 与 Models/ 会产出喂给界面的整句」。**面到了、模式没接住** —— 这是老坑「只盯调用点，看不见生产者」的第三种形状 |
+| 未登记 | 三句在 `Resources/en.lproj/Localizable.strings` 里 `grep -c` **全部 0 命中**；`HealthBreakdown.swift` 里 `String(localized:` / `localizedCopy` **零出现** |
+| 不是新引入的族 | `git show baee37c:…HealthBreakdown.swift` 里这个函数已有 **4** 条裸中文字面量；`e6bcbac`+`dc4c53f` 那一路把它改成三档并加了不可读目录后缀，同函数现在是 **6** 条。债一直在，只是这一轮更长 |
+
+**为什么先记账不自己动手**：修它要动 `Services/Health/`（别人的名下文件），
+并且把尺子扩到"生产者"必然让 `unregisteredLiteralCeiling` 当场跳升 ——
+**那是真债现形，不是工具坏了**，得由拍板的人决定是先登记键还是先扩尺子。
+
+**方案（接谁、怎么接）**：
+① 把 `testingAbsence` 的三句各自包进 `localizedCopy(...)`（本仓查表口子，`String` 型，
+不会因为 `Text(变量)` 不查表而漏）；② 键按中文原句逐字进目录，内插数字的部分换
+`localizedFormat` —— 内插串不能当键，这条台账里已记过；
+③ 守卫扩面**放在 ①② 之后**，且要先量"扩面会现形多少条"再决定上限落在哪，
+现量必须由守卫自己打印，不许由我用 python 复刻一把尺子去数（那条规矩的编号是"对齐口径"第 20 次教训）。
+
+**规模摸底（明确标注：这是 python 粗筛，不是尺子读数，不进台账）**：
+
+> **这一条已被实测取代（2026-09-22）**。下面那段"32 文件 / 327 处"保留原文是为了让读者看见
+> 我当时的判据有多弱；现量在 `docs/屏上正文双语台账.md`：为这类句子专门建了第二把仪器
+> （`scripts/ax_body_text.swift` 读 `AXValue/AXTitle/AXDescription`，与 `ax_dump` 按
+> `visited`/`withHelp` 逐项校准过），英文态 9 页实测 **81 句 / 220 次**
+> （A 有键没查 12、B 未登记话术 45、C 像数据 24），并按文件给出归属。
+> 其中 A 类 12 句本轮已清零（`StatLine` 与 `HealthComponentTable` 两处渲染点包查表），
+> 复测同一 4 页 A: 12 → 0。三类切分的判据也被实测改了一次：
+> 作者行 / 提交标题这类**数据**第一版算进了 B，靠"改完 B 反而涨 4"这个反常才暴露出来。
+"含汉字、又不落在任何 UI 入口前缀上"的字面量，`Services/` 下 **32 个文件 / 327 处**。
+但这个数**不能直接当债的规模**，因为它混着三类不同的东西，要不要上双语是产品判断不是修 bug：
+
+| 类 | 例 | 判断 |
+|---|---|---|
+| 真的会上屏的整句 | `HealthBreakdown.testingAbsence`、`ScoreCurves*` 的 detail 句、`SourceSkipLedger` 的 limitationSummary | **是债**，就是 F13 要治的那一类 |
+| 静态数据文案 | `VulnerabilitySource.swift` 58 处（内置快照里的 advisory 描述，如「lodash 存在命令注入 / ReDoS …」） | 它是**数据**不是文案。翻译它等于改快照内容，多半应当保持原文并标注来源 |
+| 终端出口 | `CLIScoreText.swift` 22 处、`CLIRouter.swift` 17 处 | 读的人是 AI 调用方。要不要跟系统语言走，是一个**待拍板的产品问题**（本轮我按"中文即可"实现，未登记键） |
+
+所以 F13 交给下一手的第一件事不是改代码，是**把这三类切开** —— 否则扩面会把 58 条快照描述
+算成双语债，逼出一个既虚高又没人愿意维护的上限。
+
+同类形状还有没有：`ScoreCurves.swift` 那句「综合 76 分（B 级）…」也住在 Services，
+守卫的注释里已经点过名 —— 所以 F13 不是 `HealthBreakdown` 一个文件的事故。
+
+## F14（本轮新发现，实测）：AI 读的那份 JSON 里有 61 处中文产品散文，而**无头入口没有语言开关**
+
+F13 把"CLI 终端出口"列为第三类时，我只给了一句"读的人是 AI，要不要翻是产品问题"。
+这一轮把它量了，结论比那句话硬得多：
+
+| 测什么 | 怎么测 | 读数 |
+|---|---|---|
+| CLI 有没有走查表 | `grep -l localizedCopy\|localizedFormat\|NSLocalizedString Sources/TcoderMonitor/Services/CLI/` | **0 个文件命中** ⇒ 终端文案与 JSON 里的散文都是字面量，与系统语言无关 |
+| 能不能把 CLI 切到英文态 | `TcoderMonitor score <repo> -AppleLanguages "(en)"` | **rc=64**，`!! 未知参数：-AppleLanguages` ⇒ 无头入口按设计拒收未知 token，所以**今天根本没有切换能力**（GUI 那一路才有） |
+| 出口里到底有多少中文 | 解析 `scan` 落的 JSON，逐字段路径数含汉字的字符串值 | **106 处 / 14 个字段路径**，其中**用户数据 45 处**（`code.hugeFiles[].path` 24、`git.recentCommits[].subject` 20、`git.authors[].name` 1）+ **产品散文 61 处**（`health.components[].{name,detail}`、`health.narrative`/`issues`/`recommendations`/`strengths`、`health.codeScope.{label,note,included,excluded}`、`code.scanLimitations`、`code.overallRisk` 与各处 `risk` 档位词、`dependencies.networkLookupNote`、`git.discoveryMode`、`code.hugeFiles[].suggestion`） |
+
+**为什么这条重要**：AI 调用方拿到的不是终端色面，是 `ProjectReport` JSON。
+它里面 `health.narrative` 这类字段是**判定结论的自然语言表达**，
+一份"英文环境里跑的自动化流水线"收到的会是中英混排的数据。
+而 `risk` 这种**四值封闭集**（低 / 中 / 高 / 严重）是最便宜的一类：
+键早就该有，缺的是"要不要在契约层出语言"这个决定。
+
+**本轮没做（明确不当已完成）**：
+① 没给无头入口开语言参数 —— 那要先决定"翻不翻"，不是先修解析器；
+② 没动 `Models/**`（`risk` 的档位词住在契约里，冻结区）；
+③ 没给那 61 处登记键 —— 键在 `Resources/en.lproj`，但**生产者住在 `Services/Health/`（WS-C 名下）**，
+   与 F13 同一条边界。要接的话顺序是：先定"JSON 出不出英文" → 再登记键 →
+   最后才轮到入口接 `-AppleLanguages`。
+
 ## 一句话结论
 
 CLI 这一轮真正的收益不是"省了 300 秒"，而是**把界面里那些只画给人看的诚实性说明
 （F1 缺席原因、F6 没查≠没病）逼成了必须有机器可读出口的东西** ——
 凡是只有 hover 或只有界面能看见的口径说明，AI 一律读不到，而它不会像人一样去猜。
+F10 是同一句话的反面教材：**只有函数返回值能看见的证据，也一律不算交付证据** ——
+AI 调用方拿到的是进程，它等到的是"命令不回、退出码永远等不到"。

@@ -335,5 +335,47 @@ extension BorderlessDetailGuardTests {
                       "MetricTile 不再消费预留 ⇒ 注入成了空操作（现居 \(tile.path)）")
     }
 
+    // MARK: 批次 P18：时间轴尾刻度必须贴边
+
+    /// 尾刻度写 `centered: false` ⇒ 标签从刻度**往右长**，半个标签掉出绘图区，
+    /// 被卡片右边切成 `08:27…`（交付头 `12ffe8c` 实拍「总览」CPU 曲线，裁到原始像素才确认）。
+    /// 规则收成一份在 `ChartAxisEdge.anchor`；这条守卫钉的是**不许再有人在自己图上写死 centered**。
+    static func timeAxisLabelsWithoutEdgeAnchor(in files: [(path: String, content: String)]) -> [String] {
+        files.flatMap { file -> [String] in
+            // 逐原始行 + `isCode`：先过 `codeLines` 会让 `index + 1` 不再是文件行号
+            // （同文件 H9 那条守卫第一次跑就栽在这里）。
+            file.content.split(separator: "\n", omittingEmptySubsequences: false)
+                .enumerated()
+                .compactMap { index, raw -> String? in
+                    let line = String(raw)
+                    guard SurfaceScanKit.isCode(line), line.contains("AxisValueLabel") else { return nil }
+                    return line.contains("centered: false") ? "\(file.path):\(index + 1)" : nil
+                }
+        }
+    }
+
+    func test_noTimeAxisLabelHardcodesCenteredFalse() throws {
+        let offenders = Self.timeAxisLabelsWithoutEdgeAnchor(
+            in: try SurfaceScanKit.sourceFiles(under: "Views") + SurfaceScanKit.sourceFiles(under: "Design"))
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些轴标签写死了 `centered: false`，尾刻度会被卡片边切字：\(offenders)")
+    }
+
+    func test_timeAxisEdgeScannerCatchesHardcodedCentered() {
+        let bad = [(path: "Views/FakeChart.swift", content: """
+            .chartXAxis {
+                AxisValueLabel(format: style, centered: false)
+            }
+            """)]
+        XCTAssertEqual(Self.timeAxisLabelsWithoutEdgeAnchor(in: bad), ["Views/FakeChart.swift:2"],
+                       "写死 centered 的样例没被抓到 ⇒ 这条守卫数不出东西")
+        let pinned = [(path: "Views/FakeChart.swift", content: """
+            .chartXAxis {
+                AxisValueLabel(format: style, anchor: ChartAxisEdge.anchor(for: date, in: domain))
+            }
+            """)]
+        XCTAssertTrue(Self.timeAxisLabelsWithoutEdgeAnchor(in: pinned).isEmpty, "走了公共规则的被误判")
+    }
+
 }
 

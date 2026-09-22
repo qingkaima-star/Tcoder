@@ -25,8 +25,12 @@ final class CoverageAnalyzer: CoverageProviding {
 
     func analyze(projectRoot: URL, options: ScanOptions) async throws -> CoverageMetrics {
         var metrics = CoverageMetrics()
-        let candidates = try discoverReportFiles(in: projectRoot, options: options)
+        let discovery = try discoverReportFiles(in: projectRoot, options: options)
+        let candidates = discovery.found
         metrics.scannedFileCount = candidates.count
+        // 每次分析都写下这一格（0 也是一句真话："扫到的每个目录都读得动"）。
+        // 旧报告里它是 nil = 那个版本根本没统计过，两者在界面上必须分开。
+        metrics.unreadableDirectoryCount = discovery.unreadableDirectories
 
         var parsed: [CoverageReport] = []
         for url in candidates {
@@ -43,17 +47,33 @@ final class CoverageAnalyzer: CoverageProviding {
 
     // MARK: Discovery
 
-    private func discoverReportFiles(in root: URL, options: ScanOptions) throws -> [URL] {
+    /// 找报告文件的产出：候选清单 + **读不动的目录数**。
+    ///
+    /// 后者是这条链上最后一个"把未知说成已知"的口子：原来目录枚举失败（权限、
+    /// 悬空软链接、竞态中消失的目录）被 `try?` 吞成空数组，于是一个根本没被看过的
+    /// 子树在界面上长成"这个项目没有覆盖率报告"。现在它必须自己报名字。
+    struct Discovery: Sendable {
         var found: [URL] = []
+        var unreadableDirectories: Int = 0
+    }
+
+    private func discoverReportFiles(in root: URL, options: ScanOptions) throws -> Discovery {
+        var out = Discovery()
         var queue: [(URL, Int)] = [(root, 0)]
 
         while let (directory, depth) = queue.popLast() {
-            if depth > 6 || found.count >= 40 { continue }
-            let children = (try? FileManager.default.contentsOfDirectory(
-                at: directory,
-                includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
-                options: [.skipsHiddenFiles]
-            )) ?? []
+            if depth > 6 || out.found.count >= 40 { continue }
+            let children: [URL]
+            do {
+                children = try FileManager.default.contentsOfDirectory(
+                    at: directory,
+                    includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
+                    options: [.skipsHiddenFiles]
+                )
+            } catch {
+                out.unreadableDirectories += 1
+                continue
+            }
 
             for child in children {
                 let values = try? child.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey])
@@ -61,11 +81,11 @@ final class CoverageAnalyzer: CoverageProviding {
                     if Self.thirdPartyDirectories.contains(child.lastPathComponent) { continue }
                     queue.append((child, depth + 1))
                 } else if Self.wantedNames.contains(child.lastPathComponent) {
-                    found.append(child)
+                    out.found.append(child)
                 }
             }
         }
-        return found
+        return out
     }
 
     // MARK: Parsing

@@ -117,6 +117,33 @@ final class CoverageAnalyzerTests: XCTestCase {
         XCTAssertFalse(metrics.hasData)
         XCTAssertNil(metrics.overallLinePercent)
         XCTAssertEqual(metrics.riskLevel, .none)
+        XCTAssertEqual(metrics.unreadableDirectoryCount, 0,
+                       "一个目录都没挡住时这一格必须是 0（一句真话），不能留 nil 让人以为没统计")
+    }
+
+    /// 目录读不动时必须自己报名字（P7-C 余量）。以前枚举失败被 `try?` 吞成空数组，
+    /// 于是"这个子树我们根本没看过"在界面上长成"该项目没有产出覆盖率报告"——
+    /// 那是关于我们的事实，被写成了关于项目的结论。
+    func testUnreadableDirectoryIsCountedNotSwallowed() async throws {
+        try write("locked/lcov.info", "SF:a.ts\nLF:100\nLH:50\nend_of_record\n")
+        let blocked = root.appendingPathComponent("locked")
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: blocked.path)
+        // 收尾必须把权限还回来：还不回来 `tearDown` 就删不掉这棵夹具，
+        // 残骸会喂给下一轮扫描当"真实数据"（本仓踩过两类：/tmp 夹具喂假绿、仓库内沙箱喂假红）。
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: blocked.path) }
+
+        let metrics = try await CoverageAnalyzer().analyze(projectRoot: root, options: .default)
+        XCTAssertNotNil(metrics.unreadableDirectoryCount, "每次分析都要写下这一格")
+        if metrics.unreadableDirectoryCount == 0 {
+            throw XCTSkip("本机允许枚举 0o000 目录（例如以 root 跑测试），此时计数为 0 是正确行为")
+        }
+        XCTAssertGreaterThanOrEqual(metrics.unreadableDirectoryCount ?? -1, 1)
+        XCTAssertFalse(metrics.hasData, "被挡住的那份报告不该被算成扫到了数据")
+
+        let note = MissingDimensionReason.testingAbsence(coverage: metrics) ?? ""
+        XCTAssertTrue(note.contains("个目录没能读取"), "扫描面不完整必须一起上屏：\(note)")
+        XCTAssertTrue(note.hasPrefix("该项目没有产出覆盖率报告"),
+                      "前半句仍是那句结论，后半句才补上我们没看完：\(note)")
     }
 
     /// Third-party coverage is not our project's coverage, but `build/` and

@@ -236,14 +236,18 @@ struct CodeDuplicationBlockRow: View {
             .map { "\(CodeViewFormat.pathTail($0.path, root: root)):\(NumberFormat.grouped($0.startLine))" }
         let joined = shown.joined(separator: "   ")
         let rest = block.occurrences.count - shown.count
-        return rest > 0 ? "\(joined)   （另有 \(NumberFormat.grouped(rest)) 处）" : joined
+        return joined + (rest > 0 ? "   " + localizedFormat("（另有 %1$@ 处）", NumberFormat.grouped(rest)) : "")
     }
 
     static func hint(_ block: DuplicatedBlock, root: String) -> String {
-        "相似度 \(NumberFormat.percent(block.similarity, precision: 1)) · "
-            + "\(NumberFormat.grouped(block.lineCount)) 行 · 出现 "
-            + "\(NumberFormat.grouped(block.occurrences.count)) 处\n"
-            + occurrenceTitles(block, root: root, limit: block.occurrences.count)
+        // **整句一条键**，不拆成三段各自做键：拆开运行时查得到，可按字面量比对键的
+        // 守卫会判"目录里有死键"，而英文态语序也必坏（双语方案 §9）。
+        // 后面的 occurrence 标题是用户自己的文件路径，属于数据，不翻。
+        localizedFormat("相似度 %1$@ · %2$@ 行 · 出现 %3$@ 处",
+                        NumberFormat.percent(block.similarity, precision: 1),
+                        NumberFormat.grouped(block.lineCount),
+                        NumberFormat.grouped(block.occurrences.count))
+            + "\n" + occurrenceTitles(block, root: root, limit: block.occurrences.count)
     }
 }
 
@@ -305,7 +309,7 @@ struct CodeComplexityRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("\(hotspot.filePath):\(hotspot.startLine) · 点击在 Finder 中显示")
+            .help(localizedFormat("%1$@ · 点击在 Finder 中显示", "\(hotspot.filePath):\(hotspot.startLine)"))
 
             CodeOpenFileButton(path: hotspot.filePath, root: root)
                 .tableCell(DataColumns.column(columns, 6))

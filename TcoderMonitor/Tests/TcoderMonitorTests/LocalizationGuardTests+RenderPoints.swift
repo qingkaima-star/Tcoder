@@ -17,11 +17,20 @@ extension LocalizationGuardTests {
     /// 侧栏九条页名仍是中文，因为 `SidebarRows` 写的是 `Text(section.title)`。
     ///
     /// 判据：`Design/` 里承载组件文案的 `Text(<已知参数名>)` 必须过 `localizedCopy`。
-    /// 只认白名单里的参数名，避免把 `Text("\(x)")`、`Text(item.name)` 这类
-    /// 由调用方自己负责语言形态的写法一起卷进来。
+    ///
+    /// ⚠ 2026-09-22 改过一次判据形状，理由与实测都在下面，别按旧说明改回去：
+    /// 原来只认**整名相等**（`label`、`section.title` 这种逐条点名），
+    /// 并写明"避免把 `Text(item.name)` 这类卷进来"。而正文台账（`scripts/ax_body_audit.py`）
+    /// 用进程外 AX 实测到：健康评分页分量表那一列整片是中文，落点正是
+    /// `HealthComponentTable.rowView` 的 `Text(row.name)` —— **被豁免的那个形状就是漏点本身**，
+    /// 而它需要的键早就登记好了（"协作分布" = "Collaboration Spread"）。
+    /// 现在按**末段相等**判（`row.name` → `name`），并把 `name` 加进名单。
+    /// 放宽的作用域实测过：同一判据跑在 `Design/` 全量上**新暴露 0 处**，
+    /// 所以这不是把噪声放进来，是把一个已经造成 6 句漏网的豁免撤掉。
+    /// 仍然排除 `Text("\(x)")`：插值串取不出标识符前缀，形状上就进不来。
     private static let copyParameterNames: Set<String> = [
         "label", "value", "caption", "unit", "title", "subtitle", "text", "message",
-        "section.title", "column.title",
+        "section.title", "column.title", "name",
     ]
 
     /// **扫描面名单（只许变长，不许变短）**。
@@ -41,6 +50,11 @@ extension LocalizationGuardTests {
     static let renderPointHosts: Set<String> = [
         "Views/CodeGit/CodeGitDesignKit.swift",
         "Views/PerfLogs/NumberText.swift",
+        "Views/Performance/PerformanceProcessGroups.swift",
+        // 2026-09-22 正文台账（进程外 AX）抓到的两处：`StatLine` 的九个调用点全是中文短标签、
+        // 分量表的维度名整列不查表。纳管按文件，不按视图名点名。
+        "Views/Shell/DashboardReadouts.swift",
+        "Views/Health/HealthComponentTable.swift",
     ]
 
     static func unlocalizedRenderPoints(in files: [(path: String, content: String)]) -> [String] {
@@ -54,8 +68,14 @@ extension LocalizationGuardTests {
                     guard let open = line.range(of: "Text(") else { return nil }
                     let rest = line[open.upperBound...]
                     let name = rest.prefix { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." }
-                    guard copyParameterNames.contains(String(name)),
-                          rest.hasPrefix(String(name) + ")") else { return nil }
+                    let ident = String(name)
+                    // 必须是"整颗标识符直接进 Text(...)"，中间不许有别的东西：
+                    // `Text(localizedCopy(label))` 的前缀是 `localizedCopy` 且后面不是 `)`，
+                    // `Text("\(x)")` 取不出标识符 —— 两种都自然落在判据外。
+                    guard rest.hasPrefix(ident + ")") else { return nil }
+                    let leaf = ident.split(separator: ".").last.map(String.init) ?? ident
+                    guard copyParameterNames.contains(ident)
+                            || copyParameterNames.contains(leaf) else { return nil }
                     return "\(file.path):\(index + 1)"
                 }
         }
@@ -91,5 +111,17 @@ extension LocalizationGuardTests {
         let interpolated = [(path: "Design/Fake.swift",
                              content: "    Text(\(name)) 拼出来的串由调用方负责\n")]
         XCTAssertTrue(Self.unlocalizedRenderPoints(in: interpolated).isEmpty, "插值写法被误判")
+        // 末段相等这一支是 2026-09-22 为 `Text(row.name)` 补的（正文台账实测：
+        // 分量表那一列的 6 个维度名就是这么漏网的）。三向都要立住：
+        // 漏网的抓到、包了查表的放过、非文案的末段（`width`）不误伤。
+        let dotted = [(path: "Views/Fake.swift", content: "    Text(row.name)\n")]
+        XCTAssertEqual(Self.unlocalizedRenderPoints(in: dotted), ["Views/Fake.swift:1"],
+                       "点号写法的文案渲染点没被抓到（末段判据失效）")
+        let dottedWrapped = [(path: "Views/Fake.swift",
+                              content: "    Text(localizedCopy(row.name))\n")]
+        XCTAssertTrue(Self.unlocalizedRenderPoints(in: dottedWrapped).isEmpty, "点号写法包了查表仍被误判")
+        let dottedGeometry = [(path: "Views/Fake.swift", content: "    Text(item.width)\n")]
+        XCTAssertTrue(Self.unlocalizedRenderPoints(in: dottedGeometry).isEmpty,
+                      "非文案末段被卷进来了（名单里不该有 width）")
     }
 }

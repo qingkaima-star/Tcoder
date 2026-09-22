@@ -132,6 +132,19 @@ enum ChartScale {
         return candidates.first { Double($0) >= wanted } ?? 3600
     }
 
+    /// 同一把档位，再加一条下界：**步长不许超过窗口的一半**（即窗口里至少落得下两格）。
+    ///
+    /// 档位本身按"窗口 ~135 秒"标定，短窗口下大多数时候够用，但候选档之间的跳变是
+    /// 1→2→5→15：26 秒的窗口会选到 15 秒（>13），一根刻度落不进左半边。
+    /// 交付头实拍「总览」那张曲线左半段没有任何时间参照（量到只有两枚标签，
+    /// 中心在绘图区 47% 与 92% 处）—— 这条下界是针对"至少两格"的那一半原因，
+    /// 另一半（首刻度必须压在域起点上）由调用点的 `roundLowerBound: false` 负责。
+    static func boundedSecondsStride(windowSeconds: TimeInterval) -> Int {
+        let ladder = secondsStride(windowSeconds: windowSeconds)
+        let atLeastTwoTicks = max(1, Int(windowSeconds / 2))
+        return min(ladder, atLeastTwoTicks)
+    }
+
     /// 窗口短于这个长度时，绝对时钟标签（`22:22`）在一分钟内没有区分度，
     /// 改用「距今 N 秒」的相对轴（总工截图复核问题 2）。
     static let relativeAxisLimitSeconds = 60.0
@@ -234,7 +247,9 @@ struct LiveSeriesChart<Point: Identifiable>: View {
             if case .seconds(let stride) = timeAxis {
                 AxisMarks(values: .stride(by: .second, count: stride)) { value in
                     AxisGridLine().foregroundStyle(Theme.Palette.Surface.separator)
-                    AxisValueLabel {
+                    // 尾刻度贴右边界往左长（`centered: false` 会把它切成 `08:27…`，
+                    // 规则见 `ChartAxisEdge`）。
+                    AxisValueLabel(anchor: ChartAxisEdge.anchor(for: value.as(Date.self), in: timeDomain)) {
                         if let date = value.as(Date.self) {
                             Text(xLabel(for: date))
                                 .font(Theme.Typo.monoSmall.font)
@@ -244,10 +259,10 @@ struct LiveSeriesChart<Point: Identifiable>: View {
                 }
             }
             if case .days(let stride) = timeAxis {
-                AxisMarks(values: .stride(by: .day, count: stride)) { _ in
+                AxisMarks(values: .stride(by: .day, count: stride)) { value in
                     AxisGridLine().foregroundStyle(Theme.Palette.Surface.separator)
                     AxisValueLabel(format: .dateTime.locale(Self.axisLocale).month(.defaultDigits).day(),
-                                   centered: false)
+                                   anchor: ChartAxisEdge.anchor(for: value.as(Date.self), in: timeDomain))
                         .font(Theme.Typo.monoSmall.font)
                         .foregroundStyle(Color.secondary)
                 }
@@ -262,6 +277,9 @@ struct LiveSeriesChart<Point: Identifiable>: View {
 
     /// 轴标签固定 POSIX locale：中文系统下「3月5日」会把间距挤掉。
     static var axisLocale: Locale { Locale(identifier: "en_US_POSIX") }
+
+    /// 横轴的数据域（首点…末点），只用来判"这个刻度是不是贴着边界"。
+    private var timeDomain: ClosedRange<Date>? { ChartAxisEdge.domain(points.map(xOf)) }
 
     private func xLabel(for date: Date) -> String {
         guard let reference = relativeReference else {

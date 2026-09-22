@@ -55,7 +55,10 @@ struct DataGridColumn: Equatable {
         // 各现形一次，而同文件注释早就写了"名称列一律显式写 .leading"：
         // 一条只能靠记性的规则就是没有规则。显式传入仍然优先。
         self.alignment = alignment ?? (width == nil ? .leading : .trailing)
-        self.help = help
+        // 列头口径**在构造点就过查表**：`.help(_:)` 收的是成品 String、自己不查目录，
+        // 而列名（`title`）在渲染处已经 `localizedCopy` 过 —— 只有 help 漏了，
+        // 于是英文态整列表头提示都是中文（2026-09-21 英文态实测 A 类残留的主因之一）。
+        self.help = help.map { localizedCopy($0) }
     }
 }
 

@@ -526,6 +526,69 @@ WS-A/WS-B/WS-C 此刻在**主树里有未提交在途改动**。不允许直接�
 过渡办法（总工执行）：先让三人各自在主树把当前成果 commit（双绿为前提），
 总工随后从该 main 切出各自 worktree，**下一轮起所有人只能在 worktree 里干活**。
 
+### 冻结区 additive 变更登记（第三轮 · P6-Q / P7-D，总工本人）
+
+22:40 单人接管后，「冻结区缺口由总工处理」这句的执行者就是本流自己。为避免它变成
+"总工想改就改"，这里逐条登记本轮动过的冻结文件，并给自己立两条判据：**只加不改**
+（不改动任何既有取义与既有成员）、**新增的东西必须自带守卫**（否则下一轮长回去没人知道）。
+
+| 冻结文件 | 加了什么 | 为什么不能在别的文件里 | 自带守卫 |
+|---|---|---|---|
+| `Utilities/SharedUtilities.swift` | `DateFormat.day`（日期档格式化器，`full` 一字未动） | `PerfHitchGuardTests` 的 `directFormatters` 现量 1 / 上限 1，把 `DateFormatter()` 挪进 `Views/**` 当场红；格式化器必须住在扫描面之外的共用层 | `DesignAbsenceStateTests` 钉「读数格走 day 且正好 10 字符」 |
+| `Models/CodeMetrics.swift` | `scanLimitations: [String]?`（一个字段，其余一字未动） | WS-A 在 `FileSystemCodeAnalyzer` 里把"哪些上限真的生效过"算好了却无处安放，注释点名"交给总工决定接入点"——这就是那个接入点的另一半。**必须是 Optional**：非 Optional 带默认值会让旧报告整份解码失败 | `FunctionalHonestyGuardTests` G9（写/读两头都在）+ `CodeAnalyzerPrecisionTests` 行为两向（截断→非空、未截断→nil）|
+| `Models/CoverageMetrics.swift` | `unreadableDirectoryCount: Int?`（其余一字未动） | 目录枚举失败被 `try?` 吞掉时，"没看到"会在界面上长成"该项目没有产出覆盖率报告"。这一格要把"扫描面不完整"随报告一起落盘，只能住在契约里 | `CoverageAnalyzerTests` 两向（挡住一个目录→计数 ≥1 且结论补一句"没看完"；一个都没挡住→必须写 0，不许留 nil） |
+| `Design/SharedComponents.swift` | `MetricTile` 的自定义 `init` 补一个 `captionHelp: String? = nil` 形参（插在 `caption:` 之后，带默认值） | 属性与渲染 main 早就开好了，**只有 init 不收这个参数 ⇒ 调用点传不进去**；「留短藏长」的格子没有别的挂载点，而 42 处现有调用点靠默认值一字不改 | `TooltipMigrationGuardTests+HelpSlots`（新标签必须进 A/B 两本账）+ S7 的 `ShellReadoutTooltipTests`（三格 captionHelp 只指既有真值生产者，不许重抄中文） |
+
+不在这张表里的冻结区改动一律视为越界。历史批次（P7-A 退役示例数据动过
+`Models/Project.swift`、`Models/HealthScore.swift`、`App/AppState.swift`、
+`Services/ProjectStore.swift`）是同一性质的 additive/删除，**当时没有登记**，
+补记在此只是为了让下一轮看得见，不是为了追认流程无瑕疵。
+
+**同一把尺子也管"删"**：从冻结文件删成员，同样要留名 + 说清为什么它不是被搬走了。
+P7-C 收尾这一批删了两处有写无读：`ProjectStore` 的 `sortedProjects`（侧栏按插入序读，
+接上去会让行在光标底下跳——**不接是判断**）、`AppState` 的 `hasProjects`
+（与 `store.projects.isEmpty` 重复且零调用），外加一个空的 `Views/Shared/` 目录。
+删之前查过 `git stash list` 为空、全仓无第二处同名实现，随 `sortedProjects`
+一起删的是它的契约测试（判据对象已不存在）。
+**还有一处删错了又恢复**：`ProjectStore` 的 `rename` —— 我按定义式 grep
+（`func rename`）判它零调用，漏掉了测试里的**调用点**，而它恰恰是
+「注册表与报告里的 project 必须同步」这条不变式唯一的 exerciser。已恢复并就地写明理由。
+⇒ 判死代码的规矩补一条：**要 grep 名字本身，不能只 grep 定义式**；
+删掉一条绿用例之前，先问它断言的不变式还有别人测吗。
+（这几处刻意写成"类型 的 成员"而不是点号形式：点号会被符号锚点棘轮当成活符号去判活。）
+
+## 5.9 无头 CLI 入口（2026-09-22 落地，WS-CL）：所有流都要知道的五条
+
+```bash
+./scripts/build_app.sh release                      # 或 .build/debug/TcoderMonitor
+dist/Tcoder.app/Contents/MacOS/TcoderMonitor scan  <path> [--out=<file>] [--compact] [--allow-network]
+dist/Tcoder.app/Contents/MacOS/TcoderMonitor score <path> [--log=<file>…] [--window-days=<n>]
+dist/Tcoder.app/Contents/MacOS/TcoderMonitor doctor [<path>]
+```
+
+1. **同一个二进制按 `argv[1]` 在 AppKit 之前分派**（`Sources/TcoderMonitor/App/TcoderEntry.swift`）。
+   无头那一路不建 `NSApplication`、不写窗口状态；命中子命令词就 `exit()`。
+   ⇒ 别把 `@main` 挪回 `TcoderMonitorApp`，也别在无头路径里碰 AppKit：
+   那正是本轮 P0（第 3 档挂死 16 分钟）的成因。
+2. **`ProjectReport` 是唯一 schema**，CLI 与 GUI 共用，不存在第二个 DTO。
+   缺数据靠**整键缺席**（`encodeIfPresent`）表达 —— 既不写 `null` 也不补 `0`。
+   ⇒ 新增落盘字段一律 `Optional`，且要回答"没测到"与"测到零"怎么区分。
+3. **退出码五档**：`0` 全成 / `2` 部分路失败 / `3` 路径不可用（不存在、不是目录、不可读）/
+   `4` 五路全失败 / `64` 用法错。`3` 那档含"存在但读不动"的目录 —— `fileExists` 只回答"存在"。
+   ⇒ 改任何一路的失败判定，要同步 `CLIExit` 的语义，并去 `Tests/…/CLIProcessTests.swift`
+   加一条**真子进程**用例（它起的是交付二进制本身）。**只有 in-process 断言不算交付证据。**
+4. **出口目前只出中文，而且无头入口没有语言开关**（2026-09-22 实测，见改进清单 F14）：
+   `Services/CLI/` 里 **0 处**走查表；`score <path> -AppleLanguages "(en)"` 得到 **rc=64**
+   （按设计拒收未知 token）。`scan` 落的 JSON 含 **106 处**汉字字符串值
+   —— 45 处是用户数据（路径 / 提交标题 / 作者名，本来就不该翻），
+   **61 处是产品散文**（`health.narrative`、`components[].detail`、`risk` 档位词…）。
+   ⇒ AI 调用方现在读到的是中文散文；要改成跟随语言，先决定"JSON 出不出英文"，
+   再登记键，最后才轮到入口接语言参数。**别一上来就改解析器。**
+5. **改了任何读数就跑对表**：`python3 scripts/report_parity.py <GUI 落盘.json> <CLI 扫描.json> <被扫总体>`
+   （逐字段比、容忍清单逐条点名，只允许时间戳 / `project.*` 身份 / `code.durationMs`）。
+   `scripts/self_score.sh` 现在就是这条 CLI 调用（改造前是"起 GUI + 轮询 300 秒"）。
+   这把尺子已经抓出两个真缺陷（F10 挂死、F11 榜单尾部不可复现）。
+
 ## 6. 完成标准（Definition of Done）
 
 1. `./scripts/locked_build.sh build` 通过（贴输出）。

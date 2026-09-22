@@ -95,10 +95,9 @@ extension CodeAnalyzerTests {
         XCTAssertEqual(Set(audited.files.map(\.relativePath)), Set(plain.files.map(\.relativePath)))
     }
 
-    /// 「比 `find` 少 22%」这类质疑的唯一正经答法：纳入行 + 各条原因剔除行 == 磁盘真实行，逐行对上。
-    func testSkipClearingReconcilesEveryLine() async throws {
-        let root = try makeFixtureRoot()
-        defer { try? fm.removeItem(at: root) }
+    /// 四类剔除各来一条的最小夹具：纳入 2 行，另有排除目录 3 行 / 未收录后缀 2 行 /
+    /// 无后缀 2 行，再加一枚**刻意不跟随**的软链接（它没有行数，正是「不适用」那一类）。
+    private func writeSkipLedgerFixture(in root: URL) throws {
         _ = try write("let kept = 1\nlet more = 2\n", to: "Keep.swift", in: root)                       // 2 行，纳入
         _ = try write("puts 1\nputs 2\nputs 3\n", to: "vendor/Deep.rb", in: root)                     // 3 行，排除目录
         _ = try write("project(x)\ninstall(FILES a)\n", to: "sub/CMakeLists.cmake", in: root)         // 2 行，后缀未收录
@@ -107,6 +106,28 @@ extension CodeAnalyzerTests {
         try? fm.removeItem(at: symlink)
         try fm.createSymbolicLink(at: symlink, withDestinationURL: root.appendingPathComponent("Keep.swift"))
         // 软链接刻意不跟随：它进台账但没有行数，正是「行数不适用」与「0 行」必须区分的那一类
+    }
+
+    /// 台账必须**接在产品路径上**：`analyzeWithCoverage` 算出的清账要出现在
+    /// `CodeMetrics.scanLimitations` 里，否则那套三态句式只是测试自娱（此前正是如此）。
+    func testSkipClearingReachesTheScanLimitationsField() async throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+        try writeSkipLedgerFixture(in: root)
+        let outcome = try await FileSystemCodeAnalyzer().analyzeWithCoverage(
+            root: root, options: options(skipDirectories: ["vendor"], binaryExtensions: ["png"]))
+        let onScreen = outcome.metrics.scanLimitations ?? []
+        XCTAssertTrue(onScreen.contains { $0.contains("语言表未收录的后缀") && $0.contains("行数未统计") },
+                      "扫描边界那条 ⓘ 里必须能看到逐条清账：\(onScreen)")
+        XCTAssertFalse(onScreen.contains { $0.contains("按规则未纳入统计") },
+                       "旧表述只给总数、不说行数没数过，已经被清账顶掉：\(onScreen)")
+    }
+
+    /// 「比 `find` 少 22%」这类质疑的唯一正经答法：纳入行 + 各条原因剔除行 == 磁盘真实行，逐行对上。
+    func testSkipClearingReconcilesEveryLine() async throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+        try writeSkipLedgerFixture(in: root)
 
         let opts = options(skipDirectories: ["vendor"], binaryExtensions: ["png"])
         let outcome = try await FileSystemCodeAnalyzer().analyzeWithCoverage(root: root, options: opts)
@@ -176,11 +197,44 @@ extension CodeAnalyzerTests {
         XCTAssertTrue(outcome.coverage.isPartial)
         XCTAssertTrue(outcome.coverage.limitationSummary.contains { $0.contains("上限") },
                       "\(outcome.coverage.limitationSummary)")
+        // 承接字段（P7-C 3-2）：光算出来不发出去等于没算 —— 视图读的是 `metrics`。
+        XCTAssertEqual(outcome.metrics.scanLimitations?.count, outcome.coverage.limitationSummary.count,
+                       "边界条数没随指标一起交出去，代码规模页就挂不出提示")
+        XCTAssertTrue(outcome.metrics.scanLimitations?.contains { $0.contains("上限") } == true)
         opts.maxFiles = 100
         let whole = try await FileSystemCodeAnalyzer().analyzeWithCoverage(root: root, options: opts)
         XCTAssertFalse(whole.coverage.truncatedByMaxFiles)
         XCTAssertFalse(whole.coverage.isPartial, "一个上限都没碰到时不得谎称部分测量")
         XCTAssertTrue(whole.coverage.limitationSummary.isEmpty, "\(whole.coverage.limitationSummary)")
+        XCTAssertNil(whole.metrics.scanLimitations, "没有被切过却带边界字段，提示条会常驻，等于把全量说成部分")
+    }
+
+    /// 读不动的目录必须自己报名（F12 的另一半）。`enumerator` 的 `errorHandler`
+    /// 原本一律返回 `true`，于是"这个子树我们根本没看过"与"这个子树里没有源码"
+    /// 在结果里长得一模一样 —— 缺陷不在渲染层，在"谁替『读不到』说了句话"。
+    func testUnreadableDirectoryIsReportedAsIncompleteScanSurface() async throws {
+        let root = try makeFixtureRoot()
+        let locked = root.appendingPathComponent("locked")
+        defer {
+            // 权限不还回去，`removeItem` 就删不掉这棵夹具；残骸会喂下一轮扫描当真实数据。
+            try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+            try? fm.removeItem(at: root)
+        }
+        _ = try write("let a = 1\n", to: "Keep.swift", in: root)
+        _ = try write("let b = 2\n", to: "locked/Hidden.swift", in: root)
+        try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+
+        let outcome = try await FileSystemCodeAnalyzer().analyzeWithCoverage(root: root, options: options())
+        if outcome.coverage.unreadableDirectoryCount == 0 {
+            throw XCTSkip("本机允许枚举 0o000 目录（例如以 root 跑测试），此时计数为 0 是正确行为")
+        }
+        XCTAssertGreaterThanOrEqual(outcome.coverage.unreadableDirectoryCount, 1)
+        XCTAssertTrue(outcome.coverage.isPartial, "有子树压根没看过，这份数字不许当全量")
+        XCTAssertTrue(outcome.coverage.limitationSummary.contains { $0.contains("读不动") },
+                      "\(outcome.coverage.limitationSummary)")
+        XCTAssertEqual(outcome.metrics.totalFiles, 1, "被挡住的那份源码不该算成扫到过")
+        XCTAssertTrue(outcome.metrics.scanLimitations?.contains { $0.contains("读不动") } == true,
+                      "这一维必须一路带到界面上，不许停在 coverage 结构里")
     }
 
 }

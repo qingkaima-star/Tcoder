@@ -35,7 +35,8 @@ final class TooltipMigrationGuardTests: XCTestCase {
     /// 少了最后这一支就是**尺子在惩罚用对 API 的人**：S2 交回时报"搬了字现量不减"，
     /// 因为它把长句放进 `help:` 后，那一行仍被 `NoteLine(` 认成可见槽位 —— 于是它只好绕开
     /// 推荐形状去直接写 `CopyHelpBadge`。画法仍然唯一，但那是被坏尺子逼出来的。
-    private static let tooltipCarrierPattern = "\\.help\\s*\\(|CopyHelpBadge\\s*\\(|\\bhelp\\s*:\\s*\""
+    private static let tooltipCarrierPattern = "\\.help\\s*\\(|CopyHelpBadge\\s*\\("
+        + "|(?:subtitleHelp|captionHelp|help)\\s*:\\s*\""
 
     private static let literalPattern = "\"((?:[^\"\\\\]|\\\\.)*?)\""
     private static let hanPattern = "[\\u4E00-\\u9FFF]"
@@ -45,7 +46,8 @@ final class TooltipMigrationGuardTests: XCTestCase {
     enum LiteralSlot { case visible, tooltip, skipped }
 
     /// 直接压在引号前面的槽位线索（比逐行判定精确一档）。
-    private static let tooltipPrefixPattern = "(?:\\.help|CopyHelpBadge)\\s*\\(\\s*$|\\bhelp\\s*:\\s*$"
+    private static let tooltipPrefixPattern = "(?:\\.help|CopyHelpBadge)\\s*\\(\\s*$"
+        + "|(?:subtitleHelp|captionHelp|help)\\s*:\\s*$"
     private static let visiblePrefixPattern =
         "(?:subtitle|caption|note|footnote|emptyNote|message|text|label|title)\\s*:\\s*$"
         + "|(?:GlassSection|NoteLine|DataFootnote|DataCaption|Text|BannerRow|StatLine"
@@ -141,8 +143,11 @@ final class TooltipMigrationGuardTests: XCTestCase {
 
     /// 2026-09-21 在 main `14a1f29` 实扫播种：**可见长句 88 条 / tooltip 长句 13 条 / 总和 101**
     /// （扫 `Views/**` 42 个 swift 文件）。
-    /// 只许往下调：每还一笔债就写清是哪一片还的。
-    private static let visibleCaliberCeiling = 88
+    /// 只许往下调，每降一次都写明是哪一片还的债（现量由守卫每次打印，不许估）：
+    /// 88 → 76（S2 代码两页）→ 74（S3 Git 与贡献者）→ 72（尺子改逐字面量判槽位 + S6 键登记）
+    /// → 69（S1 总览与外壳）→ **62（S5 性能与日志 19 处、S4 依赖 3 处、S7 总览三处收进 ⓘ）**。
+    /// 同批 tooltip 承载 13 → 49、总量 101 → 111：**B 一句没删**，降下来的 26 条全部搬进了 ⓘ。
+    private static let visibleCaliberCeiling = 62
 
     /// 总量下限 = 播种时的可见 + tooltip 之和 **减去已核准的删除数**。
     ///

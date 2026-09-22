@@ -31,7 +31,10 @@ DOMAIN="com.tcoder.monitor"
 UUID="11111111-2222-3333-4444-555555555555"
 SWITCH_MODE="${SWITCH_MODE:-single}"
 # 九个 DetailSection 的中文 rawValue，顺序即侧边栏顺序
-SECTIONS=("总览" "代码规模" "复杂度风险" "Git 洞察" "贡献者" "性能监控" "错误日志" "依赖分析" "健康评分")
+# 页名可以用 `CAPTURE_PAGES` 缩小（冒号分隔 —— 页名里有空格，不能按空白切）。
+# 为什么开这个口子：只改了一页的内容时，"重拍整批 36 张"会掩盖"这一页到底对不对"，
+# 而补拍那一页 4 张（深浅 × 顶尾）才是针对变了的那个变量。默认仍是九页全拍。
+IFS=':' read -r -a SECTIONS <<< "${CAPTURE_PAGES:-总览:代码规模:复杂度风险:Git 洞察:贡献者:性能监控:错误日志:依赖分析:健康评分}"
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 TARGET="${CAPTURE_TARGET:-$REPO_ROOT}"
@@ -240,8 +243,13 @@ fi
 echo "==> 4/4 结果核对"
 N=$(ls -1 "$OUT"/*.png 2>/dev/null | wc -l | tr -d ' ')
 DUP=$(shasum -a 256 "$OUT"/*.png 2>/dev/null | awk '{print $1}' | sort | uniq -d | wc -l | tr -d ' ')
-echo "    产出 $N 张 / 9 页，失败 $FAILED 页，内容完全相同的图组数 $DUP"
-if [ "$N" != "9" ]; then echo "    ❌ 页不齐：九页是硬性验收口径"; exit 1; fi
+EXPECTED_PAGES=${#SECTIONS[@]}
+# 分母取"本轮实际要拍的那几页"，不是写死 9：`CAPTURE_PAGES` 缩小范围时写死 9 会让
+# 补拍永远判败（于是有人去 SKIP，判据就废了）。但**空总体必须判败** ——
+# 0 页配 0 张在旧写法里是"N != 9 → 败"，在新写法里就成了通过，所以显式堵住。
+if [ "$EXPECTED_PAGES" -eq 0 ]; then echo "    ❌ 要拍的页数为 0，本取证不出数"; exit 1; fi
+echo "    产出 $N 张 / $EXPECTED_PAGES 页，失败 $FAILED 页，内容完全相同的图组数 $DUP"
+if [ "$N" != "$EXPECTED_PAGES" ]; then echo "    ❌ 页不齐：本轮口径是 $EXPECTED_PAGES 页"; exit 1; fi
 if [ "$DUP" != "0" ]; then
   echo "    ⚠ 存在字节级完全相同的两张图：要么切页没生效，要么两页真的同构。逐个 sha 如下"
   shasum -a 256 "$OUT"/*.png

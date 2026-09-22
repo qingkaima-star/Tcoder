@@ -186,7 +186,7 @@ struct SafetyVerdictBadge: View {
             RiskBadge(risk: .none)
         case .unchecked:
             SemanticBadge(verdict.badgeText, role: verdict.role, icon: verdict.badgeIcon)
-                .help("默认不联网时漏洞判定恒为 0 条，这是「没有查」，不是「没有病」")
+                .help(localizedCopy("默认不联网时漏洞判定恒为 0 条，这是「没有查」，不是「没有病」"))
         }
     }
 }

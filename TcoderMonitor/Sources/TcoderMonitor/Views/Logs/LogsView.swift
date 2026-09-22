@@ -77,7 +77,7 @@ struct LogsView: View {
                                 selection: window.wrappedValue,
                                 onSelect: { window.wrappedValue = $0 })
                 .accessibilityLabel("时间窗口")
-                .help("切换后自动重新分析（扫描进行中除外）")
+                .help(localizedCopy("切换后自动重新分析（扫描进行中除外）"))
             controls
         }
     }
@@ -115,13 +115,13 @@ struct LogsView: View {
             // **留短藏长**：横幅上只留「这一页现在没有结果」那半句，
             // 下一步怎么做（选目录 / 点重新分析 / 手动附加）进 hover。
             // 整句仍是目录里那条键，原文一字未改（守卫 3：改原文 = 烂尾键）。
-            BannerRow(text: "该项目还没有日志分析结果", style: .neutral)
-                .help("该项目还没有日志分析结果。选择项目目录后点「重新分析」，或手动附加本地日志文件。")
+            BannerRow(text: "该项目还没有日志分析结果", style: .neutral,
+                      help: "该项目还没有日志分析结果。选择项目目录后点「重新分析」，或手动附加本地日志文件。")
         } else if report?.logs?.hasData == false {
             // 同上：屏上留"扫过了、没找到可解析的文件"这个结论（诚实性），
             // 搜索范围与手动附加的路径细节进 ⓘ。
-            BannerRow(text: "没找到可解析的日志文件", style: .warning)
-                .help("项目目录与 ~/Library/Logs 里都没有找到可解析的日志文件。用「附加日志」手动选择 error.log、crash.log 后重新分析。")
+            BannerRow(text: "没找到可解析的日志文件", style: .warning,
+                      help: "项目目录与 ~/Library/Logs 里都没有找到可解析的日志文件。用「附加日志」手动选择 error.log、crash.log 后重新分析。")
         }
         if let error = state.lastError {
             BannerRow(text: error, style: .error)

@@ -97,6 +97,7 @@ struct MetricTile: View {
         value: String?,
         unit: String? = nil,
         caption: String? = nil,
+        captionHelp: String? = nil,
         tint: Color = Theme.Palette.Surface.ink,
         systemImage: String? = nil,
         gauge: MetricGauge = .none,
@@ -106,6 +107,7 @@ struct MetricTile: View {
         self.value = value
         self.unit = unit
         self.caption = caption
+        self.captionHelp = captionHelp
         self.tint = tint
         self.systemImage = systemImage
         self.gauge = gauge
@@ -318,7 +320,7 @@ struct ProgressOverlay: View {
                     .font(Theme.Typo.microLabel.font)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
-                    .help("五路分析并行执行，这个数字是已经返回的路数，不是顺序进度")
+                    .help(localizedCopy("五路分析并行执行，这个数字是已经返回的路数，不是顺序进度"))
             }
         }
         .padding(.horizontal, Theme.Spacing.sm)

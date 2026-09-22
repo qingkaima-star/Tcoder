@@ -30,11 +30,14 @@ struct StatLine: View {
 
     var body: some View {
         HStack(spacing: Theme.Spacing.xxs) {
-            Text(label)
+            // `label` 是 `String`，`Text(String)` 不查表 —— 九个调用点写的都是中文短标签
+            // （磁盘 / 网络 / 进程 / 注释行 / 空行…），英文态就整片吐中文。
+            // 这一处包查表，九个调用点同时生效；查不到键仍原样显示中文。
+            Text(localizedCopy(label))
                 .font(Theme.Typo.label.font)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
-            Text(value)
+            Text(localizedCopy(value))
                 // 数字一律等宽：这是 WS-I §4 那条「全仓 monospacedDigit 命中 = 0」的根修法，
                 // 一处改、56 个调用点全站生效。
                 // `lineLimit(1)` 同理由：这一格在实时读数旁边，值一旦折成两行，
@@ -79,15 +82,20 @@ enum BannerStyle {
 struct BannerRow: View {
     var text: String
     var style: BannerStyle = .neutral
+    /// 「留短藏长」槽，形状照 `SectionEmptyNote.help:`：屏上留 `text`，长口径进 ⓘ。
+    /// 默认 `nil` ⇒ 现有调用点一字不改。有了它，横幅的长下文不再挂在整条横幅的裸 `.help` 上
+    /// （那是全站要收掉的「匿名 tooltip」形状，见 `Design/CopyHelp.swift` 头注）。
+    var help: String? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.xs) {
             ThemedIcon(style.icon, role: .inlineText, selected: true)
                 .foregroundStyle(style.role.textColor)
-            Text(text)
+            Text(localizedCopy(text))
                 .font(Theme.Typo.narrative.font)
                 .lineSpacing(Theme.Typo.narrative.lineSpacing)
                 .foregroundStyle(.secondary)
+            if let help { CopyHelpBadge(help) }
             Spacer(minLength: Theme.Spacing.xs)
         }
         .padding(Theme.Spacing.sm)
@@ -126,66 +134,6 @@ extension View {
 // 占比条改走基座 `Theme.Share.Row`，取色走 `Theme.Chart.color(forLabel:)`。
 // 留两份哈希的后果是「同名同色」只在单页内成立——`Swift` 与 `swift` 会分到不同号位，
 // 中文名字也因 UTF-8 字节序 ≠ unicodeScalars 码点序而错位。
-
-// MARK: - CPU 历史曲线
-
-struct CPUHistoryChart: View {
-    var snapshots: [SystemSnapshot]
-
-    /// 时间轴刻度格式。**窗口不足 10 分钟时必须降到秒**：
-    /// 实拍总览页出现 `03:57` 与 `03:57` 并排 —— 三个自动刻度落进同一分钟，
-    /// 轴看起来像坏了，而它其实什么都没说错，只是分辨率不够。
-    static func axisTimeFormat(span: TimeInterval) -> Date.FormatStyle {
-        span < 600 ? .dateTime.hour().minute().second() : .dateTime.hour().minute()
-    }
-
-    private var windowSpan: TimeInterval {
-        guard let first = snapshots.first?.timestamp, let last = snapshots.last?.timestamp
-        else { return 0 }
-        return max(0, last.timeIntervalSince(first))
-    }
-
-    var body: some View {
-        Chart(snapshots) { snapshot in
-            AreaMark(
-                x: .value("时间", snapshot.timestamp),
-                y: .value("CPU", snapshot.cpuUsage * 100)
-            )
-            .interpolationMethod(.monotone)
-            .foregroundStyle(ChartSeries.gradient())
-            LineMark(
-                x: .value("时间", snapshot.timestamp),
-                y: .value("CPU", snapshot.cpuUsage * 100)
-            )
-            .interpolationMethod(.monotone)
-            .foregroundStyle(ChartSeries.lineColor)
-            .lineStyle(StrokeStyle(lineWidth: Theme.Stroke.chartLine))
-        }
-        .chartYScale(domain: 0...100)
-        // 这一张的轴没收窄（0...100 定值），加裁剪是**把规则钉死**而不是修当下的 bug：
-        // `AreaMark` 一旦配收窄轴就会把填充画到绘图区外（见 ChartChrome 里那条注释），
-        // 谁以后把这里改成自适应轴，不需要重新发现一遍这个坑。守卫：
-        // `BorderlessSurfaceGuardTests.test_areaChartsClipTheirPlotArea`。
-        .chartPlotStyle { $0.clipped() }
-        .chartYAxis {
-            // **必须显式 `.leading`**：SwiftUI 的默认是 `.automatic`，在这张图上落到**右边**，
-            // 而性能/健康/日志/Git 四页的曲线全都显式写了 `.leading` ——
-            // 于是同一个 App 里"纵轴一会儿在左一会儿在右"（实拍总览页 100/50/0 靠右）。
-            // 守卫：`test_yAxisLabelsAllSitOnTheLeadingSide`。
-            AxisMarks(position: .leading, values: [0, 50, 100]) { _ in
-                AxisGridLine().foregroundStyle(Theme.Palette.Surface.separator)
-                AxisValueLabel().font(Theme.Typo.microLabel.font.monospacedDigit())
-            }
-        }
-        .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 3)) { _ in
-                AxisValueLabel(format: Self.axisTimeFormat(span: windowSpan), centered: false)
-                    .font(Theme.Typo.microLabel.font.monospacedDigit())
-            }
-        }
-        .accessibilityLabel("CPU 占用历史曲线")
-    }
-}
 
 // MARK: - 实时读数区（隔离出 DashboardView 的心跳失效域）
 
@@ -259,6 +207,8 @@ struct DashboardLiveReadout: View {
                                 NumberFormat.grouped($0.cpuCoreCount),
                                 String(format: "%.2f", $0.loadAverage1))
             },
+            // 大数是「占用率」，分子分母那句口径走性能页那一份唯一真值（整句不在这里重抄）。
+            captionHelp: PerformanceLiveCharts.cpuBasis(context: SampleContext.from(state.monitor)),
             systemImage: IconName.cpu.rawValue
         )
     }
@@ -273,6 +223,8 @@ struct DashboardLiveReadout: View {
                                 ByteFormat.string($0.memoryTotalBytes, precision: 1),
                                 NumberFormat.percent($0.memoryFraction, precision: 0))
             },
+            // 「在用」≠「剩余可用」是这一格唯一会被读反的地方，整句走 `SystemReadings` 那一份。
+            captionHelp: SystemReadings.memoryCaliber,
             systemImage: IconName.memory.rawValue
         )
     }
@@ -312,6 +264,8 @@ struct DashboardLiveReadout: View {
                                 NumberFormat.grouped($0.totalCommits),
                                 NumberFormat.grouped($0.activeAuthorCount))
             } ?? ShellCopy.notAnalyzed(.gitHistory),
+            // 屏上两枚是**含合并的总数**与**作者表行数**；差值口径走 Git 页那个生产者 `GitHistoryScope.headline`，不另写一份。
+            captionHelp: report?.git.map { GitHistoryScope($0).headline },
             systemImage: IconName.git.rawValue
         )
     }
@@ -332,9 +286,19 @@ struct DashboardLiveReadout: View {
             : localizedFormat("本机 · 每 %@采样", state.monitor.sampleIntervalText)
     }
 
+    /// 上面那半句节奏话的 ⓘ 长口径（「留短藏长」的下半截），只给**运行态**：暂停态屏上已写着
+    /// 「采样已暂停」，而目录里那句整句口径结尾是「点「继续」恢复实时刷新」，「继续」只住在性能页
+    /// （`PerformanceView.controls`）——在总览页指一颗本页没有的按钮等于写假指引，故留 `nil` 不画问号。
+    /// 运行态这句是性能页页头那条键的**第二落点**（本流不改 `Views/Performance/**`，故重复了字面量，已按「建议收成一处常量」报总工）。落点自检：`ShellReadoutTooltipTests`。
+    private var cadenceCaliber: String? { state.monitor.isInteractionPaused ? nil : Self.liveReadingsCaliber }
+
+    /// `cadenceCaliber` 的正文。写成 `static let` 是让这处与它的落点自检共用一份真值。
+    static let liveReadingsCaliber = "系统级实时读数只观测不干预。数值随采样刷新，取不到的一律显示 --，不会补成 0。"
+
     private var livePerformanceGroup: some View {
         GlassSection("实时性能",
                      subtitle: cadenceSubtitle,
+                     subtitleHelp: cadenceCaliber,
                      icon: .performance) {
             if state.monitor.history.count > 2 {
                 CPUHistoryChart(snapshots: Array(state.monitor.history.suffix(90)))

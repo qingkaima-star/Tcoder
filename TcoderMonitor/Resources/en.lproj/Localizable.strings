@@ -300,6 +300,15 @@
 "重复块 %1$@ 个 · 复杂度上榜 %2$@ 个函数" = "%1$@ duplicate blocks · %2$@ functions on the complexity board";
 "「其他」合并了占比最低的 %1$@ 种语言" = "\"Other\" merges the %1$@ languages with the smallest share";
 "分析器降级" = "Analyzer Degraded";
+"扫描边界" = "Scan Limits";
+// 侧栏紧凑引导位的短标签：`ProjectSidebar.swift` 在 `migratedFiles` 那张零余量名单里，
+// 屏上出现的每一个中文字面量都必须有键，否则守卫 1 当场红。
+"拖到这里添加项目" = "Drop here to add a project";
+// 进程表图例：这两句住在 `NoteLine(` 的三元分支里，按行判槽位的扫描器看不见它们
+// （前缀既不是 `text:` 也不在同一行），所以它们既不算存量、也一直没有译文。
+// 在这里补上键，是为了让英文态真的读得出这句话，而不是为了把数字做小。
+"内存 / 线程 / 打开文件显示 -- 表示本轮未取到（内核任务或时间预算已截断），不表示数量为 0。" = "A -- under Memory / Threads / Open files means this round did not read it (kernel task, or the time budget ran out) - it does not mean the count is 0.";
+"内存 / 线程 / 打开文件显示 -- 表示未取到（内核任务或无权限），不表示数量为 0。" = "A -- under Memory / Threads / Open files means it was not read (kernel task or no permission) - it does not mean the count is 0.";
 "按有效代码行计" = "Counted by effective code lines";
 "识别规则降级：%1$@ 条正则没能编译，函数数与圈复杂度会偏低。" = "Recognition degraded: %1$@ patterns failed to compile, so function counts and cyclomatic complexity read low.";
 "%1$@ 个文件 · %2$@ 行有效代码" = "%1$@ files · %2$@ effective code lines";
@@ -648,3 +657,30 @@
 "首个采样点" = "first sample";
 "没有命中错误行。" = "No error lines were matched.";
 "用「附加日志文件」手动选择。" = "Use 「Attach Log Files」 to pick them by hand.";
+
+// 批次 ⓘ·双语补账第二轮：两处 `Text(变量)` 的渲染点改成 `Text(localizedCopy(…))` 之后，
+// 变量里那几句中文才真的查得到表（静态棘轮本来看不见它们，是 S1/S5 交回时点名的盲区）。
+"Java 服务" = "Java service";
+"Node 服务" = "Node service";
+"未检测到匹配进程" = "No matching process detected";
+"本次扫描有 %1$@ 条边界生效，这一页的数字是部分测量。" = "This scan hit %1$@ limit(s), so the numbers on this page are a partial measurement.";
+
+// 批次 ⓘ·S7 收尾：`SystemReadings.memoryCaliber` 一直是 `static let` ⇒ 双语守卫看不见，
+// 而它现在有两个上屏落点（性能页 + 总览读数带）。登记一次，两页的英文态一起接得住。
+"口径 = 总量 −（空闲 + 推测 + 可清除），与活动监视器一致；这是「在用」，不是「剩余可用」。" = "In use = total − (free + speculative + purgable), matching Activity Monitor; this is what is BEING USED, not what is left free.";
+
+// ── 批次 P14：`.help()` 槽位接进查表面（英文态 tooltip 残留中文）─────────────
+// 这 7 条是新键；另有 9 条**早就在目录里**，只是 `.help()` 自己不查表 ——
+// "键存在"从来不等于"查得中"（见 docs/中英双语方案.md §7.1）。
+// 守卫：`TooltipLocalizationGuardTests`（零容忍：裸中文 `.help(` 实参当场红）。
+"%1$@ · 点击在 Finder 中显示" = "%1$@ · Click to reveal in Finder";
+"%1$@ · %2$@ 次改动" = "%1$@ · %2$@ changes";
+"报告里的非合并提交数" = "the non-merge commit count in the report";
+"该项的分母" = "this item's denominator";
+"已完成扫描，这一项确实没有命中任何记录——这个 0 是测得的结果，不是没查。" = "Scan completed: this item genuinely matched no records — this 0 is a measurement, not a missing check.";
+"算不出来：分母（%1$@）为 0，这个比值没有定义。这里既不是没扫，也不是 0。" = "Not computable: the denominator (%1$@) is 0, so this ratio is undefined. This is neither an unscanned item nor a zero.";
+"还没查到：这一项的扫描或采样没有完成，先跑一次分析、或等首帧到达。" = "Not yet available: this item's scan or sample has not finished — run an analysis, or wait for the first frame.";
+
+// 批次 P16：重复块 tooltip 的两段（原先是三段拼出来的裸中文）
+"相似度 %1$@ · %2$@ 行 · 出现 %3$@ 处" = "Similarity %1$@ · %2$@ lines · %3$@ occurrences";
+"（另有 %1$@ 处）" = "(%1$@ more)";

@@ -50,8 +50,15 @@ final class DocReferenceRatchetTests: XCTestCase {
     /// 现在只数**带行号**的那一类，正是 #48 要防的东西。
     static let fileLineReferenceCeiling = 1
 
+    /// 2026-09-21 加进两份界面验收文档：`docs/界面-乱的清单.md` 的"判据"列整列都是锚点
+    /// （哪条缺陷由哪把守卫管），此前**没有任何机器**替下一轮守着它；
+    /// `docs/界面语言-对齐AiX.md` 是视觉语言的权威文档，同样点名符号。
+    /// 接入前先按本文件的口径预检过：`NSView.toolTip` 这类**外部 API** 不合规约
+    /// （锚点是给我们自己的代码用的），已改写成 `NSView` 的 `toolTip`；
+    /// `*.py` 走 `exampleManifestExtensions` 豁免、`*.txt` 不是文件锚点，也一并改了措辞。
     static let docs: [String] = ["README.md", "docs/使用说明.md",
-                                       "docs/口径与已知限制.md", "docs/九页实拍读数.md"]
+                                       "docs/口径与已知限制.md", "docs/九页实拍读数.md",
+                                       "docs/界面-乱的清单.md", "docs/界面语言-对齐AiX.md"]
 
     /// 我们自己的文件类型：这类锚点必须能在仓库里找到实体文件。
     static let repoFileExtensions: Set<String> = ["swift", "md", "sh"]
@@ -77,10 +84,20 @@ final class DocReferenceRatchetTests: XCTestCase {
 
     struct CodeIndex {
         var identifiers: Set<String> = []
+        /// `Tests/**` 里的**声明名**（`func test…` 与类型名）。**2026-09-22 补的第二份索引**：
+        /// 文档大量引用守卫用例的名字，而判活只看 `Sources/**`，于是
+        /// 写 `某测试类.test_某条` 必判死、写裸名 `test_某条` 又压根不成锚（正则要求至少一个点）
+        /// —— 两条路都不能"被盯"。补上之后，测试被改名或删掉，文档会红。
+        /// 只收声明是有原因的：收全标识符会让金丝雀被自己的测试文件喂成活锚（见 `testDeclarations`）。
+        var testIdentifiers: Set<String> = []
         /// `Sources/**` 里 Swift 文件名的去后缀形式——文档锚点的首段用它做作用域豁免。
         var sourceFileStems: Set<String> = []
         /// 文件名 -> 行数（`wc -l` 口径：数换行符，末尾不成行的一段算一行）。
         var files: [String: Int] = [:]
+
+        func knows(_ segment: String) -> Bool {
+            identifiers.contains(segment) || testIdentifiers.contains(segment)
+        }
     }
 
     enum Anchor {
@@ -125,8 +142,8 @@ final class DocReferenceRatchetTests: XCTestCase {
                 checked.removeFirst()
                 dropped = head
             }
-            let missing = checked.filter { !index.identifiers.contains($0) }
-            let reason = missing.isEmpty ? nil : "Sources/** 里找不到 \(missing.joined(separator: "."))"
+            let missing = checked.filter { !index.knows($0) }
+            let reason = missing.isEmpty ? nil : "Sources/** 与 Tests/** 里找不到 \(missing.joined(separator: "."))"
             return Resolution(reason: reason, usedFileScope: dropped != nil, droppedSegment: dropped)
         case let .file(name, line):
             guard let count = index.files[name] else {
@@ -174,16 +191,27 @@ final class DocReferenceRatchetTests: XCTestCase {
     func buildIndex() throws -> CodeIndex {
         var index = CodeIndex()
         let identifierPattern = try NSRegularExpression(pattern: #"[A-Za-z_][A-Za-z0-9_]*"#)
-        walk(under: Self.repoRoot.appendingPathComponent("TcoderMonitor/Sources", isDirectory: true)) { url in
+        func identifiers(in url: URL) -> Set<String> {
             guard url.pathExtension == "swift",
-                  let text = try? String(contentsOf: url, encoding: .utf8) else { return }
-            index.sourceFileStems.insert(url.deletingPathExtension().lastPathComponent)
+                  let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+            var found: Set<String> = []
             let range = NSRange(location: 0, length: text.utf16.count)
             for match in identifierPattern.matches(in: text, range: range) {
-                index.identifiers.insert(match.range.slice(in: text))
+                found.insert(match.range.slice(in: text))
+            }
+            return found
+        }
+        walk(under: Self.repoRoot.appendingPathComponent("TcoderMonitor/Sources", isDirectory: true)) { url in
+            index.identifiers.formUnion(identifiers(in: url))
+            if url.pathExtension == "swift" {
+                index.sourceFileStems.insert(url.deletingPathExtension().lastPathComponent)
             }
         }
+        walk(under: Self.repoRoot.appendingPathComponent("TcoderMonitor/Tests", isDirectory: true)) { url in
+            index.testIdentifiers.formUnion(testDeclarations(in: url))
+        }
         XCTAssertFalse(index.identifiers.isEmpty, "Sources 一个标识符都没数到，索引坏了")
+        XCTAssertFalse(index.testIdentifiers.isEmpty, "Tests 一个标识符都没数到，测试名锚点会全体判死")
         XCTAssertFalse(index.sourceFileStems.isEmpty, "Sources 一个文件名都没数到，作用域豁免会空转")
         walk(under: Self.repoRoot) { url in
             guard index.files[url.lastPathComponent] == nil,
@@ -192,6 +220,28 @@ final class DocReferenceRatchetTests: XCTestCase {
             index.files[url.lastPathComponent] = text.hasSuffix("\n") ? newlines : newlines + 1
         }
         return index
+    }
+
+    /// Tests 侧**只收声明**（`func test…` 与类型名），不收全部标识符。
+    ///
+    /// 这不是洁癖，是当场撞出来的：第一版按"全标识符"扫 `Tests/**`，
+    /// 于是元测试里那条金丝雀 `WsvCanaryDeadType.someMember` 被**它自己所在的测试文件**
+    /// 喂成了活锚（名字只是字符串字面量，也进了索引）—— 金丝雀当场不红了。
+    /// 判活的集合一旦包含"哪里提到过这个名字"，它就再也测不出判据失效。
+    func testDeclarations(in url: URL) -> Set<String> {
+        guard url.pathExtension == "swift",
+              let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        var found: Set<String> = []
+        let patterns = [#"func\s+(test[A-Za-z0-9_]*)"#,
+                        #"(?:class|struct|extension)\s+([A-Za-z0-9_]+)"#]
+        let range = NSRange(location: 0, length: text.utf16.count)
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            for match in regex.matches(in: text, range: range) {
+                found.insert(match.range(at: 1).slice(in: text))
+            }
+        }
+        return found
     }
 
     struct Scan {

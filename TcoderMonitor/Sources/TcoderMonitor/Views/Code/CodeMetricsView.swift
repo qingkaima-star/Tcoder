@@ -308,6 +308,19 @@ struct CodeInvariantRow: View {
                 // 记进一条永远不可能登记的键。
                 .help(failures.joined(separator: "\n"))
             }
+            // 扫描边界（批次 P7-C 3-2）：`CodeScanCoverage` 一直算得出"哪几条上限真的生效过"，
+            // 但契约里没有承接字段，于是"只读了前 3 个文件"的报告在屏上与全量报告**长得一样**。
+            // 屏上只留一句判定，逐条边界（各带真实数字）挂在悬停里。
+            if let limits = code.scanLimitations, !limits.isEmpty {
+                // 角色一律走 `DataNotice` 的中性默认值：这是一句**范围说明**，不是告警，
+                // 更不是 `info` 蓝 —— 那条守卫（`test_infoBlueNeverColorsChrome`）说得很清楚：
+                // 蓝同时是链接与选中色，拿它涂说明文字就是一色两义。
+                DataNotice(text: localizedFormat(
+                               "本次扫描有 %1$@ 条边界生效，这一页的数字是部分测量。",
+                               NumberFormat.grouped(limits.count)),
+                           iconLabel: "扫描边界")
+                    .help(limits.joined(separator: "\n"))
+            }
         }
     }
 

@@ -110,7 +110,7 @@ struct DependencySummaryGrid: View {
                         value: NumberFormat.grouped(deps.ecosystems.count),
                         unit: "个"
                     )
-                        .help("清单来源，名单在上方「风险总览」")
+                        .help(localizedCopy("清单来源，名单在上方「风险总览」"))
                     DataBandSeparator()
                     MetricTile(
                         label: "运行时 / 开发",
@@ -232,7 +232,7 @@ struct DependencyEcosystemSection: View {
     private var riskSlot: some View {
         if vulnerabilityUnchecked && eco.riskLevel == .none {
             SemanticBadge("未核对", role: Theme.Semantic.neutral, icon: .unverified)
-                .help("默认不联网时漏洞判定恒为 0 条，这是「没有查」，不是「没有病」")
+                .help(localizedCopy("默认不联网时漏洞判定恒为 0 条，这是「没有查」，不是「没有病」"))
         } else {
             RiskBadge(risk: eco.riskLevel)
         }

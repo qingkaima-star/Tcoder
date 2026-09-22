@@ -47,13 +47,44 @@ extension ShellBorderlessTests {
     func test_captureScriptPageNamesMatchTheSourceEnum() throws {
         let script = Self.packageRoot.appendingPathComponent("scripts/capture_pages_isolated.sh")
         let text = try String(contentsOf: script, encoding: .utf8)
-        guard let line = text.split(separator: "\n").first(where: { $0.contains("SECTIONS=(") }),
-              let head = line.range(of: "SECTIONS=(")
-        else { return XCTFail("取证脚本里找不到 SECTIONS=( ……) 这一行，判据失效") }
-        let names = line[head.upperBound...].split(separator: "\"")
-            .filter { $0.count >= 2 }.map(String.init)
+        let names = try Self.scriptPageNames(in: text)
         XCTAssertEqual(names, DetailSection.allCases.map(\.rawValue),
                        "脚本页名与 DetailSection 不再一一对应")
+    }
+
+    /// 从脚本里抠出默认页名清单，**两种写法都认**（都是同一件事的载体）：
+    ///   旧：`SECTIONS=("总览" "代码规模" …)`
+    ///   新：`read -r -a SECTIONS <<< "${CAPTURE_PAGES:-总览:代码规模:…}"`
+    ///     （2026-09-21 加了 `CAPTURE_PAGES` 补拍口子，页名里有空格所以用冒号分隔）
+    /// 两种都找不到就判败 —— 这条守卫的失效方式正是"脚本改了写法，测试还在按老形状找"。
+    static func scriptPageNames(in text: String) throws -> [String] {
+        if let line = text.split(separator: "\n").first(where: { $0.contains("SECTIONS=(") }),
+           let head = line.range(of: "SECTIONS=(") {
+            return line[head.upperBound...].split(separator: "\"")
+                .filter { $0.count >= 2 }.map(String.init)
+        }
+        if let range = text.range(of: "CAPTURE_PAGES:-") {
+            let tail = text[range.upperBound...]
+            let end = tail.firstIndex(of: "}") ?? tail.endIndex
+            let list = String(tail[..<end])
+            let parts = list.split(separator: ":").map(String.init)
+            XCTAssertFalse(parts.isEmpty, "CAPTURE_PAGES 默认值是空的？")
+            return parts
+        }
+        XCTFail("取证脚本里既没有 SECTIONS=( ……) 也没有 CAPTURE_PAGES:-…… —— 判据失效，"
+            + "改写法的人请同步这条测试，别让它静默空转")
+        return []
+    }
+
+    /// 元测试：上面那个抠名函数必须**两种写法都认**，且各自抠出顺序一致的两页。
+    /// （"两种都找不到就判败"那一支不单独测 —— 它一跑就会 `XCTFail` 把这次测试弄红，
+    ///   而它真正的用武之地是主门：脚本改成第三种写法时，主门必须喊而不是空转。）
+    func test_scriptPageNamesParserAcceptsBothSpellings() throws {
+        XCTAssertEqual(try Self.scriptPageNames(in: #"SECTIONS=("总览" "代码规模")"#),
+                       ["总览", "代码规模"])
+        XCTAssertEqual(try Self.scriptPageNames(in:
+                        #"read -r -a SECTIONS <<< "${CAPTURE_PAGES:-总览:代码规模:Git 洞察}"#),
+                       ["总览", "代码规模", "Git 洞察"])
     }
 
     func test_isReachableStillHasTestCoverage() throws {

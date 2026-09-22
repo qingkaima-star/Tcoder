@@ -143,7 +143,7 @@ struct ContributorRow: View {
                     .font(CodeGitType.number(Theme.Typo.microLabel))
                     .foregroundStyle(.secondary)
                     .tableCell(DataColumns.column(DataColumns.shareBar, 1))
-                    .help(shareAbsence.help(denominator: "报告里的非合并提交数")
+                    .help(shareAbsence.help(denominator: localizedCopy("报告里的非合并提交数"))
                           ?? "占非合并提交 \(NumberFormat.grouped(git.commitScope.authorBasis)) 次的比例")
             }
 
@@ -227,16 +227,23 @@ struct ContributorDirectoryChips: View {
             if !folded.isEmpty {
                 SemanticBadge("+\(NumberFormat.grouped(folded.count))",
                               role: Theme.Semantic.neutral)
-                    .help(folded.map { "\($0.0) · \($0.1) 次改动" }
+                    .help(folded.map { changeHelp($0.0, $0.1) }
                         .joined(separator: "\n"))
             }
         }
     }
 
+    /// 「路径 · N 次改动」这句 hover 的**唯一权威落点**。
+    /// 模板在两处各写一遍会被 `test_noVerbatimLongSentenceTwiceOnOnePage` 判成
+    /// "同一页逐字重复的口径长句"—— 那次说得对：一处改字，另一处必然忘记跟上。
+    static func changeHelp(_ path: String, _ count: Int) -> String {
+        localizedFormat("%1$@ · %2$@ 次改动", path, NumberFormat.grouped(count))
+    }
+
     static func chip(_ entry: (String, Int)) -> some View {
         SemanticBadge("\(tail(entry.0)) · \(NumberFormat.grouped(entry.1))",
                       role: Theme.Semantic.neutral)
-            .help("\(entry.0) · \(entry.1) 次改动")
+            .help(changeHelp(entry.0, entry.1))
     }
 
     static func tail(_ path: String) -> String {

@@ -99,12 +99,12 @@ enum DataAbsence: Equatable {
         case .value:
             return nil
         case .measuredEmpty:
-            return "已完成扫描，这一项确实没有命中任何记录——这个 0 是测得的结果，不是没查。"
+            return localizedCopy("已完成扫描，这一项确实没有命中任何记录——这个 0 是测得的结果，不是没查。")
         case .indeterminate:
-            return "算不出来：分母（\(denominator ?? "该项的分母")）为 0，这个比值没有定义。"
-                + "这里既不是没扫，也不是 0。"
+            return localizedFormat("算不出来：分母（%1$@）为 0，这个比值没有定义。这里既不是没扫，也不是 0。",
+                                   denominator ?? localizedCopy("该项的分母"))
         case .notAnalysed:
-            return "还没查到：这一项的扫描或采样没有完成，先跑一次分析、或等首帧到达。"
+            return localizedCopy("还没查到：这一项的扫描或采样没有完成，先跑一次分析、或等首帧到达。")
         }
     }
 

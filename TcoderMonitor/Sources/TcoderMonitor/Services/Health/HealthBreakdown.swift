@@ -267,8 +267,28 @@ enum MissingDimensionReason {
         dependencies == nil ? "未识别到依赖清单。" : nil
     }
 
-    private static func testingAbsence(coverage: CoverageMetrics?) -> String? {
-        coverage?.hasData == true ? nil : "该项目没有产出覆盖率报告，不参与计分。"
+    /// 覆盖率这一维要分**三档**，合成一句就把输入状态弄丢了：
+    /// `nil` = 这一趟根本没跑过覆盖率分析；跑过了但 `scannedFileCount == 0` = 真的没有报告文件；
+    /// 跑过了、也扫到了报告文件、`hasData` 却是 false = **报告读不出可用数字**
+    /// （格式不认识 / 空文件 / 超过 20 MiB 上限 / 不是 UTF-8）。
+    /// 原来三档共用一句「该项目没有产出覆盖率报告」，等于拿"没读到"冒充"没有"
+    /// （功能真实性清单 §S2：缺证据不得冒充结论）。
+    static func testingAbsence(coverage: CoverageMetrics?) -> String? {
+        guard let coverage else { return "尚未分析覆盖率报告，不参与计分。" }
+        if coverage.hasData { return nil }
+        let base: String
+        if coverage.scannedFileCount > 0 {
+            base = "扫到 \(NumberFormat.grouped(coverage.scannedFileCount)) 个覆盖率报告文件，"
+                + "但里面没有可用的行覆盖数字，不参与计分。"
+        } else {
+            base = "该项目没有产出覆盖率报告，不参与计分。"
+        }
+        // 「没找到」与「没看到」是两件事：有目录读不动时，"没有产出报告"这句站不住，
+        // 必须把扫描面不完整这件事一起说出来（`unreadableDirectoryCount == 0` 才是一句真话，
+        // 而 `nil` = 那次分析根本没统计过，也不许替它下结论）。
+        guard let unreadable = coverage.unreadableDirectoryCount, unreadable > 0 else { return base }
+        return base + "另有 \(NumberFormat.grouped(unreadable)) 个目录没能读取（权限或已消失），"
+            + "上面的结论只覆盖读得动的部分。"
     }
 
 }

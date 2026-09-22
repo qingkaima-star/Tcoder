@@ -54,8 +54,32 @@ final class PerformanceDisplayTests: XCTestCase {
         XCTAssertFalse(Live.forcesNeutral("0"))
     }
 
-    func testRealZeroSurvivesThePlaceholderLayer() {
-        // 真 0 是结论，必须原样显示成 0，不能被 `--` 吞掉。
+    /// 进程内存的三态（批次 P7-B 余量）：`rusage` 与 `task_info` 两路都没给值时是 0，
+    /// 而"占 0 字节的进程"不存在，所以那个 0 必须走 `--`；合计与单进程峰值同理。
+    /// 这条以前测不了：`residentBytes` 返回非 Optional，表里那一列是全表唯一
+    /// 会把"没读到"画成数字的地方（线程、打开文件都已经是三态）。
+    func testProcessMemoryTreatsUnreadAsMissing() {
+        let unread = process(pid: 11, memory: 0, threads: 4, files: 7)
+        let read = process(pid: 12, memory: 4096, threads: 2, files: 3)
+        XCTAssertNil(ProcessMetric.residentBytes(of: unread), "没读到不能画成 0 B")
+        XCTAssertEqual(ProcessMetric.residentBytes(of: read), 4096)
+
+        let mixed = ProcessGroupSnapshot(
+            group: TrackedProcessGroup(title: "混合组", matchPattern: "p"),
+            matchedProcesses: [unread, read])
+        XCTAssertEqual(ProcessMetric.groupMemory(of: mixed), 4096, "合计只加取到的")
+        XCTAssertEqual(ProcessMetric.memoryCovered(in: mixed), 1, "「N/M 个进程取到」里的 N 要数得出来")
+        XCTAssertEqual(ProcessMetric.peakMemory(of: mixed), 4096)
+
+        let allUnread = ProcessGroupSnapshot(
+            group: TrackedProcessGroup(title: "全空组", matchPattern: "p"),
+            matchedProcesses: [unread, process(pid: 13, memory: 0, threads: 1, files: 1)])
+        XCTAssertNil(ProcessMetric.groupMemory(of: allUnread), "一个都没读到不许给 0")
+        XCTAssertNil(ProcessMetric.peakMemory(of: allUnread), "峰值不许把 0 当成测得的最大值")
+        XCTAssertEqual(Live.bytes(ProcessMetric.groupMemory(of: allUnread)), "--")
+    }
+
+    func testRealZeroSurvivesThePlaceholderLayer() {        // 真 0 是结论，必须原样显示成 0，不能被 `--` 吞掉。
         XCTAssertEqual(Live.grouped(0), "0")
         XCTAssertEqual(Live.percent(0, precision: 0), "0%")
         XCTAssertEqual(Live.cores(0), "0.00")
@@ -234,106 +258,4 @@ final class PerformanceDisplayTests: XCTestCase {
         XCTAssertEqual(PerformanceSystemTiles.uptimeText(-1), "--")
     }
 
-    // MARK: - 轴：只跳台阶，不逐帧改
-
-    func testAxisIsStableForNearbyPeaks() {
-        XCTAssertEqual(ChartScale.axis(peak: 4.0), ChartScale.axis(peak: 4.1),
-                       "峰值小幅波动就换轴，曲线会整体上下跳动")
-        XCTAssertEqual(ChartScale.axis(peak: 4.0), ChartAxis(step: 2, maxValue: 6))
-        XCTAssertEqual(ChartScale.axis(peak: 4.0).ticks, [0, 2, 4, 6],
-                       "最后一个刻度必须正好落在轴顶，否则图上会出现悬空的留白")
-    }
-
-    /// 步长必须落在 {1,2,2.5,5}×10ⁿ 上，且「只抬不降、抬幅不超过 2 倍」——
-    /// 这才是轴不抖的充要条件。上一版把允许集写成字面量表，漏了 1 以下的档位，
-    /// 于是一次循环刷出 271 条假红；换成通用判据后同一循环只有一条断言。
-    func testNiceStepOnlyUsesTheLadder() {
-        for candidate in stride(from: 0.03, through: 600, by: 0.37) {
-            let step = ChartScale.niceStep(candidate)
-            XCTAssertTrue(isLadderStep(step), "出现了台阶外的步长 \(step)（候选 \(candidate)）")
-            XCTAssertGreaterThanOrEqual(step, candidate - 1e-12, "步长不能小于候选，否则轴顶会被数据捅破")
-            XCTAssertLessThanOrEqual(step, candidate * 2 + 1e-12, "步长最多抬一档，抬太狠曲线会被压扁")
-        }
-        XCTAssertEqual(ChartScale.niceStep(0), 1)
-        XCTAssertEqual(ChartScale.niceStep(.nan), 1)
-    }
-
-    private func isLadderStep(_ value: Double) -> Bool {
-        guard value > 0, value.isFinite else { return false }
-        let unit = value / pow(10, floor(log10(value)))
-        return [1.0, 2.0, 2.5, 5.0, 10.0].contains { abs(unit / $0 - 1) < 1e-6 }
-    }
-
-    // MARK: - 计数轴与百分比轴（总工截图复核问题 1 / 3）
-
-    func testCountAxisNeverPrintsFractionalCounts() {
-        // 单日 1 条最容易给到 0.5 步长（通用台阶是给字节速率设计的），标签就会打成 0/0/1/1。
-        let axis = ChartScale.countAxis(peak: 1)
-        XCTAssertEqual(axis.step, 1)
-        XCTAssertTrue(axis.ticks.allSatisfy { $0 == $0.rounded() }, "\(axis.ticks)")
-        for peak in [0, 1, 3, 7, 250, 10_000] {
-            let made = ChartScale.countAxis(peak: Double(peak))
-            XCTAssertGreaterThanOrEqual(made.step, 1, "峰值 \(peak) 的步长小于 1")
-            XCTAssertTrue(made.ticks.allSatisfy { $0 == $0.rounded() },
-                          "峰值 \(peak) 出现小数刻度 \(made.ticks)")
-            XCTAssertGreaterThan(made.maxValue, 0, "峰值 \(peak) 的轴没有可画高度")
-        }
-    }
-
-    func testPercentAxisStaysAtZeroOriginUntilTheCurveIsPinnedHigh() {
-        XCTAssertEqual(ChartScale.adaptivePercentAxis(peakPercent: nil), ChartScale.percentAxis)
-        XCTAssertEqual(ChartScale.adaptivePercentAxis(peakPercent: 42), ChartScale.percentAxis)
-        XCTAssertFalse(ChartScale.percentAxis.isZoomed)
-
-        let mid = ChartScale.adaptivePercentAxis(peakPercent: 72)
-        XCTAssertEqual(mid.minValue, 50)
-        XCTAssertTrue(mid.isZoomed)
-
-        let high = ChartScale.adaptivePercentAxis(peakPercent: 96)
-        XCTAssertEqual(high.minValue, 75)
-        XCTAssertEqual(high.maxValue, 100)
-        XCTAssertTrue(high.ticks.last == 100)
-        XCTAssertTrue(high.domainText.contains("75"), "收窄过就必须把下限写在轴说明里")
-    }
-
-    func testRelativeTimeAxisRescuesTheSingleClockLabelCase() {
-        // 5 点 × 1.5 秒 = 7.5 秒的窗口里，`22:22` 只会剩下一个刻度。
-        XCTAssertTrue(ChartScale.usesRelativeAxis(windowSeconds: 7.5, pointCount: 5))
-        XCTAssertFalse(ChartScale.usesRelativeAxis(windowSeconds: 135, pointCount: 90))
-        XCTAssertEqual(ChartScale.relativeSecondsText(Date(timeIntervalSince1970: 1_000), reference: Date(timeIntervalSince1970: 1_007)), "-7s")
-        XCTAssertEqual(ChartScale.relativeSecondsText(Date(timeIntervalSince1970: 1_007), reference: Date(timeIntervalSince1970: 1_007)), "现在")
-    }
-
-    func testAxisGrowsMonotonicallyAndNeverInverts() {
-        var previous = 0.0
-        for peak in stride(from: 0.5, through: 400, by: 0.5) {
-            let axis = ChartScale.axis(peak: peak)
-            XCTAssertGreaterThanOrEqual(axis.maxValue, previous, "轴不能随峰值增大而缩回去")
-            XCTAssertGreaterThan(axis.maxValue, peak, "峰值必须落在轴内，留白是刻意的")
-            XCTAssertGreaterThan(axis.step, 0)
-            previous = axis.maxValue
-        }
-    }
-
-    func testPercentAxisIsFixedAtAHundred() {
-        XCTAssertEqual(ChartScale.percentAxis.maxValue, 100)
-        XCTAssertEqual(ChartScale.percentAxis.ticks, [0, 25, 50, 75, 100])
-    }
-
-    func testStrideComesFromAFixedLadder() {
-        XCTAssertEqual(ChartScale.secondsStride(windowSeconds: 135), 30)
-        XCTAssertTrue([5, 15, 30, 60, 120, 300, 600, 1800].contains(ChartScale.secondsStride(windowSeconds: 600)))
-        XCTAssertEqual(ChartScale.dayStride(spanDays: 7), 2)
-        XCTAssertEqual(ChartScale.dayStride(spanDays: 30), 5)
-        XCTAssertEqual(ChartScale.dayStride(spanDays: -3), 1)
-    }
-
-    func testDegeneratePeaksStillProduceADrawableAxis() {
-        for peak in [0, -5, Double.infinity, Double.nan] {
-            let axis = ChartScale.axis(peak: peak)
-            XCTAssertGreaterThan(axis.maxValue, 0)
-            XCTAssertGreaterThan(axis.step, 0)
-            XCTAssertTrue(axis.maxValue.isFinite)
-        }
-    }
 }

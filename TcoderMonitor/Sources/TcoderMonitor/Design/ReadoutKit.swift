@@ -141,20 +141,24 @@ extension Theme {
                 self.gaugeHeight = gaugeHeight
             }
 
-            /// 结构占比（语言名、作者名、生态名、文件名）——**一律纯墨、不染色点**。
+            /// 结构占比（语言名、作者名、生态名、文件名）——**数据块蓝、不染色点**。
             ///
-            /// 原来这里按 key 稳定取 `Theme.Chart` 序列色，于是总览页那条
-            /// 「Swift 89%」成了一根 1300pt 长的**高饱和蓝条**，是全页最大的一块颜色，
-            /// 压过了它上方的主读数；代码规模页一个小区块里同时出现绿/棕/琥珀/红/蓝五色。
-            /// 关键点是：**每一行的名字就写在条的左边**，颜色在这里不携带任何信息，
-            /// 纯粹是装饰性用色 —— 风格契约 5「结构去色、语义留色」要删的就是这种。
-            /// 全部转墨之后，最长的那根条自然成为视觉重点，而那正是它该说的话。
-            /// 需要颜色表意的地方（风险 / 健康档 / 增删）由调用方显式传 `color:`。
+            /// 这里翻过一次车，两次理由都记下来，免得第三次再翻：
+            /// ① 最早按 key 稳定取 `Theme.Chart` 序列色 → 一个小区块里绿/棕/琥珀/红/蓝五色，
+            ///    颜色被当成"区分序列"用，而名字就写在条的左边，那是装饰性用色（该删）；
+            /// ② 收口时把它整体改成**纯墨**，理由是"最长的那根条自然成为视觉重点"——
+            ///    但这正撞在风格契约 4 上：最重的墨只许给最大的数（52,832 那一级），
+            ///    一根 1300pt 长的实心黑条比主读数还重，等于让数据块去抢主角。
+            /// 现在的口径与 `ChartSeries.dataMarkColor` 的文档同源：**数据块蓝、结构灰墨**，
+            /// 蓝不与数字争"最重"，又让条与文字/轨道/分隔线分层。
+            /// 实拍证据：同一份语言占比，代码规模页（显式传 dataMarkColor）是蓝的，
+            /// 总览页（走本默认）是黑的 —— 一个量两种颜色，就是本行以前那个默认造成的。
+            /// 需要颜色表意的地方（风险 / 健康档 / 增删）仍由调用方显式传 `color:`。
             init(label: String, detail: String? = nil, fraction: Double,
                  percentText: String, countText: String? = nil) {
                 self.init(label: label, detail: detail, fraction: fraction,
                           percentText: percentText, countText: countText,
-                          color: Theme.Palette.Surface.ink,
+                          color: ChartSeries.dataMarkColor,
                           showSwatch: false)
             }
 
