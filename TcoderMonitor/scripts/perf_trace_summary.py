@@ -18,7 +18,7 @@ AGENTS.md 第四轮红线 5（诚实性语义与阈值不许为任何指标放�
 import os
 import statistics
 
-from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, as_int, base_app_update_line, base_hang_line, base_hitch_frame_line, base_hitches_line, base_hotspot_line, base_main_thread_line, base_render_line, dedupe_pairs, disp_values, fmt_row, fps_counts, load_measure, over_budget, percentile, read_json, regime_note)
+from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, as_int, base_app_update_line, base_hang_line, base_hitch_frame_line, base_hitches_line, base_hotspot_line, base_main_thread_line, base_render_line, dedupe_pairs, disp_values, fmt_row, fps_counts, input_rate_qualification, load_measure, over_budget, percentile, read_json, regime_note, in_display_regime, phase_blame)
 from perf_trace_xml import cross_check_durations, find_tag
 
 
@@ -41,6 +41,7 @@ def cmd_summary(args):
     summary_render_rows(loaded, budget, seconds)
     summary_app_update_row(loaded, budget)
     summary_hitch_rows(loaded, seconds, budget)
+    summary_phase_blame_row(loaded, budget)
     summary_hang_rows(loaded, budget)
     summary_time_profile_rows(loaded)
     summary_fps_row(loaded)
@@ -78,14 +79,18 @@ def period_eligibility(meta):
     ⇒ 写进 meta 不等于被看见；判资格必须把复核读回来。
     """
     period = str(meta.get("period") or "idle")
-    # 输入来源决定这句话能不能说"真人"：synthetic 的样本答的是
-    # "连续滚动下渲染路径有没有 hitch"，答不了主观手感 —— 混为一谈就是造假证据。
-    source = str(meta.get("input_source") or "human")
-    tag = "" if source == "human" else "【合成输入：CGEvent 投递，非真人手感】"
+    # 输入来源**与投递节奏**决定这句话能不能说"真人"、能不能答"到不到 120Hz"。
+    # 25 Hz 的合成滚动器（每 40 ms 一拍）比 8.333 ms 的帧预算还慢，出帧上限是仪器锁的
+    # —— 今晚实测过，那两批差点被当"交互期 hitch 读数"直接引用（现已移出充数）。
+    # 混为一谈就是造假证据：合成输入答不了主观手感，慢节奏连"到不到 120Hz"都答不了。
+    rate_ok, tag = input_rate_qualification(meta.get("input_source"))
     if period == "interaction":
         if str(meta.get("no_human_input_during_window") or "") == "1":
             return False, ("声明交互期，但收尾复核记着**整窗没一次人手事件** ⇒ 不可当交互期样本，"
                            "要判 T1 得重录并真的持续滚动")
+        if not rate_ok:
+            return False, (tag + " ⇒ 这一档不许交 T1：判据里的 p95 帧间隔，"
+                           "正好是被输入节奏锁死的那一维")
         return True, tag + "有资格答 T1（交互期 hitch = 0）"
     if str(meta.get("contaminated_by_human_input") or "") == "1":
         return False, ("声明心跳期，但收尾复核记着**窗口内有人动手** ⇒ 样本已污染，"
@@ -183,42 +188,93 @@ def summary_render_rows(loaded, budget, seconds):
         fmt_row("render 超预算帧", base_over, why, "—")
 
 
+def app_update_verdict(values, budget):
+    """把"哪些迟到帧是主线程算出来的、哪些不是"分开说 —— 只报 max 会把两者混成一锅。
+
+    2026-09-21 的实证：交互期那份读数 `app-update` 打的是 `超 20.2 倍`（max 168.3 ms），
+    而 602 个迟到帧的 update 相位 **p95 只有 3.4 ms** —— 绝大多数迟到跟主线程没关系，
+    是渲染/合成侧的事；那一次 168 ms 才是真的主线程 stall。
+    一行"超 20.2 倍"把这两件事同时盖住了：既夸大了整体，又差点让人漏掉那个孤例。
+    """
+    vals = [v for v in (values or []) if v is not None]
+    if not vals:
+        return "无 app-update 记录", "—"
+    over = [v for v in vals if v > budget]
+    line = "p50 %.2f / p95 %.2f / max %.2f ms（n=%d，超预算 %d 个）" % (
+        percentile(vals, .5), percentile(vals, .95), max(vals), len(vals), len(over))
+    if not over:
+        return line, "达标（没有一个 update 超预算）"
+    share = 100.0 * len(over) / len(vals)
+    return line, ("主线程 stall %d 个（%.1f%%，最长 %.1f ms = %.1f 倍预算）；"
+                  "其余 %d 个迟到与 update 无关（p95 %.2f ms）"
+                  % (len(over), share, max(over), max(over) / budget,
+                     len(vals) - len(over), percentile(vals, .95)))
+
+
 def summary_app_update_row(loaded, budget):
     # 3) app-update 相位（一次 hitch 通常拆成 Brown+Red 两行，同 duration 走 ref）
     upd = dedupe_pairs(loaded["hitches-updates"])
     if upd:
-        cur = " ".join("%.1f" % v for v in sorted(upd))
-        fmt_row("app-update 单次耗时(ms)", base_app_update_line(),
-                (cur[:31] + "…") if len(cur) > 32 else cur,
-                "达标" if max(upd) <= budget else "超 %.1f 倍" % (max(upd) / budget))
+        cur, verdict = app_update_verdict(upd, budget)
+        fmt_row("app-update 单次耗时(ms)", base_app_update_line(), cur, verdict)
     else:
         fmt_row("app-update 单次耗时(ms)", base_app_update_line(),
                 "无 app-update = 无 hitch" if loaded["hitches-updates"]["present"] else "未覆盖", "—")
 
 
+def hitch_regime_suffix(loaded, budget):
+    """越出标称刷新率档时，hitch/HTR 的判定后缀（在档内则空串）。
+
+    【为什么要有这条】预算 8.333 ms 只对 **120 Hz 档**成立。窗口静止时 ProMotion 会把
+    实际出帧降到 ~50 Hz，那时一帧本就该花 ~20 ms —— 拿 120 Hz 的尺子去判，
+    "超预算帧数"与 HTR 会**系统性偏坏**。2026-09-21 就被这样一份 idle 读数唬过一次
+    （HTR 18.33「危急·立刻处理」，而同一份数据里主线程 88.6% 在等事件、整窗零输入）。
+    做成纯函数是为了能被合成夹具双向钉住（selfcheck 第 25 项）。
+    """
+    fps = (loaded or {}).get("displayed-surfaces-per-second") or {}
+    # 只有"确实采到过这张表"才去解析它：`json` 缺席就重解析 XML 会让**每一趟 idle**
+    # 都为这句话多跑一次 XML，而且合成夹具里没有 `doc` 键时直接 KeyError。
+    counts = fps.get("json")
+    if not counts and fps.get("present"):
+        counts = fps_counts(fps)
+    achieved = (counts or {}).get("fps_p50")
+    if in_display_regime(achieved, budget):
+        return ""
+    return "｜实测出帧 %s/s，已不在 %.1f Hz 档 ⇒ 不判档，只记形状" % (achieved, 1000.0 / budget)
+
+
 def summary_hitch_rows(loaded, seconds, budget):
     # 4) hitch 次数 / 速率
     hitch = disp_values(loaded["hitches"])
+    suffix = hitch_regime_suffix(loaded, budget)
     if loaded["hitches"]["present"]:
         rate = (len(hitch) / seconds) if seconds else 0.0
         fmt_row("hitch 次数 / 速率", base_hitches_line(),
                 "%d 次 / %ds = %.2f /s" % (len(hitch), seconds, rate),
-                "达标(0 次)" if not hitch else ("超(预算 0)" if rate < 1.0 else "严重超(>=1/s)"))
+                "达标(0 次)" if not hitch else (("超(预算 0)" if rate < 1.0 else "严重超(>=1/s)") + suffix))
         fmt_row("hitch 帧时长", base_hitch_frame_line(),
                 ("%.2f~%.2f ms" % (min(hitch), max(hitch))) if hitch else "无 hitch",
-                "超" if hitch and max(hitch) > budget else "达标")
+                ("超" if hitch and max(hitch) > budget else "达标") + suffix)
         # Hitch Time Ratio：Apple 的正式指标（tech-talk 10855）——
         # 本实现取 Σ max(0, 帧时长 − 预算) / 秒数，是"晚了多少"的保守上界。
         # 档位（Apple 原文）：<5 无感 / 5~10 可察觉需排查 / >10 危急需立刻处理 / 理想 0。
         htr = (sum(max(0.0, d - budget) for d in hitch) / seconds) if seconds else 0.0
         band = "理想(0)" if not hitch else ("无感" if htr < 5 else ("可察觉·需排查" if htr <= 10 else "危急·立刻处理"))
         fmt_row("Hitch Time Ratio (ms/s)", "%.2f（危急档）" % BASELINE.get("hitch_time_ratio_ms_per_s", 12.9),
-                "%.2f（%d 帧迟到，预算 %.3f ms）" % (htr, len(hitch), budget), band)
+                "%.2f（%d 帧迟到，预算 %.3f ms）" % (htr, len(hitch), budget), band + suffix)
     else:
         fmt_row("hitch 次数 / 速率", base_hitches_line(), "未覆盖", "—")
         fmt_row("hitch 帧时长", base_hitch_frame_line(), "未覆盖", "—")
         fmt_row("Hitch Time Ratio (ms/s)", "%.2f（危急档）" % BASELINE.get("hitch_time_ratio_ms_per_s", 12.9),
                 "未覆盖", "—")
+
+
+def summary_phase_blame_row(loaded, budget):
+    # 4b) 迟到帧到底该怪谁：主线程 update 也超预算的，和"主线程没问题、渲染/合成侧慢了"的
+    upd = dedupe_pairs(loaded["hitches-updates"])
+    late = disp_values(loaded["hitches"])
+    line, verdict = phase_blame(upd, late, budget)
+    fmt_row("迟到帧归因（update vs render）", "—", line, verdict)
 
 
 def summary_hang_rows(loaded, budget):
