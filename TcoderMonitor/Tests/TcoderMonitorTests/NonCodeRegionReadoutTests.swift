@@ -17,9 +17,10 @@ import XCTest
 ///    代码统计」必须仍然成立，两句同时在场、互不覆盖；
 /// 4. **缺席**：没有混合语言文件的语料 ⇒ 整句不出声；旧 JSON 缺这个键必须仍能解码成 `nil`。
 ///
-/// 夹具落在**被测仓库之外**的沙箱：包内 `.scratch/`（AGENTS §1.6 定的落点，已 gitignore），即建即删。
-/// ⚠️ 刻意**不**继承 `SelfScanHarnessCase`：那台夹具会复用共享扫描缓存，一个 30 行的 `.vue`
-///    落进本仓自扫面会动到「巨大文件 / 榜单」那一族基线数字。
+/// 夹具落在**被测仓库之外**的沙箱：包内 `.scratch/`（AGENTS §1.6 定的落点，已 gitignore，
+/// 且在自扫剪枝清单里），即建即删。本类的夹具用例刻意**不**继承 `SelfScanHarnessCase` ——
+/// 那台夹具复用"一次扫描六个分析器"的共享缓存，与"只扫我这 30 行"无关；
+/// 真语料那一头由文件末尾的 `NonCodeRegionRealCorpusTests` 复用那台缓存去验。
 final class NonCodeRegionReadoutTests: XCTestCase {
 
     private static let packageRoot: URL = URL(fileURLWithPath: #filePath)
@@ -286,5 +287,31 @@ final class NonCodeRegionReadoutTests: XCTestCase {
         let commentOnly = witnesses([(path: "Sources/TcoderMonitor/Views/Dummy.swift",
                                       body: "// 读者见 `MixedLanguageRegionCaliber.note(code)`\nimport Foundation")])
         XCTAssertEqual(commentOnly.exits, [], "注释凑成了读者 ⇒ 这条守卫会在文档里找到证据")
+    }
+}
+
+/// 真语料那一头（RD-42 的第 ② 件：独立真值不能只有我自己造的夹具）。
+///
+/// 复用 `SelfScanHarnessCase` 那台"一次扫描六个分析器"的缓存 —— 全仓只扫一遍，不另起 I/O。
+/// 本仓**没有任何 `.vue` 文件**（`find . -name '*.vue'` 实测 0 个），所以这一格该是"量到的 0"；
+/// 但断言只钉**不会随语料腐烂的那两条**：
+/// ① 0 或 nil 时口径句必须沉默；② 真仓库的限制账里也不许出现这句口径。
+/// （不断言"永远等于 0" —— 那等于把今天语料的形状写成契约，明天加一个 `.vue` 就莫名变红。）
+final class NonCodeRegionRealCorpusTests: SelfScanHarnessCase {
+
+    func testSelfScanKeepsTheCaliberSentenceOutOfTheLimitationLedger() async throws {
+        let metrics = try await selfScan().code
+        let field = metrics.nonCodeRegionLineCount
+        if field == nil || field == 0 {
+            XCTAssertNil(MixedLanguageRegionCaliber.note(metrics),
+                         "读数缺席或为 0 却打出一句归位说明（现量 \(field.map(String.init) ?? "nil")）")
+        } else {
+            let note = try XCTUnwrap(MixedLanguageRegionCaliber.note(metrics))
+            XCTAssertTrue(note.contains(String(field ?? 0)), "真语料上这句话必须带字段那个数：\(note)")
+        }
+        XCTAssertFalse((metrics.scanLimitations ?? []).contains { $0.contains(MixedLanguageRegionCaliber.marker) },
+                       "真仓库的限制账里出现了口径句 ⇒ CLI 的「未量准 N 条」被灌虚高")
+        print("【RD-42 真语料】本仓 nonCodeRegionLineCount = \(field.map(String.init) ?? "nil")"
+            + " · 限制账 \(metrics.scanLimitations?.count ?? 0) 条（其中不含分区口径句）")
     }
 }
