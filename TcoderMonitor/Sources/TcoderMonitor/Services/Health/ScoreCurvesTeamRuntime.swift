@@ -87,9 +87,10 @@ extension HealthCurves {
     /// 当年是按"每千行**代码**"标定的，直接搬到"每千行**日志**"上属于换了量程沿用刻度。
     /// 本轮只做正确性修正（不伪分母、不为提指标动任何锚点），**独立样本重新标定归总工**，
     /// 已登记在 Obsidian `110` 的契约缺口一节。
+    /// `detail` 由 `HealthCurves.joined` 限到 60 字（评分卡那一行放不下长句），
+    /// 所以**"证据不足"那几句不在这里**，在 `WeightedHealthScorer` 的 recommendations 里。
     static func stability(errorsPerKiloLogLines: Double, crashCount: Int, fatalCount: Int,
-                          exceptionCount: Int, totalLinesScanned: Int,
-                          evidenceGaps: [String] = []) -> CurveResult {
+                          exceptionCount: Int, totalLinesScanned: Int) -> CurveResult {
         if totalLinesScanned == 0 {
             // 没扫到日志就不假装满分：给偏高的默认分，并在文案里标明是默认值。
             return CurveResult(score: 85, detail: "未扫描到运行日志，本维度按默认值计", risk: .low)
@@ -110,7 +111,7 @@ extension HealthCurves {
             "异常 \(whole(exceptionCount)) 次",
             "扫描 \(whole(totalLinesScanned)) 行",
             deducted > 0 ? "扣 \(decimal(deducted)) 分" : ""
-        ] + evidenceGaps.map { "证据不足：\($0)" })
+        ])
         return CurveResult(score: score, detail: detail, risk: graded(score, 85, 65, 45, 20))
     }
 

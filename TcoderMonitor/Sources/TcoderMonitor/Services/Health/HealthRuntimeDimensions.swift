@@ -27,12 +27,15 @@ extension WeightedHealthScorer {
                                           crashCount: logs.crashCount,
                                           fatalCount: logs.fatalCount,
                                           exceptionCount: logs.exceptionCount,
-                                          totalLinesScanned: logs.totalLinesScanned,
-                                          evidenceGaps: stabilityEvidenceGaps(logs))
+                                          totalLinesScanned: logs.totalLinesScanned)
+        var recommendations = stabilityAdvice(logs)
+        // 「证据不足」那几句走 recommendations：detail 有 60 字硬顶（评分卡那一行），
+        // 而缺什么证据恰恰是最不能因为放不下就不说的一段。
+        recommendations.append(contentsOf: stabilityEvidenceGaps(logs).map { "证据不足：\($0)" })
         return DimensionOutcome(curve: curve,
                                 strengths: stabilityStrengths(logs, perKiloLogLines),
                                 issues: stabilityIssues(logs),
-                                recommendations: stabilityAdvice(logs))
+                                recommendations: recommendations)
     }
 
     /// 这一维**缺**哪些证据。缺了不许默默按"没问题"处理，也不许按"最坏情况"处理 ——

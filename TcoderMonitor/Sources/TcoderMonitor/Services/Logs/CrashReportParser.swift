@@ -221,11 +221,15 @@ enum CrashReportParser {
                                   asiLines: flattenASI(dictionary(body["asi"])), threadLabel: threadLabel)
     }
 
-    /// 一个崩溃事实都没读到就返回 false，由 events(for:) 决定要不要合成兜底事件。
-    /// 八条判据与它们的或运算顺序，逐字照抄拆分前那一句。
+    /// 一个崩溃事实都没读到就返回 false。**这一条判据本轮收紧了一处**：
+    /// 原来 `facts.bugType != nil` 单独也成立，于是"只有 header 那一行、body 已截断"的
+    /// 损坏报告会被判成确认崩溃（`bug_type` 是**报告类别号**，不是崩溃事件 ——
+    /// 309 只说明这是一份崩溃类报告，它里面既没有异常类型也没有线程）。
+    /// 现在要的是事件级证据：异常类型 / 信号 / subtype / codes / 终止原因 / 堆栈帧 / asi。
+    /// 其余七条判据与它们的或运算顺序逐字未动。
     static func ipsHasEvidence(facts: IPSDiagnosticFacts, stack: IPSDiagnosticStack) -> Bool {
         facts.exceptionType != nil || facts.signal != nil || facts.subtype != nil || facts.codes != nil
-            || facts.terminationText != nil || facts.bugType != nil
+            || facts.terminationText != nil
             || !stack.frames.isEmpty || !stack.asiLines.isEmpty
     }
 

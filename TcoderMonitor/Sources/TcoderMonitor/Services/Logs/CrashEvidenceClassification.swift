@@ -75,6 +75,18 @@ extension CrashReportParser {
         if diagnostic.isEmpty == false {
             return confirmedOutcome(diagnostic, path: path, modifiedAt: modifiedAt)
         }
+        // `.ips` 按规格是 JSON：JSON 读不出证据就到此为止。
+        // 让它再退一遍纯文本通道会把截断残骸里的 "EXC_BAD_ACCESS" 字样当成崩溃证据
+        // ——一次"内容坏了、我们读不动"的事,就被说成"确认崩溃了一次"。
+        if reading.url.pathExtension.lowercased() == "ips" {
+            return hasReportShape(text)
+                ? fileRecord(.parseFailed,
+                             reason: "报告声明是 JSON 格式，但两段 JSON 都取不出可用的崩溃事实",
+                             text: text)
+                : fileRecord(.suspected,
+                             reason: "扩展名是 .ips，但内容里既没有报告字段也没有崩溃特征",
+                             text: text)
+        }
         let plain = parseCrashText(text: text, path: path, modifiedAt: modifiedAt)
         if plain.isEmpty == false {
             return confirmedOutcome(plain, path: path, modifiedAt: modifiedAt)
