@@ -7,12 +7,10 @@ import XCTest
 /// ② **量出来的**与**算出来的**分栏，派生项点名它的来源；③ 每条重要结论落到
 /// **文件 + 符号 + 判据名** 的可定位坐标。外加四类高价值检查只出「候选·未判定」的提示。
 ///
-/// **独立真值怎么来的**（本轮纪律：不许拿实现自身的输出当唯一真值）：
-/// 下面 `fullReport()` 那份夹具的每一格都是**手写的具体数字**，注释里写清了手算过程：
-/// 注释行数 25 / 总行数 100 ⇒ 注释占比必为 0.25；作者表 7 + 3 ⇒ 分母 10、集中度 70.0%；
-/// 覆盖率 40/100 ⇒ 40.00；分量 80×0.6 + 60×0.4 ⇒ 综合分 72。
-/// 坐标条数同理：巨大文件 2 + 复杂度榜 3 + 重复块 1 + 通告（受影响包 1 个）1
-/// + 日志簇 1 + 覆盖率报告 1 = **9 条**，是数出来的，不是让被测代码自己报的。
+/// **独立真值怎么来的**（本轮纪律：不许拿实现自身的输出当唯一真值）：`fullReport()` 里每一格
+/// 都是手写的具体数字，期望值全部手算 —— 注释 25 / 总行 100 ⇒ 0.25；作者 7+3 ⇒ 集中度 70.0%；
+/// 覆盖 40/100 ⇒ 40.00；分量 80×0.6 + 60×0.4 ⇒ 72；坐标 = 巨大文件 2 + 复杂度榜 3 + 重复块 1
+/// + 通告 1 + 日志簇 1 + 覆盖率报告 1 = **9 条**，是数出来的，不是让被测代码自己报的。
 final class ReportTraceabilityTests: XCTestCase {
 
     // MARK: - 夹具
@@ -31,7 +29,6 @@ final class ReportTraceabilityTests: XCTestCase {
         return report
     }
 
-    /// 五路齐全的夹具。所有期望值都是注释里手算的那几个数。
     private func fullReport() -> ProjectReport {
         var full = stubReport(code: fixtureCode())
         full.git = fixtureGit()
@@ -52,19 +49,12 @@ final class ReportTraceabilityTests: XCTestCase {
     }
 
     private func fixtureCode() -> CodeMetrics {
-        var code = CodeMetrics()
-        code.totalFiles = 7
-        code.totalLines = 100
-        code.blankLines = 10
-        code.commentLines = 25
-        code.codeLines = 65
-        code.analyzedFunctionCount = 8
-        code.averageFunctionLength = 20
-        code.averageCyclomaticComplexity = 4.25
-        code.hugeFileCount = 5
-        code.highRiskHotspotCount = 2
-        code.duplicationRatio = 0.10
-        code.durationMs = 42
+        var code = CodeMetrics()          // 下面每一格都是手写的整数，期望值全部能手算
+        code.totalFiles = 7; code.totalLines = 100; code.blankLines = 10
+        code.commentLines = 25; code.codeLines = 65; code.analyzedFunctionCount = 8
+        code.averageFunctionLength = 20; code.averageCyclomaticComplexity = 4.25
+        code.hugeFileCount = 5; code.highRiskHotspotCount = 2
+        code.duplicationRatio = 0.10; code.durationMs = 42
         code.scanLimitations = ["明细榜单截断到 20 块。"]
         code.hugeFiles = [FileHotspot(path: "/tmp/r10b/A.swift", lineCount: 900, risk: .high, suggestion: "拆"),
                          FileHotspot(path: "/tmp/r10b/B.swift", lineCount: 500, risk: .medium, suggestion: "拆")]
@@ -85,10 +75,7 @@ final class ReportTraceabilityTests: XCTestCase {
 
     private func fixtureGit() -> GitInsights {
         var git = GitInsights()
-        git.isRepository = true
-        git.totalCommits = 10
-        git.commitsAnalyzed = 8
-        git.projectAgeDays = 10
+        git.isRepository = true; git.totalCommits = 10; git.commitsAnalyzed = 8; git.projectAgeDays = 10
         git.firstCommitAt = Date(timeIntervalSince1970: 1_700_000_000)
         git.lastCommitAt = Date(timeIntervalSince1970: 1_700_000_000 + 10 * 86_400)
         git.authors = [author("甲", commits: 7), author("乙", commits: 3)]
@@ -97,10 +84,7 @@ final class ReportTraceabilityTests: XCTestCase {
 
     private func fixtureLogs() -> LogSummary {
         var logs = LogSummary()
-        logs.totalLinesScanned = 1_000
-        logs.errorCount = 6
-        logs.warningCount = 2
-        logs.crashCount = 1
+        logs.totalLinesScanned = 1_000; logs.errorCount = 6; logs.warningCount = 2; logs.crashCount = 1
         logs.scannedFiles = [scannedLog("/tmp/a.log"), scannedLog("/tmp/b.log")]
         logs.topErrors = [cluster(signature: "sig-null-1", source: "/tmp/r10b/A.swift")]
         return logs
@@ -123,14 +107,13 @@ final class ReportTraceabilityTests: XCTestCase {
 
     private func fixtureCoverage() -> CoverageMetrics {
         var coverage = CoverageMetrics()
-        coverage.scannedFileCount = 12
-        coverage.unreadableDirectoryCount = 0
+        coverage.scannedFileCount = 12; coverage.unreadableDirectoryCount = 0
         coverage.reports = [coverageReport("/tmp/r10b/lcov.info", covered: 40, total: 100)]
         return coverage
     }
 
     private func fixtureHealth() -> HealthScore {
-        var health = HealthScore()
+        var health = HealthScore()       // 80×0.6 + 60×0.4 = 72，就是下面 overall 那个数
         health.components = [ScoreComponent(name: "代码质量", score: 80, weight: 0.6, detail: "d", risk: .low),
                              ScoreComponent(name: "复杂度", score: 60, weight: 0.4, detail: "d", risk: .medium)]
         health.overall = 72
@@ -169,7 +152,7 @@ final class ReportTraceabilityTests: XCTestCase {
 
     private func provenanceStub(root: String) -> ScanProvenance {
         var provenance = ScanProvenance()
-        provenance.scannedRoot = root
+        provenance.scannedRoot = root   // 其余字段留 nil = 未记录，不去凑一个假提交号
         return provenance
     }
 
@@ -180,14 +163,13 @@ final class ReportTraceabilityTests: XCTestCase {
     // MARK: - ① 台账上屏：四态各自可观测
 
     func test_fourStatesRenderAsFourDifferentPhrases() {
-        // 四态的名单在测试里自己列一份：`AnalyzerRunState` 在冻结区、没有 allCases，
-        // 而我也不许为了让一条断言顺手就改契约。
+        // 四态名单在测试里自己列一份：`AnalyzerRunState` 在冻结区、没有 allCases，
+        // 也不许为了让一条断言顺手就改契约。
         let phrases = [.ok, .partial, .failed, .notRun].map { AnalyzerLedgerText.statePhrase($0) }
         XCTAssertEqual(Set(phrases).count, 4, "四态必须四样措辞，长得一样就说明某一态被折叠了")
         XCTAssertEqual(AnalyzerLedgerText.statePhrase(.notRun), "没跑（装配口没排进来）")
     }
 
-    /// 反例：`notRun` 绝不被写成「这一维没问题」。
     func test_notRunNeverRendersAsAPass() {
         let line = AnalyzerLedgerText.row(record("依赖分析", .notRun, durationMs: nil))
         XCTAssertEqual(line, "  [没跑（装配口没排进来）] 依赖分析 · 无耗时 · 无读数")
@@ -214,6 +196,7 @@ final class ReportTraceabilityTests: XCTestCase {
         XCTAssertEqual(AnalyzerLedgerText.limitsText([]), "撞上限的条目未记录")
     }
 
+    /// 顺序就是这一屏的全部设计：先说没量准，再说每一路做了什么，最后才给分。
     func test_sectionSitsAfterCaveatAndBeforeTheScore() {
         let lines = CLIScoreText.render(fullReport(), exit: .partial).components(separatedBy: "\n")
         let caveat = lines.firstIndex { $0.hasPrefix("未量准") }
@@ -239,6 +222,7 @@ final class ReportTraceabilityTests: XCTestCase {
 
     // MARK: - ② 测量台账：两栏 + 派生项点名来源
 
+    /// 甲栏（量出来的）与乙栏（算出来的）必须真是两栏，且乙栏每行都带来源。
     func test_measuredAndDerivedAreTwoSeparateColumns() {
         let ledger = MeasurementLedger.of(fullReport())
         XCTAssertFalse(ledger.measuredRows.isEmpty, "甲栏空了，分栏就形同虚设")
@@ -261,7 +245,7 @@ final class ReportTraceabilityTests: XCTestCase {
                       "派生项引了本表与上游清单里都不存在的来源：\(ledger.danglingSources)")
     }
 
-    /// 上游清单本身也要有牙：每条都得写理由，且**真的被某条派生行用到**（挂账不许当遮羞布）。
+    /// 上游清单也要有牙：每条都得写理由，且真的被某条派生行用到（挂账不许当遮羞布）。
     func test_upstreamRosterHasOneReasonPerEntryAndNoneIsDead() {
         let used = Set(MeasurementLedger.of(fullReport()).derivedRows.flatMap(\.source))
         XCTAssertFalse(MeasurementLedger.upstreamInputs.isEmpty)
@@ -271,7 +255,7 @@ final class ReportTraceabilityTests: XCTestCase {
         }
     }
 
-    /// 独立真值：这些数字是上面夹具手写、注释里手算出来的，不是被测代码给的。
+    /// 独立真值：下面每个期望数都是夹具手写值算出来的，不是被测代码给的。
     func test_handComputedDerivedValuesAreWhatTheColumnShows() {
         let ledger = MeasurementLedger.of(fullReport())
         XCTAssertEqual(value(ledger, "注释占比"), "0.25", "25 / 100 手算 = 0.25")
@@ -283,7 +267,7 @@ final class ReportTraceabilityTests: XCTestCase {
         XCTAssertEqual(value(ledger, MeasuredItem.files), "7", "甲栏必须原样给出文件数，不许被乙栏的比值顶替")
     }
 
-    /// 元测试（证明这把尺子有牙）：塞一条假来源与一条无来源的派生行，两个反例都得抓到。
+    /// 元测试（证明尺子有牙）：塞一条假来源与一条无来源的派生行，两个反例都得抓到。
     func test_meta_danglingSourceIsCaught() {
         let fake = MeasurementLedger(rows: [
             MeasurementRow(basis: .measured, path: "代码扫描", item: "文件数", value: "3", source: ["x"]),
@@ -358,7 +342,7 @@ final class ReportTraceabilityTests: XCTestCase {
         XCTAssertTrue(text.contains("风险提示 0 条"))
     }
 
-    /// 正例：给了输入，规则本体是真能出条目并自带坐标的（不是空壳）。
+    /// 正例：给了输入，规则本体真能出条目并自带坐标（不是空壳）。
     func test_ruleEmitsCoordinatedHintWhenGivenEvidence() {
         let evidence = CandidateRiskHints.rules.map {
             CandidateRiskHints.CandidateEvidence(kind: $0.kind, file: "A.swift", symbol: "run()", detail: "形态像")
@@ -374,7 +358,7 @@ final class ReportTraceabilityTests: XCTestCase {
         }
     }
 
-    /// 反例 + 结构门：评分与判据那几路**不许**读候选提示。
+    /// 结构门：评分与判据那几路不许读候选提示（提示一旦进评分就变成扣分项）。
     func test_scorerNeverLooksAtCandidateHints() throws {
         for dir in ["Services/Health", "Services/Code", "Models"] {
             for file in try SurfaceScanKit.sourceFiles(under: dir) {
