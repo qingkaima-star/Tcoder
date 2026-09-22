@@ -253,6 +253,41 @@ struct SourceScanScopeReadout: Sendable, Equatable {
     var blocksAbsenceClaims: Bool { observed == false || unmeasuredScope.isEmpty == false }
 }
 
+// MARK: - 混合语言分区口径（RD-42 · 台账卷二 §23「有写无读」那一条）
+
+/// 「混合语言文件里那些按分区归位成非代码的行」这句话的**唯一装配口**（界面与 CLI 共用一把尺子）。
+///
+/// 为什么必须有它：`ComplexityEngine.LexIntegrity.nonCodeRegionLineCount` 从 R2 起就在算
+/// （`sanitize(_:profiles:)` 逐行累加、`merged` 跨区累加），全仓却**一个读者都没有** ——
+/// 它既不在 `hasAnomaly` 也不在 `limitations`，于是"分区认出来了、N 行归位为非代码"这件事一件没说。
+/// 现在它由 `FileSystemCodeAnalyzer.analyzeWithCoverage` **直传**进
+/// `CodeMetrics.nonCodeRegionLineCount`，本文件只把那枚数**解释**成一句中文（RD-48 同形状）。
+///
+/// ⚠️ 三个不许：
+/// 1. **不许进 `scanLimitations`** —— 那条在 CLI 会被打成「未量准 N 条」
+///    （`CLIScoreText.precisionCaveat`），而 template / style 那些行是**已经量到了**、
+///    只是分类不同（口径）。塞进限制账等于把"未量准"灌虚高，那是另一种不诚实。
+///    这条由 `NonCodeRegionReadoutTests.testThisSentenceNeverEntersTheLimitationLedger` 钉住。
+///    与它分家的是"**没**认出来"那一格：`vueRegionFallbackFileCount` 走 `limitationSummary`
+///    进限制账，那才是真没量准 —— 两句同时成立、互不覆盖。
+/// 2. **不许写成"排除了 N 行"** —— "排除"是"没扫"的意思，与事实相反，只能写"归位 / 不计入"。
+/// 3. **不许在这里再数第二遍** —— 只读那一枚直传字段，不碰中文台账、不从别的桶里加减凑数。
+enum MixedLanguageRegionCaliber {
+    /// 句子里的稳定标记：反例守卫按它认领"这条有没有被塞进限制账"，改文案必须连着改这里。
+    static let marker = "非代码分区"
+
+    /// 由**字段**装配的口径句。两种不出声的情形都是故意的：
+    /// `nil` = 这份报告没有这个读数（旧报告 / 这一路没跑，**不许**渲染成 0）；
+    /// `0` = 跑过了、这个语料里没有需要分区的区域（纯 Swift/Java 仓库）
+    /// ⇒ **一次干净的扫描一个字都不许多**。
+    static func note(_ code: CodeMetrics) -> String? {
+        guard let lines = code.nonCodeRegionLineCount, lines > 0 else { return nil }
+        // 整句必须是**一条字面量**：拆成两段再 `+` 会让双语守卫的按行正则只看到前半，
+        // 于是运行时键（整句）与守卫认知的键（前半）分叉 —— 前半被记成一笔新债。
+        return localizedFormat("另有 %1$@ 行落在混合语言文件的非代码分区（template / style 与 SFC 标签行），按分区归位、不计入代码统计。", NumberFormat.grouped(lines))
+    }
+}
+
 // MARK: - 谁会被剪掉：包状目录与 bundle 判定
 
 // 本流的判据落在 `SourceTreeScanner` 上：「这个目录为什么不下潜」必须能逐条回答，

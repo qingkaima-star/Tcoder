@@ -321,6 +321,13 @@ struct CodeInvariantRow: View {
                            iconLabel: "扫描边界")
                     .help(limits.joined(separator: "\n"))
             }
+            // RD-42（台账卷二 §23「有写无读」）：混合语言文件里"分区认出来了、N 行归位为非代码"
+            // 是一句**口径**、不是"没量准" ⇒ 刻意不进上面那本账（那条在 CLI 被打成「未量准 N 条」）。
+            // 数字来自 `CodeMetrics.nonCodeRegionLineCount`（引擎直传），这句只做解释；
+            // 一次干净的扫描（纯 Swift/Java 仓库）这里**一个字都不许多**。
+            if let regionNote = MixedLanguageRegionCaliber.note(code) {
+                DataNotice(text: regionNote, iconLabel: "扫描边界")
+            }
         }
     }
 

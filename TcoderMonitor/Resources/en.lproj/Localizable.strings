@@ -741,3 +741,7 @@
 // （`CodeBoardTruth.outsideBoardNote`）—— 引擎改文案而标记没改，披露会静默消失。
 "另有 %1$@ 个块 / %2$@ 行未列入榜内。" = "A further %1$@ blocks / %2$@ lines sit outside the reported board.";
 "另有 %1$@ 处拷贝因指纹预算未展开。" = "A further %1$@ clone windows were not expanded because of the fingerprint budget.";
+
+// ── RD-42（混合语言分区归位落成字段）：口径句由数装配，一条新键 ─────────────────────
+// 这句**不进** `scanLimitations`（那条在 CLI 打成「未量准 N 条」），所以它自己必须有键。
+"另有 %1$@ 行落在混合语言文件的非代码分区（template / style 与 SFC 标签行），按分区归位、不计入代码统计。" = "A further %1$@ lines sit in the non-code regions of mixed-language files (template / style and SFC tag lines); they are classified by region and left out of the code counts.";

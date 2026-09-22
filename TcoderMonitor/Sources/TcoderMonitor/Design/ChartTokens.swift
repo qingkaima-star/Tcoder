@@ -246,11 +246,19 @@ enum ChartAxisEdge {
         return low...high
     }
 
+    /// 时间轴标签的锚点：**只调水平方向，垂直方向必须钉在 `.top`**。
+    ///
+    /// 水平那一半是 P18 的原意：尾刻度贴边时让标签往**内**长，不被卡片右边界切成 `08:27…`。
+    /// 垂直那一半是 P18 **漏掉、这次实拍补上的**：`UnitPoint.leading` / `.center` / `.trailing`
+    /// 的 `y` 都是 **0.5**，也就是"拿标签的垂直中点对齐刻度线"——x 轴刻度线就在绘图区底边，
+    /// 于是半个标签掉进绘图区里。0 值那一档（警告数折线贴着 `y=0`）便**横穿过日期数字**：
+    /// `fb94e88` 那批 36 张·错误日志页尾裁到原始像素确认，`9/21` 被虚线划过去。
+    /// 这条规则一处生效，六张时间轴图（总览 / 健康趋势 / 错误趋势 / Git 趋势 / 性能两张）一起好。
     static func anchor(for date: Date?, in domain: ClosedRange<Date>?) -> UnitPoint {
-        guard let position = position(of: date, in: domain) else { return .center }
-        if position >= 1 - edgeFraction { return .trailing }
-        if position <= edgeFraction { return .leading }
-        return .center
+        guard let position = position(of: date, in: domain) else { return .top }
+        if position >= 1 - edgeFraction { return .topTrailing }
+        if position <= edgeFraction { return .topLeading }
+        return .top
     }
 
     /// 这个刻度落在数据域的百分之几；域退化（单点/空）时返回 nil。
