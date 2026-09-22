@@ -127,6 +127,23 @@ def launch_ready_ms(rows):
     return horizon
 
 
+NARROW_FLOOR_RATIO = 0.8
+
+
+def interval_shaped(values, budget_ms):
+    """读数是不是「贴着一帧的基线」那种窄分布 ⇒ 它的单位不能当占用时长引用。
+
+    判据**全仓只有这一条**：`trace_report.caveat_for` 调的就是这里。
+    为什么不能有两份（2026-09-23 的现场账）：交互档样本里 `hitches-updates` 是
+    `n=2090 / p50 9.89 / 逐值下限 9.31 ms`，而同窗迟到帧只有 24 个 ⇒
+    旧的 `phase_blame` 把 1841 vs 24 算成"比 7671%"，还据此下了一句
+    "几乎一比一 ⇒ 先查主线程"。那是**用一张按事件节拍计的表去定归因**，
+    与我同一天在 §R 里自纠掉的误读是同一个错，只是换了一支函数。
+    """
+    vals = [v for v in (values or []) if v is not None]
+    return bool(vals) and min(vals) >= NARROW_FLOOR_RATIO * budget_ms
+
+
 def phase_blame(updates, hitch_frames, budget_ms):
     """把"迟到帧"按"主线程 update 是否同时超预算"分开数 —— 决定该去查谁。
 
@@ -135,17 +152,38 @@ def phase_blame(updates, hitch_frames, budget_ms):
     去优化 `_updateViewGraph` 的常数是白工；反之若几乎一比一，才该查视图更新。
     两边都按"次数"报，**不假装是一次迟点对应一次 update**：
     hitches-updates 一次迟点可能出多行（Brown/Red），602 与 42 就是这种关系。
+
+    09-23 补了两种**同样不给归因**的形状：① update 表窄分布（单位就不是占用时长）；
+    ② 超预算次数远多过迟到帧（>1.5× ⇒ 两表不同源，比值不含信息）。
+    两种都只指路另两把独立的尺子（render 相位 + time-profile 的 Main Thread 忙样本）。
     """
     ups = [v for v in (updates or []) if v is not None]
     late = [v for v in (hitch_frames or []) if v is not None]
     over = sum(1 for v in ups if v > budget_ms)
     if not late:
         return "本窗口无迟到帧", "—"
-    share = 100.0 * over / len(late)
-    line = "update 超预算 %d 次 vs 迟到 %d 帧（比 %.0f%%）" % (over, len(late), share)
+    if over > len(late):      # 超预算次数比迟到帧还多 ⇒ 说"倍数"，别说"百分比"（那是 7671% 那种话）
+        line = "update 超预算 %d 次 vs 迟到 %d 帧（前者是后者的 %.1f 倍）" % (
+            over, len(late), float(over) / len(late))
+    else:
+        line = "update 超预算 %d 次 vs 迟到 %d 帧（比 %.0f%%）" % (
+            over, len(late), 100.0 * over / len(late))
     if over == 0:
         return line, "主线程一次都没超 ⇒ 迟到全在渲染/合成侧，别改视图更新常数"
-    if share >= 80:
+    if interval_shaped(ups, budget_ms):
+        return line, ("不判：该表逐值下限 %.2f ms（≈%.1f 帧）＝按事件节拍计，"
+                      "它的次数比不能定归因 ⇒ 看 render 相位与 time-profile 的 Main Thread 忙样本"
+                      % (min(ups), min(ups) / budget_ms))
+    share = 100.0 * over / len(late)
+    if over > 1.5 * len(late):
+        # 09-23 真数据逼出来的第 6 种形状：一趟交互档样本 update 超预算 **1841 次**、
+        # 迟到帧只有 **24 个**（76.7 倍），可上屏实测仍是 119~120 帧/秒。
+        # 三个数只有在"这张表的行数与帧不是一一对应"时才互相自洽 ⇒ 比值里**没有归因信息**，
+        # 硬要说"先查主线程"就是拿计数比当证据（同一天我已经为"占用"这个词自纠过一次）。
+        return line, ("不判：超预算次数是迟到帧的 %.1f 倍 ⇒ 两张表不同源，比值不含归因信息；"
+                      "归因看 render 相位（本次实测）与 time-profile 的 Main Thread 忙样本"
+                      % (float(over) / len(late)))
+    if share >= 80:      # 「一比一」只在两表次数**可比**时才说
         return line, "几乎一比一 ⇒ 先查主线程 update（视图粗粒度失效那一族）"
     return line, ("主线程只占 %d 次，其余 %d+ 次要去渲染/合成侧找 ⇒ 两件事分开修"
                   % (over, max(0, len(late) - over)))

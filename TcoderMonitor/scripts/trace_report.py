@@ -37,7 +37,7 @@ import re
 import statistics
 import sys
 
-from perf_trace_metrics import (launch_ready_ms, FRAME_BUDGET_MS_DEFAULT, dist_line, over_budget, percentile,
+from perf_trace_metrics import (launch_ready_ms, FRAME_BUDGET_MS_DEFAULT, dist_line, interval_shaped, over_budget, percentile,
                                 read_json, write_json)
 from perf_trace_summary import cmd_summary
 from perf_trace_threads import cmd_threads
@@ -64,8 +64,10 @@ def caveat_for(label, values, budget_ms):
     """
     if label not in INTERVAL_SHAPED_TABLES or not values:
         return None
-    if min(values) < 0.8 * budget_ms:          # 分布从 0 铺开 ⇒ 就是普通的时长，不用提示
-        return None
+    if not interval_shaped(values, budget_ms):   # 分布从 0 铺开 ⇒ 就是普通的时长，不用提示
+        return None                                # 判据住在 `perf_trace_metrics.interval_shaped`，
+                                                   # 这里不再抄一份数值（09-23 同一条判据被抄进两支函数，
+                                                   # 结果 `phase_blame` 用计数比定了归因）
     return ("⚠ 该表逐值下限 %.2f ms（≈%.1f 帧）且分布极窄 ⇒ **不许当\"主线程忙了多久\"引用**；"
             "主线程占用请看 time-profile 的 Main Thread 忙样本（或明确标注口径待核）"
             % (min(values), min(values) / budget_ms))

@@ -191,6 +191,9 @@ def summary_render_rows(loaded, budget, seconds):
 def app_update_verdict(values, budget):
     """把"哪些迟到帧是主线程算出来的、哪些不是"分开说 —— 只报 max 会把两者混成一锅。
 
+    两种形状要分开说：**少数孤例**（<20% 行超预算）才配得上「stall N 个」；
+    **整表贴着一帧**（≥20%）那是单位问题，不是卡顿清单（09-23 改判，理由见下面那段注释）。
+
     2026-09-21 的实证：交互期那份读数 `app-update` 打的是 `超 20.2 倍`（max 168.3 ms），
     而 602 个迟到帧的 update 相位 **p95 只有 3.4 ms** —— 绝大多数迟到跟主线程没关系，
     是渲染/合成侧的事；那一次 168 ms 才是真的主线程 stall。
@@ -205,9 +208,17 @@ def app_update_verdict(values, budget):
     if not over:
         return line, "达标（没有一个 update 超预算）"
     share = 100.0 * len(over) / len(vals)
-    return line, ("主线程 stall %d 个（%.1f%%，最长 %.1f ms = %.1f 倍预算）；"
-                  "其余 %d 个迟到与 update 无关（p95 %.2f ms）"
-                  % (len(over), share, max(over), max(over) / budget,
+    if share >= 20.0:
+        # 09-23 改判：**普遍超预算不再叫「N 个 stall」**。同一趟里上屏实测 119~120 帧/秒，
+        # 而这张表 88% 的行都超过一帧预算（2090 行、p50 9.89 ms）——
+        # 两个数只有在"行数≠迟到帧、单位待核"时才互相自洽。
+        # 老话术"主线程 stall 1841 个"正是我刚在归因行撤掉的同一个 over-claim，只是住在另一支函数。
+        return line, ("%d/%d 行（%.1f%%）超一帧预算 ⇒ 整表贴着一帧，**不许按「多少个卡顿」读**"
+                      "（单位待核，见该表的 ⚠ 行）；最长孤例 %.1f ms = %.1f 倍预算，那一个才单独查"
+                      % (len(over), len(vals), share, max(over), max(over) / budget))
+    return line, ("主线程 stall %d 个（占 %d 行的 %.1f%%，最长 %.1f ms = %.1f 倍预算）；"
+                  "其余 %d 行未超预算（p95 %.2f ms）⇒ 那些迟到与主线程无关"
+                  % (len(over), len(vals), share, max(over), max(over) / budget,
                      len(vals) - len(over), percentile(vals, .95)))
 
 
