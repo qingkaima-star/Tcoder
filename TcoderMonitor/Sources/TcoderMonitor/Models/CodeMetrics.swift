@@ -96,6 +96,25 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     /// 归一化行数触到窗口上限、后半段克隆不参与检测的文件数。
     var duplicateFilesHittingLineCap: Int? = nil
 
+    // MARK: 混合语言文件的分区归位读数（RD-42 · 台账卷二 §23「有写无读」那一条）
+    //
+    // 存在理由：`ComplexityEngine.LexIntegrity.nonCodeRegionLineCount` 从 R2 起就在算
+    // （`sanitize(_:profiles:)` 里逐行累加、`merged` 里跨区累加），全仓却**一个读者都没有**：
+    // 它不在 `hasAnomaly`、也不在 `limitations`，于是"分区认出来了、于是 N 行按非代码归位"
+    // 这件事一件没说。而"分区**没**认出来"是另一条在出声的（`vueRegionFallbackFileCount`）。
+    //
+    // ⚠️ **这一格是口径，不是"未量准"**：template / style 那些行是**已经量到了**、
+    // 只是分类不同（不进代码统计）。所以它**不进** `scanLimitations` —— 那条在 CLI 会被
+    // 打成「未量准 N 条」（`CLIScoreText.precisionCaveat`），塞进来就是把那个数灌虚高。
+    // 读者走扫描边界那一族：`MixedLanguageRegionCaliber.note(_:)`（界面与 CLI 同一把尺子）。
+    //
+    /// 混合语言文件（`.vue` 的 template / style 与 SFC 标签行）里按分区归位为**非代码**、
+    /// 因而没有进入代码统计的行数。**直传**词法台账那一份，任何消费方都不许再数第二遍。
+    /// `nil` = **这份报告没有这个读数**（旧报告 / 这一路没跑）—— 不许写成 0；
+    /// `0` = 跑过了，这个语料里没有需要分区的区域（纯 Swift/Java 仓库）。
+    /// **Optional 是落盘兼容要求**：非 Optional 带默认值会让旧报告整份解码失败。
+    var nonCodeRegionLineCount: Int? = nil
+
     var largestFileLineCount: Int = 0
 
     var overallRisk: RiskLevel = .none

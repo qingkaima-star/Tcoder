@@ -49,6 +49,10 @@ enum CLIScoreText {
         // R10b 第 1 件 · 台账上屏：位置就夹在「未量准」之后、综合分之前 ——
         // 与"失败路在分数之前""未量准在分数之前"同一条理由：先说这一路到底做了什么，再给分。
         lines.append(contentsOf: AnalyzerLedgerText.section(report))
+        // RD-42：分区归位是**口径**、不是"没量准" ⇒ 另起一行，**绝不并进**上面那条
+        // 「未量准 N 条」（那条的分母就是 `scanLimitations.count`，塞进去等于把"没量准"灌虚高）。
+        // 顺序由总工定：先"这一路做了什么"（台账），再"这一路的某个口径"（分区归位）。
+        lines.append(contentsOf: regionCaliberLines(report))
 
         guard let health = report.health else {
             lines.append("没有评分结果：五路都没给出可评的输入。")
@@ -95,6 +99,17 @@ enum CLIScoreText {
         guard let limits = report.code?.scanLimitations, limits.isEmpty == false else { return [] }
         return ["未量准 \(limits.count) 条（下面每一条都是工具自己声明的边界，读数请按它打折）："]
             + limits.map { "  边界：\($0)" }
+    }
+
+    /// 混合语言文件的**分区归位**口径（RD-42）：与上面那段分家打，一句话也不并进「未量准」。
+    ///
+    /// 判据来源是 `CodeMetrics.nonCodeRegionLineCount`（引擎直传的那一枚数），句子本身
+    /// **复用界面的那一个装配口** `MixedLanguageRegionCaliber.note(_:)` —— CLI 不许另写一份
+    /// 中文（那是第二把尺子，与"缺席维度复用 `HealthBreakdown`"同一条纪律）。
+    /// 字段缺席（旧报告）或为 0（没有混合语言文件）⇒ **一行都不打**。
+    static func regionCaliberLines(_ report: ProjectReport) -> [String] {
+        guard let code = report.code, let note = MixedLanguageRegionCaliber.note(code) else { return [] }
+        return ["口径：\(note)"]
     }
 
     // MARK: - 首行：总体
