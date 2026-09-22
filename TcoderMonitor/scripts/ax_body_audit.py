@@ -26,6 +26,14 @@ from ax_tooltip_coverage import catalog_keys, hits_key, repo_root  # 同一把�
 HAN = re.compile(r"[一-鿿]")
 # 明显是"数据"而不是"话术"的形状：路径、日期时间、纯计数、项目名。
 DATA_SHAPE = re.compile(r"^(/|\./|~|20[0-9]{2}-|Tcoder（)|:[0-9]{2}:[0-9]{2}$")
+# 第二类"是数据"：Git 页把**本仓自己的提交标题**原样铺在界面上。
+# 它们是用户数据（英文态也不该翻），但形状上不带 "/"、不像时间戳，
+# 于是第一版把它们全算进 B —— 复测时"改完 B 反而从 41 涨到 45"就是这个假象：
+# 两趟之间仓库自己又提交了几笔，Git 页上的标题列表变了。
+COMMIT_TITLE = re.compile(r"^(feat|fix|docs|chore|refactor|test|perf|build|style)"
+                          r"(\([^)]*\))?!?:")
+DATAISH = re.compile(r"(lines, Risk:|· [0-9.]+ (?:minutes|hours|days) ago ·|"
+                     r"^(Latest|最新)[：:]|^[^,]*\.(swift|md|sh|py), )")
 
 
 def live_dirs(argv):
@@ -90,15 +98,23 @@ def main(argv):
     sources = repo_root() / "TcoderMonitor/Sources"
     keys = catalog_keys()
     counts = Counter()
+    shown: dict[str, str] = {}
     for path in evidence:
         for _role, _attr, text in read_text_rows(path):
             for piece in text.split(" ⏎ "):
                 piece = piece.strip()
                 if piece and HAN.search(piece):
-                    counts[piece] += 1
-    a = [k for k in counts if hits_key(k, keys)]
+                    # **按"数字归一"后的形状去重**：直接拿整句当键会被实时读数漂走 ——
+                    # 改前/改后两趟之间只是"590 次提交"变成"591 次"、uptime 多了一小时，
+                    # 台账就凭空多出 11 句"新债"、少掉 7 句旧债。
+                    # 那是**测量噪声**，不是文案变化（本仓"总体要固定"那条的同族）。
+                    norm = re.sub(r"[0-9]+", "#", piece)
+                    counts[norm] += 1
+                    shown.setdefault(norm, piece)
+    a = [k for k in counts if hits_key(shown[k], keys)]
     data = [k for k in counts if k not in a
-            and (DATA_SHAPE.search(k) or "/" in k or len(k) <= 4)]
+            and (DATA_SHAPE.search(shown[k]) or "/" in shown[k] or len(shown[k]) <= 4
+                 or COMMIT_TITLE.match(shown[k]) or DATAISH.search(shown[k]))]
     b = [k for k in counts if k not in a and k not in data]
     print(f"== 屏上正文含中文片段 {sum(counts.values())} 次 / 去重 {len(counts)} 句"
           f"（{len(evidence)} 趟，来自 {len(dirs)} 个批次）")
@@ -108,19 +124,20 @@ def main(argv):
     by_file = defaultdict(int)
     for label, group in (("A", a), ("B", b)):
         for k in sorted(group, key=lambda x: -counts[x])[:None if show_all else 12]:
-            sites = code_sites(k, sources)
+            text = shown[k]          # 打**原句**，不是数字归一后的形状
+            sites = code_sites(text, sources)
             extra = f"（另有 {len(sites) - 1} 处）" if len(sites) > 1 else ""
             tag = f"{sites[0]} {extra}" if sites else "（静态里 grep 不到：运行时拼的）"
             for s in sites[:1]:
                 by_file[s] += 1
-            print(f"   {label} {counts[k]:3d}× {k[:60]}\n        ↳ {tag}")
+            print(f"   {label} {counts[k]:3d}× {text[:60]}\n        ↳ {tag}")
     if show_all:
         print("-- 按落点文件汇总（A/B 两类，只统计 grep 得到落点的）")
         for f, n in sorted(by_file.items(), key=lambda x: -x[1]):
             print(f"   {n:3d} 句  {f}")
         # 这一条要覆盖**全部** A/B，不能被上面默认 12 条的切片带着走 ——
         # 只数切片会得到一个"看着像总数、其实是前 12 条里没落点的"假数。
-        unmatched = sum(1 for k in a + b if not code_sites(k, sources))
+        unmatched = sum(1 for k in a + b if not code_sites(shown[k], sources))
         print(f"   另有 {unmatched} 句在源码里 grep 不到整段静态字面量"
               f" —— 它们是**运行时拼出来的**（内插 + 常量拼接），只能顺着生产者函数找")
     return 0
