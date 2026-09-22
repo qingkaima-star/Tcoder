@@ -290,3 +290,41 @@ cd TcoderMonitor && ./scripts/perf_who_holds_the_slot.sh      # 只读，不 kil
 它同时钉死一件事：**读不到路径就说"不知道是谁的"，绝不允许报成"工作树已删除"**——
 第一版就是这么错的（相对路径没解析 + BSD sed 的前导 `*` 不是通配），
 而下一个人会照着那句诬告去 kill 别人正在用的进程。`--probe` 五种归属各判一次，双向。
+
+## K. 【报给 WS-E / e2e 的主人】取证脚本漏下 6 个实例，把所有人的帧率测量押死了
+
+02:50 现查（`./scripts/perf_who_holds_the_slot.sh`，只读）：
+
+```
+pid=9969  22:41  主树的实例      pid=20362  10:01  主树的实例
+pid=12615 20:26  主树的实例      pid=21163   9:14  主树的实例
+pid=19525 10:47  主树的实例      pid=21774   8:28  主树的实例
+pid=67534 11:02:30  孤儿（工作树 .worktrees/verify-main 已删除）
+```
+
+**这 6 个的 `ppid` 全是 1（launchd）** ⇒ 起它们的那个脚本早就退出了，却没有收尾。
+按 cwd 追到 `TcoderMonitor/`，能起实例的只有 `scripts/e2e_check.sh` 与
+`scripts/verify_pages.sh`（AGENTS 名册里 `verify_pages.sh` 归 **WS-E 发布工程**，
+所以我只报不改）。两家的收尾形状都是：
+
+```bash
+open "$APP"
+…
+osascript -e 'tell application id "com.tcoder.monitor" to quit' || true
+```
+
+两个问题叠在一起：
+1. **没有 `trap`** —— 脚本被中断（超时、Ctrl-C、上游取消）就走到不了那行 quit；
+   一次跑留一个，六次跑留六个。
+2. **按 bundle id 广播退出**，一次最多退掉其中一个；而多车道同时开着实例时
+   "退掉一个"根本不含"退掉我起的那个"。这也和 22:40 之后立的规矩相反
+   （**只 TERM 自己起的那个 pid，绝不按 bundle id 广播**）。
+
+后果是具体的：测量闸门"实例数恰为 1"从昨夜到现在没通过过一次，
+**T2/T1 采不到不是因为尺子，是因为没人收尾**。
+
+修法（10 行以内，两处同一形状）：`open` 之后立刻把**自己那个** pid 记下来
+（`pgrep -fx "<该树绝对路径>/dist/Tcoder.app/Contents/MacOS/TcoderMonitor"`），
+`trap '… 只 TERM 这个 pid …' EXIT INT TERM`。
+`perf_wait_window.sh` 与 `perf_raise.swift` 已经是这个形状，可以直接照抄；
+它跑了一夜，一次都没漏下实例。
