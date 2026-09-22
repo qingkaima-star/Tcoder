@@ -539,6 +539,12 @@ WS-A/WS-B/WS-C 此刻在**主树里有未提交在途改动**。不允许直接�
 | `Models/CoverageMetrics.swift` | `unreadableDirectoryCount: Int?`（其余一字未动） | 目录枚举失败被 `try?` 吞掉时，"没看到"会在界面上长成"该项目没有产出覆盖率报告"。这一格要把"扫描面不完整"随报告一起落盘，只能住在契约里 | `CoverageAnalyzerTests` 两向（挡住一个目录→计数 ≥1 且结论补一句"没看完"；一个都没挡住→必须写 0，不许留 nil） |
 | `Design/SharedComponents.swift` | `MetricTile` 的自定义 `init` 补一个 `captionHelp: String? = nil` 形参（插在 `caption:` 之后，带默认值） | 属性与渲染 main 早就开好了，**只有 init 不收这个参数 ⇒ 调用点传不进去**；「留短藏长」的格子没有别的挂载点，而 42 处现有调用点靠默认值一字不改 | `TooltipMigrationGuardTests+HelpSlots`（新标签必须进 A/B 两本账）+ S7 的 `ShellReadoutTooltipTests`（三格 captionHelp 只指既有真值生产者，不许重抄中文） |
 
+| `Models/ScanProvenance.swift`（**新文件**） | 报告溯源块：`schemaVersion` / `toolVersion` / `rulesVersion` / `producedBy` / `scannedRoot` / `resolvedGitRoot` / `sourceCommit` / `sourceBranch` / `workingTreeDirty` / `dirtyEntryCount` / `dirtyProbeNote`，**11 个字段全 Optional** | "这份报告是哪个提交、哪一版工具、哪一版判据产的"必须随报告一起落盘；放别处就没有第二份产物能带着它走 | `ScanProvenanceTests` 17 例（含 4 条反例：没量到不得渲染成干净、缺席值打「未记录」、仓库根相等时不许造假提示、非零退出要带原因）+ 真子进程三情形对独立真值 + sabotage 3 红 |
+| `Models/Project.swift` | `ProjectReport` 加 `var provenance: ScanProvenance? = nil`（其余一字未动） | 溯源块必须挂在唯一那份 schema 上（§5.9 第 2 条：不存在第二个 DTO）；**必须 Optional**，否则旧 JSON 整份解码失败 | `testReportWithoutProvenanceKeyStillDecodes`（把键删掉再解）+ `testProvenanceRoundTripKeepsEveryField` |
+| `Models/GitInsights.swift` | 加 `workingTreeDirty: Bool?` / `dirtyEntryCount: Int?` / `dirtyProbeNote: String`（既有成员一字未动） | 工作区状态只有 Git 那一路量得到：`ShellGitAnalyzer` 已经在同一次分析里起进程，**再开第二个 git 进程就是第二把尺子**（一处看仓库根、一处看用户选的子目录，今天真踩过） | `ShellGitAnalyzer.workingTree(from:)` 三态 + `testStatusProbeDistinguishesCleanDirtyAndUnmeasured` 四分支 |
+| `App/AppState.swift` | 扫描收尾处加 **1 行**：`merged.provenance = ScanProvenance(…producedBy: "gui")` | 装配点只有两个（GUI 与 CLI），少一个就产出一半"无溯源"的报告，而 `producedBy` 正是 CLI↔GUI 对表要用的那格 | `testProvenanceHasBothWritersAndReaders`（**两个写者点名相等**，且必须有读者） |
+| `Services/CLI/CLIOutput.swift` | `buildConfiguration` / `bundleIdentity` 改成**转发**到 `ScanProvenance`，输出逐字未变 | 同一件事不许有两把尺子：`--version` 与报告溯源必须给同一个串 | `testCLIIdentityAndProvenanceShareOneRuler` |
+
 不在这张表里的冻结区改动一律视为越界。历史批次（P7-A 退役示例数据动过
 `Models/Project.swift`、`Models/HealthScore.swift`、`App/AppState.swift`、
 `Services/ProjectStore.swift`）是同一性质的 additive/删除，**当时没有登记**，
