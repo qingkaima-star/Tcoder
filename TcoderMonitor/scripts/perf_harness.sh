@@ -144,10 +144,16 @@ cmd_idle() {
     && echo "==> interact 档：**录制期间请持续滚动/拖窗**，停下就不算交互期" \
     || echo "==> idle 档：attach 现有实例录心跳（release 口径；rev=$REV dirty=$DIRTY）"
   [ -x "$TRACE_REPORT" ] || die "缺 scripts/trace_report.py"
-  require_idle_target
   mkdir -p "$out" || die "建不了 $out"
+  # MEASURE_LAUNCH=1 ⇒ 自己起一个带 FramePulse 的实例，让 xctrace 与脉冲**记同一个窗口**。
+  # 不开就是原来的"attach 场上现有实例"，那条路永远配不出 p95 的交叉核对（见 perf_probes.sh 里那段）。
+  if [ "${MEASURE_LAUNCH:-0}" = "1" ]; then
+    launch_measured_instance "$out" "$PERF_BIN" || die "自己起的实例没活过 4 秒 ⇒ 不录"
+  fi
+  require_idle_target
   meta_write "$out" "mode=idle" "period=$period" "pid=$PID" "binary=$TARGET_BINARY" \
            "input_source=${INPUT_SOURCE:-human}" \
+    "launched_by=${MEASURED_PID:+us(同窗脉冲)}" "pulse_file=${MEASURED_PULSE:-}" \
     "hitches_seconds=$SECONDS_HITCHES" "tp_seconds=$SECONDS_TP" "coexisting_instances=${COEXIST:-1}" \
     "templates=$TEMPLATE_HITCH + $TEMPLATE_TP" "build_flavor=$TARGET_FLAVOR"
   preflight_context "$out" "$PID"
@@ -159,6 +165,12 @@ cmd_idle() {
   # 拆完仍是 1/4 → 2/4 → 3/4 → 4/4 这一条直线，一步没重排。
   idle_record_hitches "$out" "$period"
   idle_record_time_profiler "$out"
+  # 自己起过实例 ⇒ 同一窗口再量一次脉冲，把两把尺子并排放（这才叫交叉核对，不是两个窗口的数对撞）
+  if [ -s "${MEASURED_PULSE:-}" ]; then
+    echo "==> 同窗脉冲（FramePulse 的帧间隔分位数，用来核对 p95 那半句）"
+    python3 "$PULSE_REPORT" "$MEASURED_PULSE" --interaction 2>&1 | tail -4 | sed 's/^/    /' || true
+    cp "$MEASURED_PULSE" "$out/pulse.txt" 2>/dev/null || true
+  fi
   idle_parse_tables "$out"
   idle_write_summary "$out"
 }

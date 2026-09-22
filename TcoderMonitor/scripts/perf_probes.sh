@@ -268,3 +268,37 @@ start_synth_scroller() {  # 只管"跑起来"：编译不许出现在闸门与�
   return 0
 }
 
+# -----------------------------------------------------------------------------
+# 自己起一个"带脉冲记录"的被测实例，让**同一个窗口同时有两把尺子**。
+#
+# 为什么必须自己起（2026-09-22 想清楚的一件事）：`interact`/`idle` 档一直是
+# `require_idle_target` 找**场上已有**的实例再 `xctrace --attach`，
+# 而那个实例多半不是带 `TCODER_PERF_PROBE=1` 起的 ⇒ 它体内根本没有 FramePulse 在记，
+# 于是"p95 帧间隔 ≤8.4 ms"这半句验收**永远无法与 xctrace 的
+# `displayed-surfaces-per-second` 对上** —— 两把尺子来自两个不同窗口，就等于没有交叉核对。
+# （今天第一份配对证据反而是 idle 档给的：surfaces p50=119 / p95=120、设备 max 120 Hz，
+#   直接推翻了我"idle 静止窗一定降频到 10/s，所以 p95 判不了"那句老话。）
+#
+# 默认关：`MEASURE_LAUNCH=1` 才走这条路。开了之后：
+#   · 用**本树的 release 二进制**起一个实例，`TCODER_PERF_OUT` 指进样本目录、
+#     `TCODER_SUPPORT_DIR` 指进样本目录下的沙箱（不污染用户真实数据，也不会与别人互写全局态）；
+#   · 只 TERM 自己起的那一个 pid（有 trap；绝不按 bundle id 广播 —— 工单 §K 那条）。
+launch_measured_instance() {  # launch_measured_instance <样本目录> <二进制>
+  local out="$1" bin="$2"
+  [ -x "$bin" ] || { echo "!! 二进制不可执行：$bin（先跑 scripts/build_app.sh release）" >&2; return 1; }
+  mkdir -p "$out/sandbox" || return 1
+  MEASURED_PULSE="$out/pulse.txt"
+  TCODER_PERF_PROBE=1 TCODER_PERF_OUT="$MEASURED_PULSE" TCODER_SUPPORT_DIR="$out/sandbox" \
+    "$bin" -ApplePersistenceIgnoreState YES >/dev/null 2>&1 &
+  MEASURED_PID=$!
+  # 只清自己起的那个 pid；EXIT/INT/TERM 三条都挂，中断不留孤儿（留了就压死所有人的闸门）
+  trap '[ -n "${MEASURED_PID:-}" ] && kill -TERM "$MEASURED_PID" 2>/dev/null; return' EXIT INT TERM
+  sleep 4
+  if kill -0 "$MEASURED_PID" 2>/dev/null; then
+    echo "    自己起的被测实例 pid=$MEASURED_PID（脉冲写 $MEASURED_PULSE，沙箱 $out/sandbox）"
+    return 0
+  fi
+  echo "!! 起的实例 4 秒内就退了 ⇒ 不继续（宁可没数，也不要一份 attach 到别人实例上的假配对）" >&2
+  return 1
+}
+
