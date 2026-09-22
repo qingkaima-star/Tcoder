@@ -33,6 +33,13 @@ enum CLIScoreText {
                          + report.failedSections.joined(separator: "、")
                          + " —— 下面的分是在这些维度缺席时算出来的")
         }
+        // 「哪些没量准」必须在**分数之前**出声，与"失败路在分数之前"同一条理由。
+        // 立这条的现场（19:04 实读）：`scanLimitations` 全仓只有
+        // `Views/Code/CodeMetricsView.swift` 一处消费方 ⇒
+        // 那些「明细榜单截断到 20 块」「块注释未闭合 ⇒ 只能当部分测量读」的句子
+        // 只有打开界面的人才看得到，而 JSON 里有、文本读数里没有 ——
+        // 看界面的人、读 CLI 的人、拿 JSON 的 AI 于是拿到三种诚实度。
+        lines.append(contentsOf: precisionCaveat(report))
 
         guard let health = report.health else {
             lines.append("没有评分结果：五路都没给出可评的输入。")
@@ -53,6 +60,18 @@ enum CLIScoreText {
         lines.append(contentsOf: health.issues.map { "  问题：\($0)" })
         lines.append(contentsOf: health.recommendations.map { "  建议：\($0)" })
         return lines.joined(separator: "\n")
+    }
+
+    /// 本次"没量准 / 只是部分测量"的句子，**逐条原样**打出来。
+    ///
+    /// 三条硬规矩（都是这一轮立的）：
+    /// 1. **不许折叠成"若干限制，详见界面"** —— 那等于把诚实性内容降级成一个指针；
+    /// 2. **不许只打第一条**（榜上有 3 条就得有 3 行，条数与行数一一对得上）；
+    /// 3. 空集合时**整段不出声**，不许打"未量准 0 条"去占位（那会被读成"有这一类信息"）。
+    static func precisionCaveat(_ report: ProjectReport) -> [String] {
+        guard let limits = report.code?.scanLimitations, limits.isEmpty == false else { return [] }
+        return ["未量准 \(limits.count) 条（下面每一条都是工具自己声明的边界，读数请按它打折）："]
+            + limits.map { "  边界：\($0)" }
     }
 
     // MARK: - 首行：总体
