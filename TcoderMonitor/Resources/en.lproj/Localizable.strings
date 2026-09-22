@@ -684,3 +684,8 @@
 // 批次 P16：重复块 tooltip 的两段（原先是三段拼出来的裸中文）
 "相似度 %1$@ · %2$@ 行 · 出现 %3$@ 处" = "Similarity %1$@ · %2$@ lines · %3$@ occurrences";
 "（另有 %1$@ 处）" = "(%1$@ more)";
+
+// 批次 P30：健康评分页补上「提交号来自外层仓库」这句真话（乱清单 §6 第 12 条）。
+// 整句键 + 位置参数：路径是数据不是文案，而 `"...\(root)..."` 那种拼法查不到键、
+// 英文态必然吐中文（`LocalizationGuardTests+InterpolatedCopy` 数的就是它）。
+"提交活跃度与协作分布按外层仓库 %1$@ 的历史统计，不是所选目录本身。" = "Commit Activity and Collaboration Spread are counted from the outer repository %1$@, not from the selected directory itself.";
