@@ -38,6 +38,15 @@ final class ShellReadoutTooltipTests: XCTestCase {
 
     // MARK: - ① BannerRow 的 help 槽
 
+    /// 横幅正文仍然由 `text` 渲染吗？
+    /// 两种写法都算"还在"：`Text(text)` 与 `Text(localizedCopy(text))` ——
+    /// 后者是 2026-09-22 正文台账（进程外 AX）抓到"英文态整条横幅吐中文"之后的形状，
+    /// 包一层查表**不改变正文的来源**，而这条判据守的是"本槽是加法、不是替换"。
+    /// 只认字面 `Text(text)` 会把"加了查表"误判成"正文被搬走"。
+    static func rendersBannerBody(_ slice: String) -> Bool {
+        slice.contains("Text(text)") || slice.contains("Text(localizedCopy(text))")
+    }
+
     func test_bannerRowHelpSlotMountsTheOneComponent() throws {
         let body = try Self.source(Self.readoutsPath)
         let banner = body[body.range(of: "struct BannerRow")!.lowerBound...]
@@ -46,7 +55,8 @@ final class ShellReadoutTooltipTests: XCTestCase {
                       "help 槽不再默认 nil ⇒ 现有调用点会被迫改签名（工单要求形状照 SectionEmptyNote.help:）")
         XCTAssertTrue(slice.contains("if let help { CopyHelpBadge(help) }"),
                       "help 槽不再走全站唯一那份画法 `CopyHelpBadge` —— 会出现第二种问号")
-        XCTAssertTrue(slice.contains("Text(text)"), "横幅正文被搬走了（本槽是加法，不是替换）")
+        XCTAssertTrue(Self.rendersBannerBody(slice),
+                      "横幅正文被搬走了（本槽是加法，不是替换）")
     }
 
     /// 元测试：①的三条判据各自都要抓得住坏样例。
@@ -62,6 +72,16 @@ final class ShellReadoutTooltipTests: XCTestCase {
         }
         """
         XCTAssertFalse(handDrawn.contains("CopyHelpBadge(help)"), "页面自己画问号没被抓到")
+        // 第三条判据（正文还在）此前**没有坏样例**，于是它一朝放宽就没人知道：
+        // 包查表要放过（同一来源，只是加了查表），搬走/换成别的来源要抓住。
+        let wrapped = "Text(localizedCopy(text))\nif let help { CopyHelpBadge(help) }"
+        XCTAssertTrue(Self.rendersBannerBody(wrapped), "包了查表的正文被判成'被搬走'（误伤）")
+        let bare = "Text(text)\nif let help { CopyHelpBadge(help) }"
+        XCTAssertTrue(Self.rendersBannerBody(bare), "原写法应当仍然通过")
+        let replaced = "Text(\"固定文案\")\nif let help { CopyHelpBadge(help) }"
+        XCTAssertFalse(Self.rendersBannerBody(replaced), "正文换成常量却没被抓到（判据空转）")
+        let removed = "if let help { CopyHelpBadge(help) }"
+        XCTAssertFalse(Self.rendersBannerBody(removed), "正文整段消失却没被抓到（判据空转）")
     }
 
     // MARK: - ② 横幅不许再挂匿名 .help

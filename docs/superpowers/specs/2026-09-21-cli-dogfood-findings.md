@@ -282,6 +282,15 @@ stderr 含「不可读」，0.1 秒内返回。
 现量必须由守卫自己打印，不许由我用 python 复刻一把尺子去数（那条规矩的编号是"对齐口径"第 20 次教训）。
 
 **规模摸底（明确标注：这是 python 粗筛，不是尺子读数，不进台账）**：
+
+> **这一条已被实测取代（2026-09-22）**。下面那段"32 文件 / 327 处"保留原文是为了让读者看见
+> 我当时的判据有多弱；现量在 `docs/屏上正文双语台账.md`：为这类句子专门建了第二把仪器
+> （`scripts/ax_body_text.swift` 读 `AXValue/AXTitle/AXDescription`，与 `ax_dump` 按
+> `visited`/`withHelp` 逐项校准过），英文态 9 页实测 **81 句 / 220 次**
+> （A 有键没查 12、B 未登记话术 45、C 像数据 24），并按文件给出归属。
+> 其中 A 类 12 句本轮已清零（`StatLine` 与 `HealthComponentTable` 两处渲染点包查表），
+> 复测同一 4 页 A: 12 → 0。三类切分的判据也被实测改了一次：
+> 作者行 / 提交标题这类**数据**第一版算进了 B，靠"改完 B 反而涨 4"这个反常才暴露出来。
 "含汉字、又不落在任何 UI 入口前缀上"的字面量，`Services/` 下 **32 个文件 / 327 处**。
 但这个数**不能直接当债的规模**，因为它混着三类不同的东西，要不要上双语是产品判断不是修 bug：
 
@@ -296,6 +305,30 @@ stderr 含「不可读」，0.1 秒内返回。
 
 同类形状还有没有：`ScoreCurves.swift` 那句「综合 76 分（B 级）…」也住在 Services，
 守卫的注释里已经点过名 —— 所以 F13 不是 `HealthBreakdown` 一个文件的事故。
+
+## F14（本轮新发现，实测）：AI 读的那份 JSON 里有 61 处中文产品散文，而**无头入口没有语言开关**
+
+F13 把"CLI 终端出口"列为第三类时，我只给了一句"读的人是 AI，要不要翻是产品问题"。
+这一轮把它量了，结论比那句话硬得多：
+
+| 测什么 | 怎么测 | 读数 |
+|---|---|---|
+| CLI 有没有走查表 | `grep -l localizedCopy\|localizedFormat\|NSLocalizedString Sources/TcoderMonitor/Services/CLI/` | **0 个文件命中** ⇒ 终端文案与 JSON 里的散文都是字面量，与系统语言无关 |
+| 能不能把 CLI 切到英文态 | `TcoderMonitor score <repo> -AppleLanguages "(en)"` | **rc=64**，`!! 未知参数：-AppleLanguages` ⇒ 无头入口按设计拒收未知 token，所以**今天根本没有切换能力**（GUI 那一路才有） |
+| 出口里到底有多少中文 | 解析 `scan` 落的 JSON，逐字段路径数含汉字的字符串值 | **106 处 / 14 个字段路径**，其中**用户数据 45 处**（`code.hugeFiles[].path` 24、`git.recentCommits[].subject` 20、`git.authors[].name` 1）+ **产品散文 61 处**（`health.components[].{name,detail}`、`health.narrative`/`issues`/`recommendations`/`strengths`、`health.codeScope.{label,note,included,excluded}`、`code.scanLimitations`、`code.overallRisk` 与各处 `risk` 档位词、`dependencies.networkLookupNote`、`git.discoveryMode`、`code.hugeFiles[].suggestion`） |
+
+**为什么这条重要**：AI 调用方拿到的不是终端色面，是 `ProjectReport` JSON。
+它里面 `health.narrative` 这类字段是**判定结论的自然语言表达**，
+一份"英文环境里跑的自动化流水线"收到的会是中英混排的数据。
+而 `risk` 这种**四值封闭集**（低 / 中 / 高 / 严重）是最便宜的一类：
+键早就该有，缺的是"要不要在契约层出语言"这个决定。
+
+**本轮没做（明确不当已完成）**：
+① 没给无头入口开语言参数 —— 那要先决定"翻不翻"，不是先修解析器；
+② 没动 `Models/**`（`risk` 的档位词住在契约里，冻结区）；
+③ 没给那 61 处登记键 —— 键在 `Resources/en.lproj`，但**生产者住在 `Services/Health/`（WS-C 名下）**，
+   与 F13 同一条边界。要接的话顺序是：先定"JSON 出不出英文" → 再登记键 →
+   最后才轮到入口接 `-AppleLanguages`。
 
 ## 一句话结论
 

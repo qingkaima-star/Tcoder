@@ -30,11 +30,14 @@ struct StatLine: View {
 
     var body: some View {
         HStack(spacing: Theme.Spacing.xxs) {
-            Text(label)
+            // `label` 是 `String`，`Text(String)` 不查表 —— 九个调用点写的都是中文短标签
+            // （磁盘 / 网络 / 进程 / 注释行 / 空行…），英文态就整片吐中文。
+            // 这一处包查表，九个调用点同时生效；查不到键仍原样显示中文。
+            Text(localizedCopy(label))
                 .font(Theme.Typo.label.font)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
-            Text(value)
+            Text(localizedCopy(value))
                 // 数字一律等宽：这是 WS-I §4 那条「全仓 monospacedDigit 命中 = 0」的根修法，
                 // 一处改、56 个调用点全站生效。
                 // `lineLimit(1)` 同理由：这一格在实时读数旁边，值一旦折成两行，
@@ -88,7 +91,7 @@ struct BannerRow: View {
         HStack(alignment: .top, spacing: Theme.Spacing.xs) {
             ThemedIcon(style.icon, role: .inlineText, selected: true)
                 .foregroundStyle(style.role.textColor)
-            Text(text)
+            Text(localizedCopy(text))
                 .font(Theme.Typo.narrative.font)
                 .lineSpacing(Theme.Typo.narrative.lineSpacing)
                 .foregroundStyle(.secondary)
