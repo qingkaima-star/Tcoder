@@ -54,6 +54,9 @@ final class LogDenominatorTests: XCTestCase {
         try R11DenominatorFixture.makeProject(at: project)
         try R11DenominatorFixture.makeDiagnosticReportsDirectory(under: libraryLogs)
         setenv("TCODER_LIBRARY_LOGS_DIR", libraryLogs.path, 1)
+        // 身份自证放在 setUp：这一条红过一次 v1 的误立案，所以每条用例开跑前都先量它，
+        // 而不是只在某一条里量 —— 夹具一旦被搬进宿主仓库树，所有读数都会是错的。
+        try assertFixtureIdentityIsOwn()
     }
 
     override func tearDownWithError() throws {
@@ -115,7 +118,6 @@ final class LogDenominatorTests: XCTestCase {
 
     /// 端到端：B 的分母仍是 10,000 行，**不是 11,500**。这条是修前必红的复现用例。
     func test_crash_reports_do_not_dilute_the_log_line_denominator() async throws {
-        try assertFixtureIdentityIsOwn()
         let logURL = try R11DenominatorFixture.writeLog(to: project, lines: Fixture.logLines,
                                                         every: Fixture.errorEvery)
         let reports = try R11DenominatorFixture.writeReports(in: libraryLogs, count: Fixture.reportFiles,
