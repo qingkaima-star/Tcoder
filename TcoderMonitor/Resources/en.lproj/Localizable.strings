@@ -685,7 +685,10 @@
 "相似度 %1$@ · %2$@ 行 · 出现 %3$@ 处" = "Similarity %1$@ · %2$@ lines · %3$@ occurrences";
 "（另有 %1$@ 处）" = "(%1$@ more)";
 
-// 批次 P30：健康评分页补上「提交号来自外层仓库」这句真话（乱清单 §6 第 12 条）。
-// 整句键 + 位置参数：路径是数据不是文案，而 `"...\(root)..."` 那种拼法查不到键、
-// 英文态必然吐中文（`LocalizationGuardTests+InterpolatedCopy` 数的就是它）。
-"提交活跃度与协作分布按外层仓库 %1$@ 的历史统计，不是所选目录本身。" = "Commit Activity and Collaboration Spread are counted from the outer repository %1$@, not from the selected directory itself.";
+// 批次 P30：健康评分页补上「提交号其实来自外层仓库」这句真话（乱清单 §6 第 12 条）。
+// 两个位置参数：`%1$@` 是 `HealthDimension.repositoryScoped` 拼出来的维度名单，
+// `%2$@` 是那个仓库的路径。**名单不在文案里手写**——手写就是给一条判定造第二份，
+// 第四个仓库归属维度出现时这句话会静默变假（守卫拿 `repositoryScoped` 当比对对象）。
+// 路径是数据不是文案，而 `"...\(root)..."` 那种拼法查不到键、英文态必然吐中文
+// （`LocalizationGuardTests+InterpolatedCopy` 数的就是它）。
+"仓库归属类维度（%1$@）按外层仓库 %2$@ 计算，不是所选目录本身。" = "Repository-attributed dimensions (%1$@) are computed from the outer repository %2$@, not from the selected directory itself.";

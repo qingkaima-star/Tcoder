@@ -124,12 +124,21 @@ struct HealthHero: View {
             if let root = relocatedGitRoot {
                 // 「同一个事实在一页告示、另一页沉默」：Git 洞察页一直有一条
                 // `DataNotice` 说清提交号来自外层仓库，而这一页把同一个外层仓库的数字
-                // 折进了分数（提交活跃度 0.12 + 协作分布 0.09），却一个字没提。
-                // 缺数据不许冒充没问题，缺来源同样不许。
-                BannerRow(text: localizedFormat("提交活跃度与协作分布按外层仓库 %1$@ 的历史统计，不是所选目录本身。", root),
-                          style: .warning)
+                // 折进了分数，却一个字没提。缺数据不许冒充没问题，缺来源同样不许。
+                BannerRow(text: Self.relocationNotice(root: relocatedGitRoot!), style: .warning)
             }
         }
+    }
+
+    /// 偏离告示的那一句。**维度名单从 `HealthDimension.repositoryScoped` 取**，
+    /// 不在文案里手写：手写等于把一条判定抄成第二份，第四个"仓库归属类"维度出现时
+    /// 这句话会静默变假（守卫 `test_relocationNoticeNamesExactlyRepositoryScopedDimensions`
+    /// 拿它当唯一比对对象，漏一个当场红）。
+    static func relocationNotice(root: String) -> String {
+        localizedFormat("仓库归属类维度（%1$@）按外层仓库 %2$@ 计算，不是所选目录本身。",
+                        HealthDimension.repositoryScoped.map { localizedCopy($0.rawValue) }
+                            .joined(separator: "、"),
+                        root)
     }
 
     /// 小标题只留**环里没有的那一件**信息。
