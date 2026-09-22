@@ -374,4 +374,9 @@ enum CoverageLegacyArithmetic {
         guard total > 0 else { return -1 }
         return Double(kept.reduce(0) { $0 + $1.covered }) / Double(total) * 100
     }
+
+    /// 旧实现留下了几份（`prefix(6)` 的可见后果：其余的**没有任何地方说它们被丢了**）。
+    static func keptCount(from reports: [(covered: Int, total: Int)], cap: Int = 6) -> Int {
+        reports.sorted { $0.total > $1.total }.prefix(cap).count
+    }
 }
