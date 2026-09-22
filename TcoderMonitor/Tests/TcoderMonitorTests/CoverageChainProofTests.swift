@@ -288,37 +288,36 @@ extension CoverageChainProofTests {
         store.storageDirectory = sandbox
         let project = store.add(path: directory.path, name: "R5 对表夹具")
         var report = ProjectReport(project: project)
-        // 五路逐条 try，失败路名与 CLI 用同一份 `sectionLabels` ——
-        // 少这一步就会让 `failedSections` 两边走出不同结果（实测第一次就是这么判败的）。
-        var failures: [String] = []
-        func run<T>(_ label: String, _ body: () async throws -> T) async -> T? {
-            do { return try await body() } catch { failures.append(label); return nil }
-        }
-        let codeValue: CodeMetrics? = await run(CLIScan.sectionLabels[0]) {
+        // 五路走**同一个装配助手** `AnalyzerLedger.timed`：原来这里自己写了一份 `run`，
+        // 于是 `AppState` 后面加的字段（provenance、analyzerLedger）这份副本一概不知道。
+        let code = await AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[0]) {
             try await FileSystemCodeAnalyzer().analyze(root: directory, options: .default)
         }
-        let gitValue: GitInsights? = await run(CLIScan.sectionLabels[1]) {
+        let git = await AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[1]) {
             try await ShellGitAnalyzer().analyze(repositoryURL: directory)
         }
-        let logsValue: LogSummary? = await run(CLIScan.sectionLabels[2]) {
+        let logs = await AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[2]) {
             try await FileLogAnalyzer().analyze(projectRoot: directory, extraLogURLs: [], withinDays: 7)
         }
-        let depsValue: DependencyReport? = await run(CLIScan.sectionLabels[3]) {
+        let deps = await AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[3]) {
             try await ManifestDependencyAnalyzer().analyze(projectRoot: directory, allowNetwork: false)
         }
-        let coverageValue: CoverageMetrics? = await run(CLIScan.sectionLabels[4]) {
+        let coverage = await AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[4]) {
             try await CoverageAnalyzer().analyze(projectRoot: directory, options: .default)
         }
-        report.code = codeValue
-        report.git = gitValue
-        report.logs = logsValue
-        report.dependencies = depsValue
-        report.coverage = coverageValue
+        var attempts = [code.attempt, git.attempt, logs.attempt, deps.attempt, coverage.attempt]
+        attempts[0].limitsHit = code.value?.scanLimitations ?? []
+        report.code = code.value
+        report.git = git.value
+        report.logs = logs.value
+        report.dependencies = deps.value
+        report.coverage = coverage.value
         report.health = WeightedHealthScorer().score(HealthInputs(
             code: report.code, git: report.git, logs: report.logs,
             dependencies: report.dependencies, coverage: report.coverage, previousScore: nil))
         report.attemptedAt = Date()
-        report.failedSections = failures
+        report.failedSections = attempts.compactMap { $0.failureReason == nil ? nil : $0.label }
+        report.analyzerLedger = AnalyzerLedger.records(from: attempts)
         // ⚠️ 这份**测试副本**重演了 GUI 装配而不是调用它 ⇒ AppState 每加一个字段这里就静默落后
         //    一格（实测就漏过 provenance）。抽成共用装配函数是 R10 第 0.5 条的契约缺口。
         report.provenance = ScanProvenance(report: report, scannedRoot: directory.path, producedBy: "gui")

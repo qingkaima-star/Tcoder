@@ -137,8 +137,8 @@ final class SourceFileReachabilityTests: XCTestCase {
     ///   九枚都是 `CoverageAnalyzer` 那条链为守 400 行闸门按类型整块搬出去的，不是空壳。）
     /// 173 → 174（R10 台账一枚 `Models/AnalyzerLedger.swift`：CLI 与 GUI 两个装配点各调一次
     ///   `AnalyzerLedger.records(from:)`，五路路名也只住这一份）。
-    /// ⚠️ 174 是**三条流各自实报拼出来的 provisional 值**，合并后必须由守卫在同一棵树上重跑一次核对；
-    ///   对不上以守卫实报为准（这条旋钮的历史就是"算的数"和"跑的数"分叉）。
+    /// ✅ 174 已由守卫在同一棵合流树上实跑核对过：打印「实现文件 174 个（普查基线 174）」，
+    ///   且零调用清单为空。拼接值不自证，跑过才算数（这条旋钮的历史就是"算的数"与"跑的数"分叉）。
     static let censusBaseline = 174
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。

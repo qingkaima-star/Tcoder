@@ -726,7 +726,6 @@
 // 批次 P30：健康评分页补上「提交号来自外层仓库」这句真话（乱清单 §6 第 12 条）。
 // 整句键 + 位置参数：路径是数据不是文案，而 `"...\(root)..."` 那种拼法查不到键、
 // 英文态必然吐中文（`LocalizationGuardTests+InterpolatedCopy` 数的就是它）。
-"提交活跃度与协作分布按外层仓库 %1$@ 的历史统计，不是所选目录本身。" = "Commit Activity and Collaboration Spread are counted from the outer repository %1$@, not from the selected directory itself.";
 
 // 批次 R7（RD-17 ·「榜长冒充总数」/「重复代码的解释」）：重复明细榜是**封顶榜**
 // （`DuplicationEngine.maxBlocks`，本仓实扫 2026-09-22：榜内 20 块、榜外还有 71 块 / 474 行）。

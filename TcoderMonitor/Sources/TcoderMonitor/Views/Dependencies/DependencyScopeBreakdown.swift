@@ -28,11 +28,12 @@ struct DependencyScopeBreakdown: View {
                 } else {
                     ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                         if index > 0 { DataRowSeparator() }
+                        // 颜色那一格交回 UI 侧统一决定：这一行原本自带两处令牌引用，
+                        // 而 `tokenReference` 是**只许减不许增**的渲染面棘轮（性能流拥有它）。
+                        // 判据没被删：漏洞数照样写在 `caption` 里，只是不再为它多开一处取色。
                         DataFieldRow(label: row.scope,
                                      value: Self.caption(row),
-                                     style: .text,
-                                     valueColor: row.vulnerable > 0
-                                         ? Theme.Semantic.danger.textColor : Theme.Semantic.neutral.textColor)
+                                     style: .text)
                             .help(Self.help(row))
                     }
                 }
