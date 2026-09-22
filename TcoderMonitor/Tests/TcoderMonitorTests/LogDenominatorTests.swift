@@ -158,6 +158,8 @@ final class LogDenominatorTests: XCTestCase {
                        "A 组独立真值：\(Fixture.errorLines) 个错误 ÷ \(Fixture.logLines) 行 = 每千行 \(Fixture.densityPerKilo)")
         XCTAssertEqual(density(withReports), density(withoutReports), accuracy: 0.001,
                        "同一份日志叠上崩溃报告后密度动了 ⇒ 分母又被灌大了")
+        print("=== R11 密度实测 ===  A 每千行 \(density(withoutReports)) 个错误 · "
+            + "B 每千行 \(density(withReports)) 个错误（B 多 3 份 / 1,500 行崩溃报告正文）")
     }
 
     /// B 的分不高于 A：多 3 次确认崩溃只会更差，不能因为灌了分母而变好。
@@ -172,6 +174,7 @@ final class LogDenominatorTests: XCTestCase {
         XCTAssertNotEqual(scoreB, -1, "B 组有 10,000 行日志，稳定维不该缺席")
         XCTAssertLessThanOrEqual(Double(scoreB), Double(scoreA),
                                 "多 3 次崩溃后 B=\(scoreB) 不得高于 A=\(scoreA)")
+        print("=== R11 稳定维实测 ===  A（无崩溃）\(scoreA) 分 · B（同一批日志 + 3 次确认崩溃）\(scoreB) 分")
     }
 
     /// C 组：3 行日志的分母就是 3 行。RD-46「证据下限」不在本流，见汇报与文件头。
