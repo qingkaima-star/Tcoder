@@ -141,18 +141,23 @@ struct MetricTile: View {
                     .font(Theme.Typo.metricNumber.font)
                     .foregroundStyle(Self.tint(value: value, fallback: tint))
                     .contentTransition(.numericText())
-                    // **数字与单位不许从中间折行**。窄态（本 App 自己的 `minWidth` 1080）
-                    // 实拍性能页：磁盘那格折成「128 MB/」+「s」，单位被劈开读起来像坏版，
-                    // 内存那格把「GB」整块挤到第二行、与旁边的「/ 48.0 GB」错位。
-                    // 装不下时**等比缩一档**而不是折行——缩了仍是一个数，劈开就是两个错。
-                    .lineLimit(1)
+                    // **读数只能断在空格上，不许截尾。** 窄态（本 App 自己的 `minWidth` 1080）
+                    // 实拍性能页抓到两代错：
+                    //   第一代（不限制）：磁盘折成「128 MB/」+「s」—— 单位被劈开；
+                    //   第二代（`lineLimit(1)` + 缩放）：内存显示成「30.0…」、
+                    //     网络成「228.2 Kb…」—— **数字被截尾比折行更坏**，
+                    //     一个截断的数读起来像一个确定的数。
+                    // 所以留两行、给一点缩放，让断点只可能落在数字与单位之间的那个空格上；
+                    // `fixedSize(vertical:)` 保证两行真的占两行，而不是被外层压回一行再截。
+                    .lineLimit(2)
                     .minimumScaleFactor(Self.metricNumberMinimumScale)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let unit {
                     Text(localizedCopy(unit))
                         .font(Theme.Typo.label.font)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(Self.metricNumberMinimumScale)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             // 量条钉在**值与脚注之间**，四格才共一条基线（见 `MetricGauge` 那段注释）。
