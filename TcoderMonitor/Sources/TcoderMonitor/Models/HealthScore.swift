@@ -122,6 +122,21 @@ enum HealthDimension: String, CaseIterable, Sendable {
         case .activity, .busFactor, .stability, .dependencies: return false
         }
     }
+
+    /// **输入按"仓库归属"定位**的维度：这一维读的不是"所选目录里有什么"，
+    /// 而是"这个目录属于哪个仓库、那个仓库叫什么"。
+    ///
+    /// 两条生产者各自都会向上找 `.git`：
+    /// - `activity` / `busFactor`：`ShellGitAnalyzer` 的仓库定位（结果记在
+    ///   `ScanProvenance.resolvedGitRoot`，与所选目录不同时**必须上屏**）；
+    /// - `stability`：`LogProjectIdentity.resolve(scanRoot:)` 先取"最近的带 `.git` 祖先"
+    ///   当锚点，再按锚点名与清单里的产品名去 `~/Library/Logs` 认领崩溃报告。
+    ///
+    /// 刻意**不含 `dependencies`**：`ManifestDependencyAnalyzer` 只吃 `projectRoot` 下面
+    /// 真实存在的清单，跟着所选目录走。
+    /// 也刻意**不是 `belongsToCodeScope` 的补集**——那个判据问的是"改代码能不能把它抬起来"，
+    /// 它把 `dependencies` 踢出、把 `testing` 留在内，两份名单只是长得像。
+    static let repositoryScoped: [HealthDimension] = [.activity, .busFactor, .stability]
 }
 
 /// Everything the scorer may look at — passed by value so scorers stay pure.

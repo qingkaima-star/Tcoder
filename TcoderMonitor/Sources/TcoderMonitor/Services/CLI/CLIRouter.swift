@@ -136,11 +136,21 @@ enum CLIRouter {
         return outcome.exit.rawValue
     }
 
+    /// `doctor` 的"我是谁"那几行。抽成函数只为它能被断言 ——
+    /// 这一族文字存在的意义就是：**相信任何读数之前，先知道自己用的是哪一版尺子。**
+    /// 立 R10 第 0 条的现场：`ScanProvenance.rulesVersionStamp` 已经落进报告与 `score` 输出，
+    /// 但 `doctor` 只打构建口径与 bundle，"我在用哪一版判据"这一格在它最该出现的地方缺席。
+    static func doctorIdentityLines() -> [String] {
+        ["  二进制 = \(CLIConfig.binaryPath)",
+         "  构建口径 = \(CLIConfig.buildConfiguration)",
+         "  bundle = \(CLIConfig.bundleIdentity)",
+         "  检测规则戳 = \(ScanProvenance.rulesVersionStamp)",
+         "  报告结构版本 = v\(ScanProvenance.currentSchemaVersion)"]
+    }
+
     private static func runDoctor(_ req: CLIRequest) -> Int32 {
         CLIOutput.line("tcoder doctor")
-        CLIOutput.line("  二进制 = \(CLIConfig.binaryPath)")
-        CLIOutput.line("  构建口径 = \(CLIConfig.buildConfiguration)")
-        CLIOutput.line("  bundle = \(CLIConfig.bundleIdentity)")
+        for line in doctorIdentityLines() { CLIOutput.line(line) }
         guard let raw = req.path else { return CLIExit.ok.rawValue }
         guard let url = CLIScan.validatedURL(for: raw) else {
             CLIOutput.fail("路径不可用：\(raw)（不存在、不是目录或不可读）")
