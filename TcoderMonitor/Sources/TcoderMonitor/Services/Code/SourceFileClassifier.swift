@@ -269,6 +269,9 @@ struct SourceScanResult: Sendable {
     var lineTruncatedFileCount: Int = 0
     /// 「为什么丢了这个文件」的台账；见 `SourceSkipLedger`。
     var skipLedger: SourceSkipLedger = SourceSkipLedger()
+    /// 遍历「跟不跟」的现场计数（软链接 / 嵌套版本库 / 包状目录 / 名单外被剪掉的目录）。
+    /// 判据与句子在 `SourceScanScopeReadout.swift`（RD-15）；这里只是它的落点。
+    var treeFollowing = SourceTreeFollowingLedger()
     /// 遍历中**读不动的目录数**（权限不够、竞态中消失、悬空软链接的目标目录）。
     ///
     /// 存在理由（F12 的另一半）：`enumerator` 的 `errorHandler` 原本 `{ _, _ in true }`

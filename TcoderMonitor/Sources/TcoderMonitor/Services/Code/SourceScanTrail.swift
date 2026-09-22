@@ -34,6 +34,10 @@ extension SourceTreeScanner {
 
     /// `.isDirectoryKey` 必须在列：URLResourceValues 只回填请求过的键，
     /// 漏掉它会让目录判定恒为 nil，skipDirectories / 符号链接兜底全部失效。
+    /// 本 SDK 没有 `URLResourceKey.isDirectoryPackageKey`（与 `canonicalItemPathKey` 同一类坑，
+    /// 见 `SourceRelativePath.pathForms` 的说明），所以"枚举器会不会把这个目录当 bundle 剪掉"
+    /// 只能由 `enumeratorPrunesDirectory(_:)` 自己复刻判据 —— 它多问一次 `Info.plist` 是否存在，
+    /// 不走资源键。
     static let resourceKeys: [URLResourceKey] = [
         .isRegularFileKey, .isDirectoryKey, .fileSizeKey, .isSymbolicLinkKey, .nameKey,
     ]
@@ -54,6 +58,8 @@ extension SourceTreeScanner {
         let values = try? url.resourceValues(forKeys: Set(Self.resourceKeys))
         let bytes = Int64(values?.fileSize ?? 0)
         let entryName = values?.name ?? url.lastPathComponent
+        // 先观察树形（只加计数、不改任何归类判定），再交给下面那条既有判定链。
+        observeRepositoryMarker(url, values: values, entryName: entryName, progress: &progress)
 
         if consumeHiddenEntry(url, values: values, bytes: bytes, entryName: entryName,
                               enumerator: enumerator, progress: &progress) { return true }
@@ -79,6 +85,22 @@ extension SourceTreeScanner {
         progress.result.truncatedByMaxFiles = true
         progress.result.skipLedger.cappedRemaining = true
         return false
+    }
+
+    /// 记一个版本库标记（`.git` / `.hg` / `.svn` / `.bzr`）。**只观察不判定**：
+    /// 谁被剪掉、谁进统计，全由下面那条既有链决定，这里只留「看到过几个仓库」。
+    /// `.git` 既可能是目录（嵌套仓库）也可能是文件（submodule 的 `gitdir:` 指针），两种都算一个。
+    private func observeRepositoryMarker(_ url: URL, values: URLResourceValues?, entryName: String,
+                                         progress: inout SourceScanProgress) {
+        guard SourceTreeFollowingLedger.repositoryMarkerNames.contains(entryName) else { return }
+        // 「是不是根自己那一个」按**相对路径深度**判，不按父路径字符串相等判：
+        // 枚举器交出的目录 URL 可能带尾斜杠，两种写法比出来永远不相等（实测把根自己的
+        // `.git` 数成了嵌套仓库）。相对路径复用 `SourceFileClassifier.relativePath`，
+        // 它已经把 /tmp→/private/tmp 那套形态差异处理掉了。
+        let relative = SourceFileClassifier.relativePath(for: url, root: progress.root)
+        progress.result.treeFollowing.observeRepositoryMarker(
+            isDirectory: values?.isDirectory == true,
+            isAtScanRoot: relative.contains("/") == false)
     }
 
     // MARK: - 逐类条目
@@ -107,6 +129,15 @@ extension SourceTreeScanner {
                                           progress: inout SourceScanProgress) -> Bool {
         guard values?.isSymbolicLink == true else { return false }
         if values?.isDirectory == true { enumerator.skipDescendants() }
+        // 目标只 stat 一次、绝不读内容：跟随软链接去数目标子树正是本流刻意不做的事。
+        let resolved = url.resolvingSymlinksInPath()
+        let targetKind = (try? FileManager.default.attributesOfItem(atPath: resolved.path))?[.type]
+            as? FileAttributeType
+        progress.result.treeFollowing.observeSymbolicLink(
+            isDirectory: targetKind == .typeDirectory,
+            // `fileExists` 会**穿过**软链接去 stat 目标，悬空链接因此返回 false；
+            // `attributesOfItem` 用的是 lstat（拿到的是链接自己），判存在性会永远为真。
+            targetResolvable: FileManager.default.fileExists(atPath: url.path))
         progress.result.skipLedger.record(.symbolicLink, path: url.path, bytes: bytes, rule: nil)
         return true
     }
@@ -115,11 +146,15 @@ extension SourceTreeScanner {
                                        enumerator: FileManager.DirectoryEnumerator,
                                        progress: inout SourceScanProgress) -> Bool {
         guard values?.isDirectory == true else { return false }
-        if isPackageDirectory(entryName) {
+        // 两条剪枝判据都要落账：**我们的后缀名单**，以及枚举器自己的 bundle 判定。
+        // 只认名单的话，名单外被剪掉的目录（`*.xcarchive` 这类）就成了台账解释不掉的黑洞。
+        let listed = isPackageDirectory(entryName)
+        if listed || enumeratorPrunesDirectory(url) {
+            progress.result.treeFollowing.observePackageDirectory(listed: listed, name: entryName)
             // `.skipsPackageDescendants` 会让枚举器交出这个目录、但不进入其内容 ——
             // 不记一笔就是台账解释不掉的黑洞（Homebrew 实测 NewApp.app + 4 个 .dSYM 共 9 个文件）。
             progress.result.skipLedger.record(.prunedPackageDir, path: url.path, bytes: 0,
-                                              rule: (entryName as NSString).pathExtension.lowercased())
+                                              rule: packageRuleKey(entryName, listed: listed))
             auditPrunedSubtree(of: url, into: &progress.result.skipLedger,
                                reason: .prunedPackageContents, readLines: true)
             return true
@@ -218,18 +253,6 @@ extension SourceTreeScanner {
         }
     }
 
-    /// 包状目录：macOS 的 bundle 后缀。`FileManager` 的 `.skipsPackageDescendants` 按这套规则剪枝，
-    /// 这里必须用同一套名单，否则台账归因和枚举器实际行为不一致。
-    static let packageExtensions: Set<String> = [
-        "app", "framework", "bundle", "xcodeproj", "xcworkspace", "lproj", "xcassets",
-        "dsym", "playbook", "kext", "component", "plugin", "pkg", "prefpane",
-        "colorpicker", "imgblock", "qd", "rule", "stage", "workflow", "mdimporter",
-        "qlgenerator", "sdef", "spotlightizer", "termext", "webplugin", "internetplug-in",
-    ]
-
-    private func isPackageDirectory(_ name: String) -> Bool {
-        Self.packageExtensions.contains((name as NSString).pathExtension.lowercased())
-    }
 
     // MARK: - 批次分类与结果合并
 
