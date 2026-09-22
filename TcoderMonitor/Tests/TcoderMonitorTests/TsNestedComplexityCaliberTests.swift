@@ -44,7 +44,7 @@ final class TsNestedComplexityCaliberTests: XCTestCase {
     //   innerCount（2...7）自己的体里有 `if` ⇒ CC = 1 + 1 = 2
     //   outerFlag （1...12）自己的体（把 2...7 挖掉之后）里有 `if` ⇒ CC = 1 + 1 = 2
     //   合并计数会得到 3 —— 那正是被否掉的那条路，本用例反面钉住它。
-    func testNestedNamedFunctionGetsItsOwnEntryAndItsOwnBody() {
+    func testNestedNamedFunctionGetsItsOwnEntryAndItsOwnBody() throws {
         let fixture = [
             /* 1 */ "function outerFlag(items: number[]): number {",
             /* 2 */ "  function innerCount(list: number[]): number {",
@@ -62,7 +62,7 @@ final class TsNestedComplexityCaliberTests: XCTestCase {
         let detected = ComplexityEngine.functions(in: makeFile("nest.ts", language: "TypeScript", fixture))
         XCTAssertEqual(describe(detected), ["outerFlag@1..12cc2", "innerCount@2..7cc2"],
                        "外层与内层必须各计自己的体：\(describe(detected))")
-        let outer = detected[0]
+        let outer = try XCTUnwrap(detected.first, "内外各计自己的体这一条崩了也要交出读数，不许崩")
         XCTAssertNotEqual(outer.complexity, 3, "「合并内外层」的数字不许再叫单个函数的独立复杂度")
         XCTAssertEqual(outer.nestedFunctionCount, 1, "外层要能看出自己还包了一个单列的函数")
         XCTAssertEqual(detected.reduce(0) { $0 + $1.complexity - 1 }, 2,
@@ -118,7 +118,7 @@ final class TsNestedComplexityCaliberTests: XCTestCase {
 
     /// 合成一个 900 行的具名函数：识别结果必须给出**真实跨度 900**，
     /// 而不是因为它内部有一个未配对的构造就退化成"最长的只有 46 行"。
-    func testNineHundredLineNamedFunctionIsReportedAtFullSpan() {
+    func testNineHundredLineNamedFunctionIsReportedAtFullSpan() throws {
         var fixture = ["function giantNamed(index: number): number {"]
         fixture.append("  if (index > 1) { return 1 }")
         fixture.append("  if (index > 2) { return 2 }")
@@ -137,12 +137,16 @@ final class TsNestedComplexityCaliberTests: XCTestCase {
         let detected = ComplexityEngine.functions(in: makeFile("giant.ts", language: "TypeScript", fixture))
         XCTAssertEqual(detected.map(\.name), ["giantNamed", "afterGiant"],
                        "900 行函数之后那条必须还在：\(detected.map(\.name))")
-        let giant = detected[0]
+        // 这里**不许**硬取 `detected[0]`：识别条数掉成 0 正是本条目要抓的病，硬取会让整个
+        // xctest 进程崩掉（反证矩阵实测：`Fatal error: Index out of range` ⇒ 同一次运行里
+        // 后面的测试类一个都没跑，一条本该转红的判定在汇总里长成 GREEN）。取不到就干净地红。
+        let giant = try XCTUnwrap(detected.first, "一条函数都没识别出来时也要交出读数，不许崩")
         XCTAssertEqual(giant.startLine, 1)
         XCTAssertEqual(giant.lineCount, 900, "最长函数报成 \(giant.lineCount) 行，真值 900")
         XCTAssertGreaterThan(giant.lineCount, 46, "「最长函数 46 行」这类结论就是漏报撑出来的")
         XCTAssertEqual(giant.complexity, 4, "基线 1 + 三个 if；模板串里的 ${} 不是分支")
-        XCTAssertEqual(detected[1].lineCount, 4)
+        let tail = try XCTUnwrap(detected.dropFirst().first, "900 行之后那条函数必须还在，不许崩")
+        XCTAssertEqual(tail.lineCount, 4)
     }
 
     /// 反证用的"合法形状"钉子：900 行这个量级不是只对内联字符串成立，
