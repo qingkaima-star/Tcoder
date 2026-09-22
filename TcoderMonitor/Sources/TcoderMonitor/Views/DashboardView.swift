@@ -45,30 +45,25 @@ struct DashboardView: View {
     private var scaleSegment: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.group) {
             codeScaleGroup
-            LazyVGrid(columns: pairColumns, alignment: .leading,
-                      spacing: Theme.Spacing.group) {
+            if hasCoverageStrip {
+                pairSegment { fileCompositionGroup } right: { coverageStrip }
+            } else {
+                // 没有覆盖率可摆时，「文件构成」**独占整行**。
+                // 旧写法让不渲染的那一格继续占一个栅格槽位，右边就拖出约 297pt 的画布洞。
                 fileCompositionGroup
-                coverageStrip
             }
         }
     }
 
-    /// 底部两块清单（最近提交 / 高频错误）。窄窗口自动折成单列。
+    /// 底部两块清单（最近提交 / 高频错误）。
     private var listSegment: some View {
-        LazyVGrid(columns: pairColumns, alignment: .leading,
-                  spacing: Theme.Spacing.group) {
-            recentCommitsGroup
-            topErrorsCard
-        }
+        pairSegment { recentCommitsGroup } right: { topErrorsCard }
     }
 
-    /// 栅格列宽全部走基座锚点，不再写死「一行四列」：窗口收窄时自动折行（WS-H §3.2）。
-    /// 列间距从 `gutter`(12) 抬到 `pageMargin`(24)：无界面里两列之间没有盒体边界，
-    /// 12pt 会被读成「两列挤成一坨」。
-    private var pairColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: Theme.Layout.twoColumnMinWidth),
-                  spacing: Theme.Spacing.pageMargin)]
-    }
+    /// 「这一页有没有覆盖率可摆」——**唯一一处**判这件事的谓词。
+    /// `coverageStrip` 用它决定渲染不渲染，`scaleSegment` 用它决定摆两列还是让「文件构成」独占整行。
+    /// 两处各判各的（或干脆没人判第二处）就是那个半页空洞的成因。
+    private var hasCoverageStrip: Bool { report?.coverage?.hasData == true }
 
     // MARK: 今日错误的着色（语义色只留给真有危险的那一态）
 
@@ -221,7 +216,7 @@ struct DashboardView: View {
     /// **字一个没删**，只是不再和读数抢注意力。
     @ViewBuilder
     private var coverageStrip: some View {
-        if let coverage = report?.coverage, coverage.hasData {
+        if hasCoverageStrip, let coverage = report?.coverage {
             GlassSection("测试覆盖率") {
                 // 风险徽标原挂在 `GlassSection.trailing`（需 `AnyView`，O-3 清零），
                 // 现作为分组首行放进内容区，信息不丢、只降排版层级。
