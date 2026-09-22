@@ -128,7 +128,10 @@ struct PerformanceProcessTableCard: View {
                        tier: Theme.Typo.monoSmall)
                 .tableCell(DataColumns.column(DataColumns.processes, 5))
         }
-        .help(process.commandLine.isEmpty ? process.name : process.commandLine)
+        // 两态各自表态：取到路径就说路径，取不到就明说"只能给出进程名"。
+        // 旧写法 `.help(commandLine.isEmpty ? name : commandLine)` 里的 `commandLine`
+        // 在路径缺席时装的是进程名 —— 上屏看着像一条真路径。
+        .help(ProcessInspector.identityTooltip(for: process))
     }
 
     /// 把「--」的含义写在表旁边：0 不是「没有线程 / 没打开文件 / 不占内存」，而是没读到。

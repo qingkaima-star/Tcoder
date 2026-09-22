@@ -120,31 +120,45 @@ extension PerformanceSamplerTests {
     }
 
     func testMatchesIsCaseInsensitiveAgainstProcessName() {
-        let java = process(pid: 900_001, name: "java", commandLine: "/usr/bin/java -jar app.jar")
+        let java = process(pid: 900_001, name: "java", executablePath: "/usr/bin/java")
         XCTAssertTrue(ProcessInspector.matches(java, pattern: "JAVA"), "pattern 必须不区分大小写命中 name")
         XCTAssertTrue(ProcessInspector.matches(java, pattern: "java"), "大小写完全一致时必须命中")
     }
 
-    func testMatchesIsCaseInsensitiveAgainstCommandLine() {
-        let launcher = process(pid: 900_002, name: "com.example.Launcher", commandLine: "/usr/bin/Java -version")
-        XCTAssertTrue(ProcessInspector.matches(launcher, pattern: "JAVA"), "name 不命中时必须回落到 commandLine")
+    func testMatchesIsCaseInsensitiveAgainstExecutablePath() {
+        let launcher = process(pid: 900_002, name: "com.example.Launcher", executablePath: "/usr/bin/Java")
+        XCTAssertTrue(ProcessInspector.matches(launcher, pattern: "JAVA"),
+                      "name 不命中时，命中可执行路径这一条必须仍算数（且不区分大小写）")
+    }
+
+    /// 名字兜底那一条老路：路径没取到时**只判名字**，不许把名字当成"命令行里有这个词"。
+    /// 旧写法 `commandLine: commandLinePath ?? name` 下，这两路在下游长得一模一样。
+    func testMissingExecutablePathFallsBackToNameOnly() {
+        let hidden = process(pid: 900_099, name: "java", executablePath: nil)
+        XCTAssertTrue(ProcessInspector.matches(hidden, pattern: "java"), "名字命中仍然算命中")
+        XCTAssertFalse(ProcessInspector.matches(hidden, pattern: "/usr/bin/"),
+                       "路径没取到，就不许出现「命中了某个路径」这件事")
+        XCTAssertNil(hidden.executablePath)
+        XCTAssertTrue(ProcessInspector.identityTooltip(for: hidden).contains("未取到"),
+                      "hover 必须明说自己没取到路径：" + ProcessInspector.identityTooltip(for: hidden))
+        XCTAssertFalse(ProcessInspector.identityTooltip(for: hidden).contains("java java"))
     }
 
     func testMatchesTrimsSurroundingWhitespaceInPattern() {
-        let java = process(pid: 900_003, name: "java", commandLine: "/usr/bin/java")
+        let java = process(pid: 900_003, name: "java", executablePath: "/usr/bin/java")
         XCTAssertTrue(ProcessInspector.matches(java, pattern: "  java  "), "pattern 前后空格必须被 trim")
         XCTAssertTrue(ProcessInspector.matches(java, pattern: "\tJava\n"), "制表符与换行也必须被 trim")
     }
 
     func testMatchesRejectsEmptyOrBlankPattern() {
-        let java = process(pid: 900_004, name: "java", commandLine: "/usr/bin/java")
+        let java = process(pid: 900_004, name: "java", executablePath: "/usr/bin/java")
         XCTAssertFalse(ProcessInspector.matches(java, pattern: ""), "空 pattern 必须为 false，否则一个组会吸走所有进程")
         XCTAssertFalse(ProcessInspector.matches(java, pattern: "   "), "纯空白 pattern 必须为 false")
         XCTAssertFalse(ProcessInspector.matches(java, pattern: "\t \n"), "纯制表/换行 pattern 必须为 false")
     }
 
     func testMatchesRejectsUnrelatedProcess() {
-        let java = process(pid: 900_005, name: "java", commandLine: "/usr/bin/java -jar app.jar")
+        let java = process(pid: 900_005, name: "java", executablePath: "/usr/bin/java")
         XCTAssertFalse(ProcessInspector.matches(java, pattern: "nginx"), "不相关 pattern 必须为 false")
         XCTAssertFalse(ProcessInspector.matches(java, pattern: "com.example.Other"), "看似同族但并不命中时必须为 false")
     }
@@ -191,9 +205,9 @@ extension PerformanceSamplerTests {
     func testGroupSnapshotsSortsMatchedProcessesByCPUDescending() {
         let java = javaGroup()
         let processes = [
-            process(pid: 900_021, name: "java-low", cpu: 0.3, commandLine: "/usr/bin/java"),
-            process(pid: 900_022, name: "java-high", cpu: 2.5, commandLine: "/usr/bin/java"),
-            process(pid: 900_023, name: "java-mid", cpu: 1.1, commandLine: "/usr/bin/java"),
+            process(pid: 900_021, name: "java-low", cpu: 0.3, executablePath: "/usr/bin/java"),
+            process(pid: 900_022, name: "java-high", cpu: 2.5, executablePath: "/usr/bin/java"),
+            process(pid: 900_023, name: "java-mid", cpu: 1.1, executablePath: "/usr/bin/java"),
         ]
         let result = ProcessInspector.groupSnapshots(for: [java], processes: processes)
         let cpus = result.first?.matchedProcesses.map { $0.cpuUsage } ?? []

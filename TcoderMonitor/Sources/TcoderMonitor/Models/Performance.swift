@@ -96,15 +96,23 @@ struct ProcessSnapshot: Codable, Equatable, Hashable, Identifiable, Sendable {
     var threadCount: Int
     var openFileCount: Int
     var startTime: Date?
-    var commandLine: String
+    /// 可执行文件的绝对路径（`proc_pidpath`）。`nil` = **这一条没取到**（无权限 / 进程刚退出）。
+    ///
+    /// **旧字段名是 `commandLine`，那个名字在撒两个谎**（整改意见第九节点名的"名字兜底"）：
+    /// ① 它从来不是 argv —— 本 App 只读可执行路径，不读任何人的命令行参数；
+    /// ② `proc_pidpath` 失败时它装的是**进程名**（旧写法 `commandLinePath ?? name`），
+    ///    于是"命令行里出现过这个词"与"只是进程名相同"在下游长得一模一样 ——
+    ///    弱证据就这样被冒充成强归因。现在路径与名字各住各的字段，
+    ///    两个消费点（`ProcessInspector.matches` 的匹配、进程表的 hover）各自显式表态。
+    /// 形状保持 `Optional`：这样旧数据缺这一键也解得开（得 `nil`），不会整份解码失败。
+    var executablePath: String?
     var parentPID: Int32
 
     var id: Int32 { pid }
     var normalizedCPU: Double { max(0, min(cpuUsage, Double(ProcessInfoWrapper.processorCount))) }
 }
 
-/// A group of processes the user cares about, e.g. "示例服务" == all java
-/// processes whose command line matches a chosen pattern.
+/// 用户关心的进程分组，例如「Java 服务」= 可执行路径或进程名命中某个模式的**全系统**进程。
 struct TrackedProcessGroup: Codable, Equatable, Hashable, Identifiable, Sendable {
     var id: UUID
     var title: String
@@ -118,6 +126,11 @@ struct TrackedProcessGroup: Codable, Equatable, Hashable, Identifiable, Sendable
         self.isBuiltIn = isBuiltIn
     }
 
+    /// ⚠️ 边界（整改意见第九节）：`matchPattern` 匹配的是**整台机器**上的进程，
+    /// 与当前选中的项目**没有任何关系** —— 分组快照因此不得被读成"这个项目的占用"。
+    /// 下面这五条是写死的通用服务名，**不是**从项目名派生的：
+    /// 「拿项目名去撞进程名」这种用弱证据冒充强归因的写法在这里不许长出来
+    /// （守卫：`MachineVsProjectBoundaryTests`）。
     static let builtInDefaults: [TrackedProcessGroup] = [
         TrackedProcessGroup(title: "Java 服务", matchPattern: "java", isBuiltIn: true),
         TrackedProcessGroup(title: "Node 服务", matchPattern: "node", isBuiltIn: true),
@@ -127,6 +140,8 @@ struct TrackedProcessGroup: Codable, Equatable, Hashable, Identifiable, Sendable
     ]
 }
 
+/// 一个分组的汇总。名字里之所以没有"项目"两个字：它的成员是**按匹配模式在全系统里查出来的**，
+/// 命中多少算多少，本项目有没有在跑不影响这个数。
 struct ProcessGroupSnapshot: Codable, Equatable, Identifiable, Sendable {
     var group: TrackedProcessGroup
     var matchedProcesses: [ProcessSnapshot]

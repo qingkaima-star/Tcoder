@@ -684,3 +684,12 @@
 // 批次 P16：重复块 tooltip 的两段（原先是三段拼出来的裸中文）
 "相似度 %1$@ · %2$@ 行 · 出现 %3$@ 处" = "Similarity %1$@ · %2$@ lines · %3$@ occurrences";
 "（另有 %1$@ 处）" = "(%1$@ more)";
+
+// ── R8（整机与项目边界，整改意见第九节）：新加的五条 ─────────────────────────
+// 这一批全部是"边界要写在数旁边"的短句：读数一枚都没删，删读数等于藏问题。
+// 双语存量棘轮现量保持 17 / 上限 19 —— 这五条一次都没花那两格余量（全登记）。
+"本机 CPU" = "This Mac · CPU";
+"本机内存" = "This Mac · memory";
+"以上是整机读数：含其它项目与系统服务的开销，不构成本项目的性能结论。" = "The readings above are machine-wide: they include other projects and system services, and are not a performance verdict about this project.";
+"可执行路径未取到（无权限或进程已退出），只能给出进程名 %@" = "Executable path unavailable (no permission, or the process already exited) — only the process name can be given: %@";
+"可执行路径 %@（本工具不读任何进程的命令行参数）" = "Executable path: %@ (this tool never reads any process's command-line arguments)";
