@@ -135,7 +135,6 @@ struct DependencyVersionIdentity: Equatable, Sendable {
         }
         return nil
     }
-
     /// 版本新旧结论（不可判定时带原因）。
     var outdatedness: DependencyOutdatedness {
         guard let current = comparisonSemver else {
@@ -177,7 +176,8 @@ struct DependencyVersionIdentity: Equatable, Sendable {
 
     var queryCoordinate: String? {
         guard let query else { return nil }
-        return Self.coordinate(ecosystem: ecosystem, name: name, queryVersion: query.version)
+        return Self.coordinate(ecosystem: ecosystem.advisoryCoordinateEcosystem,
+                               name: name, queryVersion: query.version)
     }
 
     /// 逐条依赖的**稳定记录 ID**：`EcosystemReport.id` + 包名 + 声明原文。

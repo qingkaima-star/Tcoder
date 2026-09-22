@@ -50,7 +50,10 @@ extension ManifestDependencyAnalyzer {
     /// 于是 `vulnerableCount = 0` 读起来像"查过、干净"）。
     static func offlineCaveat(for report: DependencyReport) -> String {
         let records = report.ecosystems.flatMap(\.dependencies)
-        let skipped = records.filter { KnownVulnerability.comparableCore($0.version) == nil }.count
+        // "跳过比对"的判据 = **没有查询身份**（与在线/内置比对同一条闸门）。
+        // 旧实现读的是第二套解析器 `KnownVulnerability.comparableCore`（已删，见台账 §9.5 第 1 条），
+        // 于是"这句话数出来的条数"和"实际参与比对的条数"可以不是同一批。
+        let skipped = records.filter { DependencyVersionIdentity.of($0).query == nil }.count
         // 四段各自是整句键、分隔符也查表：`parts.joined(separator: "；")`
         // 拼出来的整串在英文态会一半中文一半英文（运行时漏翻台账点名的就是这条）。
         var parts = [localizedFormat("未联网核对：漏洞判定只依据内置快照（覆盖 npm / Maven / Python），%@",

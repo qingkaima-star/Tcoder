@@ -85,8 +85,13 @@ struct LiveDependencyOnlineSource: DependencyOnlineSource {
 
 extension OsvPackageQuery {
     /// **查询与回填共用的那一个 key**：由版本身份算出，禁止任何一侧自己拼 `name@version`。
+    ///
+    /// 生态段一律走 `advisoryCoordinateEcosystem`（下面那个归一函数）：`build.gradle` 里的
+    /// junit 与 `pom.xml` 里的 junit 在 OSV 那边是**同一张 Maven 公告表**，两侧不归一到
+    /// 同一个值就会出现"查询发出去了、公告回到 `maven|…`、依赖行却查 `gradle|…`"——
+    /// 在线公告永远落不到 gradle 的行上（RD-12 的另一张脸，2026-09-22 接手时实测到）。
     var coordinate: String {
-        DependencyVersionIdentity.coordinate(ecosystem: dependencyEcosystem,
+        DependencyVersionIdentity.coordinate(ecosystem: dependencyEcosystem.advisoryCoordinateEcosystem,
                                              name: package, queryVersion: version)
     }
 
@@ -103,5 +108,17 @@ extension OsvPackageQuery {
         guard !name.isEmpty else { return nil }
         let built = OsvPackageQuery(ecosystem: ecosystem, package: name, version: queryVersion)
         return (built, built.coordinate)
+    }
+}
+
+extension DependencyEcosystem {
+    /// 公告坐标里那一段用的**规范生态**：OSV 把 Gradle 的坐标收在 Maven 那张表里
+    /// （本仓 `DependencySnapshot.lookupScopes` 同样让 maven/gradle 互通），
+    /// 所以 gradle 记录必须归一成 `.maven` 才能和查询侧对上；
+    /// OSV 根本不收的生态（SwiftPM / CocoaPods / unknown）原样返回 —— 它们一条查询都发不出去。
+    /// 幂等：已经归一过的值再过一次不变，所以两侧各自调用不会分叉。
+    var advisoryCoordinateEcosystem: DependencyEcosystem {
+        guard let osv = OsvPackageQuery.osvEcosystem(for: self) else { return self }
+        return OsvPackageQuery.dependencyEcosystem(for: osv) ?? self
     }
 }

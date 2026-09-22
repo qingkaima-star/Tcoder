@@ -5,26 +5,19 @@
 // 拆到多文件后跨文件可见的成员一律 internal（原本 private），这是模块内部类型，不对外暴露。
 import Foundation
 
+/// 由依赖记录构造 OSV 查询的入口**只有一个**：`OsvPackageQuery.query(from:)`
+/// （住在 `DependencyOnlineSource.swift`，与回填 key 同源）。
+///
+/// 这里原先还有一条 `static func make(from:)`：它用第二套版本解析器
+/// `KnownVulnerability.comparableCore` 判"能不能查"并自己剥 `^`。两套解析器并存正是
+/// RD-10 的根因（台账 §9.5 第 1 条点名），而"查询用收敛后的版本、回填用声明原文"
+/// 又正是 RD-12 的症状 —— 所以这条重复入口整个删掉，只留身份那一份。
 struct OsvPackageQuery: Equatable, Sendable {
     /// OSV 生态名："npm" / "Maven" / "PyPI" / "Go" / "crates.io" / "RubyGems" / "NuGet"。
-    /// OSV 不覆盖 SwiftPM / CocoaPods，这类依赖直接不查（`make(from:)` 返回 nil）。
+    /// OSV 不覆盖 SwiftPM / CocoaPods，这类依赖直接不查（`query(from:)` 返回 nil）。
     var ecosystem: String
     var package: String
     var version: String
-
-    /// 由依赖记录构造 OSV 查询；生态不受 OSV 支持或版本不可解析时返回 nil。
-    static func make(from record: DependencyRecord) -> OsvPackageQuery? {
-        guard let ecosystem = osvEcosystem(for: record.ecosystem) else { return nil }
-        let name = record.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let raw = record.version.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, KnownVulnerability.comparableCore(raw) != nil else { return nil }
-        // 带范围符号（^ ~ > =）的写法收敛成数字版本，其余保留原样（如 33.3.1-jre）。
-        let version = raw.contains(where: { "^~><=".contains($0) })
-            ? (KnownVulnerability.comparableCore(raw) ?? "")
-            : raw
-        guard !version.isEmpty else { return nil }
-        return OsvPackageQuery(ecosystem: ecosystem, package: name, version: version)
-    }
 
     /// 依赖生态 -> OSV 生态名；OSV 不覆盖的返回 nil。
     static func osvEcosystem(for ecosystem: DependencyEcosystem) -> String? {
@@ -200,9 +193,10 @@ enum DependencyNetworkLookup {
         )
     }
 
-    /// 便捷入口：直接对一批依赖记录查 OSV（自动过滤不支持的生态）。
+    /// 便捷入口：直接对一批依赖记录查 OSV（生态不支持 / 版本没解析出来的自动不查）。
+    /// 取数口径**只有身份那一份**：`OsvPackageQuery.query(from:)`，与回填 key 同源。
     static func osvBatch(for dependencies: [DependencyRecord]) async -> OsvLookupResult {
-        await osvBatch(dependencies.compactMap(OsvPackageQuery.make(from:)))
+        await osvBatch(dependencies.compactMap { OsvPackageQuery.query(from: $0)?.query })
     }
 
     /// GET https://registry.npmjs.org/<包名>/latest 取 `version`。并发 <=30，单个硬超时 5 秒，失败静默计数。
