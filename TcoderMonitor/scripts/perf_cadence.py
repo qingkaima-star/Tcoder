@@ -105,13 +105,84 @@ def report(path, pulse_path=None, min_frames=1200):
     return lines, code
 
 
+def stats_of(path, min_frames=1200):
+    """单份样本的节拍统计；帧数不足或读不动 ⇒ None（**不许当 0**）。"""
+    gaps, frames, span = deltas(path)
+    if frames < min_frames or not gaps or span <= 0:
+        return None
+    p50 = pct(gaps, .5)
+    return {"frames": frames, "span_s": span / 1000.0, "p50": p50, "p95": pct(gaps, .95),
+            "p99": pct(gaps, .99), "late_rate": sum(1 for x in gaps if x > p50 * 1.5) / (span / 1000.0)}
+
+
+def against_baseline(cur_xml, base_csv):
+    """相对地板判据（需求方 2026-09-22 23:20 裁定）。→ (逐行文字, 退出码)。
+
+    为什么换成相对：**实测面板节拍是 119.33~119.39 Hz，不是名义 120.000**，
+    于是"p95 ≤ 8.41 ms"在空闲档也做不到（实测空闲 p95 8.52 / 交互 8.51）
+    ——那条绝对判据量的是面板与仪器地板，不是 App。
+    裁定内容（三条一起用，一条都不许省）：
+      ① 交互档**不得劣于**空闲档基线：p95 与晚到帧率**两项都要**不劣于；
+      ② 晚到帧(>1.5×实测周期) 的绝对计数继续往下压，"不劣于"不等于"够了"；
+      ③ 名义 8.4 ms 那一栏**照旧并报**"未达标（超 X ms）"，换成相对判据不许让它消失。
+
+    【基线必须一次给多份，并给一条噪声带】第一版只比一份基线，23:36 实测当场翻车：
+    拿 idle run1 当基线判"不劣于"（-0.013 ms），换 idle run3 判"劣于"（+0.006 ms）
+    ——**换一份基线结论就反**，这种判据等于掷硬币。所以这里改成：
+    多份基线取**中位数**，并且差值小于"基线自身的散布"时判**分不开**（既不达标也不未达标）。
+    退出码：0 不劣于 / 1 劣于 / 2 数据不足或分不开。
+    """
+    paths = [p for p in base_csv.split(",") if p.strip()]
+    cur = stats_of(cur_xml)
+    bases = [s for s in (stats_of(p) for p in paths) if s]
+    lines = ["== 相对地板判据（对照空闲档基线：中位数 + 噪声带）=="]
+    if not cur or len(bases) < 2:
+        lines.append("  需要 ≥2 份空闲档基线（拿到 %d 份可用）与一份够帧数的交互档 ⇒ **不判**；"
+                     "「没判」不许被读成「过了」" % len(bases))
+        return lines, 2
+    bp95 = [b["p95"] for b in bases]
+    blate = [b["late_rate"] for b in bases]
+    m95, mlate = pct(bp95, .5), pct(blate, .5)
+    b95, blate_band = (max(bp95) - min(bp95)), (max(blate) - min(blate))
+    d95, dlate = cur["p95"] - m95, cur["late_rate"] - mlate
+    lines.append("  基线 %d 份：p95 中位 %.3f（散布 %.3f）  晚到帧率中位 %.2f /s（散布 %.2f）"
+                 % (len(bases), m95, b95, mlate, blate_band))
+    lines.append("  交互档：p95 %.3f ⇒ %+0.3f ms   晚到帧率 %.2f /s ⇒ %+0.2f /s"
+                 % (cur["p95"], d95, cur["late_rate"], dlate))
+
+    def one(d, band):
+        if d > 0 and d > band:
+            return "劣", 1
+        if abs(d) <= band:
+            return "分不开", 2
+        return "不劣", 0
+
+    a95, c95 = one(d95, b95)
+    alate, clate = one(dlate, blate_band)
+    lines.append("  两项判定：p95 %s（带宽 ±%.3f ms）  晚到帧率 %s（带宽 ±%.2f /s）"
+                 % (a95, b95, alate, blate_band))
+    code = 1 if 1 in (c95, clate) else (2 if 2 in (c95, clate) else 0)
+    verdict = {0: "**不劣于基线**（绝对计数仍要继续压：见上 ②）",
+               1: "**劣于基线 ⇒ 未达标**",
+               2: "**与基线分不开** ⇒ 这条判据当前答不了，加趟数或先压噪声，不许选一 favourable 的说法"}
+    lines.append("  裁定口径下的结论：%s" % verdict[code])
+    lines.append("  ③ 名义 8.4 ms 那一栏在上面的绝对判据里照旧报，不随本条改口而消失。")
+    return lines, code
+
+
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="呈现侧节拍：实测周期 + 两个预算 + 与回调仪器的偏移")
+    ap = argparse.ArgumentParser(description="呈现侧节拍：实测周期 + 两把预算 + 与回调仪器的偏移 + 相对地板判据")
     ap.add_argument("xml")
     ap.add_argument("--pulse", default="")
+    ap.add_argument("--baseline", default="",
+                    help="同一次测量里的空闲档 hitches-renders.xml；给了就按相对地板判据下结论")
     ap.add_argument("--min-frames", type=int, default=1200)
     args = ap.parse_args(argv)
     lines, code = report(args.xml, args.pulse or None, args.min_frames)
+    if args.baseline:
+        blines, bcode = against_baseline(args.xml, args.baseline)
+        lines += blines
+        code = bcode if code in (0, 1) else code     # 数据不足优先按"不足"报，不被相对判据盖掉
     print("\n".join(lines))
     return code
 

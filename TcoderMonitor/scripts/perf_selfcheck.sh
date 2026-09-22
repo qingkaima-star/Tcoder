@@ -97,6 +97,7 @@ items_gates() {          # items_gates <outdir> —— 14..19 前置与开录闸
   item selfcheck_launch_ready "$out"       # 19) 首帧要剔除运行期尾巴，不许拿求和冒充
   item selfcheck_launcher_inventory "$out"  # 31) 实例清单要分得清"真起 / 会收尾 / 只是讲"（三夹具双向）
   item selfcheck_synth_launch_pairing "$out"  # 32) 谁起实例/谁投滚动/什么时候投，三者必须配套
+  item selfcheck_py_rulers_compile "$out"       # 36) 每支 .py 尺子都要能被 compile() 读懂（ASCII 引号第 6 次）
 }
 
 items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 样本资格与留痕

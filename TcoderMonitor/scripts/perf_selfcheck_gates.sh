@@ -9,6 +9,47 @@
 # 两个计数器（bash 动态作用域）。拆前拆后各跑一次 `./scripts/perf_harness.sh selfcheck`，
 # 31 项输出逐字 diff 过才算这刀没切坏。
 # =============================================================================
+selfcheck_py_rulers_compile() {  # selfcheck_py_rulers_compile <outdir>
+  # 36) 每一支 `.py` 尺子都必须能被**编译器**读懂。
+  #     为什么单列一条：09-22 一晚第 6 次踩同一个坑——中文文案里出现 ASCII 双引号，
+  #     Swift 侧截断过、bash 侧静默丢内容过、这次轮到 python：
+  #     `perf_cadence.py` 写完看着没错，跑起来才 `SyntaxError: invalid syntax`
+  #     （`"…不许拿"没判"当"过了""` 被切成三段）。这类错**根本不该靠人记得**，
+  #     编译器免费判，那就每次让它判。
+  #     用内建 `compile()` 而不是 `py_compile`：后者会往 scripts/ 里写 `__pycache__`
+  #     ——为跑守卫而在被扫目录里造文件，等于自己污染自己的分母（本仓为这类形状记过好几次）。
+  local res
+  res=$(python3 -c '
+import glob, sys
+bad = []
+for f in sorted(glob.glob("scripts/*.py")):
+    try:
+        compile(open(f, encoding="utf-8").read(), f, "exec")
+    except SyntaxError as e:
+        bad.append("%s:%s" % (f.split("/")[-1], e.lineno))
+print("%d|%d|%s" % (len(glob.glob("scripts/*.py")), len(bad), ",".join(bad)))')
+  local files broke
+  files=${res%%|*}; res=${res#*|}; broke=${res%%|*}
+  [ "$broke" = "0" ] || { fail ".py 尺子编不过：${res#*|}（$broke/$files 支）"; return; }
+  [ "$files" -ge 1 ] || { fail "一支 .py 尺子都没扫到——glob 或工作目录错了，这条等于没扫"; return; }
+  # 反向钉：坏形状必须被抓到，否则上面那条判据是摆设。
+  mkdir -p "$out/pyfix"
+  printf '%s\n' 'x = "中文里"夹了"ASCII 引号"' > "$out/pyfix/broken.py"
+  local caught
+  caught=$(python3 -c '
+import sys
+try:
+    compile(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1], "exec")
+    print("clean")
+except SyntaxError:
+    print("caught")' "$out/pyfix/broken.py")
+  [ "$caught" = "caught" ] \
+    || { fail "反向失败：夹了 ASCII 引号的 .py 没被抓到（拿到 ${caught:-解析失败}）⇒ 上面那条是摆设"; return; }
+  rm -rf "$out/pyfix"
+  ok "$files 支 .py 尺子全部能被 compile() 读懂（含一句故意写坏的反例，确实会炸）"
+}
+
+
 selfcheck_binary_provenance() {  # selfcheck_binary_provenance <outdir>
   # 14) 闸门第六维：**被量的二进制必须就是这份代码**。2026-09-21 实测踩过——
   #     上下文里写 `HEAD=e991c6d`，而 attach 的 `dist/Tcoder.app` 是两小时前从
