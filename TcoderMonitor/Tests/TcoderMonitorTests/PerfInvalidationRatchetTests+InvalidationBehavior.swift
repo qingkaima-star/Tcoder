@@ -110,10 +110,10 @@ extension PerfInvalidationRatchetTests {
         snapshot.networkOutBytesPerSecond = 4_000
         let processes = [ProcessSnapshot(pid: 11, name: "a", cpuUsage: 0.5, memoryBytes: 100,
                                          threadCount: 2, openFileCount: 3, startTime: nil,
-                                         commandLine: "/bin/a", parentPID: 1),
+                                         executablePath: "/bin/a", parentPID: 1),
                          ProcessSnapshot(pid: 12, name: "b", cpuUsage: 1.5, memoryBytes: 900,
                                          threadCount: 4, openFileCount: 6, startTime: nil,
-                                         commandLine: "/bin/b", parentPID: 1)]
+                                         executablePath: "/bin/b", parentPID: 1)]
         let sweep = ProcessSweep(processes: processes, states: [:], elapsed: 1.5,
                                  truncated: true, visiblePIDCount: 2)
         let groups = [TrackedProcessGroup(title: "A 服务", matchPattern: "a")]
@@ -150,7 +150,7 @@ extension PerfInvalidationRatchetTests {
     func testRankingAndCurveWindowSizesAreUnchanged() {
         let processes = (0..<40).map {
             ProcessSnapshot(pid: Int32($0), name: "p\($0)", cpuUsage: Double($0), memoryBytes: UInt64($0),
-                            threadCount: 1, openFileCount: 1, startTime: nil, commandLine: "/bin/p", parentPID: 1)
+                            threadCount: 1, openFileCount: 1, startTime: nil, executablePath: "/bin/p", parentPID: 1)
         }
         let sweep = ProcessSweep(processes: processes, states: [:], elapsed: 1.5, truncated: false,
                                  visiblePIDCount: processes.count)
