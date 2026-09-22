@@ -411,16 +411,31 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 
 ## 4. 尺子（M0 先落，先量后改）
 
-1. `scripts/perf_harness.sh`（新）：六档，全部只读——`idle`（attach 现有实例，录 Animation Hitches +
-   Time Profiler，**期间不碰它**）、`interact`（录法同 idle，唯一区别是**期间人持续滚动**）、
-   `switch`（逐页冷启动）、`report`（重打已有目录）、`probe`（读 `FramePulse` 脉冲）、
+1. `scripts/perf_harness.sh`（新）：**七档**，全部只读——`idle`（attach 现有实例，录 Animation Hitches +
+   Time Profiler，**期间不碰它**）、`interact`（录法同 idle，唯一区别是**期间持续有滚动**：
+   真人或 `INPUT=synth` 的 CGEvent 投递）、`switch`（逐页冷启动）、`report`（重打已有目录）、
+   `probe`（读 `FramePulse` 脉冲，`--start` 可现采）、`pulse`（**边投合成滚动边读全部帧的间隔分位数**）、
    `selfcheck`（拿合成夹具验尺子自己）。解析封装在 `xctrace export --xpath` 逐表导出 +
    `perf_trace_xml.py`（id/ref 解引用）/ `perf_trace_metrics.py`（统计与 §1 基线）/ `trace_report.py`（子命令），
    出一张固定形状的结果表（hitch 数、hitch/s、帧时长分布、app-update 分布、`potential-hangs`、
    主线程热点 Top20、按线程样本数）。**表头第一行写「测量期间」**：`idle` 那批明说
    "只答心跳期，不许拿去交 T1"，`interaction` 那批才标"有资格答 T1"——两批数同形状不同含义，
    不写进表头就一定会有人混着用（本仓反复踩的"口径不对齐"）。输出目录**必须带短 HEAD 后缀**
-   （`/tmp/tcoder-perf-<rev>/`），否则后一批覆盖前一批。
+   （`$SCRATCH/tcoder-perf-<rev>/`，即仓库内被忽略的 `.scratch/`），否则后一批覆盖前一批。
+
+   ### 4.0 每条判据由哪个仪器回答（2026-09-22 补，因为发现有一条压根没人量）
+
+   | 判据（验收句里的半句） | 直接仪器 | 说明 |
+   |---|---|---|
+   | 交互期 **hitch 帧 = 0** | xctrace `hitches` 表（`interact` 档） | 它只列**超预算**的那些帧 |
+   | **p95 帧间隔 ≤ 8.4 ms** | **只有 `FramePulse`**（`pulse` 档 / `probe` 档） | 这是**全部帧**的分位数；hitches 表没有这一列，`displayed-surfaces-per-second` 也只有"每秒几张"——09-22 之前这条**没有任何仪器在量** |
+   | 1.5 s 心跳主线程占用 ≤ 4.0 ms | xctrace `hitches-updates`（`idle` 档） | 逐次 update 时长；只用 max 判会同时说反两件事（见 §1.6） |
+   | body/Mark 零动态色/零排序/零同步 I/O | 静态守卫 `PerfHitchGuardTests` + 台账 | 每条打"现量/上限"并逐条可点名 |
+
+   ⇒ 交叉核对的义务：`pulse` 读的是 **CVDisplayLink 回调送达时刻**，不等于"上屏时刻"。
+   同一次 `interact` 采样里的 `displayed-surfaces-per-second` 是独立第二把尺子
+   （若出帧 ≈120/s 而 p95 仍 9.1 ms，说明尾巴在回调时序而非呈现上），
+   两者不一致时**谁都不许单独宣布达标或未达标**。
    **不设合成输入的 `scroll` 档**（原计划里有，现撤）：合成滚轮要 `CGEvent.post`，而本机 System Events
    权限被拒（§4.1 探测时实测），事件会被静默丢弃——那会造出"交互期 0 hitch"的**假绿**。
    交互由人真滚，`interact` 档负责把它标成交互期样本。
