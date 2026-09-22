@@ -88,9 +88,13 @@ final class LogDenominatorAccountingTests: XCTestCase {
         let legacy = """
         {"analyzedAt":"2026-09-22T10:00:00Z","scannedFiles":[],"errorCount":0,"exceptionCount":0,
          "warningCount":0,"crashCount":0,"fatalCount":0,"infoLineCount":0,"totalLinesScanned":123,
-         "topErrors":[],"trend":[],"affectedFiles":[]}
+         "topErrors":[],"trend":[],"affectedFiles":{}}
         """
-        let decoded = try JSONDecoder().decode(LogSummary.self, from: Data(legacy.utf8))
+        let decoder = JSONDecoder()
+        // 与 `ProjectStore` / CLI 落盘同一把日期尺子（`.iso8601`）：默认策略要的是
+        // `secondsSinceReferenceDate`，那样这条用例会红在解码器上、而不是红在"缺键"上。
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(LogSummary.self, from: Data(legacy.utf8))
         XCTAssertEqual(decoded.totalLinesScanned, 123)
         XCTAssertNil(decoded.crashReportCount, "缺键 ⇒ nil（没量到），不是 0（量到了、没有）")
         XCTAssertNil(decoded.crashReportLineCount, "同上")
@@ -101,16 +105,18 @@ final class LogDenominatorAccountingTests: XCTestCase {
     /// 两格的写者必须**恰好**是 `FileLogAnalyzer` 一处 —— 出现第二个写者就是第二把尺子
     /// （RD-43/RD-45 同族）。这条与下面那条元测试成对出现，否则它是永真绿。
     func test_crashBoxesHaveExactlyOneWriter() throws {
-        XCTAssertEqual(try writersOfCrashBoxes(), ["FileLogAnalyzer.swift"])
+        XCTAssertEqual(try writersOfCrashBoxesInSources(), ["FileLogAnalyzer.swift"])
     }
 
     func test_writerScannerCatchesASecondWriter() throws {
         let dirty = """
         summary.crashReportLineCount = aggregate.crashReportLineCount
-        let other = 3; metrics.crashReportLineCount = other
         """
-        XCTAssertEqual(try writersOfCrashBoxes(dirty, in: "AnotherFile.swift"), ["AnotherFile.swift"])
-        XCTAssertTrue(try writersOfCrashBoxes("let x = 1").isEmpty)
+        let clean = "let metrics = Metrics()\n// 这里只提到 crashReportCount 这个名字，没有赋值\n"
+        XCTAssertEqual(writerNames(in: dirty, named: "AnotherFile.swift"), ["AnotherFile.swift"],
+                       "多出一个写者必须被抓到，否则这条守卫永不红")
+        XCTAssertTrue(writerNames(in: clean, named: "AnotherFile.swift").isEmpty,
+                      "只有名字没有赋值不该算写者（否则真改动一来它就钝了）")
     }
 
     // MARK: 夹具与扫描
@@ -119,36 +125,28 @@ final class LogDenominatorAccountingTests: XCTestCase {
         try await FileLogAnalyzer().analyze(projectRoot: project, extraLogURLs: [], withinDays: 30)
     }
 
-    /// 扫 `Sources/**`：谁给这两格赋值。允许的形状只有一种 —— `summary.crashReport* = ...`。
-    private func writersOfCrashBoxes(_ text: String? = nil,
-                                     in singleName: String? = nil) throws -> [String] {
-        let pattern = "\\.crashReport(Count|LineCount)\\s*="
-        let regex = try NSRegularExpression(pattern: pattern)
-        if let text, let singleName {
-            return matches(regex, text).isEmpty ? [] : [singleName]
-        }
-        var out: [String] = []
-        for url in try swiftFilesUnderSources() {
-            if try matches(regex, String(contentsOf: url, encoding: .utf8)).isEmpty == false {
-                out.append(url.lastPathComponent)
-            }
-        }
-        return out.sorted()
+    /// 赋值形状：`.crashReportCount =` / `.crashReportLineCount =`（声明式 `var … = nil` 前面没有点，不算）。
+    private static let writerPattern = "\\.crashReport(Count|LineCount)\\s*="
+
+    private func writerNames(in text: String, named name: String) -> [String] {
+        let regex = try! NSRegularExpression(pattern: Self.writerPattern)
+        return regex.matches(in: text, options: [], range: NSRange(text.startIndex..., in: text)).isEmpty
+            ? [] : [name]
     }
 
-    private func matches(_ regex: NSRegularExpression, _ text: String) -> [NSTextCheckingResult] {
-        regex.matches(in: text, options: [], range: NSRange(text.startIndex..., in: text))
-    }
-
-    private func swiftFilesUnderSources() throws -> [URL] {
+    private func writersOfCrashBoxesInSources() throws -> [String] {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources", isDirectory: true)
         let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)
-        var out: [URL] = []
+        var out: [String] = []
         while case let url as URL = enumerator?.nextObject() {
-            if url.pathExtension == "swift" { out.append(url) }
+            guard url.pathExtension == "swift" else { continue }
+            if writerNames(in: try String(contentsOf: url, encoding: .utf8),
+                           named: url.lastPathComponent).isEmpty == false {
+                out.append(url.lastPathComponent)
+            }
         }
-        return out
+        return out.sorted()
     }
 }
