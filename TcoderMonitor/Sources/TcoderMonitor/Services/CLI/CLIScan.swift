@@ -9,9 +9,9 @@ import Foundation
 final class CLIScan {
 
     /// 五路的中文名字，顺序即 `outcome` 里失败位的顺序。
-    /// 必须与 `AppState.sectionFailures` 调用点用的那五个字面一字不差 ——
-    /// `CLIHeadlessTests.test_sectionLabelsAreTheOnlyOnesAppStateUses` 盯着这条。
-    static let sectionLabels = ["代码扫描", "Git 分析", "错误日志", "依赖分析", "测试覆盖率"]
+    /// 名字本身不在这里定义：`AnalyzerLedger.sectionLabels` 是唯一一份，GUI 那一路引用的是同一份
+    /// （原来 `AppState` 在自己的 `attempt("日志分析")` 里又写了一遍，两个名字指同一路）。
+    static let sectionLabels = AnalyzerLedger.sectionLabels
 
     /// 与 GUI 默认值对齐：`AppState.logWindowDays`。
     static let logWindowDays = 7
@@ -55,18 +55,27 @@ final class CLIScan {
         let depAnalyzer = deps, coverageAnalyzer = coverage
         let extraLogURLs = extraLogPaths.map { URL(fileURLWithPath: $0) }
 
-        async let codeResult = Self.attempt { try await codeAnalyzer.analyze(root: root, options: .default) }
-        async let gitResult = Self.attempt { try await gitAnalyzer.analyze(repositoryURL: root) }
-        async let logResult = Self.attempt {
+        async let codeResult = AnalyzerLedger.timed(Self.sectionLabels[0]) {
+            try await codeAnalyzer.analyze(root: root, options: .default)
+        }
+        async let gitResult = AnalyzerLedger.timed(Self.sectionLabels[1]) {
+            try await gitAnalyzer.analyze(repositoryURL: root)
+        }
+        async let logResult = AnalyzerLedger.timed(Self.sectionLabels[2]) {
             try await logAnalyzer.analyze(projectRoot: root, extraLogURLs: extraLogURLs, withinDays: windowDays)
         }
-        async let depResult = Self.attempt { try await depAnalyzer.analyze(projectRoot: root, allowNetwork: allowNetwork) }
-        async let coverageResult = Self.attempt { try await coverageAnalyzer.analyze(projectRoot: root, options: .default) }
+        async let depResult = AnalyzerLedger.timed(Self.sectionLabels[3]) {
+            try await depAnalyzer.analyze(projectRoot: root, allowNetwork: allowNetwork)
+        }
+        async let coverageResult = AnalyzerLedger.timed(Self.sectionLabels[4]) {
+            try await coverageAnalyzer.analyze(projectRoot: root, options: .default)
+        }
 
         let (cm, gi, ls, dp, cv) = await (codeResult, gitResult, logResult, depResult, coverageResult)
         // 五路的返回类型各不相同，只能把「有没有失败」这一维先收成同一种元素，
         // 再与路名 zip —— 顺序即 `sectionLabels` 的顺序，两处必须一起动。
-        let errors = [cm.error, gi.error, ls.error, dp.error, cv.error]
+        let errors = [cm.attempt.failureReason, gi.attempt.failureReason, ls.attempt.failureReason,
+                      dp.attempt.failureReason, cv.attempt.failureReason]
         let failures = zip(Self.sectionLabels, errors).compactMap { $1 == nil ? nil : $0 }
 
         report.code = cm.value
@@ -80,6 +89,12 @@ final class CLIScan {
         report.generatedAt = Date()
         report.attemptedAt = Date()
         report.failedSections = failures
+        // 台账与五路同源：`limitsHit` 目前只有代码那一路报得出（`scanLimitations`），
+        // 其余四路尚无"我撞到过上限"的出口 —— 那是能力缺口，不是"它们没撞上限"，
+        // 所以它们留 nil 而不是空数组（见 `AnalyzerRunRecord`）。
+        var codeAttempt = cm.attempt
+        codeAttempt.limitsHit = cm.value?.scanLimitations ?? []
+        report.analyzerLedger = AnalyzerLedger.records(from: [codeAttempt, gi.attempt, ls.attempt, dp.attempt, cv.attempt])
         // 溯源块最后装配：它要读 Git 那一路已经拿到的提交号与工作区状态，
         // 自己不再起第二个 git 进程（两处各查一次迟早分叉）。
         report.provenance = ScanProvenance(report: report, scannedRoot: root.path, producedBy: "cli")
@@ -119,13 +134,6 @@ final class CLIScan {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = compact ? [.sortedKeys] : [.prettyPrinted, .sortedKeys]
         return String(decoding: try encoder.encode(report), as: UTF8.self)
-    }
-
-    private static func attempt<T: Sendable>(
-        _ work: @Sendable () async throws -> T
-    ) async -> (value: T?, error: String?) {
-        do { return (try await work(), nil) }
-        catch { return (nil, error.localizedDescription) }
     }
 }
 

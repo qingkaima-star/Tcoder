@@ -143,6 +143,11 @@ struct ProjectReport: Codable, Sendable {
     /// Chinese labels of analyzers that failed during the last attempt.
     var failedSections: [String] = []
 
+    /// 每一路分析器的执行台账（四态 + 耗时 + 撞到的上限 + 失败原因原文）。
+    /// 与 `failedSections` 的分工：那一格只说"哪几路挂了"，这一格说"每一路当时是什么状态"。
+    /// **必须 Optional**：旧报告没有这一格 ⇒ 解码时整键缺席，不许补空数组（空数组会被读成"五路都没跑"）。
+    var analyzerLedger: [AnalyzerRunRecord]? = nil
+
     var hasBeenScanned: Bool { attemptedAt != nil }
 
     init(project: MonitoredProject) {
