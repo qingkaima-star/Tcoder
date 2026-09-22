@@ -124,6 +124,14 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
 
         metrics.duplicationRatio = duplication.ratio
         metrics.duplicatedBlocks = duplication.blocks
+        // RD-48：把引擎早就算好的"榜外那一半"直传进契约（**逐枚原样赋值，不做任何加减**）。
+        // 之前这四个数只进 `scanLimitations` 的中文句子，界面上"上限 20 块"那格其实是
+        // 在按句式认领一句散文；落成字段之后，页尾句改成由数字装配，读 JSON 的人也不必再解析句子。
+        metrics.duplicatedBlockLimit = DuplicationEngine.maxBlocks
+        metrics.duplicatedBlocksDroppedByCap = duplication.blocksDroppedByCap
+        metrics.duplicatedLinesOutsideReportedBlocks = duplication.linesOutsideReportedBlocks
+        metrics.duplicateFragmentsNotExpandedCount = duplication.fragmentsDroppedByBudget
+        metrics.duplicateFilesHittingLineCap = duplication.filesHittingLineCap
         metrics.overallRisk = overallRisk(
             metrics: metrics,
             hotspotCount: hotspots.count,
