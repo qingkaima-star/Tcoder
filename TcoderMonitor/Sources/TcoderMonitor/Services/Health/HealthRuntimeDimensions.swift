@@ -64,10 +64,13 @@ extension WeightedHealthScorer {
         // 运行时长 / 请求量：本 App 从未采集，任何"稳定性"结论都只是日志窗口内的读数。
         gaps.append("未采集运行时长与请求量，分母只是已扫描的日志行")
         // 份数只从 `StabilityZeroDenominatorShape` 那一个口子取（RD-49：不留第二把尺子）。
+        // ⚠ 这一格数的是**读成功却没产出事件证据**的那几份（内容损坏 / 无可用事件时间 / 只有文件名像）；
+        // "读不动"的那些走 `readFailedFiles` 另一本账，由第③态单独说一句 ——
+        // 原先这句把"读不动"也算进来，等于让一本账认领另一本账的数。
         let crashChannelFiles = StabilityZeroDenominatorShape.readableCrashReportCount(logs)
         if crashChannelFiles > logs.crashCount {
             gaps.append("另有 \(crashChannelFiles - logs.crashCount) 份崩溃通道文件未产出可用事件证据"
-                + "（读不动 / 内容损坏 / 只有文件名像），未计入崩溃数")
+                + "（内容损坏 / 无可用事件时间 / 只有文件名像），未计入崩溃数")
         }
         return gaps
     }
