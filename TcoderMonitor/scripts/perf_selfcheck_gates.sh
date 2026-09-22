@@ -307,24 +307,32 @@ selfcheck_launcher_hygiene() {  # selfcheck_launcher_hygiene <outdir>
   # 今天又被**第 31 项的夹具**绊倒一次：我在夹具里写了一句 `open "$APP"` 来讲那个形状，
   # 这条守卫就把 `perf_selfcheck_gates.sh` 判成"会按 bundle id 广播退出"。
   # ⇒ 同一个问题上不许有两把尺子：取数归表，阈值归这里（与 QUIESCE_MIN 那条分工同一个道理）。
-  local rep line name bad=0
-  rep=$(bash scripts/perf_launcher_audit.sh 2>&1) \
+  local rep name need killc trapc bcast sites bad=0 seen=0
+  # --tsv：制表符事实行（同一把尺，两种视图）。以前这里读的是**给人看的那张表**，
+  # 用 `Y[[:space:]]+无` 当"没 trap"——09-23 把 kill / trap 拆成两列之后，同一个正则
+  # 会读成"没有 kill"而把 `kill=有 / trap=无` 那种形状**静默放过**。
+  # 靠排版对齐的下游解析一律不许再写；改读事实行，列序变了会当场报错而不是变绿。
+  rep=$(bash scripts/perf_launcher_audit.sh --tsv 2>&1) \
     || { fail "perf_launcher_audit.sh 跑不动，或一个 App 句柄都没解析出来 ⇒ 本项没有依据可判（不许当通过）"; return; }
-  while IFS= read -r line; do
-    name=$(printf '%s' "$line" | cut -d' ' -f1)
-    # `Y` 且 trap 列不是"有" ⇒ 该收尾没收尾；广播列出现"是" ⇒ 会退掉别人的实例
-    printf '%s' "$line" | grep -qE '[[:space:]]Y[[:space:]]+无' \
-      && { fail "$name 起实例却没有 trap 收尾 ⇒ 中断就漏一个 ppid=1 的孤儿"; bad=1; }
-    printf '%s' "$line" | grep -q '是⇒' \
-      && { fail "$name 按 bundle id 广播退出 ⇒ 只许 TERM 自己起的那个 pid"; bad=1; }
+  while IFS=$'\t' read -r name need killc trapc bcast sites; do
+    case "$name" in perf_*.sh) ;; *) continue ;; esac
+    seen=$((seen + 1))
+    # 该收尾 = 起实例 且（没有会默认跑的 kill 或 异常路径不 trap）；广播退另算一条
+    if [ "$need" = "Y" ] && { [ "$killc" != "有" ] || [ "$trapc" = "无" ]; }; then
+      fail "$name 起实例但没收干净（kill=$killc trap=$trapc）⇒ 中断或默认路径就漏 ppid=1 的孤儿"
+      bad=1
+    fi
+    [ "$bcast" = "否" ] \
+      || { fail "$name 按 bundle id 广播退出 ⇒ 只许 TERM 自己起的那个 pid"; bad=1; }
   done <<EOF
-$(printf '%s\n' "$rep" | grep -E '^perf_[a-z_]*\.sh')
+$rep
 EOF
   # 分母：表里一条 perf_* 都没有 ⇒ 说明扫描面退化了，本项等于没判（不许静默绿）
-  printf '%s\n' "$rep" | grep -qE '^perf_[a-z_]*\.sh' \
+  [ "$seen" -gt 0 ] \
     || { fail "实例清单里一个 perf_* 都没有：要么形状改了、要么目录错了 ⇒ 本项不作数"; return; }
   # 表有牙由第 31 项（三夹具双向）负责，这里不再自带一份夹具——两份夹具会同源失效
-  [ "$bad" = "0" ] && ok "perf_* 名下起实例的形状都有 trap、且不按 bundle id 广播（形状取自审计表）"
+  [ "$bad" = "0" ] \
+    && ok "perf_* 名下起实例的形状都有「默认就会跑的 kill」+「trap」，且不按 bundle id 广播（形状取自审计表 --tsv）"
 }
 
 selfcheck_synth_launch_pairing() {  # selfcheck_synth_launch_pairing <outdir>
@@ -397,4 +405,52 @@ selfcheck_launcher_inventory() {  # selfcheck_launcher_inventory <outdir>
     || fail "clean.sh 进了表但 trap 没读到『有』⇒ 宽松方向失效"
   [ "$prose" = "0" ] || fail "讲代码的话（prose.sh）被当成会起实例的脚本 ⇒ 假黑，表会失去信誉：$rep"
   ok "实例清单分得清『真起 / 会收尾 / 只是讲』（三夹具双向都验，含漏真凶的反例）"
+}
+
+selfcheck_cleanup_opt_in_state() {  # selfcheck_cleanup_opt_in_state <outdir>
+  # 37) 实例清单的「kill」那一格必须分得清**三种**收尾形状：无条件 / 躲在默认关掉的开关后面 / 没有。
+  #     为什么单独一条：09-23 凌晨那一串孤儿就是这么来的 —— `capture_pages_isolated.sh`
+  #     有 trap、也真写了一句 `kill -TERM`，旧表只看"有没有 trap"就判它干净，
+  #     而那句 kill 躲在 `CAPTURE_TERM=1` 后面（默认只印"待人工退出"），它在 for 里每页起一个
+  #     ⇒ 跑一轮九页漏九个，把所有人"实例数恰为 1"那道闸压死。
+  #     反向钉同样要紧：`if [ "$who" = "$BIN" ]` 是**核身份**的门，是好形状，
+  #     拿"缩进在 if 里"当判据就会把每一处谨慎收尾都点名 —— 那张表立刻失去信誉。
+  local d="$out/cleanup-state" rep tsv off optin guarded nokill seen
+  mkdir -p "$d/scripts"
+  printf '%s\n' 'BIN="$PWD/dist/Tcoder.app/Contents/MacOS/TcoderMonitor"' \
+    "trap 'rm -rf /tmp/lockdir' EXIT INT TERM" 'for name in a b c; do' \
+    '  env TCODER_SUPPORT_DIR=/tmp "$BIN" -ApplePersistenceIgnoreState YES &' \
+    '  pid=$!' '  if [ "${MINE_TERM:-0}" = "1" ] && [ "$pid" -gt 0 ]; then' \
+    '    kill -TERM "$pid" 2>/dev/null || true' '  fi' 'done' > "$d/scripts/optin.sh"
+  printf '%s\n' 'BIN="$PWD/dist/Tcoder.app/Contents/MacOS/TcoderMonitor"' \
+    'trap retire EXIT INT TERM' '  "$BIN" -ApplePersistenceIgnoreState YES &' 'pid=$!' \
+    'retire() { who=$(ps -p "$pid" -o comm=); if [ "$who" = "TcoderMonitor" ]; then' \
+    '  kill -TERM "$pid" 2>/dev/null || true' 'fi' '}' > "$d/scripts/guarded.sh"
+  printf '%s\n' 'BIN="$PWD/dist/Tcoder.app/Contents/MacOS/TcoderMonitor"' \
+    '  "$BIN" -ApplePersistenceIgnoreState YES &' > "$d/scripts/nokill.sh"
+  rep=$(bash scripts/perf_launcher_audit.sh --dir="$d/scripts" 2>&1)
+  tsv=$(bash scripts/perf_launcher_audit.sh --dir="$d/scripts" --tsv 2>&1)
+  # 分母：一句启动形状都没认出来时，下面三条全是空对空（工具自己会退 1，但别拿"退 1"当判据）
+  printf '%s\n' "$tsv" | grep -q . \
+    || { fail "夹具没被认出任何启动形状 ⇒ 这一项等于没扫：$rep"; return; }
+  # 四条各判一次，**任何一条不中就不许印 ✓**（第一版就是 fail 之后照样走到 ok，
+  # 于是一次跑同时留下「✗ offender 数…」和「✓ 收尾形状分得清…」——那是永真绿的亲戚）。
+  local bad=0
+  optin=$(printf '%s\n' "$tsv" | grep -c $'^optin\.sh\tY\t选装\t有')
+  guarded=$(printf '%s\n' "$tsv" | grep -c $'^guarded\.sh\tY\t有\t')
+  nokill=$(printf '%s\n' "$tsv" | grep -c $'^nokill\.sh\tY\t无\t无')
+  [ "$optin" = "1" ] \
+    || { fail "「kill 只在开关后面」的夹具判成别的（读到 $optin）⇒ 09-23 那个形状又看不见了"; bad=1; }
+  [ "$guarded" = "1" ] \
+    || { fail "核身份的门被误判成「选装」（读到 $guarded）⇒ 表会乱点名，下次没人信它"; bad=1; }
+  [ "$nokill" = "1" ] \
+    || { fail "一句 kill 都没有的夹具判成别的（读到 $nokill）"; bad=1; }
+  seen=$(printf '%s\n' "$tsv" | sed -n 's/^#facts.*opt_in=\([0-9]*\).*/\1/p')
+  [ "$seen" = "1" ] \
+    || { fail "事实行里的「选装」计数读到 '$seen'（应为 1）⇒ 那一格没被数进账"; bad=1; }
+  off=$(printf '%s\n' "$tsv" | sed -n 's/^#facts.*offenders=\([0-9]*\).*/\1/p')
+  [ "$off" = "2" ] \
+    || { fail "offender 数读到 '$off'（应为 2：optin + nokill，guarded 不算）⇒ 判定式宽了或窄了"; bad=1; }
+  [ "$bad" = "0" ] \
+    && ok "收尾形状分得清『无条件 / 躲在开关后面 / 没有』，且核身份的门不算选装（三夹具双向）"
 }

@@ -7,7 +7,9 @@
 #
 # 本文件现在只有 `cmd_selfcheck` + 三段 `items_*`（32 处 `item` 调用按主题分三段）；
 # 【两个分母别混】末行印的「N 项通过」数的是 `ok` 调用次数（一项可以印两行 ✓），
-# 与「32 处 item 调用」不是同一个数——写文档时别拿其中一个去对另一个（09-22 加第 32、33 项时就这么混过一次）。
+# 与「`item` 调用的处数」不是同一个数（那把尺现量：`grep -cE '^[[:space:]]+item selfcheck_' scripts/perf_selfcheck.sh`）。
+# 以前这里写死过"32 处"，加一项就烂一次 —— 手写分母要么每次跟着改，要么换成能跑的命令；
+# 09-22 加第 32、33 项时就把两个数混过一回，别再留第三个腐烂的数字在这里。
 # 32 处反例的**判据本体**按主题住在同目录三块文件里
 # （`_ruler_shapes` 形状与三态话术 / `_gates` 前置与闸门 / `_eligibility` 样本资格），
 # 由下面三行 source 进来。**为什么要拆**：`SelfScanDogfoodTests` 的 ≤800 行棘轮
@@ -98,6 +100,7 @@ items_gates() {          # items_gates <outdir> —— 14..19 前置与开录闸
   item selfcheck_launcher_inventory "$out"  # 31) 实例清单要分得清"真起 / 会收尾 / 只是讲"（三夹具双向）
   item selfcheck_synth_launch_pairing "$out"  # 32) 谁起实例/谁投滚动/什么时候投，三者必须配套
   item selfcheck_py_rulers_compile "$out"       # 36) 每支 .py 尺子都要能被 compile() 读懂（ASCII 引号第 6 次）
+  item selfcheck_cleanup_opt_in_state "$out"   # 37) 收尾形状三分：无条件 kill / 躲在开关后面 / 没有（三夹具双向）
 }
 
 items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 样本资格与留痕

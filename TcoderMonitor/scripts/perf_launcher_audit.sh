@@ -34,12 +34,14 @@
 set -uo pipefail
 
 STRICT=0
+TSV=0
 WATCH_DIR="scripts"
 for a in "$@"; do
   case "$a" in
     --strict)  STRICT=1 ;;
+    --tsv)     TSV=1 ;;
     --dir=*)   WATCH_DIR="${a#--dir=}" ;;
-    -h|--help) printf '用法: %s [--strict] [--dir=scripts]\n  --strict 只对 perf_* 名下的形状问题返回非零（别家只列不判）\n' "$0"; exit 0 ;;
+    -h|--help) printf '用法: %s [--strict] [--tsv] [--dir=scripts]\n  --strict 只对 perf_* 名下的形状问题返回非零（别家只列不判）\n  --tsv 只印制表符事实行（脚本\t该收\tkill\ttrap\t广播\t启动点），给下游守卫当唯一取数口\n' "$0"; exit 0 ;;
     *) printf '!! 不认识的参数：%s（故意不猜，猜错就会扫错目录）\n' "$a" >&2; exit 2 ;;
   esac
 done
@@ -88,6 +90,51 @@ code_lines() {  # code_lines <file>
     | grep -vE '(^|[[:space:]])(echo|printf|fail|ok)[[:space:]]'
 }
 
+# 【09-23 02:03 补的一种漏】"有 trap"不等于"收得干净"：
+# `capture_pages_isolated.sh` 就是 trap 有、也真会 kill，**但整段收尾躲在
+# `CAPTURE_TERM=1` 这个选装开关后面**（默认不收），而它在循环里**每页起一个实例**
+# ⇒ 跑一次九页就漏九个，压死所有人"实例数恰为 1"那道闸。
+# 旧表只问"有没有 trap"，对这种形状一律判"干净"——那是**宽松方向的错**，比误报危险。
+# 【为什么不能问"这行有没有缩进在 if 里"】缩进不是语义：`retire_instance()` 里那句
+# `kill -TERM` 缩了四层空格，看着就像"被门着的"，但门的是 `"$who" = "$BIN"`（核身份），
+# 那是**好**的门。真正的判据是"门里有没有一个**默认关掉的开关**"——
+# 形状只有两种：`${SOME_FLAG:-0}`（不传就是 0）或 `= "1"`（不显式打开就不进）。
+# 逐条 kill 各看各的前三行，**全部门着**才叫"选装"；漏一条无条件收尾就是"有"。
+opt_in_flag_ere() { printf '%s' '[{][A-Za-z_][A-Za-z0-9_]*[:-]0[}]|= *"1"'; }
+
+cleanup_state() {  # cleanup_state <file> ⇒ 无 | 有 | 选装
+  local state
+  state=$(code_lines "$1" | awk -v flags="$(opt_in_flag_ere)" '
+    { line[NR] = $0 }
+    END {
+      split("", seen)                       # 强制 seen 是数组（有些 awk 版本会当标量）
+      kills = 0; guarded = 0
+      for (i = 1; i <= NR; i++) {
+        if (line[i] !~ /kill/) continue
+        if (line[i] ~ /kill[[:space:]]+-0[[:space:]]/) continue   # kill -0 是探活，不是收尾
+        kills++
+        hit = 0
+        for (j = i - 3; j <= i; j++) {
+          if (j < 1) continue
+          if (line[j] ~ flags) { hit = 1; break }
+        }
+        if (hit) guarded++
+      }
+      if (kills == 0) print "无"; else if (guarded == kills) print "选装"; else print "有"
+    }')
+  printf '%s' "${state:-无}"
+}
+
+launch_site_count() {  # 命令位启动语句有**几处**（和命中行走同一把尺：原文取，先取后滤注释）
+  # 注意这是"语句处数"，不是"一轮漏几个"：一处写在 for 里就乘遍九页。
+  # 为什么不能用 code_lines 的产物来数：它把反斜杠续行接成一条，于是
+  # `TCODER_PERF_PROBE=1 … \<newline>"$PERF_BIN" &` 接完变成以**环境变量赋值**开头，
+  # 而 ERE 认的是行首 `open`/裸句柄/`env` —— `perf_pulse.sh` 会被数成 0 处。
+  local n
+  n=$(grep -nE "$(launcher_ere)" "$1" | grep -vcE '^[0-9]+:[[:space:]]*#' || true)
+  printf '%s' "${n:-0}"
+}
+
 is_xctrace_launcher() {  # xctrace 的参数跨行，所以两半分别认；且必须**真的**在起这个 App
   local body
   body=$(code_lines "$1")
@@ -129,31 +176,62 @@ if [ -z "$APPVARS" ]; then
   exit 1
 fi
 
-rows=0 offenders=0 mine_unsafe=0
-printf '%s\n' "==> 起实例的形状清单（只报形状、不判因果。App 句柄：$(printf '%s' "$APPVARS" | tr '|' ' ')"
-printf '%-40s %-3s %-5s %-18s %-24s %s\n' "脚本" "收尾" "trap" "广播退" "形状／谁 source" "命中行"
+rows=0 offenders=0 mine_unsafe=0 opt_in_rows=0
+if [ "$TSV" = 0 ]; then
+  printf '%s\n' "==> 起实例的形状清单（只报形状、不判因果。App 句柄：$(printf '%s' "$APPVARS" | tr '|' ' ')"
+  printf '%-40s %-4s %-6s %-5s %-16s %-16s %-18s %s\n' \
+         "脚本" "该收" "kill" "trap" "形状／启动点" "广播退" "source" "命中行"
+fi
+# 【为什么加 --tsv】上面那张表是给人看的：中文字段里带空格（`命令位起 App ×1`），
+# 下游守卫拿 `grep -E 'Y[[:space:]]+无'` 去读它，就会在我把列拆开那天**静默少判一种形状**
+# （旧表 `Y 无` = 没 trap；新表 `Y 无` = 没有 kill，trap 那一格挪到第三位了）。
+# ⇒ 人看表、机器看事实行，两者同源；再要改列只改一处。
 for f0 in "$WATCH_DIR"/*.sh; do
   [ -f "$f0" ] || continue
   verdict=$(classify "$f0")
   need="${verdict%% *}"; shape="${verdict#* }"
   [ "$need" = "?" ] && continue            # 既不启动也不录制 ⇒ 与本题无关，不进表
   base=$(basename "$f0")
-  trap_ok="无";  code_lines "$f0" | grep -q 'trap ' && trap_ok="有"
+  # 两格**各说各的**，不许互相顶替 —— 合并成一格就会重新制造今天的漏：
+  #   kill = 退实例语句是「默认就会跑」(有) / 「全躲在默认关掉的开关后面」(选装) / 没有 (无)；
+  #   trap = 异常路径（Ctrl-C、被杀、中途 return）还收不收。
+  # `ax_tooltip_report.sh`：kill=有 / trap=无（只在正常路径收尾，工单 §K 那个真凶）。
+  # `capture_pages_isolated.sh`：kill=选装 / trap=有，而那把 trap 只删锁目录、不碰实例 ⇒
+  #   两格单看都"没问题"，合起来才是"九页漏九个"。所以两格都印出来，让人自己看见形状。
+  kill_state=$(cleanup_state "$f0")
+  trap_ok="无"; code_lines "$f0" | grep -q 'trap ' && trap_ok="有"
+  [ "$kill_state" = "选装" ] && opt_in_rows=$((opt_in_rows + 1))
+  sites=$(launch_site_count "$f0")
   bcast="否";   code_lines "$f0" | grep -Eq "$SHAPE_BROADCAST" && bcast="是⇒会退掉别人的"
   # 不因"有兄弟脚本 source 它"而豁免：`ax_tooltip_report.sh` 恰恰既被 source、
   # 也能独立跑（今天它就是被独立跑起来的那一个）。宿主是谁只列在图上，由人判。
-  host=""; host=$(sourced_by "$base") && host="被 $host source"
+  host=""; host=$(sourced_by "$base") && host="$host"
   rows=$((rows + 1))
-  if { [ "$need" = "Y" ] && [ "$trap_ok" = "无" ]; } || [ "$bcast" != "否" ]; then
+  # 「该收尾却没无条件收尾」= 起实例 且（kill 不是「有」 或 没 trap）；广播退另算一条。
+  if { [ "$need" = "Y" ] && { [ "$kill_state" != "有" ] || [ "$trap_ok" = "无" ]; }; } \
+     || [ "$bcast" != "否" ]; then
     offenders=$((offenders + 1))
     case "$base" in perf_*) mine_unsafe=$((mine_unsafe + 1)) ;; esac
   fi
-  printf '%-40s %-3s %-5s %-18s %-24s %s\n' "$base" "$need" "$trap_ok" "$bcast" \
-         "$shape${host:+ + $host}" "$(pick_line "$f0")"
+  if [ "$TSV" = 1 ]; then
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$base" "$need" "$kill_state" "$trap_ok" "$bcast" "$sites"
+  else
+    printf '%-40s %-4s %-6s %-5s %-16s %-16s %-18s %s\n' "$base" "$need" "$kill_state" "$trap_ok" \
+           "$shape ×${sites}" "$bcast" "$host" "$(pick_line "$f0")"
+  fi
 done
 
-printf '◇ 认出 %s 个会起 App/录制的脚本，其中 %s 个是"该收尾却没 trap / 会按 bundle id 广播退"的形状（性能侧名下 %s 个）\n' \
+if [ "$TSV" = 1 ]; then
+  # 汇总也走事实行：人那行里「，其中 7 个」是**粘在一个 awk 字段里**的（中文逗号不算分隔），
+  # 下游拿 `$i=="其中"` 去取会取到空串——空串在 `[ "$x" = "2" ]` 里判不过，看着像"扫到了 0 个"。
+  printf '#facts\trows=%s\toffenders=%s\tmine_unsafe=%s\topt_in=%s\n' \
+         "$rows" "$offenders" "$mine_unsafe" "$opt_in_rows"
+  exit 0
+fi
+printf '◇ 认出 %s 个会起 App/录制的脚本，其中 %s 个是"该收尾却没无条件收尾 / 会按 bundle id 广播退"的形状（性能侧名下 %s 个）\n' \
        "$rows" "$offenders" "$mine_unsafe"
+printf '◇ 这 %s 个的退实例语句**全躲在默认关掉的开关后面**（默认不收 ⇒ "跑一轮漏一轮"）\n' "$opt_in_rows"
+printf '   ×N 是启动**语句**处数，不等于实例数：一处写在 for 里就乘遍整个循环。\n' 
 [ "$rows" -gt 0 ] \
   || { printf '!! 一个都没认出（%s/*.sh）——目录扫错了还是形状又改了？这份清单此刻**不作数**。\n' "$WATCH_DIR"; exit 1; }
 if [ "$STRICT" = 1 ] && [ "$mine_unsafe" -gt 0 ]; then
