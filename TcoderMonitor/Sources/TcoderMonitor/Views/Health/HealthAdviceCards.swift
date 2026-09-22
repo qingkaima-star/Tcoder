@@ -90,9 +90,13 @@ struct HealthTrendCard: View {
                      // 副标题与卡内空态标题原本逐字相同（都是「历史点不足」），隔三行念两遍。
                      // 页尾实拍（.scratch/evidence-8de2d17/light-tail/健康评分.png）抓到后改成
                      // "报数"：这一档真正知道的是**有几个点**，"不足"由下面的空态去说。
+                     // ⚠ 这里必须是**整句键 + localizedFormat**，不能是插值拼串：
+                     // 插值串没有可查的键，英文态下卡名翻成 "Score Trend" 而这一行还是中文
+                     // （英文态取证 `64c5418` 实拍照出来的就是这一格）。
                      subtitle: points.count >= 2
-                         ? "共 \(NumberFormat.grouped(points.count)) 个历史点 · 全部来自本机落盘的评分记录"
-                         : "只有 \(NumberFormat.grouped(points.count)) 个历史点",
+                         ? localizedFormat("共 %1$@ 个历史点 · 全部来自本机落盘的评分记录",
+                                           NumberFormat.grouped(points.count))
+                         : localizedFormat("只有 %1$@ 个历史点", NumberFormat.grouped(points.count)),
                      icon: .chartLine,
                      // 「怎么让趋势出现」是这条空态里唯一可操作的部分，不能因为版面就丢掉：
                      // 屏上留判定（少于两个点不画线），完整动线进 ⓘ。少一句就是 B 守恒线要红的。
