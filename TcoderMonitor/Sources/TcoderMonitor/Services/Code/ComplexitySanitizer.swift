@@ -50,6 +50,12 @@ extension ComplexityEngine {
         var untrustedDepthLineCount = 0
         /// 定界符 / 注释**成对**出现在别的语言区域里（Vue 的 template / style），
         /// 按分区归位后不进入代码统计的行数。0 = 该文件没有需要分区的区域。
+        ///
+        /// RD-42（本条原本是"有写无读"）：这一格是**口径**不是"没量准" ⇒ 刻意**不进**
+        /// `limitations` / `hasAnomaly`（那两条走 `scanLimitations`，在 CLI 被打成「未量准 N 条」）。
+        /// 唯一出口是 `FileSystemCodeAnalyzer.analyzeWithCoverage` 把它**直传**进
+        /// `CodeMetrics.nonCodeRegionLineCount`，再由 `MixedLanguageRegionCaliber.note(_:)`
+        /// 装配成一句中文给界面与 CLI；这里再算第二遍就是第二把尺子。
         var nonCodeRegionLineCount = 0
         /// 混合语言文件的分区没认出来，退回旧的粗判掩码（未知态，必须说出来）
         var regionFallback = false
