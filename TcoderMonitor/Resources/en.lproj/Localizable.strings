@@ -775,3 +775,8 @@
 "按内存" = "By memory";
 "开启后需要重新执行分析才会生效。" = "Re-run the analysis for this setting to take effect.";
 "尚未分析覆盖率报告，不参与计分。" = "No coverage report has been analyzed, so it is not scored.";
+
+// WS-R16（RD-14 角色分档进契约）：`CLIScoreText.fileRoleLines` 的两句整句键。
+// 占位符顺序与键一致（`test_catalogPlaceholdersMatch` 逐条比），译文不许增删 %n$@。
+"文件角色分档：生产源码 %1$@ 个 / %2$@ 代码行 · 弱判定 %3$@ 个 · 八档全量与判据分布见 scan 落盘的 code.fileRoles.shares。" = "File roles: %1$@ production files / %2$@ code lines · %3$@ attributed on language evidence alone · the full eight-bucket table and the criterion counts live in code.fileRoles.shares of the scan JSON.";
+"文件角色分档对不平：八档合计 %1$@ 个文件，而本次扫到 %2$@ 个，相差 %3$@ 个 —— 两边不是同一个总体，要么有文件没归进任何一档，要么有文件被记进了两档，这份分档要按读数打折使用。" = "File role buckets do not reconcile: the eight buckets total %1$@ files while this scan saw %2$@, a difference of %3$@ - the two sides are not the same population, so either some files were never bucketed or some landed in two buckets; discount this breakdown.";
