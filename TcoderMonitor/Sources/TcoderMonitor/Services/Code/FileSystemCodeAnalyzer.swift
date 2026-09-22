@@ -61,7 +61,8 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         let coverage = Self.coverage(from: scan, duplication: duplication, options: options, lex: lex)
         // 契约接入（P7-C 3-2）：判据用 `limitationSummary` 非空而不是 `isPartial` —— 前者还含
         // 「按规则排除了多少条目」这类**范围**事实，读者要知道数字是在什么范围内测出来的。
-        let limits = coverage.limitationSummary + ComplexityEngine.JavaSignatureDeclines.notes(for: files)
+        let limits = coverage.limitationSummary + coverage.surfaceNotes
+            + ComplexityEngine.JavaSignatureDeclines.notes(for: files)
         metrics.scanLimitations = limits.isEmpty ? nil : limits
         return AnalysisOutcome(metrics: metrics, coverage: coverage)
     }
@@ -123,6 +124,14 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
 
         metrics.duplicationRatio = duplication.ratio
         metrics.duplicatedBlocks = duplication.blocks
+        // RD-48：把引擎早就算好的"榜外那一半"直传进契约（**逐枚原样赋值，不做任何加减**）。
+        // 之前这四个数只进 `scanLimitations` 的中文句子，界面上"上限 20 块"那格其实是
+        // 在按句式认领一句散文；落成字段之后，页尾句改成由数字装配，读 JSON 的人也不必再解析句子。
+        metrics.duplicatedBlockLimit = DuplicationEngine.maxBlocks
+        metrics.duplicatedBlocksDroppedByCap = duplication.blocksDroppedByCap
+        metrics.duplicatedLinesOutsideReportedBlocks = duplication.linesOutsideReportedBlocks
+        metrics.duplicateFragmentsNotExpandedCount = duplication.fragmentsDroppedByBudget
+        metrics.duplicateFilesHittingLineCap = duplication.filesHittingLineCap
         metrics.overallRisk = overallRisk(
             metrics: metrics,
             hotspotCount: hotspots.count,
@@ -152,7 +161,11 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             lexAnomalousFileCount: lex.anomalousFileCount,
             unboundedFunctionSignatureCount: lex.unboundedSignatureCount,
             vueRegionFallbackFileCount: lex.vueRegionFallbackFileCount,
-            skipLedger: scan.skipLedger
+            skipLedger: scan.skipLedger,
+            roleTally: SourceRoleTally(of: scan.files),
+            treeFollowing: scan.treeFollowing,
+            duplicateBlockCoordinatesOutsideBoard: duplication.blocksOutsideBoard,
+            duplicationBoardCaliber: duplication.blocksDroppedByCap > 0 ? duplication.boardCaliberNote : ""
         )
     }
 
