@@ -172,7 +172,8 @@ struct LanguageShare: Codable, Equatable, Hashable, Identifiable, Sendable {
 
 /// 一个文件角色的分档读数。
 ///
-/// `role` 存 `SourceFileRole.rawValue`（英文小写、稳定坐标），**不存中文档名** ——
+/// `role` 存 `SourceFileRole.rawValue`（枚举 case 名原样，如 `production`、`buildArtifact`；
+/// 稳定坐标），**不存中文档名** ——
 /// 中文只由枚举的 `displayName` 一处产出；在文案里手写第二份档名名单，
 /// 新增一档时那句话就会静默漏报（与 `HealthDimension.repositoryScoped` 同一条教训）。
 struct CodeFileRoleShare: Codable, Equatable, Sendable {
