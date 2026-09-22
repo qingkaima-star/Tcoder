@@ -250,6 +250,16 @@ selfcheck_launcher_hygiene() {  # selfcheck_launcher_hygiene <outdir>
   #        多实例在场时"退掉一个"根本不含"退掉我起的那个"）。
   # 范围只扫 `scripts/perf_*`：并行多流时各家只守自己名下目录，别家的红由别家自己修
   # （§K 已把主树那两个 offender 连同证据报出去了，那才是正确的动作）。
+  #
+  # 合法形状有**两种**，别把第二种当成漏网（也别拿第二种给第一种开脱）：
+  #   ① `open "$APP/…"` 起实例 ⇒ 必须自己 trap 收尾（本循环判的就是这一种）；
+  #   ② `xctrace record --launch -- "$PERF_BIN"` 起实例 ⇒ 那个进程是 **xctrace 收养的子进程**，
+  #      按 xctrace 的语义随录制结束而死，所以 `perf_switch.sh` 里一个 `open` 都没有，
+  #      也就不需要 trap。**这一条我只验到"形状不同"，没验到"确实不泄漏"**：
+  #      哪天发现杀 xctrace（含被 -9）之后被测进程还活着，这条就要改成 ① 并补 trap，
+  #      不许拿"它是 ②"当长期豁免的借口。
+  #      判据仍然成立：谁改用 ① 的形状，这个循环当场就红——它扫的是"文件里有 open"，
+  #      与"这个文件现在恰好没有 open"无关。
   local f bad=0
   for f in scripts/perf_*.sh; do
     grep -Eq '(^|[[:space:]])open "[^"]*\$\{?(APP|START_BIN)' "$f" || continue
