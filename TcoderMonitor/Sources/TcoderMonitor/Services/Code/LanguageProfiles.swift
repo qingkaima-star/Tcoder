@@ -48,6 +48,10 @@ extension ComplexityEngine {
         var quotes: Set<Character> = ["\"", "'"]
         var allowTrailingSemicolonEnd = true
         var scriptRegionOnly = false
+        /// 归一化之后的语言名。**逐行换档案时要靠它判断"是不是换了语言"**：
+        /// Vue 的 `<script>` / `<template>` / `<style>` 三个区域各有各的词法，
+        /// 跨区域时必须把上一层未闭合的定界符结算掉（R2，RD-07）。
+        var languageKey = ""
         // 圈复杂度按语言取子集：关键字集合 + 参与判定的符号种类
         var branchKeywords: Set<String> = []
         var countsLogicalSymbols = true
@@ -58,6 +62,10 @@ extension ComplexityEngine {
         /// 只有 JS/TS/Vue 的反引号模板串会做 `${}` 插值；Go 的反引号原始串是纯字面量，
         /// 若也按模板处理，串里的 `${` 会让状态机卡在「表达式内」，把原始串当代码统计花括号。
         var backtickInterpolates = false
+        /// 只有 JS/TS/Vue 有正则字面量这一档（R2，RD-06 夹具 4）：
+        /// `/`.*\$\{(/` 里的反引号与 `${` 都是正则内容，不是模板串开头。
+        /// 判定保守 —— 本行内配不上对就退回普通字符，绝不吞行。
+        var regexLiterals = false
     }
 
     /// 正则编译缓存。签名 pattern 是热点：每个文件都要走一遍 profile → 每条 pattern 建一个
@@ -113,6 +121,7 @@ extension ComplexityEngine {
     static func profile(for language: String) -> LangProfile {
         let canonical = canonicalLanguage(language)
         var profile = LangProfile()
+        profile.languageKey = canonical
         profile.family = family(of: canonical)
         profile.patterns = patterns(of: canonical)
         profile.parenOnEveryPattern = profile.patterns.allSatisfy { $0.needsParen }
@@ -126,6 +135,9 @@ extension ComplexityEngine {
         profile.allowTrailingSemicolonEnd = profile.family == .curly
         profile.scriptRegionOnly = canonical == "Vue"
         profile.backtickInterpolates = canonical == "TypeScript" || canonical == "JavaScript" || canonical == "Vue"
+        // 正则字面量这一档只给有它的那三家（R2 / RD-06 夹具 4）。
+        // 不给 Go/Rust/C：它们的 `/` 后面跟的多半是除法或路径，白担一份误吞风险。
+        profile.regexLiterals = canonical == "TypeScript" || canonical == "JavaScript" || canonical == "Vue"
         profile.branchKeywords = branchKeywords(for: canonical)
         profile.countsLogicalSymbols = canonical != "Python" && canonical != "HTML"
         profile.countsTernary = canonical != "Python" && canonical != "Go"

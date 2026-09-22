@@ -39,6 +39,17 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         /// 遍历中读不动的目录数（权限 / 竞态消失）。这些子树里的文件**一个都没看到**，
         /// 与"看了、没有"是两件事 —— 见 `SourceScanResult.unreadableDirectoryCount`。
         var unreadableDirectoryCount: Int = 0
+        /// R2（RD-06 / RD-07）：**函数识别这一路的词法完整性汇总**，各文件 `LexIntegrity` 相加。
+        /// `hasAnomaly` 为真 ⇒ 函数条数、边界、复杂度都是在「有些行没进统计」的范围里量出来的，
+        /// 是一份**部分测量**：HEAD 之前这一格不存在，未闭合模板串把后面整段吃掉时，
+        /// 界面上读起来就是「这个仓库 0 个函数」。
+        var lexIntegrity: ComplexityEngine.LexIntegrity = ComplexityEngine.LexIntegrity()
+        /// 有词法异常的文件数（异常分布在几个文件上，比"共 N 处"更有用）
+        var lexAnomalousFileCount: Int = 0
+        /// 命中了函数签名、但边界推不出来而放弃的总数
+        var unboundedFunctionSignatureCount: Int = 0
+        /// `.vue` 分区认不出来、退回旧 `<script` 粗判掩码的文件数
+        var vueRegionFallbackFileCount: Int = 0
         var skipLedger: SourceSkipLedger = SourceSkipLedger()
 
         /// 有任一**上限**真的生效过 ⇒ 这份数字是部分测量，UI 不得当成全量展示。
@@ -47,6 +58,8 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             truncatedByMaxFiles || lineTruncatedFileCount > 0 || skippedFileCount > 0
                 || filesHittingDuplicateLineCap > 0 || duplicateFragmentsDroppedByBudget > 0
                 || duplicateBlocksDroppedByCap > 0 || unreadableDirectoryCount > 0
+                || lexIntegrity.hasAnomaly || unboundedFunctionSignatureCount > 0
+                || vueRegionFallbackFileCount > 0
         }
 
         /// 有多少条目是按规则排除的（范围问题），与「被上限切掉」分开报，两件事混在一起用户就没法判断偏差方向。
@@ -92,6 +105,20 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
                     + "未列出 \(NumberFormat.grouped(duplicateBlocksDroppedByCap)) 个块 / "
                     + "\(NumberFormat.grouped(duplicateLinesOutsideReportedBlocks)) 行）。")
             }
+            // R2：「配不平 / 边界不可信 / 分区退回」必须进同一本限制账，否则部分测量在屏上与全量一模一样。
+            lines.append(contentsOf: lexIntegrity.limitations)
+            if lexAnomalousFileCount > 0 {
+                lines.append("上述词法问题分布在 \(NumberFormat.grouped(lexAnomalousFileCount)) 个文件里："
+                    + "这些文件的函数条数与复杂度**只能当部分测量读**，不能读成「这个文件没有函数」。")
+            }
+            if unboundedFunctionSignatureCount > 0 {
+                lines.append("\(NumberFormat.grouped(unboundedFunctionSignatureCount)) 处函数签名命中后"
+                    + "边界推不出来（花括号配不平或未闭合），这些函数没有进入统计。")
+            }
+            if vueRegionFallbackFileCount > 0 {
+                lines.append("\(NumberFormat.grouped(vueRegionFallbackFileCount)) 个 .vue 文件没被认出任何顶格"
+                    + " SFC 区块，函数识别退回旧的 `<script` 粗判掩码 —— 这些文件的模板区可能混进了代码统计。")
+            }
             return lines
         }
     }
@@ -122,14 +149,17 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         let scan = await SourceTreeScanner(options: options).scan(root: root)
         let files = scan.files
 
-        let functionTask = Task.detached(priority: .userInitiated) { () -> [[FunctionCandidate]] in
-            files.map { ComplexityEngine.functions(in: $0) }
+        let functionTask = Task.detached(priority: .userInitiated) { () -> [ComplexityEngine.FunctionScanOutcome] in
+            files.map { ComplexityEngine.functionsWithIntegrity(in: $0) }
         }
         let duplicationTask = Task.detached(priority: .userInitiated) { () -> DuplicationResult in
             DuplicationEngine.analyze(files)
         }
-        let functionsPerFile = await functionTask.value
+        let functionOutcomes = await functionTask.value
+        let functionsPerFile: [[FunctionCandidate]] = functionOutcomes.map(\.candidates)
         let duplication = await duplicationTask.value
+        // R2：逐文件词法读数汇总成「这一路的测量范围」；只报一处会把其余文件藏起来。
+        let lex = ComplexityEngine.LexAggregate.accumulate(functionOutcomes)
 
         var metrics = CodeMetrics()
         metrics.scannedAt = startedAt
@@ -140,21 +170,7 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             duplication: duplication,
             to: &metrics
         )
-        let coverage = CodeScanCoverage(
-            visitedEntryCount: scan.visitedFileCount,
-            includedFileCount: scan.scannedFileCount,
-            skippedFileCount: scan.skippedFileCount,
-            truncatedByMaxFiles: scan.truncatedByMaxFiles,
-            maxFiles: options.maxFiles,
-            maxFileBytes: options.maxFileBytes,
-            lineTruncatedFileCount: scan.lineTruncatedFileCount,
-            filesHittingDuplicateLineCap: duplication.filesHittingLineCap,
-            duplicateFragmentsDroppedByBudget: duplication.fragmentsDroppedByBudget,
-            duplicateBlocksDroppedByCap: duplication.blocksDroppedByCap,
-            duplicateLinesOutsideReportedBlocks: duplication.linesOutsideReportedBlocks,
-            unreadableDirectoryCount: scan.unreadableDirectoryCount,
-            skipLedger: scan.skipLedger
-        )
+        let coverage = Self.coverage(from: scan, duplication: duplication, options: options, lex: lex)
         // 契约接入（P7-C 3-2）：判据用 `limitationSummary` 非空而不是 `isPartial` —— 前者还含
         // 「按规则排除了多少条目」这类**范围**事实，读者要知道数字是在什么范围内测出来的。
         let limits = coverage.limitationSummary + ComplexityEngine.JavaSignatureDeclines.notes(for: files)
@@ -218,6 +234,32 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             metrics: metrics,
             hotspotCount: hotspots.count,
             longestFileLines: largest
+        )
+    }
+
+    /// 覆盖度台账的装配。从 `analyzeWithCoverage` 里搬出来只为一件事：
+    /// 那条链路本身只有「扫 → 两路并行 → 摆字段」四步，摊在一起就成 60 行的超长函数了
+    /// （本包的自扫门 `CodeComplexityDebtTests` 管这条）。
+    private static func coverage(from scan: SourceScanResult, duplication: DuplicationResult,
+                                 options: ScanOptions, lex: ComplexityEngine.LexAggregate) -> CodeScanCoverage {
+        return CodeScanCoverage(
+            visitedEntryCount: scan.visitedFileCount,
+            includedFileCount: scan.scannedFileCount,
+            skippedFileCount: scan.skippedFileCount,
+            truncatedByMaxFiles: scan.truncatedByMaxFiles,
+            maxFiles: options.maxFiles,
+            maxFileBytes: options.maxFileBytes,
+            lineTruncatedFileCount: scan.lineTruncatedFileCount,
+            filesHittingDuplicateLineCap: duplication.filesHittingLineCap,
+            duplicateFragmentsDroppedByBudget: duplication.fragmentsDroppedByBudget,
+            duplicateBlocksDroppedByCap: duplication.blocksDroppedByCap,
+            duplicateLinesOutsideReportedBlocks: duplication.linesOutsideReportedBlocks,
+            unreadableDirectoryCount: scan.unreadableDirectoryCount,
+            lexIntegrity: lex.integrity,
+            lexAnomalousFileCount: lex.anomalousFileCount,
+            unboundedFunctionSignatureCount: lex.unboundedSignatureCount,
+            vueRegionFallbackFileCount: lex.vueRegionFallbackFileCount,
+            skipLedger: scan.skipLedger
         )
     }
 
