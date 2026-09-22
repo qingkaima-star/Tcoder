@@ -10,6 +10,16 @@ struct DependencyReport: Codable, Equatable, Sendable {
     var networkLookupPerformed: Bool = false
     var networkLookupNote: String = ""
 
+    /// **版本核对**这一路的账本（内置快照 + 在线 registry）。nil = 这一路没记过账
+    /// （旧报告 / 别的调用方产出的报告），此时消费端一律按"没核对"处理，不做文案猜测。
+    var versionLookup: DependencyLookupEvidence?
+    /// **漏洞核对**这一路的账本（内置规则 + OSV）。与上面那格分开存，
+    /// 因为"版本查成功"与"漏洞查成功"是两件事 —— 合成一格就会重演 RD-11 的冒充。
+    var vulnerabilityLookup: DependencyLookupEvidence?
+    /// 分 scope 的依赖统计（runtime / dev / test / build / platform / 未标注）。
+    /// nil = 没统计过；存在则各桶相加 == `totalDependencies`（守卫用例钉住）。
+    var scopeBreakdown: [DependencyScopeCount]?
+
     var totalDependencies: Int { ecosystems.reduce(0) { $0 + $1.dependencies.count } }
     var productionCount: Int {
         ecosystems.reduce(0) { $0 + $1.dependencies.filter { !$0.isDevDependency }.count }
@@ -151,6 +161,14 @@ struct DependencyRecord: Codable, Equatable, Hashable, Identifiable, Sendable {
     /// 与 `resolvedVersion` 同生同灭：只有真读出解析值时才写，否则两个都是 nil。
     var resolvedVersionSource: String?
 
+    /// 逐条依赖的**版本核对**状态（有没有拿到可用的"最新已知版本"）。
+    /// 谁写：`ManifestDependencyAnalyzer`（内置快照 + registry 两条路各记一次结局）。
+    /// 谁读：依赖行、总览、健康评分、无头出口 —— 四方同一份，禁止各自再推一遍。
+    var versionCheckState: DependencyCheckState?
+    /// 逐条依赖的**漏洞核对**状态。与上面那格**必须分开**：
+    /// "npm 版本查成功"不等于"OSV 查过这条"（RD-11 点名的冒充关系）。
+    var vulnerabilityCheckState: DependencyCheckState?
+
     var id: String { "\(ecosystem.rawValue):\(manifestPath):\(name)" }
 
     var isDevDependency: Bool { scope == .dev }
@@ -175,10 +193,80 @@ enum DependencyScope: String, Codable, Sendable {
     case unknown = "未标注"
 }
 
+/// 一个 scope 的统计格（RD-13c：runtime / dev / test / build 分别汇总，不许混成一个数）。
+///
+/// `scope` 用 `DependencyScope.rawValue`（中文）原样存，是为了让 JSON 出口自解释；
+/// 三个计数分别回答三个不同的问题，缺一个就会有人拿"总数"当"核对数"用。
+struct DependencyScopeCount: Codable, Equatable, Sendable {
+    var scope: String = DependencyScope.unknown.rawValue
+    /// 该 scope 下声明的依赖条数。
+    var declared: Int = 0
+    /// 其中**漏洞核对确实成功**的条数（`.checked`）—— "未发现漏洞"只能按这个数说。
+    var vulnerabilityChecked: Int = 0
+    /// 其中版本核对拿到可用结果的条数。
+    var versionChecked: Int = 0
+    /// 其中带已知漏洞命中的条数。
+    var vulnerable: Int = 0
+}
+
 enum VersionCheckSource: String, Codable, Sendable {
     case none = "无数据"
     case bundledSnapshot = "内置快照"
     case onlineRegistry = "在线源"
+}
+
+// MARK: - 核对状态（RD-11：版本核对与漏洞核对是两件事，逐条各记一份）
+
+/// 一条依赖在**某一个核对维度**上到底走到哪一步了。六态是用户点名的最小集：
+/// 「未查 / 查失败 / 版本没解析出来 / 生态不支持 / 预算没覆盖到 / 成功」
+/// 必须先能互相区分，"未发现漏洞"这句话才谈得上诚实。
+///
+/// 为什么是 `String` 原始值 + 住在契约里：这三处消费者（依赖行、总览、健康评分）
+/// 读的是**同一份落盘证据**，而 CLI 与 GUI 共用 `ProjectReport` 这一个 schema
+/// （AGENTS §5.9 第 2 条）—— 状态只能长在契约上，放不进视图的派生类型里，
+/// 否则无头出口与界面就会各算一套（那正是本轮要消灭的 X6 证据链断裂）。
+enum DependencyCheckState: String, Codable, CaseIterable, Sendable {
+    /// 这一路根本没发起（默认离线、或该记录没进批次）。
+    case notAttempted = "未查"
+    /// 发起了且拿到了可用结果（查成功，命中与否另说）。
+    case checked = "已核对"
+    /// 发起了但请求失败 / 超时 / 响应解不出来。
+    case failed = "核对失败"
+    /// 声明的是范围且没有任何锁文件把它解析成确切版本 ⇒ 没资格进查询。
+    case versionUnresolved = "版本未解析"
+    /// 该生态不在数据源覆盖范围内（OSV 不查 SwiftPM / CocoaPods；快照没收录该包）。
+    case ecosystemUnsupported = "生态不支持"
+    /// 生态支持、版本也可解析，但被单次上限 / 时间预算挡在门外，没进批次。
+    case budgetExcluded = "预算未覆盖"
+
+    /// 这个状态算不算"确实核对过"。**只有 `.checked` 算**——
+    /// 任何把 `attempted`、`networkLookupPerformed` 当"核对过"用的写法都是 RD-11 的靶子。
+    var isCovered: Bool { self == .checked }
+}
+
+/// 一条核对路径的账本（报告级）。
+///
+/// 字段全部非 Optional 且随父字段整体缺席：**键不存在 = 这一路没测过**；
+/// 存在则每个数都是数出来的（0 就是真的 0）。这是 AGENTS §5.9 第 2 条
+/// "缺数据靠整键缺席表达"的形状，`failed = 0` 与"没记 failed"不能混。
+struct DependencyLookupEvidence: Codable, Equatable, Sendable {
+    /// 数据源标签："OSV" / "npm registry" / "内置快照"。
+    var source: String = ""
+    /// 本次纳入统计的记录总数（逐条状态相加应等于它，由守卫用例钉住）。
+    var totalRecords: Int = 0
+    var attempted: Int = 0
+    var checked: Int = 0
+    var failed: Int = 0
+    var versionUnresolved: Int = 0
+    var ecosystemUnsupported: Int = 0
+    var budgetExcluded: Int = 0
+    /// 查询用的规范化身份说明（例如"按声明下界查询"占了多少条），供出口原文引用。
+    var lowerBoundQueries: Int = 0
+
+    /// 这一路有没有**真的**核对过（不是"尝试过"）。
+    var hasCoverage: Bool { checked > 0 }
+    /// 是否留了尾巴：失败 / 未覆盖 / 预算没到，任意一项都要出声。
+    var isPartial: Bool { failed > 0 || budgetExcluded > 0 || versionUnresolved > 0 || ecosystemUnsupported > 0 }
 }
 
 struct SecurityAdvisory: Codable, Equatable, Hashable, Identifiable, Sendable {

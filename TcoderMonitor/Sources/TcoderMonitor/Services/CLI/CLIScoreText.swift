@@ -83,10 +83,28 @@ enum CLIScoreText {
 
     /// "没查 ≠ 没有病"这句在界面上是常驻提示，CLI 里以前只把
     /// `networkLookupPerformed=false` 埋在 JSON 里 —— AI 不翻那个键就会把"0 条漏洞"当结论。
-    /// 文案沿用分析器自己产出的那句，不在这里另写一份。
+    ///
+    /// RD-11 之后这一行必须把**状态**说出来，而不是只给一句说明：
+    /// 逐条核对结果的六态分档、已成功核对的条数、数据源，一次讲清；
+    /// 没核对成时明确写"这不是没有漏洞"。文案仍沿用分析器自述的那句，不在这里另写一份口径。
     private static func networkCaveat(_ report: ProjectReport) -> [String] {
-        guard let note = report.dependencies?.networkLookupNote, !note.isEmpty else { return [] }
-        return ["漏洞核对：\(note)"]
+        guard let deps = report.dependencies else { return ["漏洞核对：无（依赖分析这一路没有产出）"] }
+        let ledger = DependencyEvidence.ledger(for: deps)
+        var lines: [String] = []
+        var status = "漏洞核对：已核对 \(ledger.vulnerabilityCheckedCount)/\(ledger.totalCount)"
+        let tail = DependencyEvidence.tailPieces(ledger)
+        if !tail.isEmpty { status += "，未覆盖：\(tail.joined(separator: localizedCopy("、")))" }
+        let source = DependencyEvidence.sourcesPhrase(ledger)
+        if !source.isEmpty { status += "；数据源：\(source)" }
+        status += ledger.vulnerabilityCheckedCount == ledger.totalCount && ledger.totalCount > 0
+            ? "（全量覆盖）" : " —— 这是「没查全」，不是「没有漏洞」"
+        lines.append(status)
+        let versionLine = "版本核对：已核对 \(ledger.versionCheckedCount)/\(ledger.totalCount)"
+            + "，未覆盖：\(DependencyEvidence.tailOfVersionStates(for: ledger))"
+        lines.append(versionLine)
+        lines.append(contentsOf: DependencyScopeLines.lines(deps))
+        if !deps.networkLookupNote.isEmpty { lines.append("核对说明：\(deps.networkLookupNote)") }
+        return lines
     }
 
     private static func codeScopeLines(_ scope: HealthSubScore?) -> [String] {

@@ -130,7 +130,7 @@ extension DependencyNetworkLookup {
                 )
                 if ([id] + (vuln.aliases ?? [])).contains(where: { covered.contains($0) }) { continue }
                 if ecosystem == nil { ecosystem = queryEcosystem }
-                packages.append("\(query.package)@\(query.version)")
+                packages.append(query.coordinate)   // RD-12：与查询侧同一个 key，回填才接得上
             }
             guard let ecosystem else { continue }
             advisories.append(makeAdvisory(id: id, vuln: vuln, ecosystem: ecosystem,
