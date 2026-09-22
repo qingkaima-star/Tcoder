@@ -170,4 +170,25 @@ extension CodeGitRestyleTests {
         XCTAssertEqual(CodeDuplicationBlockRow.occurrenceLines(few, root: "/src").count, 2)
     }
 
+
+    /// 批次 P41（乱清单 §4）：建议列的左线只说「要不要现在动手」，不许说「没事」。
+    ///
+    /// 三条判据各挡一种偷懒：① 全档不得出现 success（绿）；
+    /// ② 低档必须与同列里本来就写死 neutral 的那几行同色——同一档两种色就是缺陷本体；
+    /// ③ 中/高/严重三档**不许被顺手抹平**（有人会用「一律 neutral」来过 ① 和 ②）。
+    func testAdviceRoleNeverPaintsASuggestionAsAllClear() {
+        for risk in RiskLevel.allCases {
+            XCTAssertNotEqual(CodeRiskAnalysis.adviceRole(for: risk), Theme.Semantic.success,
+                              "风险档 \(risk.rawValue) 的建议行还是绿的：绿在这套语言里是「查过、没问题」")
+        }
+        for calm in [RiskLevel.none, .low] {
+            XCTAssertEqual(CodeRiskAnalysis.adviceRole(for: calm), Theme.Semantic.neutral,
+                           "\(calm.rawValue) 档与同列「重复率低」那行不同色：同一档两种色")
+        }
+        for urgent in [RiskLevel.medium, .high, .critical] {
+            XCTAssertEqual(CodeRiskAnalysis.adviceRole(for: urgent), Theme.Semantic.role(for: urgent),
+                           "\(urgent.rawValue) 档被顺手降级了：这条改的是低档的颜色语义，不是把急不急抹平")
+        }
+    }
+
 }

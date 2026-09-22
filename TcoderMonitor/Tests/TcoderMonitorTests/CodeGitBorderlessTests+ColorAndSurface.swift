@@ -68,6 +68,34 @@ extension CodeGitBorderlessTests {
                           + "\(corners)")
     }
 
+
+    /// 建议列里不许再出现"直接吃风险档的角色"：`role(for:)` 把 `.low` 映射成 `success`，
+    /// 于是一条动手建议被涂成"不用管"（乱清单 §4）。
+    ///
+    /// 作用域**只限 `*Advice.swift`** —— 公告行、风险徽标那些 `role(for:)` 说的是
+    /// "这个对象有多严重"，那是合法的状态色，把它们一起抓走就是把判据扩到越界。
+    static func adviceItemsWithRawRiskRole(in files: [(path: String, content: String)]) -> [String] {
+        files.filter { $0.path.hasSuffix("Advice.swift") }.flatMap { file in
+            numberedCodeLines(file.content).compactMap { entry in
+                guard entry.text.contains("role: Theme.Semantic.role(for:") else { return nil }
+                return "\(file.path):\(entry.n): "
+                    + entry.text.trimmingCharacters(in: .whitespaces).prefix(60)
+            }
+        }
+    }
+
+    func test_adviceRowsDoNotTakeRawRiskRoles() throws {
+        let pages = try Self.pageSourceFiles()
+        // 分母先出声：一条零命中即通过的扫描，判据在不在跑都不知道。
+        XCTAssertTrue(pages.contains { $0.path.hasSuffix("Advice.swift") },
+                      "扫描面里根本没有建议文件（路径口径变了？），这条判据是在跟空集合说话")
+        let hits = Self.adviceItemsWithRawRiskRole(in: pages)
+        XCTAssertTrue(hits.isEmpty,
+                      "改进建议这一列又直接吃风险档了：低档会被映射成绿，"
+                          + "而这一列只回答「要不要现在动手」。改走 CodeRiskAnalysis.adviceRole(for:)：\n"
+                          + hits.joined(separator: "\n"))
+    }
+
     /// SwiftUI **形状构造**里的裸圆角：`RoundedRectangle(cornerRadius: 4)`。
     ///
     /// 判据刻意只认这个形状，不认 `Path(roundedRect:cornerRadius:)` —— 后者是
