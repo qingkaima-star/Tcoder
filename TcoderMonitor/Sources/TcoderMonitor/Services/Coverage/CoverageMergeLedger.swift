@@ -106,6 +106,12 @@ struct CoverageMergeLedger: Equatable, Sendable {
 
     var droppedCount: Int { dropped.count }
 
+    /// §6.1 显示形状（三道截断共用那**一个**形状）。台账与落盘都从这一处取数，
+    /// 不留第二个算式：`CoverageMetrics` 里那 6 格就是它抄过去的。
+    var displayShape: CoverageDisplayShape {
+        CoverageDisplayShape.evaluate(discovery: discovery, displayedCount: consideredCount)
+    }
+
     /// "有可核对的证据没并进总数"—— 这句话**只**由它回答，与 `mergeConfident`（身份齐不齐）
     /// 是两件事，压进同一个布尔就会分不清"没测"与"测了但可疑"。
     var evidenceLeftOut: Bool {
@@ -142,10 +148,10 @@ struct CoverageMergeLedger: Equatable, Sendable {
                 .sorted()
             parts.append("读取失败 " + grouped.joined(separator: "、"))
         }
-        parts.append(contentsOf: discovery.notes)
+        parts.append(contentsOf: displayShape.statementParts)
         if !unattributedRunPaths.isEmpty {
             let sorted = unattributedRunPaths.sorted()
-            let named = sorted.prefix(3).map { ($0 as NSString).lastPathComponent }
+            let named = sorted.prefix(3).map(coverageCoordinateShort)   // 只报 basename 等于没点名
             let head = sorted.count == 1 ? "这份报告认不出属于哪次运行"
                                         : "\(sorted.count) 份报告认不出属于哪次运行"
             parts.append(head + "：" + named.joined(separator: "、")

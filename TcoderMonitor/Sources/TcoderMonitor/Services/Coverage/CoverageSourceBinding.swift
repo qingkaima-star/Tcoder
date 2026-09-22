@@ -27,6 +27,13 @@ struct CoverageSourceState: Codable, Equatable, Sendable {
     var headCommitDate: Date?
     /// 读 git 失败的原因（人话）。`nil` = 读成功。有值 ⇒ 下面两个字段的可信度作废。
     var readFailure: String?
+    /// **`.git` 实际落在哪个目录**（提交身份的来源坐标）。
+    /// `nil` = 没读到仓库。等于被扫根 = 项目自己就是仓库根；**不等于** ⇒ 提交号来自**父链上那个
+    /// 更大的仓库**，它说的不是"这个项目自己的提交"（本仓 §25 点名的"外层仓库提交号冒充被扫总体"）。
+    var repositoryRoot: URL?
+    /// `repositoryRoot` 相对**被扫根**的坐标：`"."` = 被扫目录自己，`".."` / `"<b>` = 往外 B 层。
+    /// 用相对形状而不是绝对路径：绝对路径换机器就换（本轮实测踩过 `/var` ↔ `/private/var`）。
+    var repositoryCoordinate: String?
 
     static let unavailable = CoverageSourceState(headCommit: nil, headCommitDate: nil,
                                                  readFailure: "非 git 仓库或 git 读取失败")
@@ -36,36 +43,52 @@ struct CoverageSourceState: Codable, Equatable, Sendable {
     /// 只跑一次 `git`，失败一律降级成"未知"而不是"干净"。
     /// 分析器跑在 `Task.detached` 里，这里的阻塞式 `waitUntilExit` 不碰主线程。
     static func read(at root: URL, timeout: TimeInterval = 5) -> CoverageSourceState {
-        guard FileManager.default.fileExists(atPath: root.appendingPathComponent(".git").path)
-                || hasGitDirectoryUpwards(from: root) else {
+        guard let repository = repositoryDirectory(for: root) else {
             return CoverageSourceState(headCommit: nil, headCommitDate: nil,
                                        readFailure: "所选目录内没有 .git，谈不上提交绑定")
         }
         guard let commit = runGit(["rev-parse", "HEAD"], at: root, timeout: timeout),
               !commit.isEmpty else {
             return CoverageSourceState(headCommit: nil, headCommitDate: nil,
-                                       readFailure: "git rev-parse HEAD 没拿到结果")
+                                       readFailure: "git rev-parse HEAD 没拿到结果",
+                                       repositoryRoot: repository,
+                                       repositoryCoordinate: coordinate(of: repository, relativeTo: root))
         }
         let stamp = runGit(["log", "-1", "--format=%ct"], at: root, timeout: timeout)
             .flatMap { Int($0) }
             .map { Date(timeIntervalSince1970: Double($0)) }
         return CoverageSourceState(headCommit: String(commit.prefix(12)),
                                    headCommitDate: stamp,
-                                   readFailure: stamp == nil ? "拿到 HEAD，但读不到提交时刻" : nil)
+                                   readFailure: stamp == nil ? "拿到 HEAD，但读不到提交时刻" : nil,
+                                   repositoryRoot: repository,
+                                   repositoryCoordinate: coordinate(of: repository, relativeTo: root))
     }
 
     /// lcov 里的 `SF:` 常是绝对路径，报告也可能落在被扫目录的子目录里 ——
     /// 两种情况都要能在**被扫目录及其父链**上找到 `.git` 才算 git 仓库。
-    private static func hasGitDirectoryUpwards(from root: URL) -> Bool {
+    /// ⚠ 但**找到在哪儿必须一起记下来**：用户扫的是某个大仓库的子目录时，父链上的 HEAD 是真的，
+    /// 可它绑的是那个大仓库；把它当成"这个项目自己的提交"就是冒充（`repositoryCoordinate` 说清）。
+    private static func repositoryDirectory(for root: URL) -> URL? {
         var directory = root.standardizedFileURL
         while true {
             if FileManager.default.fileExists(atPath: directory.appendingPathComponent(".git").path) {
-                return true
+                return directory
             }
             let parent = directory.deletingLastPathComponent()
-            if parent.path == directory.path { return false }
+            if parent.path == directory.path { return nil }
             directory = parent
         }
+    }
+
+    /// 仓库根相对被扫根的坐标：`"."` = 就是被扫目录；`".."` / `"../.."` = 往外几层；
+    /// `"sub"` = 被扫根里另有一个更小的仓库（读的人据此判断提交号是谁的）。
+    private static func coordinate(of repository: URL, relativeTo root: URL) -> String {
+        var left = repository.standardizedFileURL.path.split(separator: "/", omittingEmptySubsequences: true)
+        var right = root.standardizedFileURL.path.split(separator: "/", omittingEmptySubsequences: true)
+        while let a = left.first, let b = right.first, a == b { left.removeFirst(); right.removeFirst() }
+        let up = Array(repeating: "..", count: right.count).joined(separator: "/")
+        if left.isEmpty { return right.isEmpty ? "." : up }
+        return up.isEmpty ? left.joined(separator: "/") : up + "/" + left.joined(separator: "/")
     }
 
     private static func runGit(_ arguments: [String], at root: URL, timeout: TimeInterval) -> String? {

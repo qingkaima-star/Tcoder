@@ -27,6 +27,9 @@ struct CoverageCandidate: Sendable {
     /// `nil` = 非 git 目录 / git 读失败 ⇒ 身份层的"源码指纹"这一格就是缺的，
     /// 必须由 `CoverageMergeConfidence` 点名，不许悄悄当"没这个问题"。
     var sourceFingerprint: String? = nil
+    /// 上面那个提交号**是从哪个仓库**读到的（相对被扫根的坐标，`"."` = 被扫目录自己）。
+    /// 沿父链找 `.git` 时它会是 `".."` 形状 ⇒ 提交身份属于外层仓库，不许冒充"本项目自己的提交"。
+    var sourceRepository: String? = nil
 
     /// 能不能拿去做跨报告的按行并集。
     var isMergeEligible: Bool {
@@ -56,7 +59,8 @@ enum CoverageMergePlanner {
         // **运行归属先分配再谈去重**：`runKey` 只能由"同目录共位 + 正文互证"发出来
         // （`CoverageRunIdentity`），认不出就留 `nil`。原来那份身份是拿路径子串猜来的
         // unit/集成归类拼的 —— 猜错会把两次运行并成一次（丢证据）。
-        let candidates = CoverageRunIdentity.assignRunKeys(to: raw)
+        // 分配完立刻**盖章到落盘契约那五格**（`stampIdentity`）：身份只算在内存里就等于没落盘。
+        let candidates = CoverageRunIdentity.assignRunKeys(to: raw).map(stampIdentity)
         var ledger = CoverageMergeLedger(consideredCount: consideredCount,
                                         parsedCount: candidates.count,
                                         parseFailures: parseFailures,
@@ -241,7 +245,43 @@ enum CoverageMergePlanner {
         // 多份合并后分支/方法数**不再相加**：报告里没有逐分支、逐方法的身份，
         // 相加就是双计（这正是本轮的病）。所以这里给 nil（"没统计"），而不是给一个数。
         report.generatedAt = members.compactMap { $0.report.generatedAt }.min()
+        // 身份五格取成员共识（不一致就 nil，绝不替并集编一个来源）。
+        stampUnionIdentity(&report, from: members)
         return report
+    }
+
+    /// 身份 → 落盘契约的**唯一盖章处**（RD-25 剩下那半："四类身份要能随报告一起读出来"）。
+    /// 五格全部由 `CoverageReportIdentity` / `CoverageCandidate.sourceFingerprint` 抄过来，
+    /// 这里**不做任何判定**：判定在 `CoverageRunIdentity` 与 `CoverageMergeConfidence`，
+    /// 两处各算一遍就是两套尺子。认不出的格照样留 `nil`（不许补 `""`、不许拿相邻格顶替）。
+    static func stampIdentity(_ candidate: CoverageCandidate) -> CoverageCandidate {
+        var stamped = candidate
+        stamped.report.format = candidate.identity.format.rawValue
+        stamped.report.runKey = candidate.identity.runKey
+        stamped.report.runEvidence = candidate.identity.runEvidence?.rawValue
+        stamped.report.moduleKey = candidate.identity.moduleKey
+        stamped.report.sourceFingerprint = candidate.sourceFingerprint
+        stamped.report.sourceRepository = candidate.sourceRepository
+        return stamped
+    }
+
+    /// 并集那份**不是一份文件**，所以它的身份只能取"成员共识"：
+    /// 成员之间不一致的格子一律 `nil`（= 未记录），**绝不编一个**。
+    /// 注：`mergeConfident` 由**输入候选**的算出来（`applyConfidence`），与这里的盖章无关 ——
+    /// 盖章只是把已经算过的身份抄给读的人看，不是第二把尺子。
+    private static func stampUnionIdentity(_ report: inout CoverageReport, from members: [CoverageCandidate]) {
+        report.format = sharedValue(members.map { $0.report.format })
+        report.runKey = sharedValue(members.map { $0.report.runKey })
+        report.runEvidence = sharedValue(members.map { $0.report.runEvidence })
+        report.moduleKey = sharedValue(members.map { $0.report.moduleKey })
+        report.sourceFingerprint = sharedValue(members.map { $0.report.sourceFingerprint })
+        report.sourceRepository = sharedValue(members.map { $0.report.sourceRepository })
+    }
+
+    /// 全员一致才给值；任何一份缺格或两侧不一致 ⇒ `nil`（未知）。
+    private static func sharedValue(_ values: [String?]) -> String? {
+        guard let first = values.first, let value = first else { return nil }
+        return values.allSatisfy { $0 == value } ? value : nil
     }
 
     private static func dropped(_ candidate: CoverageCandidate,

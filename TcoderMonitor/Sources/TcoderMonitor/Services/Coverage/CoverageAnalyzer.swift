@@ -50,6 +50,17 @@ final class CoverageAnalyzer: CoverageProviding {
                                              parseFailures: failures,
                                              discovery: discovery.stats)
         metrics.reports = plan.scoring
+        // MARK: 落盘那半（R5b · `0fbdfc7` 的 11 格）。写者只有这一处 ⇒ 不留第二个算式。
+        // 读：`report_parity.py` 对表 / 覆盖率页（待总工接线）/ `CoverageContractFieldTests` 三态钉法。
+        let shape = plan.ledger.displayShape
+        metrics.mergeConfident = plan.ledger.mergeConfident      // 三态：nil / false / true
+        metrics.droppedByCap = shape.droppedByCap                // 三态：nil / 0 / >0（每次都写）
+        metrics.truncationTotalCount = shape.truncationTotalCount
+        metrics.displayedCount = shape.displayedCount
+        metrics.undisplayedCount = shape.undisplayedCount
+        metrics.undisplayedReports = shape.undisplayedReports
+        metrics.unexaminedDirectories = shape.unexaminedDirectories
+        metrics.unmeasuredScope = shape.unmeasuredScope
         metrics.analyzedAt = Date()
         return CoverageMetrics.AnalysisOutcome(metrics: metrics, merge: plan.ledger)
     }
@@ -117,7 +128,9 @@ final class CoverageAnalyzer: CoverageProviding {
             ledger: resolvedLedger,
             // 源码身份：本次扫描时**被扫仓库**的提交指纹。读不到就是 nil，
             // 绝不允许拿 mtime 或本次分析时刻顶替成一格"有身份"。
-            sourceFingerprint: source.headCommit))
+            sourceFingerprint: source.headCommit,
+            // 这个提交号属于哪个仓库（`"."` = 被扫目录自己；`".."` = 父链上的外层仓库）。
+            sourceRepository: source.repositoryCoordinate))
     }
 
     private func byteSize(of url: URL) -> Int? {

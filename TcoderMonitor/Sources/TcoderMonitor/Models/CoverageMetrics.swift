@@ -53,6 +53,51 @@ struct CoverageMetrics: Codable, Equatable, Sendable {
     /// **Optional 是落盘兼容要求**：非 Optional 带默认值会让旧报告整份解码失败。
     var unreadableDirectoryCount: Int? = nil
 
+    // MARK: R5b · 上限与截断的显示形状（§6.1 全站同形，口径见 `docs/R5b-覆盖率身份层契约字段清单.md`）
+    //
+    // 以下 8 格一律 **additive + Optional**：既有成员一字未动。
+    // `nil` = 那一版根本没统计过（旧报告），`0` = 统计过且结论是"没有"（一句真话），`>0` = 有东西被摘掉。
+    // 三态压成两态就是本轮要修的病：**"没统计" 不等于 "没问题"**。
+    // 写：`CoverageAnalyzer.analyzeWithLedger`（数值由 `CoverageDisplayShape` 一处算好抄进来）。
+    // 读：`scripts/report_parity.py`（GUI↔CLI 对表）、覆盖率页页尾句（待总工接线）、
+    //     `CoverageChainProofTests` / `CoverageContractFieldTests` 的恒等式断言。
+
+    /// 命中报告份数上限（40 份）而**没能交给解析/合并**的合法报告份数。
+    /// `nil` = 旧报告没统计过 ⇒「未统计是否有报告被上限丢弃」；
+    /// `0` = 一份都没丢；`>0` ⇒「另有 N 份未合并」+ 逐条点名（见 `undisplayedReports`）。
+    /// **不许由 `reports.count` 或份数反推**，也不许把"没量到"渲染成"没有问题"。
+    var droppedByCap: Int? = nil
+
+    /// 「这个总数可不可信」。**三态**：`nil` = 压根没给总数（缺证据 ≠ 不可信）；
+    /// `false` = 给了总数但进总数的报告身份不齐 ⇒「总数不可信：N 份报告缺 <格>，已分开呈现」；
+    /// `true` = 进总数的每份四格身份互证齐全。
+    /// 写：`CoverageMergeConfidence.verdict`（**只看身份，不看份数**）。
+    var mergeConfident: Bool? = nil
+
+    /// §6.1 显示形状①：真实总数 = 已看到的候选 + **已点名**的超限项。
+    /// 深于上限根本没下潜的部分**不在**这个数里（它进 `unmeasuredScope`），
+    /// 所以这一格必须与那句"没测/测不准的范围"一起读，**单独读它是低估**。
+    var truncationTotalCount: Int? = nil
+
+    /// §6.1 显示形状②：真正交给解析/合并的份数（与 `scannedFileCount` 同源，守卫钉着）。
+    var displayedCount: Int? = nil
+
+    /// §6.1 显示形状③：`max(0, truncationTotalCount - displayedCount)`，
+    /// 逐条坐标在 `undisplayedReports`（文件）与 `unexaminedDirectories`（目录）。
+    var undisplayedCount: Int? = nil
+
+    /// §6.1 坐标①：超限没交给合并的**报告文件**，相对被扫根、稳定序（可点名、可 diff）。
+    /// 一行摘要不算台账 ⇒ 这一格必须逐条给路径。
+    var undisplayedReports: [String]? = nil
+
+    /// §6.1 坐标②：因深度上限或份数上限**没下潜**的目录，相对被扫根、稳定序。
+    /// 只给路径不给原因：原因与计数在 `unmeasuredScope` 那句里。
+    var unexaminedDirectories: [String]? = nil
+
+    /// §6.1 那句话：人话 + 计数（「N 个目录深于 6 层没看、M 个目录读不动…」）。
+    /// **这一格非空时，"该项目没有覆盖率报告"这句话不成立**（有用例钉着）。
+    var unmeasuredScope: String? = nil
+
     /// 「有可用于评分的覆盖率数据」。
     /// 一份只统计到测试代码的报告**不算有数据**——否则全测试码的报告会以
     /// 一个没有生产码含义的百分比混进评分。
@@ -177,6 +222,54 @@ struct CoverageReport: Codable, Equatable, Identifiable, Sendable {
     /// 由 `generationText` 明说，绝不当成新鲜。
     /// 与 #35 的分别：这里的时分级的是文件系统真实记录的分钟，不是我们替用户编的精度。
     var generatedAt: Date?
+
+    // MARK: R5b · 报告身份四格 + 运行证据档（additive，口径见 `docs/R5b-覆盖率身份层契约字段清单.md` §1）
+    //
+    // 为什么必须有：合并后**只剩一个百分比**，读的人无法知道分母是不是同一份源码、
+    // 有没有被上限丢掉、两份是不是同一次测试运行的两种落法。R5 把四类身份的**计算**建好了，
+    // 但身份只活在内存里的派生类型上 ⇒ **没落盘 = 上不了屏 = 换个人读不到**。
+    // 这五格就是"落盘那半"。写：`CoverageAnalyzer.parse` 建好、`CoverageMergePlanner` 结算 runKey 后盖章。
+    // 读：去重判定（`CoverageRunIdentity`）、覆盖率页"来源"标签（待总工接线）、`report_parity.py`。
+    // 一律 Optional：**旧报告里根本没有这一格 ⇒ 必须是 nil，不能补 `""` 或 `0`**。
+
+    /// 格式身份的**键**（`CoverageReportFormat.rawValue`，如 `lcov` / `istanbulSummary` / `unrecognized`）。
+    /// 与 `toolName`（中文展示名、两张表）不是一回事：**键不许拿去给人看，展示名不许拿去判身份**。
+    /// `nil` = 旧报告没记过这一格 ⇒「格式未记录（旧报告，不声称与任何一份同源）」；
+    /// `"unrecognized"` = 文件名在候选清单里但认不出格式 ⇒「认不出格式，不与任何报告合并」。
+    /// **两者不是同一件事，不许都渲染成 nil。**
+    var format: String?
+
+    /// 运行身份键（"同一次运行"的分组键）。写：`CoverageRunIdentity.assignRunKeys`
+    /// （证据 = 同目录共位 + 正文互证），由规划器结算后盖到报告上。
+    /// `nil` = 认不出 ⇒ 该报告**不参与任何去重**（宁可留重复，也不许凭猜合并掉证据）。
+    var runKey: String?
+
+    /// 模块键：报告相对被扫根、剥掉"产物目录段"后剩下的相对目录（`""` = 仓库根）。
+    /// `nil` = 相对形状切不出来（报告在被扫目录之外）⇒「模块未知（报告在被扫目录之外）」。
+    /// **不许把绝对路径原样当模块键**（换机器就换键，本轮实测踩过 `/var` ↔ `/private/var`）。
+    var moduleKey: String?
+
+    /// 源码身份：**本次扫描时**被扫仓库的提交指纹（`git rev-parse HEAD` 短哈希，读不到 ⇒ `nil`）。
+    ///
+    /// ⚠️ 边界写死（两层绑定不许混）：这一格说的是"我扫的时候源码在 X"，
+    /// **不是**"这份产物产自 X"。覆盖率产物侧压根没有写着它测哪个提交的格子，
+    /// 所以 `mtime ≥ X 的时刻` 只能支持"未见更早证据"，**绝不允许**渲染成"绑定在该提交上"。
+    /// 报告自报的提交号（若某天真能解析出来）是**另一格**，不许拿这一格回填它。
+    /// `nil` ⇒「未绑定提交（非 git 或 git 读失败），不按新鲜数据声称」。
+    var sourceFingerprint: String?
+
+    /// `sourceFingerprint` 这个提交号**是从哪个仓库读到的**，相对被扫根的坐标：
+    /// `"."` = 被扫目录自己就是仓库根；`".."` / `"../.."` = 提交身份来自**父链上那个更大的仓库**。
+    /// 为什么必须有这一格（派单外新增，理由写进汇报）：`CoverageSourceState` 会沿父链找 `.git`
+    /// （用户扫"某个仓库的子目录"时这是对的），于是外层仓库的 HEAD 可以冒充"这个项目自己的提交"
+    /// —— 本仓 §25 已经把这条形状命名为缺陷。没有这一格，`sourceFingerprint` 单独读就是一句假话。
+    /// `nil` = 压根没读到仓库（与 `sourceFingerprint == nil` 同因）。
+    var sourceRepository: String?
+
+    /// `runKey` **凭的是哪条证据**（`CoverageRunEvidence.rawValue`）。
+    /// 只有键没有"凭什么"，读的人无法分辨"同一次运行的对偶落法"与"恰好放进同一个目录"，
+    /// 后者不足以声称同源 ⇒ 键相同而证据不足时**不去重**。`nil` = 旧报告没记过 / 压根没键。
+    var runEvidence: String?
 
     /// 面向用户的一句「这份报告是哪生成的」。未知就直说未知，不挤出时间、也不说"最新"。
     var generationText: String {
