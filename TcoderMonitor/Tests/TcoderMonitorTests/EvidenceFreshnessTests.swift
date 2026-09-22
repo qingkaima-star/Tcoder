@@ -215,24 +215,37 @@ final class EvidenceFreshnessTests: XCTestCase {
         return gaps
     }
 
+    /// 只挑出"这一批产物**在本树里**"的行。
+    ///
+    /// 为什么要这一道（**RD-58，总工改**）：`.scratch/` 是 gitignore 的 ⇒ 取证产物只存在于
+    /// 拍图的那一棵树。上一版 RD-55 的口径是"本树一份 `evidence-*` 都没有才跳"，
+    /// 那是**全有或全无**：一条流按需求方要的样子**只补拍变化的那一页**，
+    /// 本树就从"整个跳过"翻成"整个都要查"，于是**表里其余每一行都变成红**，
+    /// 而红的原因与当次改动无关 —— 既不证明证据存在，也不证明它不存在。
+    /// 现在的口径是**逐行按批次判**：批次在本树 ⇒ 那一行四格齐全、rev 对得上，缺一样照旧红；
+    /// 批次不在本树 ⇒ 那行不查，但**行名要打印出来**（不许把"没查"读成"查过没事"）。
+    static func rowsWithEvidence(_ rows: [Row], batchPresent: (String) -> Bool) -> (checked: [Row], absent: [String]) {
+        let hit = rows.filter { batchPresent($0.batch) }
+        return (hit, rows.filter { !batchPresent($0.batch) }.map(\.batch))
+    }
+
     func test_everyRowActuallyHasAllFourShotsAtTheHeadItClaims() throws {
         let url = Self.repoRoot.appendingPathComponent(Self.catalogPath)
         let rows = Self.rows(in: try String(contentsOf: url, encoding: .utf8))
         XCTAssertFalse(rows.isEmpty, "表读不出行 ⇒ 下面这条会空转")
         let evidenceRoot = Self.repoRoot.appendingPathComponent(".scratch")
-        // RD-55（总工改）：`.scratch/` 是 gitignore 的 ⇒ 取证产物只存在于**拍图的那棵树**。
-        // 这一格的职责是「账里声称有证据，证据就得齐、rev 就得对」，不是「每棵树都得自己拍过一遍」；
-        // 后者让任何非拍图树（别人的工作树、CI、另一台机器）门禁必红，而红的原因与当次改动无关 ——
-        // 那既不证明证据存在，也不证明它不存在，只是把一条好守卫变成落地路障。
-        // 所以：**一棵树里一份 evidence-* 都没有 ⇒ 显式跳过并点名路径**；
-        // 目录只要在，就照原样逐格钉（少一张图、rev 不符、缺 PROVENANCE 都仍然红）。
-        let hasAnyEvidence = ((try? FileManager.default.contentsOfDirectory(atPath: evidenceRoot.path)) ?? [])
-            .contains { $0.hasPrefix("evidence-") }
-        if hasAnyEvidence == false {
-            throw XCTSkip("这棵树没有取证产物（\(evidenceRoot.path) 下无 evidence-*）"
+        let scoped = Self.rowsWithEvidence(rows) { batch in
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: evidenceRoot.appendingPathComponent(batch).path,
+                                                 isDirectory: &isDir) else { return false }
+            return isDir.boolValue
+        }
+        XCTAssertFalse(rows.allSatisfy { $0.batch.isEmpty }, "表里连批次名都没解析出来 ⇒ 这条在空转")
+        if scoped.checked.isEmpty {
+            throw XCTSkip("这棵树没有表里引用的任何一批产物（\(evidenceRoot.path)；表里 \(rows.count) 行的批次都不在）"
                 + " ⇒ 本条只钉「有产物就要齐」，产物生成在哪棵树不归它管")
         }
-        let gaps = Self.evidenceGaps(in: rows, root: evidenceRoot,
+        let gaps = Self.evidenceGaps(in: scoped.checked, root: evidenceRoot,
                                      exists: { FileManager.default.fileExists(atPath: $0.path) },
                                      provenanceRev: { file in
             guard let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
@@ -244,8 +257,9 @@ final class EvidenceFreshnessTests: XCTestCase {
         XCTAssertTrue(gaps.isEmpty,
                       "逐页账里有 \(gaps.count) 格证据不成立（口径是深浅 × 顶尾四格齐全，且 rev 对得上）：\n"
                         + gaps.map { "\($0.page) @ \($0.batch)：\($0.what)" }.joined(separator: "\n"))
-        let shots = rows.reduce(0) { $0 + Self.expectedShots(for: $1).count } * Self.evidenceModes.count
-        print("【实拍格数】表里 \(rows.count) 行 → 实际查 \(shots) 格，全在、rev 全对")
+        let shots = scoped.checked.reduce(0) { $0 + Self.expectedShots(for: $1).count } * Self.evidenceModes.count
+        print("【实拍格数】表里 \(rows.count) 行 · 本树有产物 \(scoped.checked.count) 行 → 实查 \(shots) 格，全在、rev 全对"
+            + (scoped.absent.isEmpty ? "" : "；不在本树的批次 \(Set(scoped.absent).count) 个：\(Set(scoped.absent).sorted().joined(separator: " "))"))
     }
 
     // MARK: - 元测试：两个方向都要红过一次
@@ -259,6 +273,26 @@ final class EvidenceFreshnessTests: XCTestCase {
         """
 
     /// 解析器自己：行、页名拆分、以及**省略号写法整行不作数**。
+    /// RD-58 的元测试：逐行按批次判这一道**两个方向都要红过一次**。
+    /// 只喂合成输入，不碰盘上真产物 —— 这条判据要的正是"批次在不在"这一件事，与图本身无关。
+    func test_rowsWithEvidenceChecksOnlyRowsWhoseBatchIsPresent() throws {
+        let rows = Self.rows(in: Self.syntheticTable)
+        XCTAssertEqual(rows.count, 2, "夹具自检：合成表该读出两行")
+        let firstOnly = Self.rowsWithEvidence(rows) { $0 == "evidence-abc1234-x" }
+        XCTAssertEqual(firstOnly.checked.map(\.batch), ["evidence-abc1234-x"],
+                       "只有一批产物时，另那行不许被拖成红（RD-58 修的就是这个）")
+        XCTAssertEqual(firstOnly.absent, ["evidence-def5678-y"], "没查的行必须被点名，不许静默")
+
+        let nonePresent = Self.rowsWithEvidence(rows) { _ in false }
+        XCTAssertTrue(nonePresent.checked.isEmpty, "一批都不在还去查，等于把「没看见」当成「通过」")
+        XCTAssertEqual(Set(nonePresent.absent), Set(["evidence-abc1234-x", "evidence-def5678-y"]))
+
+        // 反向：两批都在 ⇒ 两行都要查（这条判据不许被"按批次跳过"变成永真绿）。
+        let allPresent = Self.rowsWithEvidence(rows) { _ in true }
+        XCTAssertEqual(allPresent.checked.count, 2, "批次齐的时候它必须逐行钉，一格都不能少查")
+        XCTAssertTrue(allPresent.absent.isEmpty)
+    }
+
     func test_tableParserReadsRowsAndRefusesAbbreviatedPaths() {
         let found = Self.rows(in: Self.syntheticTable)
         XCTAssertEqual(found.count, 2, "两行都该解析出来（第二行管两页）")
