@@ -123,12 +123,13 @@ final class SelfScanConventionGates: SelfScanHarnessCase {
     /// 而我们过去从不解释。WS-L 把这句话写进了界面，这里**用 git 命令复核那行字里的每个数**，
     /// 让它不只是"写了"，而是"写对了"——文案改一个字都不要紧，数字对不上就是虚报。
     func testGitPageExplainsTheMergeConventionAgainstGitGroundTruth() async throws {
-        let git = try await selfScan().git
+        let scan = try await selfScan()
+        let git = scan.git
         let scope = GitHistoryScope(git)
 
-        let all = try revListCount([])
-        let nonMerge = try revListCount(["--no-merges"])
-        let merges = try revListCount(["--merges"])
+        let all = scan.gitTruth.all
+        let nonMerge = scan.gitTruth.nonMerge
+        let merges = scan.gitTruth.merges
 
         XCTAssertEqual(scope.totalCommits, all, "页头用的总数必须等于 `rev-list --count HEAD`")
         XCTAssertEqual(scope.authorBasis, nonMerge,
@@ -221,7 +222,7 @@ final class SelfScanConventionGates: SelfScanHarnessCase {
         let top = try XCTUnwrap(git.authors.max { $0.commits < $1.commits })
 
         // 真相：与分析器同口径的邮箱归并占比。
-        let truth = try independentTopAuthorShare()
+        let truth = scan.gitTruth.topShare
         let pageShare = 100 * Double(top.commits) / Double(scope.authorBasis)
         XCTAssertEqual(pageShare / 100, truth, accuracy: 0.01,
                        "Git 页的占比与 `git log --no-merges --format=%aE` 不一致")

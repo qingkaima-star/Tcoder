@@ -68,6 +68,8 @@ class SelfScanHarnessCase: XCTestCase {
         var dependencies: DependencyReport
         var coverage: CoverageMetrics
         var health: HealthScore
+        /// **与上面六个分析器同一时刻**取到的 git 真值；断言只许读这一份。
+        var gitTruth: GitTruth
     }
 
     static let cacheStore = ScanCacheStore()
@@ -89,6 +91,8 @@ class SelfScanHarnessCase: XCTestCase {
             let root = Self.repoRoot
             let code = try await FileSystemCodeAnalyzer().analyze(root: root, options: .default)
             let git = try await ShellGitAnalyzer().analyze(repositoryURL: root)
+            // 紧贴 git 分析取真值：晚一步取，就等于拿两个 HEAD 比大小。
+            let truth = try Self.measureGitTruth()
             let logs = try await FileLogAnalyzer()
                 .analyze(projectRoot: root, extraLogURLs: [], withinDays: 30)
             let dependencies = try await ManifestDependencyAnalyzer()
@@ -99,7 +103,8 @@ class SelfScanHarnessCase: XCTestCase {
                              dependencies: dependencies, coverage: coverage))
 
             return SelfScan(code: code, git: git, logs: logs,
-                            dependencies: dependencies, coverage: coverage, health: health)
+                            dependencies: dependencies, coverage: coverage, health: health,
+                            gitTruth: truth)
         }
     }
 
@@ -301,8 +306,10 @@ class SelfScanHarnessCase: XCTestCase {
     // MARK: - git 独立基线（只读命令）
 
     /// `git rev-list --count HEAD`，可带 `--no-merges` / `--merges` 取不同口径。
-    func revListCount(_ filter: [String]) throws -> Int {
-        let output = try runGit(["rev-list", "--count"] + filter + ["HEAD"])
+    /// 改成 static 是为了让 `measureGitTruth()`（快照）与断言共用**同一份实现**——
+    /// 复制一份 Process 代码就是给同一个量造第二把尺子。
+    static func revListCount(_ filter: [String]) throws -> Int {
+        let output = try gitOutput(["rev-list", "--count"] + filter + ["HEAD"])
         guard let count = Int(output.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw AnalysisError.empty("git rev-list --count \(filter) 输出不可解析：\(output)")
         }
@@ -314,8 +321,8 @@ class SelfScanHarnessCase: XCTestCase {
     /// （`Tcoder Team` 与 `WS-B Git与依赖`）共用 `dev@tcoder.local`。
     /// 用姓名口径量出来的 top 是 68%，工具按邮箱归并给的是 72%，
     /// 差 4 个点会被 5 个点的容差吞掉——等于这条门白设。
-    func independentTopAuthorShare() throws -> Double {
-        let output = try runGit(["log", "--no-merges", "--format=%aE", "HEAD"])
+    static func independentTopAuthorShare() throws -> Double {
+        let output = try gitOutput(["log", "--no-merges", "--format=%aE", "HEAD"])
         var counts: [String: Int] = [:]
         for line in output.split(separator: "\n") {
             let email = line.trimmingCharacters(in: .whitespaces)
@@ -327,9 +334,14 @@ class SelfScanHarnessCase: XCTestCase {
     }
 
     func runGit(_ arguments: [String]) throws -> String {
+        try Self.gitOutput(arguments)
+    }
+
+    /// `git` 取数的**唯一实现**（实例方法只是它的一层转发，别处不再各写一遍 Process）。
+    static func gitOutput(_ arguments: [String]) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git", "-C", Self.repoRoot.path] + arguments
+        process.arguments = ["git", "-C", repoRoot.path] + arguments
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = Pipe()
@@ -337,5 +349,30 @@ class SelfScanHarnessCase: XCTestCase {
         process.waitUntilExit()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    /// 与扫描**同一快照**取到的 git 真值。
+    ///
+    /// 为什么必须有它（2026-09-22 实测，数字都在这段里）：`selfScan()` 是
+    /// "现扫一次 + 进程内缓存"，而断言里原来直接调 `revListCount()` ——
+    /// 取数的时刻比扫描晚好几分钟。这段时间里若有别的流往**共享主树**合了一笔，
+    /// 两边量的就不是同一个 HEAD：一次红门里扫描看到 **985** 个提交
+    /// （`766e497`，当时真实存在的 HEAD），断言却读到 **1059**（`merge ws/perf-base` 一次带进 74 个），
+    /// 于是三条与界面无关的自扫断言同时判红；同一份代码在树安静时重跑 **1171 / 0 失败**。
+    /// **假红比不红更坏**：它会让下一个读门禁的人去改一个没坏的东西。
+    /// 判据因此改成"和被测数据同快照"，而不是把容差放宽。
+    struct GitTruth: Sendable {
+        var all: Int
+        var nonMerge: Int
+        var merges: Int
+        /// 非合并口径下最大作者占比（按 `%aE` 归并，与分析器同口径）。
+        var topShare: Double
+    }
+
+    static func measureGitTruth() throws -> GitTruth {
+        GitTruth(all: try revListCount([]),
+                 nonMerge: try revListCount(["--no-merges"]),
+                 merges: try revListCount(["--merges"]),
+                 topShare: try independentTopAuthorShare())
     }
 }
