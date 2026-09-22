@@ -60,16 +60,25 @@ extension HealthScoreCurvesTests {
         )
     }
 
+    /// 「不许凭空给分」这条不变式（R9 留的钉子，R9b §1 结案）。
+    ///
+    /// 原先这条**直接拿 `totalLinesScanned: 0` 敲曲线、断言 detail 里那句「未扫描/默认」**。
+    /// 那一支在生产路径上不可达（调用点先 guard），已在 R9b §1 整块删除 ——
+    /// 曲线从此**不再持有任何占位分**，所以"没扫到日志"这件事换了钉法，没有失踪：
+    ///   ① 打分器侧：零行 ⇒ 整维缺席、三态各说一句（本文件下面那半 + `ScoreEvidenceFloorCrashStatesTests`）；
+    ///   ② 曲线侧：占位分回潮即红（`ScoreEvidenceFloorTests.test_curveHasNoDefaultPlaceholderScoreLeftBehind`）；
+    ///   ③ 调用点侧：先 guard 再问曲线（`ScoreWordingTests.test_stabilityCurveCallSiteStillGuardsBeforeAskingTheCurve`）。
+    /// 这里同时保留曲线**可达**的那三组锚点判据（满分 / 低分 / 崩溃单调），它们与本条同族、不依赖死支。
     func testStabilityNeverFakesUnscannedLogsAsPerfect() {
-        let unscanned = HealthCurves.stability(
-            errorsPerKiloLogLines: 0, crashCount: 0, fatalCount: 0, exceptionCount: 0, totalLinesScanned: 0
-        )
-        XCTAssertTrue(
-            unscanned.detail.contains("未扫描") || unscanned.detail.contains("默认"),
-            "无日志扫描量时 detail 必须说明未扫描/默认，实际：\(unscanned.detail)"
-        )
-        // 规格禁止把无数据伪装成满分：此处以 detail 措辞为准，不额外钉死分数，
-        // 因为实现可以合法地给出「保守默认分」或「中性分」。
+        // ① 生产形状：零行 ⇒ 整维缺席，且没有任何分量带着默认分上屏
+        let blind = WeightedHealthScorer().score(HealthInputs(
+            code: healthyCode(),
+            logs: LogSummary(errorCount: 0, exceptionCount: 0, warningCount: 0,
+                             crashCount: 0, fatalCount: 0, totalLinesScanned: 0)))
+        XCTAssertFalse(blind.components.contains { $0.name == HealthDimension.stability.rawValue },
+                       "零真日志行时这一维必须缺席，不许有一个数参与加权")
+        XCTAssertTrue(blind.components.allSatisfy { !$0.detail.contains("按默认值计") },
+                      "「按默认值计」不许在任何分量上屏：\(blind.components.map(\.detail))")
 
         let clean = HealthCurves.stability(
             errorsPerKiloLogLines: 0, crashCount: 0, fatalCount: 0, exceptionCount: 0, totalLinesScanned: 250_000
@@ -96,7 +105,6 @@ extension HealthScoreCurvesTests {
 
         assertCurveIsValid(clean, context: "stability clean")
         assertCurveIsValid(awful, context: "stability awful")
-        assertCurveIsValid(unscanned, context: "stability unscanned")
     }
 
     func testDependencyHealthAnchors() {

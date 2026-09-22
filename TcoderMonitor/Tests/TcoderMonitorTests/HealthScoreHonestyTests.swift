@@ -104,7 +104,8 @@ final class HealthScoreHonestyTests: HealthScoreTestCase {
         }
     }
 
-    /// 一行日志都没扫到时，优点卡不得写「无崩溃」——与 detail 的「按默认值计」同一口径。
+    /// 一行日志都没扫到时，优点卡不得写「无崩溃」——与缺席时那句建议同一口径
+    /// （R9b §1 之后曲线已无「按默认值计」这一格，薄证据另有「证据太薄·未判定」标记）。
     func testStabilityPraiseRequiresActuallyScannedLogs() {
         var emptyLogs = healthyLogs()
         emptyLogs.totalLinesScanned = 0

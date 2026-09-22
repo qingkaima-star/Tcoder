@@ -162,11 +162,12 @@ final class ScoreWordingTests: HealthScoreTestCase {
                        "这条元测试坏了（改坏样例改不出红），上面的守卫就是永真绿")
     }
 
-    // MARK: - 靶子 2：`stability` 的 `totalLinesScanned == 0 → 85 分` 是死支，先钉"不可达"
+    // MARK: - 靶子 2：`stability` 的 `totalLinesScanned == 0 → 85 分` 死支（R9b §1 已删除）
 
-    /// 反例（生产形状）：日志一行都没读到 ⇒ 整维缺席 + 出声，**不是** 85 分。
-    /// 真子进程同形状实测：`score <夹具> --log=<0 字节文件>` 打的是
-    /// 「运行稳定性 — 未发现可读的日志文件。」且综合分与"完全没日志"一字不差（都是 66）。
+    /// R9 那一轮只把它钉成"不可达"，R9b §1 把占位分整块删了。于是这条用例现在测的是
+    /// **删除之后仍然成立**的那件事：零真日志行 ⇒ 整维缺席、没有任何分量带默认分上屏。
+    /// 修前现场（真子进程 + 真自扫，见 Obsidian/汇报）：本仓自扫 `totalLinesScanned` 1,063 ⇒ 0，
+    /// 综合分 66 ⇒ 69 —— 这一支会"因为没量到而涨分"，那才是它最贵的地方。
     func test_zeroLineLogs_absentRatherThanADefaultEightyFive() throws {
         let inputs = HealthInputs(code: healthyCode(),
                                   logs: LogSummary(errorCount: 0, exceptionCount: 0, warningCount: 0,
@@ -185,9 +186,11 @@ final class ScoreWordingTests: HealthScoreTestCase {
                                                      with: score.overall))
     }
 
-    /// 可达性钉子：曲线里那一支只活在单测的直接调用下，生产调用点必须先判总行数。
-    /// 一旦有人删掉那道 guard（或加一个不判行数的第二调用点），这条立刻红 ——
-    /// 这就是"它当前不可达"这件事的机器记录，比在注释里写一句"这里是死支"可靠。
+    /// 可达性钉子：**删除之后它更重要**，不是更不重要。
+    /// 曲线里那一支原先最坏是给个 85，现在拿 `totalLinesScanned: 0` 直接敲曲线会得到
+    /// 「每千行日志 0 个错误 = 100 分」，所以"不许凭空给分"这条不变式的全部承重
+    /// 都压在这道 guard 上 —— guard 一没、或第二调用点不判行数就冒出来，这条立刻红。
+    /// （配套的第二枚钉子：占位分回潮扫描在 `ScoreEvidenceFloorTests`。）
     func test_stabilityCurveCallSiteStillGuardsBeforeAskingTheCurve() throws {
         let path = Self.packageRoot.appendingPathComponent(
             "Sources/TcoderMonitor/Services/Health/HealthRuntimeDimensions.swift").path
@@ -196,18 +199,24 @@ final class ScoreWordingTests: HealthScoreTestCase {
                                    "调用点没了 —— 本条判据的对象变了，请连本流结论一起更新")
         let beforeCall = String(source[source.startIndex..<callAt.lowerBound])
         XCTAssertTrue(beforeCall.contains("logs.totalLinesScanned > 0"),
-                      "调用曲线之前那道 `totalLinesScanned > 0` 守卫不见了 ⇒ 85 那个默认分又能进加权")
+                      "调用曲线之前那道 `totalLinesScanned > 0` 守卫不见了 ⇒ 零分母又能进加权")
+        XCTAssertTrue(beforeCall.contains("guard logs.totalLinesScanned > 0 else"),
+                      "守卫从 guard 退化成 if/注释 ⇒ 挡住调用这件事不再由编译器与运行时保证")
     }
 
-    /// 分母自证：上面那条读源码的判据扫的确实是代码而不是空气。
+    /// 分母自证：上面那条读源码的判据扫的确实是代码而不是空气，而且**摘掉 guard 就量得出红**。
     func test_stabilityReachabilityGuardIsNotPermanentlyGreen() throws {
-        let sample = Self.strippingComments("""
+        let sabotaged = Self.strippingComments("""
         // guard logs.totalLinesScanned > 0 else { }   <- 注释里的假守卫，不许算数
         let curve = HealthCurves.stability(errorsPerKiloLogLines: 0, totalLinesScanned: 0)
         """)
-        XCTAssertFalse(sample.contains("guard logs.totalLinesScanned > 0"),
+        XCTAssertFalse(sabotaged.contains("guard logs.totalLinesScanned > 0"),
                        "注释没剥掉：真守卫与写在注释里的假守卫分不开")
-        XCTAssertFalse(sample.contains("logs.totalLinesScanned > 0"), "剥得太狠，把真代码也剥掉了")
+        XCTAssertFalse(sabotaged.contains("logs.totalLinesScanned > 0"), "剥得太狠，把真代码也剥掉了")
+        // 反向：把 guard 写回来，同一把尺子必须数得到它（否则上面那条断言是永真绿）
+        let guarded = sabotaged + "\nguard logs.totalLinesScanned > 0 else { return .absent }"
+        XCTAssertTrue(guarded.contains("guard logs.totalLinesScanned > 0 else"),
+                      "探针装不上真守卫 ⇒ 它数不到东西，那条可达性守卫就是假的")
     }
 
     /// 三档缺席原因：`nil` / 一行没读到 / 列到文件却一行没读出来，三句不许合成一句。
