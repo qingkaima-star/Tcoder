@@ -290,7 +290,7 @@
 "至少完成两次分析后可以看到趋势。" = "The trend becomes available after at least two analyses.";
 "选择项目目录后点「重新分析」。" = "Choose a project directory, then click Re-analyse.";
 "评分综合代码规模、复杂度、重复代码率、Git 活跃度、运行日志与依赖状况，给出 0~100 分。" = "The score combines code size, complexity, duplicate-code rate, Git activity, runtime logs and dependency status into a 0~100 value.";
-"按拖累程度排序，贡献最低者在前" = "Sorted by how much each dimension drags the score down; the smallest contribution comes first.";
+"按「贡献」列升序，最低在前" = "Ascending by the Contribution column (score × normalized weight); the smallest comes first.";
 "综合分 = Σ（得分 × 归一化权重）。" = "Overall score = Σ (dimension score × normalized weight).";
 "评分器没有可算的输入。" = "The scorer had no inputs it could compute from.";
 "纵轴固定 0…100 分 · 不做任何外推。" = "Y axis fixed at 0~100 · nothing is extrapolated.";
