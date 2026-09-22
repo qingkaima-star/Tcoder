@@ -367,7 +367,8 @@ selfcheck_md_tables_unbroken() {  # selfcheck_md_tables_unbroken <outdir>
   local f bad=0 n=0
   for f in ../docs/superpowers/specs/2026-09-20-performance-120hz-design.md \
            ../docs/superpowers/plans/2026-09-20-perf-followup-tickets.md \
-           ../docs/superpowers/plans/2026-09-21-perf-handoff-notes.md; do
+           ../docs/superpowers/plans/2026-09-21-perf-handoff-notes.md \
+           ../docs/superpowers/plans/2026-09-22-perf-handoff-notes-round2.md; do
     [ -f "$f" ] || { fail "少了 $f——分母变小也是失效，不许静默跳过"; bad=1; continue; }
     n=$((n + 1))
     # 判据与手工核对时用的那条 python 完全同一形状（不是再写一把近似的）：
@@ -386,6 +387,9 @@ PYCHK
   done
   # 结构钉：三把文档都要在（分母不能悄悄缩）；反向由 selfcheck 的夹具机制覆盖不了，
   # 所以这里明确写出**已知好形状**：表头、分隔行、每行都以 | 开头。
-  [ "$n" = "3" ] || { fail "只扫到 $n 份性能文档，应为 3 份"; return; }
-  [ "$bad" = "0" ] && ok "三份性能文档的表格没有断行（分母 $n 份逐份点名存在）"
+  # 分母 09-23 从 3 改成 4：备忘涨到 810 行撞 ≤800 棘轮，按"拆，不拧阈值"搬出 §N~§U。
+  # 搬出去的那份**必须继续被扫**，否则"拆文档"就成了让表格断行免检的通道
+  # （同一个教训在 `PerfRulerHotspotRatchetTests` 的 `rulerScripts` 注释里写着）。
+  [ "$n" = "4" ] || { fail "只扫到 $n 份性能文档，应为 4 份"; return; }
+  [ "$bad" = "0" ] && ok "$n 份性能文档的表格没有断行（分母逐份点名存在）"
 }

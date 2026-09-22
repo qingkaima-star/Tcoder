@@ -717,5 +717,6 @@ ls -d /tmp/tcoder-capture.lock 2>/dev/null     # 取证锁必须空闲
 
 ## 给 UI 总工的性能侧交接（原 12:40 一节）
 
-→ 搬进独立文件继续更新：[`2026-09-21-perf-handoff-notes.md`](./2026-09-21-perf-handoff-notes.md)。
+→ 搬进独立文件继续更新：[`2026-09-21-perf-handoff-notes.md`](./2026-09-21-perf-handoff-notes.md)；
+　§N 起（09-22 中午之后）又在 09-23 撞了同一条 ≤800 棘轮，那半截在 [`2026-09-22-perf-handoff-notes-round2.md`](./2026-09-22-perf-handoff-notes-round2.md)。
 　（A 迁移欠账 / B 禁则基线 / C 守卫留档 / D 采样纪律 / E 证据标记要有读者 / E′ 存量复扫 / F 性能侧欠大家 / G 你们每并一批之后请自己重跑）
