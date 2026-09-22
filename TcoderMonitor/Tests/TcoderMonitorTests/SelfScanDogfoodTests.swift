@@ -176,12 +176,16 @@ final class SelfScanDogfoodTests: SelfScanHarnessCase {
     /// 而那 10 个其实是 merge 提交——分析器跑的一贯是 `git log --no-merges`。
     /// 现在两侧各按自己口径比，并额外钉住"含 merge 与不含 merge 是两个量"。
     func testGitSelfReportMatchesGitGroundTruth() async throws {
-        let git = try await selfScan().git
+        let scan = try await selfScan()
+        let git = scan.git
         XCTAssertTrue(git.isRepository, "工作树的 .git 是个 gitdir 文件，工具必须照样认出来")
 
-        let allCount = try revListCount([])
-        let nonMergeCount = try revListCount(["--no-merges"])
-        let mergeCount = try revListCount(["--merges"])
+        // 真值取自**与扫描同一快照**（`SelfScan.gitTruth`）——
+        // 原来在这里现取，别的流一合 main 就会造成假红，机制与数字写在
+        // `SelfScanHarness.measureGitTruth` 的注释里。
+        let allCount = scan.gitTruth.all
+        let nonMergeCount = scan.gitTruth.nonMerge
+        let mergeCount = scan.gitTruth.merges
 
         XCTAssertEqual(git.totalCommits, allCount,
                        "totalCommits 必须等于 `git rev-list --count HEAD`（含 merge）")
@@ -210,7 +214,7 @@ final class SelfScanDogfoodTests: SelfScanHarnessCase {
             + "BusFactor风险=\(git.busFactorRisk.rawValue) 截断旗=\(git.historyTruncated)")
 
         // 复核 WS-C 那句 "单一作者承担 72% 提交"：基线同样只认非合并 + 邮箱口径。
-        let truthShare = try independentTopAuthorShare()
+        let truthShare = scan.gitTruth.topShare
         XCTAssertEqual(share, truthShare, accuracy: 0.01,
                        "工具的作者集中度与 `git log --no-merges --format=%aE` 差 1 个点以上")
 
