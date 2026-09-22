@@ -16,26 +16,56 @@ extension WeightedHealthScorer {
         guard logs.totalLinesScanned > 0 else {
             return DimensionOutcome(curve: nil, recommendations: [StabilityAdvice.missingLogAdvice])
         }
-        // 密度需要代码规模做分母；没有 code 时退化成「按绝对值当每千行计」，
-        // 宁可偏严也不把证据缺失算成满分（availableDimensions 承诺了这个维度在场）。
-        let lines = inputs.code?.codeLines ?? 0
+        // **分母是本次扫到的日志行数，不是源码行数**（RD-24）。
+        // 源码行数答的是"这个项目写了多少代码"，与"程序跑了多久、接了多少请求"无关；
+        // 拿它当分母会出现"多写代码 = 运行更稳"这种完全反掉的结论
+        // （`HealthStabilityDenominatorTests` 钉住：同一批错误读数、代码行数从 1 万翻到 10 万，
+        // 分数必须一字不动）。
         let faults = logs.errorCount + logs.exceptionCount
-        let perKloc = lines > 0 ? Double(faults) / Double(lines) * 1000 : Double(faults)
-        let curve = HealthCurves.stability(errorsPerKLoc: perKloc, crashCount: logs.crashCount,
-                                           fatalCount: logs.fatalCount, exceptionCount: logs.exceptionCount,
-                                           totalLinesScanned: logs.totalLinesScanned)
+        let perKiloLogLines = Double(faults) / Double(logs.totalLinesScanned) * 1_000
+        let curve = HealthCurves.stability(errorsPerKiloLogLines: perKiloLogLines,
+                                          crashCount: logs.crashCount,
+                                          fatalCount: logs.fatalCount,
+                                          exceptionCount: logs.exceptionCount,
+                                          totalLinesScanned: logs.totalLinesScanned)
+        var recommendations = stabilityAdvice(logs)
+        // 「证据不足」那几句走 recommendations：detail 有 60 字硬顶（评分卡那一行），
+        // 而缺什么证据恰恰是最不能因为放不下就不说的一段。
+        recommendations.append(contentsOf: stabilityEvidenceGaps(logs).map { "证据不足：\($0)" })
         return DimensionOutcome(curve: curve,
-                                strengths: stabilityStrengths(logs, perKloc),
+                                strengths: stabilityStrengths(logs, perKiloLogLines),
                                 issues: stabilityIssues(logs),
-                                recommendations: stabilityAdvice(logs))
+                                recommendations: recommendations)
     }
 
-    private func stabilityStrengths(_ logs: LogSummary, _ perKloc: Double) -> [String] {
+    /// 这一维**缺**哪些证据。缺了不许默默按"没问题"处理，也不许按"最坏情况"处理 ——
+    /// 它进分量的 `detail`，读分的人与读建议的人都能看到同一句。
+    ///
+    /// 源码行数密度只作为**辅助观察**留在界面上（`LogsMetricGrid` 那一格），
+    /// 它不进这里的任何计数与扣分。
+    private func stabilityEvidenceGaps(_ logs: LogSummary) -> [String] {
+        var gaps: [String] = []
+        // 运行时长 / 请求量：本 App 从未采集，任何"稳定性"结论都只是日志窗口内的读数。
+        gaps.append("未采集运行时长与请求量，分母只是已扫描的日志行")
+        let crashChannelFiles = logs.scannedFiles.filter { $0.role == .crash }.count
+        if crashChannelFiles > logs.crashCount {
+            gaps.append("另有 \(crashChannelFiles - logs.crashCount) 份崩溃通道文件未产出可用事件证据"
+                + "（读不动 / 内容损坏 / 只有文件名像），未计入崩溃数")
+        }
+        return gaps
+    }
+
+    private func stabilityStrengths(_ logs: LogSummary, _ perKiloLogLines: Double) -> [String] {
         // 一行日志都没扫到时不得写「近期无崩溃」——那是把「没看到」说成「没有」。
         // 曲线那边已经如实标了「未扫描到运行日志，本维度按默认值计」，
         // 优点卡必须跟它一个口径，否则同一份报告自己打自己脸。
-        guard logs.crashCount == 0, perKloc < 0.5 else { return [] }
-        return ["已扫描 \(NumberFormat.grouped(logs.totalLinesScanned)) 行日志，未见崩溃"]
+        //
+        // RD-24 的措辞修正：这里能说出口的上限是"**已扫描的这些行里**未见确认崩溃"，
+        // 不是"运行期没有崩溃"。旧写法那句「未见崩溃」没有任何时间/暴露量边界，
+        // 读者会当成一份运行期健康证明（而运行时长与请求量我们根本没采）。
+        guard logs.crashCount == 0, perKiloLogLines < 0.5 else { return [] }
+        return ["已扫描 \(NumberFormat.grouped(logs.totalLinesScanned)) 行日志，窗口内未见确认崩溃"
+            + "（不等于运行期无崩溃：未采运行时长与请求量）"]
     }
 
     private func stabilityIssues(_ logs: LogSummary) -> [String] {

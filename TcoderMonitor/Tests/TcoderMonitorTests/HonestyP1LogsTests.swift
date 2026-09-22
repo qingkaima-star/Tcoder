@@ -33,7 +33,7 @@ final class HonestyP1LogsTests: XCTestCase {
         let stale = try write(text: "ERROR 三月前\n", to: "Logs/stale.log")
         try setModificationDate(.days(90), of: stale)
 
-        let found = LogDiscovery.discover(projectRoot: tempRoot, projectName: "ShopApp",
+        let found = LogDiscovery.discover(projectRoot: tempRoot, identity: LogProjectIdentity.declaring(["ShopApp"]),
                                            withinDays: 7, maxFiles: 50)
         let names = Set(found.filter { $0.url.path.hasPrefix(tempRoot.path) }.map { $0.url.lastPathComponent })
         XCTAssertEqual(names, ["fresh.log"],
@@ -45,7 +45,7 @@ final class HonestyP1LogsTests: XCTestCase {
         let stale = try write(text: "ERROR 很久以前\n", to: "Logs/stale.log")
         try setModificationDate(.days(900), of: stale)
 
-        let found = LogDiscovery.discover(projectRoot: tempRoot, projectName: "ShopApp",
+        let found = LogDiscovery.discover(projectRoot: tempRoot, identity: LogProjectIdentity.declaring(["ShopApp"]),
                                           withinDays: 0, maxFiles: 50)
         XCTAssertTrue(found.contains { $0.url.path == stale.path },
                       "withinDays <= 0 是「不限制」，必须仍能全量发现：\(found.map { $0.url.lastPathComponent })")
@@ -55,7 +55,7 @@ final class HonestyP1LogsTests: XCTestCase {
         let stale = try write(text: "ERROR 九十天前\n", to: "Logs/stale.log")
         try setModificationDate(.days(90), of: stale)
 
-        let found = LogDiscovery.discover(projectRoot: tempRoot, projectName: "ShopApp",
+        let found = LogDiscovery.discover(projectRoot: tempRoot, identity: LogProjectIdentity.declaring(["ShopApp"]),
                                           withinDays: 365, maxFiles: 50)
         XCTAssertTrue(found.contains { $0.url.path == stale.path },
                       "窗口放宽到 365 天就该收回来，过滤必须是按窗口而不是按常量：\(found.map { $0.url.lastPathComponent })")
@@ -77,8 +77,8 @@ final class HonestyP1LogsTests: XCTestCase {
     // MARK: - 打不开的文件不算「已核对」
 
     func testLogFileThatCannotBeOpenedIsNotReportedAsScanned() async throws {
-        let opened = try write(text: "ERROR 读得到的那条\n", to: "Logs/readable.log")
-        let denied = try write(text: "ERROR 读不到的那条\n", to: "Logs/locked.log")
+        let opened = try write(text: "ERROR 读得到的那条\n".stampToday(), to: "Logs/readable.log")
+        let denied = try write(text: "ERROR 读不到的那条\n".stampToday(), to: "Logs/locked.log")
         try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: denied.path)
         // 以 root 跑测试时 000 也拦得住读，此时这条用例没有前提，直接跳过而不是假绿。
         if let handle = try? FileHandle(forReadingFrom: denied) {

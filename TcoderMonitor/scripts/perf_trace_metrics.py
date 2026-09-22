@@ -127,6 +127,48 @@ def launch_ready_ms(rows):
     return horizon
 
 
+def phase_blame(updates, hitch_frames, budget_ms):
+    """把"迟到帧"按"主线程 update 是否同时超预算"分开数 —— 决定该去查谁。
+
+    只看 hitch 数会误诊：42 个迟到帧里只有 13 次 update 超预算，
+    那意味着**大多数迟到与主线程无关**（渲染/合成侧），
+    去优化 `_updateViewGraph` 的常数是白工；反之若几乎一比一，才该查视图更新。
+    两边都按"次数"报，**不假装是一次迟点对应一次 update**：
+    hitches-updates 一次迟点可能出多行（Brown/Red），602 与 42 就是这种关系。
+    """
+    ups = [v for v in (updates or []) if v is not None]
+    late = [v for v in (hitch_frames or []) if v is not None]
+    over = sum(1 for v in ups if v > budget_ms)
+    if not late:
+        return "本窗口无迟到帧", "—"
+    share = 100.0 * over / len(late)
+    line = "update 超预算 %d 次 vs 迟到 %d 帧（比 %.0f%%）" % (over, len(late), share)
+    if over == 0:
+        return line, "主线程一次都没超 ⇒ 迟到全在渲染/合成侧，别改视图更新常数"
+    if share >= 80:
+        return line, "几乎一比一 ⇒ 先查主线程 update（视图粗粒度失效那一族）"
+    return line, ("主线程只占 %d 次，其余 %d+ 次要去渲染/合成侧找 ⇒ 两件事分开修"
+                  % (over, max(0, len(late) - over)))
+
+
+def in_display_regime(achieved_fps, budget_ms, ratio=0.8):
+    """实测出帧是否还落在 `budget_ms` 所假设的那个刷新率档内。
+
+    8.333 ms 这个预算**只在 120 Hz 档成立**。外接/内建标称 120 Hz，
+    但窗口静止时 ProMotion 会把实际出帧降到 ~50 Hz —— 这时候
+    一帧本就该花 ~20 ms，拿 8.333 ms 去判就会把 36 帧判成"超预算"、
+    把 HTR 判成"危急·立刻处理"。我今晚就是这么被自己的一份 idle 读数
+    唬住了一次（主线程 88.6% 在等事件、整窗零输入，却报"危急"）。
+    ⇒ 拿不到出帧数时**保守判为在档内**（不许用"未知"去给坏消息打折）。
+    """
+    if not achieved_fps or achieved_fps <= 0 or not budget_ms or budget_ms <= 0:
+        return True
+    # `1000/8.333 = 120.005` 会比真实的 120 Hz 多出一丝，边界上会把 96.0 这种
+    # 正好该算"在档内"的值判成越界——所以先把标称 Hz 收一位小数再乘系数。
+    implied_hz = round(1000.0 / float(budget_ms), 1)
+    return float(achieved_fps) >= implied_hz * ratio
+
+
 def percentile(values, p):
     """int(n·p) 下标取法——与 §1 基线脚本同口径，换算法等于换门禁。"""
     if not values:
@@ -278,3 +320,35 @@ def disp_values(measure):
     if js and "values" in js:
         return [float(v) for v in js["values"]]
     return []
+
+
+def input_rate_qualification(source):
+    """合成输入的**投递节奏**决定这份读数能不能回答"到底能不能到 120Hz"。
+
+    为什么要有这一条（2026-09-21 实测）：滚动器最初每 40 ms 投一拍（25 Hz），
+    而 120 Hz 的帧预算是 8.333 ms —— **输入节奏本身比帧预算宽**，
+    于是"出帧只有 53/s"完全可能是仪器锁的，不是被测程序锁的。
+    那两批样本我差点当成"交互期 hitch 读数"直接引用。
+
+    ⇒ 标记要有人读：`meta.input_source` 从今晚起带节奏（`synth@8ms`），
+    本函数就是它的读者。答不了的那一档只许说"连续输入下有没有 hitch"。
+    返回 (能不能用来答"到不到 120Hz", 给表头看的一句话)。
+    """
+    s = str(source or "human").strip()
+    if s == "human":
+        return True, ""                       # 真人：既答 hitch 也答手感
+    if not s.startswith("synth@"):
+        return False, ("【合成输入：CGEvent 投递，非真人手感；**节奏未记录**（旧批次）"
+                       "⇒ 不许用它答「到不到 120Hz」】")
+    try:
+        gap = float(s.split("@", 1)[1].rstrip("ms "))
+    except ValueError:
+        gap = 0.0
+    if gap <= 0.0:
+        return False, "【合成输入但节奏读不出来（拿到 %r）⇒ 与「节奏未记录」同等处理】" % s
+    hz = 1000.0 / gap
+    note = "【合成输入：CGEvent 投递（非真人手感），节奏 %d Hz" % round(hz)
+    if hz < 60.0:
+        return False, note + "，投递间隔比 8.333 ms 帧预算还宽 ⇒ 出帧上限由仪器决定，" \
+                             "不许答「到不到 120Hz」，只答「连续输入下有没有 hitch」】"
+    return True, note + "，不低于 120Hz 帧间隔 ⇒ 仪器不是出帧上限】"

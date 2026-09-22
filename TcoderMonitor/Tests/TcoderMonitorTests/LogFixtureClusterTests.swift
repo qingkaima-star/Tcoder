@@ -131,15 +131,8 @@ final class LogFixtureClusterTests: XCTestCase {
 
     /// 崩溃报告的证据不能丢：EXC_BAD_ACCESS 必须单独成一条 crash 级签名。
     func testCrashReportProducesCrashCluster() async throws {
-        let crash = """
-        Incident Identifier: AAAAAAAA-1111-2222-3333-444444444444
-        Exception Type:      EXC_BAD_ACCESS (SIGSEGV)
-        Exception Codes:     0x000000000000000d, 0x0000000000000000
-        Thread 5 Crashed:
-        0   TcoderSample   0x0000000100004a40 com.example.shop.Store.write(_:) + 128 (Store.swift:77)
-        1   TcoderSample   0x0000000100004b80 com.example.shop.Store.flush() + 64 (Store.swift:90)
-        Fatal error: Unexpectedly found nil while implicitly unwrapping an Optional value: file TcoderSample/Store.swift, line 77
-        """
+        let crash = LogFixture.storeCrashReportText
+
         try write("crash.log", crash, daysAgo: 0)
 
         let summary = try await FileLogAnalyzer().analyze(projectRoot: root, extraLogURLs: [], withinDays: 30)
@@ -229,22 +222,22 @@ final class LogFixtureClusterTests: XCTestCase {
     func testDiagnosticReportOwnershipIsExactNotSubstring() {
         func report(_ name: String) -> URL { URL(fileURLWithPath: "/tmp/\(name).ips") }
         XCTAssertTrue(LogDiscovery.isOwnDiagnosticReport(report("TcoderMonitor-2026-09-19-081301"),
-                                                         projectName: "TcoderMonitor"),
+                                                         identity: LogProjectIdentity.declaring(["TcoderMonitor"])),
                       "自己的报告必须算自己的")
         XCTAssertFalse(LogDiscovery.isOwnDiagnosticReport(report("TcoderMonitor-2026-09-19-081301"),
-                                                          projectName: "Tcoder"),
+                                                          identity: LogProjectIdentity.declaring(["Tcoder"])),
                        "项目名是另一个可执行名的前缀时不得命中（用户实测踩到的问题）")
         XCTAssertTrue(LogDiscovery.isOwnDiagnosticReport(report("tcoder-2026-09-19-081301"),
-                                                         projectName: "Tcoder"),
+                                                         identity: LogProjectIdentity.declaring(["Tcoder"])),
                       "大小写不同但整段相等仍算命中")
         XCTAssertFalse(LogDiscovery.isOwnDiagnosticReport(report("TcoderHelper-2026-09-19-081301"),
-                                                          projectName: "Tcoder"),
+                                                          identity: LogProjectIdentity.declaring(["Tcoder"])),
                        "主名带后缀的是另一个可执行文件，不得混进来")
         XCTAssertFalse(LogDiscovery.isOwnDiagnosticReport(report("Firefox-2026-09-19-081301"),
-                                                          projectName: "Tcoder"),
+                                                          identity: LogProjectIdentity.declaring(["Tcoder"])),
                        "别的应用的报告一律不读（AGENTS.md 禁区）")
         XCTAssertFalse(LogDiscovery.isOwnDiagnosticReport(report("TcoderMonitor-2026-09-19-081301"),
-                                                          projectName: "  "),
+                                                          identity: LogProjectIdentity.declaring(["  "])),
                        "项目名为空时一律不命中，避免匹配到全部报告")
     }
 }

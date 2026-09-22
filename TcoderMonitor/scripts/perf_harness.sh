@@ -55,7 +55,19 @@ cd "$(dirname "$0")/.." || exit 1
 # 我们的 xctrace bundle 同样是 GB 级，规矩必须写进工具而不是写进记忆。
 # 覆盖方式：`TCODER_SCRATCH=/some/dir ./scripts/perf_harness.sh …`。
 SCRATCH="${TCODER_SCRATCH:-$(git rev-parse --show-toplevel)/.scratch}"
-mkdir -p "$SCRATCH" 2>/dev/null || SCRATCH="${TMPDIR:-/tmp}"
+# 建不出来就**拒绝录制**，不许把样本根退回全局临时目录。
+# 原来这里是"mkdir 失败就把 SCRATCH 指到 TMPDIR"的一行兜底 —— 上面那句
+# "不再往 $TMPDIR 倒"立刻被它推翻：一旦 `.scratch` 建不出来（只读挂载、
+# 路径被占、仓库在外置盘上休眠），GB 级 trace 就静默落回全局临时目录，
+# 正是 103 GB 那次的形状。第 23 项反例当时没抓到它，
+# 因为那条只认"绝对临时目录 + 样本名前缀"这种写死形态，不认变量兜底这种形态
+# （同一个失效的两副面孔）。这行注释本身也不许把那种字面量抄回来——
+# 抄回来就会被那条 grep 命中，判据被自己的说明文字绊倒，今晚已经第三次。
+if ! mkdir -p "$SCRATCH" 2>/dev/null || [ ! -w "$SCRATCH" ]; then
+  echo "!! 样本根 \$SCRATCH=$SCRATCH 建不出来或不可写 ⇒ 拒绝录制（不退回 \$TMPDIR）。" >&2
+  echo "   要么修这个目录，要么显式给一个可写且被 git 忽略的位置：TCODER_SCRATCH=/path/to/dir $0 …" >&2
+  exit 2
+fi
 
 # 录一档 xctrace 是 GB 级的事。2026-09-21 这台机被一次没自清的取证吃掉 103 GB、
 # 可用只剩 4.4 GiB，那种情况下录到一半会**留下半份 trace 且报告读起来像真的**。
@@ -82,6 +94,7 @@ SECONDS_LAUNCH="${SECONDS_LAUNCH:-10}"
 PERF_BIN="${PERF_BIN:-$PWD/dist/Tcoder.app/Contents/MacOS/TcoderMonitor}"
 TRACE_REPORT="$PWD/scripts/trace_report.py"
 PULSE_REPORT="$PWD/scripts/perf_framepulse.py"
+PULSE_SRC="$PWD/scripts/perf_pulse.sh"   # pulse 档的实现（>400 行棘轮：拆出去，不挂账）
 # selfcheck 档的实现放在旁边那个文件里，只在跑 selfcheck 时 source 进来（同一进程、同一批全局量）。
 # 为什么搬出去：本仓 ≤800 行棘轮的分母**含 .sh**（`SourceLanguageCatalog` 认 Shell）、ceiling=0，
 # 而 selfcheck 一项一个小函数之后本文件会撞线——搬出去才是修复，拧阈值不是。
@@ -131,10 +144,16 @@ cmd_idle() {
     && echo "==> interact 档：**录制期间请持续滚动/拖窗**，停下就不算交互期" \
     || echo "==> idle 档：attach 现有实例录心跳（release 口径；rev=$REV dirty=$DIRTY）"
   [ -x "$TRACE_REPORT" ] || die "缺 scripts/trace_report.py"
-  require_idle_target
   mkdir -p "$out" || die "建不了 $out"
+  # MEASURE_LAUNCH=1 ⇒ 自己起一个带 FramePulse 的实例，让 xctrace 与脉冲**记同一个窗口**。
+  # 不开就是原来的"attach 场上现有实例"，那条路永远配不出 p95 的交叉核对（见 perf_probes.sh 里那段）。
+  if [ "${MEASURE_LAUNCH:-0}" = "1" ]; then
+    launch_measured_instance "$out" "$PERF_BIN" || die "自己起的实例没活过 4 秒 ⇒ 不录"
+  fi
+  require_idle_target
   meta_write "$out" "mode=idle" "period=$period" "pid=$PID" "binary=$TARGET_BINARY" \
            "input_source=${INPUT_SOURCE:-human}" \
+    "launched_by=${MEASURED_PID:+us(同窗脉冲)}" "pulse_file=${MEASURED_PULSE:-}" \
     "hitches_seconds=$SECONDS_HITCHES" "tp_seconds=$SECONDS_TP" "coexisting_instances=${COEXIST:-1}" \
     "templates=$TEMPLATE_HITCH + $TEMPLATE_TP" "build_flavor=$TARGET_FLAVOR"
   preflight_context "$out" "$PID"
@@ -146,6 +165,12 @@ cmd_idle() {
   # 拆完仍是 1/4 → 2/4 → 3/4 → 4/4 这一条直线，一步没重排。
   idle_record_hitches "$out" "$period"
   idle_record_time_profiler "$out"
+  # 自己起过实例 ⇒ 同一窗口再量一次脉冲，把两把尺子并排放（这才叫交叉核对，不是两个窗口的数对撞）
+  if [ -s "${MEASURED_PULSE:-}" ]; then
+    echo "==> 同窗脉冲（FramePulse 的帧间隔分位数，用来核对 p95 那半句）"
+    python3 "$PULSE_REPORT" "$MEASURED_PULSE" --interaction 2>&1 | tail -4 | sed 's/^/    /' || true
+    cp "$MEASURED_PULSE" "$out/pulse.txt" 2>/dev/null || true
+  fi
   idle_parse_tables "$out"
   idle_write_summary "$out"
 }
@@ -296,8 +321,34 @@ PY
 # =============================================================================
 cmd_probe() {
   local file="${1:-}"
-  [ -n "$file" ] || file=$(ls -t /tmp/tcoder-framepulse-*.txt 2>/dev/null | head -1)
-  [ -n "$file" ] || die "找不到 /tmp/tcoder-framepulse-*.txt：探针没开。开法是 TCODER_PERF_PROBE=1 起 App"
+  # 【为什么要有 --start】整条自动化里**没有任何地方设过 TCODER_PERF_PROBE=1**，
+  # 而 `open` 起的 App 也不继承调用方环境变量 ⇒ 这颗"进程内侧量帧脉冲"的探针
+  # 在无人值守链里**根本开不起来**，probe 档于是只能读到一个永远不会出现的 /tmp 文件。
+  # 它不牵连 T1/T2 的判决（那两个读的是 xctrace 的 hitches / updates / displays 表），
+  # 但"规范里写着的仪器"与"实际接得通的仪器"必须是同一件，所以这里补一条起法。
+  if [ "$file" = "--start" ]; then
+    local secs="${2:-8}"
+    # macOS 自带 bash 3.2 没有 BASHPID（第一次跑就在这行 unbound 死掉，还是 `set -u` 那种
+    # "不报错、直接终止"的死法），所以文件名只用 $$ + 秒，够用且不会撞名。
+    file="$SCRATCH/tcoder-framepulse-$REV-$$-$(date +%s).txt"
+    echo "==> 自己起一个带探针的实例，采 ${secs}s（输出落仓库内 $file，不写 /tmp）"
+    TCODER_PERF_PROBE=1 TCODER_PERF_OUT="$file" "$PERF_BIN" >/dev/null 2>&1 &
+    local probe_pid=$!
+    trap 'kill -TERM "$probe_pid" 2>/dev/null || true' EXIT INT TERM
+    sleep "$secs"
+    kill -TERM "$probe_pid" 2>/dev/null || true
+    trap - EXIT INT TERM
+    [ -s "$file" ] || die "探针没产出（$file 不存在或为空）⇒ 要么 env 没传进去，要么这个 build 里 FramePulse 没接上"
+    shift 2
+    set -- "$file" "$@"
+    echo "    起了 pid=$probe_pid，产物 $file（$(wc -l < "$file" | tr -d ' ') 行）"
+  fi
+  [ "$#" -gt 0 ] && file="$1"
+  [ -n "$file" ] || file=$(ls -t "$SCRATCH"/tcoder-framepulse-*.txt /tmp/tcoder-framepulse-*.txt 2>/dev/null | head -1)
+  [ -n "$file" ] || die "找不到 FramePulse 产物：用 `probe --start` 现采一趟，或自己带 TCODER_PERF_PROBE=1 起 App"
+  case "$file" in
+    /tmp/*) echo "    ⚠ 读的是 /tmp 下的旧探针文件——仓库外，可能被系统清理（今晚对照组就是这么丢的）" >&2 ;;
+  esac
   echo "==> probe 档：读 $file"
   echo "    交互期结论只有在测量窗口内**真的有人在滚动/拖窗**时才成立，"
   echo "    所以判 T1 要自己带 --interaction 声明；不带就只会得到 idle 读数（退出码 2，不是达标）。"
@@ -328,6 +379,11 @@ main() {
       cmd_switch "$@" ;;
     report) cmd_report "$@" ;;
     probe) cmd_probe "$@" ;;
+    pulse)
+      # 与 selfcheck 档同一个做法：**只有真跑这一档才 source**，同一进程 ⇒ 全局量与口径不变
+      # shellcheck source=/dev/null
+      source "$PULSE_SRC"
+      cmd_pulse "$@" ;;
     selfcheck)
       # 只在真跑 selfcheck 时才 source：其余四档不读这个文件，也就不会被它拖住。
       [ -f "$SELF_CHECK_SRC" ] || die "缺 $SELF_CHECK_SRC（selfcheck 档被拆走了——它不归本文件管，见 97 号笔记）"

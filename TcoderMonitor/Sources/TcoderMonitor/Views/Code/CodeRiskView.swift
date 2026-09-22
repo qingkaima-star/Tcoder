@@ -89,7 +89,8 @@ struct CodeRiskOverviewSection: View {
                                 caption: "仅 ≥2 行的函数",
                                 unit: "行")
                     DataBandSeparator()
-                    DataReadout(label: "巨大文件", value: NumberFormat.grouped(code.hugeFiles.count),
+                    // 真总数，不是榜长：`hugeFiles` 被 `prefix(20)` 截过，读它会把 552 个显示成 20 个。
+                    DataReadout(label: "巨大文件", value: NumberFormat.grouped(code.reportedHugeFileCount),
                                 unit: "个")
                 }
             }

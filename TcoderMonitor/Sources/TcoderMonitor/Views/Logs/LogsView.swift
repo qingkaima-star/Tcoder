@@ -24,7 +24,7 @@ struct LogsView: View {
         Theme.Page.Scaffold {
                 header(window: $state.logWindowDays)
                 banners
-                LogsMetricGrid(logs: report?.logs, code: report?.code)
+                LogsMetricGrid(logs: report?.logs, code: report?.code, windowDays: state.logWindowDays)
                 LogsTrendCard(logs: report?.logs)
                 LogsErrorClustersCard(logs: report?.logs)
                 LogsAffectedFilesCard(logs: report?.logs)

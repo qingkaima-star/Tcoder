@@ -10,7 +10,18 @@ import Foundation
 
 enum LogAggregator {
 
-    static func aggregate(readings: [LogFileReading], extraEvents: [LogEvent], topLimit: Int) -> LogAggregate {
+    /// 聚合一批 reading 与崩溃事件。
+    ///
+    /// `windowCutoff` 是**按事件时间**的裁剪线（RD-22）：整改前它不存在，
+    /// 「最近 7 天」只裁文件 mtime（`LogDiscovery` 那一层），于是
+    /// 一个 90 天没写过、内含 90 天错误的文件会整批算进"最近 7 天"。
+    /// 现在：计数只算「有真实事件时间且时间 ≥ cutoff」的事件；
+    /// 无事件时间与窗口外的事件各自计数，**不静默丢弃**。
+    /// 传 `nil` = 不裁剪（老报告与单测的直接调用路径保持原行为）。
+    static func aggregate(readings: [LogFileReading], extraEvents: [LogEvent], topLimit: Int,
+                          windowCutoff: Date? = nil,
+                          crashHandledPaths explicitCrashPaths: Set<String>? = nil,
+                          windowExemptPaths: Set<String>? = nil) -> LogAggregate {
         var result = LogAggregate()
         // 真实读到的行数，不是估算值
         result.totalLinesScanned = readings.reduce(0) { $0 + $1.totalLines }
@@ -19,7 +30,13 @@ enum LogAggregator {
         // 崩溃报告有两种提取路径：逐行解析器会把 .ips 的 JSON 行当成日志（产出裸 JSON 的
         // 「错误」），CrashReportParser 才是权威解读。同一份文件只允许后者的事件入场，
         // 否则一次崩溃会被拆成两条 cluster、次数也翻倍。
-        let crashHandledPaths = Set(extraEvents.map(\.sourceLogPath))
+        //
+        // ⚠️ 这份名单**不能**从 `extraEvents` 反推：调用方交给聚合器的只是"够格进计数"的那部分
+        // 崩溃事件（窗口内、有事件时间、非旧构建）。一份无事件时间的报告同样已经被崩溃通道解析过，
+        // 若因为它不在 `extraEvents` 里就放行解析进来，`Exception Type: EXC_CRASH (SIGABRT)`
+        // 这一行会被 `crashMarker` 第二次算成崩溃 —— 一次崩溃两个通道各数一遍。
+        // 所以由 `FileLogAnalyzer` 显式交回"崩溃通道真出过事件的路径"。
+        let crashHandledPaths = explicitCrashPaths ?? Set(extraEvents.map(\.sourceLogPath))
         for reading in readings {
             if crashHandledPaths.contains(reading.url.path) { continue }
             events.append(contentsOf: reading.events)
@@ -28,16 +45,23 @@ enum LogAggregator {
         events = deduplicated(events)
         result.events = events
 
-        countEventSeverities(events, into: &result)
+        let split = LogEventWindowSplit.split(events, cutoff: windowCutoff,
+                                              exemptPaths: windowExemptPaths ?? [])
+        result.undatedEventCount = split.undated.count
+        result.outOfWindowEventCount = split.outOfWindow.count
+        countEventSeverities(split.inWindow, into: &result)
 
         let dated = events.compactMap { $0.date }
         result.windowStart = dated.min()
         result.windowEnd = dated.max()
 
-        let signalEvents = events.filter { $0.isContinuation == false && signature(for: $0) != nil }
+        let signalEvents = split.inWindow.filter { $0.isContinuation == false && signature(for: $0) != nil }
         result.topErrors = cluster(events: signalEvents, limit: topLimit)
+        // 趋势按天分桶看的是**全部有事件时间的事件**（含窗口外的历史），
+        // 它正是"历史报告与当前观察窗口分开展示"的那个载体；
+        // 无事件时间的事件进不了任何一天，只能由台账单列。
         result.trend = buckets(for: events)
-        result.affectedFiles = affectedFiles(for: events, limit: 10)
+        result.affectedFiles = affectedFiles(for: split.inWindow, limit: 10)
         return result
     }
 

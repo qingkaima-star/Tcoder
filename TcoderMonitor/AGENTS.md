@@ -538,6 +538,11 @@ WS-A/WS-B/WS-C 此刻在**主树里有未提交在途改动**。不允许直接�
 | `Models/CodeMetrics.swift` | `scanLimitations: [String]?`（一个字段，其余一字未动） | WS-A 在 `FileSystemCodeAnalyzer` 里把"哪些上限真的生效过"算好了却无处安放，注释点名"交给总工决定接入点"——这就是那个接入点的另一半。**必须是 Optional**：非 Optional 带默认值会让旧报告整份解码失败 | `FunctionalHonestyGuardTests` G9（写/读两头都在）+ `CodeAnalyzerPrecisionTests` 行为两向（截断→非空、未截断→nil）|
 | `Models/CoverageMetrics.swift` | `unreadableDirectoryCount: Int?`（其余一字未动） | 目录枚举失败被 `try?` 吞掉时，"没看到"会在界面上长成"该项目没有产出覆盖率报告"。这一格要把"扫描面不完整"随报告一起落盘，只能住在契约里 | `CoverageAnalyzerTests` 两向（挡住一个目录→计数 ≥1 且结论补一句"没看完"；一个都没挡住→必须写 0，不许留 nil） |
 | `Design/SharedComponents.swift` | `MetricTile` 的自定义 `init` 补一个 `captionHelp: String? = nil` 形参（插在 `caption:` 之后，带默认值） | 属性与渲染 main 早就开好了，**只有 init 不收这个参数 ⇒ 调用点传不进去**；「留短藏长」的格子没有别的挂载点，而 42 处现有调用点靠默认值一字不改 | `TooltipMigrationGuardTests+HelpSlots`（新标签必须进 A/B 两本账）+ S7 的 `ShellReadoutTooltipTests`（三格 captionHelp 只指既有真值生产者，不许重抄中文） |
+| `Models/ScanProvenance.swift`（**新文件**） | 报告溯源块：`schemaVersion` / `toolVersion` / `rulesVersion` / `producedBy` / `scannedRoot` / `resolvedGitRoot` / `sourceCommit` / `sourceBranch` / `workingTreeDirty` / `dirtyEntryCount` / `dirtyProbeNote`，**11 个字段全 Optional** | "这份报告是哪个提交、哪一版工具、哪一版判据产的"必须随报告一起落盘；放别处就没有第二份产物能带着它走 | `ScanProvenanceTests` 17 例（含 4 条反例：没量到不得渲染成干净、缺席值打「未记录」、仓库根相等时不许造假提示、非零退出要带原因）+ 真子进程三情形对独立真值 + sabotage 3 红 |
+| `Models/Project.swift` | `ProjectReport` 加 `var provenance: ScanProvenance? = nil`（其余一字未动） | 溯源块必须挂在唯一那份 schema 上（§5.9 第 2 条：不存在第二个 DTO）；**必须 Optional**，否则旧 JSON 整份解码失败 | `testReportWithoutProvenanceKeyStillDecodes`（把键删掉再解）+ `testProvenanceRoundTripKeepsEveryField` |
+| `Models/GitInsights.swift` | 加 `workingTreeDirty: Bool?` / `dirtyEntryCount: Int?` / `dirtyProbeNote: String`（既有成员一字未动） | 工作区状态只有 Git 那一路量得到：`ShellGitAnalyzer` 已经在同一次分析里起进程，**再开第二个 git 进程就是第二把尺子**（一处看仓库根、一处看用户选的子目录，今天真踩过） | `ShellGitAnalyzer.workingTree(from:)` 三态 + `testStatusProbeDistinguishesCleanDirtyAndUnmeasured` 四分支 |
+| `App/AppState.swift` | 扫描收尾处加 **1 行**：`merged.provenance = ScanProvenance(…producedBy: "gui")` | 装配点只有两个（GUI 与 CLI），少一个就产出一半"无溯源"的报告，而 `producedBy` 正是 CLI↔GUI 对表要用的那格 | `testProvenanceHasBothWritersAndReaders`（**两个写者点名相等**，且必须有读者） |
+| `Services/CLI/CLIOutput.swift` | `buildConfiguration` / `bundleIdentity` 改成**转发**到 `ScanProvenance`，输出逐字未变 | 同一件事不许有两把尺子：`--version` 与报告溯源必须给同一个串 | `testCLIIdentityAndProvenanceShareOneRuler` |
 
 不在这张表里的冻结区改动一律视为越界。历史批次（P7-A 退役示例数据动过
 `Models/Project.swift`、`Models/HealthScore.swift`、`App/AppState.swift`、
@@ -624,3 +629,32 @@ dist/Tcoder.app/Contents/MacOS/TcoderMonitor doctor [<path>]
    （本轮第一轮复核就报了三个不存在的名字），引用前先核。
 6. 每条修复要交四件：复现夹具 + 独立真值、正例/反例/未知态/失败态、CLI 与 GUI 对表、
    新守卫 sabotage 一次证明有牙。缺件按未完成处理。
+
+### 8.1 冻结区窄口径豁免（2026-09-22 07:44 由总工登记，一条链路一个负责人 ⇒ 必须放行）
+
+| 流 | 放行范围 | 为什么必须在冻结区里 | 判据来源 |
+|---|---|---|---|
+| **R3** | `Sources/TcoderMonitor/Models/DependencyReport.swift` 里的 **`DependencyVersion` 一族**（`normalize` / `compare` / `isOlder`）+ 该文件新增 **Optional** 字段 | 版本范围判 0 的根因本身就在 `DependencyVersion.normalize`（首字符即截断符 ⇒ `^1.2.3`→`[0]`），而用户 §十一 明令"依赖模型 → 查询 → 回填 → 行状态 → 总览 → 评分"这条链**不许拆给两个人各修一段**。把根因留在总工手里、消费端交给 R3，会得到两套版本口径长期并存 | 台账 RD-10、§7.2 |
+| **R3** | 允许**改**三条把错误行为当契约的旧测试：`DependencySnapshotTests.testVersionIsOlderEdgeCases`、`ManifestLabDependencyTests`（默认期望按 HEAD 实测、`TCODER_F_STRICT_CONTRACT` 才是设计真值）、`HonestyP1SnapshotDateTests`（钉"补句不改 `classify` 判据"） | 用户原话"修正错误测试，而不是继续维护错误兼容" | RD-10 / RD-13 |
+
+**豁免的边界**：只许动上面列出的类型与那三条测试；`Models/**` 其余成员、`App/**`、`Design/**`、
+`Package.swift` 仍然冻结。新增字段一律 Optional 且在交回汇报里逐条写"字段 / 谁写谁读 / 为什么不能放别处"，
+由总工补进 §3 的 additive 登记表 —— **没登记的冻结区改动视为越界**。
+
+**预算提醒（别撞闸门）**：`SourcesSizeAuditTests` 400 行口径下 Sources 侧超限名额为 **0**；
+`Views/DashboardView.swift` 余 2 行、`Services/Dependencies/OsvClient.swift` 余 6 行、
+`Services/Code/CodeLineNormalization.swift` 余 13 行 ⇒ 新增实现**整块另起新文件**。
+
+### 8.2 台账只由总工写（2026-09-22 09:12 起，因连续两次合并冲突而改）
+
+`docs/检测正确性整改清单.md` 是**一条共享时间线**：多个流各自往里追加小节，必然在合入时撞车
+（今天 `ws/r1-java` 一连两次因为它冲突，每次都要人工把两侧拼回去）。
+⇒ 从今天起：
+
+1. **负责人不要改这份文件**。你的证据、状态变更请求、契约缺口，一律写进**你自己那一份 Obsidian 笔记**
+   （`104` / `106` / `108` / `110` / `112` …），标题里带上你要改的条目号（例：`RD-06 已修，证据如下`）。
+2. 我在合入你那笔之前，把证据**由我录进台账**（含你的头 hash 与真实数字），条目状态列也由我翻。
+3. 你要是在台账里已经写了自己的小节（本轮的 R1/R2 就写了），**合并时按"取 main 全文 + 你那节原样接回"解**
+   —— 内容一字不删，只让它落在我的节之后；下一轮起就不要再写了。
+4. 唯一允许负责人直接改的代码性文档是**自己名下**的那份；`README.md` / `docs/使用说明.md` 的符号锚点
+   仍受 `DocReferenceRatchetTests` 管（只写符号、不写行号）。

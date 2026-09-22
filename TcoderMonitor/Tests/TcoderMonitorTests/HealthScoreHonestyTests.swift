@@ -112,14 +112,18 @@ final class HealthScoreHonestyTests: HealthScoreTestCase {
         emptyLogs.exceptionCount = 0
         emptyLogs.crashCount = 0
         let blind = WeightedHealthScorer().score(HealthInputs(code: healthyCode(), logs: emptyLogs))
-        XCTAssertFalse(blind.strengths.contains(where: { $0.contains("未见崩溃") || $0.contains("无崩溃") }),
+        XCTAssertFalse(blind.strengths.contains(where: { $0.contains("未见") || $0.contains("无崩溃") }),
                        "没扫到日志就断言无崩溃是虚报，实得 \(blind.strengths)")
         XCTAssertTrue(blind.recommendations.contains { $0.contains("没有可扫描的日志") },
                       "必须提示日志缺失，实得 \(blind.recommendations)")
 
         let scanned = WeightedHealthScorer().score(HealthInputs(code: healthyCode(), logs: healthyLogs()))
-        XCTAssertTrue(scanned.strengths.contains { $0.contains("未见崩溃") && $0.contains("120") },
+        // RD-24：优点卡能说出口的上限是"窗口内、已扫描的这些行里未见确认崩溃"，
+        // 而且必须自带边界声明（未采运行时长与请求量 ⇒ 不是运行期健康证明）。
+        XCTAssertTrue(scanned.strengths.contains(where: { $0.contains("未见确认崩溃") && $0.contains("120") }),
                       "真扫到 12 万行时才可以写这句优点，实得 \(scanned.strengths)")
+        XCTAssertTrue(scanned.strengths.contains(where: { $0.contains("不等于运行期无崩溃") }),
+                      "优点句必须自带它的边界，实得 \(scanned.strengths)")
     }
 
 }

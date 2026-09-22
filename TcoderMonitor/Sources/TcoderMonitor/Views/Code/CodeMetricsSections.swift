@@ -123,9 +123,11 @@ struct CodeHotspotSection: View {
                         }
                     }
                 }
-                if code.hugeFiles.count > rowLimit {
+                // 未展示数按**真总数**算：榜只带 `prefix(20)` 条回来，拿榜长会把"另有 532 个"说成"另有 12 个"。
+                let undisplayed = max(0, code.reportedHugeFileCount - rows.count)
+                if undisplayed > 0 {
                     DataDisclosureButton(expanded: expanded,
-                                        hiddenCount: code.hugeFiles.count - rowLimit,
+                                        hiddenCount: undisplayed,
                                         noun: "个未展示") {
                         expanded.toggle()
                     }
@@ -145,7 +147,7 @@ struct CodeHotspotSection: View {
     /// `.scratch/evidence-8de2d17/light-tail/代码规模.png`：两行相隔 40pt 逐字重复）。
     /// 本行只留按钮**没有**的那一半 —— 列出多少 / 一共多少。
     static func truncationNote(_ code: CodeMetrics, shown: Int) -> String {
-        let total = code.hugeFiles.count
+        let total = code.reportedHugeFileCount
         guard total > shown else {
             return "共 \(NumberFormat.grouped(total)) 个，已全部展示。"
         }
@@ -158,8 +160,9 @@ struct CodeHotspotSection: View {
 
     static func subtitle(_ code: CodeMetrics) -> String {
         if code.hugeFiles.isEmpty { return "行数是单文件总行数（含空行与注释）" }
+        // 「共 N 个」是**总数**口径，读真总数：榜单被 `prefix(20)` 截过，直读榜长会把 552 写成 20。
         return localizedFormat("共 %1$@ 个 · 最大 %2$@ 行 · 点击条目在 Finder 中显示",
-                                NumberFormat.grouped(code.hugeFiles.count),
+                                NumberFormat.grouped(code.reportedHugeFileCount),
                                 NumberFormat.grouped(largestLineCount(code)))
     }
 }
