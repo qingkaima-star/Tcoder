@@ -529,10 +529,11 @@ B 类还要先登记键，报成 A 会让人以为那 14 句随手就能清完�
 —— 标签从刻度往右长，尾刻度那半个掉出绘图区被卡片右边切掉。
 收成一条公共规则 `ChartAxisEdge.anchor`（首刻度往右长、尾刻度往左长、中间居中），
 五处调用点一起接上；守卫 `test_noTimeAxisLabelHardcodesCenteredFalse`
-（锚点写**裸名**：`Type.成员` 那种写法走的是"按类型名找同名文件"的作用域判活，
-而这条测试住在 `BorderlessDetailGuardTests+ChartAndUnits.swift` 那份拆片里，
-同名主文件没有它 ⇒ 第一次跑就被判成死引用。改裸名后落到"纯符号判活"那一档）
-零容忍 + 元测试（注入 `centered: false` 必须抓到、走公共规则的不许误判）。
+（锚点**只能写成裸名**：`DocReferenceRatchetTests` 的符号索引只吃 `TcoderMonitor/Sources/**`，
+写成 `BorderlessDetailGuardTests.test_…` 会被判"Sources 里找不到"而死；
+而正则要求**至少一个点**才算锚点 ⇒ 裸名压根不进校验。
+两条合起来 = 文档里引用测试名要么必判死、要么不被校验，这是校验器的已知盲区，
+已记进乱清单 §6 第 8 条）零容忍 + 元测试（注入 `centered: false` 必须抓到、走公共规则的不许误判）。
 修复后同一位置实拍：`08:52:57` 完整落在边界内。
 
 ⇒ 方法上记一条：**机器判据全绿不等于界面没问题**。上面那把亮度尺子四趟全绿、

@@ -1,3 +1,4 @@
+import Charts
 import SwiftUI
 
 // MARK: - 图表：全 App 唯一一套色板 + 稳定取号
@@ -246,12 +247,17 @@ enum ChartAxisEdge {
     }
 
     static func anchor(for date: Date?, in domain: ClosedRange<Date>?) -> UnitPoint {
-        guard let date, let domain else { return .center }
-        let span = domain.upperBound.timeIntervalSince(domain.lowerBound)
-        guard span > 0 else { return .center }
-        let position = date.timeIntervalSince(domain.lowerBound) / span
+        guard let position = position(of: date, in: domain) else { return .center }
         if position >= 1 - edgeFraction { return .trailing }
         if position <= edgeFraction { return .leading }
         return .center
+    }
+
+    /// 这个刻度落在数据域的百分之几；域退化（单点/空）时返回 nil。
+    static func position(of date: Date?, in domain: ClosedRange<Date>?) -> Double? {
+        guard let date, let domain else { return nil }
+        let span = domain.upperBound.timeIntervalSince(domain.lowerBound)
+        guard span > 0 else { return nil }
+        return date.timeIntervalSince(domain.lowerBound) / span
     }
 }
