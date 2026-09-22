@@ -102,9 +102,11 @@ enum AnalyzerLedgerText {
     }
 
     /// 行数与路名清单不一致时必须自己喊出来：那说明装配口与台账分叉了，
-    /// 这一屏的每一行都不可信（不是"少一行无所谓"）。
+    /// 这一屏的每一行都不可信（不是「少一行无所谓」）。
+    /// 分母取 `AnalyzerLedger.sectionLabels`（路名与路数唯一一份真值，在契约里），
+    /// 不取 `CLIScan.sectionLabels` —— 那只是它的转发，引转发层等于多绕一把尺子。
     private static func countWarning(_ records: [AnalyzerRunRecord]) -> String {
-        let expected = CLIScan.sectionLabels.count
+        let expected = AnalyzerLedger.sectionLabels.count
         guard records.count != expected else { return "" }
         return " · ⚠ 台账写了 \(records.count) 行，与路名清单的 \(expected) 路不一致 ⇒ 本段整体不可信"
     }

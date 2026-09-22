@@ -340,9 +340,7 @@ extension MeasurementLedger {
         }
         var rows: [MeasurementRow] = [
             measured(scorerPath, MeasuredItem.componentScores,
-                     health.components.map { $0.name }.count > 0
-                     ? health.components.map { "\($0.name)=\($0.score)" }.joined(separator: " ")
-                     : "无",
+                     health.components.map { "\($0.name)=\($0.score)" }.joined(separator: " "),
                      from: ["ScoreComponent.score（各维度分析器给的分数，不在这里重算）"]),
             measured(scorerPath, MeasuredItem.componentWeights,
                      health.components.map { "\($0.name)=\(String(format: "%.4f", $0.weight))" }
