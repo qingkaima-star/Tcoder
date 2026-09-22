@@ -577,3 +577,28 @@ Views/Shell/SidebarRows.swift:89      ? Color(nsColor: .quaternaryLabelColor)
 高负载下若真存在超时/并发读目录的路径，值得看一眼 `CoverageAnalyzer` 的目录扫描是否有
 时间预算——`metrics.unreadableDirectoryCount` 这个字段的存在说明它已经在容忍读不到的目录，
 那么"读不到"与"读到 0"在数值上是不是同一个形状，是可查的一问。
+
+## §P（2026-09-22 16:59）渲染路径 14 处具名存量：给一条命令，别抄我这张表
+
+`tokenReference 62` 是**读数不是债**（§N 已经说清），所以真正要还的是这 **14 处 / 10 个文件**。
+下表是 16:52 那一轮门禁现扫的快照（**它是快照，会腐烂**；重算方法就在下面那两条命令）：
+
+| 规则（现量/上限） | 处数 | 落在哪些文件 |
+|---|---|---|
+| `fullSort` 9/9 | 9 | `ContributorRows`×2、`LogsFileTables`×2、`CodeMetricsView`、`DependenciesView`、`ContributorsView`、`LogsMetricGrid`、`LogsTrendCard` |
+| `syncFileIO` 2/2 | 2 | `Views/Logs/LogsView.swift`×2（`attachedItems` → `fileSize(of:)` 两跳进 body） |
+| `dynamicColorConstruction` 2/2 | 2 | `Views/Shell/SidebarRows.swift`、`Views/Shell/ProjectSidebar.swift` |
+| `directFormatters` 1/1 | 1 | `Views/PerfLogs/ChartChrome.swift:268`（`DateFormatter()` 提 `static let`） |
+
+```bash
+./scripts/locked_build.sh test --filter PerfHitchGuardTests    # 每次跑都打「现量/上限」
+sed -n '1,200p' .scratch/tcoder-perf-renderpath-debt.txt        # 逐条带 文件:行 + 原文
+```
+
+三条使用约定：
+1. **并完 main 就重跑再看**，别拿本文里的数字派活（§H 那条"交集 = 0"就是没重算而误导了两天）。
+2. **还掉之后要有人拧基线**：`现量 < 上限` 的那一格就是"新增一处照样绿"的隐形余量，
+   而台账自己会打『可拧到 N』——**看到那句话的人就是该拧的人**，不必等总工。
+3. 这 14 处里 `DependenciesView`（n 可到上千）与 `ContributorRows`、`CodeMetricsView`
+   是**滚动/切页期**成本 ⇒ 影响 **T1**，不影响心跳期 T2；
+   别和 §H 那 16 处粗读点混成一句"清完渲染路径"——两批的验收窗口不是同一个。
