@@ -314,14 +314,21 @@ final class DependencyBackfillIdentityTests: XCTestCase {
         ])
         let stub = StubOnlineSource()
         let report = try await analyze(root, stub: stub)
-        let rows = Dictionary(uniqueKeysWithValues: report.scopeBreakdown.map { ($0.scope, $0) })
+        // 报告级那一格是 Optional（旧报告没有它 ⇒ 非 Optional 会让整份解码失败），
+        // 但**本次分析必须写下它**，所以这里按"必须有"来断，不写 nil 就当没这回事。
+        let breakdown = try XCTUnwrap(report.scopeBreakdown,
+                                      "分析器必须把分 scope 统计随报告一起落盘（RD-13c）")
+        let rows = Dictionary<String, DependencyScopeCount>(
+            uniqueKeysWithValues: breakdown.map { ($0.scope, $0) })
         XCTAssertEqual(rows["运行时"]?.declared, 1)
         XCTAssertEqual(rows["开发"]?.declared, 1)
         XCTAssertEqual(rows["测试"]?.declared, 1, "test scope 必须单列，不许并进运行时")
         XCTAssertEqual(rows["未标注"]?.declared, 1)
-        XCTAssertEqual(report.scopeBreakdown.reduce(0) { $0 + $1.declared }, report.totalDependencies,
+        XCTAssertEqual(breakdown.reduce(0) { $0 + $1.declared }, report.totalDependencies,
                        "分 scope 之和必须等于依赖总数")
-        XCTAssertFalse(DependencyEvidence.ledger(for: report).scopeBreakdown.isEmpty)
+        // 三处消费者同源的直接证据：账本里那份与报告里那份必须是**同一个值**。
+        XCTAssertEqual(DependencyEvidence.ledger(for: report).scopeBreakdown, breakdown,
+                       "总览 / 依赖行 / 评分读的是同一份 scope 统计，不许各自再算一遍")
     }
 
     // MARK: - 辅助
