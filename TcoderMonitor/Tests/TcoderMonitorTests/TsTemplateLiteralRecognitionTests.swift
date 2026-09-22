@@ -107,10 +107,13 @@ final class TsTemplateLiteralRecognitionTests: XCTestCase {
         // 分母钉子：插值行（第 2 行）之后的行必须**仍然被统计**
         let src = sanitized(fixture, "TypeScript")
         let opensAfterInterpolation = src.opens[2...].reduce(0, +)
-        let closesAfterInterpolation = src.closes[2...].reduce(0, +)
         XCTAssertGreaterThan(opensAfterInterpolation, 0, "第 3 行之后一个花括号都没统计到 ⇒ 后续代码被整段吞掉")
-        XCTAssertEqual(opensAfterInterpolation, closesAfterInterpolation,
-                       "插值之后的花括号必须自己配平（开 \(opensAfterInterpolation) / 闭 \(closesAfterInterpolation)）")
+        // 配平判据取**整份文件**：切片 `[2...]` 少算的是第 1 行那个开括号（renderUser 自己的 `{`），
+        // 所以正确的不变式是「总数配平 + 文件末尾深度回到 0」，不是切片两侧相等。
+        XCTAssertEqual(src.opens.reduce(0, +), src.closes.reduce(0, +),
+                       "整份文件的花括号总数必须配平（插值行不许多算或少算一层）")
+        XCTAssertEqual(src.prefix.last, 0,
+                       "文件末尾花括号深度必须回到 0，实际 \(src.prefix.last ?? -999)")
     }
 
     // MARK: - 夹具 3：多层插值 `${ a ? `b${c}` : `d` }`

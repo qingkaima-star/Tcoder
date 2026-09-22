@@ -36,16 +36,47 @@ enum ComplexityEngine {
 
     /// 从单个文件识别函数并算复杂度；无法识别的语言返回 []。
     static func functions(in file: ScannedSourceFile) -> [FunctionCandidate] {
-        let profile = profile(for: file.language)
-        guard profile.family != .none, !profile.patterns.isEmpty else { return [] }
-        let raw = file.lines.map { $0.text }
-        guard !raw.isEmpty else { return [] }
+        functionsWithIntegrity(in: file).candidates
+    }
 
-        let src = sanitize(raw, profile)
-        var scan = Scan(src: src,
-                        profile: profile,
-                        scriptMask: profile.scriptRegionOnly ? computeScriptMask(src.cleaned) : nil)
-        return scan.run()
+    /// 与 `functions(in:)` 同一次扫描，额外带回完整性读数。**这是 R2 之后的唯一真入口**，
+    /// `functions(in:)` 只是它的投影（既有条目与既有单测都还在按老形状调它）。
+    static func functionsWithIntegrity(in file: ScannedSourceFile) -> FunctionScanOutcome {
+        let profile = profile(for: file.language)
+        guard profile.family != .none, !profile.patterns.isEmpty else { return FunctionScanOutcome() }
+        let raw = file.lines.map { $0.text }
+        guard !raw.isEmpty else { return FunctionScanOutcome() }
+
+        // RD-07：`.vue` 一份文件住着三种语言。逐行给档案 —— 脚本区按它自己声明的 lang 清洗，
+        // 模板 / 样式区整行不进代码统计（内联箭头因此进不了榜，也不再能污染词法状态机）。
+        var profiles = Array<LangProfile?>(repeating: profile, count: raw.count)
+        var scanProfile = profile
+        var mask: [Bool]?
+        var outcome = FunctionScanOutcome(codeRegionLineCount: raw.count)
+        if profile.scriptRegionOnly, let map = detectVueRegions(raw) {
+            let scriptProfile = ComplexityEngine.profile(for: map.scriptLanguage)
+            for index in raw.indices {
+                let isScript = map.regions[index] == .script
+                profiles[index] = isScript ? scriptProfile : nil
+            }
+            scanProfile = scriptProfile
+            mask = map.scriptMask
+            outcome.codeRegionLineCount = map.scriptLineCount()
+        } else if profile.scriptRegionOnly {
+            // 分区认不出来：退回 HEAD 的 `<script` 粗判，**并且把这一格如实说出来**，
+            // 而不是悄悄按「没有模板区」处理。
+            outcome.vueRegionFallback = true
+            mask = computeScriptMask(raw)
+        }
+
+        let src = sanitize(raw, profiles: profiles)
+        var integrity = src.integrity
+        if outcome.vueRegionFallback { integrity.regionFallback = true }
+        var scan = Scan(src: src, profile: scanProfile, scriptMask: mask)
+        outcome.candidates = scan.run()
+        outcome.unboundedSignatureCount = scan.unboundedCount
+        outcome.integrity = integrity
+        return outcome
     }
 
     /// 逐行「找签名 → 定边界 → 产出候选」的扫描。原先这 66 行 / CC 20 就是 `functions(in:)` 的整个函数体。
@@ -58,6 +89,8 @@ enum ComplexityEngine {
         let scriptMask: [Bool]?
         var result: [FunctionCandidate] = []
         var line = 0
+        /// 命中签名但边界推不出来的次数（出声用；见 `FunctionScanOutcome.unboundedSignatureCount`）
+        var unboundedCount = 0
 
         mutating func run() -> [FunctionCandidate] {
             while line < src.cleaned.count {
@@ -76,7 +109,12 @@ enum ComplexityEngine {
         mutating func functionStartingHere() -> (endLine: Int, candidate: FunctionCandidate?)? {
             guard let name = signatureNameHere() else { return nil }
             let boundary = bodyBoundary()
-            guard let endLine = boundary.closing else { return nil }
+            guard let endLine = boundary.closing else {
+                // **放弃了要留名**：以前这里只是 return nil，扫描线前进一行继续，
+                // 于是一个边界推不出来的函数在报告里与「这行不是函数」完全一样。
+                unboundedCount += 1
+                return nil
+            }
             // 防御：签名行绝不能越过闭合行，否则下面的 line...signatureEnd 区间会当场 trap
             var signatureEnd = boundary.signatureEnd
             if signatureEnd > endLine { signatureEnd = endLine }
