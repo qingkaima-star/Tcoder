@@ -778,3 +778,11 @@
 "按内存" = "By memory";
 "开启后需要重新执行分析才会生效。" = "Re-run the analysis for this setting to take effect.";
 "尚未分析覆盖率报告，不参与计分。" = "No coverage report has been analyzed, so it is not scored.";
+
+// P52：健康维度那四条「优点/问题」句子以前用 `String(format:)` 直接拼中文模板，
+// 模板本身从不查表 ⇒ 英文态整句是中文（屏上各 4×，是剩余 B 里最高频的一族）。
+// 改成 `localizedFormat` + 位置参数；同一个署名数在一句里出现两次，用同一个 `%1$@`。
+"重复代码率低（%1$@）" = "Low duplication rate (%1$@)";
+"重复代码 %1$@，共 %2$@ 处重复块" = "Duplicated code %1$@ across %2$@ duplicate blocks";
+"贡献分布合理（%1$@ 个署名，头号署名占 %2$@；署名按工作流计，不等于 %1$@ 个人）" = "Contribution is well spread (%1$@ identities, the top one holds %2$@; identities are workflows, not %1$@ people)";
+"「%1$@」这个署名占 %2$@ 提交，单点风险高（署名按工作流计，不等同于一个人头）" = "Identity \u201c%1$@\u201d holds %2$@ of commits \u2014 single-point risk (identities are workflows, not people)";
