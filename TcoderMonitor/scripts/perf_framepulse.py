@@ -32,8 +32,15 @@ xctrace 那三档（`idle` / `switch` / `report`）量的是**采样窗口内的
 """
 
 import argparse
+import json
+import os
 import re
+import subprocess
 import sys
+
+# 出帧那一半的解析**不在这里重写**：`trace_report.py` 的 `fps` / `displays` 两个子命令
+# 已经是全仓唯一吃这两张表的尺子，复制一份就是造第二把尺子（两把迟早分叉）。
+XCTRACE_RULER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trace_report.py")
 
 # 一条正则吃完整行：拆成十个独立 search 的话，「p95」这类字段名在
 # 「帧间隔p95」与「心跳p95」里各出现一次，先命中哪个取决于顺序——那是个静默错数。
@@ -119,24 +126,127 @@ def verdict(reading, interaction=False, min_frames=600, budget_ms=0.0):
     return lines, 0 if ok else 1
 
 
+def read_display_pair(sample_dir):
+    """→ (设备最大 Hz, 上屏 p50/s, 上屏 p95/s, 采样秒数)；取不到的那一项是 None。
+
+    只调 `trace_report.py` 的两个子命令。缺表就是 None，**不许**把它当 0——
+    "上屏 0 帧/秒"会被下游读成"掉帧掉光了"，而真相是"这张表没导出"。
+    """
+    def _run(sub, xml):
+        path = os.path.join(sample_dir, xml)
+        if not os.path.exists(path):
+            return ""
+        try:
+            r = subprocess.run([sys.executable, XCTRACE_RULER, sub, path],
+                               capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        return r.stdout if r.returncode == 0 else ""
+    disp = _run("displays", "device-display-info.xml")
+    fps = _run("fps", "displayed-surfaces-per-second.xml")
+    hz = re.search(r"最大刷新率=(\d+)", disp)
+    sp = re.search(r"p50=([\d.]+) p95=([\d.]+)", fps)
+    n = re.search(r"采样秒数=(\d+)", fps)
+    return (float(hz.group(1)) if hz else None,
+            float(sp.group(1)) if sp else None,
+            float(sp.group(2)) if sp else None,
+            int(n.group(1)) if n else None)
+
+
+def crosscheck(reading, budget, max_hz, surf_p50, surf_p95, seconds, meta):
+    """同一窗口里两把尺子的合判（工单 §M：p95 那半句到底算不算掉帧）→ (逐行文字, 退出码)。
+
+    为什么必须有这一层：`FramePulse` 读的是 **CVDisplayLink 回调送达时刻**，不等于"上屏时刻"。
+    实测过一批三趟：p50 恰好 8.33（＝一个周期）而 p95 落在 8.98~9.26 ⇒
+    **有一大片帧比一个周期晚了约 1 ms**。这 1 ms 是在回调时序上还是在呈现上，
+    单靠脉冲这把尺子问不出来；两种解释都给"p95>8.41"这个同一个数，结论却相反。
+    退出码：0 两侧一致且都在预算内 / 1 缺件或上屏侧也缺帧 / 2 不适用或两把尺子互相矛盾。
+    """
+    lines = ["== 同窗交叉核对（CVDisplayLink 回调 vs 真实上屏）=="]
+    period = str((meta or {}).get("period") or "").strip()
+    if reading is None:
+        lines.append("  这一趟没有同窗脉冲（attach 模式下被测实例没开探针）⇒ p95 那半句**不判**。")
+        return lines, 1
+    if max_hz is None or surf_p50 is None:
+        lines.append("  xctrace 那一半缺表（`device-display-info` / `displayed-surfaces-per-second`）"
+                     "⇒ 不判：两把尺子只剩一把的时候，谁都不许单独宣布达标或未达标。")
+        return lines, 1
+    if period != "interaction":
+        lines.append("  这一趟 period=%s ⇒ **不适用**：空闲期本来就只出约 10 帧/秒"
+                     "（实测 idle 样本 `displayed-surfaces/s p50=10.00`），"
+                     "拿「上屏没跟满」去判掉帧会把正常空闲误杀成卡顿。" % period)
+        return lines, 2
+    kept = surf_p50 >= 0.9 * max_hz
+    over = reading["frame_p95_ms"] > budget
+    lines.append("  脉冲 p50 %.2f / p95 %.2f ms（期望 %.2f，预算 %.2f）→ 超出 %.2f ms；"
+                 "上屏 p50 %.1f / p95 %.1f 帧每秒，设备 %.0f Hz，采样 %s 秒"
+                 % (reading["frame_p50_ms"], reading["frame_p95_ms"],
+                    reading["expected_interval_ms"], budget,
+                    reading["frame_p95_ms"] - reading["expected_interval_ms"],
+                    surf_p50, surf_p95, max_hz, seconds))
+    if not over and kept:
+        lines.append("  合判：**两侧一致**——上屏跟到了 %.0f 帧每秒（≥0.9×%.0f），脉冲也没越预算。"
+                     % (surf_p50, max_hz))
+        return lines, 0
+    if not over and not kept:
+        lines.append("  合判：**两把尺子互相矛盾**（脉冲说没越预算，上屏却只出 %.1f 帧每秒）"
+                     "⇒ 很可能是这段窗口根本没在重绘（页面不可滚？指针没落在被测窗口上？）。不判。" % surf_p50)
+        return lines, 2
+    if kept:
+        lines.append("  合判：上屏跟满了（%.1f 帧每秒 ≈ %.0f Hz），所以那 %.2f ms 的尾巴**在回调时序上，不是掉帧**。"
+                     % (surf_p50, max_hz, reading["frame_p95_ms"] - reading["expected_interval_ms"]))
+        lines.append("  ⇒ 但**不许**据此宣布 p95 达标：要把这 %.2f ms 从读数里扣掉，得先单独量出回调送达"
+                     "与上屏之间的系统性偏移（工单 §M 要的就是这一步）。在它量出来之前，"
+                     "这句话只能写成「无一帧晚到 1.5× 周期；p95 待时序标定」。"
+                     % (reading["frame_p95_ms"] - reading["expected_interval_ms"]))
+        return lines, 2
+    lines.append("  合判：上屏侧也只有 %.1f 帧每秒（< 0.9×%.0f）⇒ **呈现真的缺帧**，未达标。"
+                 % (surf_p50, max_hz))
+    return lines, 1
+
+
 def main(argv=None):
-    p = argparse.ArgumentParser(description="FramePulse 落盘文件 → 帧间隔判定")
-    p.add_argument("pulse_file")
+    p = argparse.ArgumentParser(description="FramePulse 落盘文件 → 帧间隔判定（＋同窗上屏交叉核对）")
+    p.add_argument("pulse_file", nargs="?", default="",
+                   help="脉冲文件；带 --sample-dir 时可省，默认取该目录下的 pulse.txt")
+    p.add_argument("--sample-dir", default="",
+                   help="一趟样本目录：从里面同时读 pulse.txt、meta.json 与两张 xctrace 表，做交叉核对")
     p.add_argument("--interaction", action="store_true",
                    help="声明测量窗口内确实在交互（滚动/拖窗）；不声明则只算 idle 读数")
     p.add_argument("--min-frames", type=int, default=600)
     p.add_argument("--budget-ms", type=float, default=0.0)
     args = p.parse_args(argv)
+    pulse = args.pulse_file or (os.path.join(args.sample_dir, "pulse.txt") if args.sample_dir else "")
+    if not pulse:
+        p.error("既没给脉冲文件也没给 --sample-dir ⇒ 不知道要读谁（故意不猜）")
     try:
-        with open(args.pulse_file, "r", encoding="utf-8", errors="replace") as fh:
+        with open(pulse, "r", encoding="utf-8", errors="replace") as fh:
             text = fh.read()
     except OSError as exc:
-        print("!! 读不到 %s（%s）" % (args.pulse_file, exc), file=sys.stderr)
+        print("!! 读不到 %s（%s）" % (pulse, exc), file=sys.stderr)
         return 1
-    lines, code = verdict(parse(text), interaction=args.interaction,
+    reading = parse(text)
+    budget = args.budget_ms or (reading["expected_interval_ms"] * 1.01 if reading else 0.0)
+    lines, code = verdict(reading, interaction=args.interaction,
                           min_frames=args.min_frames, budget_ms=args.budget_ms)
+    if args.sample_dir:
+        meta = {}
+        try:
+            with open(os.path.join(args.sample_dir, "meta.json"), encoding="utf-8") as fh:
+                meta = json.load(fh)
+        except (OSError, ValueError) as exc:
+            print("  ⚠ meta.json 读不到（%s）⇒ 档位声明无从确认，交叉核对按缺件处理" % exc)
+        clines, ccode = crosscheck(reading, budget, *read_display_pair(args.sample_dir), meta=meta)
+        lines += clines
+        # 合判的码优先：脉冲自己"达标"不算数，要看另一把尺子点不点头。
+        code = ccode if frames_ok(code) else code
     print("\n".join(lines))
     return code
+
+
+def frames_ok(code):
+    """脉冲那一半只有 0/2 才有资格让合判覆盖它（1 = 坏数据/样本不足，本来就没什么可覆盖的）。"""
+    return code in (0, 2)
 
 
 if __name__ == "__main__":

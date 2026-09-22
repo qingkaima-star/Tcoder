@@ -256,7 +256,53 @@ print("%s|%s|%s|%s" % ("先查主线程" in a, "分开修" in b, "全在渲染/�
   ok "迟到帧归因分得清「查主线程 / 分开修 / 全在合成侧 / 无迟到」"
 }
 
+selfcheck_p95_crosscheck_shapes() {  # selfcheck_p95_crosscheck_shapes <outdir>
+  # 33) 「p95 ≤ 8.4 ms」这一半句现在由**两把尺子合判**，所以合判本身必须能被喂数字验。
+  #     为什么必须有这一项：脉冲读的是 CVDisplayLink **回调送达时刻**，不等于上屏时刻；
+  #     实测三趟都是 p50 恰好 8.33（＝一个周期）而 p95 落在 8.98~9.26 ⇒ 有一大片帧晚了约 1 ms。
+  #     同一串数既能解释成"掉帧"也能解释成"回调偏晚"，**结论相反**——
+  #     没有第二种仪器时它是个不可判定命题，而不可判定最容易被写成"未达标"蒙过去。
+  #     七种形状各判一次：缺脉冲 / 缺表 / 档位不适用 / 越预算但上屏跟满 / 两侧都好 /
+  #     两侧都坏 / 没越预算可上屏没跟上（两把尺子互相矛盾）。
+  local r
+  r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_framepulse import crosscheck
+p_over = {"expected_interval_ms": 8.33, "frame_p50_ms": 8.33, "frame_p95_ms": 9.18}
+p_ok   = {"expected_interval_ms": 8.33, "frame_p50_ms": 8.33, "frame_p95_ms": 8.10}
+I = {"period": "interaction"}; D = {"period": "idle"}
+c = [("缺脉冲",     crosscheck(None,     8.41, 120.0, 118.0, 120.0, 20, I)),
+     ("缺表",       crosscheck(p_over,   8.41, None,  None,  None,  None, I)),
+     ("档位不适用", crosscheck(p_over,   8.41, 120.0, 10.0,  12.0,  21, D)),
+     ("越预算但上屏跟满", crosscheck(p_over, 8.41, 120.0, 118.0, 120.0, 20, I)),
+     ("两侧都好",   crosscheck(p_ok,     8.41, 120.0, 119.0, 120.0, 20, I)),
+     ("两侧都坏",   crosscheck(p_over,   8.41, 120.0, 40.0,  60.0,  20, I)),
+     ("脉冲好上屏差", crosscheck(p_ok,   8.41, 120.0, 40.0,  60.0,  20, I))]
+print("|".join("%s=%d" % (k, code) for k, (_, code) in c))')
+  [ "$r" = "缺脉冲=1|缺表=1|档位不适用=2|越预算但上屏跟满=2|两侧都好=0|两侧都坏=1|脉冲好上屏差=2" ] \
+    || { fail "合判七种形状的退出码不对（拿到 ${r:-解析失败}）——不可判定的东西又要被写成结论"; return; }
+  # 反向钉：不许只改码不改话。「尾巴在回调时序」与「呈现真的缺帧」必须是两句话，
+  # 一模一样就等于把两种相反的结论压成一条打印。
+  local kept dropped
+  kept=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_framepulse import crosscheck
+print(" ".join(crosscheck({"expected_interval_ms": 8.33, "frame_p50_ms": 8.33,
+                            "frame_p95_ms": 9.18}, 8.41, 120.0, 118.0, 120.0, 20,
+                       {"period": "interaction"})[0]))')
+  dropped=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_framepulse import crosscheck
+print(" ".join(crosscheck({"expected_interval_ms": 8.33, "frame_p50_ms": 8.33,
+                            "frame_p95_ms": 9.18}, 8.41, 120.0, 40.0, 60.0, 20,
+                       {"period": "interaction"})[0]))')
+  case "$kept"    in *"回调时序"*) ;; *) fail "上屏跟满那一支没说出「尾巴在回调时序」（拿到 $kept）" ;; esac
+  case "$dropped" in *"呈现真的缺帧"*) ;; *) fail "上屏也差那一支没说出「呈现真的缺帧」（拿到 $dropped）" ;; esac
+  [ "$kept" != "$dropped" ] || { fail "两种相反结论印成同一句话，等于没合判"; return; }
+  # 不许把"缺表"读成"0 帧每秒"：那是把仪器故障伪装成性能灾难（本仓这类形状记过很多次）。
+  case "$r" in *"缺表=0"*) fail "缺表被判成达标" ;; esac
+  ok "p95 那半句由两把尺子合判：七种形状各判一次，缺件/不适用/矛盾都不许给结论"
+}
+
 selfcheck_input_rate_qualification() {  # selfcheck_input_rate_qualification <outdir>
+
   # 28) 【标记要有读者】`meta.input_source` 从今晚起带投递节奏（`synth@8ms`），
   #     但"写了没人读"就是第二十三次要防的那个洞——我写完参数那一笔，
   #     报表照旧对 25 Hz 批次印「有资格答 T1」。这一项就是这个读者的读者。

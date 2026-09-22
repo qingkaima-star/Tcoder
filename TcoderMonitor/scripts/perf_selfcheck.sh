@@ -5,8 +5,10 @@
 # 宿主的 $REV / $TRACE_REPORT / $PULSE_REPORT / $QUIESCE_SRC 与 quiescence_probe /
 # quietest_seconds / human_input_in_window / die 这些同进程的量。
 #
-# 本文件现在只有 `cmd_selfcheck` + 三段 `items_*`（29 项 `item` 调用按主题分三段）；
-# 29 项反例的**判据本体**按主题住在同目录三块文件里
+# 本文件现在只有 `cmd_selfcheck` + 三段 `items_*`（32 处 `item` 调用按主题分三段）；
+# 【两个分母别混】末行印的「N 项通过」数的是 `ok` 调用次数（一项可以印两行 ✓），
+# 与「32 处 item 调用」不是同一个数——写文档时别拿其中一个去对另一个（09-22 加第 32、33 项时就这么混过一次）。
+# 32 处反例的**判据本体**按主题住在同目录三块文件里
 # （`_ruler_shapes` 形状与三态话术 / `_gates` 前置与闸门 / `_eligibility` 样本资格），
 # 由下面三行 source 进来。**为什么要拆**：`SelfScanDogfoodTests` 的 ≤800 行棘轮
 # **分母含 `.sh`** 且 ceiling=0（`SourceLanguageCatalog` 认 Shell），2026-09-21 本文件
@@ -57,7 +59,7 @@ cmd_selfcheck() {
 }
 
 # -----------------------------------------------------------------------------
-# 29 项 `item` 调用按主题分成三段。
+# 32 处 `item` 调用按主题分成三段。
 #
 # **为什么还要再拆一次**（2026-09-22）：这段以前是一串直白写在 `cmd_selfcheck` 里的
 # `item …`，加到第 30 项之后函数体 53 行，被**尺子自己的**「函数 ≤50 行 / CC<16」棘轮判红。
@@ -108,6 +110,7 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_phase_blame "$out"              # 27) 迟到帧要说清该怪主线程还是合成侧，三种形状各判一次
   item selfcheck_input_rate_qualification "$out"  # 28) meta 里的输入节奏必须有读者
   item selfcheck_launcher_hygiene "$out"       # 29) 起实例的脚本必须有 trap、不许按 bundle id 广播
+  item selfcheck_p95_crosscheck_shapes "$out"  # 33) p95 那半句由两把尺子合判，七种形状各判一次
   item selfcheck_md_tables_unbroken "$out"     # 30) markdown 表格不许有夹在行中间的裸续行
 }
 

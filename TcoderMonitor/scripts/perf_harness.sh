@@ -197,7 +197,7 @@ cmd_idle() {
   # 自己起过实例 ⇒ 同一窗口再量一次脉冲，把两把尺子并排放（这才叫交叉核对，不是两个窗口的数对撞）
   if [ -s "${MEASURED_PULSE:-}" ]; then
     echo "==> 同窗脉冲（FramePulse 的帧间隔分位数，用来核对 p95 那半句）"
-    python3 "$PULSE_REPORT" "$MEASURED_PULSE" --interaction 2>&1 | tail -4 | sed 's/^/    /' || true
+    python3 "$PULSE_REPORT" --sample-dir "$out" --interaction 2>&1 | tail -8 | sed 's/^/    /' || true
     cp "$MEASURED_PULSE" "$out/pulse.txt" 2>/dev/null || true
   fi
   idle_parse_tables "$out"
@@ -332,6 +332,14 @@ PY
   python3 "$TRACE_REPORT" summary "$out" --seconds "$secs"; local src=$?
   [ -s "$out/time-profile.xml" ] && python3 "$TRACE_REPORT" threads "$out/time-profile.xml" --thread "Main Thread"
   [ -d "$out/pages" ] && python3 "$TRACE_REPORT" switches "$out/pages"
+  # 同窗交叉核对：p95 那半句要的是"回调时序 vs 真实上屏"两把尺子合判（工单 §M / selfcheck 第 33 项）。
+  # 只在样本里真有脉冲时印；没有就明写"这一趟答不了"，**不许**沉默跳过——
+  # 跳过与答不出是两件事，前者会被下一个人读成"量过了"。退出码不改（合判是给**人**读的结论）。
+  if [ -s "$out/pulse.txt" ]; then
+    python3 "$PULSE_REPORT" --sample-dir "$out" --interaction 2>&1 | tail -3 | sed 's/^/    /' || true
+  else
+    echo "    ⓘ 这一趟没有同窗脉冲（attach 模式起的实例没带 TCODER_PERF_PROBE）⇒ p95 那半句未采到，不是达标"
+  fi
   # 显式收尾：上面两条都是 `[ 测试 ] && 命令` 的形状，没有 pages 目录时（idle 档就是没有）
   # 最后一条测试自己返回 1，会把"重打成功"报成"档口失败"。
   # 实测踩过：修尺子那轮 `report` 明明全打出来了，退出码仍是 1，逼得人回头去查 Traceback。
