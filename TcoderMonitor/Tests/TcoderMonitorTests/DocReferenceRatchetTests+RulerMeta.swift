@@ -79,4 +79,20 @@ extension DocReferenceRatchetTests {
                        "金丝雀没有被全部判红，或把真实锚点误判成了失效")
     }
 
+    /// 第②份索引（`Tests/**`）的元测试。**两条都要有**：
+    /// 只证"Tests 里的名字判活"等于把判据关掉——任何人都可以让它永远活。
+    func testTestsSideAnchorsResolveWhileNonsenseStillDies() {
+        var index = CodeIndex()
+        index.identifiers = ["Widget", "spin"]
+        index.sourceFileStems = ["Widget"]
+        index.testIdentifiers = ["WidgetTests", "test_spinWorks"]
+
+        XCTAssertNil(resolve(.symbol(segments: ["WidgetTests", "test_spinWorks"]), in: index).reason,
+                     "只住在 Tests 里的守卫名必须判活；否则文档引用它只能写裸名，而裸名不成锚 = 永远不被校验")
+        let dead = resolve(.symbol(segments: ["WidgetTests", "test_goneAway"]), in: index)
+        XCTAssertNotNil(dead.reason, "两侧都没有的名字必须仍然判死")
+        XCTAssertTrue(dead.reason?.contains("Tests") == true,
+                      "失效原因要说清查了哪两侧：\(dead.reason ?? "nil")")
+    }
+
 }
