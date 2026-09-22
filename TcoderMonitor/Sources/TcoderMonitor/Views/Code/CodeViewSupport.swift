@@ -58,6 +58,116 @@ enum CodeDataGate {
     }
 }
 
+// MARK: 榜单口径（RD-17 ·「榜长冒充总数」那一族）
+
+/// 「这块数字是**榜**的还是**总体**的」——代码两页共用的判定。
+///
+/// 为什么必须有这一层：重复明细榜被 `DuplicationEngine.maxBlocks` 截过，而
+/// `CodeMetrics.duplicatedBlocks` 装的就是那份榜。直接读它的 `count` 当"这个仓库有多少
+/// 重复块"，在大仓库上是把问题**报小**（巨大文件那一格已经为同一件事补了 `hugeFileCount`）。
+///
+/// 引擎其实算得出榜外还剩多少：`DuplicationResult.blocksDroppedByCap` 与
+/// `linesOutsideReportedBlocks`。但这两个数只活在 `scanLimitations` 那句中文说明里，
+/// 契约里没有承接字段 ⇒ 这里只做两件不造假的事：
+/// ① 读数标签按「榜内」出水（`count` 是榜长，永远不是总体数，所以**不加条件**也成立）；
+/// ② 把引擎那句"未列出 N 个块 / M 行"原样带上屏，让榜外那一半看得见。
+/// **没有**从那句散文里抠数字回来做算术 —— 那等于造第二把尺子。
+enum CodeBoardTruth {
+    /// 明细榜的封顶长度。读引擎那一份，不在这里另抄一个 20。
+    static var duplicationBlockCap: Int { DuplicationEngine.maxBlocks }
+
+    /// 「榜外还有多少块/行没列」那一条限制说明，由引擎产出（`CodeScanCoverage.limitationSummary`）。
+    /// `nil` = 本次没有明细被上限切掉 ⇒ 此时"榜长就是总数"这句话才是真的。
+    ///
+    /// ⚠️ 这里按**句式**认领，不是按前缀瞎找：`AdviceWordingBoardTests` 里有一条对账断言钉着
+    /// 「引擎那句话仍然含这个标记」，谁改了文案没改这里，先红在对账上。
+    static let outsideBoardMarker = "明细榜单截断"
+
+    static func outsideBoardNote(_ code: CodeMetrics) -> String? {
+        code.scanLimitations?.first { $0.contains(outsideBoardMarker) }
+    }
+
+    /// 榜长的**唯一取法**。名字里就写着 Board：它是榜内条数，不是这个仓库的重复块总数。
+    /// 真总数要等契约里那一格（`duplicatedBlockCount`，与巨大文件的 `hugeFileCount` 同形状），
+    /// 在那之前任何消费方都不许把这一串读成总数 —— 标签、量词、页尾句都由本文件配平。
+    static func duplicationBoardCount(_ code: CodeMetrics) -> Int {
+        code.duplicatedBlocks.count
+    }
+
+    /// 榜长能不能被读成"这个仓库的重复块总数"：**榜满了就不能**。
+    ///
+    /// 判据只取「榜长 ≥ 上限」这一条，刻意**不**依赖台账里有没有那句话——
+    /// CLI 实跑（`.scratch/r7-cli`，409 行的 .ts + .swift）抓到过这个形状：
+    /// 榜内 4 块、`blocksDroppedByCap = 0`，但 `fragmentsDroppedByBudget = 1066`，
+    /// 于是台账照样产出一句"明细榜单截断…"。按句判"榜被截了"会把**没满的榜说成满了**，
+    /// 那是把一件没发生的事渲染出来（与"把没量到渲染成没有问题"对称的另一头）。
+    /// 反向偏差只有一格：恰好 20 块时多说一句"榜内"，那句话依旧是真话（它确实在榜内）。
+    static func boardAtCap(_ code: CodeMetrics) -> Bool {
+        duplicationBoardCount(code) >= duplicationBlockCap
+    }
+
+    /// 「重复块」这一格读数的标签：只有榜满了才需要「榜内」这个限定，
+    /// 榜没满时"榜内"反而是一句让人找下文的话。
+    static func duplicationSlotLabel(_ code: CodeMetrics) -> String {
+        localizedCopy(boardAtCap(code) ? "重复块（榜内）" : "重复块")
+    }
+
+    /// 展开按钮的量词（`noun:` 不是查表入口，所以这里给的是上屏原文，与"个重复块"同性质）。
+    static func duplicationHiddenRowsNoun(_ code: CodeMetrics) -> String {
+        boardAtCap(code) ? "个榜内重复块" : "个重复块"
+    }
+
+    /// 重复率口径句里的那个词（同一句里"约 X 行 / 有效代码 Y 行"是**全仓**口径，两件事要分开）。
+    static func duplicationBlockWord(_ code: CodeMetrics) -> String {
+        boardAtCap(code) ? "榜内重复块" : "重复块"
+    }
+
+    /// 页尾那句。三态：
+    /// ① 榜满 ⇒ 只说"榜内只列"，并点名上限，**绝不**说"已全部列出"；
+    /// ② 榜没满但本页折叠了 ⇒ 说"列出多少 / 一共多少"；
+    /// ③ 榜没满且全展示了 ⇒ 这时"已全部列出"才是真话（并把上限一起写出来，让人看得见尺子）。
+    /// 台账那句（榜外还有多少块/行、多少处拷贝没展开）**原样追加**：它是引擎产出的数据，
+    /// 不是这里造的文案 —— 也从没把它抠成数字参与算术，那是第二把尺子。
+    static func duplicationTruncationNote(_ code: CodeMetrics, shown: Int) -> String {
+        let listed = duplicationBoardCount(code)
+        let cap = duplicationBlockCap
+        let base: String
+        if listed >= cap {
+            base = localizedFormat("榜内只列 %1$@ 个（明细榜上限 %2$@ 块）· 本页当前列出 %3$@ 个。",
+                                   NumberFormat.grouped(listed), NumberFormat.grouped(cap),
+                                   NumberFormat.grouped(shown))
+        } else if listed > shown {
+            base = localizedFormat("当前列出 %1$@ / %2$@ 个。",
+                                   NumberFormat.grouped(shown), NumberFormat.grouped(listed))
+        } else {
+            base = localizedFormat("共 %1$@ 个重复块，已全部列出（榜未触顶，上限 %2$@ 块）。",
+                                   NumberFormat.grouped(listed), NumberFormat.grouped(cap))
+        }
+        guard let outside = outsideBoardNoteFromFields(code) ?? outsideBoardNote(code).map({ localizedCopy($0) })
+        else { return base }
+        return base + " " + outside
+    }
+
+    /// 由**字段**装配的榜外说明（RD-48）。
+    ///
+    /// 为什么优先走这条：`outsideBoardNote` 是"按句式去中文台账里认领一句话"，
+    /// 引擎改了文案而这里没改标记，披露就静默消失（R7 交回时自己点明了这个耦合，并对账钉住它）。
+    /// 字段落地后数字有了直传通道，页尾这句改由数装配；**旧报告没有这些格** ⇒ 返回 `nil`，
+    /// 调用方退回认领句子那条路，两种来源都不许让榜外那一半看不见。
+    /// ⚠️ 不做加法：不合成"总块数"（`rankedBlocks` 撞 id 削掉的块没有读数，等式天然不平）。
+    static func outsideBoardNoteFromFields(_ code: CodeMetrics) -> String? {
+        guard let dropped = code.duplicatedBlocksDroppedByCap,
+              let outsideLines = code.duplicatedLinesOutsideReportedBlocks,
+              dropped > 0 || outsideLines > 0 else { return nil }
+        var note = localizedFormat("另有 %1$@ 个块 / %2$@ 行未列入榜内。",
+                                   NumberFormat.grouped(dropped), NumberFormat.grouped(outsideLines))
+        if let fragments = code.duplicateFragmentsNotExpandedCount, fragments > 0 {
+            note += " " + localizedFormat("另有 %1$@ 处拷贝因指纹预算未展开。", NumberFormat.grouped(fragments))
+        }
+        return note
+    }
+}
+
 // MARK: 路径与数字格式化
 
 enum CodeViewFormat {

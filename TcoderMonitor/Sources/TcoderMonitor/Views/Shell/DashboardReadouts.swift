@@ -153,6 +153,14 @@ struct DashboardLiveReadout: View {
 
     private var report: ProjectReport? { state.selectedReport }
     private var snapshot: SystemSnapshot? { state.monitor.latestSnapshot }
+    /// 三态判定的**唯一入口**是 `Views/PerfLogs/LiveReadings.swift` 的 `SystemReadings`。
+    /// 这一页那两枚整机格子以前直接 `snapshot.map { $0.cpuUsage }` / `.memoryUsedBytes`，
+    /// 于是同一个数在总览页是 `0%` / `0 B`、在性能页是 `--`（首帧没有差分、
+    /// 内核没给页计数时也没有内存读数），"没量到"就这样在总览页长成了
+    /// "这台机器很闲 / 内存没怎么用"（整改意见第九节同族）。
+    /// 刻意不做成计算属性：`ShellReadoutTooltipTests` 按原文钉着 `captionHelp:` 那一行，
+    /// 换个形状就要去改别人的守卫；`@Observable` 是按属性记账的，
+    /// 同一个 body 里多构造两次这个三元组零成本。
 
     /// 顺序是**实时性能在前、读数带在后**（设计复核第 2 条的结构解）。
     ///
@@ -198,10 +206,16 @@ struct DashboardLiveReadout: View {
     }
 
     private var cpuTile: some View {
-        MetricTile(
-            label: "CPU",
-            value: snapshot.map { String(Int(($0.cpuUsage * 100).rounded())) },
-            unit: "%",
+        // 标签写「本机 CPU」而不是「CPU」：这一排四枚里前两枚量的是整台机器、
+        // 后两枚量的是这个项目，只写「CPU」等于让读者以为前两枚也在说这个项目（第九节）。
+        // 读数走 `SystemReadings`：首帧没有差分就不给百分比（传 nil ⇒ `--`），不给 0。
+        // 旧写法是 `snapshot.map { Int($0.cpuUsage * 100) }` —— 冷启动第一帧那是个真的 0，
+        // 而同一份快照在性能页那一格写的是「差分帧未到，不给百分比」。两页两种说法，
+        // 错的总是把"还没法算"报成"机器很闲"的那个。
+        let fraction = SystemReadings.cpuFraction(SampleContext.from(state.monitor))
+        return MetricTile(
+            label: "本机 CPU",
+            value: fraction.map { NumberFormat.percent($0, precision: 0) },
             caption: snapshot.map {
                 localizedFormat("%1$@ 核 · 负载 %2$@",
                                 NumberFormat.grouped($0.cpuCoreCount),
@@ -214,15 +228,21 @@ struct DashboardLiveReadout: View {
     }
 
     private var memoryTile: some View {
-        MetricTile(
-            // 「Memory」→「内存」：WS-H §7.1 点名的必修项
-            label: "内存",
-            value: snapshot.map { ByteFormat.string($0.memoryUsedBytes, precision: 1) },
-            caption: snapshot.map {
-                localizedFormat("共 %1$@ · %2$@",
-                                ByteFormat.string($0.memoryTotalBytes, precision: 1),
-                                NumberFormat.percent($0.memoryFraction, precision: 0))
-            },
+        // 「本机」二字是第九节要的边界；三态判据与性能页共用 `SystemReadings` 那一份。
+        // `memoryUsedBytes(context) == nil` = 内核没给页计数，此时这一格必须是 `--`，
+        // 不是旧写法的「0 B · 共 64 GB · 占 0%」——那把一次失败读成了「这台机器内存很空」。
+        let live = SampleContext.from(state.monitor)
+        let used = SystemReadings.memoryUsedBytes(live)
+        return MetricTile(
+            label: "本机内存",
+            value: used.map { ByteFormat.string($0, precision: 1) },
+            unit: (used != nil && SystemReadings.memoryTotalBytes(live) != nil)
+                ? "/ \(Live.bytes(SystemReadings.memoryTotalBytes(live), precision: 1))" : nil,
+            caption: used == nil
+                ? SystemReadings.memoryGapReason(live)
+                : localizedFormat("共 %1$@ · %2$@",
+                                  Live.bytes(SystemReadings.memoryTotalBytes(live), precision: 1),
+                                  Live.percent(SystemReadings.memoryFraction(live), precision: 0)),
             // 「在用」≠「剩余可用」是这一格唯一会被读反的地方，整句走 `SystemReadings` 那一份。
             captionHelp: SystemReadings.memoryCaliber,
             systemImage: IconName.memory.rawValue
@@ -340,3 +360,4 @@ struct DashboardLiveReadout: View {
         return rate(read + write)
     }
 }
+

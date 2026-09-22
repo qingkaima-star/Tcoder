@@ -94,7 +94,7 @@ final class ShellGitAnalyzer: GitAnalysisProviding {
         let resolution = try await resolveRepository(from: repositoryURL)
 
         async let branchProbe = runResilient(["rev-parse", "--abbrev-ref", "HEAD"], at: resolution.rootURL, timeout: probeTimeout)
-        async let headProbe = runResilient(["rev-parse", "--short=7", "HEAD"], at: resolution.rootURL, timeout: probeTimeout)
+        async let headProbe = runResilient(["rev-parse", "HEAD"], at: resolution.rootURL, timeout: probeTimeout)
         async let remoteProbe = runResilient(["config", "--get", "remote.origin.url"], at: resolution.rootURL, timeout: probeTimeout)
         // 仓库真实提交总数（含 merge），与下面被窗口截断的 `git log` 无关。
         async let fullCountProbe = runResilient(["rev-list", "--count", "HEAD"], at: resolution.rootURL, timeout: probeTimeout)

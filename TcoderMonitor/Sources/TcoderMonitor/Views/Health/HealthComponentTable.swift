@@ -13,7 +13,12 @@ struct HealthComponentTable: View {
 
     var body: some View {
         GlassSection("维度分量",
-                     subtitle: "按拖累程度排序，贡献最低者在前",
+                     // §十 措辞（R7）：旧句写的是「按**拖累程度**排序」。这一页确实有一枚
+                     // `ScoreRow.lostPoints = 权重 ×（100 − 得分）`，那才叫"拖累了多少分"，
+                     // 而 `HealthBreakdown.rows` 排的是 `contribution`（= 表里那列「贡献」）——
+                     // **权重不同的两维，两种排序会给出不同先后**，那句"按拖累程度"是假的。
+                     // 现在按什么排就写什么：点名那一列，不再用同义词。
+                     subtitle: "按「贡献」列升序，最低在前",
                      // 公式那半句搬进 ⓘ：它与 `HeuristicClaimLine` 的 help 本来就重复
                      // （盘点表 I 节点名"前半重复"）。基座补了 `subtitleHelp:` 之后，
                      // 不必再把它挤进 `trailing:` 与合计读数抢一行。

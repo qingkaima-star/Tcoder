@@ -39,15 +39,18 @@ final class DependencyNetworkAttributionTests: XCTestCase {
         XCTAssertFalse(after.latestKnownVersion?.isEmpty ?? true)
         XCTAssertTrue(after.isProbablyOutdated, "声明 \(after.version) 对在线最新 \(after.latestKnownVersion ?? "") 应判为过旧")
 
-        // 在线用例的跳过闸门只能用得准：成功说明不能被当成「有包没答上」。
-        XCTAssertFalse(DependencyNetworkLookup.npmShortfallDisclosed(in: "在线查询已完成（OSV + npm registry）"),
-                       "全量成功的说明被误判成有缺口，会把真缺陷跳过去")
-        XCTAssertTrue(DependencyNetworkLookup.npmShortfallDisclosed(in: "npm registry：5 个包中 1 个查询失败"))
-        XCTAssertTrue(DependencyNetworkLookup.npmShortfallDisclosed(in: "OSV 批量接口不可用，已改用逐包查询"
-            + "；达到时间预算，剩余 1 个包未查询"))
-        XCTAssertFalse(DependencyNetworkLookup.osvShortfallDisclosed(in: "在线查询已完成（OSV + npm registry）"),
-                       "OSV 的全量成功说明同样不能被误判成缺口")
-        XCTAssertTrue(DependencyNetworkLookup.osvShortfallDisclosed(in: "OSV：12 个包中 13 个查询失败"))
+        // 在线用例的"这次红是网络状况、还是产品缺陷"闸门，读的是**账本**不是那句中文。
+        // （旧写法是 `DependencyNetworkLookup.npmShortfallDisclosed(in: note)` —— 拿
+        //  note.contains("npm registry 查询超过") 一类中文清单判状态，RD-13 点名的形状，已删。）
+        let cleanLedger = DependencyEvidence.ledger(for: patched)
+        XCTAssertEqual(cleanLedger.versionStateCounts[.failed] ?? 0, 0,
+                       "registry 全量答上时账本里不许出现失败条目 —— 闸门一旦误报有缺口，"
+                       + "在线用例就会把真缺陷当网络状况跳过去")
+        // 反向：这一轮只改了版本值、没有同轮重算逐条状态 ⇒ 账本对 moment 仍说"未核对"。
+        // 这正是 `applyNetworkKnowledge` 必须把"版本值 + 来源 + 逐条状态"同轮写完的理由，
+        // 也是"改一句文案不会顺手把未核对变成已核对"的同一道防线。
+        XCTAssertEqual(cleanLedger.evidence(for: after)?.versionState, .notAttempted,
+                       "只写回版本值就宣称核对过 = attempted 冒充 checked")
     }
 
     /// 内置快照命中的依赖 -> 来源必须是快照，不能是"在线"。

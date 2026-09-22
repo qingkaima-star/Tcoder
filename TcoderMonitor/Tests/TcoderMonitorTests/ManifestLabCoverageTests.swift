@@ -8,11 +8,18 @@ final class ManifestLabCoverageTests: ManifestLabTestCase {
     // MARK: - 2. 覆盖率
 
     func testCoverageReportsMatchHandWrittenNumbers() async throws {
-        let coverage = try await CoverageAnalyzer().analyze(projectRoot: root, options: .default)
+        let outcome = try await CoverageAnalyzer().analyzeWithLedger(projectRoot: root,
+                                                                     options: .default)
+        let coverage = outcome.metrics
+        // RD-25：全部读数（进总数的 + 被分开留档的）。旧断言只看 `coverage.reports`，
+        // 那时那里头躺着五份**被直接相加**的报告 —— 正是本轮要修的伪精确形状。
+        let readings = coverage.reports + outcome.merge.separateReadings
 
         print("=== WS-F 夹具 · 覆盖率实测 ===")
-        print("发现报告文件 \(coverage.scannedFileCount) 个，计入 \(coverage.reports.count) 份")
-        for report in coverage.reports {
+        print("发现报告文件 \(coverage.scannedFileCount) 个，计入总数 \(coverage.reports.count) 份，"
+            + "分开留档 \(outcome.merge.separateReadings.count) 份")
+        print("合并台账：\(outcome.merge.statement)")
+        for report in readings {
             print("  \(report.toolName) kind=\(report.kind.rawValue)"
                 + " 行 \(report.linesCovered)/\(report.linesTotal) = \(String(format: "%.2f", report.linePercent))%"
                 + " 分支 \(report.branchesCovered)/\(report.branchesTotal.map(String.init) ?? "nil")"
@@ -26,11 +33,13 @@ final class ManifestLabCoverageTests: ManifestLabTestCase {
             + "  风险 \(coverage.riskLevel.rawValue)")
 
         XCTAssertEqual(coverage.scannedFileCount, 5, "五份报告都要被发现（含 target/ 与 coverage/ 里的）")
-        XCTAssertEqual(coverage.reports.count, 5)
-        XCTAssertTrue(coverage.hasData)
+        XCTAssertEqual(readings.count, 5, "五份报告的读数一份都不许丢（分开呈现）")
+        XCTAssertEqual(coverage.reports.count, 0,
+                       "五份互不可核对的报告不得凑成一个项目总数")
+        XCTAssertFalse(coverage.hasData, "有报告 ≠ 有可信的总分")
 
         func report(_ tool: String, _ suffix: String) throws -> CoverageReport {
-            try require(coverage.reports.first { $0.toolName == tool && $0.path.hasSuffix(suffix) },
+            try require(readings.first { $0.toolName == tool && $0.path.hasSuffix(suffix) },
                         "缺报告 \(tool) @ \(suffix)")
         }
 
@@ -74,11 +83,21 @@ final class ManifestLabCoverageTests: ManifestLabTestCase {
         XCTAssertEqual(clover.linesCovered, 90, "取 project 级 metrics（最后一组），不是文件级 28")
         XCTAssertEqual(clover.linesTotal, 120)
 
-        // 加权合计：840 / 1070
-        XCTAssertEqual(line, 840.0 / 1070.0 * 100, accuracy: 1e-9)
-        XCTAssertEqual(branch, 214.0 / 320.0 * 100, accuracy: 1e-9)
-        XCTAssertEqual(coverage.riskLevel, .low, "78.5% 落在 60..<80 -> 低风险")
-        XCTAssertNotNil(coverage.unit)
+        // RD-25 改判：旧断言 `line == 840/1070 = 78.5%`、`branch == 214/320` 是**五份报告
+        // 的 covered 与 total 各自累加相除**得到的 —— 五种生态的报告彼此覆盖了哪些文件根本没有
+        // 共同口径（istanbul 的 `total.lines` 与 JaCoCo 的 report 级 LINE 计的不是同一批行），
+        // 那个数精确到小数点后九位，却是彻底的伪精确。现在的判据：**不给总数**。
+        _ = line
+        _ = branch
+        XCTAssertNil(coverage.overallLinePercent,
+                     "五份互不可核对的汇总报告不得累加成一个总数：\(outcome.merge.statement)")
+        XCTAssertNil(coverage.overallBranchPercent)
+        XCTAssertEqual(outcome.merge.basis, .nothingMergeable)
+        XCTAssertEqual(outcome.merge.dropped.count, 5, "五份全部点名（含那份 DA 与 LF 对不上的 lcov）")
+        XCTAssertTrue(readings.allSatisfy { $0.generationText.isEmpty == false },
+                      "每一份报告都要能生成一句时间描述（哪怕是未知）")
+        XCTAssertEqual(coverage.riskLevel, .none, "没有总数 ⇒ 风险档也不许编")
+        XCTAssertNil(coverage.unit)
         XCTAssertNil(coverage.integration, "夹具里没有集成测试路径的报告")
     }
 
