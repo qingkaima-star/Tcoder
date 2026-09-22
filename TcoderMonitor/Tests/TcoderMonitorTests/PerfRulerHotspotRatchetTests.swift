@@ -58,6 +58,8 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // 2026-09-23：包 5（补测改动前基线）新写的 rev 树准备器。新建的尺子必须当场被量，
         // 否则"新建文件"本身就是免检通道（同一族教训见上面 09-21/09-22 那两段）。
         "perf_measure_rev.sh",
+        // 09-23 同一条规矩的第二次自犯：新写的"同档取值一致性"尺子差点没点进来。
+        "perf_trio_agreement.py",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。

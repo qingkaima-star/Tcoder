@@ -269,6 +269,30 @@ print("%s|%s|%s|%s|%s|%s" % ("先查主线程" in a, "分开修" in b, "全在�
   ok "迟到帧归因分得清「查主线程 / 分开修 / 全在合成侧 / 无迟到 / 窄分布不判 / 比值悬殊不判」"
 }
 
+selfcheck_trio_agreement() {  # selfcheck_trio_agreement <outdir>
+  # 39) 「连测 ≥3 趟**且取值一致」**里的**后半句**必须有尺子量（spec §1.3）。
+  #     触发事件是 09-23 02:35 那一幕：`[interact] rc=0 ⇒ 可用 3/3 趟` 打得理直气壮，
+  #     而三趟的 hitch/s 是 **1.20 / 1.30 / 18.80**（同头同产物、六维上下文逐条合格）。
+  #     "可用"数的是结构（产物齐、没被 REFUSED、复核没打回），**从来没数过一致性**——
+  #     于是排程器的 3/3 被所有人读成"协议满足"。数样本 ≠ 量一致。
+  local r
+  r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_trio_agreement import verdict
+def R(n, fps=119.0, secs=20.0, rend=4.1):
+    return {"dir": "run%d" % n, "seconds": secs, "hitch_n": int(round(n * secs)),
+            "hitch_per_s": n, "period": "interaction", "render_p50_ms": rend,
+            "surfaces_p50_fps": fps}
+a = verdict([R(1.2), R(1.3), R(1.5)], ["a", "b", "c"])[1]
+b = verdict([R(1.2), R(1.3), R(18.8)], ["a", "b", "c"])[1]
+c = verdict([R(1.2), R(1.3), None], ["a", "b", "x"])[1]
+d = verdict([R(1.2), R(1.3)], ["a", "b"])[1]
+e = verdict([R(1.2), R(1.3, fps=88.0), R(1.5)], ["a", "b", "c"])[1]
+print("%s|%s|%s|%s|%s" % (a, b, c, d, e))')
+  [ "$r" = "0|1|2|2|1" ] \
+    || { fail "一致性判定五种形状没各判对（拿到 $r，应为 0|1|2|2|1）⇒ 这条尺会把「3/3」放行"; return; }
+  ok "同档连测的一致性有尺子了：一致=0 / hitch 散布与出帧分歧=1 / 缺件与样本不足=2（都不许报 3/3 达标）"
+}
+
 selfcheck_p95_crosscheck_shapes() {  # selfcheck_p95_crosscheck_shapes <outdir>
   # 33) 「p95 ≤ 8.4 ms」这一半句现在由**两把尺子合判**，所以合判本身必须能被喂数字验。
   #     为什么必须有这一项：脉冲读的是 CVDisplayLink **回调送达时刻**，不等于上屏时刻；
