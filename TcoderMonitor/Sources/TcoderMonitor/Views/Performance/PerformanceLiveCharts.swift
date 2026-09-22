@@ -37,10 +37,15 @@ struct PerformanceLiveCharts: View {
     }
 
     private var subtitle: String {
+        // **跨度必须报"图上这一段"**：原来这里印的是 `windowSeconds`（缓冲区窗口 ~135 秒），
+        // 而图只画 `history.suffix(chartPointLimit)` ≈ 19 点 × 1.5 秒 ≈ 28.5 秒，
+        // 轴与相对档用的又都是 `actualSpanSeconds` ⇒ 同一张卡上两个口径
+        // （交付头 `64f2ed4` 逐张人眼复核抓到：标题写 135 秒，轴上只有 −12s）。
+        // 本文件早就为"别谎报跨度"准备了 `actualSpanSeconds`，只是标题这一处没用它。
         localizedFormat("最近 %1$@ 点 · %2$@ · 窗口约 %3$@ 秒",
                         NumberFormat.grouped(points.count),
                         cadenceText,
-                        "\(Int(windowSeconds))")
+                        "\(Int(actualSpanSeconds))")
     }
 
     private var trustedMemory: [SystemSnapshot] { SystemReadings.trustedMemoryPoints(points) }
