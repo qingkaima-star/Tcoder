@@ -56,40 +56,35 @@ extension ShellBorderlessTests {
     func test_overviewPageLayoutHasNoTightGroupSpacing() throws {
         let dashboard = try XCTUnwrap(
             Self.shellSources().first { $0.path == "DashboardView.swift" }).content
-        // 页面级布局现在住在**两个文件**里：`listSegment` 的间距决定随 `pairSegment`
-        // 搬进了 `Views/Shell/DashboardReadouts.swift`。判据面必须跟着代码走——
-        // 代码没坏而尺子先瞎，正是下面那句分母断言要拦的事（本轮它就是那么响的）。
-        // **没有把 3 改成 2**：改成把 `pairSegment` 整段纳进判据面（它两处 `spacing:`）。
-        //
-        // 轴要分清楚：契约 8 那句管的是**纵向**"分组之间留 32"，而 `pairSegment` 的
-        // `HStack` 那一档是**横向列间距** `pageMargin`(24)——与页边距同一个数、与旧
-        // `pairColumns` 里 `GridItem` 的 spacing 同一个值。整段扫进来时它会被判成"太紧"
-        // （第一版就是这么误报的，报错原文：`L6 Theme.Spacing.pageMargin=24.0`），
-        // 所以判"太紧"之前先只留**纵向容器**那一行。分母照旧数全部 `spacing:`。
-        let readouts = try XCTUnwrap(SurfaceScanKit.sourceFiles(under: "Views/Shell")
-            .first { $0.path.hasSuffix("DashboardReadouts.swift") }?.content)
-        let regions: [(marker: String, source: String)] =
-            Self.overviewLayoutMarkers.map { (marker: $0, source: dashboard) }
-            + [(marker: "func pairSegment<Left: View, Right: View>(", source: readouts)]
+        // 现量 **2**，不是 3 —— 这是一次真实的形状变化，不是把尺子锯短。
+        // P31 之前是 3：`scaleSegment` 里一个 `VStack` + 两张 `LazyVGrid` 各带一处 `spacing:`。
+        // 那两张栅格被收成单列删掉（病灶与量数见 `test_dashboardIsSingleColumnWithNoCardPairGrid`
+        // 与 `docs/界面语言-批次台账.md` §6.32），页面级纵向容器就只剩下面两段。
+        // 判据因此从"数够三个数"换成"**每一段恰好自己声明一处组间距**"：
+        // 少一段（漏声明）与多一处（又偷偷开一层栅格/容器）都会红，两边都钉得住。
+        let segments = Self.overviewPageSegments
         var scanned = 0
         var tight: [String] = []
-        for region in regions {
-            let body = try XCTUnwrap(Self.region(in: region.source, startingAt: region.marker),
-                                     "定位不到 \(region.marker) —— 布局被改成了别的形状，这条守卫会假绿")
+        for marker in segments {
+            let body = try XCTUnwrap(Self.region(in: dashboard, startingAt: marker),
+                                     "定位不到 \(marker) —— 布局被改成了别的形状，这条守卫会假绿")
             scanned += body.split(separator: "\n").filter { $0.contains("spacing:") }.count
             let vertical = Self.verticalContainerLines(in: body)
             tight += Self.tightSpacings(in: vertical, minimum: Theme.Spacing.group).map {
-                "\(region.marker.dropLast(2)) → \($0)"
+                "\(marker.dropLast(2)) → \($0)"
             }
         }
-        XCTAssertGreaterThanOrEqual(scanned, 3,
-                                    "页面级布局里只扫到 \(scanned) 处 spacing: —— 判据面太小，等于没量")
+        XCTAssertEqual(scanned, segments.count,
+                       "页面级分段每段应当恰好声明一处组间距：\(segments.count) 段现量 \(scanned) 处"
+                       + "（少了=漏声明，多了=又开了一层栅格/容器）")
         XCTAssertTrue(tight.isEmpty,
                       "总览页面级容器间距 < \(Int(Theme.Spacing.group))pt（风格契约 8「分组间 32」）：\(tight)")
     }
 
     /// 只留**纵向容器**那一行（`VStack` / `LazyVStack` / `LazyVGrid`）。
-    /// 这条筛选本身要有反例撑着，否则"分不清轴"只是换了一种瞎法。
+    /// 契约 8 那句管的是**纵向**"分组之间留 32"，横向列间距是另一个数（`pageMargin` 24）；
+    /// 混起来量会误报（P31 第一版就是这么红的：`L6 Theme.Spacing.pageMargin=24.0`）。
+    /// 这条筛选自己也要有反例撑着，否则"分不清轴"只是换了一种瞎法。
     static func verticalContainerLines(in region: String) -> String {
         region.split(separator: "\n", omittingEmptySubsequences: false)
             .filter { line in
@@ -194,42 +189,37 @@ extension ShellBorderlessTests {
         }.map(\.path)
     }
 
-    func test_dashboardPairsHaveNoLazyGridAndShareTheirTopLine() throws {
+    func test_dashboardIsSingleColumnWithNoCardPairGrid() throws {
         let views = try SurfaceScanKit.sourceFiles(under: "Views")
         XCTAssertFalse(views.isEmpty, "扫不到 Views 面 ⇒ 分母坏了，下面的绿是假零")
-        // 判的是"**两张不相关的卡并排**"这个形状，作用面 = 总览自己 + 它的分块文件。
-        let pairSurface = views.filter {
+        // 作用面 = 总览自己 + 它的分块文件。
+        let surface = views.filter {
             $0.path.hasPrefix("Views/Shell/") || $0.path == "Views/DashboardView.swift"
         }
-        XCTAssertFalse(pairSurface.isEmpty, "作用面扫空了 ⇒ 下面的绿是假零")
-        let grids = Self.cardPairGrids(in: pairSurface)
+        XCTAssertFalse(surface.isEmpty, "作用面扫空了 ⇒ 下面的绿是假零")
+        let grids = Self.cardPairGrids(in: surface)
         XCTAssertTrue(grids.isEmpty,
-                      "总览这一面又用 `LazyVGrid` 摆卡片对了；两列一段走 `DashboardView.pairSegment`：\(grids)")
-        // 全仓剩下的卡片对栅格**逐条留名**。它同时管两个方向：
-        // 别人新加一处 ⇒ 红；这一处被改造掉了 ⇒ 也红（逼着来改这张清单，而不是让它静默漂）。
+                      "总览这一面又出现了 `LazyVGrid` 卡片对，页面级请单列：\(grids)")
+        // 全仓剩下的这一处**逐条留名**。它同时管两个方向：
+        // 别处新加一处 ⇒ 红；这一处被改造掉了 ⇒ 也红（逼着来改这张清单，而不是让它静默漂）。
         XCTAssertEqual(Self.cardPairGrids(in: views), ["Views/Performance/PerformanceProcessGroups.swift"],
-                       "`LazyVGrid` 卡片对的去向变了：那条是进程展开行里的 4 枚等宽 KPI 格"
-                       + "（cpu/mem/threads/fd），不是两张不相关的卡并排，不归这条判据管")
+                       "`LazyVGrid` 的去向变了：那条是进程展开行里的 4 枚「等宽 KPI 格」"
+                       + "（cpu/内存/线程/fd），不是两张内容无关的卡并排，不归这条判据管")
 
         let dashboard = try XCTUnwrap(
             Self.shellSources().first { $0.path == "DashboardView.swift" }).content
-        let wired = SurfaceScanKit.codeLines(dashboard)
-            .filter { $0.contains("pairSegment {") }.count
-        XCTAssertEqual(wired, 2,
-                       "总览的两段（代码规模下的 文件构成/覆盖率、底部的 最近提交/高频错误）"
-                       + "必须都走 pairSegment，现量 \(wired) 处")
-        let helper = try XCTUnwrap(SurfaceScanKit.sourceFiles(under: "Views/Shell")
-            .first { $0.path.hasSuffix("DashboardReadouts.swift") }?.content)
-        XCTAssertTrue(SurfaceScanKit.codeLines(helper).contains { $0.contains("HStack(alignment: .top") },
-                      "pairSegment 的顶线保证没了 ⇒ 两列又会各走各的")
-        // 「覆盖率这一格有没有内容」只许一个出口：栅格洞的第二半就是「两处各判一次」造出来的。
-        // 只数**同一行既出现 coverage 又出现 hasData** 的那些——日志那一格的 hasData 是另一个输入，
-        // 拿它来判"重复"是我第一版写错的口径（当场被自己的守卫拦下一次，注释留在这里防再犯）。
-        let coverageProbes = SurfaceScanKit.codeLines(dashboard)
-            .filter { $0.contains("coverage") && $0.contains(".hasData") }
-        XCTAssertEqual(coverageProbes.count, 1,
-                       "覆盖率的 `hasData` 被判了 \(coverageProbes.count) 次：\(coverageProbes)"
-                       + "；只许 `hasCoverageStrip` 一处，渲染与排版两处都读它")
+        // `pairSegment` 是为「两列但要对齐」造的中间方案，实测两列本身就不该要
+        // （见上面注释③：两列是把卡压到内容最小宽之下才挤出来的），所以它必须整体缺席。
+        XCTAssertEqual(SurfaceScanKit.codeLines(dashboard).filter { $0.contains("pairSegment") }.count, 0,
+                       "`pairSegment` 又长回来了——它保的是两列的顶线，而这两列不该存在")
+        for segment in Self.overviewPageSegments {
+            let region = try XCTUnwrap(Self.region(in: dashboard, startingAt: segment),
+                                       "定位不到 \(segment) ⇒ 这条判据在空转")
+            XCTAssertTrue(region.contains("VStack(alignment: .leading, spacing: Theme.Spacing.group)"),
+                          "\(segment) 不再是「一个纵向容器装几段卡」的形状，页面级单列这条被绕开了")
+            XCTAssertFalse(region.contains("HStack("),
+                           "\(segment) 里又出现横向并排：两列会把卡压到内容最小宽之下")
+        }
     }
 
     func test_cardPairGridScannerCatchesSyntheticAndSparesComments() {

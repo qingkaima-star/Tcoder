@@ -361,39 +361,3 @@ struct DashboardLiveReadout: View {
     }
 }
 
-// MARK: - 两列一段（总览专用）
-
-extension DashboardView {
-    /// **两列一段**：两张卡共同一条顶线、窄窗口自动折成单列。
-    ///
-    /// 替掉 `LazyVGrid(pairColumns)`。交付头 `7b4ec25` 那批 36 张页尾实拍量出两条病灶：
-    /// ① 同一行两张卡**不共顶线**——「最近提交」顶在 1065px、「高频错误」顶在 1593px，
-    ///    差 264pt，两列读起来不像同一层；
-    /// ② 栅格给**不渲染的那一格照样留槽位**，于是「文件构成」右边拖出约 297pt 的画布洞
-    ///    （这一条由 `scaleSegment` 那侧的 `hasCoverageStrip` 分支堵掉）。
-    /// 这是全仓**最后一处"两张不相干的卡并排"的 `LazyVGrid`**：其余八页（健康建议卡、日志读数格、
-    /// 贡献者、Git 洞察、代码规模…）的注释里都写着离开它的理由，收掉它不是新立一种排版，
-    /// 是把最后一格并回去。性能页进程展开行里还剩一处 `LazyVGrid`，那是 4 枚**等宽 KPI 格**
-    /// （cpu/内存/线程/fd），不是两张内容无关的卡，不归这条判据管——守卫里逐条留了名。
-    /// 守卫 `ShellBorderlessTests.test_dashboardPairsHaveNoLazyGridAndShareTheirTopLine`。
-    ///
-    /// 列宽下限仍走基座锚点 `twoColumnMinWidth`：两列各要 420pt，装不下时 `ViewThatFits`
-    /// 退成单列——与原来 `.adaptive(minimum:)` 同一个语义，但**顶线由 `HStack(alignment: .top)` 保证**。
-    /// 列间距 `pageMargin`(24)：无界面里两列之间没有盒体边界，12pt 会被读成「两列挤成一坨」。
-    @ViewBuilder
-    func pairSegment<Left: View, Right: View>(
-        @ViewBuilder left: () -> Left,
-        @ViewBuilder right: () -> Right
-    ) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: Theme.Spacing.pageMargin) {
-                left().frame(minWidth: Theme.Layout.twoColumnMinWidth)
-                right().frame(minWidth: Theme.Layout.twoColumnMinWidth)
-            }
-            VStack(alignment: .leading, spacing: Theme.Spacing.group) {
-                left()
-                right()
-            }
-        }
-    }
-}

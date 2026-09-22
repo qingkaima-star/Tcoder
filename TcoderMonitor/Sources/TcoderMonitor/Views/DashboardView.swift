@@ -42,28 +42,31 @@ struct DashboardView: View {
     }
 
     /// 代码规模这一段（实时读数已单独成 `DashboardLiveReadout`，见其注释的失效域理由）。
+    ///
+    /// **单列**。旧写法是 `LazyVGrid(pairColumns)` 摆两列，量出来两条病灶
+    /// （`7b4ec25` 那批 36 张页尾，`scripts/card_edges.swift` 逐带量的，不是看着像）：
+    /// ① 没有覆盖率可摆时 `coverageStrip` 整格不渲染，栅格**照样给它留槽位**
+    ///   ⇒「文件构成」右边空出 594px = **297pt 画布洞**（视口三成）；
+    /// ② 同一行两张卡**不共顶线**：「最近提交」顶在 1065px、「高频错误」顶在 1593px，差 264pt。
+    /// 而"两列并排"本身也不是免费的：两张卡的内容最小宽各 > 463pt，
+    /// `.adaptive(minimum: 420)` 只按容器宽算列数、不看内容 ⇒ 它是**把卡压到内容之下**
+    /// 才挤出两列的，那正是「溢出/挤压」这一类。收成单列同时了结三件事，
+    /// 并且与其余八页早已收敛的形状一致（健康建议卡、日志读数格、进程分组…各自注释里都写着理由）。
     private var scaleSegment: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.group) {
             codeScaleGroup
-            if hasCoverageStrip {
-                pairSegment { fileCompositionGroup } right: { coverageStrip }
-            } else {
-                // 没有覆盖率可摆时，「文件构成」**独占整行**。
-                // 旧写法让不渲染的那一格继续占一个栅格槽位，右边就拖出约 297pt 的画布洞。
-                fileCompositionGroup
-            }
+            fileCompositionGroup
+            coverageStrip
         }
     }
 
-    /// 底部两块清单（最近提交 / 高频错误）。
+    /// 底部两块清单（最近提交 / 高频错误）。同上，单列。
     private var listSegment: some View {
-        pairSegment { recentCommitsGroup } right: { topErrorsCard }
+        VStack(alignment: .leading, spacing: Theme.Spacing.group) {
+            recentCommitsGroup
+            topErrorsCard
+        }
     }
-
-    /// 「这一页有没有覆盖率可摆」——**唯一一处**判这件事的谓词。
-    /// `coverageStrip` 用它决定渲染不渲染，`scaleSegment` 用它决定摆两列还是让「文件构成」独占整行。
-    /// 两处各判各的（或干脆没人判第二处）就是那个半页空洞的成因。
-    private var hasCoverageStrip: Bool { report?.coverage?.hasData == true }
 
     // MARK: 今日错误的着色（语义色只留给真有危险的那一态）
 
@@ -216,7 +219,7 @@ struct DashboardView: View {
     /// **字一个没删**，只是不再和读数抢注意力。
     @ViewBuilder
     private var coverageStrip: some View {
-        if hasCoverageStrip, let coverage = report?.coverage {
+        if let coverage = report?.coverage, coverage.hasData {
             GlassSection("测试覆盖率") {
                 // 风险徽标原挂在 `GlassSection.trailing`（需 `AnyView`，O-3 清零），
                 // 现作为分组首行放进内容区，信息不丢、只降排版层级。

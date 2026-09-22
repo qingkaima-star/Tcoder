@@ -61,7 +61,8 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         let coverage = Self.coverage(from: scan, duplication: duplication, options: options, lex: lex)
         // 契约接入（P7-C 3-2）：判据用 `limitationSummary` 非空而不是 `isPartial` —— 前者还含
         // 「按规则排除了多少条目」这类**范围**事实，读者要知道数字是在什么范围内测出来的。
-        let limits = coverage.limitationSummary + ComplexityEngine.JavaSignatureDeclines.notes(for: files)
+        let limits = coverage.limitationSummary + coverage.surfaceNotes
+            + ComplexityEngine.JavaSignatureDeclines.notes(for: files)
         metrics.scanLimitations = limits.isEmpty ? nil : limits
         return AnalysisOutcome(metrics: metrics, coverage: coverage)
     }
@@ -160,7 +161,11 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             lexAnomalousFileCount: lex.anomalousFileCount,
             unboundedFunctionSignatureCount: lex.unboundedSignatureCount,
             vueRegionFallbackFileCount: lex.vueRegionFallbackFileCount,
-            skipLedger: scan.skipLedger
+            skipLedger: scan.skipLedger,
+            roleTally: SourceRoleTally(of: scan.files),
+            treeFollowing: scan.treeFollowing,
+            duplicateBlockCoordinatesOutsideBoard: duplication.blocksOutsideBoard,
+            duplicationBoardCaliber: duplication.blocksDroppedByCap > 0 ? duplication.boardCaliberNote : ""
         )
     }
 
