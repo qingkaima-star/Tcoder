@@ -530,6 +530,9 @@
 "所选目录即仓库" = "The selected folder is the repository";
 "风险：%@" = "Risk: %@";
 "高" = "High";
+// 风险五档里只有「严重」漏了键 —— 模板 `风险：%@" = "Risk: %@"` 与另外四档都在，
+// 于是英文态长成半英半中的 `Risk: 严重`（P52）。补齐这一档，术语与 `Theme.Semantic.critical` 同源。
+"严重" = "Critical";
 "中" = "Medium";
 "低" = "Low";
 "无" = "None";
