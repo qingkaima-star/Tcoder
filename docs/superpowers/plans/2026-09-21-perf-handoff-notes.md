@@ -229,30 +229,18 @@ MODE=interact ./scripts/perf_wait_window.sh $(git rev-parse --short HEAD) 3   # 
 下面这条清单是 `python3 scripts/trace_report.py migration` 在 rev `8fea49d` 的**原样输出**
 （口径直接读守卫自己的正则，不复制第二份），行号只是当下位置、**符号是稳定的**。
 
-### 一、13 处是 1:1 换名（无判断，照抄即可）
+### 一、16 处的正确拆法（三节不重叠，加起来正好 16）
 
-| 文件 | 成员（类型.成员锚点） | 从 | 换成 |
+**16 = 13 处换名 + 3 处改接收方**；而"顺手"是**换名那 13 处里的 6 处**，不是第四类。
+（我上一版把"13 换名"与"6 顺手"并列成两类，读者会加出 19 处——dispatch 单里这种错最伤人。）
+
+| 类别 | 数量 | 逐条（`类型.成员` 为锚，行号只是当下位置） | 从 → 到 |
 |---|---|---|---|
-| `Views/PerfLogs/LiveReadings.swift` | `LiveReadings.body` ×2 | `monitor.latestSnapshot` / `monitor.history` | `monitor.pulse.value` / `monitor.curve.value` |
-| `Views/Shell/DashboardReadouts.swift` | 总览读数 ×3 | `latestSnapshot` ×1、`history` ×2 | `pulse.value`、`curve.value` |
-| `Views/Shell/ProjectSidebar.swift` | 侧栏 footer ×1 | `monitor.latestSnapshot` | `monitor.pulse.value` |
-| `Views/Performance/PerformanceView.swift` | 性能页 ×7 | `history` ×2、`latestSnapshot`、`lastSampleAt` | `curve.value` ×2、`pulse.value`、`pulse.value.sampleAt` |
+| A. 换名·承重（每 tick 必然换值，收益真实） | **7** | `LiveReadings.body` 的 `history`；`DashboardReadouts` 两处 `history`；`PerformanceView` 两处 `history` + `latestSnapshot` + `lastSampleAt` | `history → monitor.curve.value`；`latestSnapshot → monitor.pulse.value`；`lastSampleAt → monitor.pulse.value.sampleAt` |
+| B. 换名·顺手（宿主走等值闸门，单独迁它在帧率上测不出差异） | **6** | 全在 `PerformanceView`：`trackedGroups`、`processMetricsTruncated`×2、`measuredProcessCount`、`topProcesses`、`processesByMemory` | → `groupRanking.value` / `ledger.value.metricsTruncated` / `ledger.value.measuredCount` / `cpuRanking.value` / `memoryRanking.value` |
+| C. 不是换名，是**把整份快照递给接收方** | **3** | `SampleContext.from(snapshot:)`、`DashboardLiveReadout.snapshot`（别名属性）、`SidebarLiveFooter → LiveCPUBadge` | 三处都在 `latestSnapshot` 的读点上；**原地换写法等于没迁**——只要参数类型还是整份快照，接收方仍每次发布重建。正确做法是把入参换成它真正读的那几个格 |
 
-### 二、6 处"顺手"（帧率上测不出差异，但棘轮要清零才能翻闸门）
-
-同一文件 `Views/Performance/PerformanceView.swift`：
-`trackedGroups → groupRanking.value`、`processMetricsTruncated → ledger.value.metricsTruncated`（两处）、
-`measuredProcessCount → ledger.value.measuredCount`、`topProcesses → cpuRanking.value`、
-`processesByMemory → memoryRanking.value`。
-**为什么单独标出来**：这六个宿主属性早就走 `write(\.x,…)` 等值闸门（值不换就不发布），
-所以"只迁这六处"在帧率上等于没做——分级不是我拍的，是守卫从 `publish()` 现读 28 行算出来的。
-
-### 三、3 处不是换名，是"把整份快照递给了别人" ⇒ 要改**接收方**
-
-`SampleContext.from(snapshot:)`、`DashboardLiveReadout.snapshot`（别名属性）、
-`SidebarLiveFooter` 把快照递给 `LiveCPUBadge`。
-**原地换写法等于没迁**：只要参数类型还是整份快照，接收方仍然在每次发布时重建。
-这三处的正确做法是把入参换成它真正读的那几个格。
+A + B = 13 处换名（守卫现扫里报的"承重 10 / 顺手 6"= A7+C3 = 10 承重，B6 顺手，总数 16）。
 
 ### 四、验收（不接受口头完成，命令必须报 0）
 
