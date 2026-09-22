@@ -108,7 +108,8 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 新增的 `CLIProcessTests` 真子进程一把堵上）。
     /// 同时 `frameworkWhitelist` 从 `TcoderMonitorApp.swift` 换成 `TcoderEntry.swift`
     /// —— 白名单只留"真正写着 `@main` 的那一个"，`TcoderMonitorApp` 改由 `TcoderEntry` 点名调用。
-    static let censusBaseline = 144
+    /// 145：+`Models/ScanProvenance.swift`（RD-30/31 溯源块；构成与引用证据见台账 §25）。
+    static let censusBaseline = 145
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
