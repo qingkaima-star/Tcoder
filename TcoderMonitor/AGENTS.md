@@ -557,7 +557,7 @@ P7-C 收尾这一批删了两处有写无读：`ProjectStore` 的 `sortedProject
 删掉一条绿用例之前，先问它断言的不变式还有别人测吗。
 （这几处刻意写成"类型 的 成员"而不是点号形式：点号会被符号锚点棘轮当成活符号去判活。）
 
-## 5.9 无头 CLI 入口（2026-09-22 落地，WS-CL）：所有流都要知道的四条
+## 5.9 无头 CLI 入口（2026-09-22 落地，WS-CL）：所有流都要知道的五条
 
 ```bash
 ./scripts/build_app.sh release                      # 或 .build/debug/TcoderMonitor
@@ -577,7 +577,14 @@ dist/Tcoder.app/Contents/MacOS/TcoderMonitor doctor [<path>]
    `4` 五路全失败 / `64` 用法错。`3` 那档含"存在但读不动"的目录 —— `fileExists` 只回答"存在"。
    ⇒ 改任何一路的失败判定，要同步 `CLIExit` 的语义，并去 `Tests/…/CLIProcessTests.swift`
    加一条**真子进程**用例（它起的是交付二进制本身）。**只有 in-process 断言不算交付证据。**
-4. **改了任何读数就跑对表**：`python3 scripts/report_parity.py <GUI 落盘.json> <CLI 扫描.json> <被扫总体>`
+4. **出口目前只出中文，而且无头入口没有语言开关**（2026-09-22 实测，见改进清单 F14）：
+   `Services/CLI/` 里 **0 处**走查表；`score <path> -AppleLanguages "(en)"` 得到 **rc=64**
+   （按设计拒收未知 token）。`scan` 落的 JSON 含 **106 处**汉字字符串值
+   —— 45 处是用户数据（路径 / 提交标题 / 作者名，本来就不该翻），
+   **61 处是产品散文**（`health.narrative`、`components[].detail`、`risk` 档位词…）。
+   ⇒ AI 调用方现在读到的是中文散文；要改成跟随语言，先决定"JSON 出不出英文"，
+   再登记键，最后才轮到入口接语言参数。**别一上来就改解析器。**
+5. **改了任何读数就跑对表**：`python3 scripts/report_parity.py <GUI 落盘.json> <CLI 扫描.json> <被扫总体>`
    （逐字段比、容忍清单逐条点名，只允许时间戳 / `project.*` 身份 / `code.durationMs`）。
    `scripts/self_score.sh` 现在就是这条 CLI 调用（改造前是"起 GUI + 轮询 300 秒"）。
    这把尺子已经抓出两个真缺陷（F10 挂死、F11 榜单尾部不可复现）。
