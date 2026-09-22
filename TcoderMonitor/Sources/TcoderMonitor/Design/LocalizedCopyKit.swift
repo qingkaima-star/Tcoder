@@ -110,6 +110,28 @@ func localizedFormat(_ key: String, _ args: String...) -> String {
 ///
 /// 中文侧不受影响：`String(format: "%lld 秒前", 5)` 就是「5 秒前」，
 /// 与原来的 `"\(seconds) 秒前"` 一字不差。
+///
+/// ⚠ **填完之后补千分位**，否则量词族与全站大读数是两套记法：
+/// 交付头实拍「代码规模」语言构成那一列打的是 `46330 行`，
+/// 而同页的总行数打的是 `77,515`，同一个量的两种写法在同一屏上并排。
+/// 为什么不在键里写分组标志：实测 `String(format:)` **不认** `%'lld`
+/// （打出来是字面量 `'lld 行`），而 `stringsdict` 的复数规则又必须拿到数字才能选
+/// `one` / `other` ⇒ 分组只能在填完之后做。见 `LocalizedCopyKitTests.testCountsGetTheSameSeparators`。
 func localizedCount(_ key: String, _ count: Int) -> String {
-    String(format: localizedCopy(key), count)
+    let filled = String(format: localizedCopy(key), count)
+    return groupedInto(filled, count: count)
+}
+
+/// 把上一步刚填进去那串数字换成千分位。
+///
+/// 只替换**第一次出现的、正好等于 `count` 字面**的那一串 —— 那正是我们刚插进去的 token；
+/// 译文里自带的数字（例如某个单位串里的 "1024"）不会被误伤，因为它不会恰好等于本数的字面
+/// 且排在前面。凑不齐两位分隔的（< 1000）原样返回。
+func groupedInto(_ text: String, count: Int) -> String {
+    guard count >= 1_000 else { return text }
+    let digits = String(count)
+    guard let range = text.range(of: digits) else { return text }
+    var result = text
+    result.replaceSubrange(range, with: NumberFormat.grouped(count))
+    return result
 }

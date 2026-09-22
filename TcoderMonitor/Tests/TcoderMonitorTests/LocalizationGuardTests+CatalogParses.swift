@@ -69,4 +69,20 @@ extension LocalizationGuardTests {
         XCTAssertNil(Self.catalogParseFailure(at: fine),
                      "合法转义被误判 → 每次加带引号的译文都要手工绕过这条门")
     }
+
+    /// 量词族必须与全站大读数**同一把记法**。
+    /// 交付头实拍「代码规模」语言构成那一列打的是 `46330 行`，
+    /// 而同页总行数打的是 `77,515` —— 同一个量在一屏上两种写法。
+    /// 根因是 84 个 `stringsdict` 量词键一律 `%lld`（复数规则要数字），
+    /// 而 `String(format:)` 实测不认分组标志 `%'lld` ⇒ 只能在填完之后补分隔符。
+    func test_countsGetTheSameSeparatorsAsBigReadouts() {
+        XCTAssertEqual(groupedInto("46330 行", count: 46330), "46,330 行")
+        XCTAssertEqual(groupedInto("999 行", count: 999), "999 行", "不足一千不该加分隔")
+        XCTAssertEqual(groupedInto("第 1024 名 · 1024 行", count: 1024), "第 1,024 名 · 1024 行",
+                       "只替换第一次出现的那串（那才是刚填进去的 token），后面的译文自带数字不动")
+        XCTAssertEqual(groupedInto("没有数字", count: 5000), "没有数字",
+                       "找不到数字串就原样返回 —— 不许猜着改")
+        XCTAssertEqual(localizedCount("%lld 行", 46330), "46,330 行", "端到端：目录 + stringsdict 那条路也要补")
+        XCTAssertEqual(localizedCount("%lld 行", 5), "5 行", "小数量词一字不变")
+    }
 }
