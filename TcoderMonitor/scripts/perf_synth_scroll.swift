@@ -66,6 +66,10 @@ while Date() < deadline {
     // 每 20 拍换向：一路往下会在列表底部停住，那就等于"投了但没滚动"
     let dir: Int32 = (tick / 20) % 2 == 0 ? -step : step
     tick += 1
+    // 目标进程不在了就立刻收手。投事件器原先只认"到点为止"：今晚实测过一次——
+    // 被测实例 15 s 时被 TERM，而投事件器按默认 95 s 继续往屏幕上投，
+    // 那 80 秒里光标底下是谁都可能被我的合成滚动打到。liveness 检查每 20 拍一次就够。
+    if tick % 20 == 0, kill(pid_t(pid), 0) != 0 { break }   // pid 是 Int，kill 要 pid_t
     if let ev = CGEvent(scrollWheelEvent2Source: src, units: .pixel, wheelCount: 1,
                         wheel1: dir, wheel2: 0, wheel3: 0) {
         ev.location = center

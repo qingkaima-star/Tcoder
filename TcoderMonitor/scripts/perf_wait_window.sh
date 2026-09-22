@@ -133,38 +133,6 @@ cond_quiet() {  # idle 档：等"整段够久没人动"
   return 1
 }
 
-SYNTH_PID=""
-SYNTH_BIN=""
-ensure_synth_scroller() {  # **进等待循环之前**把投事件器编好（内容哈希缓存，全机一次）
-  # 原来编译写在 start_synth_scroller 里，而它是"开录闸门之后"才调的
-  # ⇒ `swiftc` 派出的 `swift-frontend` 还在吃 94.8% CPU 的时候，录制窗口已经开始了。
-  # 自己刚起的编译绕过自己刚过的闸门，这种污染比别人的干扰更难发现。
-  local want
-  want=$(shasum -a 256 scripts/perf_synth_scroll.swift 2>/dev/null | cut -c1-12)
-  SYNTH_BIN="${SCRATCH:-$PWD/.scratch}/tcoder-synth-scroll-${want:-unknown}"
-  [ -d "$SYNTH_BIN" ] && SYNTH_BIN="$SYNTH_BIN.$$"     # 别人占了这个名字：换，不硬来
-  [ -x "$SYNTH_BIN" ] && return 0
-  local tmp="$SYNTH_BIN.build.$$"
-  xcrun swiftc -O -target arm64-apple-macos14.0 \
-      -module-cache-path "${SCRATCH:-$PWD/.scratch}/swiftmodulecache" \
-      scripts/perf_synth_scroll.swift -o "$tmp" 2>/dev/null \
-    || { rm -f "$tmp"; echo "!! 合成输入器编不出来（scripts/perf_synth_scroll.swift）" >&2; return 1; }
-  mv -f "$tmp" "$SYNTH_BIN"
-}
-
-start_synth_scroller() {  # 只管"跑起来"：编译不许出现在闸门与录制之间
-  local secs="${SYNTH_SECS:-95}"   # 覆盖一整趟（hitches 20s + time-profile 25s + 导出与换趟空档）
-  [ -x "$SYNTH_BIN" ] || { echo "!! 合成输入器没预备好（应先跑 ensure_synth_scroller）" >&2; return 1; }
-  # 被测 pid：优先用本档自己起的那个；attach 模式下用唯一在场的那个
-  local tp; tp="${TARGET_PID:-$(my_instance_pid 2>/dev/null | head -1)}"
-  [ -n "$tp" ] || { echo "!! 不知道往哪个 pid 投事件 ⇒ 不开录（空转样本比没有样本更坏）" >&2; return 1; }
-  # 14 px / 8 ms ⇒ ~125 Hz 的事件节奏；每次改动都记进日志，免得读表的人不知道输入多快
-  "$SYNTH_BIN" "$secs" "$tp" "${SYNTH_PX:-14}" "${SYNTH_GAP_MS:-8}" >&2 &
-  SYNTH_PID=$!
-  echo "    合成输入器 pid=$SYNTH_PID（投 ${secs}s，${SYNTH_PX:-14}px/${SYNTH_GAP_MS:-8}ms ≈ $((1000 / ${SYNTH_GAP_MS:-8})) Hz 事件节奏；meta 记 input_source=synth）"
-  return 0
-}
-
 cond_someone_active() {  # interact 档：**必须检测到有人正在动**才开录
   # 与 cond_quiet 是同一条尺子的两端（一个问"够久了吗"，一个问"还差得远吗"），
   # 所以取数、哨兵、分类三步全部复用，只有阈值换成交互档的。
@@ -259,7 +227,8 @@ for i in $(seq 1 "$SAMPLES"); do
     if [ "$INPUT" = "synth" ]; then
       # 投事件器活着才谈开录：编译失败 / 投递 0 拍都会让它非零退出，
       # 而闸门那边看不到任何"新的输入事件" ⇒ 自然走"等不到人在动"那条放弃路径。
-      start_synth_scroller || { echo "!! 合成输入器起不来，本趟不开录" >&2; break; }
+      start_synth_scroller "$(my_instance_pid 2>/dev/null | head -1)" \
+        || { echo "!! 合成输入器起不来，本趟不开录" >&2; break; }
     fi
     wait_for "有人正在滚动（静默 <${INTERACT_WANT}s）" cond_someone_active || break
   else
