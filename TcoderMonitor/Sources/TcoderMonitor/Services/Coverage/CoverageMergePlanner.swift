@@ -200,6 +200,7 @@ enum CoverageMergePlanner {
         for candidate in candidates {
             if candidate.binding.provesStaleness {
                 ledger.dropped.append(dropped(candidate, reason: .staleAgainstSource))
+                ledger.separateReadings.append(candidate.report)   // **原样留档**，不降级成占位对象
                 ledger.staleReportCount += 1
             } else {
                 pool.append(candidate)
@@ -208,7 +209,6 @@ enum CoverageMergePlanner {
                 ledger.unboundReportCount += 1
             }
         }
-        ledger.separateReadings = ledger.dropped.map { Self.standaloneReading(of: $0) }
 
         // ② 同一来源只数一次：同模块同运行、且是同一次导出的对偶格式（或同格式重名）。
         pool = dropSameRunDuplicates(from: pool, ledger: &ledger)
@@ -307,7 +307,7 @@ enum CoverageMergePlanner {
                                                               loser.identity.format)
                 if sameFamily {
                     ledger.dropped.append(dropped(loser, reason: .sameRunDuplicate))
-                    ledger.separateReadings.append(loser.report)
+                    ledger.separateReadings.append(loser.report)   // 同一批数字的另一种落法，照样可查
                 } else {
                     kept.append(loser)
                 }
@@ -367,13 +367,6 @@ enum CoverageMergePlanner {
         return blockers.isEmpty ? nil : blockers.map { $0.rawValue }.joined(separator: "、")
     }
 
-    private static func standaloneReading(of dropped: CoverageDroppedReport) -> CoverageReport {
-        CoverageReport(path: dropped.path, kind: .unknown, toolName: dropped.toolName,
-                       linesCovered: dropped.linesCovered, linesTotal: dropped.linesTotal,
-                       branchesCovered: 0, branchesTotal: nil,
-                       methodsCovered: 0, methodsTotal: 0,
-                       scopeGranularity: .aggregateOnly)
-    }
 }
 
 // MARK: - 分析器的一次输出
