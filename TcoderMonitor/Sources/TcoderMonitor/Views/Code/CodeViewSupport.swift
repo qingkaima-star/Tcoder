@@ -58,6 +58,71 @@ enum CodeDataGate {
     }
 }
 
+// MARK: 榜单口径（RD-17 ·「榜长冒充总数」那一族）
+
+/// 「这块数字是**榜**的还是**总体**的」——代码两页共用的判定。
+///
+/// 为什么必须有这一层：重复明细榜被 `DuplicationEngine.maxBlocks` 截过，而
+/// `CodeMetrics.duplicatedBlocks` 装的就是那份榜。直接读它的 `count` 当"这个仓库有多少
+/// 重复块"，在大仓库上是把问题**报小**（巨大文件那一格已经为同一件事补了 `hugeFileCount`）。
+///
+/// 引擎其实算得出榜外还剩多少：`DuplicationResult.blocksDroppedByCap` 与
+/// `linesOutsideReportedBlocks`。但这两个数只活在 `scanLimitations` 那句中文说明里，
+/// 契约里没有承接字段 ⇒ 这里只做两件不造假的事：
+/// ① 读数标签按「榜内」出水（`count` 是榜长，永远不是总体数，所以**不加条件**也成立）；
+/// ② 把引擎那句"未列出 N 个块 / M 行"原样带上屏，让榜外那一半看得见。
+/// **没有**从那句散文里抠数字回来做算术 —— 那等于造第二把尺子。
+enum CodeBoardTruth {
+    /// 明细榜的封顶长度。读引擎那一份，不在这里另抄一个 20。
+    static var duplicationBlockCap: Int { DuplicationEngine.maxBlocks }
+
+    /// 「榜外还有多少块/行没列」那一条限制说明，由引擎产出（`CodeScanCoverage.limitationSummary`）。
+    /// `nil` = 本次没有明细被上限切掉 ⇒ 此时"榜长就是总数"这句话才是真的。
+    ///
+    /// ⚠️ 这里按**句式**认领，不是按前缀瞎找：`AdviceWordingBoardTests` 里有一条对账断言钉着
+    /// 「引擎那句话仍然含这个标记」，谁改了文案没改这里，先红在对账上。
+    static let outsideBoardMarker = "明细榜单截断"
+
+    static func outsideBoardNote(_ code: CodeMetrics) -> String? {
+        code.scanLimitations?.first { $0.contains(outsideBoardMarker) }
+    }
+
+    /// 榜长的**唯一取法**。名字里就写着 Board：它是榜内条数，不是这个仓库的重复块总数。
+    /// 真总数要等契约里那一格（`duplicatedBlockCount`，与巨大文件的 `hugeFileCount` 同形状），
+    /// 在那之前任何消费方都不许把这一串读成总数 —— 标签、量词、页尾句都由本文件配平。
+    static func duplicationBoardCount(_ code: CodeMetrics) -> Int {
+        code.duplicatedBlocks.count
+    }
+
+    /// 「重复块」这一格读数的标签。榜被截过 ⇒ 数字是榜长，标签必须带「榜内」。
+    static func duplicationSlotLabel() -> String {
+        localizedCopy("重复块（榜内）")
+    }
+
+    /// 展开按钮的量词（`noun:` 不是查表入口，所以这里给的是上屏原文，与"个重复块"同性质）。
+    static func duplicationHiddenRowsNoun() -> String {
+        "个榜内重复块"
+    }
+
+    /// 页尾那句：榜外有东西时**绝不**说"已全部列出"，并且必须点名上限。
+    static func duplicationTruncationNote(_ code: CodeMetrics, shown: Int) -> String {
+        let listed = duplicationBoardCount(code)
+        if let outside = outsideBoardNote(code) {
+            return localizedFormat("榜内只列 %1$@ 个（明细榜上限 %2$@ 块）· 本页当前列出 %3$@ 个。%4$@",
+                                   NumberFormat.grouped(listed),
+                                   NumberFormat.grouped(duplicationBlockCap),
+                                   NumberFormat.grouped(shown),
+                                   localizedCopy(outside))
+        }
+        guard listed > shown else {
+            return localizedFormat("共 %1$@ 个重复块，已全部列出（榜没被截断，这一串就是总数）。",
+                                   NumberFormat.grouped(listed))
+        }
+        return localizedFormat("当前列出 %1$@ / %2$@ 个。",
+                               NumberFormat.grouped(shown), NumberFormat.grouped(listed))
+    }
+}
+
 // MARK: 路径与数字格式化
 
 enum CodeViewFormat {
