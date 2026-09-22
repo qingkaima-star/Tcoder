@@ -52,6 +52,9 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // 给新文件免检的通道（这一条教训来自 `X3TestSizeAuditTests` 那次拆文件把守卫拆丢）。
         "perf_selfcheck_ruler_shapes.sh", "perf_selfcheck_gates.sh",
         "perf_selfcheck_eligibility.sh",
+        // 2026-09-22：新增的"谁可能漏下孤儿实例"清单（只读、不判别家）。
+        // 新尺子必须一进门就被量 —— 否则"新建文件"本身就是免检通道（同一族的教训见上面那段）。
+        "perf_launcher_audit.sh",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。

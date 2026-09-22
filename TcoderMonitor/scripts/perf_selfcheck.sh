@@ -93,6 +93,7 @@ items_gates() {          # items_gates <outdir> —— 14..19 前置与开录闸
   item selfcheck_gate_matrix "$out"      # 17) 七维闸门合成矩阵：能放行，也会逐维拒
   item selfcheck_page_list_shape "$out"    # 18) 九页页名逐条完整（带空格的那条不许被拆）
   item selfcheck_launch_ready "$out"       # 19) 首帧要剔除运行期尾巴，不许拿求和冒充
+  item selfcheck_launcher_inventory "$out"  # 31) 实例清单要分得清"真起 / 会收尾 / 只是讲"（三夹具双向）
 }
 
 items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 样本资格与留痕
