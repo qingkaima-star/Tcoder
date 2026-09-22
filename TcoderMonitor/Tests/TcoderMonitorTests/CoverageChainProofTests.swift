@@ -219,39 +219,44 @@ extension CoverageChainProofTests {
         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
         CoverageMergeFixtures.wholeRepoPlusModules.install(into: target)
 
-        // ---- CLI 侧（真子进程）
-        let cliJSON = try scanToURL(target)
+        let cliJSON = try scanToURL(target)                       // CLI 侧：真交付二进制
+        let guiJSON = try await persistGuiSideReport(in: target)   // GUI 侧：ProjectStore 落盘
+        try compareCoverageSections(gui: guiJSON, cli: cliJSON)
+        try runReportParityScript(gui: guiJSON, cli: cliJSON, target: target)
+    }
 
-        // ---- GUI 侧（同一组分析器入口 + ProjectStore 编码器 + 沙箱支持目录）
+    /// GUI 侧那份报告：与 `AppState.scan(project:)` 同一组分析器入口 + `ProjectStore` 那套编码器，
+    /// 落进沙箱支持目录（不抢全机唯一的 `~/Library/Application Support`）。
+    @MainActor
+    private func persistGuiSideReport(in directory: URL) async throws -> URL {
         let sandbox = base.appendingPathComponent("support", isDirectory: true)
-        // `save` 里是 `try?`：目录没建就会**静默不写文件**（实测第一版就是这么"没落出报告"的），
-        // 所以这里显式建好再存，并且事后断言文件真的存在。
+        // `save` 里是 `try?`：目录没建就会**静默不写文件**（实测第一版就是这么"没落出报告"的）。
         try FileManager.default.createDirectory(at: sandbox.appendingPathComponent("reports"),
                                                 withIntermediateDirectories: true)
         let store = ProjectStore()
         store.storageDirectory = sandbox
-        let project = store.add(path: target.path, name: "R5 对表夹具")
+        let project = store.add(path: directory.path, name: "R5 对表夹具")
         var report = ProjectReport(project: project)
         // 五路逐条 try，失败路名与 CLI 用同一份 `sectionLabels` ——
-        // 少这一步就会让 `failedSections` 两边走出不同结果（实测第一次就是这样判败的）。
+        // 少这一步就会让 `failedSections` 两边走出不同结果（实测第一次就是这么判败的）。
         var failures: [String] = []
         func run<T>(_ label: String, _ body: () async throws -> T) async -> T? {
             do { return try await body() } catch { failures.append(label); return nil }
         }
         let codeValue: CodeMetrics? = await run(CLIScan.sectionLabels[0]) {
-            try await FileSystemCodeAnalyzer().analyze(root: target, options: .default)
+            try await FileSystemCodeAnalyzer().analyze(root: directory, options: .default)
         }
         let gitValue: GitInsights? = await run(CLIScan.sectionLabels[1]) {
-            try await ShellGitAnalyzer().analyze(repositoryURL: target)
+            try await ShellGitAnalyzer().analyze(repositoryURL: directory)
         }
         let logsValue: LogSummary? = await run(CLIScan.sectionLabels[2]) {
-            try await FileLogAnalyzer().analyze(projectRoot: target, extraLogURLs: [], withinDays: 7)
+            try await FileLogAnalyzer().analyze(projectRoot: directory, extraLogURLs: [], withinDays: 7)
         }
         let depsValue: DependencyReport? = await run(CLIScan.sectionLabels[3]) {
-            try await ManifestDependencyAnalyzer().analyze(projectRoot: target, allowNetwork: false)
+            try await ManifestDependencyAnalyzer().analyze(projectRoot: directory, allowNetwork: false)
         }
         let coverageValue: CoverageMetrics? = await run(CLIScan.sectionLabels[4]) {
-            try await CoverageAnalyzer().analyze(projectRoot: target, options: .default)
+            try await CoverageAnalyzer().analyze(projectRoot: directory, options: .default)
         }
         report.code = codeValue
         report.git = gitValue
@@ -264,32 +269,31 @@ extension CoverageChainProofTests {
         report.attemptedAt = Date()
         report.failedSections = failures
         store.save(report: report)
-        let guiJSON = try XCTUnwrap(
+        return try XCTUnwrap(
             FileManager.default.contentsOfDirectory(at: sandbox.appendingPathComponent("reports"),
                                                     includingPropertiesForKeys: nil).first,
             "GUI 侧没落出报告文件")
+    }
 
-        // ---- 覆盖率那一段必须逐字段相同（本轮改的就是它）
-        let gui = try XCTUnwrap(JSONSerialization.jsonObject(
-            with: try Data(contentsOf: guiJSON)) as? [String: Any])
-        let cli = try XCTUnwrap(JSONSerialization.jsonObject(
-            with: try Data(contentsOf: cliJSON)) as? [String: Any])
-        // 覆盖率段：把"每次运行必然不同"的两个时间字段按同一口径抹平后逐字段比。
-        // （`report_parity.py` 的容忍清单里 `*At` 就包含它们；这里先自己做一遍，
-        //  免得只能等脚本给出一个不带上下文的不等行。）
-        let guiCov = try XCTUnwrap(stripDates(gui["coverage"]))
-        let cliCov = try XCTUnwrap(stripDates(cli["coverage"]))
-        XCTAssertTrue(guiCov.isEqual(cliCov),
-                      "两条路落出来的覆盖率段不一致：GUI=\(guiCov) CLI=\(cliCov)")
+    /// 覆盖率段先自己比一遍（抹掉 `*At`），免得只能等脚本吐一行不带上下文的不等。
+    private func compareCoverageSections(gui: URL, cli: URL) throws {
+        let guiDict = try jsonObject(gui)["coverage"]
+        let cliDict = try jsonObject(cli)["coverage"]
+        let left = try XCTUnwrap(stripDates(guiDict))
+        let right = try XCTUnwrap(stripDates(cliDict))
+        XCTAssertTrue(left.isEqual(right),
+                      "两条路落出来的覆盖率段不一致：GUI=\(left) CLI=\(right)")
+    }
 
-        // ---- 全字段对表：真跑仓库里那把尺子
+    /// 再真跑仓库里那把尺子（AGENTS §5.9 第 5 条）。
+    private func runReportParityScript(gui: URL, cli: URL, target: URL) throws {
         let scripts = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("scripts/report_parity.py")
         XCTAssertTrue(FileManager.default.fileExists(atPath: scripts.path), "对表脚本不在 \(scripts.path)")
         let parity = Process()
         parity.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        parity.arguments = [scripts.path, guiJSON.path, cliJSON.path, target.path]
+        parity.arguments = [scripts.path, gui.path, cli.path, target.path]
         let pipe = Pipe()
         parity.standardOutput = pipe
         parity.standardError = pipe
@@ -299,6 +303,10 @@ extension CoverageChainProofTests {
         print("【R5 对表 report_parity.py rc=\(parity.terminationStatus)】\n" + output)
         XCTAssertEqual(parity.terminationStatus, 0,
                        "report_parity.py 判败：GUI 落盘 vs CLI 扫描逐字段比对有不可容忍的不等\n" + output)
+    }
+
+    private func jsonObject(_ url: URL) throws -> [String: Any] {
+        try XCTUnwrap(JSONSerialization.jsonObject(with: try Data(contentsOf: url)) as? [String: Any])
     }
 
     /// 递归抹掉以 `At` 结尾的键（与 `report_parity.py` 的 `is_tolerated` 同一判据），
