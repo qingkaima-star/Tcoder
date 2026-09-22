@@ -127,7 +127,11 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 150 → 151（集成分支修复人把 `CodeScanCoverage` 整块搬出 `FileSystemCodeAnalyzer.swift`
     ///   以守 400 行闸门，新增 `FileSystemCodeAnalyzerLimits.swift` 一枚）。
     /// 151 → 152（RD-30/31 溯源块新增 `Models/ScanProvenance.swift`，四处在引用它）。
-    static let censusBaseline = 152
+    /// 152 → 153（R10 台账新增 `Models/AnalyzerLedger.swift`：CLI 的 `CLIScan.outcome` 与 GUI 的
+    ///   `AppState.scan` 收尾两个装配点各调一次 `AnalyzerLedger.records(from:)`，
+    ///   同文件里的 `AnalyzerLedger.sectionLabels` 又是五路路名的唯一一份
+    ///   （`CLIScan.sectionLabels` 改为转发它）—— 由总工按守卫实报填，不是算出来的）。
+    static let censusBaseline = 153
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
