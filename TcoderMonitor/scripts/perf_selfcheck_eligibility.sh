@@ -32,8 +32,25 @@ selfcheck_probe_sentinel() {  # selfcheck_probe_sentinel <outdir>
   grep -q 'input_quiescence.swift' scripts/perf_wait_window.sh \
     && { fail "perf_wait_window.sh 里又出现静默探针源码——删掉，改成 source preflight 那把尺子"; bad=1; }
   # 反向钉：合成输入器**必须**继续从唯一的源文件编（别哪天在排程器里手抄一份投事件逻辑）
-  grep -q 'perf_synth_scroll.swift' scripts/perf_wait_window.sh \
-    || { fail "排程器不再从 scripts/perf_synth_scroll.swift 取合成输入器——大概又手抄了一份" ; bad=1; }
+  # 【这条昨天判错过一次，所以换掉它守的东西】原来它要求"perf_wait_window.sh 里必须出现
+  # perf_synth_scroll.swift"——那守的是**位置**，不是不变式；09-22 把编译搬进
+  # perf_probes.sh（pulse 档要与 interact 档共用同一个输入器）之后，它把正确改动判成红。
+  # 真正要守的是：**全仓恰好一个文件编译这个源文件**，别处一律 source 它、不重抄一份。
+  # 形状要认得续行：编译写的是 `xcrun swiftc -O … <换行> …perf_synth_scroll.swift`，
+  # 单行正则数出 0 处（第一版就这么把对的实现判成"没了"）。
+  local builders="" f2
+  for f2 in scripts/*.sh; do
+    # 自扫排除 selfcheck 自己：这条判据的正文里就写着 `xcrun swiftc` 与那个文件名，
+    # 算进去就是"判据被自己的说明文字绊倒"——今晚第四次踩同一类坑。
+    case "$f2" in scripts/perf_selfcheck*) continue ;; esac
+    grep -q 'xcrun swiftc' "$f2" && grep -q 'perf_synth_scroll\.swift' "$f2" && builders="$builders$f2 "
+  done
+  [ "$(printf '%s\n' $builders | grep -c . || true)" = "1" ] \
+    || { fail "编译合成输入器的文件不是恰好一个（拿到：${builders:-0 个}）⇒ 要么长出第二把尺子，要么实现被搬丢"; bad=1; }
+  case " $builders" in
+    *" scripts/perf_probes.sh "*) : ;;
+    *) fail "perf_probes.sh 里不再编译合成输入器 ⇒ interact / pulse 两档要用的那个二进制从哪来？"; bad=1 ;;
+  esac
   ok "哨兵判定四类都对、且它防的失效真实存在；排程器只剩一把尺子"
 }
 
