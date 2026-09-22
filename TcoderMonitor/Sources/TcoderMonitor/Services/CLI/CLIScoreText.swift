@@ -9,9 +9,19 @@ import Foundation
 ///    （`Models/HealthScore.swift` 里 `verdict` 的注释就是为这条立的）。
 enum CLIScoreText {
 
+    /// 溯源一行，打在**任何读数之前**（与「失败路在分数之前」同一条理由）：
+    /// 读的人得先知道自己看的是哪个提交、哪把尺子，后面的每个数字才有归属。
+    /// 旧报告没有溯源块时整行照样打，只把内容写成「未记录」——静默消失会被读成「无需溯源」。
+    private static func provenanceLine(_ report: ProjectReport) -> String {
+        guard let p = report.provenance else {
+            return "溯源：未记录（这份报告出自没有溯源块的结构）"
+        }
+        return "溯源：\(p.oneLineSummary) · 范围 \(p.scannedRoot ?? "未记录") · 入口 \(p.producedBy ?? "未记录")"
+    }
+
     static func render(_ report: ProjectReport, exit: CLIExit) -> String {
         var lines: [String] = [openingLine(report)]
-
+        lines.append(provenanceLine(report))
         if exit == .allFailed {
             lines.append("五路全部失败，本次不出结论 —— 这条读作「什么都没量到」，不是「这个仓库没有代码」。")
             lines.append(contentsOf: report.failedSections.map { "  失败：\($0)" })

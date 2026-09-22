@@ -256,6 +256,8 @@ final class AppState {
                     (coverageResult.error, "测试覆盖率"),
                 ])
                 merged.failedSections = failures.sections
+                // 与 CLI 同一把尺子：同一项目同一次扫描，GUI 与 CLI 的溯源块必须能对上号。
+                merged.provenance = ScanProvenance(report: merged, scannedRoot: project.path, producedBy: "gui")
 
                 self.store.upsertReport(merged)
                 if let score = merged.health?.verdict {
