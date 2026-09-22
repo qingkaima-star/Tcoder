@@ -682,3 +682,24 @@
 // 批次 P16：重复块 tooltip 的两段（原先是三段拼出来的裸中文）
 "相似度 %1$@ · %2$@ 行 · 出现 %3$@ 处" = "Similarity %1$@ · %2$@ lines · %3$@ occurrences";
 "（另有 %1$@ 处）" = "(%1$@ more)";
+
+// ── 第五轮 R3·B 组（RD-11 / RD-13 / RD-13b·c）：依赖证据链新增的那 11 句 ──────────
+// 这批不是"存量没翻"，是 B 组自己新写的产品散文 —— 写的时候进了 `localizedCopy` /
+// `localizedFormat` / `Text(...)` 的口子却漏登记，等于英文态会在依赖页整段掉中文。
+// 落点逐条：`DependencyEvidence`（那句"未发现已知漏洞"的三种说法）、
+// `ManifestDependencyAnalyzerLookup`（两本账各自的数据源标签）、
+// `ManifestDependencyAnalyzerVersionEvidence`（读到已解析产物那句）、
+// `DependencyScopeBreakdown`（分用途统计卡的副标题与空态）。
+// 守卫：`LocalizationGuardTests.test_unregisteredLiteralInventoryPrintsAndShrinks`
+// （只减不增棘轮；本批登记后现量 28 → 17，上限仍是 19）。
+"命中 %1$@ 条（%2$@ 个依赖带已知漏洞），另有 %3$@ 条未覆盖，见「安全公告」" = "%1$@ matched (%2$@ dependencies with known vulnerabilities); %3$@ more went unchecked — see “Advisories”";
+"已核对 %1$@ / %2$@ 个依赖，未发现已知漏洞" = "Checked %1$@ / %2$@ dependencies — no known vulnerabilities found";
+"漏洞核对未覆盖任何依赖（共 %1$@ 个）：" = "Vulnerability checking covered none of the %1$@ dependencies:";
+"；另有 %1$@ 个未覆盖：" = "; %1$@ more uncovered:";
+"内置快照 + npm registry" = "Built-in snapshot + npm registry";
+"内置快照" = "Built-in snapshot";
+"内置规则 + OSV" = "Built-in rules + OSV";
+"内置规则" = "Built-in rules";
+"读到已解析产物 %1$@ 份（%2$@），按其解析出实际版本" = "Read %1$@ resolved artifact(s) (%2$@) and took the installed versions from them";
+"声明范围按 scope 分开汇总，不并成一个数" = "Declarations are tallied per scope, never merged into a single number";
+"没有可统计的依赖声明" = "No dependency declarations to tally";
