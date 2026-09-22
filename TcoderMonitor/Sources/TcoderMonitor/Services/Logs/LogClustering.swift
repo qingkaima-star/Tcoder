@@ -23,8 +23,26 @@ enum LogAggregator {
                           crashHandledPaths explicitCrashPaths: Set<String>? = nil,
                           windowExemptPaths: Set<String>? = nil) -> LogAggregate {
         var result = LogAggregate()
-        // 真实读到的行数，不是估算值
-        result.totalLinesScanned = readings.reduce(0) { $0 + $1.totalLines }
+        // 分母只数**真日志行**（RD-46b）。原来这一行是 `readings.reduce(0) { $0 + $1.totalLines }`，
+        // 不分角色，于是崩溃报告（`.ips`）的正文——机器字段、线程表、几百条 image 列表——
+        // 也被算进「每千行日志错误数」的分母。**同一份报告于是有两个相反的作用**：
+        // 它一边按份数扣分（`crashCount`），一边用自己的行数把错误密度稀释掉。
+        // 崩溃报告的正文不是运行暴露量：它不随"程序跑了多久、接了多少请求"增长，
+        // 只随"这一次崩得多深"增长，所以它单独成格（下面两格），不进密度分母。
+        //
+        // ⚠️ 本文件只管**分母**。分子（错误/异常/崩溃事件）一个字都没动：
+        //    崩溃事件仍然从 `extraEvents` 那条唯一通道入场参与计数。
+        //    用"把崩溃从分子删掉"来让密度好看是藏问题，不是修口径。
+        // ⚠️ 也不要与下面 `crashHandledPaths` 那个去重混为一谈：那个管的是**事件数**
+        //    （同一份 .ips 只许走崩溃通道，别让行解析再数一次），这个管的是**行数**。
+        for reading in readings where reading.readFailed == false {
+            if reading.role == .crash {
+                result.crashReportLineCount += reading.totalLines
+                result.crashReportFileCount += 1
+            } else {
+                result.totalLinesScanned += reading.totalLines
+            }
+        }
 
         var events: [LogEvent] = []
         // 崩溃报告有两种提取路径：逐行解析器会把 .ips 的 JSON 行当成日志（产出裸 JSON 的

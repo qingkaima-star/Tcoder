@@ -185,7 +185,13 @@ final class LogAggregationTests: LogAnalysisTestCase {
         let extra = makeEvent(.warning, raw: "WARN 外部日志告警", date: dayB, path: "/srv/app/logs/extra.log", line: 1)
 
         let agg = LogAggregator.aggregate(readings: [readingA, readingB], extraEvents: [extra], topLimit: 5)
-        XCTAssertEqual(agg.totalLinesScanned, readingA.totalLines + readingB.totalLines)
+        // 分母只数真日志行（RD-46b），崩溃正文单独成格 —— 两边相加才是"这次一共读了多少行"。
+        // 原来这一行是 `agg.totalLinesScanned == readingA.totalLines + readingB.totalLines`，
+        // 它断言的其实是**读取覆盖**；把它直接改成 16 就等于把那条不变式废掉，所以拆成两条。
+        XCTAssertEqual(agg.totalLinesScanned, readingA.totalLines, "分母只该有真日志行")
+        XCTAssertEqual(agg.crashReportLineCount, readingB.totalLines, "崩溃正文的行数要留在自己那一格，不许消失")
+        XCTAssertEqual(agg.totalLinesScanned + agg.crashReportLineCount,
+                       readingA.totalLines + readingB.totalLines, "对账：分母 + 崩溃正文 == 实际读到的总行数")
         XCTAssertEqual(agg.events.count, errorEvents.count + crashEvents.count + 1, "extraEvents 要并入")
         XCTAssertEqual(agg.warningCount, 2, "extraEvents 参与计数")
         XCTAssertEqual(agg.exceptionCount, 1)

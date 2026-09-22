@@ -97,8 +97,11 @@ final class LogFixtureClusterTests: XCTestCase {
         }
 
         XCTAssertTrue(summary.hasData, "夹具里有两个日志文件，必须扫到内容")
-        XCTAssertGreaterThanOrEqual(summary.totalLinesScanned, 25,
-                                    "两份夹具合计 25 行，读取行数必须覆盖到")
+        // 这一格断言的从来不是"密度分母"，而是**读取覆盖**：两份夹具合计 25 行必须都被读到。
+        // RD-46b 把崩溃正文移出分母之后，只对 `totalLinesScanned` 取 25 会把这条不变式静默废掉
+        // （读数变成 16，改小它就像"夹具缩水了"，其实是被搬去另一格）⇒ 让它走对账等式。
+        XCTAssertGreaterThanOrEqual(summary.totalLinesScanned + (summary.crashReportLineCount ?? 0), 25,
+                                    "两份夹具合计 25 行，读取行数必须覆盖到（分母 + 崩溃正文两格相加）")
         // 本 App 自己的 ~/Library/Logs/DiagnosticReports/*.ips 也会被一并扫到，所以只断言夹具在里面。
         let paths = Set(summary.scannedFiles.map(\.path))
         XCTAssertTrue(paths.contains(where: { $0.hasSuffix("Logs/error.log") }), "夹具 error.log 必须被扫到")
