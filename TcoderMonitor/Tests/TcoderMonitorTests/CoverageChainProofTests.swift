@@ -179,6 +179,57 @@ final class CoverageChainProofTests: XCTestCase {
         return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
     }
 
+    // MARK: - 两把尺子不许分叉：覆盖率那一路的提交号 ↔ 溯源块的提交号
+
+    /// **同一棵被扫目录**，覆盖率那一路读到的 `sourceFingerprint` 必须与溯源块
+    /// （`GitInsights.headSHA` → `ScanProvenance.sourceCommit`）同源。
+    /// 为什么单独钉这一条：覆盖率链自己起了一次 `git rev-parse HEAD`
+    /// （`CoverageSourceState.read`），而 Git 那一路另有自己的仓库根解析
+    /// （`resolvedRepositoryRoot`）—— 18:30 总工点名的"两处各查一次迟早分叉"就是这个形状。
+    /// 把 provenance 喂进覆盖率分析入口要动 `App/**` 与 `Services/CLI/`（不在我可写面），
+    /// 所以在合掉之前，先把"两边必须给出同一个提交、且对外层仓库的判断一致"钉住。
+    @MainActor
+    func testCoverageFingerprintAndProvenanceCommitShareOneRuler() async throws {
+        // 用**已解符号链接**的路径：`NSTemporaryDirectory()` 给的是 `/var/…`，而 Git 那一路
+        // 回来的是 `/private/var/…`，不相等时溯源块会打出一条"提交号来自外层仓库"的假提示
+        // （本仓 §25 那一族），这条用例要比的是"两把尺子同不同源"，不是这个。
+        let target = base.resolvingSymlinksInPath().appendingPathComponent("one_ruler", isDirectory: true)
+        try FileManager.default.createDirectory(at: target.appendingPathComponent("src"),
+                                                withIntermediateDirectories: true)
+        try "const a = 1\n".write(to: target.appendingPathComponent("src/a.js"),
+                                   atomically: true, encoding: .utf8)
+        try git(["init", "-q", "."], in: target)
+        try git(["config", "user.name", "R5b One Ruler"], in: target)
+        try git(["config", "user.email", "r5b-one-ruler@tcoder.local"], in: target)
+        try git(["add", "-A"], in: target)
+        try git(["commit", "-qm", "first"], in: target)
+        let lcov = target.appendingPathComponent("coverage/lcov.info")
+        try FileManager.default.createDirectory(at: lcov.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try "SF:src/a.js\nLF:100\nLH:50\nend_of_record\n".write(to: lcov, atomically: true,
+                                                                    encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: lcov.path)
+
+        let coverage = try await CoverageAnalyzer().analyze(projectRoot: target, options: .default)
+        let gitInsights = try await ShellGitAnalyzer().analyze(repositoryURL: target)
+        let report = coverage.reports.first
+        let fingerprint = try XCTUnwrap(report?.sourceFingerprint,
+                                        "被扫目录自己就是仓库根 ⇒ 覆盖率那一路该读到提交号")
+        XCTAssertEqual(fingerprint, gitInsights.headSHA,
+                       "覆盖率与 Git 两路读到的提交号分叉了：\(fingerprint) vs \(gitInsights.headSHA)")
+        XCTAssertEqual(report?.sourceRepository, ".", "被扫目录自己有 .git ⇒ 坐标必须是 \".\"")
+        XCTAssertFalse(gitInsights.headSHA.isEmpty, "Git 那一路也要给出提交号，否则无从对表")
+
+        // 同一件事在溯源块里也要能给出一样的结论（`sourceCommit` 是 headSHA 的原样转发）。
+        var assembled = ProjectReport(project: MonitoredProject(name: "one-ruler", path: target.path))
+        assembled.git = gitInsights
+        assembled.coverage = coverage
+        let provenance = ScanProvenance(report: assembled, scannedRoot: target.path, producedBy: "test")
+        XCTAssertEqual(provenance.sourceCommit, fingerprint,
+                       "同一份报告里两个格子说不同提交 ⇒ 上屏就是自相矛盾")
+        XCTAssertNil(provenance.resolvedGitRoot, "仓库根相等时不许造假提示（与 `ScanProvenanceTests` 同判据）")
+    }
+
     // MARK: - 反证用：把新判定单独摘掉时会发生什么（写死在这里，供人工 sabotage 对表）
 
     /// 这条不改动产品代码，只把"摘掉判定后的算式"钉成数字：
@@ -268,6 +319,12 @@ extension CoverageChainProofTests {
             dependencies: report.dependencies, coverage: report.coverage, previousScore: nil))
         report.attemptedAt = Date()
         report.failedSections = failures
+        // 与 `App/AppState.swift` 装配收尾同一批字段：溯源块漏一行，`report_parity.py` 就报
+        // 「provenance: 只有 GUI 有（CLI 缺）」（2026-09-22 实测）。
+        // ⚠️ 这条**测试副本**本身就是形状风险：它重演了 GUI 的装配而不是调用它，
+        //    `AppState` 每加一个字段这里就静默落后一格。已在 R10 工单记为契约缺口：
+        //    正解是把装配抽成一个函数，GUI 与测试都调它。
+        report.provenance = ScanProvenance(report: report, scannedRoot: directory.path, producedBy: "gui")
         store.save(report: report)
         return try XCTUnwrap(
             FileManager.default.contentsOfDirectory(at: sandbox.appendingPathComponent("reports"),

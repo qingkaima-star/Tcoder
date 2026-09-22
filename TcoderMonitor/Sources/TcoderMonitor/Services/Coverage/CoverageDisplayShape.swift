@@ -170,8 +170,9 @@ extension CoverageReport {
             case nil:
                 source = "扫描时源码在 \(commit)，但**没记**这个提交来自哪个仓库 ⇒ 不许声称是本项目自己的"
             case let coordinate?:
-                source = "扫描时源码在 \(commit)，可它来自**外层**仓库（相对被扫根 \(coordinate)）"
-                    + "，说的不是本项目自己的提交"
+                // 措辞与 `ScanProvenance.relocationNote` 同一句关键词（两处说同一件事，不许两套话）。
+                source = "扫描时源码在 \(commit)，注意：提交号来自外层仓库"
+                    + "（相对被扫根 \(coordinate)）⇒ 说的不是本项目自己的提交"
             }
         } else {
             source = "未绑定提交（非 git 或 git 读失败），不按新鲜数据声称"

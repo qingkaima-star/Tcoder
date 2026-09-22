@@ -57,7 +57,7 @@ struct CoverageSourceState: Codable, Equatable, Sendable {
         let stamp = runGit(["log", "-1", "--format=%ct"], at: root, timeout: timeout)
             .flatMap { Int($0) }
             .map { Date(timeIntervalSince1970: Double($0)) }
-        return CoverageSourceState(headCommit: String(commit.prefix(12)),
+        return CoverageSourceState(headCommit: CommitIdentity.abbreviated(commit),
                                    headCommitDate: stamp,
                                    readFailure: stamp == nil ? "拿到 HEAD，但读不到提交时刻" : nil,
                                    repositoryRoot: repository,
