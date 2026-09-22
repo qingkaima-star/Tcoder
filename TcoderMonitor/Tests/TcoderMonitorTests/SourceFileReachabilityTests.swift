@@ -127,7 +127,14 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 150 → 151（集成分支修复人把 `CodeScanCoverage` 整块搬出 `FileSystemCodeAnalyzer.swift`
     ///   以守 400 行闸门，新增 `FileSystemCodeAnalyzerLimits.swift` 一枚）。
     /// 151 → 152（RD-30/31 溯源块新增 `Models/ScanProvenance.swift`，四处在引用它）。
-    static let censusBaseline = 152
+    /// 152 → 161（R5/R5b 覆盖率链整块拆出的九枚，全在 `Services/Coverage/`：
+    ///   `CoverageDisplayShape` / `CoverageLineLedger` / `CoverageMergeConfidence` / `CoverageMergeLedger` /
+    ///   `CoverageMergePlanner` / `CoverageReportDiscovery` / `CoverageReportIdentity` /
+    ///   `CoverageRunIdentity` / `CoverageSourceBinding`。
+    ///   引用证据是同一次守卫跑出的「零调用清单：空」（`testZeroCallListIsEmpty` 未红），
+    ///   九枚都是 `CoverageAnalyzer` 那条链为守 400 行闸门按类型整块搬出去的，不是空壳。
+    ///   按守卫实报填：161 是它自己打出来的数，不是我算的。）
+    static let censusBaseline = 161
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames

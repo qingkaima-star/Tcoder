@@ -319,11 +319,8 @@ extension CoverageChainProofTests {
             dependencies: report.dependencies, coverage: report.coverage, previousScore: nil))
         report.attemptedAt = Date()
         report.failedSections = failures
-        // 与 `App/AppState.swift` 装配收尾同一批字段：溯源块漏一行，`report_parity.py` 就报
-        // 「provenance: 只有 GUI 有（CLI 缺）」（2026-09-22 实测）。
-        // ⚠️ 这条**测试副本**本身就是形状风险：它重演了 GUI 的装配而不是调用它，
-        //    `AppState` 每加一个字段这里就静默落后一格。已在 R10 工单记为契约缺口：
-        //    正解是把装配抽成一个函数，GUI 与测试都调它。
+        // ⚠️ 这份**测试副本**重演了 GUI 装配而不是调用它 ⇒ AppState 每加一个字段这里就静默落后
+        //    一格（实测就漏过 provenance）。抽成共用装配函数是 R10 第 0.5 条的契约缺口。
         report.provenance = ScanProvenance(report: report, scannedRoot: directory.path, producedBy: "gui")
         store.save(report: report)
         return try XCTUnwrap(

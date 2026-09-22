@@ -18,16 +18,7 @@ final class ManifestLabHealthTests: ManifestLabTestCase {
                                   dependencies: deps, coverage: coverage, previousScore: 80)
 
         let score = WeightedHealthScorer().score(inputs)
-        print("=== WS-F 夹具 · 健康评分实测 ===")
-        print("总分 \(score.overall) 等级 \(score.grade.rawValue) 趋势 \(score.trendDelta.map(String.init) ?? "无")")
-        for component in score.components {
-            print("  \(component.name) \(component.score) ×\(String(format: "%.3f", component.weight))"
-                + " = \(String(format: "%.1f", component.weightedContribution)) [\(component.risk.rawValue)] \(component.detail)")
-        }
-        print("优点 \(score.strengths)")
-        print("问题 \(score.issues)")
-        print("建议 \(score.recommendations)")
-        print("总评 \(score.narrative)")
+        logLabScoreCard(score)
 
         // R5b 更正一处**把旧行为当契约**的期望（不是放宽判据，理由逐条写在下面）：
         // 这棵 WS-F 夹具的 5 份报告跨格式、跨模块、彼此无法核对重叠，而唯一带文件粒度的那份
@@ -79,4 +70,21 @@ final class ManifestLabHealthTests: ManifestLabTestCase {
         print("持久夹具 = \(destination.path)（\(built.files.count) 个文件）")
     }
 
+}
+
+extension ManifestLabHealthTests {
+    /// 把整张评分卡打到测试日志里（取证用）。搬成独立方法只为让上面那条用例留在 50 行口径内，
+    /// 逐字未改 —— 打印不参与判定，判定仍全在用例里。
+    func logLabScoreCard(_ score: HealthScore) {
+        print("=== WS-F 夹具 · 健康评分实测 ===")
+        print("总分 \(score.overall) 等级 \(score.grade.rawValue) 趋势 \(score.trendDelta.map(String.init) ?? "无")")
+        for component in score.components {
+            print("  \(component.name) \(component.score) ×\(String(format: "%.3f", component.weight))"
+                + " = \(String(format: "%.1f", component.weightedContribution)) [\(component.risk.rawValue)] \(component.detail)")
+        }
+        print("优点 \(score.strengths)")
+        print("问题 \(score.issues)")
+        print("建议 \(score.recommendations)")
+        print("总评 \(score.narrative)")
+    }
 }
