@@ -389,13 +389,25 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
   - **T5 的"零"到底指什么（2026-09-20 23:35 明写，防止被读成"把令牌引用删光"）**。
     C 包落地后 `ColorToken`/`ThemeTokens` 的 `color`/`font` 已是**存储常量**，
     守卫里 `dynamicNSColor` 那条正则量的东西随之变了：**不再是"每 tick new 多少个 `NSColor`"，
-    而是"渲染路径里引用令牌成员的次数"**。所以四条禁则的终点并不一样：
-    | 规则 | 现量/上限 | 终点 | 为什么 |
+    而是"渲染路径里引用令牌成员的次数"**。
+  - **2026-09-22：那条混用的尺子已经拆成两条。** 上面这段"语义变了"的结论是对的，
+    但当时**只改了说明、没改尺子**，于是留下两个方向的失效，都是实测撞出来的：
+    ① `dynamicNSColor` 顶到 62/62 零余量后，谁在 body 里新写一处**正确**的令牌取色就把闸门打红；
+    ② 真正该拦的现造形状 `Color(nsColor: …)` **一条规则都不抓**
+    （`directFormatters` 的模式只列 `NSColor|DateFormatter|NumberFormatter` 后跟 `(`，`Color(` 不在内），
+    现扫立刻抓到 2 处（`Views/Shell/SidebarRows.swift`、`Views/Shell/ProjectSidebar.swift`）。
+    ⇒ 拆成 `dynamicColorConstruction`（现造＝债，终点 **0**）与 `tokenReference`（引用＝**读数**，终点不是 0）。
+    另记一条反面教训：那 8 处 `Design/**` 的引用曾被读成"性能侧还有一趟缓存化可做"，
+    实际 `role(for:)` 返回 `static let`、`.textColor` 读的是 init 里算好的 `let color`——
+    **去做这趟只会把 62 抬成 54 而运行时一个字节都不省，是假还债。**
+    所以五条禁则的终点并不一样：
+    | 规则 | 现量/上限（2026-09-22 复扫） | 终点 | 为什么 |
     |---|---|---|---|
     | `directFormatters` | 1/1 | **0** | 真违规：渲染路径里现造 formatter |
-    | `fullSort` | 10/10 | **0** | 真违规：body 内全量排序（缓存或挪到 publish） |
+    | `dynamicColorConstruction` | 2/2 | **0** | 真违规：渲染路径里现造动态色（2026-09-22 起才有尺子；归 UI 流） |
+    | `fullSort` | 9/9 | **0** | 真违规：body 内全量排序（缓存或挪到 publish） |
     | `syncFileIO` | 2/2 | **0** | 真违规：body 内 `exists`/`attributesOfItem` |
-    | `dynamicNSColor` | 59/59（2026-09-21 复拧） | **不是 0** | 取色本身没错，错的是"每次访问现造"。达标判据换成两件事：① `Design/**` 里不许再出现 `var color: Color {` 这类计算属性（已有守卫）；② 引用点不许嵌在 O(n) 循环 / Mark 闭包里重复求值（棘轮只减不增 + 人工核）。 |
+    | `tokenReference` | 62/62 | **不是 0** | 旧名 `dynamicNSColor`。取色本身没错，错的是"每次访问现造"。达标判据换成两件事：① `Design/**` 里不许再出现 `var color: Color {` 这类计算属性（已有守卫）；② 引用点不许嵌在 O(n) 循环 / Mark 闭包里重复求值（只减不增 + 人工核）。 |
     **不许为了凑"零动态色"去删令牌引用**——那会同时砸掉观感一致性与 T8（颜色承载语义），
     属于"为了指标改语义"，是本规范第一条禁止的事。
 - **T6 合成层预算**：内容层 0 填充、投影只给 `.floating`、每屏材质/backdrop 层 ≤ 2。
@@ -663,7 +675,7 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 | T2 心跳期占用 ≤4.0 ms | **成立（当前交付内容，3/3 趟）** | 同一产物码 `7be9386…` 的三趟 `app-update`：**max 2.08 / 1.69 / 1.40 ms**（n=16/6/9，**三趟超预算 0 个**）⇒ 红线 ≤4.0 ms，余量过半，且三趟互相印证。测量条件：静默 57 s~25 min、`TCODER_GIT_CLEAN=true` 的 release 产物、provenance 全过。<br>**同批的 hitch / HTR 两行不作数**：实测出帧掉到 10/s（静止窗口 ProMotion 降频），按 §6.2 只记形状不判档——这正是 T2 的判据用 `app-update` 而不用 hitch 计数的理由。旧内容（产物 `1eb1286…`）上的 1.98 / 2.49 / 2.17 保留为量级线索，不挂"当前头部"。 |
 | T4 逐页冷启动 ≤1.0 s | **待重测**（旧数 764~845 ms 同上） | `switch` 档自带一条更严的闸："本机有别的实例就拒"（今早实测拒因里直接列出 7 个 pid）。`SWITCH_ALLOW_COEXIST=1` 可以共存态跑，但那批只能标成"共存态"，不进验收表。 |
 | 九页取证 | **已重拍**（09-22 11:15，rev `4797a39`） | `.scratch/pages-4797a39/`：9 张 / 9 页、失败 0、内容完全相同的图组数 0；**没有跳过 provenance**（`SKIP_PROVENANCE` 未设），沙箱走 `TCODER_SUPPORT_DIR` 所以用户状态未被触碰；收尾只对本脚本自己起的 pid 发 SIGTERM ⇒ **没给下一个再添漏网实例**。 |
-| body/Mark 零动态色/零排序/零同步 I/O | **未达标，存量全在 `Views/**`（UI 流名下）** | 并完 main（`e929a47`）之后现扫台账：`directFormatters 1/1`、`dynamicNSColor 62/64`、`fullSort 9/9`、`syncFileIO 2/2` ⇒ 台账自己报出 2 格隐形余量，已按"只紧不松"拧到 **62**。粗读点仍 **16/16 未迁、细粒度消费 0 处**（`ⓘ` 收纳那两批一处都没动这条轴）。 |
+| body/Mark 零动态色/零排序/零同步 I/O | **未达标，存量全在 `Views/**`（UI 流名下）** | 并完 main（`e929a47`）之后现扫台账：`directFormatters 1/1`、`dynamicNSColor 62/64`、`fullSort 9/9`、`syncFileIO 2/2` ⇒ 台账自己报出 2 格隐形余量，已按"只紧不松"拧到 **62**。粗读点仍 **16/16 未迁、细粒度消费 0 处**（`ⓘ` 收纳那两批一处都没动这条轴）。<br>**2026-09-22 复扫（尺子拆分后，五档口径）**：`directFormatters 1/1`、**`dynamicColorConstruction 2/2`（新尺子，第一次抓到现场：`Views/Shell/SidebarRows.swift` + `ProjectSidebar.swift` 各一处 `Color(nsColor:`）**、`fullSort 9/9`、`syncFileIO 2/2`、`tokenReference 62/62`。⇒ "零动态色"这半句**从今天起才真正有判据**，且四条真判据全部零余量、终点 0 的存量**一处不剩在性能侧名下**。 |
 | 诚实性语义不降级 | 守住并在加长 | 期间自我矛盾样本 rc=3、哨兵不可当读数、磁盘/空值一律判不合格、样本根必须被 git 忽略；今晚再加三条：**样本根不许退回 `$TMPDIR`（改拒录）**、**selfcheck 每一项必须出声（项间共享 `bad` 会让一项红吞掉后续项的绿）**、**批次按产物码归类而不是按 rev 字面** |
 
 ⇒ 规矩：**产物不在，判据就不算绿**。文字记录（本文、Obsidian）只是过程记录，

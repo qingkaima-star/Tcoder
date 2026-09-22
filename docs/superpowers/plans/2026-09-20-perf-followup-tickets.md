@@ -48,9 +48,11 @@ ceiling=0，扫描分母含 `.py/.sh/.md`）。你**没有改阈值**，只把�
    **前后对比必须同路同档**：改前那棵封存产物 `/tmp/tcoder-before.app`（rev `415f0f0`）
    里根本没有 `FramePulse`，拿路 B 量改后、拿路 A 量改前 = 两把不同的尺子比同一个数，不作数。
    不带 `--interaction` / 不写 `period=interaction` 的读数一律只算 idle——**别拿它当 T1 达标**。
-3. 禁则棘轮现在每次跑都打「现量/上限」，并落一份 `$TMPDIR/tcoder-perf-renderpath-debt.txt` 台账。`dynamicNSColor` 已从 107 → 86（图表取色上提）→ **59**（`c60abbd` 颜色面积收敛又还掉 27 处）
+3. 禁则棘轮现在每次跑都打「现量/上限」，并落一份 `.scratch/tcoder-perf-renderpath-debt.txt` 台账（**不写 `$TMPDIR`**：那个目录 2026-09-21 被清过一次，对照组的封存产物就是这么丢的，而台账是"拧基线/还债"的唯一机器可读依据）。`dynamicNSColor` 已从 107 → 86（图表取色上提）→ **59**（`c60abbd` 颜色面积收敛又还掉 27 处）
    （两笔都是靠这条打印才现形的：`165faa7` 还掉 21 处、`c60abbd` 还掉 27 处，之前都藏在余量里没人看见）。
    四条现在**零余量**：`1/1 59/59 10/10 2/2`——再新增一处当场红。
+   这句"现在"会腐烂，所以 2026-09-22 的读数是 `directFormatters 1/1  dynamicNSColor 62/62  fullSort 9/9  syncFileIO 2/2`
+   （62 不是回潮：扫描面从 `Views/` 扩到 `Views ∪ Design` 多看见 8 处，见 handoff-notes §B；9 是从 10 拧下来的）。
 
 ## 0.0.1 给马上要跑九页取证的那位：`capture_pages_isolated.sh` 收尾改了
 

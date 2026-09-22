@@ -32,7 +32,7 @@
 
 ⇒ 现在 = **Views ∪ Design**，`dynamicNSColor` 基线 **56 → 64**：
 **这是扩面、不是新增债**，多看见的 8 处全在 `Design/`，台账逐条带 `Design/` 前缀可复核
-（`$TMPDIR/tcoder-perf-renderpath-debt.txt`，每条都是 `文件:行 + 原文`）。
+（`.scratch/tcoder-perf-renderpath-debt.txt`，每条都是 `文件:行 + 原文`）。
 从 64 起仍只许减不许增，终点 0。现量：`directFormatters 1/1 dynamicNSColor 64/64 fullSort 10/10 syncFileIO 2/2`。
 
 ### C. 一条会咬到 x6 的守卫 —— 已自己化解，留档说明它不是假警报
@@ -85,7 +85,7 @@
 - `fullSort` 已经掉到 **9**，我这头把基线从 10 拧到 9（`96da24d`）——
   **棘轮只许变紧**：留着那一格隐形余量，下一个人在别处新加一处排序会显示成"10/10 没涨"。
 - **`dynamicNSColor 64` 是扩面后的数，不是新增债**（Views ∪ Design，台账逐条带前缀可复核：
-  `$TMPDIR/tcoder-perf-renderpath-debt.txt`，每条 = 文件:行 + 原文）。从 64 起只许减，终点 0。
+  `.scratch/tcoder-perf-renderpath-debt.txt`，每条 = 文件:行 + 原文）。从 64 起只许减，终点 0。
 - 16 处粗读点的**逐行入口**不用抄表：`python3 scripts/trace_report.py migration` 现扫现报，
   每处都给"换成哪个细格"；其中 3 处不是 1:1 换名（要把整份快照递给别的视图），
   **必须改接收方**，原地换写法等于没迁。
@@ -439,3 +439,62 @@ pid=40149 已跑 02:52   主树的实例
 ② 收尾不要用 `osascript … to quit`（按 bundle id 广播，多实例时"退掉一个"不含"退掉我起的那个"）。
 在我这一侧：`perf_wait_window.sh` / `capture_pages_isolated.sh` / `perf_harness.sh pulse`
 三处都已经是这个形状，跑了一夜加一个上午，**没留下过一个实例**。
+
+---
+
+## §N（2026-09-22 12:44）一条尺子拆成两条 —— 附赠一份"别去做这趟假还债"的告示
+
+### 我要点单的那件事本来不存在
+
+并完 main 之后我把渲染路径台账按文件聚合，`dynamicNSColor 62` 里有 **8 处落在 `Design/**`**。
+AGENTS 的分工写的是「`Design/**` 取值归 UI 侧；**`Design/**` 内部缓存化归性能侧**」，
+于是我准备把这 8 处做成缓存 `static let`，把数字从 62 抬到 54 并顺手拧基线。
+
+**动手前查了一下它们到底在做什么，结论是这趟是假的**：
+
+| 环节 | 现状 | 每次访问的成本 |
+|---|---|---|
+| `Theme.Semantic.role(for:)` | `switch` 返回 `static let accent/success/…` | 无分配 |
+| `SemanticRole.textColor` | `var … { text.color }`，而 `text` 是 `let DualColor` | 一次存储属性读 |
+| `DualColor.color` | `let color`，在 **init** 里由 `makeDynamicNSColor` 算好 | 无分配 |
+
+⇒ 62 处**没有一处**在渲染路径上 new `NSColor`。做那趟"缓存化"只会让台账少 8 行、运行时一个字节都不省，
+而且我会把它报成"还掉 8 处债"。**这就是假还债**，数字变了但代码没变好。
+
+### 同一件事的另一半：该红的从来没有尺子
+
+`dynamicNSColor` 的模式是 `\.(textColor|graphicColor|badgeFill|onFillColor)\b`——**纯引用**。
+而真·现造的形状 `Color(nsColor:` 不在任何模式里（`directFormatters` 只列
+`NSColor|DateFormatter|NumberFormatter` 后跟 `(`，`Color(` 不匹配）。现扫当场抓到 2 处：
+
+```
+Views/Shell/ProjectSidebar.swift:222  isDropTargeted ? Theme.Semantic.accent.textColor : Color(nsColor: .separatorColor)
+Views/Shell/SidebarRows.swift:89      ? Color(nsColor: .quaternaryLabelColor)
+```
+
+⇒ 一条尺子同时量"现造"和"引用"，结果是**该红的漏了（0 处判据覆盖真债）、该绿的挡路**
+（顶到 62/62 零余量后，谁在 body 里新写一处**正确**的令牌取色就把闸门打红）。
+
+### 已改（性能侧名下，不碰 `Views/**`）
+
+- `PerfHitchScan.rules` 拆成 `dynamicColorConstruction`（现造，上限 **2**，终点 **0**）
+  与 `tokenReference`（引用，上限 62，**终点不是 0**，只许减不许增但不许当还债报数）。
+- 两条各配**双向**元测试：构造样例必须红、令牌引用必须不被判成构造
+  （模式一旦放宽到把 `.textColor` 也算债，它会立刻长出 62 处"新债"，那条反向断言当场红）。
+- 补一条我一直漏的洞：基线取不到计数会退化成 `-1` 而 `-1` 永远不"超"上限
+  ⇒ 改错一个键名，那条规则就**从闸门上消失且全绿**。现在钉
+  `Set(knownBaseline.keys) == Set(rules.map(.name))`（`ownerNotes` 同样钉）。
+- 台账位置 `$TMPDIR` → **`.scratch/tcoder-perf-renderpath-debt.txt`**，并改成
+  写不出去就 `XCTFail`（`try?` 会把"没有台账"伪装成成功）、写完读回来比对。
+
+验收：`./scripts/locked_build.sh test --filter PerfHitchGuardTests` →
+`Executed 15 tests, with 0 failures`，表头
+`directFormatters 1/1  dynamicColorConstruction 2/2  fullSort 9/9  syncFileIO 2/2  tokenReference 62/62`。
+
+### 派给 UI 侧的一条（很小，但是真债）
+
+把那 2 处 `Color(nsColor: .separatorColor/.quaternaryLabelColor)` 换成 `Theme.Palette` 里
+已缓存的 `static let`（`Design/ThemePalette.swift:23` 就有一个 `separator`，
+是现成的、语义相同的一份）。终点 0；棘轮今天起会拦新增。
+顺带这也是设计一致性：这两处是 `Views/**` 里**仅有**的直接取系统 `NSColor` 的写法
+（`grep -rn 'Color(nsColor:' Views/` 只出这两条；裸 `Color.gray` 那类另一条轴，归颜色面积收敛）。
