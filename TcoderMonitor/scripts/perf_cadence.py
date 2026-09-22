@@ -77,9 +77,13 @@ def report(path, pulse_path=None, min_frames=1200):
                  % (pct(gaps, .5), p95, pct(gaps, .99), max(gaps),
                     (sum((x - sum(gaps) / len(gaps)) ** 2 for x in gaps) / len(gaps)) ** .5))
     one_half = period * 1.5
-    lines.append("  晚到帧(>1.5×实测周期 %.2f ms) %d 个 ⇒ %.2f 帧每秒"
-                 % (one_half, sum(1 for x in gaps if x > one_half),
-                    sum(1 for x in gaps if x > one_half) / (span / 1000.0)))
+    n_gap = sum(1 for x in gaps if x > one_half)
+    lines.append("  呈现缺口(起点间隔 >1.5×实测周期 %.2f ms) %d 个 ⇒ %.2f /s；"
+                 "**注意这不是 hitch 数**（空闲档没有新内容也算缺口）"
+                 % (one_half, n_gap, n_gap / (span / 1000.0)))
+    hk = hitches_count(path)
+    lines.append("  权威 hitch 数（同目录 `hitches.xml`）：%s"
+                 % ("%d 个 ⇒ %.2f /s" % (hk, hk / (span / 1000.0)) if hk is not None else "表不在，不知道"))
     code = 0
     for name, b in bud.items():
         ok = p95 <= b
@@ -105,14 +109,33 @@ def report(path, pulse_path=None, min_frames=1200):
     return lines, code
 
 
+def hitches_count(path):
+    """同目录 `hitches.xml` 的权威 hitch 条数；表不在/读不动 ⇒ None（**不许当 0**）。"""
+    xml = os.path.join(os.path.dirname(path), "hitches.xml")
+    if not os.path.exists(xml):
+        return None
+    try:
+        return len(Doc(xml).spans())
+    except Exception:                      # 表形状变了宁可说"不知道"，不要给一个 0
+        return None
+
+
 def stats_of(path, min_frames=1200):
-    """单份样本的节拍统计；帧数不足或读不动 ⇒ None（**不许当 0**）。"""
+    """单份样本的节拍统计；帧数不足或读不动 ⇒ None（**不许当 0**）。
+
+    ⚠ `gap_rate`（呈现缺口率）**不等于 hitch 数**：空闲档"这一帧没有新内容"是正常的，
+    可它的起点间隔照样 >1.5×周期 ⇒ 会被这条算进去（实测空闲三趟 xctrace `hitches` 是 19/0/0，
+    而呈现缺口率一律 ~0.86 /s）。所以两个数并排印，相对判据用缺口率时必须带着这个说明——
+    否则下一个人会拿它当"卡顿次数"去和 §1 的基线比。
+    """
     gaps, frames, span = deltas(path)
     if frames < min_frames or not gaps or span <= 0:
         return None
     p50 = pct(gaps, .5)
-    return {"frames": frames, "span_s": span / 1000.0, "p50": p50, "p95": pct(gaps, .95),
-            "p99": pct(gaps, .99), "late_rate": sum(1 for x in gaps if x > p50 * 1.5) / (span / 1000.0)}
+    seconds = span / 1000.0
+    return {"frames": frames, "span_s": seconds, "p50": p50, "p95": pct(gaps, .95),
+            "p99": pct(gaps, .99), "gap_rate": sum(1 for x in gaps if x > p50 * 1.5) / seconds,
+            "hitches": hitches_count(path)}
 
 
 def against_baseline(cur_xml, base_csv):
@@ -141,14 +164,14 @@ def against_baseline(cur_xml, base_csv):
                      "「没判」不许被读成「过了」" % len(bases))
         return lines, 2
     bp95 = [b["p95"] for b in bases]
-    blate = [b["late_rate"] for b in bases]
+    blate = [b["gap_rate"] for b in bases]
     m95, mlate = pct(bp95, .5), pct(blate, .5)
     b95, blate_band = (max(bp95) - min(bp95)), (max(blate) - min(blate))
-    d95, dlate = cur["p95"] - m95, cur["late_rate"] - mlate
-    lines.append("  基线 %d 份：p95 中位 %.3f（散布 %.3f）  晚到帧率中位 %.2f /s（散布 %.2f）"
+    d95, dlate = cur["p95"] - m95, cur["gap_rate"] - mlate
+    lines.append("  基线 %d 份：p95 中位 %.3f（散布 %.3f）  呈现缺口率中位 %.2f /s（散布 %.2f）"
                  % (len(bases), m95, b95, mlate, blate_band))
-    lines.append("  交互档：p95 %.3f ⇒ %+0.3f ms   晚到帧率 %.2f /s ⇒ %+0.2f /s"
-                 % (cur["p95"], d95, cur["late_rate"], dlate))
+    lines.append("  交互档：p95 %.3f ⇒ %+0.3f ms   呈现缺口率 %.2f /s ⇒ %+0.2f /s"
+                 % (cur["p95"], d95, cur["gap_rate"], dlate))
 
     def one(d, band):
         if d > 0 and d > band:
@@ -159,7 +182,7 @@ def against_baseline(cur_xml, base_csv):
 
     a95, c95 = one(d95, b95)
     alate, clate = one(dlate, blate_band)
-    lines.append("  两项判定：p95 %s（带宽 ±%.3f ms）  晚到帧率 %s（带宽 ±%.2f /s）"
+    lines.append("  两项判定：p95 %s（带宽 ±%.3f ms）  呈现缺口率 %s（带宽 ±%.2f /s）"
                  % (a95, b95, alate, blate_band))
     code = 1 if 1 in (c95, clate) else (2 if 2 in (c95, clate) else 0)
     verdict = {0: "**不劣于基线**（绝对计数仍要继续压：见上 ②）",
