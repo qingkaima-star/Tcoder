@@ -86,15 +86,23 @@ final class LogCrashReportTests: LogAnalysisTestCase {
         }
     }
 
-    // MARK: 12. isCrashReport
+    // MARK: 12. 崩溃候选（RD-21：候选 ≠ 结论）
 
-    func testIsCrashReportByName() throws {
-        XCTAssertTrue(CrashReportParser.isCrashReport(URL(fileURLWithPath: "/srv/app/logs/a.ips")))
-        XCTAssertTrue(CrashReportParser.isCrashReport(URL(fileURLWithPath: "/srv/app/logs/x-crash.log")))
-        XCTAssertTrue(CrashReportParser.isCrashReport(URL(fileURLWithPath: "/srv/app/logs/y.crash")))
-        XCTAssertFalse(CrashReportParser.isCrashReport(URL(fileURLWithPath: "/srv/app/logs/app.log")))
-        // 只用明确的名字，避开「role 兜底」带来的歧义
-        XCTAssertFalse(CrashReportParser.isCrashReport(URL(fileURLWithPath: "/srv/app/logs/build-output.log")))
+    /// 整改前这里是 `testIsCrashReportByName`，断言「名字含 crash / diag 就是崩溃报告」。
+    /// 那条判据同时造成两件事：凭空合成崩溃、以及把该文件的正常错误行挡在计数之外。
+    /// 现在的判据只回答「要不要多看一眼」，**下结论的是四态分类**（见 `LogEvidenceCrashStateTests`）。
+    func testCrashCandidateFollowsFormatAndRoleNotFileName() throws {
+        // 内容格式后缀：是候选
+        XCTAssertTrue(CrashReportParser.isCrashCandidate(URL(fileURLWithPath: "/srv/app/logs/a.ips"), role: .application))
+        XCTAssertTrue(CrashReportParser.isCrashCandidate(URL(fileURLWithPath: "/srv/app/logs/y.crash"), role: .application))
+        // 角色由发现层按名字/目录给：也是候选
+        XCTAssertTrue(CrashReportParser.isCrashCandidate(URL(fileURLWithPath: "/srv/app/logs/x-crash.log"), role: .crash))
+        // 普通日志：不是候选，连通道都不进
+        XCTAssertFalse(CrashReportParser.isCrashCandidate(URL(fileURLWithPath: "/srv/app/logs/app.log"), role: .application))
+        // ⚠️ 名字里带 `diag` 的普通日志不再是候选 —— 整改前它是，
+        // 于是 `diagnostic.log` 里 3 条真错误整批消失（台账 §9.4 的 `errorCount = 0`）。
+        XCTAssertFalse(CrashReportParser.isCrashCandidate(URL(fileURLWithPath: "/srv/app/logs/diagnostic.log"), role: .application))
+        XCTAssertFalse(CrashReportParser.isCrashCandidate(URL(fileURLWithPath: "/srv/app/logs/build-output.log"), role: .build))
     }
 
     // MARK: 13. LogReader 截尾
@@ -159,7 +167,7 @@ final class LogCrashReportTests: LogAnalysisTestCase {
         _ = try writeLog("ERROR 一条\n", to: dir.appendingPathComponent("node_modules/x.log"))
         _ = try writeLog("class Main {}\n", to: dir.appendingPathComponent("src/main.java"))
 
-        let found = LogDiscovery.discover(projectRoot: dir, projectName: "ShopApp", withinDays: 30, maxFiles: 50)
+        let found = LogDiscovery.discover(projectRoot: dir, identity: LogProjectIdentity.declaring(["ShopApp"]), withinDays: 30, maxFiles: 50)
         let underRoot = found.filter { isUnder($0.url.path, root: dir) }
         let names = Set(underRoot.map { $0.url.lastPathComponent })
         XCTAssertEqual(names, ["error.log", "app.txt", "nested.log"],
@@ -180,7 +188,7 @@ final class LogCrashReportTests: LogAnalysisTestCase {
         let missing = empty.appendingPathComponent("does-not-exist")
 
         for root in [empty, missing] {
-            let found = LogDiscovery.discover(projectRoot: root, projectName: "ShopApp", withinDays: 30, maxFiles: 20)
+            let found = LogDiscovery.discover(projectRoot: root, identity: LogProjectIdentity.declaring(["ShopApp"]), withinDays: 30, maxFiles: 20)
             // 实现会额外附加 ~/Library/Logs/DiagnosticReports，所以不能断言 count == 0
             let underRoot = found.filter { isUnder($0.url.path, root: root) }
             XCTAssertTrue(underRoot.isEmpty, "\(root.path) 之下不该有任何发现项：\(underRoot.map { $0.url.path })")

@@ -108,7 +108,26 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// 新增的 `CLIProcessTests` 真子进程一把堵上）。
     /// 同时 `frameworkWhitelist` 从 `TcoderMonitorApp.swift` 换成 `TcoderEntry.swift`
     /// —— 白名单只留"真正写着 `@main` 的那一个"，`TcoderMonitorApp` 改由 `TcoderEntry` 点名调用。
-    static let censusBaseline = 144
+    /// 144 → 147（2026-09-22 检测正确性整改轮 · R4 日志与崩溃证据链，三枚全在 `Services/Logs/`；
+    /// **2026-09-22 09:36 由总工按守卫实报填**（守卫跑出 147，不是算出来的）：
+    /// `CrashEvidence.swift`（四态类型 `CrashEvidenceState` / `CrashEvidenceRecord` / `CrashEvidenceLedger`
+    ///   + `AppBuildIdentity` / `CrashEventTimeSource` / `LogEventWindowSplit`）—— 被
+    ///   `FileLogAnalyzer`、`LogParsing`、`CrashTextParsing`、`CrashIpsValueReading`、`CrashReportParser`、
+    ///   `CrashEvidenceClassification`、`LogClustering` 共同引用；
+    /// `CrashEvidenceClassification.swift`（把"文件名像崩溃报告"与"真的拿到事件证据"分开的那一步）——
+    ///   被 `CrashTextParsing` 与 `FileLogAnalyzer` 引用；
+    /// `LogProjectIdentity.swift`（应用归属不再靠目录名猜）—— 被 `FileLogAnalyzer` 与 `LogDiscovery` 引用。
+    /// 三枚都不是死文件：同一次守卫跑出「零调用清单：空」（`testZeroCallListIsEmpty` 未红）。
+    /// 147 → 150（R2 Vue/TS 识别流三枚，2026-09-22 09:46 由总工按**集成分支上守卫实报**填）：
+    /// `ComplexityLexMachine.swift`（模板串/插值的帧栈状态机，被 `ComplexitySanitizer` 与
+    ///   `ComplexityEngine` 引用）；`VueSourceRegions.swift`（SFC 三分区归位，被 `SourceFileClassifier`
+    ///   与 `FunctionRecognition.computeScriptMask` 那条路引用）；
+    /// `FunctionScanning.swift`（为回到 400 行口径从 `ComplexityEngine.swift` 整块搬出的扫描端，
+    ///   被 `ComplexityEngine` 调用 —— 同批把 `ComplexityEngine.swift` 从 475 行降到闸门内）。
+    /// 150 → 151（集成分支修复人把 `CodeScanCoverage` 整块搬出 `FileSystemCodeAnalyzer.swift`
+    ///   以守 400 行闸门，新增 `FileSystemCodeAnalyzerLimits.swift` 一枚）。
+    /// 151 → 152（RD-30/31 溯源块新增 `Models/ScanProvenance.swift`，四处在引用它）。
+    static let censusBaseline = 152
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
