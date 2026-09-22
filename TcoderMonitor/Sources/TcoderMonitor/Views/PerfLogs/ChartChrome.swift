@@ -132,17 +132,24 @@ enum ChartScale {
         return candidates.first { Double($0) >= wanted } ?? 3600
     }
 
-    /// 同一把档位，再加一条下界：**步长不许超过窗口的一半**（即窗口里至少落得下两格）。
+    /// 同一把档位，再加一条下界：**步长不许超过窗口的四分之一**（窗口里至少落得下四格）。
     ///
     /// 档位本身按"窗口 ~135 秒"标定，短窗口下大多数时候够用，但候选档之间的跳变是
     /// 1→2→5→15：26 秒的窗口会选到 15 秒（>13），一根刻度落不进左半边。
     /// 交付头实拍「总览」那张曲线左半段没有任何时间参照（量到只有两枚标签，
     /// 中心在绘图区 47% 与 92% 处）—— 这条下界是针对"至少两格"的那一半原因，
     /// 另一半（首刻度必须压在域起点上）由调用点的 `roundLowerBound: false` 负责。
+    ///
+    /// **为什么从"两格"提到"四格"**：两格的下界实测不够。复拍 `53f9b1c` 性能页
+    /// 27 秒跨度按这条算出 13 秒步长 ⇒ 三枚刻度里首尾两枚正好压在域两端
+    /// （Swift Charts 会**丢掉域下界那一枚**，§6.19 已记未解），屏上只剩中间一枚「−13s」。
+    /// 一枚标签等于没有时间参照 —— 这条下界要防的就是那个。
+    /// 四格留出"首尾各掉一枚还剩两枚"的余量；`stride == 1` 时不再强求（小于 4 秒的窗口
+    /// 已经细到秒级，再密就是重复）。
     static func boundedSecondsStride(windowSeconds: TimeInterval) -> Int {
         let ladder = secondsStride(windowSeconds: windowSeconds)
-        let atLeastTwoTicks = max(1, Int(windowSeconds / 2))
-        return min(ladder, atLeastTwoTicks)
+        let atLeastFourTicks = max(1, Int(windowSeconds / 4))
+        return min(ladder, atLeastFourTicks)
     }
 
     /// 窗口短于这个长度时，绝对时钟标签（`22:22`）在一分钟内没有区分度，

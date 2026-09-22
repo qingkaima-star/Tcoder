@@ -110,14 +110,22 @@ extension PerformanceDisplayTests {
     /// 档位本身按"窗口 ~135 秒"标定，但候选档之间是 1→2→5→15 的跳变：
     /// 26 秒的窗口会选到 15 秒（比半个窗口还大），左半边就一根刻度都没有
     /// —— 交付头实拍「总览」曲线量到标签中心在 47% 与 92%，正是这个形状。
-    func testShortWindowsStillGetAtLeastTwoTicks() {
-        XCTAssertEqual(ChartScale.boundedSecondsStride(windowSeconds: 26), 13, "15 秒的档必须被下界压回 13")
+    func testShortWindowsStillGetAtLeastFourTicks() {
+        XCTAssertEqual(ChartScale.boundedSecondsStride(windowSeconds: 26), 6, "15 秒的档必须被下界压回 6")
         XCTAssertEqual(ChartScale.boundedSecondsStride(windowSeconds: 135), 30, "长窗口不受下界影响")
         XCTAssertEqual(ChartScale.boundedSecondsStride(windowSeconds: 0), 1, "退化窗口也要给得出步长")
+        // 复拍 `53f9b1c` 那一档：27 秒跨度按旧的"两格"下界算出 13 秒 ⇒ 三枚刻度首尾各掉一枚，
+        // 屏上只剩「−13s」。按四格是 6 秒 ⇒ 五枚，掉两枚还剩三枚。
+        XCTAssertEqual(ChartScale.boundedSecondsStride(windowSeconds: 27), 6,
+                       "27 秒的窗口必须落得下四格，否则域两端掉完之后轴上只剩一枚标签")
         for span in 2...600 {
             let stride = ChartScale.boundedSecondsStride(windowSeconds: Double(span))
-            XCTAssertGreaterThanOrEqual(Double(span) / Double(stride), 2.0,
-                                        "窗口 \(span) 秒 / 步长 \(stride) 秒 ⇒ 落不下两格")
+            XCTAssertGreaterThanOrEqual(stride, 1, "步长必须 ≥1 秒")
+            // 已经细到 1 秒的短窗口不再强求四格（4 秒以下的窗口本来就装不下四个 1 秒格）。
+            if stride > 1 {
+                XCTAssertGreaterThanOrEqual(Double(span) / Double(stride), 4.0,
+                                            "窗口 \(span) 秒 / 步长 \(stride) 秒 ⇒ 落不下四格")
+            }
         }
     }
 
@@ -172,5 +180,47 @@ extension PerformanceDisplayTests {
             XCTAssertGreaterThan(axis.step, 0)
             XCTAssertTrue(axis.maxValue.isFinite)
         }
+    }
+
+    // MARK: - 批次 P24：秒轴只许有一把尺子
+
+    /// 裸档位 `secondsStride` 与带下界的 `boundedSecondsStride` 是**两把尺子**，
+    /// 差别只在"步长不许超过窗口的一半"那一条。总览那张一开始就用带下界的，
+    /// 性能页两张用了裸的 —— 复拍 `53f9b1c` 量到性能页横轴各只有 1 枚标签
+    /// （27 秒跨度选到 15 秒档，一根刻度落不进左半边）。
+    /// 规则收成一条：**档位定义之外，全站调用点一律走带下界的那把**。
+    static func unboundedSecondsStrideCalls(in files: [(path: String, content: String)]) -> [String] {
+        files.flatMap { file -> [String] in
+            guard file.path != "Views/PerfLogs/ChartChrome.swift" else { return [] }   // 定义所在
+            return file.content.split(separator: "\n", omittingEmptySubsequences: false)
+                .enumerated()
+                .compactMap { index, raw -> String? in
+                    let line = String(raw)
+                    guard SurfaceScanKit.isCode(line),
+                          line.contains("secondsStride("),
+                          !line.contains("boundedSecondsStride(") else { return nil }
+                    return "\(file.path):\(index + 1)"
+                }
+        }
+    }
+
+    func test_noCallSiteUsesTheUnboundedSecondsStride() throws {
+        let offenders = Self.unboundedSecondsStrideCalls(
+            in: try SurfaceScanKit.sourceFiles(under: "Views") + SurfaceScanKit.sourceFiles(under: "Design"))
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些调用点用的是裸档位，短窗口下横轴会只剩一两枚标签：\(offenders)")
+    }
+
+    /// 元测试：该抓的抓到、带下界的不误伤、定义文件本身不算调用点。
+    func test_strideScannerSeparatesBoundedFromUnbounded() {
+        let bare = [(path: "Views/Fake.swift", content: "TimeAxis.seconds(ChartScale.secondsStride(windowSeconds: 27))")]
+        XCTAssertEqual(Self.unboundedSecondsStrideCalls(in: bare), ["Views/Fake.swift:1"],
+                       "裸档位没被抓到 ⇒ 这条守卫数不出东西")
+        let bounded = [(path: "Views/Fake.swift",
+                        content: "TimeAxis.seconds(ChartScale.boundedSecondsStride(windowSeconds: 27))")]
+        XCTAssertTrue(Self.unboundedSecondsStrideCalls(in: bounded).isEmpty, "走了带下界那把尺的被误判")
+        let definition = [(path: "Views/PerfLogs/ChartChrome.swift",
+                           content: "static func secondsStride(windowSeconds: TimeInterval) -> Int {")]
+        XCTAssertTrue(Self.unboundedSecondsStrideCalls(in: definition).isEmpty, "定义本身被当成调用点")
     }
 }

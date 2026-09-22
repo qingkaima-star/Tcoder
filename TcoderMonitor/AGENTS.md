@@ -597,3 +597,30 @@ dist/Tcoder.app/Contents/MacOS/TcoderMonitor doctor [<path>]
 3. 单元测试覆盖你实现的纯函数逻辑（放在你名下的 Tests 文件里）。
 4. UI 有实际渲染内容（不能只有占位 EmptyState）。
 5. Obsidian 笔记已更新，最终汇报包含：文件清单、验证数字、契约缺口、已知问题。
+
+## 8. 第五轮（2026-09-22）：检测正确性整改轮
+
+台账在仓库 `docs/检测正确性整改清单.md`（条目 RD-01~32，只改状态不删除）。
+本轮的完成标准**不是**分数变高、复杂度低于某阈值、文件低于某行数，而是：
+已确认误报消除、已确认漏报补齐、未知与缺证据诚实表达，且每条能追溯 + 有独立真值与反例。
+
+| 流 | 负责 | 可写路径 | Obsidian |
+|---|---|---|---|
+| R1 Java 识别 | 注解/类/构造器/调用/资源声明与方法分开，边界绑真实方法体 | `Services/Code/**`、新建 `Tests/TcoderMonitorTests/Java*Recognition*Tests.swift` | `104` |
+| R2 Vue·TS 识别 | 模板字符串与混合语言边界、嵌套复杂度口径、未知要出声 | `Services/Code/Complexity*`、`Services/Code/LanguageProfiles.swift`、新建 `Tests/TcoderMonitorTests/Vue*Tests.swift` | `106` |
+| R3 依赖链 | 版本范围 → 查询身份 → 回填 → 行状态 → 总览 → 评分**一次改完** | `Services/Dependencies/**`、`Views/Dependencies/**`、`Tests/TcoderMonitorTests/Dependency*Tests.swift` | `108` |
+
+**本轮硬约束（覆盖本文件其它条目）**：
+
+1. **禁止读取、扫描本机其它工程来"对真值"**（§-1）。整改意见里引用的外部工程读数只是需求方的说法：
+   一律在**本仓或 `.scratch/` 自建夹具**里复现同类形状后才立案；复现不出来就写"本地未复现·按判据修"，
+   不许把外部数字抄进测试当期望。
+2. **一条链路一个负责人**（用户 §十一 点名）。依赖链、日志链、覆盖率链不得拆给两家分别宣布完成；
+   跨链共用的字段一律由总工在 `Models/**` 开（additive、Optional、自带守卫、登记进 §3 的登记表）。
+3. **禁止**用删文件/删 migration/删证据/删文档/拆测试/加空壳文件/调阈值/改权重的方式提指标。
+4. 新增 `Sources/**` 文件请**整块另起文件**（本仓 `Sources` 400 行闸门），并在汇报里列新增清单 ——
+   `SourceFileReachabilityTests.censusBaseline` 只由总工拧，别自己去改。
+5. 工单里点名的符号**必须在当前树里 `Read` 到并贴出原文**；只读复核报告里的符号名有虚构的先例
+   （本轮第一轮复核就报了三个不存在的名字），引用前先核。
+6. 每条修复要交四件：复现夹具 + 独立真值、正例/反例/未知态/失败态、CLI 与 GUI 对表、
+   新守卫 sabotage 一次证明有牙。缺件按未完成处理。
