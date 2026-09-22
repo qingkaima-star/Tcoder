@@ -35,9 +35,30 @@ struct DuplicationResult: Sendable {
             + "\(NumberFormat.grouped(linesOutsideReportedBlocks)) 行。"
         line += blocksOutsideBoard.isEmpty
             ? "榜外没有剩余块。"
-            : "榜外坐标（可点名）：\(blocksOutsideBoard.joined(separator: " ; "))"
-                + "。这些块参与分子、不参与明细。"
+            : "。\(Self.coordinateDisclosure(blocksOutsideBoard))这些块参与分子、不参与明细。"
         return line
+    }
+
+    /// 榜外坐标的**唯一**披露形状（RD-52）：散文点前 3 条样本，**全量样本落盘**。
+    ///
+    /// ⚠️ 我最初把这条记成「全量坐标被静默截断」，复核后不对：引擎本来就只点
+    /// `DuplicationScan.outsideBoardSampleLimit` 条（现 6 条），未点名的块数在
+    /// `blocksDroppedByCap` 里 —— 那不是截断。真正的缺陷是另外两件事：
+    /// 同一串 id 在一份报告里**印两遍**（口径句 + 扫描边界句），
+    /// 而 JSON 里**没有承接格**，读机器的人仍要解析散文（RD-48 刚消灭过的那个形状）；
+    /// 每条 id 又是「绝对路径 ; 绝对路径:行数」，6 条就把一句限制说明撑到实测 2,407 字符。
+    /// 现在：散文 3 条 + 明确指回字段与计数，字段给引擎那 6 条**一条不减**。
+    /// 之所以敢把散文从 6 降到 3：原先它是唯一载体，降就是藏；现在全量在字段里，
+    /// 散文只负责"让人一眼看到长什么样"，没有一条样本因此消失。
+    static func coordinateDisclosure(_ all: [String], limit: Int = 3) -> String {
+        guard all.isEmpty == false else { return "榜外没有剩余块。" }
+        let named = min(all.count, limit)
+        var line = "榜外坐标（点样 \(named) 条）：\(all.prefix(named).joined(separator: " ; "))"
+        if all.count > named {
+            line += "；另有 \(all.count - named) 条样本未写进这句"
+        }
+        return line + "（全部 \(all.count) 条样本见 `code.duplicateBlockCoordinatesOutsideBoard`，"
+            + "榜外未列的块数见 `code.duplicatedBlocksDroppedByCap`）。"
     }
 }
 

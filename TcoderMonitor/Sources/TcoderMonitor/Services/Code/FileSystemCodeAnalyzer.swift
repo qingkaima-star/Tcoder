@@ -137,6 +137,8 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         metrics.duplicatedLinesOutsideReportedBlocks = duplication.linesOutsideReportedBlocks
         metrics.duplicateFragmentsNotExpandedCount = duplication.fragmentsDroppedByBudget
         metrics.duplicateFilesHittingLineCap = duplication.filesHittingLineCap
+        // 同一份引擎读数，原样落盘（不重算、不裁剪 ⇒ 不是第二把尺子）。
+        metrics.duplicateBlockCoordinatesOutsideBoard = duplication.blocksOutsideBoard
         metrics.overallRisk = overallRisk(
             metrics: metrics,
             hotspotCount: hotspots.count,

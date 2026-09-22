@@ -107,10 +107,10 @@ extension FileSystemCodeAnalyzer {
             lines.append(contentsOf: roleTally.notes)
             lines.append(contentsOf: treeFollowing.notes)
             lines.append(contentsOf: scopeReadout.notes)
-            if duplicateBlockCoordinatesOutsideBoard.isEmpty == false {
-                lines.append("榜外未列重复块坐标：" + duplicateBlockCoordinatesOutsideBoard
-                    .joined(separator: " ; "))
-            }
+            // RD-52：这一句原先把榜外坐标的**同一串 id** 再抄一遍（口径句里已经点过名），
+            // 于是一条上限被撑成两千多字符、还在同一份报告里出现两次。
+            // 现在坐标只在 `DuplicationResult.boardCaliberNote` 里点名一次，
+            // 机器可读数落在 `CodeMetrics.duplicateBlockCoordinatesOutsideBoard`（同一个来源）。
             if duplicationBoardCaliber.isEmpty == false { lines.append(duplicationBoardCaliber) }
             return lines
         }
