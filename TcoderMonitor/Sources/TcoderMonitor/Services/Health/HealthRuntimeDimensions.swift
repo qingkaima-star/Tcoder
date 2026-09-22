@@ -129,11 +129,13 @@ extension WeightedHealthScorer {
         }
 
         /// RD-46：证据太薄的降档说明（与 detail 里那句同源，两个出口都得看得见）。
+        /// ⚠ 这一支**不是缺席**（缺席是三态那一支的事），所以这句里不许出现"不参与计分/不按 0 计入"
+        /// 那套只属于缺席的说法 —— 它说的是：分数还在、但只到普通水位，且明写"未判定"。
         static func thinEvidenceAdvice(_ logs: LogSummary) -> String {
             "只读到 \(NumberFormat.grouped(logs.totalLinesScanned)) 行真日志，低于评这一维所需的 "
                 + "\(NumberFormat.grouped(StabilityEvidence.minimumLogLines)) 行下限 ⇒ 证据太薄，"
-                + "本维度按 \(GitCadenceEvidence.fixed(StabilityEvidence.thinEvidenceScoreCeiling)) 分封顶"
-                + "（不判稳定、也不按 0 计入）；跑够一次真实运行后重扫即可解锁。"
+                + "本维度按 \(GitCadenceEvidence.fixed(StabilityEvidence.thinEvidenceScoreCeiling)) 分封顶、"
+                + "标「证据太薄·未判定」（薄不等于稳，也不等于运行不稳）；跑够一次真实运行后重扫即可解锁。"
         }
 
         /// 零分母那一支的**唯一**出口：三态各一句，都不给分。
