@@ -124,7 +124,10 @@ final class SourceFileReachabilityTests: XCTestCase {
     ///   与 `FunctionRecognition.computeScriptMask` 那条路引用）；
     /// `FunctionScanning.swift`（为回到 400 行口径从 `ComplexityEngine.swift` 整块搬出的扫描端，
     ///   被 `ComplexityEngine` 调用 —— 同批把 `ComplexityEngine.swift` 从 475 行降到闸门内）。
-    static let censusBaseline = 151
+    /// 150 → 151（集成分支修复人把 `CodeScanCoverage` 整块搬出 `FileSystemCodeAnalyzer.swift`
+    ///   以守 400 行闸门，新增 `FileSystemCodeAnalyzerLimits.swift` 一枚）。
+    /// 151 → 152（RD-30/31 溯源块新增 `Models/ScanProvenance.swift`，四处在引用它）。
+    static let censusBaseline = 152
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames

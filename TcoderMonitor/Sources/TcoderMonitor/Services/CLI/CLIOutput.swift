@@ -9,20 +9,9 @@ enum CLIConfig {
 
     static var binaryPath: String { CommandLine.arguments.first ?? "?" }
 
-    static var buildConfiguration: String {
-        #if DEBUG
-        return "debug"
-        #else
-        return "release"
-        #endif
-    }
+    static var buildConfiguration: String { ScanProvenance.buildConfiguration }
 
-    static var bundleIdentity: String {
-        let bundle = Bundle.main
-        guard let id = bundle.bundleIdentifier, !id.isEmpty else { return "未打包（SwiftPM 直跑）" }
-        let version = (bundle.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "?"
-        return "\(id) \(version)"
-    }
+    static var bundleIdentity: String { ScanProvenance.bundleIdentity }
 
     static var versionLine: String {
         "tcoder · \(buildConfiguration) · \(bundleIdentity) · \(binaryPath)"

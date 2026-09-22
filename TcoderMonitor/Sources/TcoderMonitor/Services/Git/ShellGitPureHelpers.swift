@@ -73,6 +73,7 @@ extension ShellGitAnalyzer {
                              remoteURL: String,
                              fullCommitCount: Int? = nil,
                              resolution: RepositoryResolution? = nil,
+                             workingTree: WorkingTreeOutcome = .notMeasured(reason: "本次分析未探测工作区"),
                              now: Date = Date()) -> GitInsights {
         let dates = commits.map(\.date)
         let first = dates.min()
@@ -92,6 +93,17 @@ extension ShellGitAnalyzer {
         insights.branch = branch
         insights.headSHA = headSHA
         insights.remoteURL = remoteURL
+        switch workingTree {
+        case .dirty(let entries):
+            insights.workingTreeDirty = true
+            insights.dirtyEntryCount = entries
+        case .clean:
+            insights.workingTreeDirty = false
+            insights.dirtyEntryCount = 0
+        case .notMeasured(let reason):
+            insights.workingTreeDirty = nil
+            insights.dirtyProbeNote = reason
+        }
         insights.commitsAnalyzed = commits.count
         insights.totalCommits = max(fullCommitCount ?? commits.count, commits.count)
         insights.historyTruncated = insights.commitsAnalyzed < insights.totalCommits

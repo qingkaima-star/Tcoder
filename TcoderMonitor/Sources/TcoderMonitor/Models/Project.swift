@@ -131,6 +131,9 @@ struct ProjectReport: Codable, Sendable {
     var dependencies: DependencyReport?
     var coverage: CoverageMetrics?
     var health: HealthScore?
+    /// 这份报告是在哪个提交、用哪个版本的工具与判据产的。Optional：`d0e` 之前落盘的旧 JSON 没有这一栏，
+    /// 必须照样解得开（见「落盘字段必须 Optional」那条规矩）。
+    var provenance: ScanProvenance?
     var generatedAt: Date = Date()
 
     /// Set once a scan has been attempted, even if some analyzers failed. Without this
