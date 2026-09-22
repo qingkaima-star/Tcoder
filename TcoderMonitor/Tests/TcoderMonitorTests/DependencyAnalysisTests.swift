@@ -198,9 +198,10 @@ final class DependencySnapshotTests: XCTestCase {
             }
             XCTAssertEqual(DependencyVersion.outcome(current: left, than: right), expectedOutcome,
                            "同一把尺子的两条出口分叉：\(left) vs \(right)")
-            XCTAssertEqual(DependencyVersion.isComparable(left),
+            // compare 有没有值 ⟺ **两侧**都能解析（一侧认不出就整体不可比）。
+            XCTAssertEqual(DependencyVersion.isComparable(left) && DependencyVersion.isComparable(right),
                            DependencyVersion.compare(left, right) != nil,
-                           "「能不能比」与「compare 有没有值」必须同真同假：\(left)")
+                           "「能不能比」与「compare 有没有值」必须同真同假：\(left) vs \(right)")
             if expectedComparison == nil { unknownSamples += 1 } else { comparableSamples += 1 }
         }
         XCTAssertGreaterThanOrEqual(comparableSamples, 6, "可比较样本不足，上面的对照是空跑")

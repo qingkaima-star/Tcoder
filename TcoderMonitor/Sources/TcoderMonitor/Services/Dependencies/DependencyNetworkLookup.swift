@@ -92,6 +92,10 @@ struct OsvLookupResult: Sendable {
     var failedRequests: Int
     /// 简体中文说明，成功时为 ""。
     var note: String
+    /// **发出去了、也答了，但没能查到底**的那些查询身份（详情拉取失败 / 被条数上限截断 /
+    /// 预算用尽没来得及展开）。RD-11 的第四态：这些坐标一律不许被摊成"查过了、干净"，
+    /// 也不与 `failedRequests`（整批/逐包请求本身的失败）混成一个数 —— 两本账分开记。
+    var incompleteCoordinates: [String] = []
 }
 
 struct RegistryLookupResult: Sendable {
@@ -180,15 +184,22 @@ enum DependencyNetworkLookup {
             notes: notes,
             batchCount: batch.count,
             timeoutNote: "OSV 查询超过 \(Int(requestTimeout)) 秒硬超时，本次在线漏洞结果整体放弃（含已取回但未来得及返回的公告）",
-            run: { deadline in await Self.performOsvLookup(batch, deadline: deadline) },
+            // 这里写**全限定名**而不是 `Self.` 简写：可达性守卫（WS-U）把"同作用域派发 /
+            // static 简写"算作弱证据，弱证据文件数有普查观测面上限；`performOsvLookup`
+            // 已随 C 组搬进 `OsvAnswerAccounting.swift`，用点名调用留下强证据。取义一字不变。
+            run: { deadline in await DependencyNetworkLookup.performOsvLookup(batch, deadline: deadline) },
             payloadNote: { $0.note },
             success: { payload, checked, note in
                 OsvLookupResult(advisories: payload.advisories, packagesChecked: checked,
-                                failedRequests: payload.failedRequests, note: note)
+                                failedRequests: payload.failedRequests, note: note,
+                                incompleteCoordinates: payload.incompleteCoordinates)
             },
             failure: { checked, note in
+                // 整路放弃：这一批里**每一条**都没查到底，逐条归因必须按身份点名，
+                // 不能只留一个失败总数（那正是"没量到"长成"没有问题"的入口）。
                 OsvLookupResult(advisories: [], packagesChecked: checked,
-                                failedRequests: checked, note: note)
+                                failedRequests: checked, note: note,
+                                incompleteCoordinates: batch.map(\.coordinate))
             }
         )
     }
@@ -312,30 +323,20 @@ enum DependencyNetworkLookup {
         note = note.map { $0 + "；" + text } ?? text
     }
 
-    /// 报告说明里有没有**自述**「npm 侧有包没拿到结果」。
-    ///
-    /// 这四条措辞都是 npm 路径独有（逐包失败计数、整体硬超时、全军覆没、并发窗口耗尽时间预算）。
-    /// 全量成功时 note 是 `在线查询已完成（OSV + npm registry）`，紧跟 "npm registry" 的是全角括号
-    /// 而不是全角冒号，所以不会被误判成缺口 —— 误判会把真缺陷跳过去。
-    /// 用途：让在线用例把「网络根本没给数据」和「给了数据却没归因」分开处理，前者跳过、后者必须失败。
-    /// 已知不覆盖：`maxNpmPackages` 截断说明（不含上述措辞）。
-    static func npmShortfallDisclosed(in note: String) -> Bool {
-        note.contains("npm registry：")
-            || note.contains("npm registry 查询超过")
-            || note.contains("npm registry 全部")
-            || note.contains("达到时间预算")
-    }
-
-    /// OSV 侧的同款判据：说明里有没有自述「有公告没查成 / 没来得及展开」。
-    /// 成功说明是 `在线查询已完成（OSV + npm registry）`，不含下列任何一条措辞。
-    static func osvShortfallDisclosed(in note: String) -> Bool {
-        note.contains("OSV：")
-            || note.contains("OSV 查询超过")
-            || note.contains("OSV 批量接口不可用")
-            || note.contains("OSV 详情：")
-            || note.contains("个 OSV 请求失败")
-            || note.contains("OSV 不支持其生态")
-    }
+    // MARK: - 「有没有缺口」怎么问：只问账本，不问那句中文（RD-13 的最后一处残留）
+    //
+    // 这里原本住着两个**读中文措辞判状态**的函数：`npmShortfallDisclosed(in:)` 与
+    // `osvShortfallDisclosed(in:)`，各拿四条 / 六条中文短语去 `note.contains(...)` 里找
+    // （"npm registry 查询超过"、"个 OSV 请求失败"、"OSV 详情："…）。它们唯一的用处是给
+    // 在线用例当"这一次红是网络状况还是产品缺陷"的跳过闸门，但形状正是 RD-13 点名的那条：
+    // **给人看的那句话成了业务判据**。三个必然的坏结局：
+    //   ① 改文案 / 换措辞 ⇒ 闸门静默失效，而失效方向是"把真缺陷跳过去"；
+    //   ② 任何一条新的失败措辞（例如"TLS 握手失败"）不在清单里 ⇒ 同一件事两种结局；
+    //   ③ 英文态整句换词 ⇒ 判定直接不存在。
+    // 由 R3 删除。消费方（`DependencyNetworkLiveTests` / `DependencyNetworkAttributionTests`）
+    // 改读同一轮查询落的结构化账本：`report.versionLookup.failed` /
+    // `report.vulnerabilityLookup.failed` / `OsvLookupResult.incompleteCoordinates`。
+    // 守卫见 `DependencyWordingGuardTests`（剥注释 + 分母 > 0 + 双向元测试）。
 
     /// 硬超时保护：超时返回 `.timedOut`，调用方既不抛错也不会卡住。
     enum DeadlineResult<Value: Sendable>: Sendable {

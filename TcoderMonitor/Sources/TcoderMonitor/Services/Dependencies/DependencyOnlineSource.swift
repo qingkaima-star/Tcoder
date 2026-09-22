@@ -86,6 +86,9 @@ struct LiveDependencyOnlineSource: DependencyOnlineSource {
     /// 的地方，它一旦偏向乐观，下面的行状态、总览、评分会一起发绿，而假源用例全绿也抓不到。
     /// 判据（与 `DependencyEvidenceTests.testLiveSourceIsNotLessConservativeThanTheStub` 同源）：
     ///   · 公告的 `affectedPackages` 里出现过的那条查询身份 = 确实答上了；
+    ///   · **`incompleteCoordinates` 里点名的那条 = 发出去了、也答了、却没查到底**
+    ///     （批量响应短于请求 / 详情拉取失败 / 被 `maxOsvDetailRequests` 截断 / 预算用尽）
+    ///     ⇒ 一律 `.failed`。这一支是 RD-11 的第四态："没查到"绝不许长成"没有漏洞"；
     ///   · `failedRequests == 0` ⇒ 批量端点按顺序把每条查询都答过了，空结果就是干净；
     ///   · `failedRequests > 0` 而本条没有命中 ⇒ **无法归因到具体哪几条，保守记 `.failed`**
     ///     （宁可少说"核对过"，也不把没答上的包说成答上了）。
@@ -105,8 +108,13 @@ struct LiveDependencyOnlineSource: DependencyOnlineSource {
             }
         }
         let partialFailure = result.failedRequests > 0
+        let unresolved = Set(result.incompleteCoordinates)
         for query in queries where outcomes[query.coordinate] == nil {
-            outcomes[query.coordinate] = partialFailure ? .failed : .answered(advisories: [])
+            if unresolved.contains(query.coordinate) {
+                outcomes[query.coordinate] = .failed      // 看见过公告 id，只是没展开成 ⇒ 不算核对过
+            } else {
+                outcomes[query.coordinate] = partialFailure ? .failed : .answered(advisories: [])
+            }
         }
         return outcomes
     }

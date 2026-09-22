@@ -6,24 +6,13 @@ import Foundation
 
 extension DependencyNetworkLookup {
     // MARK: - OSV pipeline internals
-
-    struct OsvPayload: Sendable {
-        var advisories: [SecurityAdvisory]
-        var failedRequests: Int
-        var note: String?
-    }
-
-    struct NpmPayload: Sendable {
-        var versions: [String: String]
-        var failedRequests: Int
-        var note: String?
-    }
-
-    /// 同一条 OSV 记录可能被多个包命中，用这个累加结构做关联与去重。
-    struct OsvEntry {
-        var vuln: OsvVuln?
-        var queryIndices: [Int]
-    }
+    //
+    // 2026-09-22 由 R3 整块搬走的部分（逐字节、未改取义）：`OsvPayload` / `NpmPayload` /
+    // `OsvEntry` / `OsvSeed` 四个内部类型与 `performOsvLookup` / `osvSeedEntries` /
+    // `expandOsvDetails` / `osvQueryBatch` 四个查询管道函数 —— 它们同住
+    // `OsvAnswerAccounting.swift`（本文件被 400 行口径点死，那一段要加"没能查到底"的
+    // 结构化出口，只能整块另起文件）。留在本文件的是：详情展开的披露口径、
+    // 条目→公告的映射、以及 OSV -> SecurityAdvisory 那一族纯函数。
 
     /// OSV 详情拉取的三种结局。混为一谈就会把"没来得及展开"报成"全丢"，
     /// 或反过来让已经取回的那部分悄悄消失（缺陷 D2）。
@@ -43,71 +32,6 @@ extension DependencyNetworkLookup {
         if tally.failed > 0 { parts.append("\(tally.failed) 条详情拉取失败") }
         parts.append("已取回 \(tally.fetched) 条并计入结果")
         return "OSV 详情：" + parts.joined(separator: "；")
-    }
-
-    /// 一次 OSV 在线查询的账本：条目累加结果 + 失败计数 + 自述说明。
-    struct OsvSeed: Sendable {
-        var entries: [String: OsvEntry]
-        var failed: Int
-        var note: String?
-    }
-
-    static func performOsvLookup(_ queries: [OsvPackageQuery], deadline: Date) async -> OsvPayload {
-        let seed = await osvSeedEntries(queries, deadline: deadline)
-        guard !seed.entries.isEmpty else {
-            return OsvPayload(advisories: [], failedRequests: seed.failed, note: seed.note)
-        }
-        var entries = seed.entries
-        var note = seed.note
-        await expandOsvDetails(&entries, deadline: deadline, note: &note)
-        let advisories = osvAdvisories(from: entries, queries: queries)
-        if seed.failed > 0 { appendNote(&note, "本次 \(seed.failed) 个 OSV 请求失败") }
-        return OsvPayload(advisories: VulnerabilitySource.sortedAdvisories(advisories),
-                          failedRequests: seed.failed, note: note)
-    }
-
-    /// 第一步：批量端点拿 id，拿不到就整批退回逐包查询。
-    /// 「批量失败算 1 次 + 逐包逐次算」这个计数口径，以及那句中文，与拆分前逐字相同。
-    static func osvSeedEntries(_ queries: [OsvPackageQuery], deadline: Date) async -> OsvSeed {
-        var failed = 0
-        var note: String?
-        var entries = [String: OsvEntry]()
-        if let idsByQuery = await osvQueryBatch(queries, deadline: deadline) {
-            for (index, ids) in idsByQuery.enumerated() where index < queries.count {
-                for id in ids { merge(&entries, id: id, queryIndex: index, vuln: nil) }
-            }
-        } else {
-            failed += 1
-            note = "OSV 批量接口不可用，已改用逐包查询"
-            let fallback = await osvSingleQueryFallback(queries, deadline: deadline)
-            failed += fallback.failedRequests
-            for row in fallback.rows { merge(&entries, id: row.id, queryIndex: row.queryIndex, vuln: row.vuln) }
-        }
-        return OsvSeed(entries: entries, failed: failed, note: note)
-    }
-
-    /// 第二步：批量接口只回 id，需要再按 id 拉完整记录。
-    /// 展开不全时的三态账本与那句披露说明原样搬过来，没有改判定顺序。
-    static func expandOsvDetails(_ entries: inout [String: OsvEntry],
-                                 deadline: Date,
-                                 note: inout String?) async {
-        let missing = entries.compactMap { $0.value.vuln == nil ? $0.key : nil }.sorted()
-        let toFetch = Array(missing.prefix(maxOsvDetailRequests))
-        let detailRows: [(id: String, outcome: OsvDetailOutcome, vuln: OsvVuln?)] =
-            toFetch.isEmpty ? [] : await fetchOsvDetails(toFetch, deadline: deadline)
-        for row in detailRows {
-            if let vuln = row.vuln {
-                merge(&entries, id: row.id, queryIndex: nil, vuln: vuln)
-            } else {
-                // 展开失败/未展开的 id 出不了公告，但已取回的那些必须留下。
-                entries[row.id] = nil
-            }
-        }
-        let tally = OsvDetailTally(totalIDs: missing.count, outcomes: detailRows.map(\.outcome))
-        if let truncation = osvDetailNote(totalIDs: missing.count, tally: tally,
-                                         cap: maxOsvDetailRequests) {
-            appendNote(&note, truncation)
-        }
     }
 
     /// 第三步：条目 -> SecurityAdvisory。
@@ -149,22 +73,7 @@ extension DependencyNetworkLookup {
         entries[id] = entry
     }
 
-    /// POST https://api.osv.dev/v1/querybatch；失败返回 nil（由调用方走逐包回退）。
-    static func osvQueryBatch(_ queries: [OsvPackageQuery], deadline: Date) async -> [[String]]? {
-        guard let url = osvURL("v1/querybatch"),
-              let body = try? JSONEncoder().encode(osvBatchPayload(for: queries)) else { return nil }
-        var request = makeRequest(url: url, deadline: deadline)
-        request.httpMethod = "POST"
-        request.httpBody = body
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        guard let (data, response) = try? await session.data(for: request), isOK(response),
-              let decoded = try? jsonDecoder.decode(OsvBatchResponse.self, from: data),
-              let results = decoded.results else { return nil }
-        return queries.indices.map { index in
-            index < results.count ? (results[index].vulns ?? []).map(\.id) : []
-        }
-    }
-
+    /// `osvQueryBatch` 已搬至 `OsvAnswerAccounting.swift`（批量响应与请求必须 1:1 对齐才算答上）。
     static func osvBatchPayload(for queries: [OsvPackageQuery]) -> OsvBatchPayload {
         OsvBatchPayload(queries: queries.map { query in
             OsvQueryPayload(package: OsvEcosystemPackage(name: query.package, ecosystem: query.ecosystem),
