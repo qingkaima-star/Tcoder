@@ -109,15 +109,75 @@ final class DependencySnapshotTests: XCTestCase {
         XCTAssertTrue(advisories[0].affectedPackages.contains { $0.contains("lodash") }, "受影响包含 lodash")
     }
 
+    /// RD-10：这条用例**原来是在给一个缺陷发合格证**，2026-09-22 由 R3 按 AGENTS §8.1 豁免改正。
+    ///
+    /// 它原来断言（逐条）：
+    ///   · `isOlder("^1.2.3", "1.2.4") == true`，注释写"`^1.2.3` 归一化为 0 视为落后"；
+    ///   · `isOlder("1.2.3", "^1.2.4") == false`，注释写"latest 归一化为 0 时不得判落后"；
+    ///   · `isOlder("", "1.0.0") == true` / `isOlder("abc", "1.0.0") == true`，注释"归一化为 [0]"；
+    ///   · `normalize("2.0") == [2, 0]` 且隐含"解析不出就是 `[0]`"。
+    /// 为什么那是错的：`normalize` 的截断符集合里写着 `^~<>`，所以 caret 在**第一个字符**就断成
+    /// 空前缀 → `[0]` → "0.0.0 落后于任何版本"。后果有两个方向都错：
+    ///   ① 任何 `^x.y.z` 声明被虚报成"版本过旧"（本仓自扫时 express `^5.2.1` 就是受害者，
+    ///      而 `KnownVulnerability.comparableCore` 会吃掉 `^` ⇒ 同一份数据两套口径）；
+    ///   ② `""` / `abc` / `*` 被折成 0.0.0 去和真版本比，于是"没量到"长成了"量出来很旧"。
+    /// 现在断言什么：解析不出的一方一律 **`.unknown`**，`isOlder` 对未知返回 false（不宣称过旧），
+    /// 而 caret 的比较按**它写的下界**（与 `comparableCore` 同一把尺子）；
+    /// "下界不等于安装版本"这条语义由 `DependencyVersionIdentity` 负责，见同文件新用例。
     func testVersionIsOlderEdgeCases() {
-        XCTAssertFalse(DependencyVersion.isOlder(current: "1.0.0-SNAPSHOT", than: "1.0.0"), "-SNAPSHOT 后缀要截掉")
-        XCTAssertTrue(DependencyVersion.isOlder(current: "^1.2.3", than: "1.2.4"), "^1.2.3 归一化为 0 视为落后")
-        XCTAssertFalse(DependencyVersion.isOlder(current: "1.2.3", than: "^1.2.4"), "latest 归一化为 0 时不得判落后")
-        XCTAssertTrue(DependencyVersion.isOlder(current: "", than: "1.0.0"), "空串归一化为 [0]")
-        XCTAssertTrue(DependencyVersion.isOlder(current: "abc", than: "1.0.0"), "纯字母归一化为 [0]")
+        XCTAssertEqual(DependencyVersion.normalize("2.0"), [2, 0], "数字芯解析")
+        XCTAssertEqual(DependencyVersion.normalize("^1.2.3"), [1, 2, 3],
+                       "caret 的下界是它写着的那个数 —— 与 comparableCore 同一口径，不再折成 [0]")
+        XCTAssertEqual(DependencyVersion.normalize("*"), [], "通配解析不出就是空，不许伪造 [0]")
+        XCTAssertEqual(DependencyVersion.normalize(""), [], "空串同上")
+        XCTAssertEqual(DependencyVersion.normalize(ManifestParsers.undeclaredVersion), [], "「未声明」同上")
+        XCTAssertEqual(DependencyVersion.normalize("[1.0,2.0)"), [], "Maven 区间不是一个版本号")
+
+        XCTAssertEqual(DependencyVersion.outcome(current: "^1.2.3", than: "1.2.4"), .older,
+                       "比较的是串里写着的 1.2.3；这条依赖**装的是哪个版本**由版本身份那一层判")
+        XCTAssertEqual(DependencyVersion.outcome(current: "1.2.3", than: "^1.2.4"), .older)
+        XCTAssertEqual(DependencyVersion.outcome(current: "", than: "1.0.0"), .unknown,
+                       "旧实现此处判『更旧』，那是把没量到说成量出来很旧")
+        XCTAssertEqual(DependencyVersion.outcome(current: "abc", than: "1.0.0"), .unknown)
+        XCTAssertEqual(DependencyVersion.outcome(current: "*", than: "1.0.0"), .unknown)
+        XCTAssertFalse(DependencyVersion.isOlder(current: "*", than: "1.0.0"),
+                       "不可比较 ⇒ 不得产出『过旧』这个结论")
+
         XCTAssertFalse(DependencyVersion.isOlder(current: "1.0.0.0.0.0.0", than: "1.0.0"), "多出的零段不得判落后")
         XCTAssertTrue(DependencyVersion.isOlder(current: "1.0.0.0.0.0.2", than: "1.0.0.0.0.0.3"), "超长段数逐位比较")
-        XCTAssertEqual(DependencyVersion.normalize("2.0"), [2, 0], "normalize 行为冻结")
+        XCTAssertTrue(DependencyVersion.isOlder(current: "1.0.0-SNAPSHOT", than: "1.0.0"),
+                      "预发布低于正式版（semver）。旧实现把 `-SNAPSHOT` 整个截掉 ⇒ 与正式版判等，"
+                      + "于是快照过期的包永远判不出落后")
+        XCTAssertFalse(DependencyVersion.isOlder(current: "33.3.1-jre", than: "33.3.1"),
+                       "发行限定（-jre / -android）不是预发布，与正式版同档")
+        XCTAssertFalse(DependencyVersion.isOlder(current: "1.2.3+build7", than: "1.2.3"),
+                       "构建元数据不参与先后")
+    }
+
+    /// 逐条依赖的"这条到底过没过旧"必须走版本身份，而不是直接拿清单原文去比。
+    /// 这里是那条链的入口守卫：`isProbablyOutdated` 读 `resolvedVersion`，
+    /// 没有解析值时**范围声明判未定**（既不报过旧、也不报正常）。
+    func testIsProbablyOutdatedUsesResolvedVersionNotDeclaredRange() {
+        func record(_ version: String, resolved: String?, latest: String?) -> DependencyRecord {
+            DependencyRecord(name: "acme", version: version, ecosystem: .npm, scope: .runtime,
+                             manifestPath: "package.json", latestKnownVersion: latest,
+                             versionCheckSource: latest == nil ? .none : .bundledSnapshot,
+                             knownVulnerabilities: [], resolvedVersion: resolved)
+        }
+        XCTAssertTrue(record("^1.2.3", resolved: "1.2.3", latest: "1.2.4").isProbablyOutdated,
+                      "锁文件说装的是 1.2.3，最新是 1.2.4 ⇒ 过旧")
+        XCTAssertFalse(record("^1.2.3", resolved: nil, latest: "1.2.4").isProbablyOutdated,
+                       "只有范围、没有解析值 ⇒ 安装版本未知，不许报过旧")
+        XCTAssertFalse(record("^5.2.1", resolved: "5.2.1", latest: "5.2.1").isProbablyOutdated,
+                       "已是最新，不得判过旧（旧实现在这里判 true）")
+        XCTAssertFalse(record("*", resolved: nil, latest: "1.9.0").isProbablyOutdated, "通配不折成 0")
+        XCTAssertFalse(record("workspace:*", resolved: nil, latest: "1.9.0").isProbablyOutdated)
+        XCTAssertFalse(record("1.9.0", resolved: nil, latest: nil).isProbablyOutdated,
+                       "没有『最新』这一侧的证据时不得判过旧")
+        XCTAssertFalse(record("2.0.0", resolved: nil, latest: "1.9.0").isProbablyOutdated,
+                       "当前高于最新 ⇒ 快照过期，不是过旧")
+        XCTAssertEqual(DependencyVersionIdentity.of(record("2.0.0", resolved: nil, latest: "1.9.0")).outdatedness,
+                       .aheadOfLatest, "『高于最新』要能单独读出来，不能被压进『不过旧』这一格")
     }
 }
 

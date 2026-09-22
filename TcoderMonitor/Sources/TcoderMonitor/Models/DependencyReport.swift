@@ -134,12 +134,35 @@ struct DependencyRecord: Codable, Equatable, Hashable, Identifiable, Sendable {
     var versionCheckSource: VersionCheckSource
     var knownVulnerabilities: [String]
 
+    /// 锁文件 / 依赖树 / SBOM 里解析出的**实际**版本（`18.2.0`），与 `version`（清单原文 `^18.2.0`）
+    /// 是两件事，必须分开存 —— RD-10 的根因就是把声明范围当安装版本。
+    ///
+    /// 谁写：`DependencyLockResolution`（package-lock.json / yarn.lock / Cargo.lock /
+    /// Maven effective-POM 与依赖树 / CycloneDX·SPDX SBOM）。
+    /// 谁读：`DependencyVersionIdentity`（比较与查询身份）、依赖行状态、漏洞核对回执。
+    /// 为什么必须 Optional：`encodeIfPresent` 语义下"没有锁文件解析值"与"解析出 0.0.0"
+    ///   是两种状态，非 Optional 会让旧报告整份解码失败（AGENTS §5.9 第 2 条）。
+    /// 为什么不能放别处：它参与 `isProbablyOutdated` 这个契约派生态，而派生态只能长在契约上。
+    var resolvedVersion: String?
+
+    /// 上面那个解析值是**从哪份文件**读到的（相对项目根的锁文件 / 依赖树 / SBOM 路径）。
+    /// 为什么不能省：台账 §4 第 1 条要求"每条重要结论都能追溯"——"这条依赖装的是 1.2.3"
+    /// 这句话的证据就是那个文件，没有它用户无法复核，也无法判断锁是不是过期。
+    /// 与 `resolvedVersion` 同生同灭：只有真读出解析值时才写，否则两个都是 nil。
+    var resolvedVersionSource: String?
+
     var id: String { "\(ecosystem.rawValue):\(manifestPath):\(name)" }
 
     var isDevDependency: Bool { scope == .dev }
+
+    /// 版本过旧 = **实际安装版本**低于最新已知版本。
+    ///
+    /// 走 `DependencyVersionIdentity` 而不是直接 `DependencyVersion.isOlder(version, latest)`：
+    /// 后者会把 `^1.2.3` 的声明范围按下界参与比较（RD-10 明令禁止的"去掉 ^ 就当安装版本"），
+    /// 而 `*` / `latest` / `workspace:*` / "未声明" 在旧口径里被折成 0 一律判过旧。
+    /// 现在这些形态一律返回 false，并由 `DependencyRecordEvidence` 落成"未定 · 具体原因"。
     var isProbablyOutdated: Bool {
-        guard let latest = latestKnownVersion else { return false }
-        return DependencyVersion.isOlder(current: version, than: latest)
+        DependencyVersionIdentity.of(self).outdatedness == .older
     }
 }
 
@@ -184,27 +207,69 @@ struct DependencyVulnerability: Codable, Equatable, Hashable, Identifiable, Send
 }
 
 /// Minimal dotted-version compare that tolerates suffixes like `-SNAPSHOT`, `+build`, `^1.2.3`.
+///
+/// ## RD-10 的根因修正（2026-09-22，R3 依 AGENTS §8.1 豁免动本类型）
+///
+/// 旧实现在自己内部有**两套**口径，且其中一套是错的：
+///   · 这里用 `prefix(while:)` 取"数字芯"，而截断符集合里就写着 `^~<>` ——
+///     `^1.2.3` 在**第一个字符**处断成空串 → `parts.isEmpty` → 返回 `[0]`，
+///     于是任何 caret 声明都"落后于"任何最新版本（虚报过旧），
+///     `*` / `latest` / `未声明` / `abc` 同样被折成 0.0.0 参与比较；
+///   · 同一仓的 `KnownVulnerability.comparableCore` 却会先吃掉 `^`（两处不一致，台账点名）。
+///
+/// 现在的形状：
+///   1. **全仓只有一把版本尺子** —— 比较一律下沉到 `DependencySemver`
+///      （`Services/Dependencies/DependencyVersionIdentity.swift`），本类型不再自带第二套解析；
+///      预发布（`-beta` / `-SNAPSHOT`）低于正式版，构建元数据（`+build`）不参与先后。
+///   2. **认不出就是认不出**：`normalize` 返回空数组（旧返回 `[0]`），`outcome` 返回 `.unknown`，
+///      `isOlder` 对不可比较的一侧返回 false —— 但**上层必须出声**，
+///      逐条依赖的"为什么判不了"由 `DependencyVersionBlocker` 承载，不靠沉默。
+///
+/// ⚠ 本类型只回答"这两个串谁在前谁在后"。**"这条依赖装的是哪个版本"是另一件事**：
+/// 声明范围 / 实际解析版本 / 最新已知版本三份身份住在 `DependencyVersionIdentity`，
+/// `isProbablyOutdated` 已改走它 —— 那里明确禁止把 `^1.2.3` 的下界当安装版本。
 enum DependencyVersion {
+    /// 数字芯（不含预发布语义）。解析不出返回**空数组**（旧实现给 `[0]`，那正是 RD-10 的病根）。
     static func normalize(_ raw: String) -> [Int] {
-        let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        let core = trimmed.prefix(while: { !$0.isWhitespace && "-+~^<>=()".firstIndex(of: $0) == nil })
-        let parts = core.split(separator: ".").map { segment -> Int in
-            Int(segment.prefix(while: { $0.isNumber })) ?? 0
-        }
-        return parts.isEmpty ? [0] : parts
+        Self.core(raw)?.segments ?? []
     }
 
+    /// 这个串能不能收敛成一个版本号。
+    static func isComparable(_ raw: String) -> Bool { Self.core(raw) != nil }
+
     static func compare(_ lhs: String, _ rhs: String) -> ComparisonResult {
-        let a = normalize(lhs), b = normalize(rhs)
-        for index in 0..<max(a.count, b.count) {
-            let x = index < a.count ? a[index] : 0
-            let y = index < b.count ? b[index] : 0
-            if x != y { return x < y ? .orderedAscending : .orderedDescending }
-        }
-        return .orderedSame
+        guard let left = Self.core(lhs), let right = Self.core(rhs) else { return .orderedSame }
+        return DependencySemver.compare(left, right)
     }
 
     static func isOlder(current: String, than latest: String) -> Bool {
-        compare(current, latest) == .orderedAscending
+        outcome(current: current, than: latest) == .older
+    }
+
+    /// 三态结局：不可比较时**明确返回 `.unknown`**，调用方必须出声，不许按"更旧"或"不旧"处理。
+    static func outcome(current: String, than latest: String) -> Outcome {
+        guard let left = Self.core(current), let right = Self.core(latest) else { return .unknown }
+        switch DependencySemver.compare(left, right) {
+        case .orderedAscending: return .older
+        case .orderedDescending: return .newer
+        default: return .same
+        }
+    }
+
+    enum Outcome: Equatable, Sendable {
+        case older, same, newer, unknown
+    }
+
+    private static func core(_ raw: String) -> DependencySemver? {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 前缀范围算符与 `v`：`^` `~` `>=` `>` `<=` `<` `=`，允许跟空格（`>= 1.2.3`）。
+        while let first = text.first, "^~<>=".contains(first) {
+            text = String(text.dropFirst())
+            text = text.trimmingCharacters(in: .whitespaces)
+        }
+        // 带区间 / 多选 / 通配结构的串不是"一个版本号"，宁可不解，也不去取它某个端点冒充版本。
+        if text.contains(where: { "[],()|*".contains($0) }) { return nil }
+        if text.split(separator: ".").contains(where: { $0.lowercased() == "x" }) { return nil }
+        return DependencySemver.parse(text)
     }
 }

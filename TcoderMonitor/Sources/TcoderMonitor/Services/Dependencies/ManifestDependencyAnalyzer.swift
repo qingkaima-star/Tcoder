@@ -14,7 +14,7 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
     private let options: ScanOptions
     private let maxDepth: Int
     private let maxManifestBytes: Int
-    private let fileManager: FileManager
+    let fileManager: FileManager   // 跨文件可见：版本证据分片（本类型 extension）要用
 
     init(options: ScanOptions = .default,
          maxDepth: Int = ManifestDependencyAnalyzer.defaultMaxDepth,
@@ -63,6 +63,7 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
         ecosystems.sort(by: Self.manifestOrder)
 
         var report = DependencyReport(analyzedAt: Date(), ecosystems: ecosystems)
+        applyLockResolutions(&report, root: projectRoot)
         applyBundledKnowledge(&report)
         if allowNetwork {
             await applyNetworkKnowledge(&report)
@@ -186,7 +187,7 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
         (try? fileManager.contentsOfDirectory(atPath: hit.url.deletingLastPathComponent().path)) ?? []
     }
 
-    private func readText(at url: URL) -> String? {
+    func readText(at url: URL) -> String? {
         guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
               size <= maxManifestBytes else { return nil }
         guard let data = try? Data(contentsOf: url) else { return nil }
@@ -224,48 +225,6 @@ final class ManifestDependencyAnalyzer: DependencyAnalysisProviding {
             record.knownVulnerabilities = Self.deduped(hits.map { $0.cveIdentifiers.first ?? $0.id })
         }
         report.offlineVulnerabilities = VulnerabilitySource.offlineVulnerabilities(for: allRecords(report))
-    }
-
-    /// 离线时的「我们没做什么」说明，与在线路径同等直白（在线侧在
-    /// `DependencyNetworkLookup` 里会把失败与未覆盖生态写进 note，离线侧原先什么都没有，
-    /// 于是 `vulnerableCount = 0` 读起来像"查过、干净"）。
-    static func offlineCaveat(for report: DependencyReport) -> String {
-        let records = report.ecosystems.flatMap(\.dependencies)
-        let skipped = records.filter { KnownVulnerability.comparableCore($0.version) == nil }.count
-        // 四段各自是整句键、分隔符也查表：`parts.joined(separator: "；")`
-        // 拼出来的整串在英文态会一半中文一半英文（运行时漏翻台账点名的就是这条）。
-        var parts = [localizedFormat("未联网核对：漏洞判定只依据内置快照（覆盖 npm / Maven / Python），%@",
-                                      DependencySnapshot.asOfText)]
-        let uncovered = ecosystemsWithoutOfflineRules(in: report)
-        if !uncovered.isEmpty {
-            parts.append(localizedFormat("本次未覆盖生态：%@",
-                                          uncovered.joined(separator: localizedCopy("、"))))
-        }
-        if skipped > 0 {
-            parts.append(localizedFormat("%@ 项版本不可比较（「*」、workspace:*、分支/修订号等）已跳过比对",
-                                          NumberFormat.grouped(skipped)))
-        }
-        if report.totalDependencies == 0 { parts.append(localizedCopy("没有可核对的依赖")) }
-        return parts.joined(separator: localizedCopy("；"))
-    }
-
-    /// 该生态有没有内置离线漏洞规则。从规则表与坐标互通表**推导**，不另抄一份清单，
-    /// 免得规则增删后口径漂移（`DependencyReport.uncoveredEcosystemNames` 就是抄了
-    /// `displayName` 清单，结果把 npm 误报成"未覆盖"）。
-    static func hasOfflineRules(for ecosystem: DependencyEcosystem) -> Bool {
-        let scopes = Set(DependencySnapshot.lookupScopes(for: ecosystem))
-        return VulnerabilitySource.bundled.contains { scopes.contains($0.ecosystem.rawValue) }
-    }
-
-    /// 报告里存在、但内置规则不覆盖的生态（去重、保持首次出现顺序）。
-    static func ecosystemsWithoutOfflineRules(in report: DependencyReport) -> [String] {
-        var seen = Set<DependencyEcosystem>()
-        var names: [String] = []
-        for ecosystem in report.ecosystems.map(\.ecosystem) {
-            guard !hasOfflineRules(for: ecosystem), seen.insert(ecosystem).inserted else { continue }
-            names.append(ecosystem.displayName)
-        }
-        return names
     }
 
     // MARK: - Optional online enrichment
