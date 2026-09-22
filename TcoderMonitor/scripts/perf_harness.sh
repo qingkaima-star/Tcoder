@@ -94,6 +94,8 @@ SECONDS_LAUNCH="${SECONDS_LAUNCH:-10}"
 PERF_BIN="${PERF_BIN:-$PWD/dist/Tcoder.app/Contents/MacOS/TcoderMonitor}"
 TRACE_REPORT="$PWD/scripts/trace_report.py"
 PULSE_REPORT="$PWD/scripts/perf_framepulse.py"
+# 呈现侧节拍（实测周期 + 两把预算 + 与回调仪器的偏移）——§M 的那把仪器，见 perf_cadence.py 头注
+CADENCE_REPORT="$PWD/scripts/perf_cadence.py"
 PULSE_SRC="$PWD/scripts/perf_pulse.sh"   # pulse 档的实现（>400 行棘轮：拆出去，不挂账）
 # selfcheck 档的实现放在旁边那个文件里，只在跑 selfcheck 时 source 进来（同一进程、同一批全局量）。
 # 为什么搬出去：本仓 ≤800 行棘轮的分母**含 .sh**（`SourceLanguageCatalog` 认 Shell）、ceiling=0，
@@ -342,6 +344,12 @@ PY
   # 同窗交叉核对：p95 那半句要的是"回调时序 vs 真实上屏"两把尺子合判（工单 §M / selfcheck 第 33 项）。
   # 只在样本里真有脉冲时印；没有就明写"这一趟答不了"，**不许**沉默跳过——
   # 跳过与答不出是两件事，前者会被下一个人读成"量过了"。退出码不改（合判是给**人**读的结论）。
+  # 节拍这一把是**独立于回调时间戳**的（合成器逐帧起点差），所以没有脉冲也要印：
+  # 09-22 就是靠它才发现名义 120 Hz 与实测 119.33~119.39 Hz 差 0.5%，
+  # 而"p95 未达标"的残差（0.04~0.10 ms）小于两台仪器的分歧（0.66 ms）。
+  if [ -s "$out/hitches-renders.xml" ]; then
+    python3 "$CADENCE_REPORT" "$out/hitches-renders.xml" --pulse "$out/pulse.txt" 2>&1 | tail -7 | sed 's/^/    /' || true
+  fi
   if [ -s "$out/pulse.txt" ]; then
     python3 "$PULSE_REPORT" --sample-dir "$out" --interaction 2>&1 | tail -3 | sed 's/^/    /' || true
   else

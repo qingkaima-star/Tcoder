@@ -329,6 +329,43 @@ print(caveat_for("hitches-updates", [9.31, 10.22, 10.64], 8.333))')
   ok "update 表的读数形状双向判对：窄分布出提示并指路 time-profile，宽分布/他表/空表都不惊动"
 }
 
+selfcheck_cadence_two_budgets() {  # selfcheck_cadence_two_budgets <outdir>
+  # 35) 「p95 ≤ 8.4 ms」这半句必须**同时按两个预算报**（名义 120Hz 与实测周期），
+  #     而且两把都要有真判例——只印一个就等于测量方偷偷选尺子。
+  #     09-22 实测：合成器自己的逐帧起点差给出实测周期 8.376~8.380 ms（≈119.33~119.39 Hz），
+  #     名义 120 Hz 的预算因此天生小 0.5%；空闲档 p95 8.52 与交互档 8.51 只差 0.013 ms
+  #     ⇒ 残差是面板/仪器地板，不是 App 的卡顿。这种结论只有"两个预算并排印"才站得住。
+  local res
+  res=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+import os, tempfile
+from perf_cadence import report
+
+def xml(path, step_ns, n=1500):
+    # 生产解析器（`perf_trace_xml.Doc`）是**按 id 建表再回查**的：
+    # 元素没有 `id="N"` 就一个 cell 都拿不到 ⇒ 一份"看起来像"的夹具会静默解析成 0 帧。
+    # 所以这里逐行发全局唯一 id，与真产物同形（复用同一个 id 会让所有行都读到第一格）。
+    rows = "".join(
+        "<row><start-time id=\"%d\" fmt=\"s\">%d</start-time>"
+        "<duration id=\"%d\" fmt=\"d\">3000000</duration></row>"
+        % (2 * i + 1, i * step_ns, 2 * i + 2) for i in range(n))
+    open(path, "w", encoding="utf-8").write("<table><schema name=\"hitches-renders\"/>%s</table>" % rows)
+
+d = tempfile.mkdtemp()
+tight, lo, few = os.path.join(d, "a.xml"), os.path.join(d, "b.xml"), os.path.join(d, "c.xml")
+xml(tight, 8333333)                       # 精确 8.3333 ms 步进 ⇒ 两个预算都该过
+xml(lo, 8500000)                          # 8.500 ms 步进 ⇒ 名义不过、实测过（两把尺子必须分歧）
+xml(few, 8333333, n=10)                   # 帧数不足 ⇒ 拒判
+a, ca = report(tight); b, cb = report(lo); c, cc = report(few, None, min_frames=1200)
+jb = "\\n".join(b)
+print("%d|%d|%d|%s|%s" % (ca, cb, cc,
+      "both" if ("名义(120Hz)预算" in jb and "实测周期预算" in jb) else "one",
+      "split" if ("名义(120Hz)预算 8.417 ms：p95 **未达标**" in jb and "实测周期预算 8.585 ms：p95 达标" in jb) else "same"))')
+  [ "$res" = "0|1|2|both|split" ] \
+    || { fail "节拍仪器的两个预算没判对（拿到 ${res:-解析失败}；要求 0|1|2|both|split）"
+          echo "     ——0=两把都过／1=有超出／2=样本不足，且 8.5ms 那一例必须『名义不过、实测过』"; return; }
+  ok "p95 判据两把预算并排印且真会分歧：精确周期=过、8.5ms 步进=名义不过/实测过、样本不足=拒判"
+}
+
 selfcheck_input_rate_qualification() {  # selfcheck_input_rate_qualification <outdir>
 
   # 28) 【标记要有读者】`meta.input_source` 从今晚起带投递节奏（`synth@8ms`），
