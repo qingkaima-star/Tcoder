@@ -11,45 +11,30 @@
 //    （只读 FileLogAnalyzer 交给我的那一个 URL）。
 // 2. 任何一步解析失败只返回空数组：绝不 force-unwrap、绝不 `try!`、绝不 `as!`，
 //    JSONSerialization 的结果全部用 `as?` 安全取值。
-//    兜底事件只在 `events(for:)` 里合成，最多 1 条。
+//    **取不出证据就交回空数组** —— 由 `crashChannel(reading:)` 判成
+//    「解析失败 / 疑似报告」，绝不合成一条崩溃事件冒充证据（RD-21 的根因就在这儿）。
 // 3. 宁少不假：一份崩溃报告只产 1 条主事件；堆栈帧只进 stackFrames、不单独成事件；
 //    纯文本通道为了 sourceFiles/affectedFiles 统计才额外产 isContinuation 事件
 //    （上层按 isContinuation 排除计数）。
 // 4. 进签名的内容一律先过 `LogLineParser.normalizeMessage`
 //    （incident_id / uuid / 地址 / 绝对路径 必须归一化，否则每次崩溃都是新签名，聚不起来）。
+// 5. 事件时间只认报告字段与报告文件名两种来源；**文件 mtime 不是事件时间**。
 
 import Foundation
 
 enum CrashReportParser {
-    // MARK: - 公开签名（FileLogAnalyzer 调用，一个字都不能改）
-
-    /// `.ips` / `.crash` / `.panic` / `.diag`，或文件名含 crash 的日志。
-    static func isCrashReport(_ url: URL) -> Bool {
-        isCrashReport(url, role: .application)
-    }
-
-    /// 同上，额外接受 `role == .crash` 这条判据（公开签名里没有 role，所以给一个重载）。
-    static func isCrashReport(_ url: URL, role: LogFileRole) -> Bool {
-        if crashExtensions.contains(url.pathExtension.lowercased()) { return true }
-        let name = url.lastPathComponent.lowercased()
-        if name.contains("crash") || name.contains("diag") { return true }
-        return role == .crash
-    }
-
-    /// 整份 reading 走崩溃通道：先试 .ips（JSON），否则按纯文本崩溃日志处理。
-    static func events(for reading: LogFileReading) -> [LogEvent] {
-        guard isCrashReport(reading.url, role: reading.role) else { return [] }
-        let path = reading.url.path
-        let modifiedAt = reading.modifiedAt
-        guard let text = readText(reading.url), !text.isEmpty else {
-            return [synthesizedEvent(path: path, modifiedAt: modifiedAt)]
-        }
-        // parseDiagnosticReport 内部要求文本以 `{` 开头，不是一行头 JSON 就返回 []。
-        let diagnostic = parseDiagnosticReport(text: text, path: path, modifiedAt: modifiedAt)
-        if !diagnostic.isEmpty { return diagnostic }
-        let plain = parseCrashText(text: text, path: path, modifiedAt: modifiedAt)
-        if !plain.isEmpty { return plain }
-        return [synthesizedEvent(path: path, modifiedAt: modifiedAt)]
+    /// `.ips` / `.crash` / `.panic` / `.diag` / `.spin` / `.csncrashed` / `.diagnostics`
+    /// 这些**内容格式**后缀，或被 `LogDiscovery` 按目录/名字归到 `.crash` 角色的文件，
+    /// 才是崩溃通道的候选。
+    ///
+    /// 整改前这里还写着 `if name.contains("crash") || name.contains("diag") { return true }`
+    /// —— 一个文件名就把普通日志推进了崩溃通道，**双向出错**：
+    /// 一方面通道内取不出证据时合成一条假崩溃（9 次 vs 真值 2 次），
+    /// 另一方面该文件被 `crashHandledPaths` 挡掉正常行解析，它真实的 3 条错误全丢
+    /// （台账 §9.4 那次读数里 `errorCount = 0` 的来由）。
+    /// 现在「候选」只决定**多看一眼**，不决定**下结论**。
+    static func isCrashCandidate(_ url: URL, role: LogFileRole) -> Bool {
+        crashExtensions.contains(url.pathExtension.lowercased()) || role == .crash
     }
 
     /// Apple DiagnosticReports 的 .ips：第一行是 header JSON，其余是 body JSON。
@@ -71,9 +56,11 @@ enum CrashReportParser {
         let rawLine = ipsRawLine(path: path, facts: facts,
                                  threadLabel: stack.threadLabel, asiLines: stack.asiLines)
         let message = title(haystack: rawLine, symbol: stack.frames.first, procName: facts.procName)
+        let timing = ipsEventDate(body: sections.body, header: sections.header,
+                                  path: path, yearReference: modifiedAt)
 
         let event = LogEvent(
-            date: ipsDate(body: sections.body, header: sections.header, path: path, modifiedAt: modifiedAt),
+            date: timing.date,
             severity: .crash,
             rawLine: rawLine,
             message: message,
@@ -82,9 +69,33 @@ enum CrashReportParser {
             stackFrames: stack.frames,
             sourceFiles: stack.sourceFiles,
             isCrash: true,
-            isContinuation: false
+            isContinuation: false,
+            eventTimeSource: timing.source,
+            appIdentity: ipsIdentity(from: facts),
+            incidentID: facts.incidentID
         )
         return [event]
+    }
+
+    /// 报告自报的身份（RD-23 的五个维度：bundle id / 构建版本 / 发生时间 / 终止原因 / 采集环境）。
+    static func ipsIdentity(from facts: IPSDiagnosticFacts) -> AppBuildIdentity {
+        AppBuildIdentity(processName: emptyToNil(facts.procName),
+                         bundleID: facts.bundleID,
+                         appVersion: facts.appVersion,
+                         buildVersion: facts.appVersion.flatMap(buildNumber(of:)),
+                         osVersion: facts.osVersion,
+                         product: facts.product,
+                         terminationReason: facts.terminationText ?? facts.terminationFlags)
+    }
+
+    /// `"2.0 (9)"` 的括号内段；没有括号就用整串。
+    static func buildNumber(of appVersion: String) -> String? {
+        guard let open = appVersion.firstIndex(of: "("), let close = appVersion.lastIndex(of: ")"),
+              open < close else {
+            return trimmed(appVersion).isEmpty ? nil : trimmed(appVersion)
+        }
+        let value = trimmed(String(appVersion[appVersion.index(after: open)..<close]))
+        return value.isEmpty ? nil : value
     }
 
     /// header 独占一行；body 是剩下的全部（可能 pretty-print 成很多行）。
@@ -113,6 +124,9 @@ enum CrashReportParser {
         var incidentID: String?
         var osVersion: String?
         var product: String?
+        /// 报告自报的 bundle id。只有部分 bug_type（309/409）会带；缺它是**归属维度不完整**，
+        /// 不许改用目录名或文件名去补（RD-23）。
+        var bundleID: String?
     }
 
     static func ipsDiagnosticFacts(body: [String: Any], header: [String: Any],
@@ -154,12 +168,19 @@ enum CrashReportParser {
         ])
         let osVersion = firstNonEmpty([string(body["os_version"]), string(header["os_version"])])
         let product = firstNonEmpty([string(body["product"]), string(header["product"])])
+        let bundleID = firstNonEmpty([
+            string(body["bundleID"]),
+            string(body["bundle_id"]),
+            string(header["bundle_id"]),
+            string(header["bundleID"]),
+        ])
 
         return IPSDiagnosticFacts(exceptionType: exceptionType, signal: signal, codes: codes,
                                   subtype: subtype, terminationText: terminationText,
                                   terminationFlags: terminationFlags, bugType: bugType,
                                   procName: procName, appVersion: appVersion, appSession: appSession,
-                                  incidentID: incidentID, osVersion: osVersion, product: product)
+                                  incidentID: incidentID, osVersion: osVersion, product: product,
+                                  bundleID: bundleID)
     }
 
     /// 线程与堆栈：找 triggered / crashed 的那一个，只取前 `ipsMaxFrames` 帧。

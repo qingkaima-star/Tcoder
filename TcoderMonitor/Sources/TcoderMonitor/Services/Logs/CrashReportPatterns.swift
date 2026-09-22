@@ -89,6 +89,23 @@ extension CrashReportParser {
     static let fileNameDatePattern = Pattern("(\\d{4})-(\\d{2})-(\\d{2})[-_](\\d{2})(\\d{2})?(\\d{2})?")
     static let sourceFilePattern = Pattern("(?:[A-Za-z0-9_$.\\-]+[/\\\\])+([A-Za-z0-9_$.\\-]+)\\.(?:swift|mm|c|cc|cpp|cxx|m|py|js|jsx|ts|tsx|kt|java|go|rs)\\b|[A-Za-z0-9_$.\\-]+\\.(?:swift|mm|c|cc|cpp|cxx|m|py|js|jsx|ts|tsx|kt|java|go|rs)\\b")
 
+    // MARK: 纯文本报告里的归属字段（RD-23：应用与构建身份要显式绑定，不靠目录名猜）
+
+    static let incidentIDPattern = Pattern("\\bIncident Identifier\\s*:\\s*([0-9A-Fa-f]{6,}(?:-[0-9A-Fa-f]+){0,4})")
+    static let processNamePattern = Pattern("^\\s*Process\\s*:\\s*(\\S+)")
+    static let reportVersionPattern = Pattern("^\\s*Version\\s*:\\s*(.+)$")
+    static let reportOSVersionPattern = Pattern("^\\s*OS Version\\s*:\\s*(.+)$")
+    static let reportIdentifierPattern = Pattern("^\\s*Identifier\\s*:\\s*(\\S+)")
+
+    /// 「这份内容**看起来是一份报告**」的形状判据：有报告独有的机器字段名。
+    /// 命中却取不出事件证据 ⇒ 判 `.parseFailed`（内容坏了）；
+    /// 一个都没命中 ⇒ 判 `.suspected`（它根本不是报告，只是名字/目录像）。
+    static let reportShapeMarkers: [String] = [
+        "incident identifier", "exception type", "termination reason", "bug_type",
+        "incident_id", "\"threads\"", "thread ", "crashed thread", "os version", "code type",
+        "\"exception\"", "\"app_version\"", "\"procname\"",
+    ]
+
     /// 堆栈帧行的几种写法（Apple 文本 / lldb / 带源码行）。
     static let framePatterns: [Pattern] = [
         Pattern("^[ \\t]*\\d{1,3}[ \\t]+\\S+[ \\t]+0x[0-9a-fA-F]{6,}[ \\t]+\\S[^\\n]*[+-][ \\t]*\\d+[ \\t]*$"),
