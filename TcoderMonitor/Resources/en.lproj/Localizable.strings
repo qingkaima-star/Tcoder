@@ -693,3 +693,8 @@
 "以上是整机读数：含其它项目与系统服务的开销，不构成本项目的性能结论。" = "The readings above are machine-wide: they include other projects and system services, and are not a performance verdict about this project.";
 "可执行路径未取到（无权限或进程已退出），只能给出进程名 %@" = "Executable path unavailable (no permission, or the process already exited) — only the process name can be given: %@";
 "可执行路径 %@（本工具不读任何进程的命令行参数）" = "Executable path: %@ (this tool never reads any process's command-line arguments)";
+
+// 批次 P30：健康评分页补上「提交号来自外层仓库」这句真话（乱清单 §6 第 12 条）。
+// 整句键 + 位置参数：路径是数据不是文案，而 `"...\(root)..."` 那种拼法查不到键、
+// 英文态必然吐中文（`LocalizationGuardTests+InterpolatedCopy` 数的就是它）。
+"提交活跃度与协作分布按外层仓库 %1$@ 的历史统计，不是所选目录本身。" = "Commit Activity and Collaboration Spread are counted from the outer repository %1$@, not from the selected directory itself.";
