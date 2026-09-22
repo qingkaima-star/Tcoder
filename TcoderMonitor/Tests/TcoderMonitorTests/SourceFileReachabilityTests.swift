@@ -143,7 +143,15 @@ final class SourceFileReachabilityTests: XCTestCase {
     /// - main 侧 R6 流 174 → 178，四枚在 `Services/Code/`：`SourceFileRoleRules`（角色判据）/ `SourceFileRoleSignals`（信号采集）/`SourceRoleTally`（逐条计数）/ `SourceScanScopeReadout`（范围读数与「跟不跟」句子的装配）。同一次守卫跑出「零调用清单：空」⇒ 四枚都有 `Sources/**` 内的调用点，不是空壳。
     /// - 本流 R10b 174 → 177，三枚全在新目录 `Services/Trace/`：`AnalyzerLedgerText`（把四态台账打成 CLI 文本，装在「未量准」之后、分数之前）、`MeasurementLedger`（甲栏量出来的 / 乙栏算出来的分栏，乙栏每行带「← 由…算来」，并用 `danglingSources` + `upstreamInputs` 把「只从既有类型算、不许重扫源码」做成机器判据）、`EvidenceCoordinates`（文件 ⇑ 符号 ⇑ 判据名的稳定坐标，key 不含行号、路径按 scannedRoot 相对化）。
     /// ⚠️ 181 = 178 + 3 是**推的**，不是守卫实报的：合完 main 之后必须重跑一次，以它打印的现量为准（这条常量只由总工拧，且只按实报拧）。
-    static let censusBaseline = 181
+    /// 181 → 182（**总工本人 2026-09-23 22:36，按守卫实报拧**）：R17 落 RD-15 契约时新增一枚
+    ///   `Services/Code/CodeScanSurfaceReadout.swift` —— 把申请单 §3 那族"范围台账"
+    ///   （`totalCount` / 被剔除条目的行数 / `linesCounted` 三态 / 读不动的目录）从内部类型
+    ///   `SourceScanScopeReadout` + `SourceTreeFollowingLedger` 接进 `CodeMetrics.scanSurface`。
+    ///   同一次全量跑出的是：分母 **182**、`unused` **为空** ⇒ 它在 `Sources/**` 内真有调用点
+    ///   （`FileSystemCodeAnalyzer` 写字段那一路），不是空壳；除这一条外 1588 例全绿。
+    ///   ⚠️ 上面那句"181 是推的"仍然算账：这一轮重跑同时把 181 与实扫现量对上了，
+    ///   没有第二枚未登记的净增减。
+    static let censusBaseline = 182
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
