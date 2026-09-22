@@ -118,6 +118,7 @@ final class SourceFileReachabilityTests: XCTestCase {
     ///   被 `CrashTextParsing` 与 `FileLogAnalyzer` 引用；
     /// `LogProjectIdentity.swift`（应用归属不再靠目录名猜）—— 被 `FileLogAnalyzer` 与 `LogDiscovery` 引用。
     /// 三枚都不是死文件：同一次守卫跑出「零调用清单：空」（`testZeroCallListIsEmpty` 未红）。
+    static let censusBaseline = 147
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
