@@ -200,4 +200,66 @@ final class VueTsRecognitionGuardTests: XCTestCase {
         XCTAssertEqual(result.problems.count, 1, "故意写错的期望必须被抓出来：\(result.problems)")
         XCTAssertTrue(result.problems[0].contains("单层插值"), "报错要能指名是哪条夹具：\(result.problems)")
     }
+
+    // MARK: - 守卫 3：每一条「出声」判据都要有人测（反证矩阵里 GREEN 那五条的形状，做成机器断言）
+
+    /// 本流写进实现每一处"读数 / 未知态"的名字，以及它必须被谁引用。
+    ///
+    /// 为什么要有这一条：F① 反证时 `unboundedSignatureCount`、`regexLikeUnterminated`、
+    /// `untrustedDepthLineCount`、`expressionUnderflow`、`unbalancedExpressions` 五处
+    /// **整条摘掉后全仓仍绿** —— 实现有、判据无，"未知态"就成了可以悄悄删掉的东西。
+    /// 这里要求每一处读数在 `Tests/**` 里**以代码身份**（不是注释、不是字符串）被引用，
+    /// 少一处就当场点名。读数的名字在这里是字符串字面量，会被本文件自己的脱敏剥掉
+    /// ⇒ 守卫不能用它自己的登记表给自己凑证据。
+    private static let voiceRoster: [String] = [
+        "unboundedSignatureCount", "regexLikeUnterminated", "expressionUnderflow",
+        "unbalancedExpressions", "endsInsideString", "endsInsideExpression",
+        "untrustedDepthLineCount", "nestedDepthTruncatedCount", "vueRegionFallback",
+        "nestedFunctionCount", "scriptCommentRatio", "isControlFlowPosition",
+        "isReservedAfterPrefix", "detectVueRegions",
+    ]
+
+    /// 扫 `Tests/**` 全部 Swift 文件，剥掉注释与字符串后收"作为代码出现的符号"多重集。
+    private func testSideCodeSymbols() throws -> [String: Int] {
+        let root = SelfScanHarnessCase.repoRoot
+            .appendingPathComponent("TcoderMonitor/Tests/TcoderMonitorTests")
+        let urls = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil,
+                                                              options: [])
+            .filter { $0.pathExtension == "swift" }
+        XCTAssertGreaterThan(urls.count, 60, "分母为 0：Tests 目录只扫到 \(urls.count) 个文件，守卫在空转")
+        var symbols: [String: Int] = [:]
+        var scanned = 0
+        for url in urls {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            let code = stripCommentsAndStrings(text)
+            scanned += 1
+            for name in Self.voiceRoster where code.contains(name) { symbols[name, default: 0] += 1 }
+        }
+        XCTAssertEqual(scanned, urls.count, "有测试文件没被读到，读数不完整")
+        return symbols
+    }
+
+    func testGuard3EveryVoiceCounterIsAssertedSomewhere() throws {
+        let symbols = try testSideCodeSymbols()
+        XCTAssertGreaterThan(symbols.count, 5,
+                             "一个判据符号都没扫到 ⇒ 脱敏或扫描面坏了（永真绿守卫）")
+        let untested = Self.voiceRoster.filter { symbols[$0] == nil }
+        XCTAssertEqual(untested, [],
+                       "这些「出声」读数没有任何用例引用（摘掉没人喊）：\(untested)")
+    }
+
+    /// 守卫 3 的元测试：编一个没人写的符号必须报，真实存在的不得误伤，注释里提一句不算数。
+    func testGuard3RulerCatchesInventedSymbolAndSparesRealOnes() throws {
+        let code = "func t() { XCTAssertGreaterThan(outcome.expressionUnderflow, 0) }\n"
+        let commentOnly = "// 这里本来该断 expressionUnderflow\nlet hint = \"expressionUnderflow\"\n"
+        XCTAssertTrue(stripCommentsAndStrings(code).contains("expressionUnderflow"),
+                      "元测试：真出现在代码里的判据符号必须被数到")
+        XCTAssertFalse(stripCommentsAndStrings(commentOnly).contains("expressionUnderflow"),
+                       "元测试：注释与字符串里提一句不得算覆盖")
+        XCTAssertFalse(Self.voiceRoster.contains("counterNobodyEverWrites"),
+                       "元测试的前提：登记表里不许有凭空的符号")
+        let symbols = try testSideCodeSymbols()
+        XCTAssertNotNil(symbols["expressionUnderflow"], "登记表里这条应该真有人测")
+        XCTAssertNil(symbols["counterNobodyEverWrites"], "不存在的符号不得被算成已覆盖")
+    }
 }

@@ -134,4 +134,31 @@ final class TsReservedKeywordBranchTests: XCTestCase {
         // 合法写法不得误伤：`x : T` 类型注解不是标签位关键字
         XCTAssertEqual(cc(["  const value: number = ifNumber(x)"]), 1, "类型注解的冒号不得触发标签判据")
     }
+
+    /// 反证矩阵里 C / K 两处是靠**别的用例**转红的，两条判据本身没人对着测过
+    /// （换个形状就可能空转）。这里直接按调用点钉一次：真判定 `[true]`、
+    /// 点号位与标签位 `[false]`，带前缀的保留字挡、关键字前缀的正常标识符不挡。
+    func testTheTwoJudgementsThemselvesAreNailed() {
+        func positions(_ line: String, _ word: String) -> [Bool] {
+            let text = line as NSString
+            var out: [Bool] = []
+            var search = NSRange(location: 0, length: text.length)
+            while search.location < text.length {
+                let at = text.range(of: word, options: [], range: search)
+                if at.location == NSNotFound { break }
+                out.append(ComplexityEngine.isControlFlowPosition(text, at))
+                search = NSRange(location: at.location + at.length,
+                                 length: text.length - at.location - at.length)
+            }
+            return out
+        }
+        XCTAssertEqual(positions("  if (a) { b() }", "if"), [true], "行首真 if 必须算判定")
+        XCTAssertEqual(positions("  box.if == other.if", "if"), [false, false], "点号后的 if 一个都不许算")
+        XCTAssertEqual(positions("  guardElse(if: x)", "if"), [false], "标签位的 if 不许算")
+        XCTAssertEqual(positions("  case .a:", "case"), [true], "case 后跟模式不是冒号标签")
+        XCTAssertTrue(ComplexityEngine.Scan.isReservedAfterPrefix(".if"), ".if 必须被认成保留字")
+        XCTAssertTrue(ComplexityEngine.Scan.isReservedAfterPrefix("if"))
+        XCTAssertFalse(ComplexityEngine.Scan.isReservedAfterPrefix(".render"), "正常方法名不许被挡")
+        XCTAssertFalse(ComplexityEngine.Scan.isReservedAfterPrefix("ifLet"), "关键字前缀的标识符不许被挡")
+    }
 }
