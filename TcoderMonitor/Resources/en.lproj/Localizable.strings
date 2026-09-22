@@ -291,7 +291,8 @@
 "选择项目目录后点「重新分析」。" = "Choose a project directory, then click Re-analyse.";
 "评分综合代码规模、复杂度、重复代码率、Git 活跃度、运行日志与依赖状况，给出 0~100 分。" = "The score combines code size, complexity, duplicate-code rate, Git activity, runtime logs and dependency status into a 0~100 value.";
 "按「贡献」列升序，最低在前" = "Ascending by the Contribution column (score × normalized weight); the smallest comes first.";
-"综合分 = Σ（得分 × 归一化权重）。" = "Overall score = Σ (dimension score × normalized weight).";
+"综合分 = Σ（得分 × 归一化权重）。「这一维拖了多少分」看贡献列的提示（乘数 ×（100 − 得分）），它不必是本页第一行 —— 两个键在低权重维度上会分叉。" = "Overall score = Σ (score × normalised weight). For how much a dimension drags the score down, see the tooltip in the contribution column (weight × (100 − score)) — it is not necessarily the first row here, because the two keys diverge for low-weight dimensions.";
+
 "评分器没有可算的输入。" = "The scorer had no inputs it could compute from.";
 "纵轴固定 0…100 分 · 不做任何外推。" = "Y axis fixed at 0~100 · nothing is extrapolated.";
 "出入通常来自评分器的归一化或取整口径不同，界面以评分器发布值为准。" = "The difference usually comes from how the scorer normalises or rounds weights; the UI shows the published value.";

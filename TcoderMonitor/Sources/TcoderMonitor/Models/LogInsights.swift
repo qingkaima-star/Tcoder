@@ -26,6 +26,23 @@ struct LogSummary: Codable, Equatable, Sendable {
     var infoLineCount: Int = 0
     var totalLinesScanned: Int = 0
 
+    /// 本项目名下**读到几份崩溃报告**（RD-46b）。它与 `crashCount`（**确认崩溃次数**）不是一回事：
+    /// 一份报告可以含多次事件，也可以一份都没确认（读不动 / 内容损坏 / 无事件时间）。
+    ///
+    /// 为什么必须落这一格：RD-46b 把崩溃正文从密度分母里摘出去之后，"分母是 0"这件事
+    /// 有两种完全不同的来路——一种是真的没有日志，一种是**读到了几份崩溃报告、只是它们不该进分母**。
+    /// 没有这一格，界面就只能把后一种也说成前一种（那就是 RD-49）。
+    /// `0` = 看了崩溃通道、一份都没有；`nil` = 这一路根本没跑（旧报告 / 该路失败）。
+    /// **Optional 是落盘兼容要求**：非 Optional 带默认值会让旧报告整份解码失败。
+    var crashReportCount: Int? = nil
+    /// 被移出分母的那些行去了哪儿：崩溃报告（读成功的那几份）贡献的**正文行数**（RD-46b）。
+    ///
+    /// 存在理由：`totalLinesScanned` 只数真日志行之后，那些行必须仍然数得出来，
+    /// 否则这次修正就是把一次"灌大分母"换成一次静默丢弃。对账等式由
+    /// `totalLinesScanned + crashReportLineCount ==` 本次实际读到的总行数，
+    /// 由 `LogDenominatorAccountingTests` 钉住。
+    var crashReportLineCount: Int? = nil
+
     var topErrors: [ErrorCluster] = []
     var trend: [LogBucket] = []
     var affectedFiles: [String: Int] = [:]

@@ -1,12 +1,15 @@
 import Foundation
 
-/// `score` 的文本读数。两件事是这份文件的全部设计：
+/// `score` 的文本读数。三件事是这份文件的全部设计：
 ///
 /// 1. **失败路在分数之前**。反过来打就等于让读它的人（人或 AI）先信了那个分，
-///    再看到"有两路其实没跑出来"。
+///    再看到"有两路其实没跑出来"。R10b 之后紧跟在同一段里的还有「各路执行情况」
+///    （`AnalyzerLedgerText`）—— 同一条理由：先交代每一路做了什么，再给分。
 /// 2. **综合分只从 `HealthScore.verdict` 读**。`overall` 在没有任何维度拿到可计分证据时
 ///    是个占位 0，直接打它会读出"综合健康分 = 0"这种看着最确定的假账
 ///    （`Models/HealthScore.swift` 里 `verdict` 的注释就是为这条立的）。
+/// 3. **分数之后才是可追溯附页**（`traceabilityTail`：测量分栏 / 结论坐标 / 候选风险提示）。
+///    附页一律不参与计分 —— 它出现或不出现，上面那个分必须一字不变。
 enum CLIScoreText {
 
     /// 溯源一行，打在**任何读数之前**（与「失败路在分数之前」同一条理由）：
@@ -25,6 +28,9 @@ enum CLIScoreText {
         if exit == .allFailed {
             lines.append("五路全部失败，本次不出结论 —— 这条读作「什么都没量到」，不是「这个仓库没有代码」。")
             lines.append(contentsOf: report.failedSections.map { "  失败：\($0)" })
+            // 台账在这一档**更要打**：五路都挂的时候，"挂在哪、花了多久、原因原文"
+            // 就是本次唯一有意义的读数。
+            lines.append(contentsOf: AnalyzerLedgerText.section(report))
             return lines.joined(separator: "\n")
         }
 
@@ -40,12 +46,17 @@ enum CLIScoreText {
         // 只有打开界面的人才看得到，而 JSON 里有、文本读数里没有 ——
         // 看界面的人、读 CLI 的人、拿 JSON 的 AI 于是拿到三种诚实度。
         lines.append(contentsOf: precisionCaveat(report))
+        // R10b 第 1 件 · 台账上屏：位置就夹在「未量准」之后、综合分之前 ——
+        // 与"失败路在分数之前""未量准在分数之前"同一条理由：先说这一路到底做了什么，再给分。
+        lines.append(contentsOf: AnalyzerLedgerText.section(report))
         // RD-42：分区归位是**口径**、不是"没量准" ⇒ 另起一行，**绝不并进**上面那条
         // 「未量准 N 条」（那条的分母就是 `scanLimitations.count`，塞进去等于把"没量准"灌虚高）。
+        // 顺序由总工定：先"这一路做了什么"（台账），再"这一路的某个口径"（分区归位）。
         lines.append(contentsOf: regionCaliberLines(report))
 
         guard let health = report.health else {
             lines.append("没有评分结果：五路都没给出可评的输入。")
+            lines.append(contentsOf: traceabilityTail(report))
             return lines.joined(separator: "\n")
         }
 
@@ -62,7 +73,20 @@ enum CLIScoreText {
         }
         lines.append(contentsOf: health.issues.map { "  问题：\($0)" })
         lines.append(contentsOf: health.recommendations.map { "  建议：\($0)" })
+        lines.append(contentsOf: traceabilityTail(report))
         return lines.joined(separator: "\n")
+    }
+
+    /// R10b 第 2、3 件 + 风险提示：测量分栏 / 结论坐标 / 候选提示，全部装在分数之后。
+    ///
+    /// 装在后面而不是前面，是因为这三段**不改变**上面任何读数的可信度（可信度由
+    /// 「失败路 → 未量准 → 各路台账」那三段说完了）；它们回答的是另外两个问题：
+    /// "这个数是量的还是算的"、"这条结论落在哪个文件哪个符号哪条判据上"。
+    /// 三段的判据本体都在 `Services/Trace/`，这里只负责挂载与顺序。
+    static func traceabilityTail(_ report: ProjectReport) -> [String] {
+        MeasurementLedger.of(report).text()
+            + EvidenceCoordinates.text(report)
+            + CandidateRiskHints.text(report)
     }
 
     /// 本次"没量准 / 只是部分测量"的句子，**逐条原样**打出来。
