@@ -291,6 +291,12 @@ pid=67534 11:02:30  孤儿（工作树 .worktrees/verify-main 已删除）
 ```
 
 **这 6 个的 `ppid` 全是 1（launchd）** ⇒ 起它们的那个脚本早就退出了，却没有收尾。
+**2026-09-22 起这张表不再手写**：`bash scripts/perf_launcher_audit.sh` 现扫现报
+（脚本 / 该不该收尾 / 有没有 trap / 会不会按 bundle id 广播 / **命中行 = 文件:行 + 原文**）。
+今天的真值是"10 个会起 App 或录制的脚本、6 个有漏孤儿的形状、**性能侧名下 0 个**"，
+三个真凶全部点到位：`ax_tooltip_report.sh:117`、`e2e_check.sh:65`、`verify_pages.sh:57`
+（外加同形状的 `ax_disclosure_liveness.sh`、`ax_tooltip_fixtures.sh`、`self_score.sh`）。
+它的退出码默认 0 —— **只报形状、不判别家**；`--strict` 才判 `perf_*` 名下。
 全仓审计（一条 grep，三个会起实例的脚本，2026-09-22 11:10）：
 
 | 脚本 | trap 收尾 | 按 bundle id 广播退出 |
