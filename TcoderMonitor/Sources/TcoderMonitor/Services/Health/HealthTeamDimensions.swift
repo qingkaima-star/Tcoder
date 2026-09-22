@@ -30,7 +30,11 @@ extension WeightedHealthScorer {
                                     _ daysSinceLast: Double?) -> DimensionOutcome {
         var outcome = DimensionOutcome(curve: curve)
         if cadence.ratePerDay >= GitCadenceEvidence.steadyCadenceCommitsPerDay {
-            outcome.strengths.append(String(format: "提交节奏稳定（日均 %.1f 次）", cadence.ratePerDay))
+            // ⚠ 尾巴那句不是修辞，是**去重**（台账 RD-29）：同一个 `ratePerDay` 已经被曲线
+            // 折算过一次（越过 8 次/天还要掉头扣分），优点卡再说一遍"稳定"就成了
+            // 同一条事实声称两次贡献。门槛两处同源，见 `ScoreCurvesTeamRuntime.activity`。
+            outcome.strengths.append(String(format: "提交节奏稳定（日均 %.1f 次；这个频率只在曲线里折算一次，本句不另加分）",
+                                            cadence.ratePerDay))
         }
         outcome.issues = ActivityAdvice.staleIssues(daysSinceLast)
         return outcome
@@ -97,11 +101,19 @@ extension WeightedHealthScorer {
 
     private func busFactorStrengths(_ git: GitInsights, _ share: Double) -> [String] {
         guard git.activeAuthorCount >= 4, share < 0.45 else { return [] }
-        return ["贡献分布合理（\(git.activeAuthorCount) 人，头号作者占 \(NumberFormat.percent(share, precision: 0))）"]
+        // 「N 个署名」不是「N 个人」（台账 RD-28 / AGENTS §7 署名口径的诚实边界）：
+        // 本仓按流署名，一个署名通常是一条工作流；这句要是写成人数，
+        // 就把"哪条流握着这块代码"说成了"多人协作已经很分散"。
+        let counted = NumberFormat.grouped(git.activeAuthorCount)
+        return ["贡献分布合理（\(counted) 个署名，头号署名占 \(NumberFormat.percent(share, precision: 0))；"
+            + "署名按工作流计，不等于 \(counted) 个人）"]
     }
 
     private func busFactorIssues(_ top: AuthorStats, _ share: Double) -> [String] {
         guard share > 0.6 else { return [] }
-        return [String(format: "%@ 一人承担 %.0f%% 提交，单点风险高", top.name, share * 100)]
+        // 同一条口径：被点出来的是**一个署名**，不是"一个人"；单点风险本身照旧成立，
+        // 不许因为换了称呼就把它说轻或说重。
+        return [String(format: "「%@」这个署名占 %.0f%% 提交，单点风险高（署名按工作流计，不等同于一个人头）",
+                       top.name, share * 100)]
     }
 }

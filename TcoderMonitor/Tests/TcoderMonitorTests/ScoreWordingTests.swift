@@ -232,7 +232,148 @@ final class ScoreWordingTests: HealthScoreTestCase {
         XCTAssertFalse(listed.contains("未发现可读的日志文件"), "第三档不许退化成第二档那句")
     }
 
+    // MARK: - 靶子 3a：排序的名字必须就是排序的键（台账 RD-28）
+
+    /// 独立真值：造一个"低权重低分"与"高权重中分"并存的分量表 ——
+    /// 按 `contribution` 排与按 `lostPoints` 排会得到**相反的第一行**，
+    /// 所以副标题只能写真的那个键。
+    func test_rowOrderingKeyAndItsNameAgreeEvenWhenTheyDiverge() {
+        let thin = ScoreComponent(name: HealthDimension.testing.rawValue, score: 20,
+                                 weight: 0.05, detail: "低权重低分", risk: .critical)
+        let heavy = ScoreComponent(name: HealthDimension.complexity.rawValue, score: 60,
+                                  weight: 0.30, detail: "高权重中分", risk: .medium)
+        var health = HealthScore()
+        health.components = [heavy, thin]
+
+        let rows = HealthBreakdown.rows(for: health)
+        XCTAssertEqual(rows.map(\.name).first, DimensionDisplay.name(thin.name),
+                       "排序键是 contribution，第一行必须是贡献最小那个")
+        XCTAssertGreaterThan(try! XCTUnwrap(rows.last).lostPoints, rows[0].lostPoints,
+                             "夹具没做出分叉形状：这条判据就成了永真绿")
+        XCTAssertLessThan(rows[0].lostPoints, try! XCTUnwrap(rows.last).lostPoints,
+                          "第一行不是失分最多的一项 —— 所以它**不许**被叫作「按拖累程度排序」")
+    }
+
+    /// 副标题与 `rows` 的键必须同源：把「按拖累程度排序」写回界面 ⇒ 这条立刻红。
+    func test_componentTableSubtitleNamesTheActualSortKey() throws {
+        let path = Self.packageRoot.appendingPathComponent(
+            "Sources/TcoderMonitor/Views/Health/HealthComponentTable.swift").path
+        let source = Self.strippingComments(try String(contentsOfFile: path, encoding: .utf8))
+        XCTAssertTrue(source.contains("按加权贡献升序"), "副标题没写出真的排序键")
+        XCTAssertFalse(source.contains("按拖累程度排序"),
+                       "「拖累」这个词只能留给 lostPoints，别把它安到一个不是它的键上")
+        // 目录里那条键必须与源码字面量逐字相等（守卫 3 的同一条理由，这里提前拦住）
+        let catalog = try String(contentsOfFile: Self.packageRoot
+            .appendingPathComponent("Resources/en.lproj/Localizable.strings").path, encoding: .utf8)
+        XCTAssertTrue(catalog.contains("\"按加权贡献升序（得分 × 本次乘数），最小者在前\" ="))
+        XCTAssertFalse(catalog.contains("\"按拖累程度排序，贡献最低者在前\""),
+                       "旧键还留在目录里 = 译文烂尾，守卫 3 会红")
+    }
+
+    // MARK: - 靶子 3b：同一个日均频率不许声称两次贡献（台账 RD-29）
+
+    /// 优点句必须自带"这句不另加分"，否则曲线折算一次、优点卡再夸一次。
+    func test_steadyCadenceStrengthDisclaimsASecondContribution() throws {
+        let score = WeightedHealthScorer().score(HealthInputs(git: matureFastGit()))
+        let claim = try XCTUnwrap(score.strengths.first { $0.contains("提交节奏稳定") },
+                                  "日均 20 次、历史 400 天的仓库必须还能被说出台词，实得 \(score.strengths)")
+        XCTAssertTrue(score.components.first { $0.name == activityName }?.detail.contains("碎片化") == true,
+                      "夹具没落进折算区：这条判据现在测不到双计")
+        XCTAssertTrue(claim.contains("不另加分") || claim.contains("折算一次"),
+                      "同一事实的两处必须有一处承认自己不加第二次分，实得：\(claim)")
+    }
+
+    /// 反向：速率不高时压根不写这句优点（不许把"没到门槛"写成优点，也不许反过来偷偷放宽）。
+    func test_slowCadenceMakesNoSteadyClaimAtAll() {
+        let score = WeightedHealthScorer().score(HealthInputs(git: matureFastGit(commits: 20)))
+        XCTAssertFalse(score.strengths.contains { $0.contains("提交节奏稳定") },
+                       "日均 0.05 次不配这句，实得 \(score.strengths)")
+    }
+
+    /// 两处门槛必须同源一把尺子：曲线里再抄一个裸数字 `rate >= 8` 就是第二把尺子。
+    func test_fragmentationTurnComesFromTheSharedConstant() throws {
+        let path = Self.packageRoot.appendingPathComponent(
+            "Sources/TcoderMonitor/Services/Health/ScoreCurvesTeamRuntime.swift").path
+        let source = Self.strippingComments(try String(contentsOfFile: path, encoding: .utf8))
+        XCTAssertTrue(source.contains("rate >= GitCadenceEvidence.steadyCadenceCommitsPerDay"),
+                      "曲线不再引用共享常量 ⇒ 优点句与折算句会各拿一个数说同一件事")
+        XCTAssertFalse(source.contains("rate >= 8"), "裸数字 8 又回来了（值虽然一样，两处会各自漂）")
+    }
+
+    // MARK: - 靶子 3c：署名 ≠ 人数，且不许出现"拆署名提分"这种指标游戏
+
+    func test_authorCountsAreReportedAsIdentitiesNotHeadcount() throws {
+        let curve = HealthCurves.busFactor(risk: .low, topAuthorShare: 0.3,
+                                           activeAuthors: 4, commitBasis: 200)
+        XCTAssertTrue(curve.detail.contains("4 个活跃署名"), "曲线要写署名：\(curve.detail)")
+        XCTAssertFalse(curve.detail.contains("位活跃作者"), "实得 \(curve.detail)")
+
+        let spread = GitInsights(totalCommits: 400, commitsAnalyzed: 400, authors: [
+            author("WS-A", 100), author("WS-B", 100), author("WS-C", 100), author("WS-D", 100)
+        ])
+        let score = WeightedHealthScorer().score(HealthInputs(git: spread))
+        let strength = try XCTUnwrap(score.strengths.first { $0.contains("贡献分布合理") },
+                                     "四维各占 25% 必须能说出这句，实得 \(score.strengths)")
+        XCTAssertTrue(strength.contains("4 个署名") && strength.contains("不等于 4 个人"),
+                      "署名口径的诚实边界必须跟着这句一起上屏：\(strength)")
+        XCTAssertFalse(strength.contains("4 人，"), "不许把身份数写成人头：\(strength)")
+
+        let solo = WeightedHealthScorer().score(HealthInputs(git: GitInsights(
+            totalCommits: 400, commitsAnalyzed: 400,
+            authors: [author("Tcoder Team", 396), author("WS-B", 4)])))
+        let issue = try XCTUnwrap(solo.issues.first { $0.contains("单点风险高") },
+                                  "实得 \(solo.issues)")
+        XCTAssertTrue(issue.contains("署名") && issue.contains("「Tcoder Team」"), "实得 \(issue)")
+        XCTAssertFalse(issue.contains("一人承担"), "被点出的是一个署名，不是一个人：\(issue)")
+    }
+
+    /// 指标游戏禁令：评分侧任何文案都不许说"改署名/拆署名来提分"。
+    /// 元测试同批给出（坏样例必须能被这三个模式抓到），否则这条就是一条永真绿。
+    func test_noCopySuggestsGamingTheIdentityMetric() throws {
+        let banned = ["拆分署名", "拆成多个署名", "多开署名", "增加署名数", "提升评分", "把分提上去"]
+        let files = ["Services/Health/ScoreCurves.swift",
+                     "Services/Health/ScoreCurvesTeamRuntime.swift",
+                     "Services/Health/HealthTeamDimensions.swift",
+                     "Services/Health/HealthCodeDimensions.swift",
+                     "Services/Health/HealthRuntimeDimensions.swift",
+                     "Services/Health/WeightedHealthScorer.swift",
+                     "Views/Health/HealthComponentTable.swift",
+                     "Views/Health/HealthAdviceCards.swift",
+                     "Views/Health/HealthView.swift"]
+        var scanned = 0
+        for file in files {
+            let url = Self.packageRoot.appendingPathComponent("Sources/TcoderMonitor/" + file)
+            guard let raw = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            scanned += 1
+            let source = Self.strippingComments(raw)
+            for pattern in banned {
+                XCTAssertFalse(source.contains(pattern), "\(file) 出现指标游戏措辞「\(pattern)」")
+            }
+        }
+        XCTAssertEqual(scanned, files.count, "有文件读不到：这条判据的分母缩水了")
+        let sabotage = Self.strippingComments("// 建议：把提交拆成多个署名以\n增加署名数就能提升评分")
+        XCTAssertTrue(sabotage.contains("增加署名数") && sabotage.contains("提升评分"),
+                      "坏样例改不出来 = 这三个模式是摆设")
+    }
+
     // MARK: - 夹具
+
+    private func author(_ name: String, _ commits: Int) -> AuthorStats {
+        AuthorStats(name: name, email: "\(name)@tcoder.local", commits: commits,
+                    additions: commits * 10, deletions: commits, filesTouched: commits,
+                    firstCommitAt: nil, lastCommitAt: nil,
+                    activityByHour: Array(repeating: 0, count: 24), topDirectories: [:])
+    }
+
+    /// 历史够长（400 天）且频率越过折算门槛（默认 8000 笔 ⇒ 日均 20 次）。
+    private func matureFastGit(commits: Int = 8_000) -> GitInsights {
+        let last = Date(timeIntervalSince1970: 1_750_000_000)
+        return GitInsights(totalCommits: commits, commitsAnalyzed: commits,
+                           firstCommitAt: last.addingTimeInterval(-400 * 86_400),
+                           lastCommitAt: last,
+                           authors: [author("WS-A", commits / 3), author("WS-B", commits / 3),
+                                     author("WS-C", commits - commits / 3 * 2)])
+    }
 
     static var packageRoot: URL {
         URL(fileURLWithPath: #filePath)

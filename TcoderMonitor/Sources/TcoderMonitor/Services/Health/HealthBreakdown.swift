@@ -45,7 +45,14 @@ enum HealthBreakdown {
         component.weight > 0 ? component.weight : (baseWeight(of: component) ?? 0)
     }
 
-    /// 按拖累程度升序：贡献最低者在前，和 Xcode / Instruments 的排序习惯一致。
+    /// 排序键 = `contribution`（得分 × 本次归一乘数）**升序**，贡献最低者在前。
+    ///
+    /// ⚠ 这条**不是**按 `lostPoints`（乘数 ×（100 − 得分））排的，两个键在低权重维度上会分叉：
+    /// 权重 0.05 / 得分 20 只拖 4 分，权重 0.30 / 得分 60 拖 12 分，前者却排在前面。
+    /// 上一轮这里与页面上的副标题都写成"按拖累程度排序"，等于给一个不是拖累的键起了拖累的名字
+    /// （台账 RD-28）。修法选的是**改名字**而不是改键：换键会同时改到这张表的既有读法，
+    /// 而"哪一维拖得最多"本来就在贡献列的提示里逐行给着，不需要靠行序去暗示。
+    /// 界面副标题与这里必须由同一条守卫盯着（`ScoreWordingTests`）。
     static func rows(for health: HealthScore) -> [ScoreRow] {
         let present = health.components.reduce(0) { $0 + effectiveWeight($1) }
         guard present > 0 else { return [] }

@@ -35,7 +35,10 @@ extension HealthCurves {
             "日均 \(decimal(rate)) 次提交",
             recency.isEmpty ? "未提供最近提交时间" : recency,
             "累计 \(whole(totalCommits)) 次",
-            rate >= 8 ? "速率偏高按碎片化折算" : "",
+            // ⚠ 门槛**不许在这里再抄一个数字**：优点句「提交节奏稳定」与这句「速率偏高按碎片化折算」
+            // 说的是同一个数，两处各写一遍就会出现"一处当优点、一处当扣分理由"（台账 RD-29）。
+            // 两处现在同源于 `GitCadenceEvidence.steadyCadenceCommitsPerDay`（值仍是 8，没动过）。
+            rate >= GitCadenceEvidence.steadyCadenceCommitsPerDay ? "速率偏高按碎片化折算" : "",
             stalePenalty > 0 ? "陈旧扣 \(decimal(stalePenalty)) 分" : ""
         ])
         return CurveResult(score: score, detail: detail, risk: graded(score, 85, 65, 45, 25))
@@ -80,10 +83,12 @@ extension HealthCurves {
         let shareText = String(format: "%.0f%%", share * 100)
         let detail = joined([
             "最高作者占比 \(shareText)",
-            "\(whole(activeAuthors)) 位活跃作者",
+            // 「署名」不是「人数」（台账 RD-28）：`activeAuthors` 数的是 git 作者身份，
+            // 本仓按流署名 ⇒ 一个署名可能是一条工作流，也可能是同一个人在两台机器上。
+            "\(whole(activeAuthors)) 个活跃署名",
             "\(whole(commitBasis)) 次非合并提交",
-            share >= 0.7 ? "单人包揽重扣 22 分" : "",
-            singlePoint ? "单点作者封顶 8 分" : ""
+            share >= 0.7 ? "单一署名包揽重扣 22 分" : "",
+            singlePoint ? "单一署名封顶 8 分" : ""
         ])
         return CurveResult(score: score, detail: detail, risk: risk)
     }
