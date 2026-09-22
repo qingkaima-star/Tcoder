@@ -252,8 +252,21 @@ enum MissingDimensionReason {
         code == nil ? "「\(analyzer)」没有产出代码指标。" : nil
     }
 
+    /// Git 那一路的缺席要分**三档**，合成一句就把输入状态弄丢了：
+    /// ① `git == nil` = 不是仓库 / 没取到历史；② 是仓库但一笔提交都没有；
+    /// ③ 有提交，但非合并口径一笔都没有 ⇒ 作者分布没有总体。
+    /// 第③档以前落到兜底句「「Git 分析」完成但该分量未产出」，读分的人看不出
+    /// "这一维为什么不参与计分"（工单 R9 靶子 1 要求上屏能看出这件事）。
+    /// ⚠ 这句只对「协作分布」成立：活跃度那一维的缺席条件是 `totalCommits == 0`，
+    /// 走到第③档时它已经在计分、不会来问原因（`WeightedHealthScorer.busFactorOutcome`）。
     private static func gitAbsence(git: GitInsights?) -> String? {
-        git == nil ? "该目录不是 Git 仓库，或未取到提交历史。" : nil
+        guard let git else { return "该目录不是 Git 仓库，或未取到提交历史。" }
+        guard git.totalCommits > 0 else { return "该仓库没有任何提交，Git 两维都没有输入。" }
+        guard git.authorBasisCommits > 0 else {
+            return "含合并共 \(NumberFormat.grouped(git.totalCommits)) 笔提交里没有一笔非合并提交，"
+                + "作者分布没有可算的总体，本维度不参与计分。"
+        }
+        return nil
     }
 
     /// 唯一要分两档的一维：`logs == nil`（没分析过）与「分析了但一行没读到」是两件事，

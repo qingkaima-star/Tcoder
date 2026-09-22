@@ -45,9 +45,25 @@ extension HealthCurves {
 
     /// `commitBasis` 是**作者统计的总体**（非合并提交数），不是 `totalCommits`（含合并）。
     /// 分子 `topAuthorShare` 来自作者表，分母若换成含合并的总数就是两个总体相除（缺陷 #44）。
+    ///
+    /// ⚠️ **`commitBasis == 0` 这一支在生产路径上不可达**（WS-R9 实测，台账 RD-29 的结案）：
+    /// 唯一调用方 `WeightedHealthScorer.busFactorOutcome` 现在把"没有可算作者分布的总体"
+    /// 直接判成整维缺席（`curve: nil` ⇒ `HealthBreakdown.missingDimensions`），压根不进来这里；
+    /// 而 `authorBasisCommits` 是作者表求和、每个署名至少 1 笔，`topAuthor == nil` 时上面那条
+    /// 守卫也已经把维度摘掉了。**结构上也没有"0 笔非合并提交却有提交"的仓库**：
+    /// `git log --no-merges` 至少返回那个根提交（`.scratch/r9-fixture/` 的合并夹具实测：
+    /// 1 笔非合并 + 19 次合并 ⇒ 总体 20，不是 0）。所以这里**不保留任何占位分**。
+    ///
+    /// 旧写法是 `score 70 + 「提交记录过少，暂不评估协作分布」` —— 话说不评估、数照进加权。
+    /// 现在这条只剩一个用途：**万一守卫被改动、0 真的漏进来，宁可当场把综合分砸出一个
+    /// 显眼的 0/严重风险，也绝不再悄悄抬一手**（fail-loud 而不是 fail-open）。
+    /// 没有用 `assertionFailure`：本文件的直接调用方还包括单测
+    /// （`HealthScoreCurvesTests` 就拿 `commitBasis: 0` 敲过一次边界），
+    /// 在测试进程里 trap 等于把别人那条用例改成崩溃。
     static func busFactor(risk: RiskLevel, topAuthorShare: Double, activeAuthors: Int, commitBasis: Int) -> CurveResult {
-        if commitBasis == 0 {
-            return CurveResult(score: 70, detail: "提交记录过少，暂不评估协作分布", risk: .none)
+        if commitBasis <= 0 {
+            return CurveResult(score: 0, detail: "作者分布总体为 0，本维度不该计分（内部守卫）",
+                               risk: .critical)
         }
         let base = ScoreCurve.piecewise(Double(risk.rank), through: [
             (x: 0, score: 100), (x: 1, score: 88), (x: 2, score: 62), (x: 3, score: 28), (x: 4, score: 10)

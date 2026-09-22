@@ -66,16 +66,33 @@ extension WeightedHealthScorer {
     // MARK: - 协作分布
 
     func busFactorOutcome(_ inputs: HealthInputs) -> DimensionOutcome {
-        guard let git = inputs.git, let top = git.topAuthor, git.totalCommits > 0 else { return .absent }
+        guard let git = inputs.git, git.totalCommits > 0 else { return .absent }
+        // 「没有可算作者分布的总体」必须在**这里**判成整维缺席，不能留给曲线兜一个占位分：
+        // 旧写法是 `max(git.authorBasisCommits, 1)`，把 0 折成"1 笔非合并提交"再算占比 ——
+        // 那一笔还是根提交本身，等于拿一条记录冒充一个分布（台账 RD-29 的同族形态）。
+        // 现在走 `stability` / `dependencies` 已经在用的那条路：`curve: nil` ⇒
+        // 进 `HealthBreakdown.missingDimensions`（界面与 CLI 都点名原因），份额按在场维度等比摊入。
+        guard let top = git.topAuthor, git.authorBasisCommits > 0 else {
+            return DimensionOutcome(curve: nil, recommendations: [BusFactorAdvice.noAuthorBasis(git)])
+        }
         // 分母必须是作者表的总体（非合并），见 `GitInsights.authorBasisCommits`。
         // 用 totalCommits（含合并）会把 91% 的集中度算成 51%（缺陷 #44）。
-        let basis = max(git.authorBasisCommits, 1)
+        let basis = git.authorBasisCommits
         let share = Double(top.commits) / Double(basis)
         let curve = HealthCurves.busFactor(risk: git.busFactorRisk, topAuthorShare: share,
                                            activeAuthors: git.activeAuthorCount, commitBasis: basis)
         return DimensionOutcome(curve: curve,
                                 strengths: busFactorStrengths(git, share),
                                 issues: busFactorIssues(top, share))
+    }
+
+    /// 这一维缺席时**必须出声**：只把它从分量表里摘掉，读分的人看到的是"少了一维"，
+    /// 而不是"这一维为什么没算"。（与 `StabilityAdvice.missingLogAdvice` 同一形态。）
+    private enum BusFactorAdvice {
+        static func noAuthorBasis(_ git: GitInsights) -> String {
+            "作者表里没有可算分布的提交（非合并口径 0 笔，含合并共 \(NumberFormat.grouped(git.totalCommits)) 笔），"
+                + "协作分布不参与本次计分；这一维读的是「署名分布」，要有非合并提交才谈得上分散与否。"
+        }
     }
 
     private func busFactorStrengths(_ git: GitInsights, _ share: Double) -> [String] {
