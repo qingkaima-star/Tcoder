@@ -35,9 +35,23 @@ enum PerfHitchScan {
     /// `fileExists` / `attributesOfItem` / `contentsOfDirectory` / `Data(contentsOf:` /
     /// `String(contentsOf:` / `stat(` / `lstat(` / `FileManager`——
     /// **只匹配 `stat(` 会得到一条永真绿守卫**（本仓实际写法是 `attributesOfItem(atPath:)`）。
+    ///
+    /// 【2026-09-22 拆掉一条被混用的尺子】原来 `dynamicNSColor` 一条同时承担两件事，
+    /// 而它们的终点方向相反：
+    /// - **构造**（`Color(nsColor:` / `NSColor(name:`）＝ 每次渲染现造一份色 ⇒ 真债，终点 0；
+    /// - **引用**（`.textColor` 等）＝ 读一个 init 里算好的 `let` ⇒ **不是债**，
+    ///   只是"渲染路径有多依赖令牌"的读数。
+    /// 混在一起的后果是实测出来的：`dynamicNSColor` 顶到 62/62 零余量后，
+    /// 任何人在 body 里新写一处**正确**的令牌取色都会把闸门打红；
+    /// 而真正的债形状 `Color(nsColor:`（已有 2 处）**一条规则都不抓**
+    /// （`directFormatters` 的模式只列 `NSColor|DateFormatter|NumberFormatter`，
+    /// `Color(` 不在其中）。⇒ 一条尺子量两种反向的东西，结果是**该红的漏了、该绿的挡路**。
     static let rules: [(name: String, pattern: String)] = [
         ("directFormatters", #"(?<![\w.])(?:NSColor|DateFormatter|NumberFormatter)\s*\("#),
-        ("dynamicNSColor", #"\.(?:textColor|graphicColor|badgeFill|onFillColor)\b"#),
+        // 渲染路径里现造动态色：`Color(nsColor: …)` 与 `NSColor(name: …) { }`。
+        // 只算构造点，不算引用点——引用的是 init 里缓存好的 `let color`，见上面那段。
+        ("dynamicColorConstruction", #"(?<![\w.])(?:Color\(nsColor:|NSColor\(name:)"#),
+        ("tokenReference", #"\.(?:textColor|graphicColor|badgeFill|onFillColor)\b"#),
         // 尾随闭包 `.sorted { … }` 与带参 `.sorted(by:)` 都是全量排序，两个形状都要抓：
         // 只写 `\.sorted\s*\(` 会漏掉尾随闭包那种写法，而 `badSamples` 里用的正是它——
         // 元测试 `testScannerFiresOnBadSamples` 就是靠这个把"规则过窄"照出来的。
@@ -53,11 +67,20 @@ enum PerfHitchScan {
 
     /// 每条规则的坏样例（元测试用）。I/O 那条特意用**仓库里真实存在的形状**
     /// `attributesOfItem(atPath:)`，而不是 `stat(`。
+    ///
+    /// `tokenReference` 是个例外：它的样例**不是违例**，只是"正则还能打中形状"的探针——
+    /// 引用缓存令牌本来就是要鼓励的写法（见 `rules` 上面那段）。
+    /// 之所以仍要求配样例：这条规则的名字刚从 `dynamicNSColor` 改过，
+    /// 一旦模式退化，读数会静默变成 0，而"0 处引用"看起来像"页面不依赖令牌了"，
+    /// 比红更难发现。
     static let badSamples: [(String, [String])] = [
         ("directFormatters", [#"let c = NSColor(name: nil) { _ in .black }"#,
                               "let formatter = DateFormatter()",
                               "let nf = NumberFormatter()"]),
-        ("dynamicNSColor", ["Text(\"x\").foregroundStyle(role.textColor)",
+        ("dynamicColorConstruction", ["let ink = Color(nsColor: .separatorColor)",
+                                      "return Color(nsColor: NSColor(name: nil) { ap in .black })",
+                                      "let fill = NSColor(name: nil) { _ in .red }"]),
+        ("tokenReference", ["Text(\"x\").foregroundStyle(role.textColor)",
                             "LineMark(x: .value(\"t\", p.t)).foregroundStyle(series.graphicColor)",
                             "RoundedRectangle().fill(state.badgeFill)",
                             "Image(systemName: \"x\").foregroundStyle(colorSet.onFillColor)"]),

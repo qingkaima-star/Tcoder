@@ -11,91 +11,6 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         self.fallbackOptions = options
     }
 
-    /// 一次扫描的「看到了多少、被哪条上限切掉了多少」。
-    ///
-    /// 背景（WS-D 诚实性审计 P1 #7）：扫描器本来就维护 `truncatedByMaxFiles` /
-    /// `visitedFileCount` / `skippedFileCount`，但原先 `analyze` 只取 `scan.files`，
-    /// 四个字段连同「2MB 单文件上限、30 项 skipDirectories、扩展名白名单、20 万行/文件截断」
-    /// 一起被丢掉，UI 于是把一份**部分测量**呈现成完整测量。这里一个都不再丢。
-    ///
-    /// 契约缺口**已闭合**（批次 P7-C 3-2）：`CodeMetrics.scanLimitations` 承接
-    /// `limitationSummary`，代码规模页据此挂一条"本次是部分测量"的提示。
-    struct CodeScanCoverage: Sendable {
-        var visitedEntryCount: Int
-        var includedFileCount: Int
-        var skippedFileCount: Int
-        var truncatedByMaxFiles: Bool
-        var maxFiles: Int
-        var maxFileBytes: Int
-        /// 超过 20 万行、只统计了前 20 万行的文件数
-        var lineTruncatedFileCount: Int
-        /// 归一化行数触到重复检测滑窗上限（2 万行/文件）而被丢弃后半部分的文件数
-        var filesHittingDuplicateLineCap: Int
-        /// 因每指纹片段预算而未展开成明细片段的拷贝窗口数
-        var duplicateFragmentsDroppedByBudget: Int
-        /// 榜单截断到 20 块时丢掉的块数与它们覆盖的行数
-        var duplicateBlocksDroppedByCap: Int
-        var duplicateLinesOutsideReportedBlocks: Int
-        /// 遍历中读不动的目录数（权限 / 竞态消失）。这些子树里的文件**一个都没看到**，
-        /// 与"看了、没有"是两件事 —— 见 `SourceScanResult.unreadableDirectoryCount`。
-        var unreadableDirectoryCount: Int = 0
-        var skipLedger: SourceSkipLedger = SourceSkipLedger()
-
-        /// 有任一**上限**真的生效过 ⇒ 这份数字是部分测量，UI 不得当成全量展示。
-        /// 注意不含「按规则主动排除」：跳过 vendor/二进制是范围定义，不是被截断。
-        var isPartial: Bool {
-            truncatedByMaxFiles || lineTruncatedFileCount > 0 || skippedFileCount > 0
-                || filesHittingDuplicateLineCap > 0 || duplicateFragmentsDroppedByBudget > 0
-                || duplicateBlocksDroppedByCap > 0 || unreadableDirectoryCount > 0
-        }
-
-        /// 有多少条目是按规则排除的（范围问题），与「被上限切掉」分开报，两件事混在一起用户就没法判断偏差方向。
-        var excludedEntryCount: Int { skipLedger.skippedFileTotal }
-        var excludedLineCount: Int { skipLedger.skippedLineTotal }
-
-        /// 完整的「少掉的部分去哪了」清账，一行一条原因。`skipLedgerAuditRan` 为 false 时
-        /// 如实标注行数未统计，不会把 0 当成「这些文件没有行」。
-        func skipClearing() -> [String] {
-            skipLedger.clearing(linesCounted: skipLedger.linesCounted)
-        }
-
-        /// 逐条带真实数字的限制说明，供横幅/脚注直接展示。
-        var limitationSummary: [String] {
-            var lines: [String] = []
-            if truncatedByMaxFiles {
-                lines.append("达到单次扫描文件上限 \(NumberFormat.grouped(maxFiles))，其余文件未读，结果偏小。")
-            }
-            if lineTruncatedFileCount > 0 {
-                lines.append("\(NumberFormat.grouped(lineTruncatedFileCount)) 个文件超过 20 万行，只统计了前 20 万行。")
-            }
-            if skippedFileCount > 0 {
-                lines.append("\(NumberFormat.grouped(skippedFileCount)) 个文件被跳过（超过 \(ByteFormat.string(UInt64(maxFileBytes))) 单文件上限、二进制或语言表未收录）。")
-            }
-            if skipLedger.skippedFileTotal > 0 {
-                // 逐条原因的清账（条数 + 体积 + 行数到底统没统计），顶掉以前那句
-                // 「另有 N 个条目按规则未纳入统计。」—— 那句只给一个总数，读者既不知道
-                // 少在哪一类，也无从知道"行数"是没数还是数了是 0。
-                // 审计模式（`countSkippedLines`）要额外读盘、预算 400 MB，产品默认不开：
-                // 这一页的性能预算留给杀手功能，但**没数过就得写没数过**。
-                lines.append(contentsOf: skipClearing())
-            }
-            if unreadableDirectoryCount > 0 {
-                lines.append("\(NumberFormat.grouped(unreadableDirectoryCount)) 个目录读不动（权限不够或已消失），"
-                    + "这些子树里的文件一个都没看到 —— 少掉的不是数量，是**看过的范围**。")
-            }
-            if filesHittingDuplicateLineCap > 0 {
-                lines.append("\(NumberFormat.grouped(filesHittingDuplicateLineCap)) 个文件的重复检测只看前 2 万归一化行。")
-            }
-            if duplicateFragmentsDroppedByBudget > 0 || duplicateBlocksDroppedByCap > 0 {
-                lines.append("重复率按全量命中计算，但明细榜单截断到 20 块、片段展开受指纹预算限制"
-                    + "（本次未展开 \(NumberFormat.grouped(duplicateFragmentsDroppedByBudget)) 处拷贝、"
-                    + "未列出 \(NumberFormat.grouped(duplicateBlocksDroppedByCap)) 个块 / "
-                    + "\(NumberFormat.grouped(duplicateLinesOutsideReportedBlocks)) 行）。")
-            }
-            return lines
-        }
-    }
-
     func analyze(root: URL, options: ScanOptions) async throws -> CodeMetrics {
         try await analyzeWithCoverage(root: root, options: options).metrics
     }
@@ -106,6 +21,11 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
     }
 
     /// 与 `analyze` 同一次遍历、同一批数据，额外带回覆盖度；不重复扫描。
+    ///
+    /// `scanLimitations` 在这里拼两段：`limitationSummary`（**扫描范围**：哪些上限真的生效过）
+    /// 加 `JavaSignatureDeclines.notes`（**识别覆盖面**：轻量正则认不出的 Java 形状）。
+    /// 两段共用同一条纪律——零命中不出声，否则「没测到」会长成「这个文件没有复杂函数」。
+    /// 本函数体停在 50 行口径内（`CodeComplexityDebtTests`），要补理由请补到上面的文档注释里。
     func analyzeWithCoverage(root: URL, options: ScanOptions) async throws -> AnalysisOutcome {
         let startedAt = Date()
 
@@ -117,14 +37,17 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         let scan = await SourceTreeScanner(options: options).scan(root: root)
         let files = scan.files
 
-        let functionTask = Task.detached(priority: .userInitiated) { () -> [[FunctionCandidate]] in
-            files.map { ComplexityEngine.functions(in: $0) }
+        let functionTask = Task.detached(priority: .userInitiated) { () -> [ComplexityEngine.FunctionScanOutcome] in
+            files.map { ComplexityEngine.functionsWithIntegrity(in: $0) }
         }
         let duplicationTask = Task.detached(priority: .userInitiated) { () -> DuplicationResult in
             DuplicationEngine.analyze(files)
         }
-        let functionsPerFile = await functionTask.value
+        let functionOutcomes = await functionTask.value
+        let functionsPerFile: [[FunctionCandidate]] = functionOutcomes.map(\.candidates)
         let duplication = await duplicationTask.value
+        // R2：逐文件词法读数汇总成「这一路的测量范围」；只报一处会把其余文件藏起来。
+        let lex = ComplexityEngine.LexAggregate.accumulate(functionOutcomes)
 
         var metrics = CodeMetrics()
         metrics.scannedAt = startedAt
@@ -135,24 +58,10 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             duplication: duplication,
             to: &metrics
         )
-        let coverage = CodeScanCoverage(
-            visitedEntryCount: scan.visitedFileCount,
-            includedFileCount: scan.scannedFileCount,
-            skippedFileCount: scan.skippedFileCount,
-            truncatedByMaxFiles: scan.truncatedByMaxFiles,
-            maxFiles: options.maxFiles,
-            maxFileBytes: options.maxFileBytes,
-            lineTruncatedFileCount: scan.lineTruncatedFileCount,
-            filesHittingDuplicateLineCap: duplication.filesHittingLineCap,
-            duplicateFragmentsDroppedByBudget: duplication.fragmentsDroppedByBudget,
-            duplicateBlocksDroppedByCap: duplication.blocksDroppedByCap,
-            duplicateLinesOutsideReportedBlocks: duplication.linesOutsideReportedBlocks,
-            unreadableDirectoryCount: scan.unreadableDirectoryCount,
-            skipLedger: scan.skipLedger
-        )
+        let coverage = Self.coverage(from: scan, duplication: duplication, options: options, lex: lex)
         // 契约接入（P7-C 3-2）：判据用 `limitationSummary` 非空而不是 `isPartial` —— 前者还含
         // 「按规则排除了多少条目」这类**范围**事实，读者要知道数字是在什么范围内测出来的。
-        let limits = coverage.limitationSummary
+        let limits = coverage.limitationSummary + ComplexityEngine.JavaSignatureDeclines.notes(for: files)
         metrics.scanLimitations = limits.isEmpty ? nil : limits
         return AnalysisOutcome(metrics: metrics, coverage: coverage)
     }
@@ -204,6 +113,11 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         metrics.hugeFiles = Array(huge.prefix(20))
 
         let hotspots = hotspots(files: files, functionsPerFile: functionsPerFile)
+        // 高档个数必须从**全体**函数算，不能事后在榜上 filter：
+        // 榜只留前 20，仓库越大越会把"高复杂度 N 个"报小（与"榜长冒充总数"同一条病）。
+        // ⚠️ 这里的 `hotspots` 名字有误导性：它**不做筛选**，条数 = 被识别函数总数，
+        //    所以不要把它当"热点总数"落任何字段（详见 `CodeMetrics.highRiskHotspotCount` 的说明）。
+        metrics.highRiskHotspotCount = hotspots.filter { $0.risk.rank >= RiskLevel.high.rank }.count
         metrics.topComplexFunctions = Self.rankedHotspots(hotspots)
         applyFunctionMetrics(functionsPerFile.flatMap { $0 }, to: &metrics)
 
@@ -213,6 +127,32 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             metrics: metrics,
             hotspotCount: hotspots.count,
             longestFileLines: largest
+        )
+    }
+
+    /// 覆盖度台账的装配。从 `analyzeWithCoverage` 里搬出来只为一件事：
+    /// 那条链路本身只有「扫 → 两路并行 → 摆字段」四步，摊在一起就成 60 行的超长函数了
+    /// （本包的自扫门 `CodeComplexityDebtTests` 管这条）。
+    private static func coverage(from scan: SourceScanResult, duplication: DuplicationResult,
+                                 options: ScanOptions, lex: ComplexityEngine.LexAggregate) -> CodeScanCoverage {
+        return CodeScanCoverage(
+            visitedEntryCount: scan.visitedFileCount,
+            includedFileCount: scan.scannedFileCount,
+            skippedFileCount: scan.skippedFileCount,
+            truncatedByMaxFiles: scan.truncatedByMaxFiles,
+            maxFiles: options.maxFiles,
+            maxFileBytes: options.maxFileBytes,
+            lineTruncatedFileCount: scan.lineTruncatedFileCount,
+            filesHittingDuplicateLineCap: duplication.filesHittingLineCap,
+            duplicateFragmentsDroppedByBudget: duplication.fragmentsDroppedByBudget,
+            duplicateBlocksDroppedByCap: duplication.blocksDroppedByCap,
+            duplicateLinesOutsideReportedBlocks: duplication.linesOutsideReportedBlocks,
+            unreadableDirectoryCount: scan.unreadableDirectoryCount,
+            lexIntegrity: lex.integrity,
+            lexAnomalousFileCount: lex.anomalousFileCount,
+            unboundedFunctionSignatureCount: lex.unboundedSignatureCount,
+            vueRegionFallbackFileCount: lex.vueRegionFallbackFileCount,
+            skipLedger: scan.skipLedger
         )
     }
 

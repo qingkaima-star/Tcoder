@@ -389,13 +389,25 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
   - **T5 的"零"到底指什么（2026-09-20 23:35 明写，防止被读成"把令牌引用删光"）**。
     C 包落地后 `ColorToken`/`ThemeTokens` 的 `color`/`font` 已是**存储常量**，
     守卫里 `dynamicNSColor` 那条正则量的东西随之变了：**不再是"每 tick new 多少个 `NSColor`"，
-    而是"渲染路径里引用令牌成员的次数"**。所以四条禁则的终点并不一样：
-    | 规则 | 现量/上限 | 终点 | 为什么 |
+    而是"渲染路径里引用令牌成员的次数"**。
+  - **2026-09-22：那条混用的尺子已经拆成两条。** 上面这段"语义变了"的结论是对的，
+    但当时**只改了说明、没改尺子**，于是留下两个方向的失效，都是实测撞出来的：
+    ① `dynamicNSColor` 顶到 62/62 零余量后，谁在 body 里新写一处**正确**的令牌取色就把闸门打红；
+    ② 真正该拦的现造形状 `Color(nsColor: …)` **一条规则都不抓**
+    （`directFormatters` 的模式只列 `NSColor|DateFormatter|NumberFormatter` 后跟 `(`，`Color(` 不在内），
+    现扫立刻抓到 2 处（`Views/Shell/SidebarRows.swift`、`Views/Shell/ProjectSidebar.swift`）。
+    ⇒ 拆成 `dynamicColorConstruction`（现造＝债，终点 **0**）与 `tokenReference`（引用＝**读数**，终点不是 0）。
+    另记一条反面教训：那 8 处 `Design/**` 的引用曾被读成"性能侧还有一趟缓存化可做"，
+    实际 `role(for:)` 返回 `static let`、`.textColor` 读的是 init 里算好的 `let color`——
+    **去做这趟只会把 62 抬成 54 而运行时一个字节都不省，是假还债。**
+    所以五条禁则的终点并不一样：
+    | 规则 | 现量/上限（2026-09-22 复扫） | 终点 | 为什么 |
     |---|---|---|---|
     | `directFormatters` | 1/1 | **0** | 真违规：渲染路径里现造 formatter |
-    | `fullSort` | 10/10 | **0** | 真违规：body 内全量排序（缓存或挪到 publish） |
+    | `dynamicColorConstruction` | 2/2 | **0** | 真违规：渲染路径里现造动态色（2026-09-22 起才有尺子；归 UI 流） |
+    | `fullSort` | 9/9 | **0** | 真违规：body 内全量排序（缓存或挪到 publish） |
     | `syncFileIO` | 2/2 | **0** | 真违规：body 内 `exists`/`attributesOfItem` |
-    | `dynamicNSColor` | 59/59（2026-09-21 复拧） | **不是 0** | 取色本身没错，错的是"每次访问现造"。达标判据换成两件事：① `Design/**` 里不许再出现 `var color: Color {` 这类计算属性（已有守卫）；② 引用点不许嵌在 O(n) 循环 / Mark 闭包里重复求值（棘轮只减不增 + 人工核）。 |
+    | `tokenReference` | 62/62 | **不是 0** | 旧名 `dynamicNSColor`。取色本身没错，错的是"每次访问现造"。达标判据换成两件事：① `Design/**` 里不许再出现 `var color: Color {` 这类计算属性（已有守卫）；② 引用点不许嵌在 O(n) 循环 / Mark 闭包里重复求值（只减不增 + 人工核）。 |
     **不许为了凑"零动态色"去删令牌引用**——那会同时砸掉观感一致性与 T8（颜色承载语义），
     属于"为了指标改语义"，是本规范第一条禁止的事。
 - **T6 合成层预算**：内容层 0 填充、投影只给 `.floating`、每屏材质/backdrop 层 ≤ 2。
@@ -411,16 +423,31 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 
 ## 4. 尺子（M0 先落，先量后改）
 
-1. `scripts/perf_harness.sh`（新）：六档，全部只读——`idle`（attach 现有实例，录 Animation Hitches +
-   Time Profiler，**期间不碰它**）、`interact`（录法同 idle，唯一区别是**期间人持续滚动**）、
-   `switch`（逐页冷启动）、`report`（重打已有目录）、`probe`（读 `FramePulse` 脉冲）、
+1. `scripts/perf_harness.sh`（新）：**七档**，全部只读——`idle`（attach 现有实例，录 Animation Hitches +
+   Time Profiler，**期间不碰它**）、`interact`（录法同 idle，唯一区别是**期间持续有滚动**：
+   真人或 `INPUT=synth` 的 CGEvent 投递）、`switch`（逐页冷启动）、`report`（重打已有目录）、
+   `probe`（读 `FramePulse` 脉冲，`--start` 可现采）、`pulse`（**边投合成滚动边读全部帧的间隔分位数**）、
    `selfcheck`（拿合成夹具验尺子自己）。解析封装在 `xctrace export --xpath` 逐表导出 +
    `perf_trace_xml.py`（id/ref 解引用）/ `perf_trace_metrics.py`（统计与 §1 基线）/ `trace_report.py`（子命令），
    出一张固定形状的结果表（hitch 数、hitch/s、帧时长分布、app-update 分布、`potential-hangs`、
    主线程热点 Top20、按线程样本数）。**表头第一行写「测量期间」**：`idle` 那批明说
    "只答心跳期，不许拿去交 T1"，`interaction` 那批才标"有资格答 T1"——两批数同形状不同含义，
    不写进表头就一定会有人混着用（本仓反复踩的"口径不对齐"）。输出目录**必须带短 HEAD 后缀**
-   （`/tmp/tcoder-perf-<rev>/`），否则后一批覆盖前一批。
+   （`$SCRATCH/tcoder-perf-<rev>/`，即仓库内被忽略的 `.scratch/`），否则后一批覆盖前一批。
+
+   ### 4.0 每条判据由哪个仪器回答（2026-09-22 补，因为发现有一条压根没人量）
+
+   | 判据（验收句里的半句） | 直接仪器 | 说明 |
+   |---|---|---|
+   | 交互期 **hitch 帧 = 0** | xctrace `hitches` 表（`interact` 档） | 它只列**超预算**的那些帧 |
+   | **p95 帧间隔 ≤ 8.4 ms** | **只有 `FramePulse`**（`pulse` 档 / `probe` 档） | 这是**全部帧**的分位数；hitches 表没有这一列，`displayed-surfaces-per-second` 也只有"每秒几张"——09-22 之前这条**没有任何仪器在量** |
+   | 1.5 s 心跳主线程占用 ≤ 4.0 ms | xctrace `hitches-updates`（`idle` 档） | 逐次 update 时长；只用 max 判会同时说反两件事（见 §1.6） |
+   | body/Mark 零动态色/零排序/零同步 I/O | 静态守卫 `PerfHitchGuardTests` + 台账 | 每条打"现量/上限"并逐条可点名 |
+
+   ⇒ 交叉核对的义务：`pulse` 读的是 **CVDisplayLink 回调送达时刻**，不等于"上屏时刻"。
+   同一次 `interact` 采样里的 `displayed-surfaces-per-second` 是独立第二把尺子
+   （若出帧 ≈120/s 而 p95 仍 9.1 ms，说明尾巴在回调时序而非呈现上），
+   两者不一致时**谁都不许单独宣布达标或未达标**。
    **不设合成输入的 `scroll` 档**（原计划里有，现撤）：合成滚轮要 `CGEvent.post`，而本机 System Events
    权限被拒（§4.1 探测时实测），事件会被静默丢弃——那会造出"交互期 0 hitch"的**假绿**。
    交互由人真滚，`interact` 档负责把它标成交互期样本。
@@ -622,6 +649,28 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 | ~~`ProjectStore` 的主线程编码+落盘~~ | 已量：单次 0.5 ms（见上表） | **结案：不改**。原先"缺绝对值"这个理由已经不成立，现在成立的是"绝对值小到不值得动它，而动它要引入丢报告风险" |
 | ~~`ProjectStore.load()` 启动同步解码 4 份报告~~ | 已量：1.3 ms（见上表） | **结案：不改**，占冷启动预算 0.13% |
 
+**2026-09-22 16:16 独立复量（`ProjectStoreCostProbeTests`，真数据沙箱）**：把真实支持目录整份拷进
+`TCODER_SUPPORT_DIR` 沙箱跑生产代码路径本身 ⇒ 上面两行的**结案成立**，并且补了此前没人量过的那一路：
+
+| 事件（都在主 actor 上） | 实测 | 占一帧预算（8.33 ms） |
+|---|---|---|
+| 切项目 `setSelectedProject` → `persist()` | **0.40 ms** | 4.8% |
+| 记分 `recordScore` → 全量历史落盘 | **0.29 ms** | 3.5% |
+| 扫描完成 `upsertReport`（42 KB 那份） | **1.18 ms** | 14% |
+| 扫描完成 `upsertReport`（**最大 104,913 B**） | **1.41 ms** | 17% |
+| 连续 5 次 upsert 累积 | 4.97 ms | 每次 ≈1 ms |
+
+三点必须一起读，否则这组数会被用错：
+1. **`load` 两次数不一样不是尺子分叉，是总体不同**：上表 1.3 ms 量的是"4 份报告"，
+   我这次沙箱里有 6 份 / 272 KB ⇒ 4.99 ms（另一次冷启动 7.19 ms）。
+   ⇒ 谁看到两个数都别去"调平"，要动的是**说明它量的是哪份数据**（这一类错证据本仓记过二十次）。
+2. **别外推**：我先按"字节数线性"估最大那份约 4.8 ms（那就意味着要动异步化了），
+   实测 **1.41 ms**，差了 **3.4 倍** ⇒ 这类"要不要改架构"的决定只能靠量，不能靠比例推算。
+3. **`load` 是启动一次性成本**，不进心跳期也不进交互期 ⇒ 它归 T4（冷启动 ≤1.0 s，占 0.5%），
+   **不许**拿它去解释帧率；交互期真正相关的是 0.40 ms 那一行。
+⇒ 持久化这条轴**结案并有独立复量**：不改。省下的人力应该花在还开着的两条上——
+   16 处粗读点（细粒度消费仍 0 处）与渲染路径那 14 处（见工单 §P）。
+
 ## 6. 验收判据（改完必须交这些）
 
 1. `perf_harness.sh idle` + `report` 的改后读数，与**§1.3 重定后的受控基线**逐列同形状对齐（**不是** run1 那张未受控的表）：
@@ -644,15 +693,39 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 
 | 判据 | 现在的资格 | 为什么 |
 |---|---|---|
-| T1 交互期 hitch=0 / p95≤8.4 ms | **零个有资格样本** | 三批历史 `period=interaction` 全部没有收尾复核字段或复核判"整窗没人"；新闸门下正在重采（合成输入会显式标 `input_source=synth`，不冒充手感） |
-| T2 心跳期占用 ≤4.0 ms | **待重测**（旧数 1.6/1.5/1.7 ms 只算历史读数） | 原始产物在 2026-09-21 的清盘里被删（`/tmp/tcoder-perf-*` 命中 0）；且 main 之后又并了 P7-D，旧绿灯对应的不是当前头部 |
-| T4 冷启动 ≤1.0 s 九页 | **待重测**（旧数 764~845 ms 同上） | 同上：产物没了 + 头部变了 |
-| body/Mark 零动态色/零排序/零同步 I/O | **未达标，存量在 UI 流名下** | `dynamicNSColor 64`、`fullSort 10`、`syncFileIO 2`、`directFormatters 1`；粗读点 16/16 未迁、细粒度契约消费 0 处 |
-| 诚实性语义不降级 | 守住并在加长 | 期间自我矛盾样本 rc=3、哨兵不可当读数、磁盘/空值一律判不合格、样本根必须被 git 忽略（第 23 项） |
+| T1 交互期 hitch=0 / p95≤8.4 ms | **两半句都要重开**：`0 丢帧`已成立；`p95` 这条**未达标但待交叉核对** | `pulse` 档三趟 ×20 s、**7 513 帧**（rev `70af045`、release、synth@8ms≈125Hz）：p50 8.33 / p95 **9.12 / 9.26 / 8.98** / p99 ~9.3 / **max 9.35 ms**，`hitch(>1.5×)=0 次`（580 拍全 0）⇒ **没有任何一帧晚到 12.5 ms**（这半句成立）。p95 这一半：**按 8.41 ms 判是未达标**，但结论悬在一件没定的事上——p50 恰好 8.33、p95 8.98~9.26、max 9.35 ⇒ **有一大片帧比一个周期晚了约 1 ms**；若 CVDisplayLink 回调送达时刻与真正上屏时刻同形，"未达标"成立；若回调本身系统性偏晚约 1 ms，这 1 ms 要从读数里扣掉、结论翻转（工单 §M）。**交叉核对完成之前，两种结论都不许写进验收**。<br>**两件事没做完，不许把它当结论**：① 这一列只有 CVDisplayLink 一把仪器在量，回调送达时刻≠上屏时刻，必须用同批 xctrace 的 `displayed-surfaces-per-second` 交叉核对；② xctrace 的 `interact` 档（另一半句 hitch 计数）仍未采到——有循环在反复起实例而不收尾（工单 §K-2），闸门要求实例数恰为 1。此前那两批 25 Hz 合成输入的读数（42 与 5 次 hitch）已移出充数。 |
+| T2 心跳期占用 ≤4.0 ms | **在产物 `7be9386…` 上 3/3 成立；当前内容（Sources `36c70a8f`）未覆盖** | 同一产物码 `7be9386…` 的三趟 `app-update`：**max 2.08 / 1.69 / 1.40 ms**（n=16/6/9，**三趟超预算 0 个**）⇒ 红线 ≤4.0 ms，余量过半，且三趟互相印证。测量条件：静默 57 s~25 min、`TCODER_GIT_CLEAN=true` 的 release 产物、provenance 全过。<br>**同批的 hitch / HTR 两行不作数**：实测出帧掉到 10/s（静止窗口 ProMotion 降频），按 §6.2 只记形状不判档——这正是 T2 的判据用 `app-update` 而不用 hitch 计数的理由。旧内容（产物 `1eb1286…`）上的 1.98 / 2.49 / 2.17 保留为量级线索，不挂"当前头部"。<br>**2026-09-22 13:17–13:35 重量未成功，原因是环境不是尺子**：release 已重打到当前树（产物码 `58fbb2d…`、Sources `36c70a8f`），但 `perf_wait_window.sh` 等满 900 s 仍被"实例数恰为 1"拒（现场从 4 个 foreign 实例涨到 8 个，来源见工单 §K 的 `ax_tooltip_report.sh` 缺 `trap`）⇒ rc=1、零样本。**这一格现在写"未覆盖"，不写"达标"**：谁拿到一个没人跑取证循环的 5 分钟，跑 `MODE=idle ./scripts/perf_wait_window.sh <rev> 3 900` 就能把它变成结论。 |
+| T4 逐页冷启动 ≤1.0 s | **待重测**（旧数 764~845 ms 同上） | `switch` 档自带一条更严的闸："本机有别的实例就拒"（今早实测拒因里直接列出 7 个 pid）。`SWITCH_ALLOW_COEXIST=1` 可以共存态跑，但那批只能标成"共存态"，不进验收表。 |
+| 九页取证 | **已拍（09-22 11:15，rev `4797a39`）；当前内容待重拍** | `.scratch/pages-4797a39/`：9 张 / 9 页、失败 0、内容完全相同的图组数 0；**没有跳过 provenance**（`SKIP_PROVENANCE` 未设），沙箱走 `TCODER_SUPPORT_DIR` 所以用户状态未被触碰；收尾只对本脚本自己起的 pid 发 SIGTERM ⇒ **没给下一个再添漏网实例**。 |
+| body/Mark 零动态色/零排序/零同步 I/O | **未达标，存量全在 `Views/**`（UI 流名下）** | 并完 main（`e929a47`）之后现扫台账：`directFormatters 1/1`、`dynamicNSColor 62/64`、`fullSort 9/9`、`syncFileIO 2/2` ⇒ 台账自己报出 2 格隐形余量，已按"只紧不松"拧到 **62**。粗读点仍 **16/16 未迁、细粒度消费 0 处**（`ⓘ` 收纳那两批一处都没动这条轴）。<br>**2026-09-22 复扫（尺子拆分后，五档口径）**：`directFormatters 1/1`、**`dynamicColorConstruction 2/2`（新尺子，第一次抓到现场：`Views/Shell/SidebarRows.swift` + `ProjectSidebar.swift` 各一处 `Color(nsColor:`）**、`fullSort 9/9`、`syncFileIO 2/2`、`tokenReference 62/62`。⇒ "零动态色"这半句**从今天起才真正有判据**，且四条真判据全部零余量、终点 0 的存量**一处不剩在性能侧名下**。 |
+| 诚实性语义不降级 | 守住并在加长 | 期间自我矛盾样本 rc=3、哨兵不可当读数、磁盘/空值一律判不合格、样本根必须被 git 忽略；今晚再加三条：**样本根不许退回 `$TMPDIR`（改拒录）**、**selfcheck 每一项必须出声（项间共享 `bad` 会让一项红吞掉后续项的绿）**、**批次按产物码归类而不是按 rev 字面** |
 
 ⇒ 规矩：**产物不在，判据就不算绿**。文字记录（本文、Obsidian）只是过程记录，
-不能替代 `.trace` 与导出表；取证产物从此固定落 `TcoderMonitor/tmp/perf/`（项目内、被忽略、
-每轮收尾扫 `$TMPDIR` 的 `.ktrace` 残骸、可用 < 20 GiB 拒跑）。
+不能替代 `.trace` 与导出表；取证产物落 **`.scratch/`**（唯一根名单 = `perf_preflight.sh` /
+`perf_harness.sh` 的 `SCRATCH`，仓库根下、已 gitignore；`TCODER_SCRATCH=` 可覆盖但必须自己保证被忽略），
+每轮收尾扫 `$TMPDIR` 的 `.ktrace` 残骸、可用 < 20 GiB 拒跑，
+且**建不出来就直接拒绝录制**——不许再出现"退回全局临时目录"这种同一个失效的第二副面孔。
+
+
+### 6.2 一条从实测里长出来的口径：hitch 的档位词必须先问"还在不在 120Hz 档"
+
+`.scratch/tcoder-perf-5236033-idle-run2` 报 `HTR 18.33「危急·立刻处理」`、超预算 36 帧，
+但同一份数据里主线程 **88.6% 样本在等事件**、整窗 **零人手输入**（距上次事件 846 s）、
+`app-update` 最大 **2.49 ms**、实测出帧 **p50 48/s**。
+⇒ 窗口静止时 ProMotion 降到 ~50 Hz，一帧本就该花 ~20 ms；
+  用 120 Hz 的 8.333 ms 预算去判，"超预算帧数"与 HTR **系统性偏坏**。
+  对照列早有"出帧机制不同 ⇒ 只各判绝对预算"，但 **hitch 三行的档位词没跟着改口**——
+  我第一反应就被那两个字唬住，把一份降频读数当成了缺陷线索。
+⇒ `in_display_regime(实测出帧, 预算)` + `hitch_regime_suffix(...)`：越档时三行统一追加
+  「实测出帧 X/s，已不在 120.0 Hz 档 ⇒ 不判档，只记形状」；
+  拿不到出帧数**保守判在档内**（不许用"未知"给坏消息打折）。
+  selfcheck 第 25 项钉四边界（119.7/96.0 在档、95.9/49.8 越档）与三态话术。
+
+两条自我更正（都写进文档，不只留在聊天里）：
+① 报表 `app-update` 那行印的是**截断列表**（`0.2 0.2 0.3 …`），
+   照抄会把 2.49 ms 误说成 1.3 ms —— 我今晚第二次没回原始数据就复述数字；
+② 元测试的夹具必须长成**生产形状**（`load_measure` 的 json/doc/present 三件套）：
+   只塞 `{"json": None}` 时真红的是夹具本身（`fps_counts` 去摸不存在的 `doc` 键）。
 
 
 ## 7. 风险与备案

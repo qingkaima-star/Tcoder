@@ -19,7 +19,8 @@ struct HealthView: View {
                 if health.components.isEmpty {
                     HealthNoInputCard(health: health)
                 } else {
-                    HealthHero(health: health)
+                    HealthHero(health: health,
+                               relocatedGitRoot: report?.provenance?.resolvedGitRoot)
                     HealthComponentTable(health: health, report: report)
                     HealthAdviceGrid(health: health)
                 }
@@ -94,6 +95,17 @@ struct ScanControls: View {
 /// `ground` 上，全页最暗的墨与最重的字号第一次对上位置（风格契约 4）。
 struct HealthHero: View {
     let health: HealthScore
+    /// `.git` 真正所在的仓库根，**仅当它与所选目录不同**时非空。
+    ///
+    /// 这一句只许读 `ScanProvenance.resolvedGitRoot`，不许在这一页再算一次
+    /// 「是不是偏离」：Git 洞察页那套 `isRelocated`（含 `discoveryMode` 与
+    /// 规范化路径比较）是它自己的私有实现，抄过来就是给同一个事实造第二把尺子，
+    /// 两把尺子迟早分叉（乱清单 §6 第 12 条点名的就是这种分叉）。
+    ///
+    /// **故意不给默认值**：Swift 会把带初值的 `let` 整个从合成成员初始化器里丢掉
+    /// （于是"给个 `= nil` 省事"直接编译不过），而不给默认值就逼每个调用点
+    /// 自己交代这件事——这条告示一旦能被漏传，它就又会变成一页响、一页沉默。
+    let relocatedGitRoot: String?
 
     var body: some View {
         GlassSection("综合评分", subtitle: subtitle, icon: .health) {
@@ -107,6 +119,14 @@ struct HealthHero: View {
             if health.generatedByAI {
                 // 契约里这个标记恒为 false；真出现时如实提示口径冲突，绝不把本页说成调用过外部模型。
                 BannerRow(text: "上游把这条评分标记为外部模型产物，与本页口径不一致：Tcoder 只做本机启发式加权计算，不调用外部模型。请重新分析后再看。",
+                          style: .warning)
+            }
+            if let root = relocatedGitRoot {
+                // 「同一个事实在一页告示、另一页沉默」：Git 洞察页一直有一条
+                // `DataNotice` 说清提交号来自外层仓库，而这一页把同一个外层仓库的数字
+                // 折进了分数（提交活跃度 0.12 + 协作分布 0.09），却一个字没提。
+                // 缺数据不许冒充没问题，缺来源同样不许。
+                BannerRow(text: localizedFormat("提交活跃度与协作分布按外层仓库 %1$@ 的历史统计，不是所选目录本身。", root),
                           style: .warning)
             }
         }

@@ -74,12 +74,28 @@ extension HealthCurves {
 
     // MARK: - 运行稳定性
 
-    static func stability(errorsPerKLoc: Double, crashCount: Int, fatalCount: Int, exceptionCount: Int, totalLinesScanned: Int) -> CurveResult {
+    /// 运行稳定性曲线。
+    ///
+    /// **分母换掉了，锚点表一个数字都没动。**
+    /// 整改前 `errorsPerKLoc` 的量程是「错误数 ÷ 源码行数 × 1000」（调用方在
+    /// `HealthRuntimeDimensions.stabilityOutcome`），于是**往仓库里加代码就能让同样多的
+    /// 错误显得更稳定** —— 源码行数不是运行暴露量，它是"这个项目写了多少行"。
+    /// 现在分母换成**本次扫到的日志行数**（`totalLinesScanned`）：它至少随运行时长增长，
+    /// 与代码体量无关，"加代码 = 更稳定" 这条路被 `HealthStabilityDenominatorTests` 钉死。
+    ///
+    /// ⚠️ 保留边界（交总工复核，不是本流自己收口）：锚点值 0 / 0.5 / 1.5 / 3 / 6 / 12 / 25
+    /// 当年是按"每千行**代码**"标定的，直接搬到"每千行**日志**"上属于换了量程沿用刻度。
+    /// 本轮只做正确性修正（不伪分母、不为提指标动任何锚点），**独立样本重新标定归总工**，
+    /// 已登记在 Obsidian `110` 的契约缺口一节。
+    /// `detail` 由 `HealthCurves.joined` 限到 60 字（评分卡那一行放不下长句），
+    /// 所以**"证据不足"那几句不在这里**，在 `WeightedHealthScorer` 的 recommendations 里。
+    static func stability(errorsPerKiloLogLines: Double, crashCount: Int, fatalCount: Int,
+                          exceptionCount: Int, totalLinesScanned: Int) -> CurveResult {
         if totalLinesScanned == 0 {
             // 没扫到日志就不假装满分：给偏高的默认分，并在文案里标明是默认值。
             return CurveResult(score: 85, detail: "未扫描到运行日志，本维度按默认值计", risk: .low)
         }
-        let base = ScoreCurve.piecewise(Swift.max(0, errorsPerKLoc), through: [
+        let base = ScoreCurve.piecewise(Swift.max(0, errorsPerKiloLogLines), through: [
             (x: 0, score: 100), (x: 0.5, score: 92), (x: 1.5, score: 78), (x: 3, score: 58),
             (x: 6, score: 32), (x: 12, score: 12), (x: 25, score: 0)
         ])
@@ -89,8 +105,8 @@ extension HealthCurves {
         let deducted = crashPenalty + fatalPenalty + exceptionPenalty
         let score = ScoreCurve.clamped(base - deducted)
         let detail = joined([
-            "每千行 \(decimal(Swift.max(0, errorsPerKLoc))) 个错误",
-            "崩溃 \(whole(crashCount)) 次",
+            "每千行日志 \(decimal(Swift.max(0, errorsPerKiloLogLines))) 个错误",
+            "确认崩溃 \(whole(crashCount)) 次",
             "致命 \(whole(fatalCount)) 次",
             "异常 \(whole(exceptionCount)) 次",
             "扫描 \(whole(totalLinesScanned)) 行",
