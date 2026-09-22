@@ -42,17 +42,26 @@ enum CodeScanSurfaceReadout {
         localizedCopy("扫描范围：本次没有范围台账 —— 这一路没跑过，或这份报告出自没有这一格的旧结构，所以「排除了几个」这类读数一个都不成立。")
     }
 
-    /// 干净扫描的判据：每一格都是量到的 0（或没记）⇒ 不出声。
-    /// 任一非零 ⇒ 必须出声。这里**只读字段**，不碰 `scanLimitations` 的中文句子。
+    /// 干净扫描的判据：每一格都是量到的 0（或没记）⇒ 不出声；任一非零 ⇒ 必须出声。
+    /// 这里**只读字段**，不碰 `scanLimitations` 的中文句子。拆成三小段而不是一条长串 `||`：
+    /// 本包的自扫门 `CodeComplexityDebtTests` 钉 CC < 16（口径是工具自己那条"高风险函数"线）。
     private static func speaksUp(_ surface: CodeScanScope) -> Bool {
+        hasExcludedEntries(surface) || hasUnmeasuredScope(surface) || hasTreeFollowingFacts(surface)
+    }
+
+    private static func hasExcludedEntries(_ surface: CodeScanScope) -> Bool {
         (surface.reportedExcludedEntryCount ?? 0) > 0
-            || (surface.unmeasuredScope?.isEmpty == false)
-            || (surface.nestedRepositoryCount ?? 0) > 0
-            || (surface.submoduleMarkerCount ?? 0) > 0
-            || (surface.symbolicLinkFileCount ?? 0) > 0
-            || (surface.symbolicLinkDirectoryCount ?? 0) > 0
-            || (surface.unlistedPrunedDirectoryCount ?? 0) > 0
-            || (surface.unreadableDirectoryCount ?? 0) > 0
+    }
+
+    private static func hasUnmeasuredScope(_ surface: CodeScanScope) -> Bool {
+        surface.unmeasuredScope?.isEmpty == false
+    }
+
+    /// 「跟不跟」那六格里任一非零。`nil` 不参与（那是没记，不是"有一个"）。
+    private static func hasTreeFollowingFacts(_ surface: CodeScanScope) -> Bool {
+        [surface.nestedRepositoryCount, surface.submoduleMarkerCount, surface.symbolicLinkFileCount,
+         surface.symbolicLinkDirectoryCount, surface.unlistedPrunedDirectoryCount,
+         surface.unreadableDirectoryCount].contains { ($0 ?? 0) > 0 }
     }
 
     /// 顶格那句：看到多少条目、按规则排除多少、其中逐条点名了几条。
