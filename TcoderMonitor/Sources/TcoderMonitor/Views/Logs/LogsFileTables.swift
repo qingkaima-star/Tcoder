@@ -45,7 +45,7 @@ struct LogsAffectedFilesCard: View {
                         Theme.Share.Row(label: (item.key as NSString).lastPathComponent,
                                         fraction: Double(item.value) / Double(total),
                                         percentText: NumberFormat.percent(Double(item.value) / Double(total), precision: 1),
-                                        countText: "\(NumberFormat.grouped(item.value)) 次",
+                                        countText: localizedCount("%lld 次", item.value),
                                         color: Theme.Semantic.danger.graphicColor,
                                         // 十行全涂同一个红，色点就把「图例」变成了重复装饰：
                                         // 量条本身已经是那一列的值，颜色在这里不区分任何东西。

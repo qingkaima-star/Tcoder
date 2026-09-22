@@ -78,7 +78,7 @@ struct LogErrorClusterRow: View {
                     .truncationMode(.middle)
                     .flexCell()
                     .help(cluster.signature)
-                LiveNumber("\(NumberFormat.grouped(cluster.count)) 次", tier: Theme.Typo.monoBody)
+                LiveNumber(localizedCount("%lld 次", cluster.count), tier: Theme.Typo.monoBody)
                     .numberCell(PerfLogWidths.count)
             }
 
