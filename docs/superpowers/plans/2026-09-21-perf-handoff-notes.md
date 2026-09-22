@@ -219,3 +219,55 @@ MODE=interact ./scripts/perf_wait_window.sh $(git rev-parse --short HEAD) 3   # 
 同时报一条已经还上的：渲染路径台账现扫 `dynamicNSColor 62/64`，
 台账自己点名两格隐形余量 ⇒ 棘轮已拧到 **62**（`directFormatters 1/1`、`fullSort 9/9`、
 `syncFileIO 2/2` 本来就零余量）。**四条里留一条松，就是给下一次"没涨"留口子。**
+
+## I. 【可直接派】16 处粗读点迁移单批工单（2026-09-22 02:22 现扫生成，rev `8fea49d`）
+
+用户 2026-09-22 裁定：**性能侧单独起草一批、交 UI 总工执行**（我不写 `Views/**`）。
+下面这条清单是 `python3 scripts/trace_report.py migration` 在 rev `8fea49d` 的**原样输出**
+（口径直接读守卫自己的正则，不复制第二份），行号只是当下位置、**符号是稳定的**。
+
+### 一、13 处是 1:1 换名（无判断，照抄即可）
+
+| 文件 | 成员（类型.成员锚点） | 从 | 换成 |
+|---|---|---|---|
+| `Views/PerfLogs/LiveReadings.swift` | `LiveReadings.body` ×2 | `monitor.latestSnapshot` / `monitor.history` | `monitor.pulse.value` / `monitor.curve.value` |
+| `Views/Shell/DashboardReadouts.swift` | 总览读数 ×3 | `latestSnapshot` ×1、`history` ×2 | `pulse.value`、`curve.value` |
+| `Views/Shell/ProjectSidebar.swift` | 侧栏 footer ×1 | `monitor.latestSnapshot` | `monitor.pulse.value` |
+| `Views/Performance/PerformanceView.swift` | 性能页 ×7 | `history` ×2、`latestSnapshot`、`lastSampleAt` | `curve.value` ×2、`pulse.value`、`pulse.value.sampleAt` |
+
+### 二、6 处"顺手"（帧率上测不出差异，但棘轮要清零才能翻闸门）
+
+同一文件 `Views/Performance/PerformanceView.swift`：
+`trackedGroups → groupRanking.value`、`processMetricsTruncated → ledger.value.metricsTruncated`（两处）、
+`measuredProcessCount → ledger.value.measuredCount`、`topProcesses → cpuRanking.value`、
+`processesByMemory → memoryRanking.value`。
+**为什么单独标出来**：这六个宿主属性早就走 `write(\.x,…)` 等值闸门（值不换就不发布），
+所以"只迁这六处"在帧率上等于没做——分级不是我拍的，是守卫从 `publish()` 现读 28 行算出来的。
+
+### 三、3 处不是换名，是"把整份快照递给了别人" ⇒ 要改**接收方**
+
+`SampleContext.from(snapshot:)`、`DashboardLiveReadout.snapshot`（别名属性）、
+`SidebarLiveFooter` 把快照递给 `LiveCPUBadge`。
+**原地换写法等于没迁**：只要参数类型还是整份快照，接收方仍然在每次发布时重建。
+这三处的正确做法是把入参换成它真正读的那几个格。
+
+### 四、验收（不接受口头完成，命令必须报 0）
+
+```bash
+cd TcoderMonitor && python3 scripts/trace_report.py migration | sed -n 2p
+# 期望：粗粒度读点 **0** 处 / 登记上限 16 处 / 细粒度读点 **> 0** 处
+./scripts/locked_build.sh test --filter PerfInvalidationRatchetTests   # 消费闸门必须翻绿
+./scripts/locked_build.sh test --filter PerfMainThreadBudgetTests       # 假迁移守卫（见下）
+```
+
+三条红线：① **细格结果上不许再 `Array(….suffix(n))` 或 `.sorted{}`**——那叫假迁移，
+守卫 `testPreparedCellsAreNeverReslicedOrResorted` 会当场抓（已进 main）；
+② 不许顺手改视觉语义（这一批只做数据接线）；
+③ 迁移与视觉改动**分提交分门禁**（一人接两条线之后这条尤其重要，不能自己给自己的两套口径放行）。
+
+### 五、迁完请顺手给我一个判决实验的窗口（3 分钟，不需要你操作）
+
+今晚第一份"上下文全合格"的交互期读数里，**602 次 update 有 13 次超 8.333 ms 预算、最长 168 ms**，
+而 13 与"心跳 1.5 s 在 20 s 里约 13 次 tick"同量级——**不足以下因果结论**。
+所以这批迁完之后我按同一份尺子原样重跑三趟：超预算 update 趋近 0 ⇒ 因果成立；
+纹丝不动 ⇒ 我这个假设证伪，转查渲染/合成侧并记进"已排除"表（缺陷 #47 的另一半）。
