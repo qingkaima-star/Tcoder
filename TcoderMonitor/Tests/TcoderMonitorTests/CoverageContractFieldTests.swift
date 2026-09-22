@@ -174,6 +174,37 @@ final class CoverageContractFieldTests: XCTestCase {
         XCTAssertTrue(scored.bindingText.contains("说的不是本项目自己的提交"), scored.bindingText)
     }
 
+    /// RD-39 那一族（"只在整套跑时红"）的**污染源形状**：环境名字参与了判定。
+    /// 旧实现 `CoverageAnalyzer.classify(url:)` 拿**绝对路径**做子串匹配，于是
+    /// `NSTemporaryDirectory()` 里那串随机名字含 `e2e` 的概率约 0.7%（台账 §14 算过），
+    /// 命中时整棵夹具被判成"集成测试"、`unit` 那一格读成 0 —— 同一份夹具两次跑出两个数。
+    /// 这一条把沙箱目录**直接命名**成 `e2e-integration-test-…`：归类与读数都不许受影响。
+    func testAmbientDirectoryNamesNeverLeakIntoKindOrNumbers() async throws {
+        let base = URL(fileURLWithPath: NSTemporaryDirectory())
+        var readings: [CoverageReport.Kind: [Int]] = [:]
+        var kinds: [CoverageReport.Kind] = []
+        for name in ["e2e-integration-test-fixture", "plain-fixture"] {
+            let sandbox = base.appendingPathComponent("\(name)-\(UUID().uuidString)/unit",
+                                                      isDirectory: true)
+            try FileManager.default.createDirectory(at: sandbox.appendingPathComponent("coverage"),
+                                                    withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: sandbox.deletingLastPathComponent()) }
+            try "SF:src/a.js\nLF:100\nLH:78\nend_of_record\n"
+                .write(to: sandbox.appendingPathComponent("coverage/lcov.info"),
+                       atomically: true, encoding: .utf8)
+
+            let metrics = try await CoverageAnalyzer().analyze(projectRoot: sandbox, options: .default)
+            let report = try XCTUnwrap(metrics.reports.first, "两种沙箱名都得读出那一份报告")
+            kinds.append(report.kind)
+            readings[report.kind, default: []].append(report.linesCovered)
+            XCTAssertEqual(report.linesCovered, 78, "读数不许随环境名变：\(name)")
+            XCTAssertEqual(report.linesTotal, 100, "分母不许随环境名变：\(name)")
+        }
+        XCTAssertEqual(Set(kinds).count, 1, "同一批内容换沙箱名就换归类 ⇒ 环境名字漏进了判定：\(kinds)")
+        XCTAssertEqual(kinds.first, .combined, "相对路径里没有 integration/e2e/unit 的**目录段** ⇒ 不猜")
+        XCTAssertEqual(readings.values.first?.count, 2, "两种沙箱名各跑一次才算对比")
+    }
+
     // MARK: - mergeConfident：三态 + 清单点名的那条反例
 
     /// `nil` = **压根没给总数**（缺证据 ≠ 不可信）。
