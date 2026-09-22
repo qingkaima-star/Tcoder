@@ -247,8 +247,20 @@ final class CoverageAccountingReadoutTests: SelfScanHarnessCase {
                        "量过了、真的没切 ⇒ ⓘ 里一个字都不许多")
     }
 
+    /// 同一棵树、两个方向：**先**扫干净的 40 份（那句必须不出现在 CLI 里），
+    /// **再**往盘上补 3 份合法报告（下一次扫描必须出声）。
+    /// （第一版把顺序写反了 —— 同一个夹具根里补写 40 份并不会把先前那 43 份抹掉，
+    ///  门禁当场把它判红一条。这是本文件自己踩到的坑，留在这里当注释。）
     func testScoreTextAndGUIReadoutPrintTheSameAccount() async throws {
-        let metrics = try await overCapMetrics()
+        var cleanReport = ProjectReport(project: MonitoredProject(name: "夹具", path: "/tmp/r13-clean"))
+        for index in 0..<cap { try writeModule(index) }              // 正好到上限：一份都没丢
+        cleanReport.coverage = try await scanned()
+        XCTAssertNil(cleanReport.coverage?.boardAccountingNote)
+        XCTAssertFalse(CLIScoreText.render(cleanReport, exit: .ok).contains("未合并"),
+                       "没丢东西时 CLI 不许凭空多出这一行")
+
+        for index in cap..<(cap + 3) { try writeModule(index) }      // 补三份合法报告
+        let metrics = try await scanned()
         let note = try XCTUnwrap(metrics.boardAccountingNote)
         var report = ProjectReport(project: MonitoredProject(name: "夹具", path: "/tmp/r13-accounting"))
         report.coverage = metrics
@@ -258,11 +270,9 @@ final class CoverageAccountingReadoutTests: SelfScanHarnessCase {
         XCTAssertEqual(numberInSentence(scoreText), metrics.droppedByCap,
                        "CLI 上那句里的数与字段分叉")
         XCTAssertFalse(scoreText.contains("另有 1 份"), "CLI 那侧也不许拿榜内长度当丢弃份数")
-        // 干净台账 ⇒ CLI 也不许多出一行（与界面同一条判据）
-        for index in 0..<cap { try writeModule(index) }
-        var cleanReport = ProjectReport(project: MonitoredProject(name: "夹具", path: "/tmp/r13-clean"))
-        cleanReport.coverage = try await scanned()
-        XCTAssertFalse(CLIScoreText.render(cleanReport, exit: .ok).contains("未合并"))
+        // 界面与 CLI 同一条尺子：两处那句逐字相同
+        XCTAssertEqual(numberInSentence(DashboardCoverageHelp.text(metrics)),
+                       numberInSentence(scoreText))
     }
 
     // MARK: - 反例守卫 ③：调用点还在（结构断言，作为行为断言的第二层网）
