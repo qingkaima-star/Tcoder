@@ -223,4 +223,67 @@ extension PerformanceDisplayTests {
                            content: "static func secondsStride(windowSeconds: TimeInterval) -> Int {")]
         XCTAssertTrue(Self.unboundedSecondsStrideCalls(in: definition).isEmpty, "定义本身被当成调用点")
     }
+
+    // MARK: - 批次 P43：秒级轴的刻度表自己给（Charts 会丢域下界那一枚）
+
+    /// 刻度表必须**从域起点开始**排，且不越出域尾。
+    /// 这条是 P43 那处改动的全部目的：`.stride(by: .second)` 交给 Charts 生成时，
+    /// 正好压在域下界的那一枚会被丢掉（乱清单 §6 第 7 条"仍然开着"那半条）。
+    func test_secondsTicksStartAtTheDomainLowerBound() {
+        let low = Date(timeIntervalSince1970: 1_700_000_000)
+        let domain = low...low.addingTimeInterval(27)
+        let ticks = ChartScale.secondsTicks(domain: domain, strideSeconds: 7)
+        XCTAssertEqual(ticks.count, 4, "27 秒窗口按 7 秒一格 ⇒ 0/7/14/21 四枚")
+        XCTAssertEqual(ticks.first, low, "首枚必须正好是窗口起点")
+        XCTAssertEqual(ticks.map { $0.timeIntervalSince(low) }, [0, 7, 14, 21])
+        XCTAssertLessThanOrEqual(ticks[ticks.count - 1], domain.upperBound, "不许造出域外刻度")
+        // 退化输入：单点域给一枚（就是那个时刻），nil 与 0 步长给空集，超长域有上限。
+        XCTAssertEqual(ChartScale.secondsTicks(domain: low...low, strideSeconds: 5).count, 1)
+        XCTAssertTrue(ChartScale.secondsTicks(domain: nil, strideSeconds: 5).isEmpty)
+        XCTAssertTrue(ChartScale.secondsTicks(domain: domain, strideSeconds: 0).isEmpty)
+        let huge = low...low.addingTimeInterval(1_000_000)
+        XCTAssertLessThanOrEqual(ChartScale.secondsTicks(domain: huge, strideSeconds: 1).count, 65,
+                                 "上限兜底没生效 ⇒ 一格一秒会造出上千枚标签")
+    }
+
+    /// 秒级轴不许再退回让 Charts 自己生成刻度（日级轴 `.stride(by: .day` 不在这条范围里：
+    /// 日刻度本来就落在整日上，域下界那枚不是"窗口起点"而是"那一天"，语义不同）。
+    static func secondStrideMarks(in files: [(path: String, content: String)]) -> [String] {
+        files.flatMap { file in
+            file.content.split(separator: "\n", omittingEmptySubsequences: false)
+                .enumerated()
+                .compactMap { index, raw -> String? in
+                    let line = String(raw)
+                    guard SurfaceScanKit.isCode(line),
+                          line.contains(".stride(by: .second") else { return nil }
+                    return "\(file.path):\(index + 1)"
+                }
+        }
+    }
+
+    func test_noTimeAxisHandsTheSecondsTicksBackToCharts() throws {
+        let files = try SurfaceScanKit.sourceFiles(under: "Views")
+            + SurfaceScanKit.sourceFiles(under: "Design")
+        XCTAssertFalse(files.isEmpty, "一个源码文件都没扫到 ⇒ 这条判据在跟空集合说话")
+        let offenders = Self.secondStrideMarks(in: files)
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些横轴又把秒级刻度交给 Charts 生成，域下界那一枚会被丢掉：\(offenders)")
+    }
+
+    func test_secondsStrideScannerSeparatesSecondsFromDays() {
+        let dirty = [(path: "Views/Fake.swift",
+                      content: "AxisMarks(values: .stride(by: .second, count: 13)) { _ in }")]
+        XCTAssertEqual(Self.secondStrideMarks(in: dirty), ["Views/Fake.swift:1"],
+                       "秒级写法没被抓到 ⇒ 这条守卫数不出东西")
+        let days = [(path: "Views/Fake.swift",
+                     content: "AxisMarks(values: .stride(by: .day, count: stride)) { _ in }")]
+        XCTAssertTrue(Self.secondStrideMarks(in: days).isEmpty, "日级轴被误伤 ⇒ 下次有人连日级一起改坏")
+        let explicit = [(path: "Views/Fake.swift",
+                         content: "AxisMarks(values: ChartScale.secondsTicks(domain: d, strideSeconds: s))")]
+        XCTAssertTrue(Self.secondStrideMarks(in: explicit).isEmpty, "改好的写法不该再被报")
+        let comment = [(path: "Views/Fake.swift",
+                        content: "// 旧写法是 .stride(by: .second, count:) —— 讲历史不算违规")]
+        XCTAssertTrue(Self.secondStrideMarks(in: comment).isEmpty, "注释里的旧写法必须豁免")
+    }
+
 }
