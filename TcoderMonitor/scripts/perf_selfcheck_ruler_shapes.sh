@@ -212,19 +212,32 @@ PY
 
 selfcheck_framepulse() {  # selfcheck_framepulse <outdir>
   # 6) 交互期那把尺子（perf_framepulse.py）：0 / 1 / 2 三个退出码必须是三种意思
-  #    （格式与产品是否脱钩由 `PerfFramePulseRulerTests` 拿真实摘要行对账，这里只管判定方向）
+  #    （格式对账原本挂在 PerfFramePulseRulerTests 上——这次它也没抓住两层括号的脱钩，
+  #     所以这条自测改成直接吃**真产物那一行**，不再信"另有一把尺子管格式"）
   local out="$1"
-  printf 'hz=120.0(合成) 期望间隔=8.33ms 帧数=5000 帧间隔p50=8.33 p95=8.40 p99=8.50 max=9.00ms hitch(>1.5x)=0 hitch/s=0.00 心跳拍数=10 心跳最大间隔=1520.0ms 心跳p50=1500.0 p95=1510.0 带hitch的拍=0/10\n' > "$out/pulse-good.txt"
+  # 【夹具必须长得像生产者】原来这条喂的是 `hz=120.0(合成)`——**括号里没有第二层括号**，
+  # 而真产物写的是 `hz=120.0(CGDisplayCopyDisplayMode(current))`。
+  # 解析器的 source 组当时写的是 `[^)]*`，遇上真产物就整行解析失败，
+  # 而自测一路绿：手搓的假形状是"第二个错误假设的实现"，它替真缺陷打了掩护。
+  # 底下那条 pulse-real 是 2026-09-22 从真产物**逐字抄来**的一行，别再换成"好写的"形状。
+  printf 'hz=120.0(CGDisplayCopyDisplayMode(current)) 期望间隔=8.33ms 帧数=5000 帧间隔p50=8.33 p95=8.40 p99=8.50 max=9.00ms hitch(>1.5x)=0 hitch/s=0.00 心跳拍数=10 心跳最大间隔=1520.0ms 心跳p50=1500.0 p95=1510.0 带hitch的拍=0/10\n' > "$out/pulse-good.txt"
+  printf 'hz=120.0(CGDisplayCopyDisplayMode(current)) 期望间隔=8.33ms 帧数=1029 帧间隔p50=8.33 p95=9.91 p99=10.24 max=10.28ms hitch(>1.5x)=0 hitch/s=0.00 心跳拍数=100 心跳最大间隔=1019.5ms 心跳p50=1.8 p95=508.3 带hitch的拍=0/100\n' > "$out/pulse-real.txt"
   printf '# 探针没开\n不是摘要行\n' > "$out/pulse-junk.txt"
-  local c_idle c_live c_junk
+  local c_idle c_live c_junk c_real
   python3 "$PULSE_REPORT" "$out/pulse-good.txt" > "$out/pulse-idle.txt" 2>&1; c_idle=$?
   python3 "$PULSE_REPORT" "$out/pulse-good.txt" --interaction > "$out/pulse-live.txt" 2>&1; c_live=$?
   python3 "$PULSE_REPORT" "$out/pulse-junk.txt" --interaction > "$out/pulse-junk.txt" 2>&1; c_junk=$?
+  # 真产物那一行的两个方向都要判对：p95 9.91 ms 超预算 ⇒ 未达标（1），
+  # 而"帧间隔 0 次 hitch"绝不能被读成达标。
+  python3 "$PULSE_REPORT" "$out/pulse-real.txt" --interaction > "$out/pulse-real.out" 2>&1; c_real=$?
+  [ "$c_real" -eq 1 ] || fail "真产物形状的那行没被判成未达标（p95 9.91 > 预算），实得 $c_real——两层括号的解析大概又坏了"
+  grep -q 'CGDisplayCopyDisplayMode(current)' "$out/pulse-real.out" \
+    || fail "刷新率来源被截断了（只该吃括号，不该在第一个右括号就停）：$(head -3 "$out/pulse-real.out" | tr '\n' ' ')"
   [ "$c_idle" -eq 2 ] || fail "健康读数在未声明交互时退出码应为 2（第三种意思），实得 $c_idle"
   [ "$c_live" -eq 0 ] || fail "健康读数声明交互后应判达标（0），实得 $c_live：$(cat "$out/pulse-live.txt")"
   [ "$c_junk" -ne 0 ] || fail "坏数据被判成了达标——一次失败的测量会伪装成「0 hitch，完美」"
-  [ "$c_idle" -eq 2 ] && [ "$c_live" -eq 0 ] && [ "$c_junk" -ne 0 ] \
-    && ok "framepulse：达标/未达标/坏数据/未确认交互 四种结果互不混淆"
+  [ "$c_idle" -eq 2 ] && [ "$c_live" -eq 0 ] && [ "$c_junk" -ne 0 ] && [ "$c_real" -eq 1 ] \
+    && ok "framepulse：四种结果互不混淆，且夹具是**真产物形状**（两层括号 + p95 超预算判未达标）"
 }
 
 selfcheck_period_wording() {  # selfcheck_period_wording <outdir>

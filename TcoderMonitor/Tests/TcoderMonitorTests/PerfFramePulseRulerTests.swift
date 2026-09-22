@@ -97,6 +97,24 @@ final class PerfFramePulseRulerTests: XCTestCase {
         XCTAssertNotEqual(code, 0,
                           "没带 --interaction 的任何真机读数都不许判达标（0 帧应拒判=1，有帧应=2）。实得 \(code)")
         print("【FramePulse 对账】产品行：\(raw.prefix(120))… → 解析通过，退出码 \(code)")
+
+        // 【2026-09-22 补：这条"对账"原来比的是生产者的**另一条分支**】
+        // 上面 `raw` 来自一个没 startIfNeeded() 的单例，它的 refreshRateSource 是默认值「未测」；
+        // 而真产物那一行是 `hz=120.0(CGDisplayCopyDisplayMode(current))` —— **括号里还套一层括号**。
+        // python 侧的 source 组当时写的是 `[^)]*`，撞上真产物就整行解析失败，
+        // 而这条测试一路绿。⇒ 对账必须吃掉**真产物的字面形状**，不是"我以为它会产出的样子"。
+        // 下面这行是从 `.scratch/tcoder-framepulse-5742fa0-*.txt` 逐字抄来的（别简化它）。
+        let realLine = #"hz=120.0(CGDisplayCopyDisplayMode(current)) 期望间隔=8.33ms 帧数=1029 帧间隔p50=8.33 p95=9.91 p99=10.24 max=10.28ms hitch(>1.5x)=0 hitch/s=0.00 心跳拍数=100 心跳最大间隔=1019.5ms 心跳p50=1.8 p95=508.3 带hitch的拍=0/100"#
+        let realFile = try writeFixture("tcoder-pulse-realproducer.txt", realLine + "\n")
+        let (realOut, realCode) = try runRuler(on: realFile, interaction: true)
+        XCTAssertFalse(realOut.contains("没有可解析"),
+                       "解析器读不懂真产物那一行（两层括号那类脱钩又回来了）：\n\(realOut)")
+        XCTAssertTrue(realOut.contains("CGDisplayCopyDisplayMode(current)"),
+                      "刷新率来源被截断了——解析器在第一个右括号就停了，没吃到 (current) 那层")
+        XCTAssertTrue(realOut.contains("帧数 1029"), "真产物行的帧数没被读出来：\n\(realOut)")
+        XCTAssertNotEqual(realCode, 0,
+                          "p95=9.91 ms 超预算 8.41 ms 却判成达标？退出码 \(realCode)")
+        print("【FramePulse 对账·真产物形状】退出码 \(realCode)（应为 1：p95 超预算）")
     }
 
     // MARK: - 2. 三种失效方向必须给出三种可区分的退出码
