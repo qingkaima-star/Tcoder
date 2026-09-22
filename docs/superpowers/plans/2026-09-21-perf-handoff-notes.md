@@ -655,7 +655,9 @@ hitch 计数与 `p95` 交叉核对（`perf_framepulse.py --sample-dir <目录>` 
 
 ## §R（2026-09-22 22:52）第一趟"四个条件齐"的交互档样本——以及我自己误读又自纠的那一条
 
-样本 `.scratch/tcoder-perf-d73bea4-interact-run1`（头 `d73bea4`，产物 Sources 与 main 同一份）。
+样本 `.scratch/tcoder-perf-d73bea4-interact-run1`（头 `d73bea4`）。
+⚠ 归属范围：量它的时候 `Sources` 与 main 逐字节相同；**09-23 00:08 复核时 main 已前进 23 个渲染路径文件**
+⇒ 这一行的数描述的是 `d73bea4` 那一份产物，不描述 main 当前内容；已在 `61b7181` 合并 main 后重测。
 四个条件第一次同时成立：被测对象**有真实数据**（沙箱按授权复制真实支持目录，5 份真报告）✓、
 `前台=Tcoder` 且 `visible=有在屏窗口` ✓、`pid == scroll_target`（滚动落在被 attach 的那个进程上）✓、
 收尾复核判"窗口内确有输入事件" ✓、七维上下文合格（并发重活=无）✓。
