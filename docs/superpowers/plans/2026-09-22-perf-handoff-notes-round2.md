@@ -326,3 +326,26 @@ selfcheck 41 项 0 失败。
 
 对 §Q 验收的影响：靶子没变（滚动期 render 相位 p50 压回 3 ms 量级、缺口率落进空闲基线带宽），
 但**验收报告里不会再出现"1841 个 stall"这种句子**——谁在别处看到这句话，那是 `a38a472` 之前的旧报表。
+
+## §W 补测改动前基线已经可走（2026-09-23 02:39，`249d6ee`）——"X 拿不到"不再是理由
+
+以前每张交互档表都挂一句"**对照列未受控**（run1 采在总工并发几十个 swiftc 抢满 15 核期间）⇒
+不作任何『从 X 降到 Y』的 X"（spec §1.3）。根因不是没人愿意量旧内容，而是**尺子只肯比 HEAD**：
+`perf_provenance.sh` 把产物与当前工作树比，于是"量另一个 rev 的产物"结构性做不到。
+
+现在这条路通了，而且**判定一条没放宽**：
+```
+eval "$(scripts/perf_measure_rev.sh env 465f5a6)"      # PERF_BIN + MEASURE_REV 一起给
+MODE=interact ./scripts/perf_wait_window.sh 465f5a6 3 900
+scripts/perf_measure_rev.sh clean 465f5a6
+```
+真数据四向验过：`HEAD`/`HEAD~1`（只动 docs）⇒ 按产物码 tree 放行；`d73bea4`（Sources 不同）⇒ 拒并印两个 sha；
+不存在的 rev ⇒ 回空并拒（`--verify --quiet`，不是裸 `git rev-parse`——后者会把入参原样吐回来）。
+钉在 selfcheck 第 38 项。
+
+两个已知边界，别当缺陷报：
+1. `465f5a6` 在无界基座之前，**没有 FramePulse** ⇒ 它的 p95 那半句注定"未采到"。
+   这一趟只取 `hitches` 计数、render 相位、Time Profiler 三样。
+2. 它用的是**当年那份 `.scratch` 之外的旧产物布局**；`prepare` 找不到预期二进制会当场死，不会假装量过。
+
+`measure19` 正按这条队列补测 `465f5a6` 三趟交互档 —— 等它落完，§1 的对照列就有受控的 X 了。
