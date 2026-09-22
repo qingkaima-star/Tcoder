@@ -189,7 +189,11 @@ final class RealRepositoryEvidenceTests: XCTestCase {
         let logs = try await FileLogAnalyzer().analyze(
             projectRoot: url, extraLogURLs: samples, withinDays: 30)
 
-        XCTAssertGreaterThan(logs.totalLinesScanned, 0, "真实报告不可能一行都没扫到")
+        // 这一格喂进去的**全是**真实崩溃报告 ⇒ RD-46b 之后密度分母本来就该是 0（没有一行真日志）。
+        // 原来那句 `totalLinesScanned > 0` 想说的是"真实报告不可能一行都没读到"= **读取覆盖**，
+        // 所以它现在必须落在崩溃那一格上；把它改成 `== 0` 会让这条用例变成永真绿。
+        XCTAssertGreaterThan(logs.crashReportLineCount ?? 0, 0, "真实报告不可能一行都没读到（崩溃正文那一格）")
+        XCTAssertEqual(logs.totalLinesScanned, 0, "输入里一行真日志都没有 ⇒ 分母必须是 0（RD-46b）")
         XCTAssertFalse(logs.topErrors.isEmpty, "真实崩溃必须聚出至少一条 Top Error")
         guard let signature = logs.topErrors.first?.signature else { return }
         XCTAssertFalse(signature.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

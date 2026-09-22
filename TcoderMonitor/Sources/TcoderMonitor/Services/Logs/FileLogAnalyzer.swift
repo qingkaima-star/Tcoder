@@ -62,12 +62,15 @@ final class FileLogAnalyzer: LogAnalysisProviding {
         summary.infoLineCount = aggregate.infoLineCount
         // 分母 = **真日志行**（RD-46b）：崩溃报告的正文已经在 `crashCount` 那一路扣过分，
         // 不许再拿它去稀释「每千行日志错误数」。被移出的那些行没有消失，
-        // 它们在 `aggregate.crashReportLineCount` / `crashReportFileCount` 两格里，
-        // 落盘侧也仍然逐份留在 `scannedFiles`（role == 崩溃报告，各带自己的行数）。
-        // ⚠️ 这条边有个后果要总工拍：一个**只有崩溃报告、没有真日志**的项目，
-        //    现在分母是 0，`stabilityOutcome` 会让整维缺席 ⇒ 那几次崩溃也就不扣分了。
-        //    正确解法是 Health 侧把"有崩溃证据但零日志行"当第三种输入，不在本流可写范围内。
+        // 它们落在下面两格，界面与 CLI 也仍然逐份留在 `scannedFiles`（role == 崩溃报告，各带行数）。
+        // ⚠️ 这条边的后果已立案 **RD-49**：一个只有崩溃报告、没有真日志的项目现在分母是 0，
+        //    会让稳定维整维缺席、那几次崩溃也不再扣分。修在 Health 侧
+        //    `HealthRuntimeDimensions.stabilityOutcome`（工单 R9b §0），**不在这里**。
         summary.totalLinesScanned = aggregate.totalLinesScanned
+        // 两格直传装配口的读数，不在这里二次推导（那就是第二把尺子）。
+        // 崩溃分析跑过就一定写值（哪怕是 0 = 「看了，一份都没有」），`nil` 只留给"这一路没跑"。
+        summary.crashReportCount = aggregate.crashReportFileCount
+        summary.crashReportLineCount = aggregate.crashReportLineCount
         summary.topErrors = aggregate.topErrors
         summary.trend = aggregate.trend
         summary.affectedFiles = aggregate.affectedFiles
