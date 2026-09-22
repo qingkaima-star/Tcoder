@@ -240,13 +240,21 @@ final class CoverageMergeTests: XCTestCase {
     }
 
     /// 只有一份报告时不存在合并，也就谈不上双计 —— 该给数就给数（不许为了保守装成缺证据）。
+    /// ⚠ R5b 改判：`mergeConfident` 从这一条的 `true` 变成 **`false`**，因为它是
+    /// "这份 JaCoCo 认不出属于哪次运行、又没有提交指纹"的**真话**（`pool.count == 1 → true`
+    /// 就是"由份数推置信"，正是 RD-25 点名的形状）。**读数本身一字未变**：70% 照样给。
     func testSingleAggregateReportStillProducesItsOwnNumber() async throws {
         try write("target/jacoco/jacoco.xml",
                   #"<report><counter type="LINE" missed="300" covered="700"/></report>"#)
         let result = try await outcome()
-        XCTAssertEqual(result.metrics.overallLinePercent ?? -1, 70, accuracy: 0.001)
+        XCTAssertEqual(result.metrics.overallLinePercent ?? -1, 70, accuracy: 0.001,
+                       "份数不是不给数的理由")
         XCTAssertEqual(result.merge.basis, .singleReport)
-        XCTAssertEqual(result.merge.mergeConfident, true)
+        XCTAssertEqual(result.merge.mergeConfident, false,
+                       "只剩一份 ⇒ 不等于可信合并：这一份的运行归属与源码指纹都是缺的")
+        XCTAssertEqual(result.merge.identityGaps, [.unknownRun, .unboundSource],
+                       "缺哪格要逐格点名：\(result.merge.identityGaps)")
+        XCTAssertTrue(result.merge.statement.contains("认不出属于哪次运行"), result.merge.statement)
     }
 
     // MARK: - 场景⑤　旧报告与当前源码不一致
@@ -275,7 +283,7 @@ final class CoverageMergeTests: XCTestCase {
                                    scopeGranularity: .perSourceFile),
             identity: CoverageReportIdentity.derive(
                 path: root.appendingPathComponent("coverage/lcov.info").path,
-                root: root, format: .lcov, kind: .combined),
+                root: root, format: .lcov),
             binding: stale, ledger: nil)
         let plan = CoverageMergePlanner.plan(candidates: [candidate], consideredCount: 1,
                                              parseFailures: [],

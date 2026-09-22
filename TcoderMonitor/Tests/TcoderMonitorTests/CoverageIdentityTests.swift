@@ -60,9 +60,8 @@ final class CoverageIdentityTests: XCTestCase {
 
     func testModuleKeyDropsOnlyOutputDirectorySegments() throws {
         let root = URL(fileURLWithPath: "/repo")
-        func module(_ path: String, _ kind: CoverageReport.Kind = .combined) throws -> String? {
-            try XCTUnwrap(CoverageReportIdentity.derive(path: path, root: root, format: .lcov,
-                                                        kind: kind).moduleKey)
+        func module(_ path: String) throws -> String? {
+            try XCTUnwrap(CoverageReportIdentity.derive(path: path, root: root, format: .lcov).moduleKey)
         }
         XCTAssertEqual(try module("/repo/coverage/lcov.info"), "", "仓库根的 coverage/ ⇒ 全仓候选")
         XCTAssertEqual(try module("/repo/packages/pay/coverage/lcov.info"), "packages/pay")
@@ -79,41 +78,41 @@ final class CoverageIdentityTests: XCTestCase {
         XCTAssertEqual(try module("/repo/latest/lcov.info"), "latest", "`latest` 不是 `test`")
     }
 
-    /// 同一模块、同一归类、同一目录里共存的对偶格式 ⇒ 同一个 runKey（去重的前提）。
-    func testCoPublishedFormatsShareOneRunKey() throws {
+    /// R5b：`derive` **不再**单独发运行归属 —— 一份报告看不出"哪次运行"，
+    /// 运行身份是**两份以上互相核对**的结果（`CoverageRunIdentity`，用例见
+    /// `CoverageRunIdentityTests`）。这里钉住的是它留下的那一半：目录坐标。
+    /// `directoryKey` = 报告自身所在目录（不剥产物段），`moduleKey` = 剥过产物段的模块。
+    func testDeriveNeverInventsARunKeyForASingleReport() throws {
         let root = URL(fileURLWithPath: "/repo")
         let lcov = CoverageReportIdentity.derive(path: "/repo/web/coverage/lcov.info", root: root,
-                                                 format: .lcov, kind: .combined)
+                                                 format: .lcov)
+        XCTAssertNil(lcov.runKey, "一份报告就发 runKey ⇒ 等于凭目录猜同一次运行")
+        XCTAssertEqual(lcov.directoryKey, "web/coverage")
+        XCTAssertEqual(lcov.moduleKey, "web")
         let json = CoverageReportIdentity.derive(path: "/repo/web/coverage/coverage-summary.json",
-                                                 root: root, format: .istanbulSummary, kind: .combined)
-        XCTAssertEqual(lcov.runKey, json.runKey, "一次 nyc 运行的两种落法必须认出同一来源")
+                                                 root: root, format: .istanbulSummary)
+        XCTAssertEqual(lcov.directoryKey, json.directoryKey, "同一次 nyc 运行的两种落法共位")
+        XCTAssertEqual(lcov.moduleKey, json.moduleKey)
         XCTAssertTrue(CoverageReportFormat.isCoPublishedPair(lcov.format, json.format))
-        XCTAssertEqual(lcov.runKey, "module=web|kind=整体")
     }
 
-    /// unit 与 integration 是**两次运行**，绝不能共用 runKey（否则会被去重成一份，
-    /// 联合覆盖就永久丢失 —— 那是另一种漏报）。
-    func testUnitAndIntegrationRunsAreNeverCollapsed() throws {
-        let root = URL(fileURLWithPath: "/repo")
-        let unit = CoverageReportIdentity.derive(path: "/repo/coverage/unit/lcov.info", root: root,
-                                                 format: .lcov, kind: .unit)
-        let integration = CoverageReportIdentity.derive(path: "/repo/coverage/integration/lcov.info",
-                                                        root: root, format: .lcov, kind: .integration)
-        XCTAssertNotEqual(unit.runKey, integration.runKey)
-        XCTAssertNotEqual(CoverageReportFormat.lcov, CoverageReportFormat.coveragePyXml,
-                          "不同工具不是一对对偶落法")
-        XCTAssertFalse(CoverageReportFormat.isCoPublishedPair(.lcov, .coveragePyXml))
+    /// 对偶格式表本身的边界（"同一次运行"那半在 `CoverageRunIdentityTests`）。
+    func testCoPublishedPairTableIsNarrow() {
+        XCTAssertFalse(CoverageReportFormat.isCoPublishedPair(.lcov, .coveragePyXml),
+                       "不同工具不是一对对偶落法")
         XCTAssertFalse(CoverageReportFormat.isCoPublishedPair(.lcov, .lcov),
-                       "同格式的重名靠 runKey 相同即可判重，不需要对偶表放行")
+                       "同格式的两份要另判（账本一致才算同一批证据），对偶表不许顺手放行")
+        XCTAssertTrue(CoverageReportFormat.isCoPublishedPair(.lcov, .istanbulSummary))
     }
 
     /// 推不出来的必须显式未知：报告不在被扫目录之下 ⇒ 没有 runKey、没有模块键。
     func testIdentityOutsideTheScannedRootStaysUnknown() throws {
         let root = URL(fileURLWithPath: "/repo")
         let foreign = CoverageReportIdentity.derive(path: "/elsewhere/lcov.info", root: root,
-                                                    format: .lcov, kind: .combined)
+                                                    format: .lcov)
         XCTAssertNil(foreign.runKey, "路径切不出可信相对形状 ⇒ 未知，不许凭猜合并")
         XCTAssertNil(foreign.moduleKey)
+        XCTAssertNil(foreign.directoryKey, "连共位坐标都没有 ⇒ 任何两份都不能算同一次运行")
         XCTAssertFalse(foreign.isRepositoryWide)
     }
 

@@ -91,10 +91,10 @@ final class CoverageAnalyzer: CoverageProviding {
                                                  lineBudget: lineBudget)
             report = tally?.report
             ledger = tally?.ledger
-        case .istanbulSummary: report = parseIstanbulSummary(text: text, url: url); ledger = nil
-        case .jacocoXml: report = parseJaCoCo(text: text, url: url); ledger = nil
-        case .coveragePyXml: report = parseCoveragePy(text: text, url: url); ledger = nil
-        case .cloverXml: report = parseClover(text: text, url: url); ledger = nil
+        case .istanbulSummary: report = parseIstanbulSummary(text: text, url: url, root: root); ledger = nil
+        case .jacocoXml: report = parseJaCoCo(text: text, url: url, root: root); ledger = nil
+        case .coveragePyXml: report = parseCoveragePy(text: text, url: url, root: root); ledger = nil
+        case .cloverXml: report = parseClover(text: text, url: url, root: root); ledger = nil
         case .unrecognized: report = nil; ledger = nil      // 上面已拦，这里只为穷尽
         }
 
@@ -102,15 +102,22 @@ final class CoverageAnalyzer: CoverageProviding {
             return .failure(CoverageParseFailure(path: path, reason: .noUsableNumbers, byteCount: size))
         }
         filled = fill(url: url, with: filled)
+        // 运行时刻只能来自**正文**（coverage.py 的 `timestamp=`、clover 的 `generated=`）。
+        // 报告文件的 mtime 不算运行证据：它记的是"这个文件什么时候被写/被复制"，
+        // 不是"哪一次测试运行产出了它"（`cp` 一次就变了，见 `CoverageSourceBinding.swift` 的边界）。
+        let runStamp = CoverageRunIdentity.runStamp(in: text, format: format)
         let identity = CoverageReportIdentity.derive(path: path, root: root, format: format,
-                                                     kind: filled.kind)
+                                                    runStamp: runStamp)
         // 带文件粒度的格式即使一条 `DA:` 都没有，也要交出一个（可能只有汇总计数的）账本，
         // 让规划器去判"能不能合并"；汇总粒度的格式压根没有账本这回事 ⇒ nil。
         let resolvedLedger = ledger ?? (identity.format.carriesPerSourceFileRecords ? CoverageLineLedger() : nil)
         return .success(CoverageCandidate(
             report: filled, identity: identity,
             binding: CoverageBinding.state(generatedAt: filled.generatedAt, source: source),
-            ledger: resolvedLedger))
+            ledger: resolvedLedger,
+            // 源码身份：本次扫描时**被扫仓库**的提交指纹。读不到就是 nil，
+            // 绝不允许拿 mtime 或本次分析时刻顶替成一格"有身份"。
+            sourceFingerprint: source.headCommit))
     }
 
     private func byteSize(of url: URL) -> Int? {
@@ -145,10 +152,12 @@ final class CoverageAnalyzer: CoverageProviding {
         return (tally.report(url: url), tally.ledger)
     }
 
-    private func parseIstanbulSummary(text: String, url: URL) -> CoverageReport? {
+    private func parseIstanbulSummary(text: String, url: URL, root: URL) -> CoverageReport? {
+        // 局部名不叫 `root`：那个名字是**被扫目录**（参数），撞名会把 `classify` 的
+        // 坐标换成一份 JSON 字典（编译器拦住了，注释留在这里免得下次再撞）。
         guard let data = text.data(using: .utf8),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let total = root["total"] as? [String: Any] else { return nil }
+              let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let total = document["total"] as? [String: Any] else { return nil }
 
         // 两级判断不能合并成一次回退：lines 桶**存在但为 0** 时不认 statements，
         // 只有 lines 缺失才回退。合起来会把"零覆盖"悄悄报成 83% 覆盖。
@@ -158,7 +167,7 @@ final class CoverageAnalyzer: CoverageProviding {
         let functions = Self.istanbulCounter(total["functions"])
         return CoverageReport(
             path: url.path,
-            kind: Self.classify(url: url),
+            kind: Self.classify(url: url, root: root),
             toolName: CoverageReportFormat.istanbulSummary.toolName,
             linesCovered: lines.covered, linesTotal: lines.total,
             branchesCovered: branches?.covered ?? 0,
@@ -184,7 +193,7 @@ final class CoverageAnalyzer: CoverageProviding {
         return counter.total
     }
 
-    private func parseJaCoCo(text: String, url: URL) -> CoverageReport? {
+    private func parseJaCoCo(text: String, url: URL, root: URL) -> CoverageReport? {
         // Report-level counters are the last ones in the document; per-package and
         // per-class counters appear earlier and would double-count.
         guard let line = Self.jacocoTotals(for: "LINE", in: text) else { return nil }
@@ -194,7 +203,7 @@ final class CoverageAnalyzer: CoverageProviding {
         guard total > 0 else { return nil }
         return CoverageReport(
             path: url.path,
-            kind: Self.classify(url: url),
+            kind: Self.classify(url: url, root: root),
             toolName: CoverageReportFormat.jacocoXml.toolName,
             linesCovered: line.covered, linesTotal: total,
             branchesCovered: branch?.covered ?? 0,
@@ -233,7 +242,7 @@ final class CoverageAnalyzer: CoverageProviding {
         counter.map { $0.missed + $0.covered } ?? 0
     }
 
-    private func parseCoveragePy(text: String, url: URL) -> CoverageReport? {
+    private func parseCoveragePy(text: String, url: URL, root: URL) -> CoverageReport? {
         guard let start = text.range(of: "<coverage") else { return nil }
         let headerEnd = text.range(of: ">", range: start.lowerBound..<text.endIndex)?.lowerBound
             ?? start.upperBound
@@ -253,7 +262,7 @@ final class CoverageAnalyzer: CoverageProviding {
         let branchValid = Int(attr("branches-valid") ?? 0)
         return CoverageReport(
             path: url.path,
-            kind: Self.classify(url: url),
+            kind: Self.classify(url: url, root: root),
             toolName: CoverageReportFormat.coveragePyXml.toolName,
             linesCovered: covered, linesTotal: valid,
             branchesCovered: Int(attr("branches-covered") ?? 0),
@@ -266,7 +275,7 @@ final class CoverageAnalyzer: CoverageProviding {
         )
     }
 
-    private func parseClover(text: String, url: URL) -> CoverageReport? {
+    private func parseClover(text: String, url: URL, root: URL) -> CoverageReport? {
         let pattern = "<metrics\\s+statements=\"(\\d+)\"\\s+coveredstatements=\"(\\d+)\""
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).last,
@@ -279,7 +288,7 @@ final class CoverageAnalyzer: CoverageProviding {
         guard total > 0 else { return nil }
         return CoverageReport(
             path: url.path,
-            kind: Self.classify(url: url),
+            kind: Self.classify(url: url, root: root),
             toolName: CoverageReportFormat.cloverXml.toolName,
             linesCovered: value(2), linesTotal: total,
             branchesCovered: 0, branchesTotal: nil,
@@ -297,8 +306,16 @@ final class CoverageAnalyzer: CoverageProviding {
         return Int(line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)) ?? 0
     }
 
-    static func classify(url: URL) -> CoverageReport.Kind {
-        let path = url.path.lowercased()
+    /// 这份报告属于 unit / 集成 / 整体。**判据只准看被扫目录之内的相对路径**：
+    /// 原来读的是 `url.path`（绝对路径），于是机器上那串临时目录名也能参与匹配 ——
+    /// `NSTemporaryDirectory()` 里那个 UUID 是十六进制串，含 `e2e` 的概率约 0.7%
+    /// （32 个字符 × 30 个三字符窗口 × 1/16³），命中时**整棵夹具**会被判成"集成测试"，
+    /// 同一份夹具两次跑出两个数（台账 RD-39 那条"只在整套跑时红"就是它）。
+    /// 相对路径切不出来（报告在被扫目录之外）时一律 `.combined`：不猜。
+    static func classify(url: URL, root: URL) -> CoverageReport.Kind {
+        let scoped = CoverageReportIdentity.relativePath(of: url.path, root: root) ?? ""
+        let path = scoped.lowercased()
+        if path.isEmpty { return .combined }
         if path.contains("integration") || path.contains("/itest") || path.contains("e2e") { return .integration }
         if path.contains("unit") || path.contains("/test/") || path.contains("surefire") { return .unit }
         return .combined

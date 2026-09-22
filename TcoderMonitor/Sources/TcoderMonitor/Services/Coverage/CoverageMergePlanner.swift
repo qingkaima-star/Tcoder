@@ -23,148 +23,16 @@ struct CoverageCandidate: Sendable {
     var binding: CoverageBindingState
     /// `nil` = 这个格式根本没有文件粒度（istanbul 摘要 / JaCoCo report 级 counter / …）。
     var ledger: CoverageLineLedger?
+    /// 本次扫描时**被扫源码**的提交指纹（`git rev-parse HEAD` 短哈希）。
+    /// `nil` = 非 git 目录 / git 读失败 ⇒ 身份层的"源码指纹"这一格就是缺的，
+    /// 必须由 `CoverageMergeConfidence` 点名，不许悄悄当"没这个问题"。
+    var sourceFingerprint: String? = nil
 
     /// 能不能拿去做跨报告的按行并集。
     var isMergeEligible: Bool {
         guard let ledger, ledger.isMergeSafe else { return false }
         // 账本与报告自己的 LF/LH 必须是同一批文件，否则并集会悄悄换口径。
         return ledger.agrees(with: report)
-    }
-}
-
-// MARK: - 丢弃原因
-
-enum CoverageDropReason: String, Codable, Sendable, CaseIterable {
-    /// 报告时刻早于被扫仓库最新提交 ⇒ 测的不是当前源码。
-    case staleAgainstSource
-    /// 与另一份是**同一次运行的另一种落法**（同模块、同运行键、格式对偶）。
-    case sameRunDuplicate
-    /// 只有汇总桶：与别份无法核对是否重叠 ⇒ 不并入总数（旧实现正是把这些直接相加的）。
-    case aggregateOnlyCannotCrossCheck
-    /// 账本不可信（逐行预算截断 / 同文件重复且数字不一 / 有 `SF:` 之外的孤儿计数）。
-    case ledgerUntrusted
-    /// 与别份提到同一文件而双方都给不出可核对的行集合 ⇒ 两边一起摘出分母。
-    case lineSetConflict
-
-    var note: String {
-        switch self {
-        case .staleAgainstSource: return "早于当前源码提交（陈旧）"
-        case .sameRunDuplicate: return "与已计入的那份是同一次运行的另一种落法"
-        case .aggregateOnlyCannotCrossCheck: return "只有汇总粒度，无法与其它报告核对重叠"
-        case .ledgerUntrusted: return "逐行账本不可信（预算截断或同文件数字冲突）"
-        case .lineSetConflict: return "与别份重叠且拿不出可核对的行集合"
-        }
-    }
-}
-
-struct CoverageDroppedReport: Equatable, Sendable {
-    var path: String
-    var toolName: String
-    var linesCovered: Int
-    var linesTotal: Int
-    var reason: CoverageDropReason
-    /// 细分原因（账本不可信时说是预算命中还是同文件数字冲突）。`nil` = 该档没有更细的说法。
-    var detail: String?
-}
-
-// MARK: - 总数是从哪种证据算出来的
-
-enum CoverageTotalBasis: String, Codable, Sendable {
-    /// 一份报告文件都没扫到 ⇒ 缺证据。
-    case nothingDiscovered
-    /// 扫到了但没有任何一份能可信地合成总数 ⇒ **分开呈现**，不给总数。
-    case nothingMergeable
-    /// 只有一份可用报告：不存在合并，也就谈不上重复计数。
-    case singleReport
-    /// 多份带文件粒度的报告按**源码行集合求并**。
-    case lineSetUnion
-    /// 只有那一份带文件粒度的进总数，其余汇总粒度报告未并入（总数可能偏低，已披露）。
-    case perFileReportWithUnmergedSummaries
-
-    var note: String {
-        switch self {
-        case .nothingDiscovered: return "没有扫到任何覆盖率报告文件"
-        case .nothingMergeable: return "有报告，但彼此无法核对重叠 ⇒ 不给伪精确总数，分开呈现"
-        case .singleReport: return "只有一份可用报告，未做合并"
-        case .lineSetUnion: return "按源码行命中集合求并（同一次运行只数一次）"
-        case .perFileReportWithUnmergedSummaries: return "只按带文件粒度的报告求并，汇总粒度的未并入"
-        }
-    }
-}
-
-// MARK: - 台账
-
-/// 这次覆盖率合并的**全部账目**。旧报告里没有这一格 ⇒ 全部 Optional，
-/// 契约缺口见 Obsidian `112` 的 ## 契约缺口（要总工上提到 `Models/CoverageMetrics.swift`）。
-struct CoverageMergeLedger: Equatable, Sendable {
-    /// 发现阶段看到的候选文件数（= 旧字段 `scannedFileCount`，两者必须相等，守卫钉着）。
-    var consideredCount = 0
-    var parsedCount = 0
-    /// 进了总数的那几份**输入**报告（并集情形下是"合成总数用了 4 份"）。
-    var mergedInputCount = 0
-    /// 落到 `CoverageMetrics.reports` 里的读数份数（并集情形下是 1）。
-    var includedCount = 0
-    var dropped: [CoverageDroppedReport] = []
-    var parseFailures: [CoverageParseFailure] = []
-    var basis: CoverageTotalBasis = .nothingDiscovered
-    /// true = 总数就是全部可信证据的并集；false = 有可核对的东西没并进总数；
-    /// `nil` = **压根没给总数**（谈不上置不置信）。nil 与 false 必须分得开。
-    var mergeConfident: Bool?
-    var conflictingFileCount = 0
-    var excludedFoundLines = 0
-    var staleReportCount = 0
-    /// 没有提交绑定（非 git / mtime 读不到）的报告数。它们**不被排除**，只是不能声称新鲜。
-    var unboundReportCount = 0
-    var unionFileCount = 0
-    var discovery: CoverageDiscoveryStats = CoverageDiscoveryStats()
-
-    /// 未进总数、但真实存在的读数。**分开呈现的数据源**（界面读它 = 契约缺口）。
-    var separateReadings: [CoverageReport] = []
-
-    var droppedCount: Int { dropped.count }
-
-    /// 恒等式①：考虑 = 解析成功 + 读取失败（每一份被发现的文件都要有个交代）。
-    var consideredAccountBalanced: Bool { consideredCount == parsedCount + parseFailures.count }
-    /// 恒等式②：解析成功 = 并入总数 + 被丢弃（**没有一份报告是"悄悄不见"的**）。
-    var parsedAccountBalanced: Bool { parsedCount == mergedInputCount + dropped.count }
-
-    /// 一句人话。所有上限与丢弃都要在这里出声（静默截断是本轮要修的病根）。
-    var statement: String {
-        var parts: [String] = [
-            "考虑 \(consideredCount) 份报告文件 · 解析成功 \(parsedCount) · "
-                + "并入总数 \(mergedInputCount) 份（产出 \(includedCount) 份读数）· 丢弃 \(dropped.count)",
-        ]
-        parts.append(basis.note)
-        if includedCount > 1 || basis == .lineSetUnion {
-            parts.append("并集覆盖 \(unionFileCount) 个源文件"
-                + (conflictingFileCount > 0
-                   ? "，另有 \(conflictingFileCount) 个文件因重叠无法核对被摘出分母"
-                     + "（\(excludedFoundLines) 行）" : ""))
-        }
-        if !dropped.isEmpty {
-            let grouped = Dictionary(grouping: dropped, by: { $0.reason })
-                .map { "\($0.key.note) \($0.value.count) 份" }
-                .sorted()
-            parts.append("丢弃 " + grouped.joined(separator: "、"))
-        }
-        if !parseFailures.isEmpty {
-            let grouped = Dictionary(grouping: parseFailures, by: { $0.reason })
-                .map { "\($0.key.note) \($0.value.count) 份" }
-                .sorted()
-            parts.append("读取失败 " + grouped.joined(separator: "、"))
-        }
-        parts.append(contentsOf: discovery.notes)
-        let details = dropped.compactMap(\.detail)
-        if details.contains(where: { $0.contains(CoverageLineLedger.Blocker.budgetExceeded.rawValue) }) {
-            let n = details.filter { $0.contains(CoverageLineLedger.Blocker.budgetExceeded.rawValue) }.count
-            parts.append("\(n) 份报告逐行账本被内存预算截断 ⇒ 判不可信、未并入（残缺并集比没有并集更坏）")
-        }
-        if staleReportCount > 0 { parts.append("\(staleReportCount) 份报告早于当前源码提交，未计入") }
-        if unboundReportCount > 0 { parts.append("\(unboundReportCount) 份报告没有提交绑定（mtime 不等于提交绑定）") }
-        if mergeConfident == false, basis != .nothingMergeable {
-            parts.append("⚠ 总数未覆盖全部报告，别当项目全量")
-        }
-        return parts.joined(separator: " · ")
     }
 }
 
@@ -181,17 +49,25 @@ enum CoverageMergePlanner {
         var ledger: CoverageMergeLedger
     }
 
-    static func plan(candidates: [CoverageCandidate],
+    static func plan(candidates raw: [CoverageCandidate],
                      consideredCount: Int,
                      parseFailures: [CoverageParseFailure],
                      discovery: CoverageDiscoveryStats) -> Result {
+        // **运行归属先分配再谈去重**：`runKey` 只能由"同目录共位 + 正文互证"发出来
+        // （`CoverageRunIdentity`），认不出就留 `nil`。原来那份身份是拿路径子串猜来的
+        // unit/集成归类拼的 —— 猜错会把两次运行并成一次（丢证据）。
+        let candidates = CoverageRunIdentity.assignRunKeys(to: raw)
         var ledger = CoverageMergeLedger(consideredCount: consideredCount,
                                         parsedCount: candidates.count,
                                         parseFailures: parseFailures,
                                         discovery: discovery)
+        ledger.unattributedRunPaths = candidates.filter { $0.identity.runKey == nil }
+            .map { $0.report.path }
         guard !candidates.isEmpty else {
             ledger.basis = consideredCount > 0 ? .nothingMergeable : .nothingDiscovered
-            ledger.mergeConfident = consideredCount > 0 ? false : nil
+            // `nil` = 压根没给总数。有报告却给不出总数时也是 `nil`（下面各分支同口径），
+            // "有数字但身份不全"才是 `false`。
+            ledger.mergeConfident = nil
             return Result(scoring: [], ledger: ledger)
         }
 
@@ -210,17 +86,18 @@ enum CoverageMergePlanner {
             }
         }
 
-        // ② 同一来源只数一次：同模块同运行、且是同一次导出的对偶格式（或同格式重名）。
+        // ② 同一来源只数一次：同目录、有正文互证的格式对偶（或同格式且账本一致）。
         pool = dropSameRunDuplicates(from: pool, ledger: &ledger)
 
         // ③ 谁能进并集。
         // 只剩一份时**不存在合并**，也就谈不上双计：该给数就给数，
         // 不许为了"保守"把一份真实的单报告读数控成缺证据。
+        // ⚠ 但 `mergeConfident` 与"只剩一份"无关 —— 那一份身份缺格照样判不置信。
         if pool.count == 1, let only = pool.first {
             ledger.basis = .singleReport
-            ledger.mergeConfident = true
             ledger.includedCount = 1
             ledger.mergedInputCount = 1
+            applyConfidence(&ledger, included: [only], gaveTotal: true)
             return Result(scoring: [only.report], ledger: ledger)
         }
 
@@ -234,7 +111,7 @@ enum CoverageMergePlanner {
 
         guard !bounded.isEmpty else {
             ledger.basis = .nothingMergeable
-            ledger.mergeConfident = false        // 明确"没给总数"，与 nil（没扫到）分开
+            applyConfidence(&ledger, included: [], gaveTotal: false)   // 没给总数 ⇒ nil
             return Result(scoring: [], ledger: ledger)
         }
 
@@ -247,7 +124,7 @@ enum CoverageMergePlanner {
             // 每一个文件都判了冲突 ⇒ 没有任何可信分母。给不出总数，
             // 但每一份输入都要在 `dropped` 里留名（恒等式②不许破）。
             ledger.basis = .nothingMergeable
-            ledger.mergeConfident = false
+            applyConfidence(&ledger, included: [], gaveTotal: false)
             for candidate in bounded {
                 ledger.dropped.append(dropped(candidate, reason: .lineSetConflict))
                 ledger.separateReadings.append(candidate.report)
@@ -262,25 +139,42 @@ enum CoverageMergePlanner {
         if bounded.count == 1, let only = bounded.first {
             report = only.report
             ledger.basis = pool.count == 1 ? .singleReport : .perFileReportWithUnmergedSummaries
-            ledger.mergeConfident = ledger.basis == .singleReport
         } else {
             report = unionReport(from: bounded, merged: merged)
             ledger.basis = eligible.count == pool.count ? .lineSetUnion : .perFileReportWithUnmergedSummaries
-            ledger.mergeConfident = ledger.basis == .lineSetUnion
         }
         ledger.includedCount = 1
         for candidate in bounded where candidate.report.id != report.id {
             ledger.separateReadings.append(candidate.report)
         }
+        applyConfidence(&ledger, included: bounded, gaveTotal: true)
         var result = Result(scoring: [report], ledger: ledger)
         result.ledger.includedCount = 1
         return result
+    }
+
+    /// `mergeConfident` 的**唯一**写入点：把"给了总数没有、进总数的那几份身份齐不齐"
+    /// 交给 `CoverageMergeConfidence`。**份数不参与判定**（R5 那三处
+    /// `= true` / `= basis == …` 的写法都由这一处取代）。
+    private static func applyConfidence(_ ledger: inout CoverageMergeLedger,
+                                        included: [CoverageCandidate],
+                                        gaveTotal: Bool) {
+        let verdict = CoverageMergeConfidence.verdict(included: included,
+                                                     fingerprint: included.first?.sourceFingerprint,
+                                                     gaveTotal: gaveTotal,
+                                                     evidenceLeftOut: ledger.evidenceLeftOut,
+                                                     conflictingFileCount: ledger.conflictingFileCount)
+        ledger.mergeConfident = verdict.confident
+        ledger.identityGaps = verdict.gaps
+        ledger.identityGapsByPath = verdict.missingByPath
     }
 
     // MARK: 同一来源
 
     /// 同 `runKey` 的一组里留一份：**优先留有逐行账本的**（它能参与合并），
     /// 其次留数字大的，最后按路径定序 —— 顺序必须与输入顺序无关（复现性是硬要求）。
+    /// 注：`runKey` 由 `CoverageRunIdentity.assignRunKeys` 发出来，**只有正文互证过的那些
+    /// 才会共享同一个键**，所以这里的分组不再需要"猜它们是不是同一次运行"。
     private static func dropSameRunDuplicates(from candidates: [CoverageCandidate],
                                               ledger: inout CoverageMergeLedger)
         -> [CoverageCandidate] {

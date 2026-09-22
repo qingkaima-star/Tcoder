@@ -364,7 +364,7 @@ extension CoverageAnalyzer {
             let prodBranches = separated ? prodBranchesFound : allBranchesFound
             return CoverageReport(
                 path: url.path,
-                kind: CoverageAnalyzer.classify(url: url),
+                kind: CoverageAnalyzer.classify(url: url, root: root),
                 toolName: CoverageReportFormat.lcov.toolName,
                 linesCovered: separated ? prodLinesHit : allLinesHit,
                 linesTotal: separated ? prodLinesFound : allLinesFound,

@@ -69,16 +69,30 @@ enum CoverageReportFormat: String, Codable, Sendable, CaseIterable {
 
 // MARK: - 运行 / 模块身份
 
-/// 一份报告的身份。**全部由路径推出**，因此可以随报告一起落盘并原地重算 ——
-/// 这是有意的：新增字段要动 `Models/**`（冻结区），而路径里确实写着这些信息。
+/// 一份报告的身份。**全部由路径与报告正文推出**，因此可以随报告一起落盘并原地重算 ——
+/// 这是有意的：新增字段要动 `Models/**`（冻结区），而路径与正文里确实写着这些信息。
+///
+/// ⚠️ R5b 改判：`runKey` **不再由 `derive` 拼出**。原来那句
+/// `runKey = "module=\(module)|kind=\(kind.rawValue)"` 里的 `kind` 是
+/// `CoverageAnalyzer.classify(url:)` 对**绝对路径**做子串匹配猜出来的归类，
+/// 拿它当运行身份就是"靠文件名猜同一次运行"，而且猜错会把两次运行去重成一次（丢证据）。
+/// 现在 `runKey` 一律先留 `nil`，由 `CoverageRunIdentity.assignRunKeys(to:)` 按
+/// **同目录共位 + 正文互证** 分配；分不出来就保持 `nil`（未知不参与任何去重）。
 struct CoverageReportIdentity: Codable, Equatable, Sendable {
     var format: CoverageReportFormat
-    /// 同一模块、同一次运行、同一种归类（unit / integration / 整体）的键。
-    /// `nil` = 推不出运行归属 ⇒ 该报告**不与任何报告合并**。
+    /// 同一目录、同一来源的键。`nil` = **认不出这次运行** ⇒ 该报告不与任何报告合并。
     var runKey: String?
+    /// `runKey` 凭的是哪一条证据。`nil`/`.none` = 没有证据。
+    var runEvidence: CoverageRunEvidence?
     /// 模块键：报告所在目录去掉"产物目录尾巴"之后剩下的相对目录。`""` = 仓库根。
     /// `nil` = 未知（绝对路径切不出可信相对形状）。
     var moduleKey: String?
+    /// 报告**自身所在目录**相对被扫根的形式（**不**剥产物段）：这是"同一次运行"的共位坐标。
+    /// `nil` = 在被扫目录之外。
+    var directoryKey: String?
+    /// 正文里写着的运行时刻（coverage.py `timestamp=` / clover `generated=`）。
+    /// `nil` = 这个格式的正文里压根没有这一格（lcov / JaCoCo / istanbul 摘要都没有）。
+    var runStamp: String?
     /// 只有汇总数字、没有文件清单 ⇒ 与其它汇总报告**永远无法核对是否重叠**。
     var isAggregateOnly: Bool
     /// 模块键为仓库根：视作"全仓候选"。**这只是候选，不是结论** ——
@@ -96,9 +110,9 @@ struct CoverageReportIdentity: Codable, Equatable, Sendable {
         "build", "target", "out", "dist",
     ]
 
-    /// 由报告路径推身份。`root` 是被扫目录（用来把绝对路径切成相对路径）。
+    /// 由报告路径与正文推出身份。`root` 是被扫目录（用来把绝对路径切成相对路径）。
     static func derive(path: String, root: URL, format: CoverageReportFormat?,
-                       kind: CoverageReport.Kind) -> CoverageReportIdentity {
+                       runStamp: String? = nil) -> CoverageReportIdentity {
         let resolved = format ?? CoverageReportFormat.identify(fileName: (path as NSString).lastPathComponent)
         let relative = relativePath(of: path, root: root)
         let directory = relative.map { ($0 as NSString).deletingLastPathComponent } ?? ""
@@ -111,10 +125,13 @@ struct CoverageReportIdentity: Codable, Equatable, Sendable {
 
         return CoverageReportIdentity(
             format: resolved,
-            // 相对路径切不出来（例如报告不在被扫目录之下）时不给运行归属：
-            // 认错来源的代价是双计，而"没归属"的代价只是分开呈现。
-            runKey: relative == nil ? nil : "module=\(module)|kind=\(kind.rawValue)",
+            // 运行归属要**两份以上互相核对**才成立，derive 只看一份 ⇒ 一律先留未知，
+            // 由 `CoverageRunIdentity.assignRunKeys` 补。相对路径切不出来的连共位坐标都没有。
+            runKey: nil,
+            runEvidence: nil,
             moduleKey: relative == nil ? nil : module,
+            directoryKey: relative == nil ? nil : directory,
+            runStamp: runStamp,
             isAggregateOnly: !resolved.carriesPerSourceFileRecords,
             isRepositoryWide: relative != nil && module.isEmpty)
     }
