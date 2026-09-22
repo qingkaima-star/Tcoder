@@ -43,6 +43,14 @@ struct LogEvent: Sendable {
     /// 折叠进来的堆栈头里出现的异常类名。异常类常在级别行的下一行，
     /// 签名要靠它才能落在 `java.lang.NullPointerException` 而不是前缀文案上。
     var exceptionToken: String? = nil
+    /// `date` 是哪来的。**必须有这一格**，否则「事件时间」与「文件修改时间」在下游无法区分：
+    /// 整改前崩溃通道会拿 mtime 兜底填 `date`，于是一份没有时间戳的旧报告
+    /// 被算成"刚发生的崩溃"并进入窗口计数（RD-22）。
+    var eventTimeSource: CrashEventTimeSource = .unavailable
+    /// 报告自报的应用与构建身份（RD-23）。只有崩溃通道的事件会有。
+    var appIdentity: AppBuildIdentity? = nil
+    /// Apple 报告里的 incident id / 崩溃事件唯一号 —— 去重的第一优先键。
+    var incidentID: String? = nil
 }
 
 struct LogFileReading: Sendable {
@@ -82,6 +90,12 @@ struct LogAggregate: Sendable {
     var affectedFiles: [String: Int] = [:]
     var windowStart: Date?
     var windowEnd: Date?
+    /// 有真实事件时间、落在窗口内的事件才参与上面的各种计数。
+    /// 下面两本是**被排除的部分**，它们不是 0，是"没算进来"（X3 的那条老红线）。
+    var undatedEventCount: Int = 0
+    var outOfWindowEventCount: Int = 0
+    /// 崩溃证据台账（四态 + 去重 + 构建归属）。**不落盘**，形状登记在 Obsidian `110` 的契约缺口。
+    var crashEvidence: CrashEvidenceLedger? = nil
 }
 
 // MARK: - 尾部读取
@@ -313,7 +327,8 @@ fileprivate struct LogEventBuilder {
             let parentIsCrash = events[parentIndex].isCrash
             var event = LogEvent(date: line.date, severity: parentSeverity, rawLine: line.raw,
                                  message: line.message, sourceLogPath: sourcePath, lineNumber: number,
-                                 isCrash: parentIsCrash, isContinuation: true)
+                                 isCrash: parentIsCrash, isContinuation: true,
+                                 eventTimeSource: line.date == nil ? .unavailable : .logLineTimestamp)
             if let frame = line.stackFrame {
                 event.stackFrames = [frame]
                 events[parentIndex].stackFrames.append(frame)
@@ -341,7 +356,8 @@ fileprivate struct LogEventBuilder {
         }
         let isCrash = severity == .crash || (role == .crash && LogLineParser.looksLikeCrash(line.raw))
         var event = LogEvent(date: line.date, severity: severity, rawLine: line.raw, message: line.message,
-                             sourceLogPath: sourcePath, lineNumber: number, isCrash: isCrash)
+                             sourceLogPath: sourcePath, lineNumber: number, isCrash: isCrash,
+                             eventTimeSource: line.date == nil ? .unavailable : .logLineTimestamp)
         if let frame = line.stackFrame { event.stackFrames = [frame] }
         if let file = line.sourceFile { event.sourceFiles = [file] }
         events.append(event)

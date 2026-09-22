@@ -5,9 +5,13 @@ import Foundation
 struct FunctionCandidate: Sendable {
     var name: String
     var startLine: Int      // 1-based，函数签名所在行
-    var lineCount: Int      // 函数总行数（签名行到闭合行）
+    var lineCount: Int      // 函数跨度（签名行到闭合行，**含**嵌套函数体）
     var parameterCount: Int
-    var complexity: Int     // 圈复杂度，>= 1
+    /// 圈复杂度，>= 1。口径见 `ComplexityEngine.Scan`（RD-08）：
+    /// **只算本函数自己那部分体**，直接嵌套的具名函数体已按行挖掉、各自单列一条。
+    var complexity: Int
+    /// 本函数体内单列出去的嵌套具名函数个数（0 = 这条的数字就是它自己的全部）
+    var nestedFunctionCount: Int = 0
 }
 
 // MARK: - Engine
@@ -25,6 +29,10 @@ enum ComplexityEngine {
     static let maxCandidatesPerFile = 20_000
     /// 多行签名时向后找第一个 `{` 的最大跨度
     static let maxSignatureLookahead = 8
+    /// 嵌套具名函数下钻的最大深度：超过就不再展开，其判定并入直接外层，
+    /// 并通过 `FunctionScanOutcome.nestedDepthTruncatedCount` 出声（R2 / RD-08）。
+    /// 为什么要有上限：每下一层就要把上一层的体再扫一遍，深度无界时病态夹具会打成 N×深度。
+    static let maxNestedFunctionScanDepth = 8
     /// 缩进签名的跨行窗口：只在「括号还没配平」时往后走，配平即停，放大窗口没有误并风险
     static let maxSignatureContinuationLines = 64
     /// 超过该长度的行视为压缩产物/数据行，不做签名匹配
@@ -32,105 +40,6 @@ enum ComplexityEngine {
     /// 无括号语言的函数体最大跨度
     static let maxBodyLookahead = 4_000
 
-    // MARK: API
-
-    /// 从单个文件识别函数并算复杂度；无法识别的语言返回 []。
-    static func functions(in file: ScannedSourceFile) -> [FunctionCandidate] {
-        let profile = profile(for: file.language)
-        guard profile.family != .none, !profile.patterns.isEmpty else { return [] }
-        let raw = file.lines.map { $0.text }
-        guard !raw.isEmpty else { return [] }
-
-        let src = sanitize(raw, profile)
-        var scan = Scan(src: src,
-                        profile: profile,
-                        scriptMask: profile.scriptRegionOnly ? computeScriptMask(src.cleaned) : nil)
-        return scan.run()
-    }
-
-    /// 逐行「找签名 → 定边界 → 产出候选」的扫描。原先这 66 行 / CC 20 就是 `functions(in:)` 的整个函数体。
-    ///
-    /// `line` 的两条推进路经刻意保住：命中签名（哪怕最后因为太短/太长没成候选）就跳到闭合行的
-    /// 下一行，其余一切情况只前进一行；命中数达到 `maxCandidatesPerFile` 就地收工。
-    struct Scan {
-        let src: SanitizedSource
-        let profile: LangProfile
-        let scriptMask: [Bool]?
-        var result: [FunctionCandidate] = []
-        var line = 0
-
-        mutating func run() -> [FunctionCandidate] {
-            while line < src.cleaned.count {
-                if result.count >= ComplexityEngine.maxCandidatesPerFile { break }
-                if let matched = functionStartingHere() {
-                    if let candidate = matched.candidate { result.append(candidate) }
-                    line = matched.endLine + 1
-                } else {
-                    line += 1
-                }
-            }
-            return result
-        }
-
-        /// 本行是不是一个函数签名的开头；是的话给出闭合行与（可能不合格的）候选。
-        mutating func functionStartingHere() -> (endLine: Int, candidate: FunctionCandidate?)? {
-            guard let name = signatureNameHere() else { return nil }
-            let boundary = bodyBoundary()
-            guard let endLine = boundary.closing else { return nil }
-            // 防御：签名行绝不能越过闭合行，否则下面的 line...signatureEnd 区间会当场 trap
-            var signatureEnd = boundary.signatureEnd
-            if signatureEnd > endLine { signatureEnd = endLine }
-
-            let count = endLine - line + 1
-            guard count >= ComplexityEngine.minFunctionLines, count <= ComplexityEngine.maxFunctionLines
-            else { return (endLine, nil) }
-            let signature = src.cleaned[line...signatureEnd].joined(separator: " ")
-            return (endLine, FunctionCandidate(
-                name: name,
-                startLine: line + 1,
-                lineCount: count,
-                parameterCount: ComplexityEngine.parameterCount(from: signature),
-                complexity: ComplexityEngine.complexity(ofCleanedLines: Array(src.cleaned[line...endLine]),
-                                                        profile: profile)
-            ))
-        }
-
-        /// 四道廉价闸门 + 签名正则，先便宜后贵，顺序与原实现一致。
-        func signatureNameHere() -> String? {
-            if line > 0, !src.balancedBefore[line - 1] { return nil }
-            if let mask = scriptMask, !mask[line] { return nil }
-            let cleanedLine = src.cleaned[line]
-            // utf8.count 对原生 Swift String 是 O(1)，utf16.count 会触发转码；这里只是长度门槛
-            guard !cleanedLine.isEmpty, cleanedLine.utf8.count <= ComplexityEngine.maxLineLengthForMatch else {
-                return nil
-            }
-            // 廉价预筛：绝大多数语言的签名都必须带 `(`，先挡掉就不必为每行进 NSString/正则循环
-            if profile.parenOnEveryPattern, cleanedLine.contains("(") == false { return nil }
-            return ComplexityEngine.matchSignature(cleanedLine, profile)
-        }
-
-        /// 签名命中之后定函数边界：花括号族 / 缩进族 / Ruby `end` 族各走各的。
-        func bodyBoundary() -> (closing: Int?, signatureEnd: Int) {
-            switch profile.family {
-            case .curly, .shell:
-                guard let span = ComplexityEngine.curlyEnd(start: line, src, profile) else { return (nil, line) }
-                return (span.closing, span.brace)
-            case .indentation:
-                let signatureEnd = ComplexityEngine.multiLineSignatureEnd(start: line, src.cleaned,
-                                                                         closingChars: [":"])
-                return (ComplexityEngine.indentedEnd(start: line, signatureEnd: signatureEnd,
-                                                     cleaned: src.cleaned), signatureEnd)
-            case .rubyEnd:
-                // Ruby 的边界靠同级 `end` 判定，不受跨行签名影响；这里只把签名行对齐，
-                // 好让 `def foo(\n a,\n b\n)` 这种跨行参数表也数得出参数。
-                let signatureEnd = ComplexityEngine.multiLineSignatureEnd(start: line, src.cleaned,
-                                                                          closingChars: [")"])
-                return (ComplexityEngine.rubyEnd(start: line, src.cleaned), signatureEnd)
-            case .none:
-                return (nil, line)
-            }
-        }
-    }
 
     /// 对给定文本行序列计算圈复杂度（>=1）。
     static func complexity(forLines lines: [String], language: String) -> Int {
@@ -350,3 +259,4 @@ enum ComplexityEngine {
         return colons
     }
 }
+

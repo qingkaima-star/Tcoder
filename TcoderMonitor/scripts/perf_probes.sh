@@ -228,3 +228,77 @@ probe_usable() {  # 探针"取不到"必须是**一个词**，两侧档位共用
   case "$q" in ''|-1|-1.0|-1.00) return 1 ;; esac
   return 0
 }
+
+
+# =============================================================================
+# 合成输入器（CGEvent 投递滚动）—— 从 perf_wait_window.sh 搬进来，因为现在有两个消费者：
+# 排程器的 interact 档，和 `perf_harness.sh pulse`（进程内帧脉冲 + 同时投滚动）。
+# 留一份实现是底线：编译缓存键、"编译不许挤进闸门与录制之间"、投不出事件就非零退出，
+# 两处都得同一份待遇。目标 pid 改成调用方传（pulse 档起的不是"唯一那个实例"）。
+# =============================================================================
+SYNTH_PID=""
+SYNTH_BIN=""
+ensure_synth_scroller() {  # **进等待循环之前**把投事件器编好（内容哈希缓存，全机一次）
+  # 原来编译写在 start_synth_scroller 里，而它是"开录闸门之后"才调的
+  # ⇒ `swiftc` 派出的 `swift-frontend` 还在吃 94.8% CPU 的时候，录制窗口已经开始了。
+  # 自己刚起的编译绕过自己刚过的闸门，这种污染比别人的干扰更难发现。
+  local want
+  want=$(shasum -a 256 scripts/perf_synth_scroll.swift 2>/dev/null | cut -c1-12)
+  SYNTH_BIN="${SCRATCH:-$PWD/.scratch}/tcoder-synth-scroll-${want:-unknown}"
+  [ -d "$SYNTH_BIN" ] && SYNTH_BIN="$SYNTH_BIN.$$"     # 别人占了这个名字：换，不硬来
+  [ -x "$SYNTH_BIN" ] && return 0
+  local tmp="$SYNTH_BIN.build.$$"
+  xcrun swiftc -O -target arm64-apple-macos14.0 \
+      -module-cache-path "${SCRATCH:-$PWD/.scratch}/swiftmodulecache" \
+      scripts/perf_synth_scroll.swift -o "$tmp" 2>/dev/null \
+    || { rm -f "$tmp"; echo "!! 合成输入器编不出来（scripts/perf_synth_scroll.swift）" >&2; return 1; }
+  mv -f "$tmp" "$SYNTH_BIN"
+}
+
+start_synth_scroller() {  # 只管"跑起来"：编译不许出现在闸门与录制之间。<目标 pid> [秒]
+  local secs="${SYNTH_SECS:-95}"   # 覆盖一整趟（hitches 20s + time-profile 25s + 导出与换趟空档）
+  [ -x "$SYNTH_BIN" ] || { echo "!! 合成输入器没预备好（应先跑 ensure_synth_scroller）" >&2; return 1; }
+  # 被测 pid：优先用本档自己起的那个；attach 模式下用唯一在场的那个
+  local tp="${1:-${TARGET_PID:-}}"   # 目标 pid 由调用方给（本函数不再假设"我只有一个实例"）
+  [ -n "$tp" ] || { echo "!! 不知道往哪个 pid 投事件 ⇒ 不开录（空转样本比没有样本更坏）" >&2; return 1; }
+  # 14 px / 8 ms ⇒ ~125 Hz 的事件节奏；每次改动都记进日志，免得读表的人不知道输入多快
+  "$SYNTH_BIN" "$secs" "$tp" "${SYNTH_PX:-14}" "${SYNTH_GAP_MS:-8}" >&2 &
+  SYNTH_PID=$!
+  echo "    合成输入器 pid=$SYNTH_PID（投 ${secs}s，${SYNTH_PX:-14}px/${SYNTH_GAP_MS:-8}ms ≈ $((1000 / ${SYNTH_GAP_MS:-8})) Hz 事件节奏；meta 记 input_source=synth）"
+  return 0
+}
+
+# -----------------------------------------------------------------------------
+# 自己起一个"带脉冲记录"的被测实例，让**同一个窗口同时有两把尺子**。
+#
+# 为什么必须自己起（2026-09-22 想清楚的一件事）：`interact`/`idle` 档一直是
+# `require_idle_target` 找**场上已有**的实例再 `xctrace --attach`，
+# 而那个实例多半不是带 `TCODER_PERF_PROBE=1` 起的 ⇒ 它体内根本没有 FramePulse 在记，
+# 于是"p95 帧间隔 ≤8.4 ms"这半句验收**永远无法与 xctrace 的
+# `displayed-surfaces-per-second` 对上** —— 两把尺子来自两个不同窗口，就等于没有交叉核对。
+# （今天第一份配对证据反而是 idle 档给的：surfaces p50=119 / p95=120、设备 max 120 Hz，
+#   直接推翻了我"idle 静止窗一定降频到 10/s，所以 p95 判不了"那句老话。）
+#
+# 默认关：`MEASURE_LAUNCH=1` 才走这条路。开了之后：
+#   · 用**本树的 release 二进制**起一个实例，`TCODER_PERF_OUT` 指进样本目录、
+#     `TCODER_SUPPORT_DIR` 指进样本目录下的沙箱（不污染用户真实数据，也不会与别人互写全局态）；
+#   · 只 TERM 自己起的那一个 pid（有 trap；绝不按 bundle id 广播 —— 工单 §K 那条）。
+launch_measured_instance() {  # launch_measured_instance <样本目录> <二进制>
+  local out="$1" bin="$2"
+  [ -x "$bin" ] || { echo "!! 二进制不可执行：$bin（先跑 scripts/build_app.sh release）" >&2; return 1; }
+  mkdir -p "$out/sandbox" || return 1
+  MEASURED_PULSE="$out/pulse.txt"
+  TCODER_PERF_PROBE=1 TCODER_PERF_OUT="$MEASURED_PULSE" TCODER_SUPPORT_DIR="$out/sandbox" \
+    "$bin" -ApplePersistenceIgnoreState YES >/dev/null 2>&1 &
+  MEASURED_PID=$!
+  # 只清自己起的那个 pid；EXIT/INT/TERM 三条都挂，中断不留孤儿（留了就压死所有人的闸门）
+  trap '[ -n "${MEASURED_PID:-}" ] && kill -TERM "$MEASURED_PID" 2>/dev/null; return' EXIT INT TERM
+  sleep 4
+  if kill -0 "$MEASURED_PID" 2>/dev/null; then
+    echo "    自己起的被测实例 pid=$MEASURED_PID（脉冲写 $MEASURED_PULSE，沙箱 $out/sandbox）"
+    return 0
+  fi
+  echo "!! 起的实例 4 秒内就退了 ⇒ 不继续（宁可没数，也不要一份 attach 到别人实例上的假配对）" >&2
+  return 1
+}
+

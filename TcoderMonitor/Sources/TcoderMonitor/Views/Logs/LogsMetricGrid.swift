@@ -49,6 +49,10 @@ enum LogReading {
 struct LogsMetricGrid: View {
     let logs: LogSummary?
     let code: CodeMetrics?
+    /// 页头那枚时间窗口的天数。ⓘ 里"历史报告在窗口之外"那一句要说清窗口有多长，
+    /// 所以它必须由 `LogsView` 传进来，而不是在这里写一个常量 —— 写了就会在用户
+    /// 切到 30 天时说出一句和屏上不一致的话。
+    var windowDays: Int = 7
 
     var body: some View {
         GlassSection("错误概览", subtitle: subtitle, icon: .riskSevere, trailing: headerTrailing) {
@@ -60,7 +64,9 @@ struct LogsMetricGrid: View {
                      caption: LogReading.caption(logs) { _ in "窗口内累计" }, icon: .riskSevere)
                 DataBandSeparator()
                 tile("崩溃", count: LogReading.count(logs) { $0.crashCount },
-                     caption: LogReading.caption(logs) { "其中 FATAL \(NumberFormat.grouped($0.fatalCount)) 条" },
+                     // 读数句在 Services 侧拼（`LogSummary.crashTileCaption`）：
+                     // 这里以前是「其中 FATAL n 条」，读者看不出这个数**只含窗口内有证据的那些**。
+                     caption: LogReading.caption(logs) { $0.crashTileCaption },
                      icon: .crash)
                 DataBandSeparator()
                 tile("警告", count: LogReading.count(logs) { $0.warningCount },
@@ -93,11 +99,21 @@ struct LogsMetricGrid: View {
     }
 
     /// 进 ⓘ 的完整句：同样是被跳过，权限问题用户自己能修，文件消失是另一回事。
+    ///
+    /// 崩溃证据那一句（含"为什么崩溃数比崩溃通道文件数小"）也挂这里 ——
+    /// 屏上只留四枚读数与一句副标题，长解释按风格契约 8 收进 ⓘ。
     private var skippedReasonHelp: String? {
-        guard let logs, let failed = logs.readFailedFiles, failed.isEmpty == false else { return nil }
-        let grouped = Dictionary(grouping: failed.map { $0.readFailure ?? "未记录原因" }, by: { $0 })
-        let reasons = grouped.keys.sorted().map { "\($0) ×\(NumberFormat.grouped(grouped[$0]?.count ?? 0))" }
-        return "已跳过 \(NumberFormat.grouped(failed.count)) 份读取失败，原因分布：\(reasons.joined(separator: "、"))。"
+        guard let logs else { return nil }
+        var lines: [String] = []
+        if let failed = logs.readFailedFiles, failed.isEmpty == false {
+            let grouped = Dictionary(grouping: failed.map { $0.readFailure ?? "未记录原因" }, by: { $0 })
+            let reasons = grouped.keys.sorted().map { "\($0) ×\(NumberFormat.grouped(grouped[$0]?.count ?? 0))" }
+            lines.append("已跳过 \(NumberFormat.grouped(failed.count)) 份读取失败，原因分布：\(reasons.joined(separator: "、"))。")
+        }
+        if logs.crashCount > 0 || logs.scannedFiles.contains(where: { $0.role == .crash }) {
+            lines.append(logs.crashEvidenceFootnote(windowDays: windowDays))
+        }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
     /// 卡头右侧：ⓘ（跳过原因分布）在前、风险徽标在后，两者都可能缺席。

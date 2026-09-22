@@ -62,7 +62,7 @@ extension HealthScoreCurvesTests {
 
     func testStabilityNeverFakesUnscannedLogsAsPerfect() {
         let unscanned = HealthCurves.stability(
-            errorsPerKLoc: 0, crashCount: 0, fatalCount: 0, exceptionCount: 0, totalLinesScanned: 0
+            errorsPerKiloLogLines: 0, crashCount: 0, fatalCount: 0, exceptionCount: 0, totalLinesScanned: 0
         )
         XCTAssertTrue(
             unscanned.detail.contains("未扫描") || unscanned.detail.contains("默认"),
@@ -72,12 +72,12 @@ extension HealthScoreCurvesTests {
         // 因为实现可以合法地给出「保守默认分」或「中性分」。
 
         let clean = HealthCurves.stability(
-            errorsPerKLoc: 0, crashCount: 0, fatalCount: 0, exceptionCount: 0, totalLinesScanned: 250_000
+            errorsPerKiloLogLines: 0, crashCount: 0, fatalCount: 0, exceptionCount: 0, totalLinesScanned: 250_000
         )
         XCTAssertGreaterThanOrEqual(clean.score, 90, "扫描到 25 万行且零错误必须高分")
 
         let awful = HealthCurves.stability(
-            errorsPerKLoc: 30, crashCount: 12, fatalCount: 6, exceptionCount: 40, totalLinesScanned: 80_000
+            errorsPerKiloLogLines: 30, crashCount: 12, fatalCount: 6, exceptionCount: 40, totalLinesScanned: 80_000
         )
         XCTAssertLessThanOrEqual(awful.score, 35, "每千行 30 个错误 + 崩溃必须低分")
         XCTAssertGreaterThan(clean.score, awful.score)
@@ -85,7 +85,7 @@ extension HealthScoreCurvesTests {
         var previous: Double?
         for crashes in [0, 2, 9] {
             let result = HealthCurves.stability(
-                errorsPerKLoc: 1.5, crashCount: crashes, fatalCount: 0, exceptionCount: 3, totalLinesScanned: 90_000
+                errorsPerKiloLogLines: 1.5, crashCount: crashes, fatalCount: 0, exceptionCount: 3, totalLinesScanned: 90_000
             )
             if let previous {
                 XCTAssertLessThanOrEqual(result.score, previous, "crashCount=\(crashes) 时分数不得回升")
@@ -159,7 +159,7 @@ extension HealthScoreCurvesTests {
             results.append(HealthCurves.busFactor(risk: .medium, topAuthorShare: share, activeAuthors: 5, commitBasis: 700))
         }
         for errorsPerKLoc in [0.0, 2.0, 18.0] {
-            results.append(HealthCurves.stability(errorsPerKLoc: errorsPerKLoc, crashCount: 1, fatalCount: 0, exceptionCount: 4, totalLinesScanned: 40_000))
+            results.append(HealthCurves.stability(errorsPerKiloLogLines: errorsPerKLoc, crashCount: 1, fatalCount: 0, exceptionCount: 4, totalLinesScanned: 40_000))
         }
         for vulnerable in [0, 5, 30] {
             results.append(HealthCurves.dependencyHealth(vulnerableCount: vulnerable, outdatedCount: 8, totalDependencies: 120))

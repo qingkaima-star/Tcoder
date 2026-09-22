@@ -38,6 +38,15 @@ struct GitInsights: Codable, Equatable, Sendable {
     var headSHA: String = ""
     var remoteURL: String = ""
 
+    /// 扫描那一刻工作区有没有未提交改动。nil = **没量到**（不是仓库、git 不可用或探测超时），
+    /// 与 `false`（量到了、确实干净）是两件事：报告如果把这俩混成一格，「按提交号复核」
+    /// 就会拿一份带未提交改动的树去对某个提交号，然后得出「代码对不上」的假结论。
+    var workingTreeDirty: Bool? = nil
+    /// `git status --porcelain` 的行数；没量到时为 nil。
+    var dirtyEntryCount: Int? = nil
+    /// `workingTreeDirty == nil` 的原因。量到了留空。
+    var dirtyProbeNote: String = ""
+
     var totalCommits: Int = 0
     /// How many commits were actually parsed. Large repositories are read within a
     /// cap, so this can be smaller than `totalCommits`; derived statistics

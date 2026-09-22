@@ -274,8 +274,14 @@ extension CrashReportParser {
         return text
     }
 
-    /// date 优先 body 的 timestamp，回落到 header 的 timestamp/reporting_time，再回落 modifiedAt。
-    static func ipsDate(body: [String: Any], header: [String: Any], path: String, modifiedAt: Date) -> Date {
+    /// 一份 .ips 的**事件时间**，以及它是从哪儿读到的。
+    ///
+    /// 整改前这里最后两行是 `if let fromName = dateFromFileName(path) { return fromName }`
+    /// 与 `return modifiedAt`：**报告里没有时间也硬造一个时间**，
+    /// 于是「无事件时间的崩溃」在下游与「刚刚崩的」长得一模一样，还会被 mtime 拉进窗口。
+    /// 现在读不到就返回 `nil` + `.unavailable`，由 `CrashEvidenceLedger` 单列成"无事件时间"。
+    static func ipsEventDate(body: [String: Any], header: [String: Any], path: String, yearReference: Date)
+        -> (date: Date?, source: CrashEventTimeSource) {
         let candidates = [
             string(body["timestamp"]),
             string(body["incident_timestamp"]),
@@ -285,10 +291,12 @@ extension CrashReportParser {
             string(header["incident_identifier"]),
         ]
         for candidate in candidates.compactMap({ $0 }) {
-            if let parsed = date(from: candidate, referenceDate: modifiedAt) { return parsed }
+            if let parsed = date(from: candidate, referenceDate: yearReference) {
+                return (parsed, .reportField)
+            }
         }
-        if let fromName = dateFromFileName(path) { return fromName }
-        return modifiedAt
+        if let fromName = dateFromFileName(path) { return (fromName, .reportFileName) }
+        return (nil, .unavailable)
     }
 
     static func date(from text: String, referenceDate: Date) -> Date? {

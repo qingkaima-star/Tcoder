@@ -54,13 +54,40 @@ extension ComplexityEngine {
                     var word = text.substring(with: match.range)
                     // `else   if`（多个空白）也要落到 "else if" 这个关键字上
                     if word.hasPrefix("else") { word = "else if" }
-                    if keywords.contains(word) { total += 1 }
+                    guard keywords.contains(word) else { continue }
+                    // RD-09：关键字形状但语法位置不是判定的一律不加分（见下面两个判据）。
+                    // 反向也要守住：`ifLet(` / `.ifLet(` / `switchMap(` 这些**名字里含关键字前缀**的
+                    // 写法本来就命不中 `\b…\b`，这里不新增任何"整行不数"的口子。
+                    guard isControlFlowPosition(text, match.range) else { continue }
+                    total += 1
                 }
             }
             total += branchSymbols(in: rawLine, profile: profile)
         }
         return max(1, total)
     }
+
+    /// 关键字命中处**是不是真的在写判定**。两条判据，各对应一种被误算成控制流的形状：
+    /// 1. **成员访问位**：`box.if` / `x.else` / `list.case` —— 点号后面那个词是属性名 / 方法名。
+    ///    正则的 `\b` 管不住点号（`.` 不是标识符字符），所以 `.if` 以前白送一次复杂度。
+    /// 2. **标签位**：`guardElse(if: x)` / `{ if: true }` —— 关键字之后紧跟冒号（中间只允许空白）
+    ///    就是参数标签 / 对象键名，不是判定。真的 `if` / `case` 后面跟的是条件表达式，
+    ///    冒号要么没有要么隔着一整个条件（`if (a): ` 里冒号前还有 `)`，判据 2 命不中）。
+    static func isControlFlowPosition(_ text: NSString, _ range: NSRange) -> Bool {
+        if range.location > 0, text.character(at: range.location - 1) == Self.dotUnichar { return false }
+        var index = NSMaxRange(range)
+        while index < text.length {
+            let c = text.character(at: index)
+            if c == Self.spaceUnichar || c == Self.tabUnichar { index += 1; continue }
+            return c != Self.colonUnichar
+        }
+        return true
+    }
+
+    static let dotUnichar: unichar = 0x2E      // "."
+    static let colonUnichar: unichar = 0x3A    // ":"
+    static let spaceUnichar: unichar = 0x20
+    static let tabUnichar: unichar = 0x09
 
     // 三元 `?` 的判定是纯启发式：Swift/Kotlin/Dart 里 `Int?` 满天飞，所以额外要求
     // 「冒号出现在该 ? 之后」，否则 `let x: Int? = 5` 会被误计一次。

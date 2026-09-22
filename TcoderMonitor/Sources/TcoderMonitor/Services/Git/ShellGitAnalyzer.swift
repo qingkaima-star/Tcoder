@@ -73,6 +73,14 @@ final class ShellGitAnalyzer: GitAnalysisProviding {
         var relocated: Bool { rootPath != selectedPath }
     }
 
+    /// 工作区探测的**三种**结局。必须有三态：把「没量到」压成 `false` 会让一份
+    /// 带未提交改动的树看起来「与提交号一致」，按提交号复核的人就会白跑一趟。
+    enum WorkingTreeOutcome: Sendable {
+        case dirty(entries: Int)
+        case clean
+        case notMeasured(reason: String)
+    }
+
     // MARK: - Entry point
 
     func analyze(repositoryURL: URL) async throws -> GitInsights {
@@ -90,11 +98,16 @@ final class ShellGitAnalyzer: GitAnalysisProviding {
         async let remoteProbe = runResilient(["config", "--get", "remote.origin.url"], at: resolution.rootURL, timeout: probeTimeout)
         // 仓库真实提交总数（含 merge），与下面被窗口截断的 `git log` 无关。
         async let fullCountProbe = runResilient(["rev-list", "--count", "HEAD"], at: resolution.rootURL, timeout: probeTimeout)
+        // 工作区状态：报告要能说「这份结论是在哪个提交上、当时树干不干净」。
+        // `-uno` 故意**不**用 —— 未跟踪文件也是「与提交号不一致」的一部分；
+        // 但 `.build`/派生数据这类被 gitignore 的目录 git 自己会跳过，不必另造一套忽略规则。
+        async let statusProbe = runResilient(["status", "--porcelain"], at: resolution.rootURL, timeout: probeTimeout)
         let log = await run(logArguments, at: resolution.rootURL, timeout: logTimeout)
         let branchResult = await branchProbe
         let headResult = await headProbe
         let remoteResult = await remoteProbe
         let fullCountResult = await fullCountProbe
+        let statusResult = await statusProbe
 
         let commits: [ParsedCommit]
         if log.succeeded {
@@ -114,8 +127,23 @@ final class ShellGitAnalyzer: GitAnalysisProviding {
             headSHA: headResult.succeeded ? Self.firstLine(headResult.stdout) : "",
             remoteURL: remoteResult.succeeded ? Self.firstLine(remoteResult.stdout) : "",
             fullCommitCount: fullCountResult.succeeded ? Int(Self.firstLine(fullCountResult.stdout)) : nil,
-            resolution: resolution
+            resolution: resolution,
+            workingTree: Self.workingTree(from: statusResult)
         )
+    }
+
+    /// `git status --porcelain` 的结局 → 三态。
+    ///
+    /// 只认「退出码为 0」这一次探测；非零/超时时**不猜**干净与否，把 git 的第一行 stderr
+    /// 当成原因带出去（`not a git repository`、`dubious ownership` 都是真实会遇到的）。
+    static func workingTree(from outcome: GitCommandOutcome) -> WorkingTreeOutcome {
+        guard outcome.succeeded else {
+            if outcome.timedOut { return .notMeasured(reason: "工作区探测超时") }
+            let reason = firstLine(outcome.stderr)
+            return .notMeasured(reason: reason.isEmpty ? "git status 未成功退出" : reason)
+        }
+        let entries = outcome.stdout.components(separatedBy: "\n").filter { !$0.isEmpty }
+        return entries.isEmpty ? .clean : .dirty(entries: entries.count)
     }
 
     /// 按「自身 → 向上 → 向下」三级定位仓库。
