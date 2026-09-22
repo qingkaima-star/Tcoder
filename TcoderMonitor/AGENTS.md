@@ -557,6 +557,31 @@ P7-C 收尾这一批删了两处有写无读：`ProjectStore` 的 `sortedProject
 删掉一条绿用例之前，先问它断言的不变式还有别人测吗。
 （这几处刻意写成"类型 的 成员"而不是点号形式：点号会被符号锚点棘轮当成活符号去判活。）
 
+## 5.9 无头 CLI 入口（2026-09-22 落地，WS-CL）：所有流都要知道的四条
+
+```bash
+./scripts/build_app.sh release                      # 或 .build/debug/TcoderMonitor
+dist/Tcoder.app/Contents/MacOS/TcoderMonitor scan  <path> [--out=<file>] [--compact] [--allow-network]
+dist/Tcoder.app/Contents/MacOS/TcoderMonitor score <path> [--log=<file>…] [--window-days=<n>]
+dist/Tcoder.app/Contents/MacOS/TcoderMonitor doctor [<path>]
+```
+
+1. **同一个二进制按 `argv[1]` 在 AppKit 之前分派**（`Sources/TcoderMonitor/App/TcoderEntry.swift`）。
+   无头那一路不建 `NSApplication`、不写窗口状态；命中子命令词就 `exit()`。
+   ⇒ 别把 `@main` 挪回 `TcoderMonitorApp`，也别在无头路径里碰 AppKit：
+   那正是本轮 P0（第 3 档挂死 16 分钟）的成因。
+2. **`ProjectReport` 是唯一 schema**，CLI 与 GUI 共用，不存在第二个 DTO。
+   缺数据靠**整键缺席**（`encodeIfPresent`）表达 —— 既不写 `null` 也不补 `0`。
+   ⇒ 新增落盘字段一律 `Optional`，且要回答"没测到"与"测到零"怎么区分。
+3. **退出码五档**：`0` 全成 / `2` 部分路失败 / `3` 路径不可用（不存在、不是目录、不可读）/
+   `4` 五路全失败 / `64` 用法错。`3` 那档含"存在但读不动"的目录 —— `fileExists` 只回答"存在"。
+   ⇒ 改任何一路的失败判定，要同步 `CLIExit` 的语义，并去 `Tests/…/CLIProcessTests.swift`
+   加一条**真子进程**用例（它起的是交付二进制本身）。**只有 in-process 断言不算交付证据。**
+4. **改了任何读数就跑对表**：`python3 scripts/report_parity.py <GUI 落盘.json> <CLI 扫描.json> <被扫总体>`
+   （逐字段比、容忍清单逐条点名，只允许时间戳 / `project.*` 身份 / `code.durationMs`）。
+   `scripts/self_score.sh` 现在就是这条 CLI 调用（改造前是"起 GUI + 轮询 300 秒"）。
+   这把尺子已经抓出两个真缺陷（F10 挂死、F11 榜单尾部不可复现）。
+
 ## 6. 完成标准（Definition of Done）
 
 1. `./scripts/locked_build.sh build` 通过（贴输出）。
