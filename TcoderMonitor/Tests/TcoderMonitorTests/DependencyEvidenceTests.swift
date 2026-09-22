@@ -255,6 +255,47 @@ final class DependencyEvidenceTests: ManifestLabTestCase {
         XCTAssertEqual(DependencyEvidence.ledger(for: two).records.filter(\.isCheckedOnBothAxes).count, 0)
     }
 
+    // MARK: - ②b 真源与假源的方向对照（补 `DependencyBackfillIdentityTests` 注释里点名却不存在的那条）
+
+    /// **假源永远不许比生产实现更乐观**，否则用例全绿而线上是假的。
+    ///
+    /// 同一件事实（三条查询、端点自述"其中 1 条失败"、只有 A 带回了公告），两边各自怎么归因：
+    ///   · 真源 `LiveDependencyOnlineSource.osvOutcomes`：**说不清是哪几条 ⇒ 没答上的全判 `.failed`**
+    ///     （A 答上、B/C 判失败 = 2 条）；
+    ///   · 假源只能按测试**点名**的坐标判失败：点名 B ⇒ 1 条。
+    /// 于是合法的判据是"同一事实下 `.failed` 条数 真源 ≥ 假源"。
+    /// 把真源那行 `partialFailure ? .failed : .answered` 改成恒 `.answered`，本条立刻红（实测见笔记）。
+    func testLiveSourceIsNotLessConservativeThanTheStub() async throws {
+        let queries = ["a", "b", "c"].map {
+            OsvPackageQuery(ecosystem: "npm", package: $0, version: "1.0.0")
+        }
+        let coordinates = queries.map(\.coordinate)
+        let answeredAdvisory = stubAdvisory(id: "GHSA-a", coordinate: coordinates[0],
+                                            aliases: ["CVE-2099-0001"])
+        // 事实：批量端点答了 3 条、其中 1 条失败（失败的是哪条它没说）。
+        let result = OsvLookupResult(advisories: [answeredAdvisory], packagesChecked: 3,
+                                     failedRequests: 1, note: "OSV：3 个包中 1 个查询失败")
+
+        let live = LiveDependencyOnlineSource.osvOutcomes(for: queries, result: result)
+        XCTAssertEqual(live[coordinates[0]], .answered(advisories: [answeredAdvisory]),
+                       "公告里出现过的那条身份必须算答上了")
+        XCTAssertEqual(live[coordinates[1]], .failed, "说不清是哪几条时不许把没答上的说成答上了")
+        XCTAssertEqual(live[coordinates[2]], .failed)
+        let liveFailures = live.values.filter { if case .failed = $0 { return true }; return false }.count
+        XCTAssertEqual(liveFailures, 2)
+        XCTAssertFalse(LiveDependencyOnlineSource.osvPathUnavailable(result),
+                       "只失败 1/3 不算整路不可用（整路不可用由 `failedRequests == packagesChecked` 保证）")
+
+        // 同一事实喂假源：它只能表达"测试点名的那几条失败"。
+        let stub = StubOnlineSource(failedCoordinates: [coordinates[1]])
+        let stubbed = await stub.osvAdvisories(for: queries)
+        let stubFailures = stubbed.osvOutcomes.values
+            .filter { if case .failed = $0 { return true }; return false }.count
+        XCTAssertEqual(stubFailures, 1, "假源按身份点名几条就失败几条")
+        XCTAssertLessThanOrEqual(stubFailures, liveFailures,
+                                 "假源把没点名的失败说成答上了 ⇒ 用例会比线上乐观")
+    }
+
     // MARK: - ③ 手写坐标串 = RD-12 的病根，扫描守卫要有牙
 
     /// 生产代码里**不许**再手写 `"\(name)@\(version)"` 这种 key：

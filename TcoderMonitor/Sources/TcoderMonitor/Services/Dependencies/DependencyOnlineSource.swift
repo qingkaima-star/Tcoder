@@ -74,31 +74,47 @@ struct LiveDependencyOnlineSource: DependencyOnlineSource {
     func osvAdvisories(for queries: [OsvPackageQuery]) async -> DependencyOnlineReceipt {
         let result = await DependencyNetworkLookup.osvBatch(queries)
         var receipt = DependencyOnlineReceipt()
-        // 逐条归因：公告的 affectedPackages 里出现过的那条查询身份 = 确实答上了。
+        receipt.osvOutcomes = Self.osvOutcomes(for: queries, result: result)
+        receipt.osvPathUnavailable = Self.osvPathUnavailable(result)
+        receipt.osvNote = result.note
+        return receipt
+    }
+
+    /// 把一次 OSV 批量结果**按查询身份**归因成逐条结局。
+    ///
+    /// 单独抽出来只为一件事：这条归因是全链路上唯一一处"把批量端点的整体计数摊到逐条状态"
+    /// 的地方，它一旦偏向乐观，下面的行状态、总览、评分会一起发绿，而假源用例全绿也抓不到。
+    /// 判据（与 `DependencyEvidenceTests.testLiveSourceIsNotLessConservativeThanTheStub` 同源）：
+    ///   · 公告的 `affectedPackages` 里出现过的那条查询身份 = 确实答上了；
+    ///   · `failedRequests == 0` ⇒ 批量端点按顺序把每条查询都答过了，空结果就是干净；
+    ///   · `failedRequests > 0` 而本条没有命中 ⇒ **无法归因到具体哪几条，保守记 `.failed`**
+    ///     （宁可少说"核对过"，也不把没答上的包说成答上了）。
+    static func osvOutcomes(for queries: [OsvPackageQuery],
+                            result: OsvLookupResult) -> [String: DependencyOsvOutcome] {
         var hitsByCoordinate: [String: [SecurityAdvisory]] = [:]
         for advisory in result.advisories {
             for coordinate in advisory.affectedPackages {
                 hitsByCoordinate[coordinate, default: []].append(advisory)
             }
         }
+        var outcomes: [String: DependencyOsvOutcome] = [:]
         for query in queries {
             let coordinate = query.coordinate
             if let advisories = hitsByCoordinate[coordinate] {
-                receipt.osvOutcomes[coordinate] = .answered(advisories: advisories)
+                outcomes[coordinate] = .answered(advisories: advisories)
             }
         }
-        // 剩下的是"没公告"还是"没答上"？靠**计数**分开，不靠中文说明（RD-13）：
-        //   · `failedRequests == 0` ⇒ 批量端点按顺序把每条查询都答过了，空结果就是干净；
-        //   · `failedRequests > 0` 而本条没有命中 ⇒ 无法归因到具体哪几条，保守记 `.failed`
-        //     （宁可少说"核对过"，也不把没答上的包说成答上了）。
-        // 整路超时由 `OsvLookupResult` 自己保证 `failedRequests == packagesChecked`。
         let partialFailure = result.failedRequests > 0
-        for query in queries where receipt.osvOutcomes[query.coordinate] == nil {
-            receipt.osvOutcomes[query.coordinate] = partialFailure ? .failed : .answered(advisories: [])
+        for query in queries where outcomes[query.coordinate] == nil {
+            outcomes[query.coordinate] = partialFailure ? .failed : .answered(advisories: [])
         }
-        receipt.osvPathUnavailable = result.failedRequests >= max(1, result.packagesChecked)
-        receipt.osvNote = result.note
-        return receipt
+        return outcomes
+    }
+
+    /// 整路失败（超时 / 批量端点不可用且回退也失败）：此时未答上的那批一律记 `.failed`。
+    /// 取义与搬动前逐字一致（整路超时由 `OsvLookupResult` 自己保证 `failedRequests == packagesChecked`）。
+    static func osvPathUnavailable(_ result: OsvLookupResult) -> Bool {
+        result.failedRequests >= max(1, result.packagesChecked)
     }
 }
 
