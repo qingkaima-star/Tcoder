@@ -304,6 +304,18 @@ private final class PomDocumentModel: NSObject, XMLParserDelegate {
     var declaresParent: Bool { hasParent }
 
     func dependencyRecords(manifestPath: String) -> [DependencyRecord] {
+        let managed = managedVersionTable()
+        let built = entries.compactMap { record(for: $0, managed: managed, manifestPath: manifestPath) }
+        return ManifestParsers.dedupe(built)
+    }
+
+    /// `dependencyManagement` 的版本表（顺带把导入型 BOM 数出来）。
+    ///
+    /// 从 `dependencyRecords` 里拆出来只为一件事：那条函数本来的职责是"把条目变成记录"，
+    /// 而"先建一张管理表"是它的**前置事实**，两件事写在一起时 CC 已经数到 19，
+    /// 本包那条 16 的线（`SelfScanHarnessCase.complexFunctionBar`）就兜不住了。
+    /// 取义一字未改：仍然按 `managedEntries` 原序遍历、仍然在**代入之前**数 BOM。
+    private func managedVersionTable() -> [String: String] {
         var managedVersions: [String: String] = [:]
         for item in managedEntries {
             let group = resolve(item.group.isEmpty ? rootGroup : item.group)
@@ -317,41 +329,44 @@ private final class PomDocumentModel: NSObject, XMLParserDelegate {
             guard !group.isEmpty, !artifact.isEmpty, !version.isEmpty else { continue }
             managedVersions["\(group):\(artifact)"] = version
         }
+        return managedVersions
+    }
 
-        var records: [DependencyRecord] = []
-        for item in entries {
-            let group = resolve(item.group.isEmpty ? rootGroup : item.group)
-            let artifact = resolve(item.artifact)
-            guard !artifact.isEmpty else { continue }
-            // 顺序：清单自己写的 <version> → 本份 pom 的 dependencyManagement → 占位串。
-            let rawVersion = item.version
-            var version = resolve(item.version)
-            var state = declaredVersionState(for: version, raw: rawVersion)
-            if version.isEmpty, let managed = managedVersions["\(group):\(artifact)"] {
-                version = resolve(managed)
-                state = declaredVersionState(for: version, raw: managed)
-            }
-            if version.isEmpty {
-                version = ManifestParsers.undeclaredVersion
-                // 三态分岔（RD-13b）：没写版本 ≠ 没管理版本。
-                state = hasParent || importedBOMs > 0 ? .managedByParent : .notDeclared
-            }
-            let scope: DependencyScope
-            if item.fromPlugin && item.scope.isEmpty {
-                scope = .build
-            } else {
-                switch item.scope.lowercased() {
-                case "test": scope = .test
-                case "provided": scope = .platform
-                default: scope = .runtime
-                }
-            }
-            let name = group.isEmpty ? artifact : "\(group):\(artifact)"
-            var record = ManifestParsers.record(name, version, .maven, scope, manifestPath)
-            record.declaredVersionState = state
-            records.append(record)
+    /// 一条 `<dependency>` → 一条记录；`<artifactId>` 解析后为空的条目**不产出记录**
+    /// （与原实现里那句 `guard !artifact.isEmpty else { continue }` 同一件事，只是改成返回 nil）。
+    private func record(for item: Entry, managed: [String: String],
+                        manifestPath: String) -> DependencyRecord? {
+        let group = resolve(item.group.isEmpty ? rootGroup : item.group)
+        let artifact = resolve(item.artifact)
+        guard !artifact.isEmpty else { return nil }
+        // 顺序：清单自己写的 <version> → 本份 pom 的 dependencyManagement → 占位串。
+        let rawVersion = item.version
+        var version = resolve(item.version)
+        var state = declaredVersionState(for: version, raw: rawVersion)
+        if version.isEmpty, let managedVersion = managed["\(group):\(artifact)"] {
+            version = resolve(managedVersion)
+            state = declaredVersionState(for: version, raw: managedVersion)
         }
-        return ManifestParsers.dedupe(records)
+        if version.isEmpty {
+            version = ManifestParsers.undeclaredVersion
+            // 三态分岔（RD-13b）：没写版本 ≠ 没管理版本。
+            state = hasParent || importedBOMs > 0 ? .managedByParent : .notDeclared
+        }
+        let name = group.isEmpty ? artifact : "\(group):\(artifact)"
+        var record = ManifestParsers.record(name, version, .maven, scope(of: item), manifestPath)
+        record.declaredVersionState = state
+        return record
+    }
+
+    /// 依赖条目 → scope。拆出来是为了让上面那条函数只管"版本从哪来"这一件事。
+    /// 判据顺序与原来一致：插件注入且没写 scope ⇒ 构建；其余按 `<scope>` 归一。
+    private func scope(of item: Entry) -> DependencyScope {
+        if item.fromPlugin && item.scope.isEmpty { return .build }
+        switch item.scope.lowercased() {
+        case "test": return .test
+        case "provided": return .platform
+        default: return .runtime
+        }
     }
 }
 

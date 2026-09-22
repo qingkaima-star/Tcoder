@@ -23,42 +23,62 @@ extension ManifestDependencyAnalyzer {
             let directory = root.appendingPathComponent(ecosystem.manifestPath)
                 .deletingLastPathComponent().standardizedFileURL
             let listed: [String] = (try? fileManager.contentsOfDirectory(atPath: directory.path)) ?? []
-            let names = Set(listed)
             let manifestDirectory = (ecosystem.manifestPath as NSString).deletingLastPathComponent
             // 先读锁文件，再读"已解析产物"（effective-POM / 依赖树 / SBOM）：
             // 两边写进同一个 `resolvedVersion` 字段，但 `resolvedVersionSource` 必须点名是哪份文件，
             // 因为这两类证据的强度不同（锁文件 = 装了什么；产物 = 上次解析出什么，可能过期）。
-            let isLockFileRound = ManifestParsers.lockfileCandidates[ecosystem.ecosystem] ?? []
-            let artifactRound = ManifestParsers.resolvedArtifactCandidates[ecosystem.ecosystem] ?? []
-            for candidate in isLockFileRound + artifactRound {
-                guard names.contains(candidate) else { continue }
-                let url = directory.appendingPathComponent(candidate)
-                guard let text = readText(at: url) else { continue }
+            for candidate in Self.resolutionFiles(for: ecosystem, listing: Set(listed)) {
+                guard let text = readText(at: directory.appendingPathComponent(candidate)) else { continue }
                 let relative = manifestDirectory.isEmpty ? candidate : "\(manifestDirectory)/\(candidate)"
-                let isArtifact = artifactRound.contains(candidate)
-                guard let resolution = isArtifact
-                    ? DependencyLockParser.parseResolvedArtifact(fileName: candidate, text: text,
-                                                                 relativePath: relative)
-                    : DependencyLockParser.parse(fileName: candidate, text: text, relativePath: relative)
+                let isArtifact = Self.isResolvedArtifactFile(candidate, of: ecosystem.ecosystem)
+                guard let resolution = Self.parseResolutionFile(candidate: candidate, text: text,
+                                                               relative: relative, isArtifact: isArtifact)
                 else { continue }
                 recordResolutionProvenance(resolution, for: relative)
                 if isArtifact { markResolvedArtifact(ecoIndex: ecoIndex, file: relative) }
-                for recordIndex in report.ecosystems[ecoIndex].dependencies.indices
-                where report.ecosystems[ecoIndex].dependencies[recordIndex].resolvedVersion == nil {
-                    let record = report.ecosystems[ecoIndex].dependencies[recordIndex]
-                    guard let hit = resolution.resolvedVersion(name: record.name,
-                                                              declaredRange: record.version) else { continue }
-                    report.ecosystems[ecoIndex].dependencies[recordIndex].resolvedVersion = hit
-                    report.ecosystems[ecoIndex].dependencies[recordIndex].resolvedVersionSource = relative
-                    // 量到安装版本之后，"由父级管理但未解析"这件事就结束了：
-                    // 三态里那一格必须翻成"已显式声明"，否则界面上会同时说"没解析出来"和"装的是 1.4.2"。
-                    if report.ecosystems[ecoIndex].dependencies[recordIndex].declaredVersionState
-                        == .managedByParent ||
-                       report.ecosystems[ecoIndex].dependencies[recordIndex].declaredVersionState
-                        == .undeterminable {
-                        report.ecosystems[ecoIndex].dependencies[recordIndex].declaredVersionState = .explicit
-                    }
-                }
+                write(resolution, resolvedFrom: relative, into: &report, ecoIndex: ecoIndex)
+            }
+        }
+    }
+
+    /// 这个清单目录里**存在**、且值得尝试解析的文件（锁文件在前、已解析产物在后）。
+    /// 拆出来只因为原函数把"挑文件 / 读文件 / 写回记录"三件事叠在一条 CC18 的循环里。
+    static func resolutionFiles(for ecosystem: EcosystemReport, listing names: Set<String>) -> [String] {
+        let order = (ManifestParsers.lockfileCandidates[ecosystem.ecosystem] ?? [])
+            + (ManifestParsers.resolvedArtifactCandidates[ecosystem.ecosystem] ?? [])
+        return order.filter { names.contains($0) }
+    }
+
+    /// 同一个文件名既可能是锁文件也可能是已解析产物 —— 两边不重叠时这就是"按强度归类"。
+    static func isResolvedArtifactFile(_ candidate: String, of ecosystem: DependencyEcosystem) -> Bool {
+        (ManifestParsers.resolvedArtifactCandidates[ecosystem] ?? []).contains(candidate)
+    }
+
+    /// 按类别选解析器。**不改任何取义**：两类解析函数与参数顺序都和原来一致。
+    static func parseResolutionFile(candidate: String, text: String, relative: String,
+                                    isArtifact: Bool) -> DependencyLockResolution? {
+        isArtifact ? DependencyLockParser.parseResolvedArtifact(fileName: candidate, text: text,
+                                                               relativePath: relative)
+                   : DependencyLockParser.parse(fileName: candidate, text: text, relativePath: relative)
+    }
+
+    /// 把一次解析结果写回**尚未有过解析值**的那些记录（先到先得，锁文件排在产物前面）。
+    private func write(_ resolution: DependencyLockResolution, resolvedFrom relative: String,
+                       into report: inout DependencyReport, ecoIndex: Int) {
+        for recordIndex in report.ecosystems[ecoIndex].dependencies.indices
+        where report.ecosystems[ecoIndex].dependencies[recordIndex].resolvedVersion == nil {
+            let record = report.ecosystems[ecoIndex].dependencies[recordIndex]
+            guard let hit = resolution.resolvedVersion(name: record.name,
+                                                      declaredRange: record.version) else { continue }
+            report.ecosystems[ecoIndex].dependencies[recordIndex].resolvedVersion = hit
+            report.ecosystems[ecoIndex].dependencies[recordIndex].resolvedVersionSource = relative
+            // 量到安装版本之后，"由父级管理但未解析"这件事就结束了：
+            // 三态里那一格必须翻成"已显式声明"，否则界面上会同时说"没解析出来"和"装的是 1.4.2"。
+            if report.ecosystems[ecoIndex].dependencies[recordIndex].declaredVersionState
+                == .managedByParent ||
+               report.ecosystems[ecoIndex].dependencies[recordIndex].declaredVersionState
+                == .undeterminable {
+                report.ecosystems[ecoIndex].dependencies[recordIndex].declaredVersionState = .explicit
             }
         }
     }

@@ -211,23 +211,31 @@ final class DependencySingleRulerTests: XCTestCase {
 
     /// 在依赖域里，**在自己的文件里按 `.` 切版本号**就是第二把尺子的定义性动作
     /// （白名单之外任何一处都得重新解释一遍 `^1.2.3` / `-beta` / `+build`）。
-    /// 白名单只有两处：`DependencySemver.swift`（那把尺子本身）与
-    /// `Models/DependencyReport.swift` 里 `DependencyVersion` 的入口（只剥前缀，比较仍转交）。
-    static let rulerWhitelist: Set<String> = ["DependencySemver.swift", "DependencyReport.swift"]
+    /// 白名单仍然**只有两处**：`DependencySemver.swift`（那把尺子本身）与
+    /// `DependencyVersionRuler.swift`（`DependencyVersion` 的入口，只剥前缀、比较仍转交）。
+    ///
+    /// ⚠ 第二处原来是 `Models/DependencyReport.swift`：R3 按 AGENTS §8.1 的豁免把 `DependencyVersion`
+    /// 一族整块搬进它自己的实现文件（那个契约文件被 400 行口径点名超限）。**搬家不是加尺子** ——
+    /// 所以这里换的是"入口住哪儿"，白名单计数仍是 2；而 `Models/DependencyReport.swift`
+    /// **仍在扫描面里、且从此不再被白名单保护**：谁要在那儿再写一份版本解析，这条当场红。
+    static let rulerWhitelist: Set<String> = ["DependencySemver.swift", "DependencyVersionRuler.swift"]
     static let rulerNeedles = ["split(separator: \".\")", "prefix(while:"]
 
     /// 纯函数：喂文件清单，返回"第二把尺子"的落点。剥行首注释 —— 注释里的 needle 不算。
+    static func hasRulerNeedle(_ text: String) -> Bool {
+        text.split(separator: "\n").contains { rawLine in
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard !line.hasPrefix("//") else { return false }
+            return rulerNeedles.contains(where: { line.contains($0) })
+        }
+    }
+
     static func secondRulerFindings(in files: [(path: String, text: String)]) -> [String] {
         files.compactMap { file in
             guard isDependencyDomain(file.path) else { return nil }   // 守卫只管依赖链，越界就是误伤
             let name = (file.path as NSString).lastPathComponent
             guard !rulerWhitelist.contains(name) else { return nil }
-            let hit = file.text.split(separator: "\n").contains { rawLine in
-                let line = rawLine.trimmingCharacters(in: .whitespaces)
-                guard !line.hasPrefix("//") else { return false }
-                return rulerNeedles.contains(where: { line.contains($0) })
-            }
-            return hit ? file.path : nil
+            return hasRulerNeedle(file.text) ? file.path : nil
         }
     }
 
@@ -240,6 +248,13 @@ final class DependencySingleRulerTests: XCTestCase {
         // 白名单本身必须在场，否则"0 命中"可能只是因为那把尺子被改名/挪走了。
         XCTAssertTrue(files.contains { Self.rulerWhitelist.contains(($0.path as NSString).lastPathComponent) },
                       "唯一那把尺子不在扫描面里，这条守卫已经失去意义")
+        // 搬家与加尺子的区别就在这两条断言上：**计数仍是 2**，而**老地方从此不算合法**。
+        XCTAssertEqual(Self.rulerWhitelist.count, 2,
+                       "白名单只许两处（尺子实现 + 唯一入口），第三处就是一把新尺子")
+        let legacyHome = files.first { $0.path.hasSuffix("/Models/DependencyReport.swift") }
+        XCTAssertNotNil(legacyHome, "契约文件不在扫描面里 ⇒ 它可以偷偷留一份版本解析而没人看见")
+        XCTAssertFalse(Self.hasRulerNeedle(legacyHome?.text ?? ""),
+                       "版本解析又长回 Models 了 —— 入口只许在 `DependencyVersionRuler.swift` 一处")
     }
 
     /// 元测试①：坏样例必须被抓到（证明上一条不是永真绿）。
@@ -253,17 +268,23 @@ final class DependencySingleRulerTests: XCTestCase {
         XCTAssertEqual(Self.secondRulerFindings(in: alsoBad).count, 1)
     }
 
-    /// 元测试②：合法形状不误伤（白名单文件、注释里的字样、依赖域外的切点）。
+    /// 元测试②：合法形状不误伤（白名单文件、注释里的字样、依赖域外的切点），
+    /// 并且**搬家后的老地方不再算合法** —— 这一条是"换入口 ≠ 加尺子"的反证。
     func testGuardIgnoresLegalShapes() {
         let inDomain = [
             (path: "Sources/TcoderMonitor/Services/Dependencies/DependencySemver.swift",
              text: "let parts = core.split(separator: \".\")"),
-            (path: "Sources/TcoderMonitor/Models/DependencyReport.swift",
+            (path: "Sources/TcoderMonitor/Services/Dependencies/DependencyVersionRuler.swift",
              text: "text.split(separator: \".\")"),
             (path: "Sources/TcoderMonitor/Services/Dependencies/ManifestParsers.swift",
              text: "// 这里以前写作 text.prefix(while: …)，现在不了。\nlet x = 1"),
         ]
         XCTAssertTrue(Self.secondRulerFindings(in: inDomain).isEmpty, "合法形状被误伤")
+        XCTAssertEqual(Self.secondRulerFindings(in: [
+            (path: "Sources/TcoderMonitor/Models/DependencyReport.swift",
+             text: "text.split(separator: \".\")"),
+        ]), ["Sources/TcoderMonitor/Models/DependencyReport.swift"],
+        "契约文件里的版本解析必须被看见 —— 入口搬走了，老地方就不是白名单")
         // 域外（不在扫描面里）的东西扫不到是**设计**：这条守卫管的是依赖链，不是全仓。
         let outOfDomain = [(path: "Sources/TcoderMonitor/Utilities/SharedUtilities.swift",
                             text: "name.split(separator: \".\")")]
