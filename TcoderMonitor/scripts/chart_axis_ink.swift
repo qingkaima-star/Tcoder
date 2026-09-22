@@ -12,7 +12,8 @@ import AppKit
 // 尺子坏的时候，它报出来的"缺陷"也是误判候选（本仓第 N 次）。
 //
 // 用法：
-//   chart_axis_ink rows <png> <y0> <y1>              逐 4 行报暗列数（用来**找**标签那一横带）
+//   chart_axis_ink rows <png> <y0> <y1> [<x0> <x1>]  逐 4 行报暗列数（用来**找**标签那一横带；
+//                                                    给 x 带就只数那一段，别把左栏的墨混进来）
 //   chart_axis_ink runs <png> <y0> <y1> [<x0> <x1>]  该带内按列投影，把暗团按 14pt 间隙分簇，
 //                                                    每簇报像素区间、宽度、以及在给定横坐标里的百分比
 // 坐标一律是**比例**（0~1），因为截图有 @2x 与非 @2x 两种。
@@ -44,10 +45,14 @@ let y1 = Int(fraction(args[4], "y1") * Double(height))
 guard y1 > y0 else { print("!! y1 必须大于 y0"); exit(2) }
 
 if args[1] == "rows" {
+    // 可选 x 带：整页截图的左侧栏与卡片会在同一行同时有墨，
+    // 不限横坐标就分不出"卡片里空了"还是"整幅都空了"。
+    let rowX0 = args.count >= 7 ? Int(fraction(args[5], "x0") * Double(width)) : 0
+    let rowX1 = args.count >= 7 ? min(Int(fraction(args[6], "x1") * Double(width)), width) : width
     var y = y0
     while y < y1 {
         var count = 0
-        for x in stride(from: 0, to: width, by: 2) where isInk(x, y) { count += 1 }
+        for x in stride(from: rowX0, to: rowX1, by: 2) where isInk(x, y) { count += 1 }
         print(String(format: "y=%4d (%.3f) 暗列 %d", y, Double(y) / Double(height), count))
         y += 4
     }

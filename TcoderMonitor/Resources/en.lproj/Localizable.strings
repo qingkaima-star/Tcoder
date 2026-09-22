@@ -203,7 +203,6 @@
 "提交记录里没有可解析的时间戳，因此无法给出任何时段结论。" = "The commit records contain no parseable timestamps, so no conclusion about time of day is possible.";
 "数据源只有边际分布 · 单元格是小时与星期两档归一的近似强度" = "The data source is marginal distributions only · each cell is an approximate intensity normalised over hour and weekday";
 "新增" = "Added";
-"暂无提交趋势" = "No commit trend yet";
 "暂无时段分布" = "No time-of-day distribution yet";
 "最冷清桶" = "Quietest Bucket";
 "本次没有取回最近提交明细" = "Recent commit details weren't retrieved this run";
@@ -267,7 +266,7 @@
 "默认不联网时漏洞判定恒为 0 条，这是「没有查」，不是「没有病」" = "By default it runs offline, so the vulnerability verdict is always 0 findings — that is 'we did not look', not 'there is nothing wrong'.";
 "B 级线" = "Grade B Line";
 "优点" = "Strengths";
-"历史点不足" = "Not enough history points";
+"历史点不足 · 少于两个点时这里不画线。" = "Not enough history points · with fewer than two points no line is drawn here.";
 "已完成计算，未识别到突出项。" = "Computation finished; no standout items identified.";
 "已完成计算，未识别到风险项。" = "Computation finished; no risk items identified.";
 "建议" = "Suggestions";
@@ -287,7 +286,6 @@
 "尚无错误签名数据" = "No error signature data yet";
 "本窗口没有可归类的错误行。" = "This time window has no error lines that can be grouped.";
 "至少完成两次分析后可以看到趋势。" = "The trend becomes available after at least two analyses.";
-"少于两个点时这里不画线。" = "With fewer than two points no line is drawn here.";
 "选择项目目录后点「重新分析」。" = "Choose a project directory, then click Re-analyse.";
 "评分综合代码规模、复杂度、重复代码率、Git 活跃度、运行日志与依赖状况，给出 0~100 分。" = "The score combines code size, complexity, duplicate-code rate, Git activity, runtime logs and dependency status into a 0~100 value.";
 "按拖累程度排序，贡献最低者在前" = "Sorted by how much each dimension drags the score down; the smallest contribution comes first.";

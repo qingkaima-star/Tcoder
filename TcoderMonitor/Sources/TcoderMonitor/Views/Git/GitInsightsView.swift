@@ -182,11 +182,12 @@ struct GitCommitTrendSection: View {
                          // 屏上的空态只留「没有产出分桶数据」这一条事实，
                          // "因此给不出峰值与均值"这句推论不再占版面。
                          trailing: AnyView(CopyHelpBadge("Git 分析没有产出按时间分桶的提交数据，因此这里无法给出峰值或均值。"))) {
-                EmptyStateView(
-                    icon: .chartLine,
-                    title: "暂无提交趋势",
-                    message: "Git 分析没有产出按时间分桶的提交数据。"
-                )
+                // 与「评分趋势」同一处修法：图表槽位的空态用 `SectionEmptyNote`。
+                // 原 `EmptyStateView` 的标题「暂无提交趋势」是卡名「提交趋势」换个说法
+                // 再讲一遍（副标题已经报了"分桶数据缺席"），按「留短藏长」判删；
+                // 屏上只留这一句事实，"因此给不出峰值与均值"仍在卡头 ⓘ。
+                SectionEmptyNote(text: "Git 分析没有产出按时间分桶的提交数据。",
+                                 icon: .chartLine)
             }
         }
     }

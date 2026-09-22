@@ -113,9 +113,13 @@ struct HealthTrendCard: View {
                     consistencyNote
                 }
             } else {
-                EmptyStateView(icon: IconName.chartLine.rawValue,
-                               title: "历史点不足",
-                               message: "少于两个点时这里不画线。")
+                // **卡内空态用 `SectionEmptyNote`，不用 `EmptyStateView`**（错误趋势卡早就是这么办的）。
+                // `EmptyStateView` 带 140pt 最小高，那一档的判据是"整块区域只有空态"；
+                // 这里卡头已经把"这块渲染了"说了，再垫 140 就只剩空洞 ——
+                // 页尾实拍（.scratch/evidence-64f2ed4-p21/light-tail/健康评分.png）量到这张卡 290pt 高，
+                // 最后一行字停在 0.800 处，下面 150pt 一个字形都没有。
+                SectionEmptyNote(text: "历史点不足 · 少于两个点时这里不画线。",
+                                 icon: .chartLine)
             }
         }
     }
