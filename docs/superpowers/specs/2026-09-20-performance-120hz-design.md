@@ -451,13 +451,36 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
    **不设合成输入的 `scroll` 档**（原计划里有，现撤）：合成滚轮要 `CGEvent.post`，而本机 System Events
    权限被拒（§4.1 探测时实测），事件会被静默丢弃——那会造出"交互期 0 hitch"的**假绿**。
    交互由人真滚，`interact` 档负责把它标成交互期样本。
+   **【19:38 实况修订：这条撤因的前提被今天的排演推翻，撤销它】**
+   原句把两件不同的东西混成了一件：**System Events 的 AppleScript 路线**确实被权限拒过
+   （取证脚本 `osascript` 那条路），但 `perf_synth_scroll.swift` 走的是
+   `CGEvent(scrollWheelEvent2Source:units:.pixel,…)` 投给**目标 pid 的窗口中心**，不经 System Events。
+   实测证据（2026-09-22 19:23 排演，脚本 `TcoderMonitor/.scratch/rehearse_synth_pairing.sh`——
+   `.scratch` 会被清，所以这里把**读数原文**留下，不拿路径当证据存活）：
+   投事件**前**静默探针读 `scrollWheel=1502.24s 静默=756.95s`，投事件**中**读
+   `scrollWheel=0.00s 静默=0.00s`，同一把尺子（`input_quiescence.swift` 用
+   `CGEventSource.secondsSinceLastEventType(.combinedSessionState, …)`）当场翻转 ⇒
+   **事件真进了系统事件流，没有被静默丢弃**。
+   历史上那两批 25 Hz 合成读数被移出充数，原因是**输入节奏不对**（25 Hz 冒充不了 120 Hz 体感），
+   不是"事件没投递进去"——这两条撤因当时被混着引用，害得我差点又放弃一次可自动化的档。
+   ⇒ 现在 `INPUT=synth`（14px/8ms ≈ 125 Hz 事件节奏）是**合法输入源**，写进 meta 的
+   `input_source` 与 `scroll_target` 两栏，谁引用谁负责注明节奏。
+   **一条仍然没证的东西（不许顺手当成已成立）**：合成滚动有没有触发 App 自己的
+   `NSEvent` 本地监视器、也就是 T3 的"交互期暂停实时刷新"。
+   这半句要从**同一趟样本的 Time Profiler 表**里判：若 `MachSystemMonitor` 的采样回调
+   在这 20 秒里仍按 1.5 s 节奏出现 ⇒ 暂停没触发 ⇒ 这批数读的是"一边刷新一边滚"的混合态，
+   方向上**比真实交互更严**（不是假绿），但必须注明，不许当"用户体感"引用。
    **02:31 补第二条独立的撤因（免得下一个人重新想到同一条路）**：也**不要**改成"让 App 自己滚"
    （进程内 `NSScrollView` 程序化滚动，看起来能绕开权限）。它绕开了权限，却绕不开语义：
    T3 的暂停是靠 `AppState` 的 **`NSEvent` 本地监视器**认"有人在滚"（§4.1），
    程序化滚动**不产生 NSEvent**，于是监视器不触发、实时刷新不暂停——
    测出来的将是一个"一边刷新一边滚"的混合态，与真实交互不是同一件事。
    **要自动化就必须连暂停语义一起造，而那等于测我自己造的假现场。**
-   ⇒ T1 的这一档必须人滚 20 秒，这是度量前提，不是工具没做完。
+   ⇒ ~~T1 的这一档必须人滚 20 秒，这是度量前提，不是工具没做完。~~
+   **19:38 改口**：人手**或** `INPUT=synth` 都行——两者共用同一道开录闸门与同一道收尾复核
+   （那两道读的是 `.combinedSessionState`，本来就不区分手与 CGEvent）。
+   前提换成了另一条更实的：**滚动必须落在被 xctrace attach 的那个 pid 上**，
+   所以合成投递改由录制档发起（`MEASURE_LAUNCH=1`，见工单包 8），排程器不再自己起实例。
 2. `FramePulse`（新，`Services/Performance/`）：`CVDisplayLink` 时间戳 + 主线程 runloop 心跳看门狗
    + `os_signpost`，**仅 `TCODER_PERF_PROBE=1` 时启动**（常驻开销不可接受），
    读数落 `$TCODER_PERF_OUT` 或 `/tmp` 文件——**取证 print 必须落文件**，`swift test` 会丢子进程 stdout 后半段。

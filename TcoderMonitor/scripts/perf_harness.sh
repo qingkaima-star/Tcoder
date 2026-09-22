@@ -131,6 +131,32 @@ PREFLIGHT_SRC="$PWD/scripts/perf_preflight.sh"
 . "$PREFLIGHT_SRC"
 
 # =============================================================================
+# MEASURE_LAUNCH=1 ＋ INPUT=synth 时的接线（09-22 排演之后加的，见工单包 8）
+#   为什么投递要搬进录制档：排程器那一侧先起了一个实例、又朝它投滚动，
+#   而录制档起的是**另一个**实例去 attach ⇒ "滚的是 A、量的是 B"的假配对。
+#   滚动只能落在**被 attach 的那个 pid** 上，而那个 pid 只有录制档知道。
+#   开录检查没有被取消，只是搬到这里：投不起来 ⇒ die，不录一份没人滚的"交互期"。
+# =============================================================================
+synth_wired() {  # 这一趟该不该由录制档投滚动
+  [ "${MEASURE_LAUNCH:-0}" = "1" ] && [ "${PERIOD:-idle}" = "interaction" ] \
+    && [ "${INPUT:-human}" = "synth" ]
+}
+
+arm_synth_input() {  # 闸门**之前**把输入器编好（编译落在录制窗口里就是自己污染自己）
+  synth_wired || return 0
+  ensure_synth_scroller || die "合成输入器编不出来 ⇒ 不录（宁可没数，也不要一份没人滚的『交互期』）"
+  INPUT_SOURCE="${INPUT_SOURCE:-synth@${SYNTH_GAP_MS:-8}ms}"
+  SYNTH_TARGET="$PID"     # 与 xctrace attach 的是同一个 pid —— 这条就是配对的定义
+  export INPUT_SOURCE
+}
+
+start_synth_input() {  # 闸门之后、开录之前才投；时长盖住 hitches + time-profile + 换档空档
+  synth_wired || return 0
+  start_synth_scroller "$SYNTH_TARGET" $((SECONDS_HITCHES + SECONDS_TP + 20)) \
+    || die "合成输入器起不来 ⇒ 不录（这一档的『有人在动』没有别人来补）"
+}
+
+# =============================================================================
 # idle —— 不碰它，量心跳（spec §1 / §3 T2 的那一档）
 # =============================================================================
 cmd_idle() {
@@ -151,8 +177,9 @@ cmd_idle() {
     launch_measured_instance "$out" "$PERF_BIN" || die "自己起的实例没活过 4 秒 ⇒ 不录"
   fi
   require_idle_target
+  arm_synth_input          # 只编译，不投递：编译不许落在闸门与录制之间（见函数注释）
   meta_write "$out" "mode=idle" "period=$period" "pid=$PID" "binary=$TARGET_BINARY" \
-           "input_source=${INPUT_SOURCE:-human}" \
+           "input_source=${INPUT_SOURCE:-human}" "scroll_target=${SYNTH_TARGET:-（没有人投）}" \
     "launched_by=${MEASURED_PID:+us(同窗脉冲)}" "pulse_file=${MEASURED_PULSE:-}" \
     "hitches_seconds=$SECONDS_HITCHES" "tp_seconds=$SECONDS_TP" "coexisting_instances=${COEXIST:-1}" \
     "templates=$TEMPLATE_HITCH + $TEMPLATE_TP" "build_flavor=$TARGET_FLAVOR"
@@ -161,10 +188,12 @@ cmd_idle() {
   # 标记描述的是"最近一次尝试"，不是目录的永久属性；不清的话同名目录复用时，
   # 一份合法读数会被过期标记挡在对照表外（report 会退 1）。
   rm -f "$out/REFUSED"
+  start_synth_input        # 闸门之后、开录之前才投：滚动必须盖住整段录制窗口
   # 四个步骤各自成函数：录哪张表、导哪张表、什么时候问人手探针，顺序就是口径，
   # 拆完仍是 1/4 → 2/4 → 3/4 → 4/4 这一条直线，一步没重排。
   idle_record_hitches "$out" "$period"
   idle_record_time_profiler "$out"
+  stop_synth_scroller
   # 自己起过实例 ⇒ 同一窗口再量一次脉冲，把两把尺子并排放（这才叫交叉核对，不是两个窗口的数对撞）
   if [ -s "${MEASURED_PULSE:-}" ]; then
     echo "==> 同窗脉冲（FramePulse 的帧间隔分位数，用来核对 p95 那半句）"

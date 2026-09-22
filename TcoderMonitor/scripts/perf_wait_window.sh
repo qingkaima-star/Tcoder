@@ -35,6 +35,16 @@ INPUT="${INPUT:-human}"                  # human=等真人滚；synth=自己投 
 #   为 synth 单开一条"跳过检查"的分支，就是给将来的自己留一个骗自己的地方。
 DEADLINE_SECS="${3:-1800}"          # 总共最多等多久（默认 30 分钟），超了就如实放弃
 LAUNCH_APP="${LAUNCH_APP:-1}"      # 0 = 只等你自己把 App 开到最前面
+# MEASURE_LAUNCH=1 ⇒ **录制档**自己起被测实例（要让同一个窗口同时有 xctrace 与 FramePulse）。
+# 这时排程器必须**不**起实例，两条都是 09-22 排演实测出来的，不是推想：
+#   ① `instance_pids()` 是 `pgrep -x TcoderMonitor`，录制档起的裸二进制也算一个
+#     ⇒ 排程器起了一个、录制档再起一个 = 2 个 ⇒ `require_idle_target` 必拒（会连撞满重试上限）；
+#   ② 排程器投的合成滚动落在**排程器那个实例**上，而 xctrace attach 的是另一个
+#     ⇒ 一份"没人被滚却被记成交互期"的假配对。
+# 所以这一档把"起实例 + 投滚动"整包让给录制档，排程器只保证场上为零。
+# 【不是"给 synth 跳过检查"】上面注释里那条纪律仍然成立：开录检查没有取消，
+# 只是搬到滚动真正发生的地方（录制档里"输入器起来了"＋收尾复核"这段窗口里确实在动"）。
+HARNESS_LAUNCHES="${MEASURE_LAUNCH:-0}"
 QUIET_WANT=8                        # 比闸门的 5 s 留一点余量，免得刚过线就开始动
 INTERACT_WANT="${INTERACT_WANT:-3}" # interact 档：静默 <3 s 才算"人正在滚"（滚轮事件间隔通常 <1 s）
 POLL=5
@@ -125,6 +135,13 @@ cond_one_instance() {  # 满足则回 0 且不打印；不满足则打印原因�
   return 1
 }
 
+cond_no_instance() {  # MEASURE_LAUNCH=1 那一档用：场上必须**一个都没有**，留给录制档去起那一个
+  local n; n=$(instance_count)
+  [ "$n" = "0" ] && return 0
+  echo "场上有 $n 个实例（这一档的实例由录制档自己起，多一个就是『attach 错人』或『多实例拒跑』）：$(slot_holders)"
+  return 1
+}
+
 cond_quiet() {  # idle 档：等"整段够久没人动"
   local q; q=$(quiet_seconds)
   probe_usable "$q" || { echo "静默探针取不到（拿到「${q:-空}」），不知道有没有人在动，不开录"; return 1; }
@@ -155,19 +172,9 @@ cond_no_heavy_jobs() {  # 录制档自己会拒这一维，排程器就必须**�
   return 1
 }
 
-RAISE_BIN=""
 RAISED_THIS_ATTEMPT=0
-ensure_raiser() {  # 编译"把自己的实例带到前台"的小工具（一次尝试只 raise 一次，见那个文件的头注）
-  [ -n "$RAISE_BIN" ] && [ -x "$RAISE_BIN" ] && return 0
-  local want dir; want=$(shasum -a 256 scripts/perf_raise.swift 2>/dev/null | cut -c1-12)
-  dir="${SCRATCH:-$PWD/.scratch}"; mkdir -p "$dir" 2>/dev/null
-  RAISE_BIN="$dir/tcoder-raise-${want:-unknown}"
-  [ -x "$RAISE_BIN" ] && return 0
-  xcrun swiftc -O -target arm64-apple-macos14.0 \
-      -module-cache-path "$dir/swiftmodulecache" scripts/perf_raise.swift -o "$RAISE_BIN.tmp.$$" 2>/dev/null \
-    && mv -f "$RAISE_BIN.tmp.$$" "$RAISE_BIN" && return 0
-  rm -f "$RAISE_BIN.tmp.$$"; RAISE_BIN=""; return 1
-}
+# `ensure_raiser` / `raise_to_front` 09-22 搬进 scripts/perf_probes.sh：
+# MEASURE_LAUNCH 那条路（harness 自己起实例）也要带前台，而"怎么带前台"不该有两份。
 
 cond_front_is_ours() {
   local f; f=$(front_app)
@@ -175,9 +182,9 @@ cond_front_is_ours() {
   # 抢不到就如实等；但**每次尝试只主动 raise 一次**：
   # 两条车道互相 raise 就是焦点拉锯，那会让两边的读数同时变成垃圾。
   local tp; tp="${TARGET_PID:-$(my_instance_pid 2>/dev/null | head -1)}"
-  if [ "$RAISED_THIS_ATTEMPT" = "0" ] && [ -n "$tp" ] && ensure_raiser; then
+  if [ "$RAISED_THIS_ATTEMPT" = "0" ] && [ -n "$tp" ]; then
     RAISED_THIS_ATTEMPT=1
-    "$RAISE_BIN" "$tp" >/dev/null 2>&1 \
+    raise_to_front "$tp" \
       && echo "    （已把自己那个实例带到前台一次 pid=$tp；再被抢走就等，不拉锯）"
   fi
   printf '前台是「%s」' "${f:-未知}"
@@ -192,14 +199,21 @@ echo "==> 等窗口：$SAMPLES 趟 ${MODE}（release 口径，rev=$TAG），最�
 wait_for "人手静默 ≥${QUIET_WANT}s" cond_quiet || exit 1
 
 # 2) 起一个实例（或复用已有的那一个），并确认前台是它
-if [ "$(instance_count)" = "0" ] && [ "$LAUNCH_APP" = "1" ]; then
-  open "$START_BIN" && sleep 4
-  started_pid=$(my_instance_pid)
-  echo "    已起自己的实例 pid=${started_pid:-?}（收尾只 TERM 这一个）"
+#    MEASURE_LAUNCH=1 时反过来：排程器**不起**，只等场上清零（见上面 HARNESS_LAUNCHES 那段）。
+if [ "$HARNESS_LAUNCHES" = "1" ]; then
+  echo "    本档：实例与合成滚动都归录制档（MEASURE_LAUNCH=1）⇒ 排程器只保证『场上为零 + 没有重活』"
+  wait_for "本仓没有重活在跑" cond_no_heavy_jobs || exit 1
+  wait_for "场上没有 TcoderMonitor 实例" cond_no_instance || exit 1
+else
+  if [ "$(instance_count)" = "0" ] && [ "$LAUNCH_APP" = "1" ]; then
+    open "$START_BIN" && sleep 4
+    started_pid=$(my_instance_pid)
+    echo "    已起自己的实例 pid=${started_pid:-?}（收尾只 TERM 这一个）"
+  fi
+  wait_for "本仓没有重活在跑" cond_no_heavy_jobs || exit 1
+  wait_for "实例数恰为 1" cond_one_instance || exit 1
+  wait_for "前台是被测 App" cond_front_is_ours || exit 1
 fi
-wait_for "本仓没有重活在跑" cond_no_heavy_jobs || exit 1
-wait_for "实例数恰为 1" cond_one_instance || exit 1
-wait_for "前台是被测 App" cond_front_is_ours || exit 1
 
 # 3) 逐趟录。每趟之内 preflight 还会重查五条闸——这里只保证"开始的那一刻"是干净的。
 fails=0
@@ -211,6 +225,11 @@ for i in $(seq 1 "$SAMPLES"); do
   # 因为人回来把 ChatGPT 调到最前面而被拒——当时的排程器只会立刻硬撞下一趟，
   # 于是"三趟一致"变成"一次成功两次自撞"。等条件回来才是正确动作。
   # 起 App 只在没有实例时做一次；后面几趟复用同一个实例（重启会让节拍重新预热）。
+  # MEASURE_LAUNCH=1 走上面那条分工：排程器清零，录制档起实例 + 朝**它 attach 的那个 pid** 投滚动。
+  if [ "$HARNESS_LAUNCHES" = "1" ]; then
+    wait_for "本仓没有重活在跑" cond_no_heavy_jobs || break
+    wait_for "场上没有 TcoderMonitor 实例" cond_no_instance || break
+  else
   if [ "$(instance_count)" = "0" ] && [ "$LAUNCH_APP" = "1" ]; then
     open "$START_BIN" && sleep 4
     started_pid=$(my_instance_pid)
@@ -233,6 +252,7 @@ for i in $(seq 1 "$SAMPLES"); do
     wait_for "有人正在滚动（静默 <${INTERACT_WANT}s）" cond_someone_active || break
   else
     wait_for "人手静默 ≥${QUIET_WANT}s" cond_quiet || break
+  fi
   fi
   if [ "$MODE" = "interact" ]; then
     # T1 的判据是"交互期 hitch=0"，而合成滚动两条撤因都在 spec §4（进程内滚动不发 NSEvent，

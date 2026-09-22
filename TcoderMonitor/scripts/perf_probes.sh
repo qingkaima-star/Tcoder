@@ -256,7 +256,10 @@ ensure_synth_scroller() {  # **进等待循环之前**把投事件器编好（�
 }
 
 start_synth_scroller() {  # 只管"跑起来"：编译不许出现在闸门与录制之间。<目标 pid> [秒]
-  local secs="${SYNTH_SECS:-95}"   # 覆盖一整趟（hitches 20s + time-profile 25s + 导出与换趟空档）
+  # 【第二参数原来根本没人读】写的是 `${SYNTH_SECS:-95}`，注释却承诺 `[秒]`——
+  # 09-22 排演时按 12 秒调用，实际投了 95 秒。MEASURE_LAUNCH 那条路要按
+  # "hitches + time-profile + 换档空档"来定时长，所以这个参数必须真生效。
+  local secs="${2:-${SYNTH_SECS:-95}}"   # 默认覆盖一整趟（hitches 20s + time-profile 25s + 导出与换趟空档）
   [ -x "$SYNTH_BIN" ] || { echo "!! 合成输入器没预备好（应先跑 ensure_synth_scroller）" >&2; return 1; }
   # 被测 pid：优先用本档自己起的那个；attach 模式下用唯一在场的那个
   local tp="${1:-${TARGET_PID:-}}"   # 目标 pid 由调用方给（本函数不再假设"我只有一个实例"）
@@ -266,6 +269,39 @@ start_synth_scroller() {  # 只管"跑起来"：编译不许出现在闸门与�
   SYNTH_PID=$!
   echo "    合成输入器 pid=$SYNTH_PID（投 ${secs}s，${SYNTH_PX:-14}px/${SYNTH_GAP_MS:-8}ms ≈ $((1000 / ${SYNTH_GAP_MS:-8})) Hz 事件节奏；meta 记 input_source=synth）"
   return 0
+}
+
+stop_synth_scroller() {  # 只停**自己起的那个** pid（绝不按名字 pkill：别人同形状的取证脚本会被误杀）
+  [ -n "$SYNTH_PID" ] || return 0
+  kill -TERM "$SYNTH_PID" 2>/dev/null || true
+  SYNTH_PID=""
+}
+
+# -----------------------------------------------------------------------------
+# 把**自己起的**那个实例带到前台：按 pid，绝不遍历、绝不按 bundle id 广播（AGENTS -1.3）。
+# 09-22 从 perf_wait_window.sh 搬进来，因为 `MEASURE_LAUNCH=1` 那条路是 harness 自己起实例的，
+# 而实测裸 `exec` 起来的实例**不会自己抢到前台**（前台仍是别的 App）——不在前的窗口会被
+# 系统节流绘制，实测那份脉冲 2015 帧 / 25 s ≈ 80 帧每秒，与"独占且在前"的 p50=8.33 ms 不是一回事。
+# 搬而不是复制：怎么带前台只该有一把尺子（本仓为这类分叉记过不止一次）。
+# -----------------------------------------------------------------------------
+RAISE_BIN=""
+ensure_raiser() {  # 编译"把自己的实例带到前台"的小工具（一次尝试只 raise 一次，见那个文件的头注）
+  [ -n "$RAISE_BIN" ] && [ -x "$RAISE_BIN" ] && return 0
+  local want dir; want=$(shasum -a 256 "$HERE/perf_raise.swift" 2>/dev/null | cut -c1-12)
+  dir="${SCRATCH:-$PWD/.scratch}"; mkdir -p "$dir" 2>/dev/null
+  RAISE_BIN="$dir/tcoder-raise-${want:-unknown}"
+  [ -x "$RAISE_BIN" ] && return 0
+  xcrun swiftc -O -target arm64-apple-macos14.0 \
+      -module-cache-path "$dir/swiftmodulecache" "$HERE/perf_raise.swift" -o "$RAISE_BIN.tmp.$$" 2>/dev/null \
+    && mv -f "$RAISE_BIN.tmp.$$" "$RAISE_BIN" && return 0
+  rm -f "$RAISE_BIN.tmp.$$"; RAISE_BIN=""; return 1
+}
+
+raise_to_front() {  # raise_to_front <pid> ⇒ 只负责"发出请求"，成不成由调用方的前台闸判
+  local tp="${1:-}"
+  [ -n "$tp" ] || { echo "!! 没给 pid ⇒ 不猜该带谁到前台" >&2; return 1; }
+  ensure_raiser || { echo "!! raiser 编不出来（scripts/perf_raise.swift）" >&2; return 1; }
+  "$RAISE_BIN" "$tp" >/dev/null 2>&1
 }
 
 # -----------------------------------------------------------------------------
@@ -296,6 +332,10 @@ launch_measured_instance() {  # launch_measured_instance <样本目录> <二进�
   sleep 4
   if kill -0 "$MEASURED_PID" 2>/dev/null; then
     echo "    自己起的被测实例 pid=$MEASURED_PID（脉冲写 $MEASURED_PULSE，沙箱 $out/sandbox）"
+    # 裸 exec 不抢前台（09-22 实测：前台仍是 ChatGPT）⇒ 必须按 pid 主动带一次。
+    # 带不动也**不装绿**：preflight 的前台硬闸会照原样拒，这里只负责别让它白拒一场。
+    raise_to_front "$MEASURED_PID" || echo "    ⚠ 带前台没成功（交给 preflight 的前台闸判，不绕）"
+    sleep 1
     return 0
   fi
   echo "!! 起的实例 4 秒内就退了 ⇒ 不继续（宁可没数，也不要一份 attach 到别人实例上的假配对）" >&2

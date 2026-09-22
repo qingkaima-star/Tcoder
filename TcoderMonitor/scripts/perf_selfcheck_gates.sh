@@ -286,6 +286,48 @@ EOF
   [ "$bad" = "0" ] && ok "perf_* 名下起实例的形状都有 trap、且不按 bundle id 广播（形状取自审计表）"
 }
 
+selfcheck_synth_launch_pairing() {  # selfcheck_synth_launch_pairing <outdir>
+  # 32) "谁起实例 / 谁投滚动 / 什么时候投"三件事必须配套。
+  # 09-22 排演（.scratch/rehearse_synth_pairing.sh）实测出来的两种坏形状，都不是推想：
+  #  ① 排程器与录制档**各起一个**实例 ⇒ `pgrep -x` 数到 2 个 ⇒ `require_idle_target` 必拒，
+  #     而这一条会让自动重试连撞满上限（每一个稀缺窗口都白烧在同一个确定性拒绝上）；
+  #  ② 排程器朝**自己那个**实例投滚动，录制档却 attach 另一个 ⇒ "量的是没在被滚的那个"，
+  #     出一份看起来完全正常的假配对（比红更难发现，因为它不报错）。
+  # 所以钉三件：排程器里每处 `open "$START_BIN"` 都要在 `HARNESS_LAUNCHES` 的 else 分支里；
+  # 录制档里编译（arm）在闸门之前、投递（start）在闸门之后；而且**倒过来必须被抓住**。
+  local w=scripts/perf_wait_window.sh h=scripts/perf_harness.sh bad=0 line
+  while IFS=: read -r line _; do
+    [ -n "$line" ] || continue
+    sed -n "$((line > 8 ? line - 8 : 1)),${line}p" "$w" | grep -q 'HARNESS_LAUNCHES' \
+      || { fail "$w:$line 起实例却没被『录制档自己起』那条分支挡住 ⇒ 两边各起一个 = 多实例拒跑"; bad=1; }
+  done < <(grep -n '^[[:space:]]*open "\$START_BIN"' "$w")
+  pairing_order_violations "$h" \
+    || { fail "$h 里 arm/start/preflight 的顺序不成立（见上面那行）"; bad=1; }
+  # 反向：坏顺序（**投递排在闸门之前**）必须被同一条判据抓住，否则上面那条是永真绿。
+  local fx="$out/pairing-reversed.sh"
+  printf '%s\n' '  arm_synth_input' '  start_synth_input' '  preflight_context "$out" "$PID"' > "$fx"
+  pairing_order_violations "$fx" >/dev/null \
+    && { fail "反向失败：把投递挪到闸门**之前**的夹具没被抓到，这条守卫等于没扫"; rm -f "$fx"; return; }
+  rm -f "$fx"
+  # 每个动作只许有一个调用点：多一处就有一条绕开这张表的旁路。
+  [ "$(grep -cE '^[[:space:]]*start_synth_input([[:space:]]|$)' "$h")" = "1" ] \
+    || { fail "$h 里 \`start_synth_input\` 的调用点不是恰好一处"; bad=1; }
+  [ "$bad" = "0" ] && ok "起实例/投滚动/开录时机三者配套（含把投递排到闸门前的反例也抓得住）"
+}
+
+# 判"编译在闸门之前、投递在闸门之后"。违规时打印是哪一对，返回 1。
+pairing_order_violations() {  # pairing_order_violations <file>
+  local f="$1" a p s
+  a=$(grep -nE '^[[:space:]]*arm_synth_input([[:space:]]|$)' "$f" | head -1 | cut -d: -f1)
+  p=$(grep -nE '^[[:space:]]*preflight_context ' "$f" | head -1 | cut -d: -f1)
+  s=$(grep -nE '^[[:space:]]*start_synth_input([[:space:]]|$)' "$f" | head -1 | cut -d: -f1)
+  [ -n "$a" ] && [ -n "$p" ] && [ -n "$s" ] \
+    || { echo "  三个动作没找齐（arm=${a:-?} preflight=${p:-?} start=${s:-?}）—— 换了名字要一起改这条判据"; return 1; }
+  { [ "$a" -lt "$p" ] && [ "$p" -lt "$s" ]; } && return 0
+  echo "  顺序不成立：arm=$a preflight=$p start=$s（要求 arm < preflight < start）"
+  return 1
+}
+
 selfcheck_launcher_inventory() {  # selfcheck_launcher_inventory <outdir>
   # 31) `perf_launcher_audit.sh` 这张表**必须能分辨三种形状**：
   #     真起 App 的（要判）/ 起了但会收尾的（不判）/ 只在注释与 echo 里"讲起 App"的（不进表）。
