@@ -32,6 +32,9 @@ struct GitCommitTrendChart: View {
     /// 6pt 圆角会把每根柱子削成胶囊，读起来不像时间轴。
     private static let barCorner: CGFloat = Theme.Stroke.emphasis
 
+    /// 横轴数据域（首桶…末桶），只用来判刻度是否贴边。
+    private var timeDomain: ClosedRange<Date>? { ChartAxisEdge.domain(buckets.map(\.date)) }
+
     var body: some View {
         Chart(buckets) { bucket in
             BarMark(
@@ -46,9 +49,11 @@ struct GitCommitTrendChart: View {
             .cornerRadius(Self.barCorner)
         }
         .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 6)) { _ in
+            AxisMarks(values: .automatic(desiredCount: 6)) { value in
                 AxisGridLine().foregroundStyle(Theme.Palette.Surface.separator)
-                AxisValueLabel(format: axisFormat, centered: false)
+                // 尾刻度贴边往左长，否则最后一个日期被卡片右边界切掉半截。
+                AxisValueLabel(format: axisFormat,
+                               anchor: ChartAxisEdge.anchor(for: value.as(Date.self), in: timeDomain))
                     // AxisMark 链上没有 .monospacedDigit()，所以走已开等宽数字的字体档。
                     .font(CodeGitType.number(Theme.Typo.microLabel))
             }

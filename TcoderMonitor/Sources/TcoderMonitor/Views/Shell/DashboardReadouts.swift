@@ -132,66 +132,6 @@ extension View {
 // 留两份哈希的后果是「同名同色」只在单页内成立——`Swift` 与 `swift` 会分到不同号位，
 // 中文名字也因 UTF-8 字节序 ≠ unicodeScalars 码点序而错位。
 
-// MARK: - CPU 历史曲线
-
-struct CPUHistoryChart: View {
-    var snapshots: [SystemSnapshot]
-
-    /// 时间轴刻度格式。**窗口不足 10 分钟时必须降到秒**：
-    /// 实拍总览页出现 `03:57` 与 `03:57` 并排 —— 三个自动刻度落进同一分钟，
-    /// 轴看起来像坏了，而它其实什么都没说错，只是分辨率不够。
-    static func axisTimeFormat(span: TimeInterval) -> Date.FormatStyle {
-        span < 600 ? .dateTime.hour().minute().second() : .dateTime.hour().minute()
-    }
-
-    private var windowSpan: TimeInterval {
-        guard let first = snapshots.first?.timestamp, let last = snapshots.last?.timestamp
-        else { return 0 }
-        return max(0, last.timeIntervalSince(first))
-    }
-
-    var body: some View {
-        Chart(snapshots) { snapshot in
-            AreaMark(
-                x: .value("时间", snapshot.timestamp),
-                y: .value("CPU", snapshot.cpuUsage * 100)
-            )
-            .interpolationMethod(.monotone)
-            .foregroundStyle(ChartSeries.gradient())
-            LineMark(
-                x: .value("时间", snapshot.timestamp),
-                y: .value("CPU", snapshot.cpuUsage * 100)
-            )
-            .interpolationMethod(.monotone)
-            .foregroundStyle(ChartSeries.lineColor)
-            .lineStyle(StrokeStyle(lineWidth: Theme.Stroke.chartLine))
-        }
-        .chartYScale(domain: 0...100)
-        // 这一张的轴没收窄（0...100 定值），加裁剪是**把规则钉死**而不是修当下的 bug：
-        // `AreaMark` 一旦配收窄轴就会把填充画到绘图区外（见 ChartChrome 里那条注释），
-        // 谁以后把这里改成自适应轴，不需要重新发现一遍这个坑。守卫：
-        // `BorderlessSurfaceGuardTests.test_areaChartsClipTheirPlotArea`。
-        .chartPlotStyle { $0.clipped() }
-        .chartYAxis {
-            // **必须显式 `.leading`**：SwiftUI 的默认是 `.automatic`，在这张图上落到**右边**，
-            // 而性能/健康/日志/Git 四页的曲线全都显式写了 `.leading` ——
-            // 于是同一个 App 里"纵轴一会儿在左一会儿在右"（实拍总览页 100/50/0 靠右）。
-            // 守卫：`test_yAxisLabelsAllSitOnTheLeadingSide`。
-            AxisMarks(position: .leading, values: [0, 50, 100]) { _ in
-                AxisGridLine().foregroundStyle(Theme.Palette.Surface.separator)
-                AxisValueLabel().font(Theme.Typo.microLabel.font.monospacedDigit())
-            }
-        }
-        .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 3)) { _ in
-                AxisValueLabel(format: Self.axisTimeFormat(span: windowSpan), centered: false)
-                    .font(Theme.Typo.microLabel.font.monospacedDigit())
-            }
-        }
-        .accessibilityLabel("CPU 占用历史曲线")
-    }
-}
-
 // MARK: - 实时读数区（隔离出 DashboardView 的心跳失效域）
 
 /// 总览页的实时部分：**独立成 struct**，整体从 `DashboardView.body` 的失效域里挪出。

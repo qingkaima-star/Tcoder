@@ -234,7 +234,10 @@ struct LiveSeriesChart<Point: Identifiable>: View {
             if case .seconds(let stride) = timeAxis {
                 AxisMarks(values: .stride(by: .second, count: stride)) { value in
                     AxisGridLine().foregroundStyle(Theme.Palette.Surface.separator)
-                    AxisValueLabel {
+                    // 尾刻度贴右边界往左长（`centered: false` 会把它切成 `08:27…`，
+                    // 规则见 `ChartAxisEdge`）。
+                    AxisValueLabel(anchor: ChartAxisEdge.anchor(for: value.as(Date.self),
+                                                               in: timeDomain)) {
                         if let date = value.as(Date.self) {
                             Text(xLabel(for: date))
                                 .font(Theme.Typo.monoSmall.font)
@@ -244,10 +247,10 @@ struct LiveSeriesChart<Point: Identifiable>: View {
                 }
             }
             if case .days(let stride) = timeAxis {
-                AxisMarks(values: .stride(by: .day, count: stride)) { _ in
+                AxisMarks(values: .stride(by: .day, count: stride)) { value in
                     AxisGridLine().foregroundStyle(Theme.Palette.Surface.separator)
                     AxisValueLabel(format: .dateTime.locale(Self.axisLocale).month(.defaultDigits).day(),
-                                   centered: false)
+                                   anchor: ChartAxisEdge.anchor(for: value.as(Date.self), in: timeDomain))
                         .font(Theme.Typo.monoSmall.font)
                         .foregroundStyle(Color.secondary)
                 }
@@ -262,6 +265,9 @@ struct LiveSeriesChart<Point: Identifiable>: View {
 
     /// 轴标签固定 POSIX locale：中文系统下「3月5日」会把间距挤掉。
     static var axisLocale: Locale { Locale(identifier: "en_US_POSIX") }
+
+    /// 横轴的数据域（首点…末点），只用来判"这个刻度是不是贴着边界"。
+    private var timeDomain: ClosedRange<Date>? { ChartAxisEdge.domain(points.map(xOf)) }
 
     private func xLabel(for date: Date) -> String {
         guard let reference = relativeReference else {

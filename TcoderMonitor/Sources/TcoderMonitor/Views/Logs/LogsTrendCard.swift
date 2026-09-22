@@ -74,6 +74,9 @@ struct LogTrendChart: View {
     /// 警告折线用虚线：与堆叠柱分开靠的是线型，不是再多加一种颜色。
     private static let warningLineDash: [CGFloat] = [3, 2]
 
+    /// 横轴数据域（首桶…末桶），只用来判刻度是否贴边。
+    private var timeDomain: ClosedRange<Date>? { ChartAxisEdge.domain(buckets.map(\.date)) }
+
     /// 计数轴：步长取整且至少 1，避免出现「0.5 条」这种刻度
     /// （通用 `axis(peak:)` 的台阶是为字节速率设计的，峰值很小时会给到 0.5）。
     static func axis(for buckets: [LogBucket]) -> ChartAxis {
@@ -119,11 +122,12 @@ struct LogTrendChart: View {
             }
         }
         .chartXAxis {
-            AxisMarks(values: .stride(by: .day, count: Self.dayStride(buckets))) { _ in
+            AxisMarks(values: .stride(by: .day, count: Self.dayStride(buckets))) { value in
                 AxisGridLine().foregroundStyle(Theme.Palette.Surface.separator)
                 // 固定 POSIX locale：中文系统把刻度写成「3月5日」会挤掉间距。
+                // 尾刻度贴边往左长，否则最后一个日期被卡片右边界切掉半截。
                 AxisValueLabel(format: .dateTime.locale(Locale(identifier: "en_US_POSIX")).month(.defaultDigits).day(),
-                               centered: false)
+                               anchor: ChartAxisEdge.anchor(for: value.as(Date.self), in: timeDomain))
                     .font(Theme.Typo.monoSmall.font)
                     .foregroundStyle(Color.secondary)
             }

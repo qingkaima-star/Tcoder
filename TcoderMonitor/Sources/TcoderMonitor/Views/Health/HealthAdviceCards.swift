@@ -166,6 +166,9 @@ struct HealthTrendChart: View {
     private static let pointSymbolSize: CGFloat = 32
     private static let referenceLineDash: [CGFloat] = [4, 3]
 
+    /// 横轴数据域（首点…末点），只用来判刻度是否贴边。
+    private var timeDomain: ClosedRange<Date>? { ChartAxisEdge.domain(points.map(\.date)) }
+
     var body: some View {
         Chart(points) { point in
             LineMark(x: .value("时间", point.date), y: .value("分数", Double(point.score)))
@@ -201,10 +204,11 @@ struct HealthTrendChart: View {
             }
         }
         .chartXAxis {
-            AxisMarks(values: .stride(by: .day, count: stride)) { _ in
+            AxisMarks(values: .stride(by: .day, count: stride)) { value in
                 AxisGridLine().foregroundStyle(Theme.Palette.Surface.separator)
+                // 尾刻度贴边往左长，否则最后一个日期被卡片右边界切掉半截。
                 AxisValueLabel(format: .dateTime.locale(Locale(identifier: "en_US_POSIX")).month(.defaultDigits).day(),
-                               centered: false)
+                               anchor: ChartAxisEdge.anchor(for: value.as(Date.self), in: timeDomain))
                     .font(Theme.Typo.monoSmall.font)
                     .foregroundStyle(Color.secondary)
             }

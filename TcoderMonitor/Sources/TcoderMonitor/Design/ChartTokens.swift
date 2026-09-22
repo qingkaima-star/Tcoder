@@ -218,3 +218,40 @@ enum ChartSeries {
     static func color(for risk: RiskLevel) -> Color { Theme.Semantic.role(for: risk).graphicColor }
     static func color(forScore score: Int?) -> Color { Theme.Semantic.role(forScore: score).graphicColor }
 }
+
+// MARK: - 时间轴标签的首尾贴边（全仓一份）
+
+/// 最后一个刻度的标签原来一律写 `centered: false`：标签从刻度**往右长**，
+/// 于是尾刻度那个标签有一半掉在绘图区外，被卡片右边切成 `08:27…`
+/// （2026-09-22 交付头实拍「总览」CPU 曲线，按原始像素裁块才确认 —— 缩略图上只是"有点挤"）。
+///
+/// 规则只有一条：**首刻度往右长、尾刻度往左长、中间刻度居中**。
+/// 收成一份的理由与取色板同：五处时间轴（总览 CPU、性能页三条曲线、Git 提交趋势、
+/// 日志按日、评分按日）各自写一遍，就是五份会各自漂移的实现。
+enum ChartAxisEdge {
+    /// 落在域两端这个比例之内就按"贴边刻度"处理。取 8% 而不是 1%：
+    /// `.automatic(desiredCount:)` 把刻度挑在整点/整日上，尾刻度通常**不正好**压在域尾，
+    /// 但只要离域尾不足一个标签的宽度就会被切，而标签宽约占域宽的 6~10%。
+    static let edgeFraction = 0.08
+
+    static func domain(_ dates: some Sequence<Date>) -> ClosedRange<Date>? {
+        var low: Date?
+        var high: Date?
+        for date in dates {
+            if let current = low, date < current { low = date } else if low == nil { low = date }
+            if let current = high, date > current { high = date } else if high == nil { high = date }
+        }
+        guard let low, let high, high > low else { return nil }
+        return low...high
+    }
+
+    static func anchor(for date: Date?, in domain: ClosedRange<Date>?) -> UnitPoint {
+        guard let date, let domain else { return .center }
+        let span = domain.upperBound.timeIntervalSince(domain.lowerBound)
+        guard span > 0 else { return .center }
+        let position = date.timeIntervalSince(domain.lowerBound) / span
+        if position >= 1 - edgeFraction { return .trailing }
+        if position <= edgeFraction { return .leading }
+        return .center
+    }
+}
