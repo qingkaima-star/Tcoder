@@ -48,7 +48,17 @@ cleanup() {
     [ "$comm" = "TcoderMonitor" ] && kill -TERM "$started_pid" 2>/dev/null
   fi
 }
-trap cleanup EXIT INT TERM
+# 【今天实测的失效】原来三件事共用 `trap cleanup EXIT INT TERM`，而 handler 里没有 exit
+# ⇒ bash 跑完 trap 就**回去继续等**：TERM/INT 都杀不掉它（今晚 kill -TERM 两次没反应）。
+# 只能 -9，而 -9 会跳过 cleanup ⇒ 我起的那个实例留在场上，变成下一个人的"实例数不为 1"。
+# 这条修的就是我自己。
+on_signal() {
+  cleanup
+  echo "!! 收到中断信号 ⇒ 收尾自己起的实例并终止（不绕闸、不给人留坑）" >&2
+  exit 130
+}
+trap cleanup EXIT
+trap on_signal INT TERM
 
 quiet_seconds() {  # 整机人手静默。**只转发**，不再自己编一份二进制、自己写一份正则
   # 原来这里是第二把尺子：`swiftc` 单独编到 /tmp/tcoder-quiesce-wait-$$，
@@ -68,6 +78,18 @@ instance_count() { pgrep -x TcoderMonitor 2>/dev/null | wc -l | tr -d ' '; }
 # （`ps -o args=` 在本机被拒，所以用 `pgrep -f` 的全路径匹配来认。）
 MY_BIN="$START_BIN/Contents/MacOS/TcoderMonitor"
 my_instance_pid() { pgrep -fx "$MY_BIN" 2>/dev/null | head -1; }
+
+SLOT_HOLD="" SLOT_HOLD_AT=0
+slot_holders() {  # 谁占着窗口：把只读诊断搬进拒因里（缓存 60 s，别每 5 s 打一次 lsof）
+  local now; now=$(date +%s)
+  if [ -z "$SLOT_HOLD" ] || [ $((now - SLOT_HOLD_AT)) -ge 60 ]; then
+    SLOT_HOLD=$(./scripts/perf_who_holds_the_slot.sh 2>/dev/null | sed -n '3,20p' \
+                | tr -s ' ' | tr '\n' ' @ ')
+    SLOT_HOLD_AT=$now
+  fi
+  # 读不到要说"读不到"，不许留空——空串会被读成"没有实例占着"，那正好是反的。
+  printf '%s' "${SLOT_HOLD:-诊断脚本没出东西（不等于场上没有实例）}"
+}
 
 wait_for() {  # wait_for <人类可读的条件名> <判定函数>；不满足就一直等，超时按失败退出
   local what="$1" check="$2" waited=0 reason=""
@@ -92,8 +114,14 @@ cond_one_instance() {  # 满足则回 0 且不打印；不满足则打印原因�
   local n mine; n=$(instance_count); mine=$(my_instance_pid)
   if [ "$n" = "1" ] && [ -n "$mine" ]; then return 0; fi
   if [ "$n" = "0" ]; then echo "还没有实例在跑"; return 1; fi
-  if [ "$n" != "1" ]; then echo "有 $n 个实例（多实例会互相回写全局状态，读数没意义）"; return 1; fi
-  echo "唯一那个实例不是本树起的（attach 它会量到别人的构建）"
+  # 「为什么量不到」原来只答一句事实、不答下一步该做什么，于是人会以为"再等等就好"。
+  # 今晚真实现场是主树漏下 6 个 + 一棵已删树的孤儿 1 个，闸门从夜里一直拒到上午——
+  # 把只读诊断接进来，一句话里带上 pid、跑了多久、哪棵树、那棵树还在不在。
+  if [ "$n" != "1" ]; then
+    echo "有 $n 个实例（多实例会互相回写全局状态，读数没意义）：$(slot_holders)"
+    return 1
+  fi
+  echo "唯一那个实例不是本树起的（attach 它会量到别人的构建）：$(slot_holders)"
   return 1
 }
 
