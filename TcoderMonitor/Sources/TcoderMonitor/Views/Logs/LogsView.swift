@@ -73,7 +73,9 @@ struct LogsView: View {
             // 实心绿选中态、与参考图的 `Week / Month / Quarter / Year` 都对不齐；
             // 而且 `.fixedSize()` 明确拒绝压缩，窄窗口下这一行会横向溢出页边距（清单 2.12）。
             TextSegmentedPicker(options: Self.windowChoices,
-                                label: { "最近 \($0) 天" },
+                                // 窗口档位走复数键 `%lld 天`（本来就在 `Localizable.stringsdict`，带 one/other）：
+            // 手写 `"最近 \(n) 天"` 是一句"看着像文案、其实没查表"的拼接，英文态永远中文（P52）。
+            label: { localizedCount("%lld 天", $0) },
                                 selection: window.wrappedValue,
                                 onSelect: { window.wrappedValue = $0 })
                 .accessibilityLabel("时间窗口")

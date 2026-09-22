@@ -530,6 +530,9 @@
 "所选目录即仓库" = "The selected folder is the repository";
 "风险：%@" = "Risk: %@";
 "高" = "High";
+// 风险五档里只有「严重」漏了键 —— 模板 `风险：%@" = "Risk: %@"` 与另外四档都在，
+// 于是英文态长成半英半中的 `Risk: 严重`（P52）。补齐这一档，术语与 `Theme.Semantic.critical` 同源。
+"严重" = "Critical";
 "中" = "Medium";
 "低" = "Low";
 "无" = "None";
@@ -780,3 +783,10 @@
 // 占位符顺序与键一致（`test_catalogPlaceholdersMatch` 逐条比），译文不许增删 %n$@。
 "文件角色分档：生产源码 %1$@ 个 / %2$@ 代码行 · 弱判定 %3$@ 个 · 八档全量与判据分布见 scan 落盘的 code.fileRoles.shares。" = "File roles: %1$@ production files / %2$@ code lines · %3$@ attributed on language evidence alone · the full eight-bucket table and the criterion counts live in code.fileRoles.shares of the scan JSON.";
 "文件角色分档对不平：八档合计 %1$@ 个文件，而本次扫到 %2$@ 个，相差 %3$@ 个 —— 两边不是同一个总体，要么有文件没归进任何一档，要么有文件被记进了两档，这份分档要按读数打折使用。" = "File role buckets do not reconcile: the eight buckets total %1$@ files while this scan saw %2$@, a difference of %3$@ - the two sides are not the same population, so either some files were never bucketed or some landed in two buckets; discount this breakdown.";
+// P52：健康维度那四条「优点/问题」句子以前用 `String(format:)` 直接拼中文模板，
+// 模板本身从不查表 ⇒ 英文态整句是中文（屏上各 4×，是剩余 B 里最高频的一族）。
+// 改成 `localizedFormat` + 位置参数；同一个署名数在一句里出现两次，用同一个 `%1$@`。
+"重复代码率低（%1$@）" = "Low duplication rate (%1$@)";
+"重复代码 %1$@，共 %2$@ 处重复块" = "Duplicated code %1$@ across %2$@ duplicate blocks";
+"贡献分布合理（%1$@ 个署名，头号署名占 %2$@；署名按工作流计，不等于 %1$@ 个人）" = "Contribution is well spread (%1$@ identities, the top one holds %2$@; identities are workflows, not %1$@ people)";
+"「%1$@」这个署名占 %2$@ 提交，单点风险高（署名按工作流计，不等同于一个人头）" = "Identity \u201c%1$@\u201d holds %2$@ of commits \u2014 single-point risk (identities are workflows, not people)";
