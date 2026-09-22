@@ -19,12 +19,15 @@ final class HealthScoreHonestyTests: HealthScoreTestCase {
             XCTAssertEqual(VulnerabilityEvidence.classify(report { $0.networkLookupNote = note }), .unchecked,
                            "未联网时无论 note 怎么写都必须是未核对，note=\(note)")
         }
-        // 开了网、查完了。
+        // 开了网、查完了 —— "查完"这件事自 R3 起由**逐条状态**说，不再由 note 的字面说
+        // （旧判据是 note 里有没有"失败"两个字，那等于让中文文案给业务状态授权，RD-13 点名）。
         XCTAssertEqual(VulnerabilityEvidence.classify(report {
+            markAllChecked(&$0)
             $0.networkLookupPerformed = true
             $0.networkLookupNote = "在线查询已完成（OSV + npm registry）"
         }), .verified)
-        // 开了网但部分失败。
+        // 开了网但部分失败：这里没有逐条账（旧报告的形状）⇒ 只能落到"试了没查完"，
+        // 而不是"查过且干净"。note 里那句中文只是给人看的，**不参与判定**。
         XCTAssertEqual(VulnerabilityEvidence.classify(report {
             $0.networkLookupPerformed = true
             $0.networkLookupNote = "OSV：52 个包中 3 个查询失败"

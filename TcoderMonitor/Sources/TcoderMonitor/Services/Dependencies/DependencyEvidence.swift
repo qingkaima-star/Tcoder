@@ -54,6 +54,10 @@ struct DependencyEvidenceLedger: Sendable {
     var totalCount: Int { records.count }
     var vulnerabilityCheckedCount: Int { records.filter { $0.vulnerabilityState.isCovered }.count }
     var versionCheckedCount: Int { records.filter { $0.versionState.isCovered }.count }
+    /// 有几条是**按声明范围的下界**去查的（实际安装版本没量到）。
+    /// 这个数必须能单独说出来：它决定"未发现漏洞"这句话的强度 ——
+    /// 按下界查到公告 ≠ 你装的这一版有公告（RD-10 明令不许把下界当安装版本）。
+    var lowerBoundQueryCount: Int { records.filter { $0.queriedByLowerBound }.count }
     var vulnerableCount: Int { records.filter { !$0.findings.isEmpty }.count }
 
     /// 各状态的条数，出口文案与守卫用例都读它（分母必须能对上 `totalCount`）。

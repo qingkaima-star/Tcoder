@@ -55,9 +55,20 @@ enum VulnerabilityEvidence: String, Sendable, Equatable {
         if report.vulnerableCount > 0 { return .verified }
         let ledger = DependencyEvidence.ledger(for: report)
         guard ledger.totalCount > 0 else { return .unchecked }
-        guard ledger.vulnerabilityCheckedCount > 0 else { return .unchecked }
-        // 只要还剩下一条没核对成，"零命中"就不是全量结论。
-        return ledger.vulnerabilityCheckedCount == ledger.totalCount ? .verified : .degraded
+        let counts = ledger.vulnerabilityStateCounts
+        let checked = counts[.checked] ?? 0
+        if checked == ledger.totalCount { return .verified }
+        // `.degraded` 与 `.unchecked` 的分界是"这一路发没发起过"：
+        // 有失败、有被预算挡在门外的 ⇒ 发起了但没走到底 ⇒ degraded（旧文案判据正是这一支，
+        // 保守方向不许松）；一条都没发起（全 notAttempted / 版本未解析 / 生态不支持）才是 unchecked。
+        let attemptedButIncomplete = (counts[.failed] ?? 0) + (counts[.budgetExcluded] ?? 0) > 0
+        // 旧报告（R3 之前落盘的那些，没有逐条状态可解）只留了一句 `networkLookupPerformed = true`：
+        // 它**发起过**却收不齐账 ⇒ 只能说"没查完"，永远不许升成 `.verified`。
+        // 这一支比被删掉的文案判据更保守：旧实现在这里读 note 有没有"失败"两个字，
+        // note 不含就发绿；现在不含也只到 degraded。
+        let attemptedWithoutAccounting = report.networkLookupPerformed
+            && ledger.records.allSatisfy { $0.vulnerabilityState == .notAttempted }
+        return checked > 0 || attemptedButIncomplete || attemptedWithoutAccounting ? .degraded : .unchecked
     }
 
     /// `.degraded` 到底是哪一种"没查完"——给建议文案用，同样只读结构化计数。

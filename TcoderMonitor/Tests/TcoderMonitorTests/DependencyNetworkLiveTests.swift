@@ -129,8 +129,13 @@ final class DependencyNetworkLiveTests: XCTestCase {
                           "公告编号要像真实 OSV id：\(advisory.id)")
             XCTAssertFalse(advisory.affectedPackages.isEmpty, "\(advisory.id) 必须点名受影响坐标")
             XCTAssertFalse(advisory.summary.isEmpty, "\(advisory.id) 摘要不得为空")
-            XCTAssertTrue(advisory.affectedPackages.allSatisfy { $0.contains("@") },
-                          "受影响坐标要带版本：\(advisory.affectedPackages)")
+            // 坐标自 R3 起是**规范形状** `生态|包名|版本`（存储层用它回填，展示层才还原成
+            // `lodash@4.17.15`）。这条用例管的是"受影响坐标必须点到具体版本"，
+            // 与分隔符无关 ⇒ 判据改成"三段且第三段非空"。
+            XCTAssertTrue(advisory.affectedPackages.allSatisfy { coordinate in
+                let pieces = coordinate.split(separator: "|")
+                return pieces.count == 3 && !pieces[2].isEmpty && pieces[1].contains(where: { $0.isLetter })
+            }, "受影响坐标必须是 生态|包名|版本 且带版本：\(advisory.affectedPackages)")
         }
         XCTAssertTrue(osv.contains { $0.aliases.contains { $0.hasPrefix("CVE-") } },
                       "至少一条在线公告要带真实 CVE 编号")

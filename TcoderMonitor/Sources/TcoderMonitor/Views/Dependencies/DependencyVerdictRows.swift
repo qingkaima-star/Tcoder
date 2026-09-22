@@ -44,14 +44,18 @@ enum DependencyRowStatus: Equatable {
         if version.isCovered, DependencyVersionIdentity.of(record).outdatedness == .older { return .outdated }
         switch (version, vulnerability) {
         case (.checked, .checked): return .verifiedSafe
+        // 只有两路都核对过才许发绿；**下面每一条都比 `.versionOnly` 更该出声**。
+        // 旧顺序把 `case (.checked, _)` 写在最前面，于是"版本查成功 + 漏洞查失败"
+        // 长成"仅版本比对"（中性灰），把"核对失败"这个必须露出来的事实吞掉了 ——
+        // 修它的前提是先看清：这一格永远不许发绿，但也不能把坏消息说轻。
+        case (_, .failed), (.failed, _): return .checkFailed
+        case (_, .budgetExcluded), (.budgetExcluded, _): return .budgetExcluded
+        case (_, .versionUnresolved), (.versionUnresolved, _): return .versionUnresolved
+        case (_, .ecosystemUnsupported), (.ecosystemUnsupported, _): return .unsupported
         case (.checked, _): return .versionOnly
-        case (.failed, _), (_, .failed): return .checkFailed
-        case (.budgetExcluded, _), (_, .budgetExcluded): return .budgetExcluded
-        case (.versionUnresolved, _), (_, .versionUnresolved): return .versionUnresolved
-        case (.ecosystemUnsupported, _), (_, .ecosystemUnsupported): return .unsupported
         // 其余组合（含"版本没发起、漏洞却查出了东西"这类账本不自洽）一律按未核对呈现：
         // 拿不准的时候**往保守那侧靠**，绝不因为分支没写完就发绿。
-        case (.notAttempted, _), (_, .notAttempted): return .unchecked
+        default: return .unchecked
         }
     }
 

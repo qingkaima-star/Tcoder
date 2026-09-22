@@ -33,6 +33,25 @@ struct DependencyOnlineReceipt: Sendable {
     var osvPathUnavailable = false
 }
 
+/// 这一轮**实际发出去**了哪些查询身份（与 `DependencyOnlineReceipt` 是一对：
+/// 一个记"发了谁"、一个记"谁答了"）。
+///
+/// 为什么单独一格：`.budgetExcluded` 的语义是"这一条我们根本没发"，只能按**身份**落。
+/// 接手时这里传的是条数，于是"被上限切掉 7 条"会让同一批里**发出去并且答了**的 100 条
+/// 也一起长成"未进批次"（实测 107 条全落此态），反向的谎也成立 —— 都是账本与事实分叉。
+struct DependencyOnlineDispatch: Sendable {
+    static let empty = DependencyOnlineDispatch()
+
+    /// 发给 npm registry 的包名。
+    var registrySent: Set<String> = []
+    /// 被单次上限挡在门外的 npm 包名。
+    var registryDeferred: Set<String> = []
+    /// 发给 OSV 的查询坐标（`DependencyVersionIdentity.coordinate`）。
+    var osvSent: Set<String> = []
+    /// 被单次上限挡在门外的 OSV 坐标。
+    var osvDeferred: Set<String> = []
+}
+
 /// 在线数据源。生产实现就是现有那两个静态入口的薄壳。
 protocol DependencyOnlineSource: Sendable {
     func registryLatestVersions(for packages: [String]) async -> DependencyOnlineReceipt

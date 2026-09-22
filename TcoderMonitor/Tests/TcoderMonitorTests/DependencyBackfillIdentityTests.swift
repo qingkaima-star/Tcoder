@@ -18,8 +18,6 @@ final class StubOnlineSource: DependencyOnlineSource, @unchecked Sendable {
     var answered: [String: [SecurityAdvisory]] = [:]
     /// 明确失败的坐标。
     var failedCoordinates: [String] = []
-    /// 没出现在 outcomes 里的坐标数（模拟"回执丢了"），同时决定整路是否判为不可用。
-    var silentCount = 0
     var latestVersions: [String: String] = [:]
     var registryFailures: [String] = []
 
@@ -44,6 +42,11 @@ final class StubOnlineSource: DependencyOnlineSource, @unchecked Sendable {
         return receipt
     }
 
+    /// 与 `LiveDependencyOnlineSource.osvAdvisories` **同形**：每条发出去的查询都必须有结局，
+    /// 没点名失败的那些落 `.answered(空)`（批量端点按顺序逐条回答，空数组就是干净）。
+    /// 真源在"答不上但说不清是哪几条"时会更保守（整批判 `.failed`），那条差异由
+    /// `DependencyEvidenceTests.testLiveSourceIsNotLessConservativeThanTheStub` 单独钉住 ——
+    /// 假源永远不许比生产实现**更乐观**，否则用例全绿而线上是假的。
     func osvAdvisories(for queries: [OsvPackageQuery]) async -> DependencyOnlineReceipt {
         receivedOsvQueries = queries
         var receipt = DependencyOnlineReceipt()
@@ -53,6 +56,8 @@ final class StubOnlineSource: DependencyOnlineSource, @unchecked Sendable {
                 receipt.osvOutcomes[key] = .answered(advisories: advisories)
             } else if failedCoordinates.contains(key) {
                 receipt.osvOutcomes[key] = .failed
+            } else {
+                receipt.osvOutcomes[key] = .answered(advisories: [])
             }
         }
         receipt.osvPathUnavailable = !failedCoordinates.isEmpty
@@ -73,21 +78,23 @@ final class DependencyBackfillIdentityTests: XCTestCase {
     // MARK: - 主案：总览有公告，依赖行必须同时被标记
 
     func testAdvisoryInOverviewAlsoMarksTheRow() async throws {
-        // 真值（手写）：package.json 声明 `lodash: ^4.17.15`，OSV 对**查询用的下界版本**
-        // 4.17.15 回了一条 GHSA-lodash。旧实现在这里必然漏标：
-        // 公告侧 key 是 `lodash@4.17.15`，回填侧查的是 `lodash@^4.17.15` ⇒ 永不相等。
+        // 真值（手写）：package.json 声明 `left-pad: ^1.2.3`，OSV 对**查询用的下界版本 1.2.3**
+        // 回了一条 GHSA-leftpad。旧实现在这里必然漏标：公告侧 key 是 `left-pad@1.2.3`、
+        // 回填侧查的是 `left-pad@^1.2.3` ⇒ 永不相等。
+        // 故意选内置表**没有**的包：这样行上那串 CVE 只可能来自在线回填，
+        // 不会被"内置规则本来就命中"混进同一格（用 lodash 就测不出这条链）。
         let root = try makeTree("backfill-main", files: [
-            "package.json": #"{"name":"app","dependencies":{"lodash":"^4.17.15"}}"#,
+            "package.json": #"{"name":"app","dependencies":{"left-pad":"^1.2.3"}}"#,
         ])
-        let coordinate = DependencyVersionIdentity.coordinate(ecosystem: .npm, name: "lodash",
-                                                             queryVersion: "4.17.15")
+        let coordinate = DependencyVersionIdentity.coordinate(ecosystem: .npm, name: "left-pad",
+                                                             queryVersion: "1.2.3")
         let stub = StubOnlineSource(answered: [coordinate: [
-            stubAdvisory(id: "GHSA-lodash-0001", coordinate: coordinate, aliases: ["CVE-2099-0001"]),
+            stubAdvisory(id: "GHSA-leftpad-0001", coordinate: coordinate, aliases: ["CVE-2099-0001"]),
         ]])
         let report = try await analyze(root, stub: stub)
 
         XCTAssertFalse(report.advisories.isEmpty, "前提：总览确实带回了公告")
-        let row = try XCTUnwrap(record(report, "lodash"))
+        let row = try XCTUnwrap(record(report, "left-pad"))
         XCTAssertTrue(row.knownVulnerabilities.contains("CVE-2099-0001"),
                       "总览有公告而依赖行没标记 = RD-12 的原始症状，实得 \(row.knownVulnerabilities)")
         XCTAssertEqual(DependencyRowStatus.of(row), .vulnerable(count: 1),
@@ -98,24 +105,26 @@ final class DependencyBackfillIdentityTests: XCTestCase {
     /// 同包多版本：**只有一个版本有公告**，不得错绑到没有的那条。
     func testAdvisoryBindsOnlyToTheVersionThatHasIt() async throws {
         let root = try makeTree("backfill-two-versions", files: [
-            "package.json": #"{"name":"app","dependencies":{"lodash":"^4.17.15"}}"#,
-            "web/package.json": #"{"name":"web","dependencies":{"lodash":"4.17.21"}}"#,
+            "package.json": #"{"name":"app","dependencies":{"left-pad":"^1.2.3"}}"#,
+            "web/package.json": #"{"name":"web","dependencies":{"left-pad":"1.2.9"}}"#,
         ])
-        let vulnerableCoordinate = DependencyVersionIdentity.coordinate(ecosystem: .npm, name: "lodash",
-                                                                       queryVersion: "4.17.15")
-        let cleanCoordinate = DependencyVersionIdentity.coordinate(ecosystem: .npm, name: "lodash",
-                                                                  queryVersion: "4.17.21")
+        let vulnerableCoordinate = DependencyVersionIdentity.coordinate(ecosystem: .npm, name: "left-pad",
+                                                                       queryVersion: "1.2.3")
+        let cleanCoordinate = DependencyVersionIdentity.coordinate(ecosystem: .npm, name: "left-pad",
+                                                                  queryVersion: "1.2.9")
         let stub = StubOnlineSource(answered: [
             vulnerableCoordinate: [stubAdvisory(id: "GHSA-a", coordinate: vulnerableCoordinate,
                                                aliases: ["CVE-2099-0002"])],
             cleanCoordinate: [],        // 答上了、且干净
-        ])
+        ], latestVersions: ["left-pad": "1.2.9"])   // registry 答上 ⇒ 版本那一路才算"已核对"
         let report = try await analyze(root, stub: stub)
-        let old = try XCTUnwrap(recordFrom(root: report, manifest: "package.json", name: "lodash"))
-        let fresh = try XCTUnwrap(recordFrom(root: report, manifest: "web/package.json", name: "lodash"))
+        let old = try XCTUnwrap(recordFrom(root: report, manifest: "package.json", name: "left-pad"))
+        let fresh = try XCTUnwrap(recordFrom(root: report, manifest: "web/package.json", name: "left-pad"))
         XCTAssertEqual(old.knownVulnerabilities, ["CVE-2099-0002"], "有公告的那条要标上")
         XCTAssertTrue(fresh.knownVulnerabilities.isEmpty, "同包另一版本确实干净，不得被错绑")
         XCTAssertEqual(DependencyRowStatus.of(old), .vulnerable(count: 1))
+        XCTAssertEqual(DependencyEvidence.versionState(of: fresh), .checked,
+                       "精确声明 ⇒ 安装版本就是它，版本这一路可比对")
         XCTAssertEqual(DependencyRowStatus.of(fresh), .verifiedSafe, "两路都核对过且无命中才允许发绿")
     }
 
@@ -164,8 +173,11 @@ final class DependencyBackfillIdentityTests: XCTestCase {
     // MARK: - npm 成功不得冒充 OSV 成功（RD-11）
 
     func testRegistrySuccessDoesNotImplyVulnerabilityCoverage() async throws {
+        // 声明写成**精确版本**：这条用例只管"npm 成功 ≠ OSV 成功"，
+        // 不许把"范围没解析成安装版本"那件事混进来（那是另一格，见
+        // `testAdvisoryInOverviewAlsoMarksTheRow` 与 `versionState` 的 `.versionUnresolved` 支）。
         let root = try makeTree("npm-vs-osv", files: [
-            "package.json": #"{"name":"app","dependencies":{"semver":"^7.5.0"}}"#,
+            "package.json": #"{"name":"app","dependencies":{"semver":"7.5.0"}}"#,
         ])
         // registry 答上了最新版；OSV 这一路对该坐标**失败**。
         let coordinate = DependencyVersionIdentity.coordinate(ecosystem: .npm, name: "semver",
@@ -177,11 +189,18 @@ final class DependencyBackfillIdentityTests: XCTestCase {
         XCTAssertEqual(DependencyEvidence.versionState(of: row), .checked)
         XCTAssertEqual(DependencyEvidence.vulnerabilityState(of: row), .failed,
                        "漏洞这一路失败 —— 不许被版本成功盖过去")
-        XCTAssertEqual(DependencyRowStatus.of(row), .checkFailed, "行上不许出现『正常』")
+        // 行上只有一格徽标， precedence 是「有命中的正向发现 > 没查完 > 中性」：
+        // 这条依赖版本确实落后（registry 答了 7.6.3 > 声明 7.5.0）⇒ 先说"过旧"这件真发现，
+        // 但它**绝不是绿灯**；"漏洞没查成"必须同时能从 tooltip、总览与评分里读到（下面三行就是在查这个）。
+        XCTAssertEqual(DependencyRowStatus.of(row), .outdated, "行状态：过旧是测出来的事实，且不是绿灯")
+        XCTAssertNotEqual(DependencyRowStatus.of(row).role, Theme.Semantic.success)
+        XCTAssertTrue(DependencyRowStatus.of(row).tooltip(record: row).contains("核对失败"),
+                      "「漏洞没核对成」必须能在这一行上讲清楚：" + DependencyRowStatus.of(row).tooltip(record: row))
         XCTAssertEqual(DependencySafetyVerdict(report),
                        .unchecked(coveredCount: 1, total: 1, uncoveredEcosystems: []),
                        "总览也不能发绿")
-        XCTAssertEqual(VulnerabilityEvidence.classify(report), .degraded, "评分侧同形")
+        XCTAssertEqual(VulnerabilityEvidence.classify(report), .degraded,
+                       "评分侧同形：发起了 OSV 且这一条失败 ⇒ 「试了没查完」= degraded，而不是「压根没查」的 unchecked")
     }
 
     func testPartialOsvFailureStillDisclosesTheUncoveredCount() async throws {
@@ -202,7 +221,7 @@ final class DependencyBackfillIdentityTests: XCTestCase {
         let statement = DependencyEvidence.findingsStatement(for: report, ledger: ledger)
         XCTAssertTrue(statement.contains("已核对 4"), statement)
         XCTAssertTrue(statement.contains("6"), statement)
-        XCTAssertTrue(statement.contains("核对失败 2"), statement)
+        XCTAssertTrue(statement.contains("2 个核对失败"), statement)
     }
 
     // MARK: - 预算截断 / 生态不支持 / 版本未解析
@@ -217,7 +236,9 @@ final class DependencyBackfillIdentityTests: XCTestCase {
         XCTAssertEqual(stub.receivedOsvQueries.count, DependencyNetworkLookup.maxOsvBatchPackages,
                        "发给数据源的条数必须等于上限")
         let ledger = DependencyEvidence.ledger(for: report)
-        XCTAssertEqual(ledger.vulnerabilityStateCounts[.budgetExcluded], 7)
+        XCTAssertEqual(ledger.vulnerabilityStateCounts[.budgetExcluded], 7,
+                       "只有**真没发出去**的那 7 条能落预算态：发出去并答了的 100 条不许被连坐")
+        XCTAssertEqual(ledger.vulnerabilityStateCounts[.checked], 100)
         guard let evidence = report.vulnerabilityLookup else { return XCTFail("报告级账本必须落盘") }
         XCTAssertEqual(evidence.totalRecords, count)
         XCTAssertEqual(evidence.budgetExcluded, 7)
@@ -240,9 +261,15 @@ final class DependencyBackfillIdentityTests: XCTestCase {
         XCTAssertTrue(stub.receivedOsvQueries.isEmpty, "OSV 不收 SwiftPM，一条都不该发出去")
         let row = try XCTUnwrap(record(report, "swift-log"))
         XCTAssertEqual(DependencyEvidence.vulnerabilityState(of: row), .ecosystemUnsupported)
-        XCTAssertEqual(DependencyRowStatus.of(row), .unsupported)
+        // 行状态读的是"两路各自结局"里更靠前的那格：这条依赖版本可比对且确实落后
+        // （快照里 swift-log 最新 1.6.1 > 声明 1.5.0）⇒ 报「过旧」是真发现，
+        // **但它绝不是绿灯** —— 这条用例管的就是"绝不因为 OSV 不收就发绿"。
+        XCTAssertNotEqual(DependencyRowStatus.of(row), .verifiedSafe,
+                          "生态不支持漏洞核对 ⇒ 永不许出现「正常」")
+        XCTAssertEqual(DependencyRowStatus.of(row), .outdated, "过旧是独立于漏洞核对的另一件事")
+        // SwiftPM 没有内置离线规则 ⇒ 未覆盖生态必须点名（旧期望写空是把它当"覆盖了"）。
         XCTAssertEqual(DependencySafetyVerdict(report),
-                       .unchecked(coveredCount: 0, total: 1, uncoveredEcosystems: []))
+                       .unchecked(coveredCount: 1, total: 1, uncoveredEcosystems: ["Swift Package"]))
         XCTAssertTrue(DependencyEvidence.tailPieces(DependencyEvidence.ledger(for: report))
                         .contains { $0.contains("生态不支持") })
     }
@@ -274,7 +301,10 @@ final class DependencyBackfillIdentityTests: XCTestCase {
         XCTAssertEqual(DependencyEvidence.vulnerabilityState(of: row), .checked,
                        "内置规则命中了 lodash ⇒ 这条确实核对过")
         XCTAssertFalse(row.knownVulnerabilities.isEmpty, "真值：4.17.15 在内置规则覆盖范围内")
-        XCTAssertEqual(DependencySafetyVerdict(report).badgeText, "风险：高", "有命中就报命中")
+        // 真值来自冻结契约 `DependencyReport.riskLevel`：vulnerableCount 落在 1...2 ⇒ .medium。
+        // （本流不许改那把分档尺子，只许照它断。）
+        XCTAssertEqual(DependencySafetyVerdict(report), .findings(count: 1, risk: .medium),
+                       "有命中就报命中：lodash 4.17.15 命中 1 条内置规则（取该规则的第一个 CVE 编号）")
     }
 
     func testOfflineCleanPackageIsNotClaimedSafe() async throws {

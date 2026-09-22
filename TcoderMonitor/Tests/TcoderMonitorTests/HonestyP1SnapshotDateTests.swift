@@ -81,35 +81,55 @@ final class HonestyP1SnapshotDateTests: XCTestCase {
 
     // MARK: - ② 只加信息，不动判定
 
-    /// `classify` 拿 `contains("失败")` 当降级判据；新文案必须对这个词免疫。
-    func testSnapshotDisclosureNeverCarriesTheDegradedKeyword() {
-        XCTAssertFalse(DependencySnapshot.asOfText.contains("失败"),
-                       "这句话一旦被拼进 note，就会把成功的在线核对误判成降级：\(DependencySnapshot.asOfText)")
-        XCTAssertFalse(ManifestDependencyAnalyzer.offlineCaveat(for: offlineReport()).contains("失败"),
-                       "离线判据同理：\(ManifestDependencyAnalyzer.offlineCaveat(for: offlineReport()))")
+    /// ## RD-13（2026-09-22，R3 按 AGENTS §8.1 豁免改正这两条用例）
+    ///
+    /// 这两条原来钉的是「措辞里不许出现『失败』，否则 `classify` 会把成功的在线核对读成降级」
+    /// —— 那是**让中文文案给业务判定让路**：判据本身是 `networkLookupNote.contains("失败")`，
+    /// 于是每加一句人话都得先问它会不会撞词。方向是反的，所以修法不是继续维护这套兼容，
+    /// 而是把判定换成读结构化状态、再把这里改写成"判据对措辞**免疫**"。
+    /// 语义一条没丢：补句仍然不许改变任何状态，只是现在它**凭什么**不改变换成了账本。
+    func testClassificationIsImmuneToWording() {
+        // 同一份账本，五种措辞（含"失败"、不含、纯英文、空、超长）都必须同一个状态。
+        let base = onlineCheckedCleanReport()
+        let wordings = ["", "OSV：52 个包中 3 个查询失败", "在线查询已完成（OSV + npm registry）",
+                        "OSV lookup finished without failures", DependencySnapshot.asOfText,
+                        "未联网核对：漏洞判定只依据内置快照（覆盖 npm / Maven / Python），"
+                            + "快照截至 2026-09-19（很久以前）、很久以前、很久以前、很久以前"]
+        for note in wordings {
+            var report = base
+            report.networkLookupNote = note
+            report.networkLookupPerformed = !note.isEmpty
+            XCTAssertEqual(VulnerabilityEvidence.classify(report), .verified,
+                           "措辞影响了判定（RD-13 的原始症状）：\(note.prefix(24))")
+        }
+        // 快照那句本身含不含"失败"从此与判定无关 —— 但日期粒度那条纪律仍然成立。
+        XCTAssertFalse(DependencySnapshot.asOfText.contains(":"), "整句披露不该带时分")
     }
 
-    /// 三态判定的输入输出在加日期前后必须一模一样。
+    /// 三态判定的输入输出在补句前后必须一模一样（补句只加信息，不动判定）。
     func testEvidenceClassificationIsUnchangedByTheDisclosure() {
-        var blind = DependencyReport()
-        blind.ecosystems = offlineReport().ecosystems
+        var blind = offlineReport()
         XCTAssertEqual(VulnerabilityEvidence.classify(blind), .unchecked, "没联网仍然是未核对")
-
         blind.networkLookupNote = DependencySnapshot.noteAppended(to: blind.networkLookupNote)
         XCTAssertEqual(VulnerabilityEvidence.classify(blind), .unchecked,
                        "给离线说明补日期不许改变证据状态：\(blind.networkLookupNote)")
 
-        var checked = DependencyReport()
-        checked.networkLookupPerformed = true
+        // 「查过且干净」= 逐条漏洞核对全部成功，而不是 note 里没出现"失败"两个字。
+        let checked = onlineCheckedCleanReport()
         XCTAssertEqual(VulnerabilityEvidence.classify(checked), .verified, "查过且干净仍然是已核对")
+        XCTAssertEqual(VulnerabilityEvidence.classify(notePatched(checked)), .verified,
+                       "补日期不许把已核对改成降级")
 
-        var degraded = DependencyReport()
-        degraded.networkLookupPerformed = true
-        degraded.networkLookupNote = "OSV 查询失败 1 个包"
+        // 「降级」= 发起了但没查完 —— 这里用**结构化事实**造，不再靠句子里有没有"失败"。
+        var degraded = onlineCheckedCleanReport()
+        degraded.ecosystems[0].dependencies[0].vulnerabilityCheckState = .failed
         XCTAssertEqual(VulnerabilityEvidence.classify(degraded), .degraded)
-        XCTAssertEqual(VulnerabilityEvidence.classify(
-            notePatched(degraded)
-        ), .degraded, "降级说明补日期后必须还是降级")
+        XCTAssertEqual(VulnerabilityEvidence.classify(notePatched(degraded)), .degraded,
+                       "降级说明补日期后必须还是降级")
+        // 被单次上限挡在门外的那批同样是"试了没查完"，绝不是"压根没查"。
+        var deferred = onlineCheckedCleanReport()
+        deferred.ecosystems[0].dependencies[0].vulnerabilityCheckState = .budgetExcluded
+        XCTAssertEqual(VulnerabilityEvidence.classify(deferred), .degraded)
     }
 
     /// 降级说明补句：空 note 不无中生有，非空 note 原句保留、只往后追加。
@@ -149,6 +169,19 @@ final class HonestyP1SnapshotDateTests: XCTestCase {
         var copy = report
         copy.networkLookupNote = DependencySnapshot.noteAppended(to: copy.networkLookupNote)
         return copy
+    }
+
+    /// 一份"在线查过且全部零命中"的报告：逐条漏洞核对状态都落成 `.checked`。
+    /// RD-13 之后这是**唯一**能让 `classify` 给出 `.verified` 的形状 —— 光把 note 写得
+    /// 不含"失败"两个字不再算数（那正是被删掉的旧判据）。
+    private func onlineCheckedCleanReport() -> DependencyReport {
+        var report = offlineReport()
+        for index in report.ecosystems[0].dependencies.indices {
+            report.ecosystems[0].dependencies[index].vulnerabilityCheckState = .checked
+        }
+        report.networkLookupPerformed = true
+        report.networkLookupNote = "在线查询已完成（OSV + npm registry）"
+        return report
     }
 
     /// 一份典型的离线 npm 报告：一条可比对、一条 `workspace:*` 不可比对。

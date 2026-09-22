@@ -188,14 +188,25 @@ final class DependencySnapshotTests: XCTestCase {
 // 现在视图与单测共用 DependencySafetyVerdict / DependencyRowStatus 这一份判定。
 
 final class DependencySafetyVerdictTests: XCTestCase {
+    /// 造一份依赖报告。
+    ///
+    /// RD-11 之后**绿灯只能由逐条结构化状态授权**，所以这里除了 `versionCheckSource`
+    /// （那是"版本数据从哪来"，不是"漏洞查没查"）还要能落 `vulnerabilityCheckState`。
+    /// 旧写法只给 source：那种报告在新口径下必须读成"没核对"，`testSourceKindAloneNeverClaimsSafe`
+    /// 就是钉这一件的（旧实现会发绿 ⇒ 这条用例修前红）。
     func report(networkPerformed: Bool,
                         versions: [VersionCheckSource],
                         advisories: [SecurityAdvisory] = [],
-                        offlineVulns: [DependencyVulnerability] = []) -> DependencyReport {
+                        offlineVulns: [DependencyVulnerability] = [],
+                        vulnerabilityStates: [DependencyCheckState] = []) -> DependencyReport {
         let records = versions.enumerated().map { index, source -> DependencyRecord in
-            DependencyRecord(name: "pkg\(index)", version: "1.0.0", ecosystem: .npm, scope: .runtime,
-                             manifestPath: "package.json", latestKnownVersion: source == .none ? nil : "9.9.9",
-                             versionCheckSource: source, knownVulnerabilities: [])
+            var record = DependencyRecord(name: "pkg\(index)", version: "1.0.0", ecosystem: .npm, scope: .runtime,
+                                          manifestPath: "package.json",
+                                          latestKnownVersion: source == .none ? nil : "9.9.9",
+                                          versionCheckSource: source, knownVulnerabilities: [])
+            record.vulnerabilityCheckState = index < vulnerabilityStates.count ? vulnerabilityStates[index] : nil
+            record.versionCheckState = source == .none ? .notAttempted : .checked
+            return record
         }
         var result = DependencyReport(analyzedAt: Fixture.commit(sha: Fixture.shaA, date: Date()).date)
         result.ecosystems = [EcosystemReport(ecosystem: .npm, manifestPath: "package.json",
@@ -209,7 +220,8 @@ final class DependencySafetyVerdictTests: XCTestCase {
     /// 同一份「零命中」数据，联网与否必须给出**不同**的可见结论。
     func testOfflineAndOnlineZeroFindingsDifferVisibly() {
         let offline = DependencySafetyVerdict(report(networkPerformed: false, versions: [.bundledSnapshot]))
-        let online = DependencySafetyVerdict(report(networkPerformed: true, versions: [.onlineRegistry]))
+        let online = DependencySafetyVerdict(report(networkPerformed: true, versions: [.onlineRegistry],
+                                                     vulnerabilityStates: [.checked]))
 
         XCTAssertEqual(offline, .unchecked(coveredCount: 1, total: 1, uncoveredEcosystems: []))
         XCTAssertEqual(online, .clean(coveredCount: 1, total: 1))
@@ -229,7 +241,8 @@ final class DependencySafetyVerdictTests: XCTestCase {
     /// 这一格只许留下核对状态 —— 少了它，`0 条` 就会被读成"查过、没有病"。
     func testVerdictTileCaptionKeepsTheHonestyStateAndPointsAtTheAuthority() {
         let offline = DependencySafetyVerdict(report(networkPerformed: false, versions: []))
-        let online = DependencySafetyVerdict(report(networkPerformed: true, versions: [.onlineRegistry]))
+        let online = DependencySafetyVerdict(report(networkPerformed: true, versions: [.onlineRegistry],
+                                                    vulnerabilityStates: [.checked]))
         XCTAssertTrue(offline.tileCaption.contains("未联网核对"), offline.tileCaption)
         XCTAssertFalse(online.tileCaption.contains("未联网"), online.tileCaption)
         XCTAssertFalse(offline.tileCaption.contains("未发现已知漏洞"),
@@ -288,24 +301,67 @@ final class DependencySafetyVerdictTests: XCTestCase {
         XCTAssertEqual(coveredCount, 1)
     }
 
-    func testRowStatusOnlyTurnsGreenOnOnlineSource() {
-        func row(_ source: VersionCheckSource, vulns: [String] = [], latest: String? = "1.0.0") -> DependencyRowStatus {
-            DependencyRowStatus.of(DependencyRecord(name: "pkg", version: "1.0.0", ecosystem: .npm, scope: .runtime,
-                                                    manifestPath: "package.json", latestKnownVersion: latest,
-                                                    versionCheckSource: source, knownVulnerabilities: vulns))
+    /// 行级绿灯的唯一授权是**两个维度的结构化状态**，不再是"版本数据从哪来"。
+    ///
+    /// 旧实现这一格是 `switch record.versionCheckSource { case .onlineRegistry: return .verifiedSafe }`
+    /// —— npm 版本查成功就发绿，从没问过"这条的漏洞核对成功了没有"（RD-11 点名的冒充关系）。
+    /// 修前红的那一条是 `source == .onlineRegistry` 而漏洞状态没落账：现在必须落「仅版本比对」。
+    func testRowStatusIsAuthorizedByStatesNotBySourceKind() {
+        func row(source: VersionCheckSource,
+                 vulnerability: DependencyCheckState?,
+                 version versionState: DependencyCheckState? = nil,
+                 vulns: [String] = [],
+                 latest: String? = "1.0.0") -> DependencyRowStatus {
+            var record = DependencyRecord(name: "pkg", version: "1.0.0", ecosystem: .npm, scope: .runtime,
+                                          manifestPath: "package.json", latestKnownVersion: latest,
+                                          versionCheckSource: source, knownVulnerabilities: vulns)
+            record.vulnerabilityCheckState = vulnerability
+            record.versionCheckState = versionState
+            return DependencyRowStatus.of(record)
         }
-        XCTAssertEqual(row(.onlineRegistry), .verifiedSafe)
-        XCTAssertEqual(row(.onlineRegistry).text, "正常")
-        XCTAssertEqual(row(.bundledSnapshot), .versionOnly, "只有内置快照比过版本 → 漏洞层面仍未核对")
-        XCTAssertNotEqual(row(.bundledSnapshot).text, "正常")
-        XCTAssertEqual(row(.none, latest: nil), .unchecked)
-        XCTAssertNotEqual(row(.none, latest: nil).text, "正常")
-        XCTAssertEqual(row(.none, vulns: ["CVE-1"]).text, "有漏洞")
-        XCTAssertEqual(row(.bundledSnapshot, latest: "9.9.9"), .outdated, "版本落后是版本结论，可保留")
-        XCTAssertTrue(row(.bundledSnapshot).tooltip(record: DependencyRecord(
-            name: "pkg", version: "1.0.0", ecosystem: .npm, scope: .runtime, manifestPath: "package.json",
-            latestKnownVersion: "1.0.0", versionCheckSource: .bundledSnapshot,
-            knownVulnerabilities: [])).contains("未联网核对"))
+
+        // 正例：两路都已核对且零命中 —— 这才是唯一能发绿的形状。
+        XCTAssertEqual(row(source: .onlineRegistry, vulnerability: .checked), .verifiedSafe)
+        XCTAssertEqual(row(source: .bundledSnapshot, vulnerability: .checked), .verifiedSafe,
+                       "绿灯与「数据从哪来」无关，只看两路各自的结果")
+        // 反例（RD-11 的原始形状）：来源是在线源，但漏洞这一路没核对成 ⇒ 绝不发绿。
+        XCTAssertNotEqual(row(source: .onlineRegistry, vulnerability: nil), .verifiedSafe,
+                          "来源种类不许单独授权绿灯")
+        XCTAssertEqual(row(source: .onlineRegistry, vulnerability: nil), .versionOnly)
+        XCTAssertEqual(row(source: .onlineRegistry, vulnerability: .notAttempted), .versionOnly)
+        // 另外四种"没查成"各占一格，谁也不许长成"正常"。
+        for (state, expected) in [(DependencyCheckState.failed, DependencyRowStatus.checkFailed),
+                                  (.versionUnresolved, .versionUnresolved),
+                                  (.ecosystemUnsupported, .unsupported),
+                                  (.budgetExcluded, .budgetExcluded)] {
+            XCTAssertEqual(row(source: .onlineRegistry, vulnerability: state), expected, state.rawValue)
+            XCTAssertNotEqual(row(source: .onlineRegistry, vulnerability: state).text, "正常", state.rawValue)
+        }
+        // 有命中优先于一切状态。
+        XCTAssertEqual(row(source: .none, vulnerability: .notAttempted, vulns: ["CVE-1"], latest: nil).text, "有漏洞")
+        // 版本落后是另一件事，仍可保留（但不是绿灯）。
+        let outdated = row(source: .bundledSnapshot, vulnerability: .checked, latest: "9.9.9")
+        XCTAssertEqual(outdated, .outdated)
+        XCTAssertNotEqual(outdated.role, Theme.Semantic.success, "「过旧」不许画成绿色")
+        XCTAssertTrue(DependencyRowStatus.versionOnly.tooltip(
+            record: DependencyRecord(name: "pkg", version: "1.0.0", ecosystem: .npm, scope: .runtime,
+                                     manifestPath: "package.json", latestKnownVersion: "1.0.0",
+                                     versionCheckSource: .bundledSnapshot,
+                                     knownVulnerabilities: [])).contains("只比对了版本新旧"))
+    }
+
+    /// 旧报告（只有 `versionCheckSource`、没有任何逐条状态）在新口径下必须读成"没核对"。
+    func testSourceKindAloneNeverClaimsSafe() {
+        let legacy = DependencyRecord(name: "pkg", version: "1.0.0", ecosystem: .npm, scope: .runtime,
+                                      manifestPath: "package.json", latestKnownVersion: "1.0.0",
+                                      versionCheckSource: .onlineRegistry, knownVulnerabilities: [])
+        XCTAssertEqual(DependencyEvidence.vulnerabilityState(of: legacy), .notAttempted,
+                       "字段缺席 = 没测过：宁可得罪人，不得给假绿灯")
+        XCTAssertEqual(DependencyRowStatus.of(legacy), .versionOnly)
+        XCTAssertFalse(DependencySafetyVerdict(DependencyReport(ecosystems: [
+            EcosystemReport(ecosystem: .npm, manifestPath: "package.json", lockfileName: nil,
+                            dependencies: [legacy], frameworkMarkers: []),
+        ])).mayClaimSafe)
     }
 
     func testOfflineCaveatNamesSkippedIncomparableVersions() {

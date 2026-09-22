@@ -13,79 +13,108 @@ extension ManifestDependencyAnalyzer {
 
     // MARK: - 在线核对（可注入假源；默认走真源）
 
+    /// 一次在线核对的编排：两条路各发一批、各自记结局，最后把逐条状态与报告级账本一次写完。
+    ///
+    /// 拆成三个小函数（`dispatchRegistryLookup` / `dispatchOsvLookup` / `onlineNotes`），
+    /// 因为合在一起是 73 行、超过本仓"函数不超过自身 CC(20)"的申报线，
+    /// 且这一段每多一条判断就多一处"账本与事实分叉"的地方。
     func applyNetworkKnowledge(_ report: inout DependencyReport) async {
         let records = report.ecosystems.flatMap(\.dependencies)
-        var notes: [String] = []
-        var attempted = 0
         var receipt = DependencyOnlineReceipt()
+        var dispatch = DependencyOnlineDispatch()
+        var attempted = 0
 
-        // npm 版本核对路：先去重、再按单次上限切，切掉的那些是**我们主动没查**，
-        // 必须落 `.budgetExcluded`，不能让他们在报告里长成"查过、干净"。
-        let npmRecords = records.filter { $0.ecosystem == .npm }
-        let npmNames = Array(Set(npmRecords.compactMap { record in
+        if await dispatchRegistryLookup(records: records, receipt: &receipt, dispatch: &dispatch,
+                                        ecosystems: &report.ecosystems) { attempted += 1 }
+        if await dispatchOsvLookup(records: records, receipt: &receipt, dispatch: &dispatch,
+                                   report: &report) { attempted += 1 }
+
+        let notes = Self.onlineNotes(receipt: receipt, dispatch: dispatch, attempted: attempted)
+        report.networkLookupPerformed = attempted > 0
+        report.networkLookupNote = DependencySnapshot.noteAppended(to: notes.joined(separator: localizedCopy("；")))
+        // 状态落账：逐条结局 + 报告级账本 + 分 scope 统计（离线侧在 analyze 里走同一个函数）。
+        applyCheckStates(&report, online: receipt, dispatch: dispatch)
+    }
+
+    /// npm registry 那条路（版本核对）。返回"这一路到底发没发"。
+    ///
+    /// 先去重、再按单次上限切：切掉的那些是**我们主动没查**，必须按**身份**记下来，
+    /// 让他们落 `.budgetExcluded` —— 只记条数的话，"发出去了但数据源没答"与"根本没发"
+    /// 在逐条状态上就长成一个样（那正是本条流要消灭的形状）。
+    private func dispatchRegistryLookup(records: [DependencyRecord],
+                                        receipt: inout DependencyOnlineReceipt,
+                                        dispatch: inout DependencyOnlineDispatch,
+                                        ecosystems: inout [EcosystemReport]) async -> Bool {
+        let npmNames = Array(Set(records.filter { $0.ecosystem == .npm }.compactMap { record in
             DependencyVersionIdentity.of(record).query == nil ? nil : record.name
         })).sorted()
-        let npmBatch = Array(npmNames.prefix(DependencyNetworkLookup.maxNpmPackages))
-        let npmBudgetExcluded = npmNames.count - npmBatch.count
-        if !npmBatch.isEmpty {
-            attempted += 1
-            let registry = await onlineSource.registryLatestVersions(for: npmBatch)
-            receipt.latestVersions = registry.latestVersions
-            receipt.failedRegistryPackages = registry.failedRegistryPackages
-            receipt.registryNote = registry.registryNote
-            Self.applyRegistryVersions(RegistryLookupResult(latestVersions: registry.latestVersions,
-                                                           packagesChecked: npmBatch.count,
-                                                           failedRequests: registry.failedRegistryPackages.count,
-                                                           note: registry.registryNote),
-                                      to: &report.ecosystems)
-        }
+        let batch = Array(npmNames.prefix(DependencyNetworkLookup.maxNpmPackages))
+        dispatch.registrySent = Set(batch)
+        dispatch.registryDeferred = Set(npmNames.dropFirst(batch.count))
+        guard !batch.isEmpty else { return false }
+        let registry = await onlineSource.registryLatestVersions(for: batch)
+        receipt.latestVersions = registry.latestVersions
+        receipt.failedRegistryPackages = registry.failedRegistryPackages
+        receipt.registryNote = registry.registryNote
+        Self.applyRegistryVersions(RegistryLookupResult(latestVersions: registry.latestVersions,
+                                                       packagesChecked: batch.count,
+                                                       failedRequests: registry.failedRegistryPackages.count,
+                                                       note: registry.registryNote),
+                                   to: &ecosystems)
+        return true
+    }
 
-        // OSV 漏洞核对路：查询身份由版本身份给出（锁文件解析值优先）。
+    /// OSV 那条路（漏洞核对）。查询身份由版本身份给出（锁文件解析值优先）。
+    private func dispatchOsvLookup(records: [DependencyRecord],
+                                   receipt: inout DependencyOnlineReceipt,
+                                   dispatch: inout DependencyOnlineDispatch,
+                                   report: inout DependencyReport) async -> Bool {
         var queries: [(query: OsvPackageQuery, coordinate: String)] = []
         for record in records {
             guard let built = OsvPackageQuery.query(from: record) else { continue }
             queries.append(built)
         }
-        let osvBatchQueries = Array(queries.prefix(DependencyNetworkLookup.maxOsvBatchPackages))
-        let osvBudgetExcluded = queries.count - osvBatchQueries.count
-        if !osvBatchQueries.isEmpty {
-            attempted += 1
-            let osv = await onlineSource.osvAdvisories(for: osvBatchQueries.map(\.query))
-            receipt.osvOutcomes = osv.osvOutcomes
-            receipt.osvPathUnavailable = osv.osvPathUnavailable
-            receipt.osvNote = osv.osvNote
-            // 去重：内置规则已经命中同一 CVE / 规则的包，在线不再重复计入。
-            let covered = Self.coveredIdentifiers(in: records)
-            let fresh = osv.osvOutcomes.values.flatMap { outcome -> [SecurityAdvisory] in
-                guard case .answered(let advisories) = outcome else { return [] }
-                return advisories
-            }
-            let unseen = fresh.filter { advisory in
-                !Self.intersects(covered, with: [advisory.id] + advisory.aliases)
-            }
-            let merged = VulnerabilitySource.sortedAdvisories(Self.dedupedAdvisories(unseen))
-            report.advisories = merged
-            Self.backfill(advisories: merged, coordinates: queries, into: &report.ecosystems)
+        let batch = Array(queries.prefix(DependencyNetworkLookup.maxOsvBatchPackages))
+        dispatch.osvSent = Set(batch.map(\.coordinate))
+        dispatch.osvDeferred = Set(queries.dropFirst(batch.count).map(\.coordinate))
+        guard !batch.isEmpty else { return false }
+        let osv = await onlineSource.osvAdvisories(for: batch.map(\.query))
+        receipt.osvOutcomes = osv.osvOutcomes
+        receipt.osvPathUnavailable = osv.osvPathUnavailable
+        receipt.osvNote = osv.osvNote
+        // 去重：内置规则已经命中同一 CVE / 规则的包，在线不再重复计入。
+        let covered = Self.coveredIdentifiers(in: records)
+        let fresh = osv.osvOutcomes.values.flatMap { outcome -> [SecurityAdvisory] in
+            guard case .answered(let advisories) = outcome else { return [] }
+            return advisories
         }
+        let unseen = fresh.filter { advisory in
+            !Self.intersects(covered, with: [advisory.id] + advisory.aliases)
+        }
+        let merged = VulnerabilitySource.sortedAdvisories(Self.dedupedAdvisories(unseen))
+        report.advisories = merged
+        Self.backfill(advisories: merged, coordinates: queries, into: &report.ecosystems)
+        return true
+    }
+
+    /// 给人看的那句在线说明。**不参与任何判定**（判定只读 `DependencyCheckState`）。
+    static func onlineNotes(receipt: DependencyOnlineReceipt,
+                            dispatch: DependencyOnlineDispatch,
+                            attempted: Int) -> [String] {
+        var notes: [String] = []
         if !receipt.registryNote.isEmpty { notes.append(receipt.registryNote) }
         if !receipt.osvNote.isEmpty { notes.append(receipt.osvNote) }
-        if npmBudgetExcluded > 0 {
-            notes.append("npm registry 单次上限：\(npmBudgetExcluded) 个包未查询")
+        if !dispatch.registryDeferred.isEmpty {
+            notes.append("npm registry 单次上限：\(dispatch.registryDeferred.count) 个包未查询")
         }
-        if osvBudgetExcluded > 0 {
-            notes.append("OSV 单次上限：\(osvBudgetExcluded) 条未查询")
+        if !dispatch.osvDeferred.isEmpty {
+            notes.append("OSV 单次上限：\(dispatch.osvDeferred.count) 条未查询")
         }
-
-        report.networkLookupPerformed = attempted > 0
-        report.networkLookupNote = DependencySnapshot.noteAppended(to: notes.isEmpty
-            ? (attempted > 0 ? "在线查询已完成（OSV + npm registry）"
-                              : "本项目没有可在线查询的生态（SwiftPM / CocoaPods 不在 OSV 覆盖范围内）")
-            : notes.joined(separator: localizedCopy("；")))
-        // 状态落账：把逐条结局 + 报告级账本一次写完（离线侧在 analyze 里走同一个函数）。
-        var excluded = [String: Int]()
-        if npmBudgetExcluded > 0 { excluded["npm"] = npmBudgetExcluded }
-        if osvBudgetExcluded > 0 { excluded["osv"] = osvBudgetExcluded }
-        applyCheckStates(&report, online: receipt, budgetExcluded: excluded)
+        if notes.isEmpty {
+            notes.append(attempted > 0 ? "在线查询已完成（OSV + npm registry）"
+                                       : "本项目没有可在线查询的生态（SwiftPM / CocoaPods 不在 OSV 覆盖范围内）")
+        }
+        return notes
     }
 
     // MARK: - 回填（RD-12：按查询身份，不按字符串拼装）
@@ -130,15 +159,20 @@ extension ManifestDependencyAnalyzer {
 
     /// 逐条落两个核对状态，并把它们**汇总**成报告级账本与分 scope 统计。
     /// 离线时 `online == nil`：任何"在线才查得出"的结论都必须落回未查。
+    ///
+    /// `dispatch` 是"这一轮到底把哪些身份发出去了"的账 —— **`.budgetExcluded` 只能按身份落**。
+    /// 接手时这里传的是条数（`["osv": 7]`），于是"被上限切掉的 7 条"会把**发出去的 100 条**
+    /// 也一起说成"未进批次"（实测 107 条全落 budgetExcluded），而数据源明明答过它们；
+    /// 反过来说谎的方向也一样：账没收上来的那条被说成"没发"，就永远不会有人去查。
     func applyCheckStates(_ report: inout DependencyReport,
                           online: DependencyOnlineReceipt?,
-                          budgetExcluded: [String: Int] = [:]) {
+                          dispatch: DependencyOnlineDispatch = .empty) {
         Self.mutateRecords(&report.ecosystems) { record in
             let identity = DependencyVersionIdentity.of(record)
-            record.versionCheckState = Self.versionState(record: record, identity: identity, online: online)
+            record.versionCheckState = Self.versionState(record: record, identity: identity,
+                                                         online: online, dispatch: dispatch)
             record.vulnerabilityCheckState = Self.vulnerabilityState(record: record, identity: identity,
-                                                                    online: online,
-                                                                    budgetExcluded: budgetExcluded["osv"] ?? 0)
+                                                                     online: online, dispatch: dispatch)
             // 版本值与来源字段成对写：registry 答上了才算在线源，答不上原样留着。
             if record.versionCheckState == .checked, record.latestKnownVersion != nil,
                record.versionCheckSource == .none, let latest = online?.latestVersions[record.name] {
@@ -157,17 +191,21 @@ extension ManifestDependencyAnalyzer {
         report.scopeBreakdown = Self.scopeBreakdown(in: report)
     }
 
-    /// 版本核对的六态。判定只用结构化事实：解析身份 + 有没有拿到最新值 + 该路结局。
+    /// 版本核对的六态。判定只用结构化事实：解析身份 + 有没有拿到最新值 + 这一条发没发出去。
     static func versionState(record: DependencyRecord,
                              identity: DependencyVersionIdentity,
-                             online: DependencyOnlineReceipt?) -> DependencyCheckState {
+                             online: DependencyOnlineReceipt?,
+                             dispatch: DependencyOnlineDispatch = .empty) -> DependencyCheckState {
         guard identity.comparisonVersion != nil else {
-            // 只有范围 / 通配 / workspace / 外部来源：安装版本没量到。
+            // 只有范围 / 通配 / workspace / 外部来源：安装版本没量到 —— 哪怕 registry 答了
+            // "最新是哪个"，也不知道**本机装的是哪个**，所以这一格不是"已核对"。
             return record.latestKnownVersion == nil && !DependencyLockSupport.isEcosystemTrackable(record.ecosystem)
                 ? .ecosystemUnsupported : .versionUnresolved
         }
         guard record.latestKnownVersion != nil else {
             guard DependencyLockSupport.isEcosystemTrackable(record.ecosystem) else { return .ecosystemUnsupported }
+            // 被单次上限挡在门外 = 我们主动没查，不是数据源失败。
+            if online != nil, dispatch.registryDeferred.contains(record.name) { return .budgetExcluded }
             if let online, online.failedRegistryPackages.contains(record.name) { return .failed }
             return online == nil ? .notAttempted : .failed
         }
@@ -178,7 +216,7 @@ extension ManifestDependencyAnalyzer {
     static func vulnerabilityState(record: DependencyRecord,
                                    identity: DependencyVersionIdentity,
                                    online: DependencyOnlineReceipt?,
-                                   budgetExcluded: Int) -> DependencyCheckState {
+                                   dispatch: DependencyOnlineDispatch = .empty) -> DependencyCheckState {
         if !record.knownVulnerabilities.isEmpty { return .checked }
         guard OsvPackageQuery.osvEcosystem(for: record.ecosystem) != nil else { return .ecosystemUnsupported }
         guard let coordinate = identity.queryCoordinate else { return .versionUnresolved }
@@ -189,9 +227,10 @@ extension ManifestDependencyAnalyzer {
             case .skipped: break
             }
         }
-        if online == nil { return .notAttempted }
-        // 在线跑了、但这坐标没回执：要么被单次上限切掉，要么是回执缺账 —— 都算没覆盖到。
-        return budgetExcluded > 0 ? .budgetExcluded : .notAttempted
+        guard online != nil else { return .notAttempted }
+        // 在线跑了、这一条却没有回执：按**身份**分清两种结局，谁也不许冒充谁。
+        if dispatch.osvDeferred.contains(coordinate) { return .budgetExcluded }
+        return dispatch.osvSent.contains(coordinate) ? .failed : .notAttempted
     }
 
     /// 报告级账本 = 逐条状态求和（分母恒等于记录总数，由用例钉住）。
