@@ -593,7 +593,25 @@
 			<string>%lld signature classes in total, sorted by occurrences</string>
 		</dict>
 	</dict>
-
+	<!-- 批次 P69a：`SourceScopeCount.describe(unit:)` 的入参从半截量词（"个条目"）改成
+		整句量词键。旧形状拼出来的「1,234 个条目」不是键，英文态永远铺中文。
+		`%lld 行` 上面已经有了，这一条是它的同族。 -->
+	<key>%lld 个条目</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@scopeEntries@</string>
+		<key>scopeEntries</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld entry</string>
+			<key>other</key>
+			<string>%lld entries</string>
+		</dict>
+	</dict>
   <!--
     批次 P69c（WS-多槽复数流）：**一个键里两个复数槽**的第一族。
     立这一族的动机见 `LocalizedCopyKit.localizedCount(_:slots:)` 的注释。

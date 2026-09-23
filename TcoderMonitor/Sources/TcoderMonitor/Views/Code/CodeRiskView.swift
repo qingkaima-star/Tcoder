@@ -149,9 +149,12 @@ struct CodeDuplicationSection: View {
                     EmptyStateView(
                         icon: .noRisk,
                         title: "已完成扫描，未发现重复块",
-                        message: "扫描了 \(NumberFormat.grouped(code.totalFiles)) 个文件 / "
-                            + "\(NumberFormat.grouped(code.codeLines)) 行有效代码，"
-                            + "重复率为 \(NumberFormat.percent(code.duplicationRatio, precision: 1))。"
+                        // 整句键（P69a）：旧写法是三段字面量 `+` 起来再交给 `Text(变量)`，
+                        // 那一串嵌着测得值 ⇒ 不是键，英文态永远铺中文。
+                        message: localizedFormat("扫描了 %1$@ 个文件 / %2$@ 行有效代码，重复率为 %3$@。",
+                                                 NumberFormat.grouped(code.totalFiles),
+                                                 NumberFormat.grouped(code.codeLines),
+                                                 NumberFormat.percent(code.duplicationRatio, precision: 1))
                     )
                 } else {
                     let rows = visibleRows
@@ -207,9 +210,10 @@ struct CodeComplexitySection: View {
                 EmptyStateView(
                     icon: .noRisk,
                     title: "已完成扫描，没有函数上榜",
-                    message: "本次扫描没有函数达到引擎给出的复杂度上榜条件。参考数字：超长函数 "
-                        + "\(NumberFormat.grouped(code.longFunctions)) 个 · 平均函数长度 "
-                        + "\(NumberFormat.grouped(code.averageFunctionLength)) 行。"
+                    // 整句键（P69a）：与上面那句空态同一个坑 —— 三段拼完的串不是键。
+                    message: localizedFormat("本次扫描没有函数达到引擎给出的复杂度上榜条件。参考数字：超长函数 %1$@ 个 · 平均函数长度 %2$@ 行。",
+                                             NumberFormat.grouped(code.longFunctions),
+                                             NumberFormat.grouped(code.averageFunctionLength))
                 )
             } else {
                 VStack(alignment: .leading, spacing: Theme.Spacing.md) {

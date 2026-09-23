@@ -1044,3 +1044,28 @@
 "快照截至 %1$@（%2$@）" = "snapshot as of %1$@ (%2$@)";
 "版本声明形态：%1$@" = "declaration shapes: %1$@";
 "B 级参考线 %1$@ 分；折线只连已有历史点，不外插也不预测。" = "Grade B reference line at %1$@ points; the polyline joins existing history points only - no interpolation, no forecast.";
+
+// ===== 批次 P69a（WS-代码页双语流）：代码风险这一片 7 条「先拼再上屏」改成整句键 =====
+// 注释一律用 `//`：一个 `#` 会让系统解析器从那一行起整段放弃
+// （P59 真炸过一次：整本目录运行时作废，而按正则数键的守卫全绿）。
+// 值只用 ASCII 标点 + `·`：`。`/`，`/`（）`/`「」` 全在中日韩码点段内，
+// 会被「英文目录值不许留中日韩残留」那条判据（守卫 1f）判红。
+// 复杂度风险页：严重复杂度那条建议的四段拼接（P69 清单第 2~5 条）。
+"%1$@（CC %2$@ · %3$@ 行 · %4$@:%5$@）" = "%1$@ (CC %2$@ · %3$@ lines · %4$@:%5$@)";
+"%1$@ 个函数被判为严重复杂度，最高圈复杂度 %2$@：%3$@。先去掉嵌套：校验与异常分支改成提前返回，再把成组的分支换成策略表/多态；先把分支数压到 CC %4$@ 以下（那是本工具判「高」的那条线，与榜位无关）。" = "%1$@ functions are rated as critically complex, highest cyclomatic complexity %2$@: %3$@. Remove nesting first - turn validation and error branches into early returns, then replace branch groups with a policy table or polymorphism; bring the branch count below CC %4$@, the line this tool uses to call a function high, independent of board rank.";
+"同时有 %1$@ 个函数处于高复杂度档（CC %2$@~%3$@）：先给它们补单元测试，再把分支下沉成命名清晰的小函数。" = "Another %1$@ functions sit in the high complexity band (CC %2$@~%3$@): add unit tests for them first, then push the branches down into small, clearly named functions.";
+"%1$@ 个上榜函数的参数达到或超过 %2$@ 个，最多的是%3$@（%4$@ 个参数 · %5$@:%6$@）：把成组参数收进一个配置或值类型，调用点会同步变短。" = "%1$@ functions on the board take %2$@ or more parameters, the worst is %3$@ (%4$@ parameters · %5$@:%6$@): gather grouped parameters into one configuration or value type and the call sites shorten with them.";
+"注释率 %1$@（%2$@ / %3$@ 行）低于本页 %4$@ 的提示线：优先给对外接口和圈复杂度最高的那批函数写意图说明，直白代码不必加注释。" = "Comment ratio %1$@ (%2$@ of %3$@ lines) is below the %4$@ hint line on this page: write intent notes for the public interfaces and the highest-complexity functions first, obvious code needs no comment.";
+// 复杂度风险页两处空态正文（P69 清单第 6~7 条）。
+"扫描了 %1$@ 个文件 / %2$@ 行有效代码，重复率为 %3$@。" = "Scanned %1$@ files / %2$@ effective code lines; duplication ratio %3$@.";
+"本次扫描没有函数达到引擎给出的复杂度上榜条件。参考数字：超长函数 %1$@ 个 · 平均函数长度 %2$@ 行。" = "No function in this scan reached the engine condition to enter the complexity board. Reference figures: %1$@ over-long functions · average function length %2$@ lines.";
+// 扫描范围读数（P69 清单第 1 条）：`describe(unit:)` 的入参换成整句量词键之后，
+// 这三句的槽位才真的查得到（量词键本身在 `.stringsdict`，见那里的 `%lld 个条目`）。
+"扫描范围：遍历看到 %1$@、逐条留名的 %2$@ 个、未留名 %3$@ 个、未量准的范围 %4$@ 条。" = "Scan scope: %1$@ entries seen, %2$@ named one by one, %3$@ unnamed, %4$@ scope ranges not measured.";
+"被剔除条目的行数：%1$@。" = "Lines in the excluded entries: %1$@.";
+"未统计（%1$@）" = "Not counted (%1$@)";
+// `SourceScopeCount.notCounted(reason:)` 的三枚原因：它们经 `localizedCopy` 进上面那句的槽，
+// 不登记的话英文态会长成 "Not counted (本次没有范围台账)" —— 半英半中比整句中文更难读。
+"本次没有范围台账" = "this run carries no scope ledger";
+"非审计模式不读被剔除文件" = "non-audit mode does not read excluded files";
+"产品扫描不读被剔除文件的内容，审计模式才会数" = "the product scan does not read excluded file contents; only audit mode counts them";

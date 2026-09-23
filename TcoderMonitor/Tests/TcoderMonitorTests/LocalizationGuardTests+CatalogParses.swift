@@ -142,6 +142,34 @@ extension LocalizationGuardTests {
         keys.filter { !bodies.contains($0) }
     }
 
+    // MARK: - 批次 P69a：代码风险这一片收口时新增的整句量词键（7 条里的第 1 条）
+
+    /// `%lld 个条目` 必须在**真英文 bundle** 上选出 one / other 两支，并且真的被生产者查着。
+    ///
+    /// 为什么跟着 P69 那两条的形状再写一遍而不是复用：`describe(unit:)` 的入参从半截量词
+    /// （`"个条目"`）换成整句键之后，"键查不中"的表现不再是"退回中文"而是
+    /// **屏幕上打「%lld 个条目」** —— 字面 `%lld` 漏上屏，比铺中文更难看，
+    /// 而按正则数键的尺子看不见它（它读的是 `.strings`，复数形态住在 `.stringsdict`）。
+    /// 所以两侧都要量：bundle 解析得出两支、源码里有人查这一枚。
+    func test_p69aScopeEntryCountResolvesBothPluralFormsAndHasAProducer() throws {
+        let en = LocalizationGuardTests.packageRoot.appendingPathComponent("Resources/en.lproj")
+        guard let enBundle = Bundle(url: en) else {
+            return XCTFail("打不开 \(en.path) —— 英文资源不在原位，本条不能算通过")
+        }
+        let key = "%lld 个条目"
+        let english = enBundle.localizedString(forKey: key, value: "\u{FFFF}", table: nil)
+        XCTAssertFalse(english.contains("\u{FFFF}"), "\(key) 在 stringsdict 里查不到")
+        XCTAssertEqual(String(format: english, 1), "1 entry", "单数形态")
+        XCTAssertEqual(String(format: english, 4), "4 entries", "复数形态")
+        // 正向：三个调用点里至少这一枚真的在源码里被传进 `describe(unit:)`。
+        let bodies = try SurfaceScanKit.sourceFiles(under: "").map(\.content).reduce("") { $0 + $1 }
+        XCTAssertEqual(Self.unusedPluralKeys([key], in: bodies), [],
+                       "整句量词键登记了却没有生产者 ⇒ 屏上仍是拼出来的中文")
+        // 反向（元测试）：一条不存在的键必须报出来，否则上面那条绿只说明扫描面是空的。
+        XCTAssertFalse(Self.unusedPluralKeys(["P69a 夹具：这条键绝不存在 %lld 个条目"], in: bodies).isEmpty,
+                       "假键没被抓到 ⇒ 判据没有牙")
+    }
+
     /// 句末标点随语言：中文 `。`、英文 `.`。
     /// 探针在测试宿主里恒判中文（`Bundle.main` 没有 `en.lproj`），
     /// 所以英文那一支用入参驱动 —— 两支都要咬得住。
