@@ -127,7 +127,9 @@ struct HealthComponentTable: View {
                     HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
                         ThemedIcon(.unverified, role: .badge)
                             .foregroundStyle(Theme.Semantic.warning.textColor)
-                        Text("\(DimensionDisplay.name(dimension))：")
+                        // 整句键：`名字 + "："` 是守卫 1d【拼了查不中】点名的形状 ——
+                        // 拼完那一串没有键，英文态就永远铺着「运行稳定性：」这种半中半英。
+                        Text(localizedFormat("%1$@：", DimensionDisplay.name(dimension)))
                             .font(Theme.Typo.label.font)
                         Text(MissingDimensionReason.text(for: dimension, report: report))
                             .font(Theme.Typo.label.font)

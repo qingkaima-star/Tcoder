@@ -46,7 +46,13 @@ extension LocalizationGuardTests {
 
     static func missingKeys(in files: [(path: String, content: String)], keys: Set<String>) -> [String] {
         files.flatMap { file in
-            lookedUpLiterals(in: file.content).plain.filter { !keys.contains($0) }
+            // **只扫代码行**（`SurfaceScanKit.codeLines` 会滤掉整行 `//` / `///`）。
+            // P57 是被自己的文档注释教出来的：我在 `DimensionDisplay.name` 上方写了一句
+            // 「形如 `localizedFormat("「%1$@」完成但该分量未产出。", …)` 那一族」当反面举例，
+            // 判据把注释里引的那句当真调用点，当场要我为一条**文档**去登记键。
+            // 注释里必须能写被禁的写法本身 —— 否则没人能在判据旁边解释它为什么存在。
+            let code = SurfaceScanKit.codeLines(file.content).joined(separator: "\n")
+            return lookedUpLiterals(in: code).plain.filter { !keys.contains($0) }
                 .map { "\(file.path) → \($0)" }
         }
     }
@@ -67,7 +73,12 @@ extension LocalizationGuardTests {
                       "这些句子查了表，但目录里根本没键 ⇒ 英文态直接把中文原文铺上屏，"
                     + "而且一句都不会报错：\n  " + missing.sorted().joined(separator: "\n  "))
 
-        let interpolated = files.reduce(0) { $0 + Self.lookedUpLiterals(in: $1.content).interpolated.count }
+        // 与判据**同一把尺子**：打印的插值处数也走代码行，不另抄一份口径
+        // （P46 那次是打印 44 格、判据查 72 格；同一类错的第二处就要写成同源）
+        let interpolated = files.reduce(0) { sum, file in
+            sum + Self.lookedUpLiterals(in: SurfaceScanKit.codeLines(file.content)
+                .joined(separator: "\n")).interpolated.count
+        }
         print("【查表必有键】扫 \(files.count) 个文件 → 缺键 0 条；"
             + "含插值的查表实参 \(interpolated) 处（另一档：要改成 localizedFormat，见双语台账）")
     }
@@ -88,6 +99,13 @@ extension LocalizationGuardTests {
                       "含插值的查表实参要改的是写法（localizedFormat + 位置参数），不该被这条误伤")
         XCTAssertEqual(Self.lookedUpLiterals(in: interpolated[0].content).interpolated.count, 1,
                        "插值那一档必须被**数出来**，不能悄悄不算")
+        // 文档注释里**必须**能写被禁的写法本身（P57：我自己的反面举例被判成调用点）。
+        let documented = [(path: "Views/Fake.swift",
+                           content: "/// 形如 localizedCopy(\"缺的键\") 的写法是旧账\n"
+                                 + "Text(localizedCopy(\"缺的键\"))\n")]
+        XCTAssertEqual(Self.missingKeys(in: documented, keys: ["已有键"]),
+                       ["Views/Fake.swift → 缺的键"],
+                       "注释里的那一条不该算，代码里那一条必须算——两个方向都要成立")
     }
 
     // MARK: - 守卫 1d（P53）：先拼再上屏的中文串永远查不中
