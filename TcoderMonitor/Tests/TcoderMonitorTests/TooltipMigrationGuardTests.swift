@@ -23,8 +23,7 @@ final class TooltipMigrationGuardTests: XCTestCase {
 
     private static let longCaliberWidth = 24
 
-    /// 槽位标签与字面量之间允许插一层**查表出口**（WHY 与元测试见
-    /// `TooltipMigrationGuardTests+HelpSlots.swift`）。
+    /// 槽位标签与字面量之间允许插一层**查表出口**（WHY 与元测试见 `+HelpSlots` 分片）。
     static let keyedLookup = "(?:localizedCopy|localizedFormat|localizedCount)\\(\\s*"
 
     /// 可见槽位：字面上屏的那些入口（与 `LocalizationGuardTests` 的入口族同源）。
@@ -152,9 +151,8 @@ final class TooltipMigrationGuardTests: XCTestCase {
     /// 88 → 76（S2 代码两页）→ 74（S3 Git 与贡献者）→ 72（尺子改逐字面量判槽位 + S6 键登记）
     /// → 69（S1 总览与外壳）→ **62（S5 性能与日志 19 处、S4 依赖 3 处、S7 总览三处收进 ⓘ）**。
     /// 同批 tooltip 承载 13 → 49、总量 101 → 111：**B 一句没删**，降下来的 26 条全部搬进了 ⓘ。
-    /// ⚠ 上面那条 62 **打在一把瞎的尺子上**：入口族认了查表出口之后，同一份内容是 **54 → 86**
-    /// （86 条里只有 7 条住在 P69 改过的文件 ⇒ 大部分是先前就躲着的）。机制与逐条名单见
-    /// `TooltipMigrationGuardTests+HelpSlots.swift`；从此按修好的口径只减不增。
+    /// → **54（P69 合流：26 段半句并成 10 条整句键，可见单元再合掉 8 个，文本零丢失）**。
+    /// ⚠ 62/54 都打在一把**看不见查表出口**的尺子上：修好之后同一份内容读成 **86**（机制见 `+HelpSlots`）。
     private static let visibleCaliberCeiling = 86
 
     /// 总量下限 = 播种时的可见 + tooltip 之和 **减去已核准的删除数**。
@@ -162,7 +160,10 @@ final class TooltipMigrationGuardTests: XCTestCase {
     /// 为什么必须有豁免口：盘点表里 16 处判的是「删」（同屏两遍、卡名换个说法再讲一遍），
     /// 那些不是"藏起来"，是本来就不该占两处。一条只许往上的守恒线会把合理的删句一起拦下，
     /// 而被人嫌烦的守卫活不过下一轮 —— 所以给一个**逐条留名**的口，而不是放宽判据。
-    private static let totalCaliberFloor = 101 - acceptedCaliberDeletions.count
+    /// 101 → **100（P69 合流，2026-09-24）**：26 段"插值 + `+` 拼的半句"并成 10 条整句键，
+    /// 文本一字未少、可数单元少 8 个 ⇒ 那 10 句改由 `+CaliberMerges.swift` 逐句钉着还活着。
+    /// ⚠ 而 100 与 62/54 同出一把瞎尺子：认了查表出口后同一份内容 = **132**（86+46）⇒ 重打到 132。
+    private static let totalCaliberFloor = 132 - acceptedCaliberDeletions.count
 
     /// 已核准「删掉而不是藏进 ⓘ」的口径句：片段 → 为什么该删。
     /// **只由总工写**：切片负责人在自己汇报里列《建议删除》清单，由总工在合流时逐条登记。
@@ -377,8 +378,8 @@ final class TooltipMigrationGuardTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(why.trimmingCharacters(in: .whitespaces).count, 8,
                                         "「\(fragment)」的删除理由太短，无法被反驳：" + why)
         }
-        XCTAssertEqual(Self.totalCaliberFloor, 101 - Self.acceptedCaliberDeletions.count,
-                       "下界只能被登记数逐条抵掉，不许另写一个更小的数")
+        XCTAssertEqual(Self.totalCaliberFloor, 132 - Self.acceptedCaliberDeletions.count,
+                       "下界只能被登记数逐条抵掉，不许另写一个更小的数（基数 132 = 尺子认查表出口之后的现量）")
     }
 
     /// 记成测试是为了将来有人改判据时知道这条边界在哪儿 —— 方向是安全的（多要求藏，不会少要求）。

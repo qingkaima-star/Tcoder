@@ -182,6 +182,9 @@ extension LocalizationGuardTests {
         // 收成整句键之后文件里一个 `+` 拼接都不剩，点进来把形状钉死不许长回去。
         "Views/Code/CodeRiskAdvice.swift",
         "Views/Code/CodeRiskView.swift",
+        // P69c（总工落）：`crashEvidenceFootnote` 那三句并成整句槽型键之后，
+        // 这个文件里已经没有一个 `+` 拼出来的中文半句（【拼了查不中】由 171 降到 169 就是它贡献的 2 处）。
+        "Services/Logs/FileLogAnalyzer.swift",
     ]
 
     func test_compositionFreeFilesStayFreeOfJoinedChineseCopy() throws {
