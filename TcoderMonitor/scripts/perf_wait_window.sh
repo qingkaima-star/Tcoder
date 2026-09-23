@@ -49,6 +49,12 @@ LAUNCH_APP="${LAUNCH_APP:-1}"      # 0 = 只等你自己把 App 开到最前面
 # 只是搬到滚动真正发生的地方（录制档里"输入器起来了"＋收尾复核"这段窗口里确实在动"）。
 HARNESS_LAUNCHES="${MEASURE_LAUNCH:-0}"
 QUIET_WANT=8                        # 比闸门的 5 s 留一点余量，免得刚过线就开始动
+# 起跑线要分两档：**复用你已经开着的实例**只要 8 s 余量；**排程器自己起 App 并顶到前台**要 180 s。
+# 2026-09-23 14:57 实测（交接笔记 §AJ）：按 8 s 起的那一次，窗口一弹出来就被需求方当场关掉 ⇒
+# 三趟一趟没录成，还白抢了三次前台。「挂着等它自己空出来」在这里不成立——场上是有人在用这台机器的，
+# 再挂下去就是拿测量去打扰人，而被打扰的人会杀掉我们的实例，两边都拿不到数。
+# 这一格只许往上抬（抬到分钟级才是"真的没人用"），压低到闸门以下就是给自己放行。
+LAUNCH_QUIET_WANT="${LAUNCH_QUIET_WANT:-180}"
 INTERACT_WANT="${INTERACT_WANT:-3}" # interact 档：静默 <3 s 才算"人正在滚"（滚轮事件间隔通常 <1 s）
 POLL=5
 START_BIN="$PWD/dist/Tcoder.app"
@@ -145,12 +151,16 @@ cond_no_instance() {  # MEASURE_LAUNCH=1 那一档用：场上必须**一个都�
   return 1
 }
 
-cond_quiet() {  # idle 档：等"整段够久没人动"
-  local q; q=$(quiet_seconds)
+cond_quiet() {  # idle 档：等"整段够久没人动"。参数=门槛秒数，不给就用默认那一档
+  local q want; q=$(quiet_seconds); want="${1:-$QUIET_WANT}"
   probe_usable "$q" || { echo "静默探针取不到（拿到「${q:-空}」），不知道有没有人在动，不开录"; return 1; }
-  [ "$(human_input_in_window "$q" "$QUIET_WANT")" = "窗口内没人" ] && return 0
-  echo "人手 ${q}s 前还在动（要 ≥${QUIET_WANT}s）"
+  [ "$(human_input_in_window "$q" "$want")" = "窗口内没人" ] && return 0
+  echo "人手 ${q}s 前还在动（要 ≥${want}s）"
   return 1
+}
+
+cond_quiet_before_launch() {  # 只用在**起跑那一次**：下面马上要 open + 顶前台，门槛换成分两档里高的那条
+  cond_quiet "$LAUNCH_QUIET_WANT"
 }
 
 cond_someone_active() {  # interact 档：**必须检测到有人正在动**才开录
@@ -199,7 +209,16 @@ echo "==> 等窗口：$SAMPLES 趟 ${MODE}（release 口径，rev=$TAG），最�
 
 # 1) 起手先等静默：两档都要——interact 档要的是"录起来之后有人滚"，
 #    不是"现在就可以插进去"。人正忙着的时候起 App，只会把别人的焦点抢走。
-wait_for "人手静默 ≥${QUIET_WANT}s" cond_quiet || exit 1
+#    【起跑线按"接下来要不要自己起 App"分两档】判据与它印出的数字写在同一个 if 里，
+#    免得将来只改一条 ⇒ 屏幕上印的门槛和真正用的门槛不是一回事（§AJ 那一晚就是这么被弹走的）。
+FIRST_QUIET_COND=cond_quiet
+FIRST_QUIET_WANT="$QUIET_WANT"
+if [ "$MODE" != "interact" ] && [ "$LAUNCH_APP" = "1" ] && [ "$(instance_count)" = "0" ]; then
+  FIRST_QUIET_COND=cond_quiet_before_launch
+  FIRST_QUIET_WANT="$LAUNCH_QUIET_WANT"
+  echo "    本档接下来会自己起 App 并顶到前台 ⇒ 起跑线抬到人手静默 ≥${FIRST_QUIET_WANT}s（场上已有人在使用，见文件头那条实测）"
+fi
+wait_for "人手静默 ≥${FIRST_QUIET_WANT}s" "$FIRST_QUIET_COND" || exit 1
 
 # 2) 起一个实例（或复用已有的那一个），并确认前台是它
 #    MEASURE_LAUNCH=1 时反过来：排程器**不起**，只等场上清零（见上面 HARNESS_LAUNCHES 那段）。
