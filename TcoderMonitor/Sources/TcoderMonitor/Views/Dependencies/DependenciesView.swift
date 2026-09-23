@@ -154,10 +154,10 @@ struct DependencySummaryGrid: View {
     static func outdatedCaption(_ deps: DependencyReport) -> String {
         let total = max(1, deps.totalDependencies)
         let share = NumberFormat.percent(Double(deps.outdatedCount) / Double(total), precision: 0)
-        guard deps.totalDependencies > 0 else { return "没有可判定的依赖" }
+        guard deps.totalDependencies > 0 else { return localizedCopy("没有可判定的依赖") }
         return deps.outdatedCount > 0
-            ? "占依赖总数 \(share)"
-            : "已比对版本数据，未发现落后项"
+            ? localizedFormat("占依赖总数 %1$@", share)
+            : localizedCopy("已比对版本数据，未发现落后项")
     }
 }
 
@@ -253,8 +253,8 @@ struct DependencyEcosystemSection: View {
                     DataFieldRow(
                         label: "锁文件",
                         value: eco.lockfileName.map {
-                            "\($0)（只说明可复现，未计入依赖数）"
-                        } ?? "未发现",
+                            localizedFormat("%1$@（只说明可复现，未计入依赖数）", $0)
+                        } ?? localizedCopy("未发现"),
                         style: .text)
                     DataFieldRow(label: "依赖", value: NumberFormat.grouped(eco.dependencies.count),
                                  style: .number)
@@ -327,21 +327,25 @@ struct DependencyTable: View {
     }
 
     /// 屏上那一句：原句里"计数"那一层，逐字取前半。
+    /// **整句键**：这几句原来把测得值插在自己肚子里（还有一处用 `+` 拼两个半句），
+    /// 英文态整串永远查不中——本仓依赖清单是空的，所以这条分支只在**换一个大仓**时才上屏
+    /// （2026-09-23 拿 Homebrew 复验抓到）。
     static func countLabel(total: Int, shown: Int) -> String {
         guard total > shown else {
-            return "共 \(NumberFormat.grouped(total)) 项，已全部展示。"
+            return localizedFormat("共 %1$@ 项，已全部展示。", NumberFormat.grouped(total))
         }
-        return "当前展示 \(NumberFormat.grouped(shown)) / \(NumberFormat.grouped(total)) 项。"
+        return localizedFormat("当前展示 %1$@ / %2$@ 项。",
+                               NumberFormat.grouped(shown), NumberFormat.grouped(total))
     }
 
     /// 折叠必须被计数交代：只显示 12 行而不说「共 N 项」，用户会把 12 当成全部。
     /// **整句**（含排序口径）现在是 ⓘ 里那一句，屏上的短句是它的前半 —— 两个落点不重叠。
     static func countNote(total: Int, shown: Int) -> String {
         guard total > shown else {
-            return "共 \(NumberFormat.grouped(total)) 项，已全部展示。"
+            return localizedFormat("共 %1$@ 项，已全部展示。", NumberFormat.grouped(total))
         }
-        return "当前展示 \(NumberFormat.grouped(shown)) / \(NumberFormat.grouped(total)) 项 · "
-            + "按名称排序。"
+        return localizedFormat("当前展示 %1$@ / %2$@ 项 · 按名称排序。",
+                               NumberFormat.grouped(shown), NumberFormat.grouped(total))
     }
 }
 
@@ -377,9 +381,10 @@ struct DependencyAdvisoriesSection: View {
 
     static func subtitle(items: [VulnerabilityItem], deps: DependencyReport) -> String {
         items.isEmpty
-            ? "内置快照与安全公告均未命中"
-            : "共 \(NumberFormat.grouped(items.count)) 条 · 影响 "
-                + "\(NumberFormat.grouped(deps.vulnerableCount)) 个依赖"
+            ? localizedCopy("内置快照与安全公告均未命中")
+            : localizedFormat("共 %1$@ 条 · 影响 %2$@ 个依赖",
+                              NumberFormat.grouped(items.count),
+                              NumberFormat.grouped(deps.vulnerableCount))
     }
 
     /// 空列表不等于「没有漏洞」：默认离线时 `vulnerableCount` 恒为 0，那是「没查」。
