@@ -116,13 +116,9 @@ final class CrashEvidenceReadoutGuardTests: XCTestCase {
     /// 判据形状：`Services/**` 里同一行**同时**出现 `trend` 与 `.crashes`。
     /// 这正是 `historicalCrashCount` 的签名形状（从已落盘的趋势桶求和当崩溃次数）。
     static func trendAsCrashRulerLines(in content: String) -> [String] {
-        content.split(separator: "\n", omittingEmptySubsequences: false)
-            .map(String.init)
-            .filter { line in
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("//") { return false }
-                return trimmed.contains("trend") && trimmed.contains(".crashes")
-            }
+        SurfaceScanKit.codeLines(content).filter { line in
+            line.contains("trend") && line.contains(".crashes")
+        }
     }
 
     static func serviceSideTrendCrashRulers() throws -> [(path: String, hits: [String])] {
@@ -168,15 +164,21 @@ final class CrashEvidenceReadoutGuardTests: XCTestCase {
 
     // MARK: - 守卫 2：细账必须有生产读者（RD-34 的复发位）
 
-    /// 只认**台账在场**的文件：内容里既出现 `CrashEvidenceLedger`、又出现 `.statement` 之类的成员读法。
-    /// 少了前半个条件，覆盖率那族 `CoverageMergeLedger.statement` 会把这条顶成永真绿
-    /// （`Sources/**` 里 `.statement` 的命中历史上全是覆盖率家的）。
+    /// 只认**台账在场**的代码行：文件里既出现 `CrashEvidenceLedger`、又有代码行读到 `.statement`。
+    /// 两处边界都是本仓踩过的：
+    /// · 少了前半个条件，覆盖率那族 `CoverageMergeLedger.statement` 会把这条顶成永真绿
+    ///   （`Sources/**` 里 `.statement` 的命中历史上全是覆盖率家的）；
+    /// · 不剥注释，本装配口的头注正是靠写出被禁写法来解释为什么禁 ——
+    ///   判据会被自己的文档教成绿（main 上 `fix(P57)` 就是这一课）。
     static func ledgerReaders(of member: String) throws -> [String] {
         let files = try SurfaceScanKit.sourceFiles(under: "")
         XCTAssertGreaterThanOrEqual(files.count, 40, "只扫到 \(files.count) 个实现文件 ⇒ 分母不对")
         return files
             .filter { $0.path.hasSuffix("Services/Logs/CrashEvidence.swift") == false }
-            .filter { $0.content.contains("CrashEvidenceLedger") && $0.content.contains("." + member) }
+            .filter { file in
+                file.content.contains("CrashEvidenceLedger")
+                    && SurfaceScanKit.codeLines(file.content).contains { $0.contains("." + member) }
+            }
             .map { $0.path }
     }
 
@@ -189,19 +191,25 @@ final class CrashEvidenceReadoutGuardTests: XCTestCase {
         }
     }
 
-    /// 双向元测试：摘掉读者 ⇒ 判据必须红；留着 ⇒ 绿。证明上一条不是永真绿。
-    func testMetaLedgerReaderScannerSeparatesBothStates() throws {
+    /// 三向元测试：真读者必须扫到、把读者换掉必须扫不到、**只写在注释里也必须扫不到**。
+    func testMetaLedgerReaderScannerSeparatesAllThreeStates() throws {
         let files = try SurfaceScanKit.sourceFiles(under: "Services/Logs")
         XCTAssertFalse(files.isEmpty, "扫描面为空 ⇒ 元测试本身失效")
-        let withReader = files.filter { $0.content.contains(".unknownStatement")
-            && $0.content.contains("CrashEvidenceLedger") }
-        XCTAssertFalse(withReader.isEmpty, "真树里已经没有读者了，上一条应该正在红")
+        let withReader = files.filter { $0.content.contains("CrashEvidenceLedger")
+            && SurfaceScanKit.codeLines($0.content).contains { $0.contains(".unknownStatement") } }
+        XCTAssertFalse(withReader.isEmpty, "真树里已经没有代码级读者了，上面那条守卫应该正在红")
         let emptied = withReader.map {
             (path: $0.path,
              content: $0.content.replacingOccurrences(of: ".unknownStatement", with: ".nothing"))
         }
         XCTAssertTrue(emptied.filter { $0.content.contains(".unknownStatement") }.isEmpty,
                       "把读者换掉之后还能扫到 ⇒ 判据在数别的东西")
+        let commentOnly = """
+        //  旧写法：evidence.unknownStatement 拼在脚注里。（讲给维护者看的话，不是读者）
+        enum Holder { static func use(_ ledger: CrashEvidenceLedger) -> String { ledger.statement } }
+        """
+        XCTAssertTrue(SurfaceScanKit.codeLines(commentOnly).filter { $0.contains(".unknownStatement") }.isEmpty,
+                      "注释里的写法被当成读者 ⇒ 这条判据会被自己的文档教绿")
     }
 
     // MARK: - 守卫 3：视图只接不改写
@@ -210,13 +218,16 @@ final class CrashEvidenceReadoutGuardTests: XCTestCase {
         let files = try SurfaceScanKit.sourceFiles(under: "Views/Logs")
         XCTAssertGreaterThanOrEqual(files.count, 3, "只扫到 \(files.count) 个日志视图文件 ⇒ 扫描面坏了")
         let offenders = files.filter { file in
-            file.content.contains("未产出可计数") || file.content.contains("属历史报告")
-                || file.content.contains("逐条原因")
+            let code = SurfaceScanKit.codeLines(file.content).joined(separator: "\n")
+            return code.contains("未产出可计数") || code.contains("属历史报告")
+                || code.contains("逐条原因")
         }
         XCTAssertTrue(offenders.isEmpty,
                       "崩溃证据那几句只能在 Services 侧拼一次；视图里出现即为第二把尺子："
                           + offenders.map { $0.path }.joined(separator: "、"))
-        let forwarders = files.filter { $0.content.contains("crashEvidenceFootnote") }
+        let forwarders = files.filter { file in
+            SurfaceScanKit.codeLines(file.content).contains { $0.contains("crashEvidenceFootnote") }
+        }
         XCTAssertEqual(forwarders.count, 1,
                        "上屏出口应当只有一个：" + forwarders.map { $0.path }.joined(separator: "、"))
     }
