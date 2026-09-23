@@ -267,7 +267,7 @@ final class EvidenceFreshnessTests: XCTestCase {
                       "逐页账里有 \(gaps.count) 格证据不成立（口径是深浅 × 顶尾四格齐全，且 rev 对得上）：\n"
                         + gaps.map { "\($0.page) @ \($0.batch)：\($0.what)" }.joined(separator: "\n"))
         let shots = rows.reduce(0) { $0 + Self.expectedShots(for: $1).count } * Self.evidenceModes.count
-        print("【实拍格数】表里 \(rows.count) 行 → 实际查 \(shots) 格，全在、rev 全对")
+        print("【实拍格数】表里 \(rows.count) 行 → 实际查 \(shots) 格，不成立的格 \(gaps.count) 处")
     }
 
     // MARK: - 元测试：两个方向都要红过一次

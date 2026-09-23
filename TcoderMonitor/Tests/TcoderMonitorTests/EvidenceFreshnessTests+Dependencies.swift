@@ -25,6 +25,11 @@ extension EvidenceFreshnessTests {
     static let caliberProducers: [(file: String, type: String)] = [
         ("TcoderMonitor/Sources/TcoderMonitor/Views/CodeGit/GitHistoryScope.swift",
          "GitHistoryScope"),
+        // P57：健康页那本供的不只是健康页。维度名（`DimensionDisplay.name`）被插进多条整句，
+        // 而**总览 hero 也在读这些整句** —— 词汇层动一行，健康页之外的格子也会变。
+        // 名单加一条，就让判据自己去点名哪些行漏了它，而不是等下一次改文案时撞红。
+        ("TcoderMonitor/Sources/TcoderMonitor/Services/Health/HealthBreakdown.swift",
+         "DimensionDisplay"),
     ]
 
     /// 类型名的词界匹配：`GitHistoryScope` 不许被 `GitHistoryScopeTests` 那种邻居蒙住 ——
