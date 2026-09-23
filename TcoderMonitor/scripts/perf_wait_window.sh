@@ -190,9 +190,24 @@ cond_instance_ready() {  # 场上恰有"我这一个"实例才算好；一个都
   launches_done=$((launches_done + 1))
   open "$START_BIN" && sleep 4
   started_pid=$(my_instance_pid)
-  [ -n "$started_pid" ] && started_pids="$started_pids $started_pid"
-  echo "    已起自己的实例 pid=${started_pid:-?}（本批累计起过：${started_pids:-无}；收尾逐个 TERM）"
-  [ -n "$started_pid" ] || { echo "    起了却没认到 pid ⇒ 不往下走：收尾会漏掉它，那就是一格没人负责的窗口"; return 1; }
+  # `open` 是异步的：4 秒没看见不等于起不来。今晚 22:35 与 00:34 两批就栽在这里——
+  # 认不到 pid 就直接 `return 1`，而那个 App 半秒后照样出现在场上
+  # ⇒ **谁都不负责它**，它变成下一个人的"实例数不为 1"（包 24 修的是"只记最后一个"，
+  # 这条是它的兄弟洞：一个都没记上）。
+  for _wait in 1 2 3 4 5 6; do
+    [ -n "$started_pid" ] && break
+    sleep 1
+    started_pid=$(my_instance_pid)
+  done
+  if [ -z "$started_pid" ]; then
+    # 撤销这次获取：只 TERM 全路径正好等于 $MY_BIN 的进程——**路径就是归属**，
+    # 别人那棵树的同产物流程不匹配这一条（这与包 26 用路径判归属是同一个道理）。
+    echo "    !! 起了却没认到 pid ⇒ 撤销这次获取（只收全路径匹配本树产物那些），不把无主实例留给别人" >&2
+    for _stray in $(pgrep -fx "$MY_BIN" 2>/dev/null); do kill -TERM "$_stray" 2>/dev/null; done
+    return 1
+  fi
+  started_pids="$started_pids $started_pid"
+  echo "    已起自己的实例 pid=${started_pid}（本批累计起过：${started_pids}；收尾逐个 TERM）"
   return 0
 }
 
