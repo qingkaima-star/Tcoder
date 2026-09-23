@@ -127,6 +127,36 @@ final class EvidenceFreshnessTests: XCTestCase {
         return ninePages.filter { !covered.contains($0) }
     }
 
+    /// 那一页的依赖面从实拍那个头到 `HEAD` **净变了哪些文件**。
+    ///
+    /// 为什么判过期要用净差异、而不是 `runGitLog` 的提交数（需求方 2026-09-23 13:24 授权的窄修）：
+    /// 本仓规约是"每人一树、落地前必须先并 main"，而 `git log <头>..HEAD -- 路径` 数的是**历史形状**。
+    /// 分支并 main 时那些内容会在合并里被重新落地一遍 ⇒ 提交数非空、内容却一字不差。
+    /// 实测（这棵树的十个行）：十条全被判过期，其中**六条净差异为 0**
+    /// （性能监控 / Git 洞察 / 贡献者 / 错误日志 / 依赖分析 / 全九页外壳）——
+    /// 那六条在 RD-57 之后不再是"当场红"，而会变成**逼人流假欠账**的假条目：
+    /// 挂了账不等于看过了，往账上写没发生过的变化是把这条守卫变成遮羞布。
+    /// ⇒ 净差异只用来决定"过不过期"；**挂账对不上号仍然照 `runGitLog` 的候选提交判**（见下）。
+    static func netChanged(head: String, paths: [String],
+                           root: URL = EvidenceFreshnessTests.repoRoot) throws -> [String] {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["diff", "--name-only", head, "HEAD", "--"] + paths
+        process.currentDirectoryURL = root
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        process.waitUntilExit()
+        let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        // 与 `runGitLog` 同一条保守规则：git 报错一律算"变了"，宁可误红不可漏红。
+        guard process.terminationStatus == 0 else {
+            let firstLine = text.split(separator: "\n").first.map(String.init) ?? "无输出"
+            return ["git diff 失败（exit " + String(process.terminationStatus) + "）：" + firstLine]
+        }
+        return text.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+    }
+
     // MARK: - 真判据
 
     static func runGitLog(head: String, paths: [String]) throws -> [String] {
@@ -165,10 +195,12 @@ final class EvidenceFreshnessTests: XCTestCase {
         // 依赖面算过期的一条没放宽，改的只是"过期之后谁都能被这张表卡住"那件事。
         var stalePages: [(pages: [String], head: String, candidates: [String])] = []
         for row in found {
-            let touched = try Self.runGitLog(head: row.head, paths: row.paths)
-            if !touched.isEmpty {
-                stalePages.append((pages: row.pages, head: row.head, candidates: touched))
-            }
+            // 过期 = **内容与实拍端不同**（净差异）。`candidates` 仍取 `git log` 的提交：
+            // 「待重拍积压」第三格要指到真把那一页改了的提交，净差异只给得出文件名，给不出 sha。
+            let changed = try Self.netChanged(head: row.head, paths: row.paths)
+            guard !changed.isEmpty else { continue }
+            stalePages.append((pages: row.pages, head: row.head,
+                               candidates: try Self.runGitLog(head: row.head, paths: row.paths)))
         }
         let logged = Self.backlog(in: markdown)
         XCTAssertTrue(logged.malformed.isEmpty,
@@ -192,6 +224,23 @@ final class EvidenceFreshnessTests: XCTestCase {
         print("【实拍新鲜度】表里 \(found.count) 行、覆盖 \(Set(found.flatMap(\.pages)).count) 页 → "
             + "过期 \(stalePages.count) 行（已挂账 \(verdict.acknowledged.count) 行、"
             + "没挂账 \(verdict.unlisted.count) 行）")
+    }
+
+    /// 净差异口径的**真 git 夹具**，两个方向都要钉住（需求方授权的窄修，见 `netChanged` 上方注释）：
+    /// ① 历史动过、内容与实拍端一字不差 ⇒ **不判**过期（否则每条并过 main 的流都被逼去挂假欠账）；
+    /// ② 内容真的变了 ⇒ 判过期（这条窄修不许把"看过的屏"变成"不必再看"）。
+    func test_stalenessFollowsContentNotHistory() throws {
+        let fx = try FixtureRepo(name: "tcoder-evidence-fx-")
+        addTeardownBlock { fx.cleanup() }
+        let shot = try fx.buildHistoryThatLooksTouchedButIsNot()
+        XCTAssertFalse(try fx.git(["log", "--format=%h", shot + "..HEAD", "--", "a.txt"]).isEmpty,
+                       "夹具没造出「历史动过、净内容未变」的形状 ⇒ 这条元测试在空转")
+        XCTAssertTrue(try Self.netChanged(head: shot, paths: ["a.txt"], root: fx.root).isEmpty,
+                      "内容一字不差却被判成变了 ⇒ 会把每条并过 main 的流都逼成假欠账")
+        try fx.change("a.txt", "9")
+        try fx.git(["commit", "-qam", "Z 这次真的改了内容"])       // 不 commit 就进不了 `diff <头> HEAD`
+        XCTAssertEqual(try Self.netChanged(head: shot, paths: ["a.txt"], root: fx.root), ["a.txt"],
+                       "内容真的变了却不判过期 ⇒ 这条判据被放宽成了没判据")
     }
 
     /// 表里每行说的"实拍过"到底成不成立：四格图都在、且每格的 `PROVENANCE` 里
