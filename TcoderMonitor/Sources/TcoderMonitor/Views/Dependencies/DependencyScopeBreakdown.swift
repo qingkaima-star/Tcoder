@@ -19,7 +19,14 @@ struct DependencyScopeBreakdown: View {
     }
 
     var body: some View {
-        GlassSection("分用途统计", subtitle: "声明范围按 scope 分开汇总，不并成一个数", icon: .package) {
+        // 盘点表 H 组（`DependencyScopeBreakdown` 副标题）判**藏**：这句说的是"我们怎么汇总的"，
+        // 而这件事已经由卡名「分用途统计」+ 下面每一行的行名（scope 本名）+ 每行三个
+        // 「声明 / 漏洞已核对 / 版本已核对」各自说了一遍 —— 副标题是第三遍。
+        // 屏上没有可留的短半句（留任何半句都是把同一件事再讲一次），所以整句进卡头 ⓘ，
+        // 挂载点与 `GitInsightsMetricGrid` 同一形状：`subtitleHelp:` 只在副标题在场时才渲染，
+        // 这里副标题为空 ⇒ 只能走 `trailing:`（`CaliberBadgePlacementGuardTests` 认这一档）。
+        GlassSection("分用途统计", icon: .package,
+                     trailing: AnyView(CopyHelpBadge("声明范围按 scope 分开汇总，不并成一个数"))) {
             VStack(alignment: .leading, spacing: DataRowMetrics.rowGap) {
                 if rows.isEmpty {
                     Text("没有可统计的依赖声明")
