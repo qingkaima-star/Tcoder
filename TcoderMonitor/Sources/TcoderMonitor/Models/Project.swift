@@ -131,6 +131,9 @@ struct ProjectReport: Codable, Sendable {
     var dependencies: DependencyReport?
     var coverage: CoverageMetrics?
     var health: HealthScore?
+    /// 这份报告是在哪个提交、用哪个版本的工具与判据产的。Optional：`d0e` 之前落盘的旧 JSON 没有这一栏，
+    /// 必须照样解得开（见「落盘字段必须 Optional」那条规矩）。
+    var provenance: ScanProvenance?
     var generatedAt: Date = Date()
 
     /// Set once a scan has been attempted, even if some analyzers failed. Without this
@@ -139,6 +142,11 @@ struct ProjectReport: Codable, Sendable {
     var attemptedAt: Date?
     /// Chinese labels of analyzers that failed during the last attempt.
     var failedSections: [String] = []
+
+    /// 每一路分析器的执行台账（四态 + 耗时 + 撞到的上限 + 失败原因原文）。
+    /// 与 `failedSections` 的分工：那一格只说"哪几路挂了"，这一格说"每一路当时是什么状态"。
+    /// **必须 Optional**：旧报告没有这一格 ⇒ 解码时整键缺席，不许补空数组（空数组会被读成"五路都没跑"）。
+    var analyzerLedger: [AnalyzerRunRecord]? = nil
 
     var hasBeenScanned: Bool { attemptedAt != nil }
 

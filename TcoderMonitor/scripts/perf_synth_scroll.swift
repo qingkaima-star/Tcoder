@@ -25,7 +25,11 @@ guard args.count >= 3, let secs = Double(args[1]), secs > 0, let pid = Int(args[
     exit(2)
 }
 let dy = args.count > 3 ? (Double(args[3]) ?? 14) : 14
-let gapMs = args.count > 4 ? (Double(args[4]) ?? 40) : 40
+// 投递节奏默认 **8 ms ≈ 125 Hz**，与被测档的标称刷新率同量级。
+// 第一版用 40 ms（25 Hz）：那会让"实测出帧只有 41~53/s"这件事**没法归因**——
+// 到底是 App 画不动，还是我的输入器每秒只推 25 下、画面本来就没必要重画？
+// ⇒ 输入器的频率必须 ≥ 想证明的帧率，否则这个变量就是我自己造的假象。
+let gapMs = args.count > 4 ? (Double(args[4]) ?? 8) : 8
 
 /// 在屏窗口里属于该 pid、层号为 0（普通窗口）、面积最大的那个的中心点。
 func targetWindowCenter(for owner: Int) -> CGPoint? {
@@ -62,6 +66,10 @@ while Date() < deadline {
     // 每 20 拍换向：一路往下会在列表底部停住，那就等于"投了但没滚动"
     let dir: Int32 = (tick / 20) % 2 == 0 ? -step : step
     tick += 1
+    // 目标进程不在了就立刻收手。投事件器原先只认"到点为止"：今晚实测过一次——
+    // 被测实例 15 s 时被 TERM，而投事件器按默认 95 s 继续往屏幕上投，
+    // 那 80 秒里光标底下是谁都可能被我的合成滚动打到。liveness 检查每 20 拍一次就够。
+    if tick % 20 == 0, kill(pid_t(pid), 0) != 0 { break }   // pid 是 Int，kill 要 pid_t
     if let ev = CGEvent(scrollWheelEvent2Source: src, units: .pixel, wheelCount: 1,
                         wheel1: dir, wheel2: 0, wheel3: 0) {
         ev.location = center

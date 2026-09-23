@@ -81,13 +81,15 @@ extension WeightedHealthScorer {
     private func duplicationStrengths(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
         // 优点宣称不得越过曲线自己承认的置信度下限（同一条 200 行，见 `HealthCurves.smallSampleCodeLines`）。
         guard curve.score >= 85, code.codeLines >= HealthCurves.smallSampleCodeLines else { return [] }
-        return [String(format: "重复代码率低（%.1f%%）", code.duplicationRatio * 100)]
+        return [localizedFormat("重复代码率低（%1$@）",
+                                    NumberFormat.percent(code.duplicationRatio, precision: 1))]
     }
 
     private func duplicationIssues(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
         guard curve.score <= 60 else { return [] }
-        return [String(format: "重复代码 %.1f%%，共 %d 处重复块",
-                       code.duplicationRatio * 100, code.duplicatedBlocks.count)]
+        return [localizedFormat("重复代码 %1$@，共 %2$@ 处重复块",
+                                    NumberFormat.percent(code.duplicationRatio, precision: 1),
+                                    NumberFormat.grouped(code.duplicatedBlocks.count))]
     }
 
     private func duplicationAdvice(_ curve: CurveResult) -> [String] {

@@ -42,6 +42,13 @@ struct PerformanceSystemTiles: View {
                 networkTile
             }
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                // **边界（整改意见第九节）**：这一页住在项目详情里、页头挂着项目名，
+                // 所以四枚整机读数的正下方第一句必须写清"这不是本项目的开销"。
+                // 只加说明、**不删任何读数**——删读数才是藏问题。
+                // 这一句与 `PerformanceProcessGroupsCard` 的「与所选项目无关」是一对：
+                // 系统级读数与按模式归因的进程读数各说各的边界，没有一份在替另一份背书。
+                NoteLine("以上是整机读数：含其它项目与系统服务的开销，不构成本项目的性能结论。",
+                         icon: .unverified)
                 // **留短藏长**（盘点表 F 组）：屏上只留最容易被读错的那半句
                 // （「在用」≠「剩余可用」），44 字的完整口径进 ⓘ 的 hover。
                 // 长句走 `SystemReadings.memoryCaliber` 那一份唯一真值，不在这里重抄一遍。
@@ -62,6 +69,26 @@ struct PerformanceSystemTiles: View {
     private var memoryIsMissing: Bool { SystemReadings.memoryUsedBytes(context) == nil }
 
     // MARK: 四枚 tile
+
+    /// 把 `ByteFormat` 那一族的成品串切成「数字 / 单位」两段。
+    ///
+    /// 为什么要切：**单位与数字同字号，是在抢本属于数字的宽度**。
+    /// 窄态（1080 = 本 App 自己的 `minWidth`）实拍：四列各分约 185pt，
+    /// `33.7 GB / 48.0 GB`、`125.4 Kbps` 放不下 ⇒ 折成两行，
+    /// 于是这两格的量条比 CPU/磁盘低一行（乱的清单 §6 第 0 条）。
+    /// P49 那三代修法（留两行、给缩放、单位里塞 WORD JOINER）治的是
+    /// "单位被劈开"与"数字被截尾"，**没有治"读数带被撑高"** —— 这一条治的是那个。
+    ///
+    /// 故意**不重算单位阶梯**：阶梯只在 `ByteFormat` 里有一份，这里只切第一个空格
+    /// （`string` / `rate` / `bitRate` 三个出口都保证数字与单位之间恰好一个空格）。
+    /// 切不出两段就原样返回，宁可不缩也不许把数改错。
+    static func splitReading(_ text: String) -> (value: String, unit: String?) {
+        guard let space = text.firstIndex(of: " ") else { return (text, nil) }
+        let value = String(text[..<space])
+        let unit = String(text[text.index(after: space)...])
+        guard !value.isEmpty, !unit.isEmpty else { return (text, nil) }
+        return (value, unit)
+    }
 
     private var cpuTile: some View {
         let fraction = SystemReadings.cpuFraction(context)
@@ -86,14 +113,18 @@ struct PerformanceSystemTiles: View {
         let fraction = SystemReadings.memoryFraction(context)
         let pressure = SystemReadings.memoryPressure(context)
         let role = LoadLevel.role(for: fraction)
+        // 分母从值槽挪到脚注：值槽里同时摆 `33.7 GB` 与 `/ 48.0 GB` 是**两个数抢一个
+        // 主角位**，窄态必然折行、量条掉一行。分母本来就是口径，脚注那一行就是干这个的
+        // （`ChartChrome.SeriesLegend` 的「已用 X / 总量 Y」也是放在第二行）。
+        let reading = used.map { Self.splitReading(Live.bytes($0, precision: 1)) }
         return MetricTile(
             label: "内存",
-            value: used == nil ? nil : Live.bytes(used, precision: 1),
-            // 分子/分母同精度：`48.0 GB / 64 GB` 是同一行里的两套小数位（批次 P5）。
-            unit: (used != nil && total != nil) ? "/ \(Live.bytes(total, precision: 1))" : nil,
+            value: used == nil ? nil : reading?.value,
+            unit: reading?.unit,
             caption: used == nil
                     ? (SystemReadings.memoryGapReason(context) ?? "等待首个样本")
-                    : localizedFormat("在用 %1$@ · 压力 %2$@",
+                    : localizedFormat("总量 %1$@ · 在用 %2$@ · 压力 %3$@",
+                        total.map { Live.bytes($0, precision: 1) } ?? Live.missing,
                         Live.percent(fraction, precision: 0),
                         localizedCopy(pressure?.rawValue ?? Live.missing)),
             tint: Theme.Palette.Surface.ink,
@@ -104,9 +135,11 @@ struct PerformanceSystemTiles: View {
 
     private var diskTile: some View {
         let total = SystemReadings.diskBytesPerSecond(context)
+        let reading = total.map { Self.splitReading(Live.rate($0)) }
         return MetricTile(
             label: "磁盘吞吐",
-            value: total == nil ? nil : Live.rate(total),
+            value: total == nil ? nil : reading?.value,
+            unit: reading?.unit,
             caption: total == nil
                     ? "首个差分帧到达前，不给速率"
                     : localizedFormat("读 %1$@ / 写 %2$@",
@@ -119,9 +152,11 @@ struct PerformanceSystemTiles: View {
 
     private var networkTile: some View {
         let total = SystemReadings.networkBytesPerSecond(context)
+        let reading = total.map { Self.splitReading(Live.bitRate($0)) }
         return MetricTile(
             label: "网络吞吐",
-            value: total == nil ? nil : Live.bitRate(total),
+            value: total == nil ? nil : reading?.value,
+            unit: reading?.unit,
             caption: total == nil
                     ? "首个差分帧到达前，不给速率"
                     : "↓ \(Live.bitRate(SystemReadings.networkInBytesPerSecond(context))) / ↑ \(Live.bitRate(SystemReadings.networkOutBytesPerSecond(context)))",
@@ -161,7 +196,7 @@ struct PerformanceSystemTiles: View {
             // 后者在窄窗口下按弹性比例压缩每段，`·` 会单独留在行尾（清单 2.14）。
             // 同页 `sampleStats` 本来就是拼成单串的写法 —— 两种写法并存就是"不规整"本身。
             Text(localizedFormat("机身 %1$@ · 已运行 %2$@ · 全系统 %3$@ 个进程",
-                                 context.snapshot?.thermalState.rawValue ?? Live.missing,
+                                 SystemReadings.thermalText(context),
                                  Self.uptimeText(context.snapshot?.uptimeSeconds),
                                  Live.grouped(context.snapshot?.processCount)))
             Spacer(minLength: 0)

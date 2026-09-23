@@ -46,6 +46,15 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         "perf_trace_xml.py", "perf_trace_metrics.py", "perf_trace_threads.py",
         "perf_trace_summary.py", "perf_framepulse.py",
         "perf_provenance.sh", "perf_probes.sh", "perf_switch.sh",
+        "perf_pulse.sh",
+        // 2026-09-21：`perf_selfcheck.sh` 涨到 835 行撞 ≤800 棘轮，按"拆开它、不拧阈值"
+        // 把 27 项反例按主题搬进下面三块。**搬走的名额必须继续被量**——不然"拆"就成了
+        // 给新文件免检的通道（这一条教训来自 `X3TestSizeAuditTests` 那次拆文件把守卫拆丢）。
+        "perf_selfcheck_ruler_shapes.sh", "perf_selfcheck_gates.sh",
+        "perf_selfcheck_eligibility.sh",
+        // 2026-09-22：新增的"谁可能漏下孤儿实例"清单（只读、不判别家）。
+        // 新尺子必须一进门就被量 —— 否则"新建文件"本身就是免检通道（同一族的教训见上面那段）。
+        "perf_launcher_audit.sh",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。

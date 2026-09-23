@@ -48,7 +48,17 @@ cleanup() {
     [ "$comm" = "TcoderMonitor" ] && kill -TERM "$started_pid" 2>/dev/null
   fi
 }
-trap cleanup EXIT INT TERM
+# 【今天实测的失效】原来三件事共用 `trap cleanup EXIT INT TERM`，而 handler 里没有 exit
+# ⇒ bash 跑完 trap 就**回去继续等**：TERM/INT 都杀不掉它（今晚 kill -TERM 两次没反应）。
+# 只能 -9，而 -9 会跳过 cleanup ⇒ 我起的那个实例留在场上，变成下一个人的"实例数不为 1"。
+# 这条修的就是我自己。
+on_signal() {
+  cleanup
+  echo "!! 收到中断信号 ⇒ 收尾自己起的实例并终止（不绕闸、不给人留坑）" >&2
+  exit 130
+}
+trap cleanup EXIT
+trap on_signal INT TERM
 
 quiet_seconds() {  # 整机人手静默。**只转发**，不再自己编一份二进制、自己写一份正则
   # 原来这里是第二把尺子：`swiftc` 单独编到 /tmp/tcoder-quiesce-wait-$$，
@@ -68,6 +78,18 @@ instance_count() { pgrep -x TcoderMonitor 2>/dev/null | wc -l | tr -d ' '; }
 # （`ps -o args=` 在本机被拒，所以用 `pgrep -f` 的全路径匹配来认。）
 MY_BIN="$START_BIN/Contents/MacOS/TcoderMonitor"
 my_instance_pid() { pgrep -fx "$MY_BIN" 2>/dev/null | head -1; }
+
+SLOT_HOLD="" SLOT_HOLD_AT=0
+slot_holders() {  # 谁占着窗口：把只读诊断搬进拒因里（缓存 60 s，别每 5 s 打一次 lsof）
+  local now; now=$(date +%s)
+  if [ -z "$SLOT_HOLD" ] || [ $((now - SLOT_HOLD_AT)) -ge 60 ]; then
+    SLOT_HOLD=$(./scripts/perf_who_holds_the_slot.sh 2>/dev/null | sed -n '3,20p' \
+                | tr -s ' ' | tr '\n' ' @ ')
+    SLOT_HOLD_AT=$now
+  fi
+  # 读不到要说"读不到"，不许留空——空串会被读成"没有实例占着"，那正好是反的。
+  printf '%s' "${SLOT_HOLD:-诊断脚本没出东西（不等于场上没有实例）}"
+}
 
 wait_for() {  # wait_for <人类可读的条件名> <判定函数>；不满足就一直等，超时按失败退出
   local what="$1" check="$2" waited=0 reason=""
@@ -92,8 +114,14 @@ cond_one_instance() {  # 满足则回 0 且不打印；不满足则打印原因�
   local n mine; n=$(instance_count); mine=$(my_instance_pid)
   if [ "$n" = "1" ] && [ -n "$mine" ]; then return 0; fi
   if [ "$n" = "0" ]; then echo "还没有实例在跑"; return 1; fi
-  if [ "$n" != "1" ]; then echo "有 $n 个实例（多实例会互相回写全局状态，读数没意义）"; return 1; fi
-  echo "唯一那个实例不是本树起的（attach 它会量到别人的构建）"
+  # 「为什么量不到」原来只答一句事实、不答下一步该做什么，于是人会以为"再等等就好"。
+  # 今晚真实现场是主树漏下 6 个 + 一棵已删树的孤儿 1 个，闸门从夜里一直拒到上午——
+  # 把只读诊断接进来，一句话里带上 pid、跑了多久、哪棵树、那棵树还在不在。
+  if [ "$n" != "1" ]; then
+    echo "有 $n 个实例（多实例会互相回写全局状态，读数没意义）：$(slot_holders)"
+    return 1
+  fi
+  echo "唯一那个实例不是本树起的（attach 它会量到别人的构建）：$(slot_holders)"
   return 1
 }
 
@@ -103,37 +131,6 @@ cond_quiet() {  # idle 档：等"整段够久没人动"
   [ "$(human_input_in_window "$q" "$QUIET_WANT")" = "窗口内没人" ] && return 0
   echo "人手 ${q}s 前还在动（要 ≥${QUIET_WANT}s）"
   return 1
-}
-
-SYNTH_PID=""
-SYNTH_BIN=""
-ensure_synth_scroller() {  # **进等待循环之前**把投事件器编好（内容哈希缓存，全机一次）
-  # 原来编译写在 start_synth_scroller 里，而它是"开录闸门之后"才调的
-  # ⇒ `swiftc` 派出的 `swift-frontend` 还在吃 94.8% CPU 的时候，录制窗口已经开始了。
-  # 自己刚起的编译绕过自己刚过的闸门，这种污染比别人的干扰更难发现。
-  local want
-  want=$(shasum -a 256 scripts/perf_synth_scroll.swift 2>/dev/null | cut -c1-12)
-  SYNTH_BIN="${SCRATCH:-$PWD/.scratch}/tcoder-synth-scroll-${want:-unknown}"
-  [ -d "$SYNTH_BIN" ] && SYNTH_BIN="$SYNTH_BIN.$$"     # 别人占了这个名字：换，不硬来
-  [ -x "$SYNTH_BIN" ] && return 0
-  local tmp="$SYNTH_BIN.build.$$"
-  xcrun swiftc -O -target arm64-apple-macos14.0 \
-      -module-cache-path "${SCRATCH:-$PWD/.scratch}/swiftmodulecache" \
-      scripts/perf_synth_scroll.swift -o "$tmp" 2>/dev/null \
-    || { rm -f "$tmp"; echo "!! 合成输入器编不出来（scripts/perf_synth_scroll.swift）" >&2; return 1; }
-  mv -f "$tmp" "$SYNTH_BIN"
-}
-
-start_synth_scroller() {  # 只管"跑起来"：编译不许出现在闸门与录制之间
-  local secs="${SYNTH_SECS:-95}"   # 覆盖一整趟（hitches 20s + time-profile 25s + 导出与换趟空档）
-  [ -x "$SYNTH_BIN" ] || { echo "!! 合成输入器没预备好（应先跑 ensure_synth_scroller）" >&2; return 1; }
-  # 被测 pid：优先用本档自己起的那个；attach 模式下用唯一在场的那个
-  local tp; tp="${TARGET_PID:-$(my_instance_pid 2>/dev/null | head -1)}"
-  [ -n "$tp" ] || { echo "!! 不知道往哪个 pid 投事件 ⇒ 不开录（空转样本比没有样本更坏）" >&2; return 1; }
-  "$SYNTH_BIN" "$secs" "$tp" 14 40 >&2 &
-  SYNTH_PID=$!
-  echo "    合成输入器 pid=$SYNTH_PID（投 ${secs}s；meta 记 input_source=synth）"
-  return 0
 }
 
 cond_someone_active() {  # interact 档：**必须检测到有人正在动**才开录
@@ -158,14 +155,36 @@ cond_no_heavy_jobs() {  # 录制档自己会拒这一维，排程器就必须**�
   return 1
 }
 
+RAISE_BIN=""
+RAISED_THIS_ATTEMPT=0
+ensure_raiser() {  # 编译"把自己的实例带到前台"的小工具（一次尝试只 raise 一次，见那个文件的头注）
+  [ -n "$RAISE_BIN" ] && [ -x "$RAISE_BIN" ] && return 0
+  local want dir; want=$(shasum -a 256 scripts/perf_raise.swift 2>/dev/null | cut -c1-12)
+  dir="${SCRATCH:-$PWD/.scratch}"; mkdir -p "$dir" 2>/dev/null
+  RAISE_BIN="$dir/tcoder-raise-${want:-unknown}"
+  [ -x "$RAISE_BIN" ] && return 0
+  xcrun swiftc -O -target arm64-apple-macos14.0 \
+      -module-cache-path "$dir/swiftmodulecache" scripts/perf_raise.swift -o "$RAISE_BIN.tmp.$$" 2>/dev/null \
+    && mv -f "$RAISE_BIN.tmp.$$" "$RAISE_BIN" && return 0
+  rm -f "$RAISE_BIN.tmp.$$"; RAISE_BIN=""; return 1
+}
+
 cond_front_is_ours() {
   local f; f=$(front_app)
   case "$f" in *Tcoder*) return 0;; esac
+  # 抢不到就如实等；但**每次尝试只主动 raise 一次**：
+  # 两条车道互相 raise 就是焦点拉锯，那会让两边的读数同时变成垃圾。
+  local tp; tp="${TARGET_PID:-$(my_instance_pid 2>/dev/null | head -1)}"
+  if [ "$RAISED_THIS_ATTEMPT" = "0" ] && [ -n "$tp" ] && ensure_raiser; then
+    RAISED_THIS_ATTEMPT=1
+    "$RAISE_BIN" "$tp" >/dev/null 2>&1 \
+      && echo "    （已把自己那个实例带到前台一次 pid=$tp；再被抢走就等，不拉锯）"
+  fi
   printf '前台是「%s」' "${f:-未知}"
   return 1
 }
 
-echo "==> 等窗口：$SAMPLES 趟 idle（release 口径，rev=$TAG），最长 ${DEADLINE_SECS}s"
+echo "==> 等窗口：$SAMPLES 趟 ${MODE}（release 口径，rev=$TAG），最长 ${DEADLINE_SECS}s"
 [ -x "$START_BIN/Contents/MacOS/TcoderMonitor" ] || { echo "!! 没有 release 产物 $START_BIN；先跑 scripts/build_app.sh release"; exit 2; }
 
 # 1) 起手先等静默：两档都要——interact 档要的是"录起来之后有人滚"，
@@ -186,6 +205,7 @@ wait_for "前台是被测 App" cond_front_is_ours || exit 1
 fails=0
 for i in $(seq 1 "$SAMPLES"); do
   echo "==> 第 $i/$SAMPLES 趟（档=$MODE）"
+  RAISED_THIS_ATTEMPT=0
   # 【每一趟之前都重等一次，而不是开头等一次再连撞三次】
   # 实测 12:20：第 1 趟条件极好（人手已静默 478 s）并成功出数；第 2、3 趟
   # 因为人回来把 ChatGPT 调到最前面而被拒——当时的排程器只会立刻硬撞下一趟，
@@ -207,7 +227,8 @@ for i in $(seq 1 "$SAMPLES"); do
     if [ "$INPUT" = "synth" ]; then
       # 投事件器活着才谈开录：编译失败 / 投递 0 拍都会让它非零退出，
       # 而闸门那边看不到任何"新的输入事件" ⇒ 自然走"等不到人在动"那条放弃路径。
-      start_synth_scroller || { echo "!! 合成输入器起不来，本趟不开录" >&2; break; }
+      start_synth_scroller "$(my_instance_pid 2>/dev/null | head -1)" \
+        || { echo "!! 合成输入器起不来，本趟不开录" >&2; break; }
     fi
     wait_for "有人正在滚动（静默 <${INTERACT_WANT}s）" cond_someone_active || break
   else
@@ -220,7 +241,11 @@ for i in $(seq 1 "$SAMPLES"); do
     echo "    ★ 请**从现在起持续滚动**被测窗口（性能页或代码页都行，按 120Hz 的体感滚，别停）。"
     echo "      我一检测到你正在滚就开录（约 50 s），你不用猜时机、也不用等我发话。"
   fi
-  INPUT_SOURCE="$INPUT" export INPUT_SOURCE
+  # meta 里的来源要带上**投递节奏**：25 Hz 与 125 Hz 的输入器采出的帧数不是一回事，
+  # 不带参数的话，两批不同输入率的样本会被当成同一批混着引用（今晚就差点这么混）。
+  INPUT_SOURCE="$INPUT"
+  [ "$INPUT" = "synth" ] && INPUT_SOURCE="synth@${SYNTH_GAP_MS:-8}ms"
+  export INPUT_SOURCE
   if ./scripts/perf_harness.sh "$MODE" "$SCRATCH/tcoder-perf-$TAG-$MODE-run$i"; then
     echo "    ✓ 第 $i 趟完成"
   else

@@ -4,10 +4,16 @@ import XCTest
 
 /// OWNER: R 尺子包（性能 spec §4.3、AGENTS.md 第四轮红线 6）。
 ///
-/// T5「主线程禁则」的静态守卫：`Views/**` 的渲染路径里不许出现
-/// ① 每次访问现造的对象（`NSColor(name:` / `DateFormatter(` / `NumberFormatter(`，
-///    以及间接形状 `.textColor`——令牌未缓存时它每次访问都 new 一个 `NSColor`）、
+/// T5「主线程禁则」的静态守卫：渲染路径（`Views/**` ∪ `Design/**`）里不许出现
+/// ① 每次访问现造的对象（`NSColor(name:` / `Color(nsColor:` / `DateFormatter(` / `NumberFormatter(`）、
 /// ② 全量排序 `.sorted(`、③ 同步文件 I/O。
+///
+/// 【2026-09-22 撤掉一句假话】①以前还写着"以及间接形状 `.textColor`——令牌未缓存时它每次访问
+/// 都 new 一个 `NSColor`"。那个前提**在 M0-d′ 令牌缓存落地后就不成立了**：现在 `.textColor`
+/// 读的是 init 里算好的 `let`，一次分配都没有。继续把它算成禁则，会得到两个方向的失效：
+/// 新写一处**正确**的取色被打红，而真正该拦的 `Color(nsColor:` 因为不在模式里而**一条都不红**。
+/// ⇒ 拆成两条各管一件事：`dynamicColorConstruction`（现造＝债，终点 0）与
+/// `tokenReference`（引用＝读数，终点不是 0，只许减不许增但不许当还债报数）。
 ///
 /// **写成只减不增棘轮，而不是 `== 0`**，因为现状不是零（本文件下面记录了数出来的真数）。
 /// 写成 `== 0` 的唯一后果是有人把守卫删掉；写成"≤ 基线"才既拦得住新增、
@@ -76,13 +82,14 @@ final class PerfHitchGuardTests: XCTestCase {
     /// 2026-09-20 在 rev `c0dbc0a` 上数出来的原始值（R 尺子包）：
     /// - `directFormatters` **1** —— `PerfLogs/ChartChrome.swift` 里 `DateFormatter()` 1 处。
     ///   → 归 **M1 / WS-W**（spec §5 写明"DateFormatter 提 static let"），终点 0。
-    /// - `dynamicNSColor` **88** —— 渲染路径内 `.textColor` 88 处（Views 全目录 91 处，
+    /// - `dynamicNSColor` **88**（现名 `tokenReference`）—— 渲染路径内 `.textColor` 88 处（Views 全目录 91 处，
     ///   差额 3 处在非渲染路径）。注意任务书里提到的"115 处"是**更早一次全 Sources 口径**的数，
     ///   本守卫只认 `Views/**` 渲染路径口径，两边不可混比。
     ///   → 归 **M0 / C 令牌缓存包（总工）**：`ColorToken.swift` 改成缓存后，
     ///     这一条的语义从"每次访问 new NSColor"降级为"引用一个缓存值"，
     ///     届时要由总工把它从禁则表里摘掉或重定基线——**在 C 包落地前它必须 ≤ 88**。
-    /// - `fullSort` **10** —— 2026-09-20 17:00 由总工**复量校正**（原记 2 是错的）。
+    /// - `fullSort` **9**（2026-09-21 20:40 台账现量拧下来一格）—— 2026-09-20 17:00 由总工
+    ///   **复量校正**（原记 2 是错的）。
     ///   原值 2 是用只认 `.sorted(` 的正则量出来的，而仓库里真实写法以**尾随闭包**
     ///   `.sorted { … }` 为主，于是 8 处漏计（实测清单见 `testRenderPathViolationsDoNotGrowBeyondBaseline`
     ///   的报错体）。这正是本仓反复记的失效模式：**正则过窄 → 分母虚低 → 守卫看着有牙其实是假绿**。
@@ -95,27 +102,52 @@ final class PerfHitchGuardTests: XCTestCase {
     ///   → 归 **M1 / WS-W**（spec §5 点名"LogsView.attachedItems 的 body 内 stat() 移出"），终点 0。
     static let knownBaseline: [String: Int] = [
         "directFormatters": 1,
-        "dynamicNSColor": 64,   // 56→**64 是扩面，不是新增债**：判据写的是"body/Mark 内"，
+        // 【2026-09-22 新增，不是新债】渲染路径里**现造**动态色的地方。
+        // 这条才是目标里"body/Mark 内零动态色"那句话的字面判据；过去它根本没有尺子——
+        // `directFormatters` 只列 `NSColor|DateFormatter|NumberFormatter` 后跟 `(`，
+        // 于是 `Color(nsColor: …)` 这种写法一条都不抓（现扫才看见 2 处，全在 `Views/Shell/`）。
+        // 上限 = 2026-09-22 现扫真值，**零余量**；终点 0，归 UI 流（改的是 `Views/**`）。
+        "dynamicColorConstruction": 2,
+        "tokenReference": 62,   // 旧名 `dynamicNSColor`。56→**64 是扩面，不是新增债**：判据写的是"body/Mark 内"，
         // 而 `Design/**`（`GlassComponents`/`ChartTokens`/`HealthAdviceCards` 等）本身就是视图构造器，
         // 旧扫描面只看 `Views/`。多看见的 8 处全部落在 Design/（台账现在带 `Design/` 前缀可逐条复核）。
-        // 从 64 起仍只许减不许增；终点 0。历史上这条是 107→86→59→58→56（三次还债）→64（一次扩面）。
-        // 为什么又拧：台账"现量/上限"一上线就自己报出 `58/59（可拧到 58）`——
+        // 历史上这条是 107→86→59→58→56（三次还债）→64（一次扩面）→62（并 main 后复拧）。
+        //
+        // 【终点**不是 0**，2026-09-22 写死】这句以前一直写着"终点 0"，是错的：
+        // 令牌缓存（M0-d′）落地后这条量的已经不是分配次数，而 62 处引用**全部命中 init 里
+        // 算好的 `let color`**（`Theme.Semantic.role(for:)` 返回 `static let` 角色，
+        // `.textColor` → `DualColor.color` 是存储属性）。打到 0 等于要求页面**不给任何东西着色**，
+        // 而那 8 处 `Design/**` 更是一个陷阱：我据此差点去做一趟"缓存化改造"，
+        // 会把数字从 62 抬到 54 而**运行时一个字节都没省**——假还债。
+        // 所以这条保留为**读数**（引用越密＝每 tick 重算面越大），棘轮方向仍只许减，
+        // 但"再新增一处正确的令牌取色"该由 `dynamicColorConstruction` 那条真判据管，
+        // 不该被这条挡路。
+        // 为什么还留着"只许减不许增"：台账"现量/上限"一上线就自己报出 `58/59（可拧到 58）`——
         // 留 1 处余量等于"新增 1 处照样绿"。**只减不增要成立，降下来必须有人拧**。
         // 没点名是哪一笔还掉的：这条不需要知道，扫描器每次跑都会重算。
-        "fullSort": 10,
+        // 2026-09-21 20:39 台账报 `fullSort 9/10（可拧到 9）` ⇒ 拧到 9。
+        // 方向只有这一个：棘轮**只许变紧**。留 1 处隐形余量，下一个人在别处新加一处
+        // 排序就会显示成 10/10「没涨」——那正是"每次打现量"这条规矩要防的事。
+        "fullSort": 9,
         "syncFileIO": 2,
     ]
 
     /// 每条规则的负责人 / 里程碑，只在报错时打出来，避免"基线是遮羞布"。
     static let ownerNotes: [String: String] = [
         "directFormatters": "M1 WS-W：DateFormatter/NumberFormatter 提 static let（终点 0）",
-        "dynamicNSColor": "语义已变（C 包落地后）：令牌由「每次访问现造」改成缓存之后，本条量的不再是分配次数，"
-            + "而是**渲染路径里引用令牌成员的次数**——它仍是重算面的代理指标（引用越多＝每 tick 求值越密），"
-            + "但不再等于「每 tick new 多少个 NSColor」。落地前 88（只认 .textColor），"
-            + "放宽到四成员后实测 107（+19 处 .graphicColor，全在图表 Mark/循环里）。终点仍由 M1 各流按页面收敛。"
+        "dynamicColorConstruction": "UI 流（Views/Shell）：把 `Color(nsColor: .separatorColor)` / "
+            + "`Color(nsColor: .quaternaryLabelColor)` 换成 `Theme.Palette` 里已缓存的 `static let` 角色"
+            + "（终点 0）。**2026-09-22 才有的尺子**：这条以前完全没人量——"
+            + "`directFormatters` 的模式不认 `Color(`，于是渲染路径里现造动态色可以一路绿灯。"
+            + "性能侧不接手：改的是 `Views/**`，归 UI 总工派发。",
+        "tokenReference": "旧名 `dynamicNSColor`（2026-09-22 改名，因为名字在撒谎：它量的不是 NSColor）。"
+            + "令牌由「每次访问现造」改成缓存之后，本条量的不再是分配次数，"
+            + "而是**渲染路径里引用令牌成员的次数**——它是重算面的**读数**，"
+            + "**终点不是 0**（打到 0＝页面不再着色）。它仍只许减不许增，但谁也不许把它当「还掉多少债」报。"
+            + "落地前 88（只认 .textColor），放宽到四成员后实测 107（+19 处 .graphicColor，全在图表 Mark/循环里）。"
             + "**2026-09-20 拧到 86**：`165faa7`（M1-集成，图表取色上提进 Design/）还掉了 21 处 Views 侧引用，"
             + "**2026-09-21 再拧到 59**：`c60abbd`（观感·批次 ABC 颜色面积收敛）又还掉 27 处。"
-            + "两次都是同一条『现量/上限』打印＋$TMPDIR 台账抓出来的——不打印就没人知道基线在漏。"
+            + "两次都是同一条『现量/上限』打印＋`.scratch` 台账抓出来的——不打印就没人知道基线在漏。"
             + "而这条棘轮当时不报现量、没人看得见那 21 处余量——现在它每次跑都打「现量/上限」。",
         "fullSort": "M1 WS-P/WS-W：body 内派生集合缓存或移到 publish 里算（终点 0）",
         "syncFileIO": "M1 WS-W：渲染路径的文件尺寸/存在性检查移到扫描期（终点 0）",
@@ -135,6 +167,15 @@ final class PerfHitchGuardTests: XCTestCase {
                              "读到的源码行数异常少（\(census.totalLines)）——文件没真被读进来")
 
         var problems: [String] = []
+        // 【基线键必须与规则名一一对应】下面那行 `counts[rule] ?? -1` 有个静默失效形状：
+        // 基线里写了一个**不存在**的规则名（改名时最容易发生），取不到计数就退化成 -1，
+        // 而 -1 永远不"超过"上限 ⇒ 那条规则**从闸门上消失**，日志里一个字都不会多。
+        // 今天正好把 `dynamicNSColor` 改名成 `tokenReference`，所以这条等式断言现在补上。
+        XCTAssertEqual(Set(Self.knownBaseline.keys), Set(PerfHitchScan.rules.map(\.name)),
+                       "基线键与规则名不再一一对应：多出来的键会被当成 -1 处而恒绿，"
+                       + "少掉的名字则完全没人管")
+        XCTAssertEqual(Set(Self.ownerNotes.keys), Set(PerfHitchScan.rules.map(\.name)),
+                       "有规则没写负责人，或负责人讲了一条不存在的规则")
         for rule in PerfHitchScan.rules where counts[rule.name] == nil {
             problems.append("规则「\(rule.name)」没有计数结果，扫描器漏了一条")
         }
@@ -170,15 +211,29 @@ final class PerfHitchGuardTests: XCTestCase {
             return now < baseline ? "\(rule) \(now)/\(baseline)（可拧到 \(now)）" : "\(rule) \(now)/\(baseline)"
         }.joined(separator: "  ")
         print("【渲染路径禁则】现量/上限 —— \(debt)")
-        let ledger = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("tcoder-perf-renderpath-debt.txt")
+        // 台账**不写在 $TMPDIR**：那个目录 2026-09-21 被清过一次，对照组的封存产物就是这么
+        // 丢的；而"拧基线前要拿现量、还债人要拿明细"依赖的正是这份文件——
+        // 放在会被系统随手清掉的地方，等于一份只在今天可用的台账。
+        // 仓库根的求法与本仓其他文档级守卫一致（本文件 → TcoderMonitorTests → Tests → TcoderMonitor → 树根）。
+        let scratch = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent(".scratch")
+        try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        let ledger = scratch.appendingPathComponent("tcoder-perf-renderpath-debt.txt")
         var detail: [String] = ["HEAD=\(Date()) \(debt)"]
         for rule in knownBaseline.keys.sorted() {
             let hits = scan.hits[rule, default: []]
             detail.append("—— \(rule)：\(hits.count) 处")
             detail.append(contentsOf: hits.sorted().map { "   \($0)" })
         }
-        try? (detail.joined(separator: "\n") + "\n").write(to: ledger, atomically: true, encoding: .utf8)
+        let body = detail.joined(separator: "\n") + "\n"
+        // 不用 `try?`：写不进去的台账 == 没有台账，而它在链条里是"拧基线/还债"的唯一机器可读依据。
+        do { try body.write(to: ledger, atomically: true, encoding: .utf8) }
+        catch { XCTFail("渲染路径台账写不出去（\(ledger.path)）：\(error)。"
+                            + "宁可红，也不要一份悄悄消失的余量记录。") }
+        XCTAssertEqual(try? String(contentsOf: ledger, encoding: .utf8), body,
+                       "台账写完读回来的不是同一份内容（原子替换没生效？那读余量就是在读上一次的）")
     }
 
     /// 存量必须**可点名**：守卫报出来的每一条都要有"文件:行 + 原文"，
@@ -210,10 +265,19 @@ final class PerfHitchGuardTests: XCTestCase {
         let sorts = scan.hits["fullSort"] ?? []
         XCTAssertTrue(sorts.contains { $0.contains(".sorted(") },
                       "Views 里已知有 body 内排序，扫不到说明 .sorted( 正则失效：\(sorts)")
-        let colors = scan.hits["dynamicNSColor"] ?? []
+        let colors = scan.hits["tokenReference"] ?? []
         XCTAssertTrue(colors.count >= 50, ".textColor 存量应有几十处，只数到 \(colors.count) 处：跨度提取退化了")
         XCTAssertTrue(colors.contains { $0.hasPrefix("Design/") },
                       "Design/ 侧的令牌引用一条都没数到——扫描面又退回只看 Views/ 了")
+        // 【新增尺子必须已经咬到真东西】这条的存在理由：`dynamicColorConstruction` 是 2026-09-22
+        // 才补的，补之前 `Color(nsColor:` 在渲染路径里**一条都不抓**。钉住现在已知的两处真实构造点，
+        // 万一有人把模式改窄（比如只留 `NSColor(name:`），这里当场红，而不是静默降到 0。
+        let built = scan.hits["dynamicColorConstruction"] ?? []
+        XCTAssertEqual(built.count, 2, "现造动态色的构造点应正好 2 处（变了要同步改上限并写明原因）：\(built)")
+        for name in ["Views/Shell/SidebarRows.swift", "Views/Shell/ProjectSidebar.swift"] {
+            XCTAssertTrue(built.contains { $0.hasPrefix(name) },
+                          "已知的构造点 \(name) 扫不到了——模式退化：\(built)")
+        }
     }
 
     // MARK: - 元测试：每条守卫都要能被坏样例打红
@@ -277,7 +341,12 @@ final class PerfHitchGuardTests: XCTestCase {
         XCTAssertEqual(counts["directFormatters"] ?? 0, 0, "静态 let 的 DateFormatter 不该算 body 内构造")
         XCTAssertEqual(counts["fullSort"] ?? 0, 0)
         XCTAssertEqual(counts["syncFileIO"] ?? 0, 0)
-        XCTAssertEqual(counts["dynamicNSColor"] ?? 0, 0, ".ink 是常量，.textColor 才是动态色形状")
+        XCTAssertEqual(counts["tokenReference"] ?? 0, 0, ".ink 是常量，.textColor 才是令牌引用形状")
+        // 反向钉（拆尺子的理由就在这一条）：**引用**缓存令牌不是**构造**动态色。
+        // 如果 `dynamicColorConstruction` 的模式宽到把 `.textColor` 也算进去，
+        // 它会立刻长出 62 处"新债"，把闸门变成"禁止给东西着色"。
+        XCTAssertEqual(counts["dynamicColorConstruction"] ?? 0, 0,
+                       "令牌引用被误判成现造动态色——这条尺子开始惩罚正确写法了")
     }
 
     /// 状态词/属性名不许被当成 I/O 或排序命中（`snapshot(`、`stats(`、`state.sorted` 之类）。

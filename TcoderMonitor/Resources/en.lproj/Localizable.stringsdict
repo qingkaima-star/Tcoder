@@ -201,5 +201,329 @@
 			<string>%lld more occurrences</string>
 		</dict>
 	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>展开其余 %lld 条提交</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@showCommits@</string>
+		<key>showCommits</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Show %lld more commit</string>
+			<key>other</key>
+			<string>Show %lld more commits</string>
+		</dict>
+	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>收起 %lld 条提交</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@hideCommits@</string>
+		<key>hideCommits</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Collapse %lld commit</string>
+			<key>other</key>
+			<string>Collapse %lld commits</string>
+		</dict>
+	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>展开其余 %lld 个函数</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@showFunctions@</string>
+		<key>showFunctions</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Show %lld more function</string>
+			<key>other</key>
+			<string>Show %lld more functions</string>
+		</dict>
+	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>收起 %lld 个函数</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@hideFunctions@</string>
+		<key>hideFunctions</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Collapse %lld function</string>
+			<key>other</key>
+			<string>Collapse %lld functions</string>
+		</dict>
+	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>展开其余 %lld 个文件</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@showFiles@</string>
+		<key>showFiles</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Show %lld more file</string>
+			<key>other</key>
+			<string>Show %lld more files</string>
+		</dict>
+	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>收起 %lld 个文件</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@hideFiles@</string>
+		<key>hideFiles</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Collapse %lld file</string>
+			<key>other</key>
+			<string>Collapse %lld files</string>
+		</dict>
+	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>展开其余 %lld 个进程</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@showProcesses@</string>
+		<key>showProcesses</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Show %lld more process</string>
+			<key>other</key>
+			<string>Show %lld more processes</string>
+		</dict>
+	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>收起 %lld 个进程</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@hideProcesses@</string>
+		<key>hideProcesses</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Collapse %lld process</string>
+			<key>other</key>
+			<string>Collapse %lld processes</string>
+		</dict>
+	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>展开其余 %lld 位贡献者</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@showContributors@</string>
+		<key>showContributors</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Show %lld more contributor</string>
+			<key>other</key>
+			<string>Show %lld more contributors</string>
+		</dict>
+	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>收起 %lld 位贡献者</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@hideContributors@</string>
+		<key>hideContributors</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Collapse %lld contributor</string>
+			<key>other</key>
+			<string>Collapse %lld contributors</string>
+		</dict>
+	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>展开其余 %lld 个重复块</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@showBlocks@</string>
+		<key>showBlocks</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Show %lld more duplicate block</string>
+			<key>other</key>
+			<string>Show %lld more duplicate blocks</string>
+		</dict>
+	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>收起 %lld 个重复块</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@hideBlocks@</string>
+		<key>hideBlocks</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Collapse %lld duplicate block</string>
+			<key>other</key>
+			<string>Collapse %lld duplicate blocks</string>
+		</dict>
+	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>展开其余 %lld 个榜内重复块</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@showCapped@</string>
+		<key>showCapped</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Show %lld more reported block</string>
+			<key>other</key>
+			<string>Show %lld more reported blocks</string>
+		</dict>
+	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>收起 %lld 个榜内重复块</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@hideCapped@</string>
+		<key>hideCapped</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Collapse %lld reported block</string>
+			<key>other</key>
+			<string>Collapse %lld reported blocks</string>
+		</dict>
+	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>展开其余 %lld 个未展示</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@showHidden@</string>
+		<key>showHidden</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Show %lld more hidden item</string>
+			<key>other</key>
+			<string>Show %lld more hidden items</string>
+		</dict>
+	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>收起 %lld 个未展示</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@hideHidden@</string>
+		<key>hideHidden</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Collapse %lld hidden item</string>
+			<key>other</key>
+			<string>Collapse %lld hidden items</string>
+		</dict>
+	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>展开其余 %lld 项</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@showItems@</string>
+		<key>showItems</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Show %lld more item</string>
+			<key>other</key>
+			<string>Show %lld more items</string>
+		</dict>
+	</dict>
+	<!-- 批次 P56：展开/收起这一族。中文没有单复数，英语有 ⇒ 整句进 stringsdict，
+		键 = 中文整句（与 `DisclosureNoun` 的 expandKey/collapseKey 一字不差）。 -->
+	<key>收起 %lld 项</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@hideItems@</string>
+		<key>hideItems</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Collapse %lld item</string>
+			<key>other</key>
+			<string>Collapse %lld items</string>
+		</dict>
+	</dict>
 </dict>
 </plist>

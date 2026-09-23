@@ -27,6 +27,13 @@ struct ScannedSourceFile: Sendable {
     /// 文件行数超过 `maximumLineCount` 时为 true：该文件只有前 20 万行进入统计。
     /// 没有这个标志，`totalLines` 会看起来像全量（WS-D 诚实性审计 P1 #7 的一条）。
     var lineCountTruncated: Bool = false
+    /// R2（RD-07 / RD-20 的相关半边）：混合语言文件**按区域归位**后的行读数。
+    /// 只有真认出 SFC 分区的文件才有值；`nil` = 该文件不是（认得出的）混合语言文件。
+    /// 存在理由：`commentRatio` 只有一个全文件分母，把模板注释、样式注释与脚本注释混进
+    /// 同一个分母读出来的「注释率」没有意义；分区归位后每一区要有自己的分子分母。
+    /// 契约缺口：`CodeMetrics`（冻结区）没有承接字段，所以这个数目前只能到单测与 CLI 内部，
+    /// 界面上看不到 —— 已列进 R2 交回汇报的「契约缺口」。
+    var vueRegionTally: ComplexityEngine.VueRegionTally? = nil
 
     var totalLineCount: Int { lines.count }
 }
@@ -59,10 +66,21 @@ final class SourceFileClassifier {
         guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else { return nil }
 
         let split = contentSegments(of: data)
-        var tally = LineTally(walker: SourceLineWalker(language: language))
-        tally.lines.reserveCapacity(split.segments.count)
-        for (offset, segment) in split.segments.enumerated() {
-            tally.add(segment, at: offset)
+        var texts = [String]()
+        texts.reserveCapacity(split.segments.count)
+        for segment in split.segments {
+            var text = String(segment)
+            if text.hasSuffix("\r") { text.removeLast() }
+            texts.append(text)
+        }
+        // RD-07：`.vue` 一份文件住着三种语言。逐行按所在区域换词法档案，
+        // 于是脚本区的 `//`、样式区的 `/* */` 各按自己的语言判注释，
+        // 而不是整份文件套 Vue 那一条 `linePrefixes: [] / blockStart: "<!--"`。
+        let regionLanguages = Self.regionLanguagesForClassification(fileLanguage: language, lines: texts)
+        var tally = LineTally(walker: SourceLineWalker(language: language),
+                              regionLanguages: regionLanguages, fileLanguage: language)
+        for (offset, text) in texts.enumerated() {
+            tally.add(text, at: offset, fileLanguage: language)
         }
 
         return ScannedSourceFile(
@@ -75,8 +93,23 @@ final class SourceFileClassifier {
             codeLineCount: tally.code,
             todoCount: tally.todo,
             fixmeCount: tally.fixme,
-            lineCountTruncated: split.truncated
+            lineCountTruncated: split.truncated,
+            vueRegionTally: tally.regionTally
         )
+    }
+
+    /// 逐行该按哪种语言的词法判注释 / 代码。认不出分区时返回 nil（退回整份文件一种语言）。
+    static func regionLanguagesForClassification(fileLanguage: String,
+                                                  lines: [String]) -> [String]? {
+        guard fileLanguage == "Vue", let map = ComplexityEngine.detectVueRegions(lines) else { return nil }
+        return map.regions.map { region in
+            switch region {
+            case .script: return map.scriptLanguage
+            case .template: return "HTML"
+            case .style: return "CSS"
+            case .structure, .other: return "Vue"
+            }
+        }
     }
 
     /// 把整份字节流切成行。三种行终止符都接受，末尾不成行的一段算一行，
@@ -102,6 +135,12 @@ final class SourceFileClassifier {
     /// 逐行落桶：`kind` 判定 + 三个计数 + TODO/FIXME 计次。
     /// 原先这几段直接摊在 `classify` 里（那个函数因此 74 行 / CC 25），搬出来之后
     /// 每行该进哪个桶、行号怎么算，都只有一处可读的地方。
+    ///
+    /// R2（RD-07）加的两件事：
+    /// 1. **逐行换词法档案**：混合语言文件按所在区域换语言，每个区域自己一套
+    ///    `SourceLineWalker`（块注释状态各归各的，脚本区没闭合的 `/*` 不许去吃模板区）；
+    /// 2. **按区域归位的行读数** `regionTally`：注释率要有自己的分母，
+    ///    不能把模板注释、样式注释与脚本注释混进同一个全文件分母里读出一个没意义的数。
     private struct LineTally {
         var lines: [SourceLine] = []
         var blank = 0
@@ -109,14 +148,31 @@ final class SourceFileClassifier {
         var code = 0
         var todo = 0
         var fixme = 0
-        /// 跨行的块注释 / docstring 状态挂在这里，必须逐行传递。
-        var walker: SourceLineWalker
+        /// 跨行的块注释 / docstring 状态挂在这里，必须逐行传递；
+        /// 混合语言文件按区域各存一份（每种语言一个 walker）。
+        private var walkers: [String: SourceLineWalker]
+        private let regionLanguages: [String]?
+        var regionTally: ComplexityEngine.VueRegionTally?
 
-        mutating func add(_ segment: Substring, at offset: Int) {
-            var text = String(segment)
-            if text.hasSuffix("\r") { text.removeLast() }
+        init(walker: SourceLineWalker, regionLanguages: [String]?, fileLanguage: String) {
+            self.regionLanguages = regionLanguages
+            walkers = [fileLanguage: walker]
+            regionTally = regionLanguages == nil ? nil : ComplexityEngine.VueRegionTally()
+            lines.reserveCapacity(regionLanguages?.count ?? 0)
+        }
+
+        /// 这一行按哪种语言的词法判：分区表有值就走分区，否则退回整份文件一种语言。
+        func languageAt(_ offset: Int, fallback: String) -> String {
+            guard let regionLanguages, offset < regionLanguages.count else { return fallback }
+            return regionLanguages[offset]
+        }
+
+        mutating func add(_ text: String, at offset: Int, fileLanguage: String) {
+            let language = languageAt(offset, fallback: fileLanguage)
+            var walker = walkers[language] ?? SourceLineWalker(language: language)
             var characters = Array(text)
             let kind = walker.kind(for: &characters)
+            walkers[language] = walker
             switch kind {
             case .blank: blank += 1
             case .comment: comment += 1
@@ -136,6 +192,25 @@ final class SourceFileClassifier {
                 fixme += sourceMarkerOccurrences(of: "FIXME", in: text, uppercased: uppercased)
             }
             lines.append(SourceLine(number: offset + 1, text: text, kind: kind))
+            recordRegionLine(language: language, kind: kind)
+        }
+
+        /// 按区域再记一本账：脚本 / 模板 / 样式 / 结构行各自的代码行数与注释行数。
+        /// 分区口径下 `language` 就是区域名（TypeScript↔script、HTML↔template、CSS↔style、Vue↔结构行）。
+        mutating func recordRegionLine(language: String, kind: SourceLineKind) {
+            guard var tally = regionTally else { return }
+            let isComment = kind == .comment
+            switch language {
+            case "HTML":
+                if isComment { tally.templateCommentLines += 1 } else { tally.templateCodeLines += 1 }
+            case "CSS", "SCSS":
+                if isComment { tally.styleCommentLines += 1 } else { tally.styleCodeLines += 1 }
+            case "Vue":
+                if isComment { tally.structureCommentLines += 1 } else { tally.structureCodeLines += 1 }
+            default:
+                if isComment { tally.scriptCommentLines += 1 } else { tally.scriptCodeLines += 1 }
+            }
+            regionTally = tally
         }
     }
 }
@@ -194,6 +269,9 @@ struct SourceScanResult: Sendable {
     var lineTruncatedFileCount: Int = 0
     /// 「为什么丢了这个文件」的台账；见 `SourceSkipLedger`。
     var skipLedger: SourceSkipLedger = SourceSkipLedger()
+    /// 遍历「跟不跟」的现场计数（软链接 / 嵌套版本库 / 包状目录 / 名单外被剪掉的目录）。
+    /// 判据与句子在 `SourceScanScopeReadout.swift`（RD-15）；这里只是它的落点。
+    var treeFollowing = SourceTreeFollowingLedger()
     /// 遍历中**读不动的目录数**（权限不够、竞态中消失、悬空软链接的目标目录）。
     ///
     /// 存在理由（F12 的另一半）：`enumerator` 的 `errorHandler` 原本 `{ _, _ in true }`

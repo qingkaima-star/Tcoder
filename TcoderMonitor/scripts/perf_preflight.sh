@@ -36,12 +36,21 @@ QUIESCE_MIN="${QUIESCE_MIN:-5}"  # 静默合格线（与 perf_harness.sh 同值�
 # 是因为**阈值**属于判定、不属于取数；排程器单独 source 本文件时也要有默认值可走。
 
 sections() {
-  local line
-  line=$(grep -m1 '^SECTIONS=(' scripts/capture_pages_isolated.sh) || return 1
-  # 【按引号取，不许按空格拆】旧写法 `tr ' \n'` 会把**引号内部的空格**也当分隔符，
-  # 于是 `Git 洞察` 变成 "Git" 与 "洞察" 两页：九页扫描实际只覆盖 8 页，
-  # 还有一页是用错名字起的 App。实测抓到于 2026-09-21 14:57（DRY_RUN 里出现 10 行）。
-  printf '%s\n' "$line" | grep -o '"[^"]*"' | sed -e 's/^"//' -e 's/"$//'
+  local f=scripts/capture_pages_isolated.sh line blob
+  # 【读"生产者的形状"，不是读我记得的形状】2026-09-22 实测失效一次：本函数原来钉的是
+  # `^SECTIONS=(`，而 main 把 capture_pages_isolated.sh 改写成
+  # `IFS=':' read -r -a SECTIONS <<< "${CAPTURE_PAGES:-总览:…}"` ⇒ grep 命中 0 行、
+  # 于是**九页变成 0 页**，而当时除了 selfcheck 第 18 项没人会看见。
+  # 判据：解析别的文件的字面量时，**取不到内容必须报错并说明去哪儿看**，不许静默返回空——
+  # "空"在下游和"真的没有页"长得一模一样。
+  line=$(grep -m1 'read -r -a SECTIONS' "$f" 2>/dev/null) \
+    || { echo "!! sections：$f 里没有 'read -r -a SECTIONS' 这一行了——页名的生产方式又改了，" \
+                "去那文件看它现在的形状（本函数故意不返回空，免得 0 页被下游读成「没有页可拍」）" >&2; return 1; }
+  blob=$(printf '%s' "$line" | sed -e 's/.*:-//' -e 's/}".*//')
+  [ -n "$blob" ] || { echo "!! sections：找到那行却抠不出冒号串（默认值被搬走了？）：$line" >&2; return 1; }
+  # 【按冒号取】页名内部允许有空格（「Git 洞察」），所以既不许按空格拆，
+  # 也不许按引号取——现在引号只包住整串，不再一个个包住页名。
+  printf '%s\n' "$blob" | tr ':' '\n'
 }
 
 
@@ -332,8 +341,13 @@ sweep_orphan_traces() {  # 只删**没有任何进程打开着**的 .ktrace 中�
 
 post_run_disk_hygiene() {  # 每轮收尾固定两件事：进程真退了没 + $TMPDIR 残骸
   local left
-  left=$(pgrep -x xctrace 2>/dev/null | tr '\n' ' ')
+  # `|| true` 不是装饰：`pgrep` 在"没有 xctrace"时退出码是 1，
+  # 而 `set -e` 会让整个收尾**在那一行中止** —— 于是"机器干净"这种最好的情况
+  # 反而跳过了扫残骸。新加的第 22 项收尾检查就是把它抓出来的东西。
+  left=$(pgrep -x xctrace 2>/dev/null | tr '\n' ' ' || true)
   [ -n "$left" ] && echo "    ⚠ 还有 xctrace 在场（pid ${left% }）——先别开下一趟" >&2
   printf '    %s\n' "$(sweep_orphan_traces "${1:-${TMPDIR:-/tmp}}")"
-  echo "    磁盘可用 $(disk_free_gib) GiB（低于 ${MIN_FREE_GIB} 就不开新趟）"
+  # 阈值名收敛到 TCODER_MIN_FREE_GIB 时漏改了这行：`set -u` 下它直接**中止收尾**，
+  # 于是"录成功的一趟"被上层记成失败（今晚就是这样丢了一份合格的心跳期读数）。
+  echo "    磁盘可用 $(disk_free_gib) GiB（低于 ${TCODER_MIN_FREE_GIB:-20} 就不开新趟）"
 }

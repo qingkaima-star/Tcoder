@@ -45,7 +45,11 @@ final class LogHotspotRatchetTests: XCTestCase {
         "ManifestParsersPython.pyprojectDependencies": (26, 78),
         "LogParsing.read": (25, 113),
         "ManifestParsersNative.goModDependencies": (25, 38),
-        "OsvClient.performOsvLookup": (21, 65),
+        // R3（2026-09-22 C 组）把 `performOsvLookup` 整块搬进了它的新落点
+        // `OsvAnswerAccounting.swift`（OsvClient.swift 已被 400 行口径点死，"没能查到底"的
+        // 结构化出口只能另起文件）。**键跟着函数搬家，读数与阈值一字未动**：
+        // 这张表是历史"报告点名值"，上限仍是 CC 16 / 50 行，反逃跑的兜底数的是全量函数。
+        "OsvAnswerAccounting.performOsvLookup": (21, 65),
     ]
 
     /// 报告点名之外、本包同一把尺子数出来的其余高复杂度函数，本轮一并清零。

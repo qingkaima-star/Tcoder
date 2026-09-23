@@ -33,7 +33,18 @@ final class ManifestLabLogAndGitTests: ManifestLabTestCase {
                        ["error.log", "crash.log"])
         XCTAssertEqual(logs.scannedFiles.first { $0.path.hasSuffix("error.log") }?.role, .error)
         XCTAssertEqual(logs.scannedFiles.first { $0.path.hasSuffix("crash.log") }?.role, .crash)
-        XCTAssertEqual(logs.totalLinesScanned, 32, "29 + 3 行")
+        // 逐份真值取自**盘上换行数**（`R11DenominatorFixture.newlineCount`），不是实现自己的读数。
+        // RD-46b 之后：error.log 那 29 行进密度分母，crash.log 那 3 行进崩溃正文那一格，
+        // 原来那句「29 + 3 行」的账仍然必须一字不差地平 —— 直接把 32 改成 29 就是丢掉一半证据。
+        let errorFixtureLines = try R11DenominatorFixture.newlineCount(
+            of: root.appendingPathComponent("Logs/error.log"))
+        let crashFixtureLines = try R11DenominatorFixture.newlineCount(
+            of: root.appendingPathComponent("Logs/crash.log"))
+        XCTAssertEqual(logs.totalLinesScanned, errorFixtureLines, "分母只数真日志行")
+        XCTAssertEqual(logs.crashReportLineCount, crashFixtureLines, "崩溃正文的行数留在自己那一格")
+        XCTAssertEqual(logs.crashReportCount, 1, "崩溃通道读到 1 份")
+        XCTAssertEqual(logs.totalLinesScanned + (logs.crashReportLineCount ?? 0),
+                       errorFixtureLines + crashFixtureLines, "对账：两份夹具合计行数一字不差")
 
         XCTAssertEqual(logs.errorCount, 5, "ERROR 前缀行 5 条")
         XCTAssertEqual(logs.warningCount, 3, "WARN 前缀行 3 条")
@@ -138,7 +149,9 @@ final class ManifestLabLogAndGitTests: ManifestLabTestCase {
         XCTAssertTrue(git.isRepository)
         XCTAssertEqual(git.branch, "main")
         XCTAssertEqual(git.remoteURL, "https://git.acme.example/orders/acme-orders-lab.git")
-        XCTAssertEqual(git.headSHA.count, 7)
+        // 钉的是「走那一把缩短尺子」而不是某个宽度：写死 7 会把 `--short=7` 这个旧行为当契约，
+        // 而它与覆盖率那一路的 12 位并存过一整天（同一份报告两个串）。
+        XCTAssertEqual(git.headSHA.count, CommitIdentity.abbreviatedLength)
 
         XCTAssertEqual(git.totalCommits, 9)
         XCTAssertEqual(git.authors.count, 3)

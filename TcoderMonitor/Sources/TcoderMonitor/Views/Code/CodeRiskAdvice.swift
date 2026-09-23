@@ -11,6 +11,21 @@ import SwiftUI
 
 extension CodeRiskAnalysis {
 
+    /// 建议行的左线只回答一个问题：**这条要不要现在动手**。
+    ///
+    /// `Theme.Semantic.role(for:)` 是**状态**口径，里面 `.low → success`（绿）。
+    /// 而绿在这套语言里的意思是"查过了、没问题"——把它贴在一条"按领域或路由拆成多个文件"
+    /// 的动手建议上，同一屏就一边写着"改一下"一边涂成"不用管"，且与同列里
+    /// 低档重复率那行的灰**自相矛盾**（乱清单 §4，复杂度风险页尾人眼复核抓到）。
+    /// 所以只有低档被改走 `neutral`；中/高/严重三档仍取状态口径——
+    /// **急不急是真分档，不是把它抹平。**
+    static func adviceRole(for risk: RiskLevel) -> Theme.SemanticRole {
+        switch risk {
+        case .none, .low: return Theme.Semantic.neutral
+        default: return Theme.Semantic.role(for: risk)
+        }
+    }
+
     /// 「这一维该怎么改」的建议卡片。原本是一个 138 行的函数（被本 App 自扫同时点名
     /// CC 17 与「超长函数 >50 行」），九类建议共用一份 items；按类分成三组，各攒各的卡片。
 
@@ -44,11 +59,13 @@ extension CodeRiskAnalysis {
         } else if code.duplicationRatio > 0 {
             items.append(Item(
                 id: "duplication-low", label: "重复代码", icon: .duplicate, role: Theme.Semantic.neutral,
-                text: localizedFormat("重复率 %1$@（约 %2$@ / %3$@ 行）仍在低档：%4$@ 个重复块中最长 %5$@ 行，暂不需要专门重构，改到相关代码时顺带去重即可。",
+                // 「榜内 %4$@ 个」是刻意写出来的限定词：这一串是**封顶榜的条数**，
+                // 不是"这个仓库有这么多重复块"（RD-17）。
+                text: localizedFormat("重复率 %1$@（约 %2$@ / %3$@ 行）仍在低档：榜内 %4$@ 个重复块中最长 %5$@ 行，暂不需要专门重构，改到相关代码时顺带去重即可。",
                                       NumberFormat.percent(code.duplicationRatio, precision: 1),
                                       NumberFormat.grouped(duplicatedLines),
                                       NumberFormat.grouped(code.codeLines),
-                                      NumberFormat.grouped(code.duplicatedBlocks.count),
+                                      NumberFormat.grouped(CodeBoardTruth.duplicationBoardCount(code)),
                                       NumberFormat.grouped(longestBlock))
             ))
         }
@@ -67,13 +84,16 @@ extension CodeRiskAnalysis {
                     + "\(CodeViewFormat.fileName($0.filePath)):\(NumberFormat.grouped($0.startLine))）"
             }
             let highest = critical.map(\.cyclomaticComplexity).max() ?? 0
-            let lowestOnBoard = code.topComplexFunctions.map(\.cyclomaticComplexity).min() ?? 0
             items.append(Item(
                 id: "complexity-critical", label: "严重复杂度", icon: .riskSevere, role: Theme.Semantic.critical,
                 text: "\(NumberFormat.grouped(critical.count)) 个函数被判为严重复杂度，"
                     + "最高圈复杂度 \(NumberFormat.grouped(highest))：" + named.joined(separator: "、")
                     + "。先去掉嵌套：校验与异常分支改成提前返回，再把成组的分支换成策略表/多态；"
-                    + "先把分支数压到上榜函数的最低水位 CC \(NumberFormat.grouped(lowestOnBoard)) 以下。"
+                    // 「压到上榜函数的最低水位以下」是一枚**从榜里长出来的目标**：榜只留前 20 条，
+                    // 第 20 名在大仓库上可能是 CC 40 —— 照它做既出不了榜也没修掉任何东西。
+                    // 换成引擎判档的那条线（冻结常量，本处**只读不改**）：低于它就是离开高档。
+                    + "先把分支数压到 CC \(NumberFormat.grouped(FileSystemCodeAnalyzer.highFunctionComplexity)) 以下"
+                    + "（那是本工具判「高」的那条线，与榜位无关）。"
             ))
         }
 
@@ -139,7 +159,7 @@ extension CodeRiskAnalysis {
         if let largest = code.hugeFiles.max(by: { $0.lineCount < $1.lineCount }) {
             items.append(Item(
                 id: "huge-file", label: "巨大文件", icon: .duplicate,
-                role: Theme.Semantic.role(for: largest.risk),
+                role: Self.adviceRole(for: largest.risk),
                 text: localizedFormat("最大文件 %1$@ 共 %2$@ 行（项目行数峰值 %3$@ 行）：%4$@",
                                       CodeViewFormat.fileName(largest.path),
                                       NumberFormat.grouped(largest.lineCount),

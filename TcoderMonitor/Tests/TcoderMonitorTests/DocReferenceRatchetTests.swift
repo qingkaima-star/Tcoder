@@ -63,7 +63,22 @@ final class DocReferenceRatchetTests: XCTestCase {
                                        // §6.15 起的批次台账**整块搬出**成这份文件。
                                        // 必须登记进来 —— 否则几百条锚点随着搬家脱离判活，
                                        // 正好制造 §6 第 8 条点名过的那个"扫描面外看不见 rot"的洞。
-                                       "docs/界面语言-批次台账.md"]
+                                       "docs/界面语言-批次台账.md",
+                                       // 2026-09-23：台账本体写到 861 行，同一把闸门逼着把 §6.30 起
+                                       // 再搬一次。**搬进新文件的锚点不登记就全体脱离判活**——
+                                       // 这条规矩就是上一次搬家留下的教训，别只记在文档前导里。
+                                       "docs/界面语言-批次台账-续.md",
+                                       // 2026-09-23（P53）：这份台账是**活的判据文档** ——
+                                       // 它写着哪些句子在屏上、落点在哪个文件，锚点与路径
+                                       // 和批次台账同性质。不登记进来，它里面的锚点就落在
+                                       // "扫描面外看不见 rot"那个洞里；P53 是新文档里第一次
+                                       // 出现跨文档 § 指针，当场被这条判据照出来才补的登记。
+                                       "docs/屏上正文双语台账.md",
+                                       // 2026-09-23（P55）：台账-续写到 764 行，同一把 800 行闸门
+                                       // 逼着第三次搬家。**搬家当天就要登记**——
+                                       // 上一批（P53）就是没登记被这条判据当场判"跨文件 § 指针
+                                       // 指向不在扫描面里的文档"，那条教训写在这里当回执。
+                                       "docs/界面语言-批次台账-续二.md"]
 
     /// 我们自己的文件类型：这类锚点必须能在仓库里找到实体文件。
     static let repoFileExtensions: Set<String> = ["swift", "md", "sh"]
@@ -89,7 +104,7 @@ final class DocReferenceRatchetTests: XCTestCase {
 
     struct CodeIndex {
         var identifiers: Set<String> = []
-        /// `Tests/**` 里的**声明名**（`func test…` 与类型名）。**2026-09-22 补的第二份索引**：
+        /// `Tests/**` 里的**声明名**（类型名 + 方法名）。**2026-09-22 补的第二份索引**：
         /// 文档大量引用守卫用例的名字，而判活只看 `Sources/**`，于是
         /// 写 `某测试类.test_某条` 必判死、写裸名 `test_某条` 又压根不成锚（正则要求至少一个点）
         /// —— 两条路都不能"被盯"。补上之后，测试被改名或删掉，文档会红。
@@ -227,26 +242,17 @@ final class DocReferenceRatchetTests: XCTestCase {
         return index
     }
 
-    /// Tests 侧**只收声明**（`func test…` 与类型名），不收全部标识符。
+    /// Tests 侧**只收声明**（类型名 + 方法名），不收全部标识符。
     ///
     /// 这不是洁癖，是当场撞出来的：第一版按"全标识符"扫 `Tests/**`，
-    /// 于是元测试里那条金丝雀 `WsvCanaryDeadType.someMember` 被**它自己所在的测试文件**
+    /// 于是元测试里那条金丝雀 WsvCanaryDeadType.someMember 被**它自己所在的测试文件**
     /// 喂成了活锚（名字只是字符串字面量，也进了索引）—— 金丝雀当场不红了。
     /// 判活的集合一旦包含"哪里提到过这个名字"，它就再也测不出判据失效。
+    /// 采集器本体（关键字表、剥注释）在 `+RulerMeta.swift`，和钉它的那个方向放在一处。
     func testDeclarations(in url: URL) -> Set<String> {
         guard url.pathExtension == "swift",
               let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
-        var found: Set<String> = []
-        let patterns = [#"func\s+(test[A-Za-z0-9_]*)"#,
-                        #"(?:class|struct|extension)\s+([A-Za-z0-9_]+)"#]
-        let range = NSRange(location: 0, length: text.utf16.count)
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
-            for match in regex.matches(in: text, range: range) {
-                found.insert(match.range(at: 1).slice(in: text))
-            }
-        }
-        return found
+        return Self.declaredNames(in: text)
     }
 
     struct Scan {

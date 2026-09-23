@@ -222,4 +222,35 @@ extension BorderlessDetailGuardTests {
         XCTAssertTrue(Self.repeatedBasisSentences(in: short).isEmpty, "术语复用被误判成口径重复")
     }
 
+    /// `ChartAxisEdge.anchor` 的**垂直分量必须是 0**（标签挂在刻度线下方）。
+    ///
+    /// P18 修「尾刻度被卡片右边切成 `08:27…`」时，三档写成了 `.leading` / `.center` / `.trailing`——
+    /// 这三个 `UnitPoint` 的 `y` 都是 **0.5**，语义是"拿标签的垂直中点对齐刻度线"，
+    /// 于是半个标签掉进绘图区；x 轴刻度线就在绘图区底边，0 值那一档
+    /// （错误趋势里警告数贴着 `y=0`）便**横穿过日期数字**。
+    /// `fb94e88` 那批 36 张·错误日志页尾裁到原始像素确认：`9/21` 被虚线划过去。
+    /// 水平那一半必须照旧（尾刻度往内长），所以两个分量分开钉。
+    func test_timeAxisAnchorsHangBelowTheAxisLine() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let domain = start...start.addingTimeInterval(4 * 86_400)
+        let cases: [(name: String, date: Date, x: CGFloat, y: CGFloat)] = [
+            ("首刻度", start, 0, 0),
+            ("中间刻度", start.addingTimeInterval(2 * 86_400), 0.5, 0),
+            ("尾刻度", start.addingTimeInterval(4 * 86_400), 1, 0),
+        ]
+        for item in cases {
+            let anchor = ChartAxisEdge.anchor(for: item.date, in: domain)
+            XCTAssertEqual(anchor.y, item.y, accuracy: 0.001,
+                           "\(item.name) 的垂直锚点不是 \(item.y) ⇒ 标签掉进绘图区，会被 0 值线横穿")
+            XCTAssertEqual(anchor.x, item.x, accuracy: 0.001,
+                           "\(item.name) 的水平锚点变了 ⇒ P18 那条「尾刻度不许被切字」的修复被弄坏")
+        }
+        // 读不到日期时的兜底档同样落在刻度线上，也不许垂直居中。
+        XCTAssertEqual(ChartAxisEdge.anchor(for: nil, in: domain).y, 0,
+                       "缺席刻度的兜底又写成垂直居中")
+        // 正对照：老写法为什么错，要能被机器复现，不能只写在注释里。
+        XCTAssertEqual(UnitPoint.center.y, 0.5, accuracy: 0.001,
+                       "UnitPoint.center 的 y 不再是 0.5 ⇒ 上面这条判据的理由变了，要连判据一起重读")
+    }
+
 }

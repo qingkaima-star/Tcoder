@@ -76,4 +76,111 @@ extension FunctionalHonestyGuardTests {
         XCTAssertTrue(Self.truncationNotesWithoutDisclosure(in: commented).isEmpty,
                       "注释里交代旧写法就被判红")
     }
+
+    /// G11（乱清单 §6 第 12 条）：「提交号其实来自外层仓库」这个事实必须**每一页都告示**。
+    /// Git 洞察页一直有一条 `DataNotice`，健康评分页此前一个字没有 ——
+    /// 实测：把**空的非 git 目录**注册成项目，这一页照样给出「协作分布 6 分 ·
+    /// 最高作者占比 78%，29 位活跃作者，678 次非合并提交」，而那些数字是外层仓库的。
+    /// 同一件事一页响、一页沉默，等于告诉读者"这一页的分数不必复核"。
+    ///
+    /// 判据两头：① 健康页必须真的**读** `provenance?.resolvedGitRoot`（有写无读就是死字段）；
+    /// ② 健康页不许自己再判一次"是不是偏离"。`GitInsightsSections.isRelocated` 那套
+    /// （`discoveryMode` + `canonicalPath` 比较）是 Git 页的私有实现，抄过来就是给同一个
+    /// 事实造第二把尺子（AGENTS §3 横切那条点名过），两把尺子迟早分叉。
+    static func relocationRulers(in files: [(path: String, content: String)])
+        -> (readers: [String], secondRulers: [String]) {
+        var readers: [String] = []
+        var secondRulers: [String] = []
+        for file in files {
+            var readsProvenance = false
+            for raw in file.content.split(separator: "\n", omittingEmptySubsequences: false) {
+                let line = raw.trimmingCharacters(in: .whitespaces)
+                guard !line.hasPrefix("//"), !line.hasPrefix("///") else { continue }
+                if line.contains("provenance?.resolvedGitRoot") { readsProvenance = true }
+                if ["discoveryMode", "resolvedRepositoryRoot", "canonicalPath("].contains(where: line.contains) {
+                    secondRulers.append("\(file.path): \(line)")
+                }
+            }
+            if readsProvenance { readers.append(file.path) }
+        }
+        return (readers, secondRulers)
+    }
+
+    func test_gitRelocationIsDisclosedOnTheHealthPageToo() throws {
+        let health = try SurfaceScanKit.sourceFiles(under: "Views/Health")
+        XCTAssertFalse(health.isEmpty, "扫不到健康页任何一个文件 ⇒ 扫描面坏了，下面的绿是假零")
+        let rulers = Self.relocationRulers(in: health)
+        XCTAssertFalse(rulers.readers.isEmpty,
+                       "健康页没有一处读 `provenance?.resolvedGitRoot`：Git 定位偏离这件事"
+                       + "在 Git 洞察页有告示、在这一页沉默。修法是 `HealthHero(relocatedGitRoot:)`"
+                       + "承接 `ScanProvenance.resolvedGitRoot`，不要在健康页另算。")
+        XCTAssertTrue(rulers.secondRulers.isEmpty,
+                      "健康页自己重算了一遍「仓库定位是否偏离」⇒ 同一个事实的第二把尺子：\(rulers.secondRulers)")
+    }
+
+    func test_relocationRulerScannerCatchesSyntheticAndSparesWired() {
+        let silent = [(path: "Views/Health/Fake.swift", content: "HealthHero(health: health)\n")]
+        let rulers = Self.relocationRulers(in: silent)
+        XCTAssertTrue(rulers.readers.isEmpty, "没读来源的那种写法被当成读了 ⇒ 这条守卫是摆设")
+        XCTAssertTrue(rulers.secondRulers.isEmpty)
+
+        let wired = [(path: "Views/Health/Fake2.swift",
+                      content: "HealthHero(health: health,\n           relocatedGitRoot: report?.provenance?.resolvedGitRoot)\n")]
+        XCTAssertEqual(Self.relocationRulers(in: wired).readers, ["Views/Health/Fake2.swift"],
+                       "正确写法判不出读点")
+
+        let copied = [(path: "Views/Health/Fake3.swift",
+                       content: "  git.discoveryMode != .selectedDirectory\n")]
+        XCTAssertEqual(Self.relocationRulers(in: copied).secondRulers.count, 1, "第二把尺子没抓到")
+        let commented = [(path: "Views/Health/Fake4.swift",
+                          content: "/// 不在这里重算 `discoveryMode`，那是 Git 页的私有实现\n")]
+        XCTAssertTrue(Self.relocationRulers(in: commented).secondRulers.isEmpty,
+                      "注释里交代为什么不用它就被判红")
+    }
+
+    /// `repositoryScoped` 必须和**喂它的那两路生产者**对齐，而不是和文案对齐。
+    ///
+    /// 为什么不钉"文案 vs 名单"：句子那份名单本来就是从 `repositoryScoped` 拼出来的，
+    /// 拿它比它自己是永真绿（本项目已吃过六次）。真正会各走各的是
+    /// `HealthInputs.availableDimensions`（哪一路点亮哪几个维度）与 `repositoryScoped`
+    /// 这两份名单——比如哪天新增一个"由 Git 算出来"的维度却没进 `repositoryScoped`，
+    /// 健康页那句偏离告示就会**漏报一个来源**，而这正是本条缺陷原本的形状。
+    ///
+    /// 判据：单独喂某一路输入，它点亮的维度必须整部落进或整落不出 `repositoryScoped`。
+    func test_repositoryScopedMatchesTheInputsThatFeedIt() {
+        let git = Set(HealthInputs(git: GitInsights()).availableDimensions)
+        let logs = Set(HealthInputs(logs: LogSummary()).availableDimensions)
+        let code = Set(HealthInputs(code: CodeMetrics()).availableDimensions)
+        let deps = Set(HealthInputs(dependencies: DependencyReport()).availableDimensions)
+        let coverage = Set(HealthInputs(coverage: CoverageMetrics()).availableDimensions)
+        // 分母自证：这五路各自真的点亮了东西（空集比空集也会"通过"）。
+        XCTAssertEqual(git, [.activity, .busFactor], "Git 那一路点亮的维度变了，下面的判定要重读")
+        XCTAssertEqual(logs, [.stability], "日志那一路点亮的维度变了，下面的判定要重读")
+        XCTAssertFalse(code.isEmpty); XCTAssertFalse(deps.isEmpty)
+
+        let scoped = Set(HealthDimension.repositoryScoped)
+        XCTAssertEqual(git.union(logs), scoped,
+                       "按仓库/项目身份定位输入的维度 ≠ `repositoryScoped`"
+                       + "⇒ 健康页那句偏离告示会漏报或多报来源")
+        let treeScoped = code.union(deps).union(coverage)
+        XCTAssertTrue(treeScoped.isDisjoint(with: scoped),
+                      "只读所选目录的维度被算成了仓库归属：\(treeScoped.intersection(scoped))")
+    }
+
+    /// 句子必须**真的**把 `repositoryScoped` 每一个成员念出来。
+    /// 正向那半只在"有人把拼名单换成手写死串"时才红（拼出来的天然相等），
+    /// 反向那半才是日常会咬人的：把只读所选目录的维度塞进这句就是虚报来源。
+    func test_relocationNoticeNamesExactlyRepositoryScopedDimensions() {
+        let notice = HealthHero.relocationNotice(root: "/outer/repo")
+        XCTAssertTrue(notice.contains("/outer/repo"), "外层仓库路径没进句子 ⇒ 这句没法核对")
+        for dimension in HealthDimension.repositoryScoped {
+            XCTAssertTrue(notice.contains(localizedCopy(dimension.rawValue)),
+                          "告示漏了「\(dimension.rawValue)」——它按仓库归属算，读者必须看得见")
+        }
+        for dimension in HealthDimension.allCases
+        where !HealthDimension.repositoryScoped.contains(dimension) {
+            XCTAssertFalse(notice.contains(localizedCopy(dimension.rawValue)),
+                           "「\(dimension.rawValue)」只读所选目录，写进这句就是虚报来源")
+        }
+    }
 }

@@ -1,7 +1,39 @@
 /// OWNER: WS-X3 TestSplit —— 自 DocReferenceRatchetTests.swift 拆出，尺子自身的双向元测试：文件作用域锚点、真索引金丝雀、死锚点要带原因。用例本体未改，只是搬了家。
+/// 2026-09-23 追加：Tests 侧**声明采集器**（`declaredNames`）也搬进来了 ——
+/// 主文件撞上 Tests 的 400 行门，而采集器与钉它的元测试本来就该一起改。
+import Foundation
 import XCTest
 
 extension DocReferenceRatchetTests {
+
+    /// Tests 侧索引的采集器：从一份源码文本里收**声明名**（类型名 + 方法名）。
+    ///
+    /// 关键字表必须覆盖 Swift 全部顶层类型声明族：头一版只写了 `class|struct|extension`，
+    /// 于是 `enum` 型的**共享测试基座**在索引里压根不存在 —— 第一次撞上是 `SurfaceScanKit`
+    /// （扫描型守卫的尺子本体），文档正常引用它的成员被判死。
+    /// 方法名同理从"只认 `test` 前缀"放宽：基座成员（`codeLines` 那一类）没有 test 前缀。
+    ///
+    /// 采集前先剥整行注释：`// struct CommentOnly {}` 不是声明。判活集合一旦包含
+    /// "哪里提到过这个名字"，它就测不出判据失效 —— 金丝雀当年正是这样不红的。
+    /// 注意只剥**整行**注释：行尾注释里的名字仍会进来（台账 §6.40 末尾备着这条，没吹成已封）。
+    static func declaredNames(in text: String) -> Set<String> {
+        var found: Set<String> = []
+        let code = SurfaceScanKit.codeLines(text).joined(separator: "\n")
+        let patterns = [#"func\s+([A-Za-z_][A-Za-z0-9_]*)"#,
+                        #"(?:class|struct|enum|actor|protocol|extension)\s+([A-Za-z0-9_]+)"#]
+        let range = NSRange(location: 0, length: code.utf16.count)
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            for match in regex.matches(in: code, range: range) {
+                // 不走主文件那个 `slice(in:)`：它是**每个尺子文件各一份**的私有帮手
+                // （`DocBareLineReferenceTests` 里还有一份同名的），放宽成 internal 会直接重声明冲突。
+                if let span = Range(match.range(at: 1), in: code) {
+                    found.insert(String(code[span]))
+                }
+            }
+        }
+        return found
+    }
 
     /// 把每条失效连同原因打印出来，交各流认领；不参与判定。
     func testDeadAnchorsAreReportedWithReasons() throws {
@@ -93,6 +125,34 @@ extension DocReferenceRatchetTests {
         XCTAssertNotNil(dead.reason, "两侧都没有的名字必须仍然判死")
         XCTAssertTrue(dead.reason?.contains("Tests") == true,
                       "失效原因要说清查了哪两侧：\(dead.reason ?? "nil")")
+    }
+
+    /// 收声明的那把正则**自己**的元测试：上一批补 Tests 侧索引时只测了"喂进 testIdentifiers
+    /// 之后判活"，合成输入是手写集合，绕过了采集器 —— 于是 `enum` 不在关键字表里这件事
+    /// 无人可测，`SurfaceScanKit.codeLines` 在真实索引里被判死才由文档门当场撞出来。
+    /// 两个方向：声明族一个都不许漏（漏 = 正常引用判死），非声明里的名字一个都不许多
+    /// （多 = 金丝雀被自己喂活，判据失效测不出来）。
+    func testDeclarationCollectorCoversEveryNamedKindOnlyAtDeclarationSites() {
+        let text = """
+        enum ScanKit { static func codeLines(_ s: String) -> [String] { [] } }
+        actor Ledger { private func trim() {} }
+        protocol Ruler {}
+        struct Shape {}
+        final class SurfaceGuardTests: XCTestCase { func test_borderless() {} }
+        extension SurfaceGuardTests { func helper() {} }
+        let canary = "WsvCanaryDeadType.someMember 只是字符串，不是声明"
+        // struct CommentOnly {} —— 整行注释不是声明，剥注释由 SurfaceScanKit.codeLines 负责
+        """
+        let found = Self.declaredNames(in: text)
+        for name in ["ScanKit", "codeLines", "Ledger", "trim", "Ruler", "Shape",
+                     "SurfaceGuardTests", "test_borderless", "helper"] {
+            XCTAssertTrue(found.contains(name), "声明名 \(name) 没被收到 —— 文档引用它会判死")
+        }
+        for notADeclaration in ["WsvCanaryDeadType", "someMember", "CommentOnly"] {
+            XCTAssertFalse(found.contains(notADeclaration),
+                           "\(notADeclaration) 不是声明却被收了：判活集合一旦包含「哪里提到过」，"
+                         + "它就再也测不出判据失效（金丝雀当年就是这样不红的）")
+        }
     }
 
 }

@@ -2,11 +2,18 @@ import Foundation
 
 // OWNER: Workstream A (静态代码分析) —— ComplexitySanitizer
 //
-// 从 ComplexityEngine.swift 拆出，只为守住本工作流的红线（800 行以上的文件不得增加）：
-// 语义、阈值、判定顺序一字未改。原先的 `private` 跨文件后必须放宽到模块内可见（internal），
-// 除可见性外没有任何变化；ComplexityEngine 本身仍是唯一的入口。
+// 从 ComplexityEngine.swift 拆出，只为守住本工作流的红线（800 行以上的文件不得增加）。
 //
 // 复杂度前置清洗：剥掉注释与字符串字面量，同时产出花括号增量与「深度是否可信」标记。
+//
+// **R2 改动留痕（RD-06 / RD-07）**：原先这一层的词法状态是 `LexState` 里四个平铺字段
+// （`stringDelim` / `stringIsTemplate` / `inTemplateExpression` / `templateBraceDepth`），
+// 配套静态函数 `sanitizeLine(_:profile:state:)` / `advanceSanitizedLine` / `openMultiLineQuote` /
+// `handleTemplateExpressionCharacter` / `recordPlainCharacter` / `scanString`。
+// 现在字符级判定整体搬到 `ComplexityLexMachine.swift` 的**帧栈**（`ComplexityEngine.LexState.line(_:_:)`），
+// 本文件只留「按行驱动 + 逐行语言档案 + 前缀和 + 完整性结算」。
+// `scanBlockComment` / `matchMultiLineQuote` / `closingQuote` / `matchesAnyPrefix` / `startsHere`
+// 五条小工具留在下面，帧栈要用；除可见性外判定一字未改。
 
 extension ComplexityEngine {
     // MARK: Sanitizer (strings + comments stripped, brace deltas)
@@ -17,195 +24,175 @@ extension ComplexityEngine {
         var closes: [Int]
         var prefix: [Int]
         var balancedBefore: [Bool]
+        /// 配不平的读数。**以前没有这一格**：深度跌破容忍线只有 `balancedBefore` 一道静默闸门，
+        /// 被放弃的候选与被吞掉的行一个都不报，于是「没识别出来」在界面上长成「这仓库没函数」。
+        var integrity: LexIntegrity
     }
 
-    struct LexState {
-        var blockDepth = 0
-        var stringDelim: [Character]?
-        var stringIsTemplate = false
-        var inTemplateExpression = false
-        var templateBraceDepth = 0
+    /// 一份源码清洗完之后的**词法完整性**读数。非空 = 这份数字是在「边界不可信」的范围里量出来的，
+    /// 界面与 CLI 必须把它当部分测量说，不许当全量。
+    struct LexIntegrity: Sendable, Equatable {
+        /// 文件读完仍在串 / 模板串里的定界符个数（未闭合）
+        var endsInsideString = 0
+        /// 文件读完仍在 `${ … }` 插值表达式里（表达式帧未弹出）
+        var endsInsideExpression = 0
+        /// 文件读完块注释仍未闭合
+        var endsInsideBlockComment = false
+        /// 插值表达式 `${ … }` 里还剩未配平的 `{` 或 `(`
+        var unbalancedExpressions = 0
+        /// 插值表达式里出现多余闭括号（配平跌破 0）
+        var expressionUnderflow = 0
+        /// 像正则起点但本行内找不到收尾 `/`（按普通字符处理、不吞行；留名是因为它确实判不准）
+        var regexLikeUnterminated = 0
+        /// 全文件最低的花括号前缀深度（跌破 -3 之后函数边界不可信）
+        var lowestBracePrefix = 0
+        /// 有多少行处在「深度已不可信」的区间里（`balancedBefore` 为 false 的行数）
+        var untrustedDepthLineCount = 0
+        /// 定界符 / 注释**成对**出现在别的语言区域里（Vue 的 template / style），
+        /// 按分区归位后不进入代码统计的行数。0 = 该文件没有需要分区的区域。
+        ///
+        /// RD-42（本条原本是"有写无读"）：这一格是**口径**不是"没量准" ⇒ 刻意**不进**
+        /// `limitations` / `hasAnomaly`（那两条走 `scanLimitations`，在 CLI 被打成「未量准 N 条」）。
+        /// 唯一出口是 `FileSystemCodeAnalyzer.analyzeWithCoverage` 把它**直传**进
+        /// `CodeMetrics.nonCodeRegionLineCount`，再由 `MixedLanguageRegionCaliber.note(_:)`
+        /// 装配成一句中文给界面与 CLI；这里再算第二遍就是第二把尺子。
+        var nonCodeRegionLineCount = 0
+        /// 混合语言文件的分区没认出来，退回旧的粗判掩码（未知态，必须说出来）
+        var regionFallback = false
+
+        /// 有没有需要向用户出声的东西。
+        var hasAnomaly: Bool {
+            endsInsideString > 0 || endsInsideExpression > 0 || endsInsideBlockComment
+                || unbalancedExpressions > 0 || expressionUnderflow > 0
+                || lowestBracePrefix < -3 || untrustedDepthLineCount > 0 || regionFallback
+        }
+
+        /// 一行一条中文说明（带真实数字），交给 `CodeScanCoverage.limitationSummary` 落盘。
+        var limitations: [String] {
+            var lines: [String] = []
+            if endsInsideString > 0 {
+                lines.append("\(endsInsideString) 处字符串 / 模板串到文件末尾仍未闭合，"
+                    + "其后的代码没有进入函数识别与复杂度统计 —— 这一份是**部分测量**。")
+            }
+            if endsInsideExpression > 0 {
+                lines.append("\(endsInsideExpression) 处模板插值 `${…}` 到文件末尾仍未闭合。")
+            }
+            if endsInsideBlockComment {
+                lines.append("块注释到文件末尾仍未闭合，其后的代码没有进入统计。")
+            }
+            if unbalancedExpressions > 0 || expressionUnderflow > 0 {
+                lines.append("\(unbalancedExpressions + expressionUnderflow) 处模板插值 `${…}` 的 "
+                    + "`{}` / `()` 配不平，这些行上的函数边界不可信。")
+            }
+            if untrustedDepthLineCount > 0 {
+                lines.append("\(untrustedDepthLineCount) 行处在花括号深度跌破 -3 的区间"
+                    + "（最低 \(lowestBracePrefix) 层）：这些行上的签名一律放弃，不做边界推断。")
+            }
+            if regexLikeUnterminated > 0 {
+                lines.append("\(regexLikeUnterminated) 处形似正则字面量的 `/` 在本行内找不到收尾，"
+                    + "已按普通字符处理（不吞行，但该行的字符串边界判不准）。")
+            }
+            return lines
+        }
+
+        /// 区域之间的台账要合并：`<script>` 里没闭合的模板串不许因为切到 `<style>` 就悄悄归零。
+        static func merged(_ first: LexIntegrity, _ second: LexIntegrity) -> LexIntegrity {
+            var out = first
+            out.endsInsideString += second.endsInsideString
+            out.endsInsideExpression += second.endsInsideExpression
+            out.endsInsideBlockComment = out.endsInsideBlockComment || second.endsInsideBlockComment
+            out.unbalancedExpressions += second.unbalancedExpressions
+            out.expressionUnderflow += second.expressionUnderflow
+            out.regexLikeUnterminated += second.regexLikeUnterminated
+            out.lowestBracePrefix = min(out.lowestBracePrefix, second.lowestBracePrefix)
+            out.untrustedDepthLineCount += second.untrustedDepthLineCount
+            out.nonCodeRegionLineCount += second.nonCodeRegionLineCount
+            out.regionFallback = out.regionFallback || second.regionFallback
+            return out
+        }
     }
 
+    /// 既有条目用的单档案入口。**语义与 HEAD 一致**：整份文件按同一种语言清洗。
     static func sanitize(_ lines: [String], _ profile: LangProfile) -> SanitizedSource {
-        var cleaned = [String]()
-        cleaned.reserveCapacity(lines.count)
-        var opens = [Int]()
-        opens.reserveCapacity(lines.count)
-        var closes = [Int]()
-        closes.reserveCapacity(lines.count)
-        var state = LexState()
+        sanitize(lines, profiles: Array(repeating: profile, count: lines.count))
+    }
 
-        var prefix = [Int](repeating: 0, count: lines.count + 1)
-        for (index, line) in lines.enumerated() {
-            let out = sanitizeLine(line, profile, &state)
+    /// 逐行给档案：`profiles[index] == nil` 表示该行**不属于任何代码区域**
+    /// （Vue 的 `<template>` / `<style>` 正文），清洗成空行、不产出花括号增量、
+    /// 也不把定界符状态带过去 —— RD-07 要的「按分区归位」，函数识别这一条走这里。
+    static func sanitize(_ lines: [String], profiles: [LangProfile?]) -> SanitizedSource {
+        var cleaned = [String]()
+        var opens = [Int]()
+        var closes = [Int]()
+        cleaned.reserveCapacity(lines.count)
+        opens.reserveCapacity(lines.count)
+        closes.reserveCapacity(lines.count)
+
+        var state = LexState()
+        var ledger = LexIntegrity()
+        var nonCodeLines = 0
+        var lastProfile: LangProfile?
+
+        for index in 0..<lines.count {
+            let profile = index < profiles.count ? profiles[index] : nil
+            guard let profile else {
+                // 非代码区域：整行进「已知不统计」账，不留任何词法状态
+                nonCodeLines += 1
+                ledger = LexIntegrity.merged(ledger, state.seal())
+                state = LexState()
+                lastProfile = nil
+                cleaned.append("")
+                opens.append(0)
+                closes.append(0)
+                continue
+            }
+            if let last = lastProfile, last.languageKey != profile.languageKey {
+                // 跨语言区域（Vue 的 script(lang=ts) ↔ template ↔ style）：
+                // 上一层区域里未闭合的定界符必须结算并归零，不许继续吃下一区域的代码
+                ledger = LexIntegrity.merged(ledger, state.seal())
+                state = LexState()
+            }
+            lastProfile = profile
+            let out = state.line(lines[index], profile)
             cleaned.append(out.text)
             opens.append(out.opens)
             closes.append(out.closes)
-            prefix[index + 1] = prefix[index] + out.opens - out.closes
         }
+        ledger = LexIntegrity.merged(ledger, state.seal())
+        ledger.nonCodeRegionLineCount = nonCodeLines
+        return finishSanitizedSource(cleaned: cleaned, opens: opens, closes: closes, integrity: ledger)
+    }
 
-        // balancedBefore[i]：第 i 行之前累计花括号从未跌破 -3。跌破说明有字符串/注释被误判
-        // 导致深度错位（heredoc、正则字面量里的 `}`），此后的函数边界不可信，直接放弃候选，
-        // 免得 curlyEnd 在错位的深度上扫到文件尾。容忍 3 层是为了放过零星噪声。
-        var balanced = [Bool](repeating: true, count: lines.count)
+    /// 前缀和与「深度是否可信」。
+    ///
+    /// `balancedBefore[i]`：第 i 行之前累计花括号从未跌破 -3。跌破说明有字符串 / 注释被误判
+    /// 导致深度错位（heredoc、正则字面量里的 `}`），此后的函数边界不可信，直接放弃候选，
+    /// 免得 `curlyEnd` 在错位的深度上扫到文件尾。容忍 3 层是为了放过零星噪声。
+    /// R2 补的是那半句：**放弃了必须留名**（`untrustedDepthLineCount`），不许静默丢行继续算。
+    static func finishSanitizedSource(cleaned: [String], opens: [Int], closes: [Int],
+                                      integrity: LexIntegrity) -> SanitizedSource {
+        var prefix = [Int](repeating: 0, count: cleaned.count + 1)
+        for index in 0..<cleaned.count {
+            prefix[index + 1] = prefix[index] + opens[index] - closes[index]
+        }
+        var balanced = [Bool](repeating: true, count: cleaned.count)
         var lowest = 0
-        for index in 0..<lines.count {
+        var untrusted = 0
+        for index in 0..<cleaned.count {
             if prefix[index] < lowest { lowest = prefix[index] }
             balanced[index] = lowest > -3
+            if !balanced[index] { untrusted += 1 }
         }
-        return SanitizedSource(cleaned: cleaned, opens: opens, closes: closes, prefix: prefix, balancedBefore: balanced)
+        var settled = integrity
+        settled.lowestBracePrefix = lowest
+        settled.untrustedDepthLineCount += untrusted
+        return SanitizedSource(cleaned: cleaned, opens: opens, closes: closes, prefix: prefix,
+                               balancedBefore: balanced, integrity: settled)
     }
 
-    struct LineOutput {
-        var text = ""
-        var opens = 0
-        var closes = 0
-    }
+    // MARK: 帧栈要用的五条小工具（搬自 HEAD，判定一字未改）
 
-    /// 一行清洗里「一个字符处理完」的两种结局，逐字对应原 `sanitizeLine` 的 `return out` / `continue`。
-    enum SanitizeLineStep {
-        /// 本行到此为止（进了行注释、或跨行构造到这行没闭合）——原实现在这里 `return out`。
-        case lineDone
-        /// index 已推进，回到 while 顶部重新看当前字符——原实现在这里 `continue`。
-        case keepGoing
-    }
-
-    static func sanitizeLine(_ raw: String, _ profile: LangProfile, _ state: inout LexState) -> LineOutput {
-        var out = LineOutput()
-        guard !raw.isEmpty else { return out }
-        let chars = Array(raw)
-        var i = 0
-
-        // 续行：仍在跨行字符串里
-        if let delim = state.stringDelim, state.inTemplateExpression == false {
-            if scanString(chars, &i, delim, state.stringIsTemplate, profile, &state, &out) == false {
-                return out
-            }
-        }
-
-        while i < chars.count {
-            if advanceSanitizedLine(chars, &i, profile, &state, &out) == .lineDone { return out }
-        }
-        return out
-    }
-
-    /// 原先 79 行、CC 21 的那个 while 循环体，逐段搬到下面的小函数里；
-    /// **判定顺序一个字没改**（块注释 → 新开块注释 → 行注释 → 跨行引号 → 单行引号 → 模板插值 → 普通字符），
-    /// 每一段该 `continue` 的返回 `.keepGoing`，该 `return out` 的返回 `.lineDone`。
-    static func advanceSanitizedLine(_ chars: [Character], _ i: inout Int, _ profile: LangProfile,
-                                     _ state: inout LexState, _ out: inout LineOutput) -> SanitizeLineStep {
-        if state.blockDepth > 0 {
-            return scanBlockComment(chars, &i, profile, &state) ? .keepGoing : .lineDone
-        }
-        if let start = profile.blockStart, startsHere(chars, start, at: i) {
-            state.blockDepth = 1
-            i += start.count
-            return scanBlockComment(chars, &i, profile, &state) ? .keepGoing : .lineDone
-        }
-        if matchesAnyPrefix(chars, at: i, profile.lineComments) != nil {
-            return .lineDone
-        }
-        if let delim = matchMultiLineQuote(chars, at: i, profile) {
-            return openMultiLineQuote(chars, &i, delim, profile, &state, &out)
-        }
-        if profile.quotes.contains(chars[i]), let close = closingQuote(chars, chars[i], from: i + 1) {
-            i = close + 1
-            return .keepGoing
-        }
-        // 本行没有闭合引号（Rust 生命周期、英文撇号）→ 当普通字符处理
-
-        let c = chars[i]
-        if state.inTemplateExpression,
-           handleTemplateExpressionCharacter(c, chars, &i, &state, &out) {
-            return .keepGoing
-        }
-        recordPlainCharacter(c, &i, &out)
-        return .keepGoing
-    }
-
-    /// 进入 JS/TS/Vue 模板串或 Python docstring：置状态、吃掉定界符，再看这行内能不能闭合。
-    static func openMultiLineQuote(_ chars: [Character], _ i: inout Int, _ delim: [Character],
-                                   _ profile: LangProfile, _ state: inout LexState,
-                                   _ out: inout LineOutput) -> SanitizeLineStep {
-        state.stringDelim = delim
-        state.stringIsTemplate = delim.first == "`" && profile.backtickInterpolates
-        state.inTemplateExpression = false
-        i += delim.count
-        guard scanString(chars, &i, delim, state.stringIsTemplate, profile, &state, &out) else {
-            return .lineDone
-        }
-        return .keepGoing
-    }
-
-    /// 反引号模板串 `${ … }` 内部的 `{` / `}` 要自己配平，配平完就退出表达式态。
-    /// 返回 false 表示当前字符既不是 `{` 也不是 `}`，交给普通字符分支处理。
-    static func handleTemplateExpressionCharacter(_ c: Character, _ chars: [Character], _ i: inout Int,
-                                                  _ state: inout LexState,
-                                                  _ out: inout LineOutput) -> Bool {
-        if c == "{" {
-            state.templateBraceDepth += 1
-            out.text.append(c)
-            out.opens += 1
-            i += 1
-            return true
-        }
-        guard c == "}" else { return false }
-        if state.templateBraceDepth == 0 {
-            state.inTemplateExpression = false
-            i += 1
-            return true
-        }
-        state.templateBraceDepth -= 1
-        out.text.append(c)
-        out.closes += 1
-        i += 1
-        return true
-    }
-
-    /// 留在 cleaned 里的普通字符：只有真正的花括号才计进深度增量。
-    static func recordPlainCharacter(_ c: Character, _ i: inout Int, _ out: inout LineOutput) {
-        if c == "{" {
-            out.opens += 1
-        } else if c == "}" {
-            out.closes += 1
-        }
-        out.text.append(c)
-        i += 1
-    }
-
-    /// 返回 false 表示该行结束时仍在字符串内。
-    static func scanString(
-        _ chars: [Character], _ i: inout Int, _ delim: [Character], _ isTemplate: Bool,
-        _ profile: LangProfile, _ state: inout LexState, _ out: inout LineOutput
-    ) -> Bool {
-        let n = chars.count
-        // Go 的反引号原始字符串里反斜杠不是转义符（`\` 就是两个字符），
-        // 这里若照 JS 的方式跳两步，会把收尾的反引号一起吃掉，从此整文件被当成在字符串里。
-        let honorsEscapes = delim.first != "`" || profile.backtickInterpolates
-        while i < n {
-            if isTemplate, chars[i] == "$", i + 1 < n, chars[i + 1] == "{" {
-                state.inTemplateExpression = true
-                state.templateBraceDepth = 0
-                i += 2
-                return true
-            }
-            if honorsEscapes, chars[i] == "\\" {
-                i += 2
-                continue
-            }
-            if startsHere(chars, delim, at: i) {
-                state.stringDelim = nil
-                state.stringIsTemplate = false
-                i += delim.count
-                return true
-            }
-            i += 1
-        }
-        return false
-    }
-
-    /// 返回 false 表示该行结束时块注释仍未闭合。
+    /// 返回 false 表示该行结束时块注释仍未闭合。嵌套块注释（Swift）按 `blockDepth` 配平。
     static func scanBlockComment(
         _ chars: [Character], _ i: inout Int, _ profile: LangProfile, _ state: inout LexState
     ) -> Bool {
@@ -213,8 +200,8 @@ extension ComplexityEngine {
             state.blockDepth = 0
             return true
         }
-        let n = chars.count
-        while i < n {
+        let count = chars.count
+        while i < count {
             if profile.nestedBlockComments, startsHere(chars, start, at: i) {
                 state.blockDepth += 1
                 i += start.count
@@ -238,6 +225,7 @@ extension ComplexityEngine {
         return nil
     }
 
+    /// 单行引号串里的闭合位置（`\` 转义跳两格）。
     static func closingQuote(_ chars: [Character], _ quote: Character, from: Int) -> Int? {
         var i = from
         while i < chars.count {

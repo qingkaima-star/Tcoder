@@ -16,6 +16,50 @@ struct DuplicationResult: Sendable {
     /// 按行数降序截断到 `maxBlocks` 时被丢掉的克隆块数，以及它们覆盖的代码行数。
     var blocksDroppedByCap: Int = 0
     var linesOutsideReportedBlocks: Int = 0
+    /// 榜外未列块的**稳定坐标**（`DuplicatedBlock.id` = 涉及路径排序后拼接 + 行数）。
+    /// RD-17 工单点名要的东西：只留一个总数 = 读的人无法反驳、也无法去核对那 181 处在哪。
+    /// 顺序 = 榜单自己的排序（行数降序 → id 升序），因此同一份输入永远给出同一串。
+    var blocksOutsideBoard: [String] = []
+
+    /// 「这一格的重复率是按什么算的」——必须**这一格自己说**，不许只靠 `scanLimitations` 里
+    /// 别处的一句（看重复率的人不会先翻边界列表）。两个口径的差别是真实的：
+    /// `ratio` 的分子是**全量命中的并集**，`blocks` 只是按行数取前 `maxBlocks` 块的明细。
+    /// **没有任何阈值在这里被改动**：`maxBlocks = 20` 与判档门限都是冻结口径。
+    var boardCaliberNote: String {
+        let listed = blocks.map(\.lineCount).reduce(0, +)
+        var line = "重复率 \(NumberFormat.percent(ratio, precision: 1)) 的口径是**全量命中**："
+            + "\(NumberFormat.grouped(duplicatedCodeLines)) 个代码行落在重复块内 / 共 "
+            + "\(NumberFormat.grouped(totalCodeLines)) 代码行（并集口径，同一行被多块覆盖只算一次）。"
+        line += "明细榜单只列前 \(DuplicationEngine.maxBlocks) 块（合计 \(NumberFormat.grouped(listed)) 行，"
+            + "榜单行数是各块行数相加、与并集不同尺），榜外未列 \(NumberFormat.grouped(blocksDroppedByCap)) 块 / "
+            + "\(NumberFormat.grouped(linesOutsideReportedBlocks)) 行。"
+        line += blocksOutsideBoard.isEmpty
+            ? "榜外没有剩余块。"
+            : "。\(Self.coordinateDisclosure(blocksOutsideBoard))这些块参与分子、不参与明细。"
+        return line
+    }
+
+    /// 榜外坐标的**唯一**披露形状（RD-52）：散文点前 3 条样本，**全量样本落盘**。
+    ///
+    /// ⚠️ 我最初把这条记成「全量坐标被静默截断」，复核后不对：引擎本来就只点
+    /// `DuplicationScan.outsideBoardSampleLimit` 条（现 6 条），未点名的块数在
+    /// `blocksDroppedByCap` 里 —— 那不是截断。真正的缺陷是另外两件事：
+    /// 同一串 id 在一份报告里**印两遍**（口径句 + 扫描边界句），
+    /// 而 JSON 里**没有承接格**，读机器的人仍要解析散文（RD-48 刚消灭过的那个形状）；
+    /// 每条 id 又是「绝对路径 ; 绝对路径:行数」，6 条就把一句限制说明撑到实测 2,407 字符。
+    /// 现在：散文 3 条 + 明确指回字段与计数，字段给引擎那 6 条**一条不减**。
+    /// 之所以敢把散文从 6 降到 3：原先它是唯一载体，降就是藏；现在全量在字段里，
+    /// 散文只负责"让人一眼看到长什么样"，没有一条样本因此消失。
+    static func coordinateDisclosure(_ all: [String], limit: Int = 3) -> String {
+        guard all.isEmpty == false else { return "榜外没有剩余块。" }
+        let named = min(all.count, limit)
+        var line = "榜外坐标（点样 \(named) 条）：\(all.prefix(named).joined(separator: " ; "))"
+        if all.count > named {
+            line += "；另有 \(all.count - named) 条样本未写进这句"
+        }
+        return line + "（全部 \(all.count) 条样本见 `code.duplicateBlockCoordinatesOutsideBoard`，"
+            + "榜外未列的块数见 `code.duplicatedBlocksDroppedByCap`）。"
+    }
 }
 
 enum DuplicationEngine {
@@ -105,6 +149,7 @@ enum DuplicationEngine {
                                  fragmentsDroppedByBudget: scan.droppedFragments,
                                  filesHittingLineCap: indexed.filesHittingLineCap,
                                  blocksDroppedByCap: ranked.droppedByCap,
-                                 linesOutsideReportedBlocks: ranked.linesOutsideReportedBlocks)
+                                 linesOutsideReportedBlocks: ranked.linesOutsideReportedBlocks,
+                                 blocksOutsideBoard: Array(ranked.outsideBoardCoordinates))
     }
 }

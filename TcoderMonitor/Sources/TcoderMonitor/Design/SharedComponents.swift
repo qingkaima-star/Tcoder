@@ -92,6 +92,32 @@ struct MetricTile: View {
         case value(Double, Color)
     }
 
+    /// 窄态下读数与单位允许等比缩到的下限。
+    ///
+    /// 只有一个数、且写在**基座**里：散在各调用点的缩放系数会变成"每页缩得不一样"，
+    /// 而那正是这轮要修的"同一档两种色"的横向版本。
+    /// 0.8 的取法：`metricNumber` 那档缩到 0.8 之后仍明显大于脚注字号，
+    /// 主次不丢；再低就开始与脚注糊成一片。
+    static let metricNumberMinimumScale = 0.8
+
+    /// 让「MB/s」这类单位成为**不可断开**的整体：在每个 `/` 前插一个 U+2060 WORD JOINER。
+    ///
+    /// 窄态（1080）实测「201 MB/s」会断成「201 MB/」+「s」—— 断点在斜杠之后，
+    /// 那是 Unicode 换行规则给 `/` 的合法机会，**不是字符串写错了**，
+    /// 所以光靠"只断在空格上"的假设修不掉（P49b 就是这么修了一半、重拍才看出来）。
+    /// 插连接符只挪断行位置、**不改任何一个可见字符**，
+    /// 于是断行只剩数字与单位之间那个空格可断（「201」/「MB/s」）。
+    /// 只在**渲染处**做：数据、日志、目录键里的原字符串一个字都不动。
+    static func unbreakUnits(_ text: String) -> AttributedString {
+        var joined = ""
+        joined.reserveCapacity(text.count + text.lazy.filter { $0 == "/" }.count)
+        for character in text {
+            if character == "/" { joined.append("\u{2060}") }
+            joined.append(character)
+        }
+        return AttributedString(joined)
+    }
+
     init(
         label: String,
         value: String?,
@@ -129,14 +155,27 @@ struct MetricTile: View {
                     .lineLimit(1)
             }
             HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
-                Text(Self.displayValue(value))
+                Text(Self.unbreakUnits(Self.displayValue(value)))
                     .font(Theme.Typo.metricNumber.font)
                     .foregroundStyle(Self.tint(value: value, fallback: tint))
                     .contentTransition(.numericText())
+                    // **读数只能断在空格上，不许截尾。** 窄态（本 App 自己的 `minWidth` 1080）
+                    // 实拍性能页抓到两代错：
+                    //   第一代（不限制）：磁盘折成「128 MB/」+「s」—— 单位被劈开；
+                    //   第二代（`lineLimit(1)` + 缩放）：内存显示成「30.0…」、
+                    //     网络成「228.2 Kb…」—— **数字被截尾比折行更坏**，
+                    //     一个截断的数读起来像一个确定的数。
+                    // 所以留两行、给一点缩放，让断点只可能落在数字与单位之间的那个空格上；
+                    // `fixedSize(vertical:)` 保证两行真的占两行，而不是被外层压回一行再截。
+                    .lineLimit(2)
+                    .minimumScaleFactor(Self.metricNumberMinimumScale)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let unit {
-                    Text(localizedCopy(unit))
+                    Text(Self.unbreakUnits(localizedCopy(unit)))
                         .font(Theme.Typo.label.font)
                         .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             // 量条钉在**值与脚注之间**，四格才共一条基线（见 `MetricGauge` 那段注释）。

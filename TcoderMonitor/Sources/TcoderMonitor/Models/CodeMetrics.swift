@@ -27,6 +27,19 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     /// 占比分子的唯一取法，两处消费方（评分器与界面）都走它，免得各写一份口径。
     var reportedHugeFileCount: Int { hugeFileCount ?? hugeFiles.count }
     var topComplexFunctions: [FunctionHotspot] = []
+    /// **全体**函数里判档达到"高"或更高的个数。
+    ///
+    /// ⚠️ 为什么没有一并加一枚"热点总数"：读实现才确认 `FileSystemCodeAnalyzer.hotspots(…)`
+    /// **根本不做筛选** —— 它把每一个被识别的函数都映射成 `FunctionHotspot`，
+    /// 所以它的 `count` 等于函数总数（本仓 3358），拿它当"热点总数"上屏就是一句谎话。
+    /// 榜就是榜：`topComplexFunctions` 的读数以"复杂度**上榜**"命名是诚实的，
+    /// 需要"多少个函数真的偏复杂"这一格时，用下面这个按判档算出来的个数。
+    var highRiskHotspotCount: Int? = nil
+    /// 取法只留一处：消费方不许各自再写一遍 `?? 榜内 filter`（那会得到第二个口径）。
+    /// 旧报告没有这一格时才退回榜内算法，那是**偏小**的口径（榜只留 20）。
+    var reportedHighRiskHotspotCount: Int {
+        highRiskHotspotCount ?? topComplexFunctions.filter { $0.risk.rank >= RiskLevel.high.rank }.count
+    }
     var longFunctions: Int = 0
     var averageFunctionLength: Int = 0
 
@@ -60,6 +73,60 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     /// 0...1 — share of code lines that fall inside a duplicated block.
     var duplicationRatio: Double = 0
     var duplicatedBlocks: [DuplicatedBlock] = []
+
+    // MARK: 重复明细榜的"榜外那一半"（RD-48 · 台账卷二 §27 之续）
+    //
+    // 存在理由：`DuplicationEngine` 早就算清了"被上限切掉多少"（下面这几枚全是它的字段直传），
+    // 但契约里没有承接格 ⇒ 那四个数**只活在 `scanLimitations` 那句中文里**。
+    // 后果有两层：① 消费方要"榜外还有几块"只能去解析句子（等于造第二把尺子）；
+    // ② 界面页尾那句"明细榜上限 20 块"是**数**，却来自一条按句式认领的字符串
+    // （`CodeBoardTruth.outsideBoardNote`），改文案不改认领标记就会静默失去披露。
+    // ⚠️ **故意不给"重复块总数"**：`rankedBlocks` 在撞 id 时还会削掉若干块而无处计数
+    // （R6b 交回时点名），所以"榜内 + 榜外 == 总数"这个等式天然不平，
+    // 造一枚看似精确的总数就是把不平藏起来。
+    /// 明细榜的封顶长度（引擎那份 `maxBlocks` 的直传，不是界面自己抄的 20）。
+    /// `nil` = 本次没跑到重复分析（旧报告与"依赖/日志缺席"同一种处理）。
+    var duplicatedBlockLimit: Int? = nil
+    /// 按行数降序截断到上限时**被丢掉的克隆块数**（它们参与了 ratio，只是没进明细）。
+    var duplicatedBlocksDroppedByCap: Int? = nil
+    /// 上面那些被丢掉的块覆盖的代码行数。
+    var duplicatedLinesOutsideReportedBlocks: Int? = nil
+    /// 因每指纹片段的展开预算而**没展开成片段**的拷贝窗口数（ratio 已含它们）。
+    var duplicateFragmentsNotExpandedCount: Int? = nil
+    /// 归一化行数触到窗口上限、后半段克隆不参与检测的文件数。
+    var duplicateFilesHittingLineCap: Int? = nil
+
+    /// 榜外（被明细榜单的 20 块上限切掉、但**参与重复率分子**）那些块的**可点名坐标**（RD-52）。
+    ///
+    /// 存在理由：这些坐标原先只活在 `scanLimitations` 的中文句子里，而且**同一串在一份报告里
+    /// 印两遍**（口径句一遍、扫描边界句一遍），单条实测长达 2,407 个字符。
+    /// 读 JSON 的人（含 AI 调用方）要定位"到底是哪几块"仍然得解析散文 ——
+    /// 这正是 RD-48 刚消灭过的形状，在坐标这一格复活了。
+    /// 现在引擎那份**原样**落在这里（原始测量，不做加工），句子只点名前几条并指回本字段。
+    /// `nil` = 这份报告没有这一读数（旧报告 / 这一路没跑）；**空数组 = 榜外确实没有剩余块** ——
+    /// 两件事不许混，后者是"量过了、为零"。
+    /// **Optional 是落盘兼容要求**：非 Optional 带默认值会让旧报告整份解码失败。
+    var duplicateBlockCoordinatesOutsideBoard: [String]? = nil
+
+    // MARK: 混合语言文件的分区归位读数（RD-42 · 台账卷二 §23「有写无读」那一条）
+    //
+    // 存在理由：`ComplexityEngine.LexIntegrity.nonCodeRegionLineCount` 从 R2 起就在算
+    // （`sanitize(_:profiles:)` 里逐行累加、`merged` 里跨区累加），全仓却**一个读者都没有**：
+    // 它不在 `hasAnomaly`、也不在 `limitations`，于是"分区认出来了、于是 N 行按非代码归位"
+    // 这件事一件没说。而"分区**没**认出来"是另一条在出声的（`vueRegionFallbackFileCount`）。
+    //
+    // ⚠️ **这一格是口径，不是"未量准"**：template / style 那些行是**已经量到了**、
+    // 只是分类不同（不进代码统计）。所以它**不进** `scanLimitations` —— 那条在 CLI 会被
+    // 打成「未量准 N 条」（`CLIScoreText.precisionCaveat`），塞进来就是把那个数灌虚高。
+    // 读者走扫描边界那一族：`MixedLanguageRegionCaliber.note(_:)`（界面与 CLI 同一把尺子）。
+    //
+    /// 混合语言文件（`.vue` 的 template / style 与 SFC 标签行）里按分区归位为**非代码**、
+    /// 因而没有进入代码统计的行数。**直传**词法台账那一份，任何消费方都不许再数第二遍。
+    /// `nil` = **这份报告没有这个读数**（旧报告 / 这一路没跑）—— 不许写成 0；
+    /// `0` = 跑过了，这个语料里没有需要分区的区域（纯 Swift/Java 仓库）。
+    /// **Optional 是落盘兼容要求**：非 Optional 带默认值会让旧报告整份解码失败。
+    var nonCodeRegionLineCount: Int? = nil
+
     var largestFileLineCount: Int = 0
 
     var overallRisk: RiskLevel = .none

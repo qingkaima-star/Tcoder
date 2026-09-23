@@ -237,4 +237,44 @@ extension CodeAnalyzerTests {
                       "这一维必须一路带到界面上，不许停在 coverage 结构里")
     }
 
+    /// RD-54：进散文的样本清单必须**可复现**。
+    ///
+    /// 现场（第一次拿真 GUI 落盘与真 CLI 落盘对同一总体做逐字段对表时抓出来的）：
+    /// 同一个总体，GUI 侧写「命中：.gitignore ×2、.build ×1、.git ×1」，
+    /// CLI 侧写「命中：.gitignore ×2、.git ×1、.build ×1」——**并集完全相同，次序不同**。
+    /// 根因是三处 `sorted { $0.value > $1.value }` 只按计数排，计数相同（全部 ×1 是常态）
+    /// 时相对次序交给 `Dictionary` 的遍历序。
+    ///
+    /// 判据不是"两次跑出来一样"（那是碰运气），而是**手写的期望串**：
+    /// 同计数段必须按名字升序，且两种插入顺序渲染成同一个字节串。
+    func testSampleListsInDisclosureSentencesAreDeterministic() throws {
+        let names = ["zzz.stringsdict", "aaa.strings", "mmm.build", "ggg.git"]
+        var forward = SourceSkipLedger()
+        var backward = SourceSkipLedger()
+        for (index, name) in names.enumerated() {
+            forward.record(.unsupportedExtension, path: "root/\(name)", bytes: 1_000 + Int64(index), rule: name)
+        }
+        for (index, name) in names.reversed().enumerated() {
+            backward.record(.unsupportedExtension, path: "root/\(name)", bytes: 1_000 + Int64(index), rule: name)
+        }
+        let left = forward.clearing(linesCounted: false)
+        let right = backward.clearing(linesCounted: false)
+        XCTAssertEqual(left, right, "同一批剔除项，插入顺序不同就渲染成两句不一样的话：\(left) / \(right)")
+
+        // 独立真值：手写的期望次序（计数全为 1 ⇒ 按名字升序），不是拿实现的输出当答案。
+        let expected = "aaa.strings ×1、ggg.git ×1、mmm.build ×1、zzz.stringsdict ×1"
+        XCTAssertTrue(left.contains { $0.contains("命中：\(expected)") },
+                      "同计数段没有按名字升序兜底：\(left)")
+
+        // 反例：计数不同时段首先按计数排（名字升序只在并列时接管），否则这条守卫是摆设。
+        var mixed = SourceSkipLedger()
+        for index in 0..<3 { mixed.record(.unsupportedExtension, path: "root/b\(index)", bytes: 10, rule: "bbb") }
+        mixed.record(.unsupportedExtension, path: "root/a", bytes: 10, rule: "aaa")
+        mixed.record(.unsupportedExtension, path: "root/c", bytes: 10, rule: "ccc")
+        mixed.record(.unsupportedExtension, path: "root/d", bytes: 10, rule: "ddd")
+        let mixedLine = try XCTUnwrap(mixed.clearing(linesCounted: false).first)
+        XCTAssertTrue(mixedLine.contains("命中：bbb ×3、aaa ×1、ccc ×1、ddd ×1"),
+                      "计数优先、并列才按名字：\(mixedLine)")
+    }
+
 }

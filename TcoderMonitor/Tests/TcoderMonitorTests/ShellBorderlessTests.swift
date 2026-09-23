@@ -101,8 +101,10 @@ final class ShellBorderlessTests: XCTestCase {
 
     /// 总览页面级布局的三段：页 body + 两个段落装配器。
     /// 只量 `body` 会让「把拥挤挪进 scaleSegment」也算通过。
-    static let overviewLayoutMarkers = [
-        "var body: some View {",
+    /// 总览的**页面级分段**（批次 P31 起页面级一律单列，所以只有这两段）。
+    /// 原来那三档里含 `var body`，但 `body` 自己不带 `spacing:`（组间距由基座 Scaffold 定），
+    /// 数它会让"每段声明一处组间距"这条判据对不上号。
+    static let overviewPageSegments = [
         "private var scaleSegment: some View {",
         "private var listSegment: some View {",
     ]

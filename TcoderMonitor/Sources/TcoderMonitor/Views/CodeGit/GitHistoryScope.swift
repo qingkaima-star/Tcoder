@@ -98,17 +98,24 @@ struct GitHistoryScope: Equatable {
     }
 
     /// 「总提交数」磁贴的副标题：先把合并交代清楚，再给节奏数字。
+    ///
+    /// P53：这三个分支此前是 `"...含 \(n) 次合并 · 非合并 " + "\(m) 次"` 这种**先拼再上屏**的写法。
+    /// 渲染侧确实查了表，但查的是**拼完之后**的整串 —— 串里带着测得值，
+    /// 目录里没有任何键可能对得上，于是英文态永远出中文（`ax_body_audit` 的 B 类 2× 那条
+    /// 「含 279 次合并 · 非合并 606 次」就是这么来的）。改成整句键 + 位置占位符。
     var totalTileCaption: String {
         switch basis {
         case .complete(let merges) where merges > 0:
-            return "含 \(NumberFormat.grouped(merges)) 次合并 · 非合并 "
-                + "\(NumberFormat.grouped(nonMergeCommitsAnalysed)) 次"
+            return localizedFormat("含 %1$@ 次合并 · 非合并 %2$@ 次",
+                                     NumberFormat.grouped(merges),
+                                     NumberFormat.grouped(nonMergeCommitsAnalysed))
         case .complete:
-            return "无合并提交 · 已覆盖全部历史"
+            return localizedCopy("无合并提交 · 已覆盖全部历史")
         case .windowCapped:
-            return "含合并 · 非合并窗口 " + NumberFormat.grouped(nonMergeCommitsAnalysed) + " 次"
+            return localizedFormat("含合并 · 非合并窗口 %1$@ 次",
+                                     NumberFormat.grouped(nonMergeCommitsAnalysed))
         case .unknown:
-            return "旧报告未记录窗口口径"
+            return localizedCopy("旧报告未记录窗口口径")
         }
     }
 
@@ -116,8 +123,9 @@ struct GitHistoryScope: Equatable {
     func authorTileCaption(authorCount: Int) -> String {
         switch basis {
         case .windowCapped:
-            return "近 \(NumberFormat.grouped(nonMergeCommitsAnalysed)) 次提交窗口内 · "
-                + "\(NumberFormat.grouped(authorCount)) 人"
+            return localizedFormat("近 %1$@ 次提交窗口内 · %2$@ 人",
+                                     NumberFormat.grouped(nonMergeCommitsAnalysed),
+                                     NumberFormat.grouped(authorCount))
         case .unknown:
             return localizedFormat("%1$@ 人 · 分母口径未记录", NumberFormat.grouped(authorCount))
         case .complete(let merges):
@@ -131,9 +139,13 @@ struct GitHistoryScope: Equatable {
     }
 
     /// 图表/明细卡副标题后缀：窗口没盖住全部历史时必须挂在每张图上。
+    ///
+    /// P53：这里此前直出 `" · 近 \(n) 次提交窗口内"`。三个取用点里有两个把它当 `%3$@`
+    /// 塞进**已经查表**的整句模板 —— 模板翻成了英文，插进去的这段仍是中文，
+    /// 于是英文态同一行里两种语言并存，比纯中文更难读。后缀本身必须是一条键。
     var windowSuffix: String {
         isWindowTruncated
-            ? " · 近 \(NumberFormat.grouped(nonMergeCommitsAnalysed)) 次提交窗口内"
+            ? localizedFormat(" · 近 %1$@ 次提交窗口内", NumberFormat.grouped(nonMergeCommitsAnalysed))
             : ""
     }
 }

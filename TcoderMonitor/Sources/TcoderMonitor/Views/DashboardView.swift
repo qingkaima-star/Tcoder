@@ -42,32 +42,26 @@ struct DashboardView: View {
     }
 
     /// 代码规模这一段（实时读数已单独成 `DashboardLiveReadout`，见其注释的失效域理由）。
+    ///
+    /// **页面级单列**。旧的 `LazyVGrid(pairColumns)` 两列量出三条病灶（`7b4ec25` 那批 36 张页尾
+    /// 配 `card_edges` 逐带量）：不渲染的那格照样占栅格槽位 ⇒ 297pt 画布洞；同一行两张卡
+    /// 不共顶线（1065px vs 1593px）；而两列本身是把卡**压到内容最小宽之下**才挤出来的
+    /// （两张各需 > 463pt，容器只有 951pt），那属「溢出/挤压」而不是排版问题。
+    /// 守卫 `ShellBorderlessTests.test_dashboardIsSingleColumnWithNoCardPairGrid`。
     private var scaleSegment: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.group) {
             codeScaleGroup
-            LazyVGrid(columns: pairColumns, alignment: .leading,
-                      spacing: Theme.Spacing.group) {
-                fileCompositionGroup
-                coverageStrip
-            }
+            fileCompositionGroup
+            coverageStrip
         }
     }
 
-    /// 底部两块清单（最近提交 / 高频错误）。窄窗口自动折成单列。
+    /// 底部两块清单（最近提交 / 高频错误）。同上，单列。
     private var listSegment: some View {
-        LazyVGrid(columns: pairColumns, alignment: .leading,
-                  spacing: Theme.Spacing.group) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.group) {
             recentCommitsGroup
             topErrorsCard
         }
-    }
-
-    /// 栅格列宽全部走基座锚点，不再写死「一行四列」：窗口收窄时自动折行（WS-H §3.2）。
-    /// 列间距从 `gutter`(12) 抬到 `pageMargin`(24)：无界面里两列之间没有盒体边界，
-    /// 12pt 会被读成「两列挤成一坨」。
-    private var pairColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: Theme.Layout.twoColumnMinWidth),
-                  spacing: Theme.Spacing.pageMargin)]
     }
 
     // MARK: 今日错误的着色（语义色只留给真有危险的那一态）
@@ -130,14 +124,22 @@ struct DashboardView: View {
         }
     }
 
-    /// 文件构成：从「代码规模」那张卡里分出来的第二组。
+    /// 文件构成：从「代码规模」那张卡里分出来的第二组。三格**横排**——
+    /// 单列化之后这张卡有 951pt 宽，竖排三行会把右侧四分之三留空（乱清单 §5 那一行）。
+    /// 刻意不升格成 `MetricTile`：这三格是次级读数，最重的字号要留给页顶那条读数带
+    /// （风格契约 4），所以沿用 `StatLine` 那一档，只把每格撑成等宽三栏。
     private var fileCompositionGroup: some View {
         GlassSection("文件构成") {
             if let code = report?.code {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                HStack(spacing: Theme.Spacing.lg) {
                     StatLine(label: "文件", value: NumberFormat.grouped(code.totalFiles))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    DataBandSeparator()
                     StatLine(label: "注释行", value: NumberFormat.grouped(code.commentLines))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    DataBandSeparator()
                     StatLine(label: "空行", value: NumberFormat.grouped(code.blankLines))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
                 Text(ShellCopy.notAnalyzed(.codeSize))
@@ -245,7 +247,7 @@ struct DashboardView: View {
                             // 原来是 `.tertiary`：这一行里是**测得值**（含测试代码占比、差值），
                             // 测得值不得用 tertiary。降到 10pt 已经足够安静了。
                             .foregroundStyle(.secondary)
-                        CopyHelpBadge(Self.coverageCaliberLine(coverage))
+                        CopyHelpBadge(DashboardCoverageHelp.text(coverage))
                     }
                     // #38：这些读数是把几份本地报告合起来算的，而报告本身是 .gitignore 挡着的
                     // 本地产物——不写「哪天生成的」，一份几天前的 lcov 就能长期冒充新鲜数据进健康分。
@@ -346,9 +348,9 @@ private struct CommitRow: View {
                 // spec §0 根因 ④ 点名的 36 处里就有它。
                 .foregroundStyle(.primary)
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                // 冻结区 additive（AGENTS §3 的 P54 行）：长标题裁得掉，但被裁的那一半必须有去处
                 Text(commit.subject)
-                    .font(Theme.Typo.narrative.font)
-                    .lineLimit(1)
+                    .font(Theme.Typo.narrative.font).lineLimit(1).help(commit.subject)
                 Text("\(commit.author) · \(DateFormat.sinceDescription(commit.date))")
                     .font(Theme.Typo.microLabel.font.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -377,9 +379,9 @@ private struct ErrorClusterRow: View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
             SeverityBadge(severity: cluster.severity)
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                // 裁一行可以，被裁掉的那一半必须有去处（P55 窄态实测：格宽 557pt / 单行需 624pt）
                 Text(cluster.displayMessage)
-                    .font(Theme.Typo.monoSmall.font)
-                    .lineLimit(1)
+                    .font(Theme.Typo.monoSmall.font).lineLimit(1).help(cluster.displayMessage)
                 Text(localizedFormat("首次 %1$@ · 最近 %2$@",
                                       cluster.firstSeenDescription,
                                       cluster.lastSeenDescription))

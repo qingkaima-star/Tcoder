@@ -15,6 +15,7 @@
 #   产物: .scratch/evidence-<rev>-<批次名>/{light,dark}-{top,tail}/ + 每趟一份 PROVENANCE
 #   EXPECT_PAGES=<n>  每趟应有张数（默认 9）
 #   VIEWPORT_PT=<pt>  取证窗口高（默认 1000；本机屏高 1080，请求再高会被 AppKit 钳住）
+#   CAPTURE_WINDOW_WIDTH=<pt>  取证窗口宽（不设 = 产品默认 1280；量窄态传 1080 = 本 App 的 minWidth）
 #   只重拍变化的那几页：CAPTURE_PAGES="代码规模:健康评分" EXPECT_PAGES=2（冒号分隔，页名里有空格）
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
@@ -29,6 +30,11 @@ BATCH="${1:-$REV}"
 OUT_ROOT="$SCRATCH/evidence-$REV-$BATCH"
 EXPECT="${EXPECT_PAGES:-9}"
 VIEWPORT="${VIEWPORT_PT:-1000}"
+# 取证窗宽。不设 = 产品自己的 `CaptureWindow.width`（1280）。
+# 为什么要开这个口子：本 App 的 `minWidth` 是 1080，而"深浅两态九页全部实拍复核通过"
+# 这句话一直**只在 1280 那一档被量过** —— 窄态从没进过取证口径。
+# P49 首拍 1080 就在性能页抓到读数被折断（`128 MB/` + `s`），见台账 §6.49。
+WIDTH="${CAPTURE_WINDOW_WIDTH:-}"
 
 fail() { echo "!! $1"; exit 1; }
 
@@ -68,7 +74,7 @@ for pass in light-top light-tail dark-top dark-tail; do
   sleep 1
   got=$(appearance)
   [ "$got" = "$want_dark" ] || fail "外观没翻过去（要 $want_dark，读到 $got）—— 这一趟不拍"
-  CAPTURE_WINDOW_HEIGHT="$VIEWPORT" CAPTURE_SCROLL="$scroll" \
+  CAPTURE_WINDOW_HEIGHT="$VIEWPORT" CAPTURE_WINDOW_WIDTH="$WIDTH" CAPTURE_SCROLL="$scroll" \
     ./scripts/capture_pages_isolated.sh "$out" > "$OUT_ROOT/$pass.capture.log" 2>&1
   inner=$?
   mkdir -p "$out"
@@ -79,6 +85,7 @@ branch=$(git rev-parse --abbrev-ref HEAD)
 pass=$pass
 polarity=$polarity
 viewport=${VIEWPORT}pt
+width=${WIDTH:-product-default}pt
 scroll=$scroll
 appearance=$want_dark
 binary_sha=$(shasum -a 256 "$BIN" | awk '{print $1}')

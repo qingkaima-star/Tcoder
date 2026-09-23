@@ -124,8 +124,22 @@ struct SourceSkipLedger: Sendable {
     /// 行数最多的前几个根因，形如 `vendor=352784`。
     func topLineRules(_ reason: SourceSkipReason, limit: Int = 6) -> String {
         let rules = buckets[reason]?.lineRules ?? [:]
-        return rules.sorted { $0.value > $1.value }.prefix(limit)
+        return rules.sorted(by: Self.byCountThenName).prefix(limit)
             .map { "\(String($0.key.prefix(22)))=\($0.value)" }.joined(separator: " ")
+    }
+
+    /// 计数降序、**计数相同按名字升序**；本文件三处渲染共用这一把尺子。
+    ///
+    /// 那半句「按名字升序」才是重点：这三处排完的清单会**直接进 `scanLimitations` 的散文**，
+    /// 而只按计数排时，计数相同的条目（全部 ×1 是常态）相对次序由 `Dictionary` 的遍历序决定。
+    /// 后果是「同一个总体、同一台机器，跑两次得到两句不一样的话」——
+    /// RD-54 就是拿真 GUI 落盘与真 CLI 落盘对表时抓出来的：
+    /// 「命中：.gitignore ×2、.build ×1、.git ×1」对上「…、.git ×1、.build ×1」判 4 处不等。
+    /// 散文不可复现，逐字段对表就永远有假红/假绿的空间。
+    static func byCountThenName(_ lhs: (key: String, value: Int),
+                                _ rhs: (key: String, value: Int)) -> Bool {
+        if lhs.value != rhs.value { return lhs.value > rhs.value }
+        return lhs.key < rhs.key
     }
 
 
@@ -146,12 +160,12 @@ struct SourceSkipLedger: Sendable {
             }
             if bucket.bytes > 0 { line += " · \(bucket.byteDescription)" }
             if linesCounted, reason.linesAreCountable, !bucket.lineRules.isEmpty {
-                let causes = bucket.lineRules.sorted { $0.value > $1.value }.prefix(topRootCauses)
+                let causes = bucket.lineRules.sorted(by: Self.byCountThenName).prefix(topRootCauses)
                     .map { "\($0.key) \(NumberFormat.grouped($0.value)) 行" }
                     .joined(separator: "、")
                 line += "；按根因：\(causes)"
             } else if bucket.rules.isEmpty == false {
-                let causes = bucket.rules.sorted { $0.value > $1.value }.prefix(topRootCauses)
+                let causes = bucket.rules.sorted(by: Self.byCountThenName).prefix(topRootCauses)
                     .map { "\($0.key) ×\($0.value)" }.joined(separator: "、")
                 line += "；命中：\(causes)"
             }
