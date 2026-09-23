@@ -76,12 +76,14 @@ enum VulnerabilityEvidence: String, Sendable, Equatable {
         let ledger = DependencyEvidence.ledger(for: report)
         let counts = ledger.vulnerabilityStateCounts
         var reasons: [String] = []
-        for (state, label) in [(DependencyCheckState.failed, "查询失败"),
-                               (.versionUnresolved, "版本未解析"),
-                               (.ecosystemUnsupported, "生态不支持"),
-                               (.budgetExcluded, "未进查询批次"),
-                               (.notAttempted, "未发起核对")] {
-            if let value = counts[state], value > 0 { reasons.append("\(label) \(value) 条") }
+        for (state, label) in [(DependencyCheckState.failed, localizedCopy("查询失败")),
+                               (.versionUnresolved, localizedCopy("版本未解析")),
+                               (.ecosystemUnsupported, localizedCopy("生态不支持")),
+                               (.budgetExcluded, localizedCopy("未进查询批次")),
+                               (.notAttempted, localizedCopy("未发起核对"))] {
+            if let value = counts[state], value > 0 {
+                reasons.append(localizedFormat("%1$@ %2$@ 条", label, HealthCurves.whole(value)))
+            }
         }
         return reasons
     }
@@ -231,7 +233,8 @@ enum HealthCurves {
     /// 不足 40 字补固定垫句（补满即停，绝不为凑长度把总预算顶破 80），最后再兜底截断。
     private static func padded(_ text: String) -> String {
         var result = text
-        let pads = ["其余维度处于可接受区间。", "建议保持观察，待各维度数据补齐后复核。"]
+        let pads = [localizedCopy("其余维度处于可接受区间。"),
+                    localizedCopy("建议保持观察，待各维度数据补齐后复核。")]
         var padIndex = 0
         while result.count < 40, padIndex < pads.count, result.count + pads[padIndex].count <= 80 {
             result += pads[padIndex]

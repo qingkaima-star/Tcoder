@@ -50,18 +50,21 @@ extension WeightedHealthScorer {
 
     private func complexityStrengths(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
         guard curve.score >= 85, !code.topComplexFunctions.isEmpty else { return [] }
-        return ["函数复杂度可控（最高 CC \(complexityWorstCC(code))）"]
+        return [localizedFormat("函数复杂度可控（最高 CC %1$@）",
+                                HealthCurves.whole(complexityWorstCC(code)))]
     }
 
     private func complexityIssues(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
         guard curve.score <= 60, !code.topComplexFunctions.isEmpty else { return [] }
         let highRisk = code.topComplexFunctions.filter { $0.cyclomaticComplexity >= 16 }.count
-        return ["\(highRisk) 个函数圈复杂度 ≥16，最高 \(complexityWorstCC(code))"]
+        return [localizedFormat("%1$@ 个函数圈复杂度 ≥16，最高 %2$@",
+                                HealthCurves.whole(highRisk),
+                                HealthCurves.whole(complexityWorstCC(code)))]
     }
 
     private func complexityAdvice(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
         guard curve.score <= 60, !code.topComplexFunctions.isEmpty else { return [] }
-        return ["优先拆分最高复杂度函数，用早返回替代嵌套分支"]
+        return [localizedCopy("优先拆分最高复杂度函数，用早返回替代嵌套分支")]
     }
 
     // MARK: - 重复度
@@ -94,7 +97,7 @@ extension WeightedHealthScorer {
 
     private func duplicationAdvice(_ curve: CurveResult) -> [String] {
         guard curve.score <= 60 else { return [] }
-        return ["抽取重复块为共享工具或基类，优先处理跨服务重复"]
+        return [localizedCopy("抽取重复块为共享工具或基类，优先处理跨服务重复")]
     }
 
     // MARK: - 代码质量
@@ -125,13 +128,13 @@ extension WeightedHealthScorer {
     }
 
     private func codeQualityStrengths(_ curve: CurveResult) -> [String] {
-        curve.score >= 85 ? ["文件规模健康，巨大文件占比低"] : []
+        curve.score >= 85 ? [localizedCopy("文件规模健康，巨大文件占比低")] : []
     }
 
     private func codeQualityIssues(_ worst: FileHotspot) -> [String] {
         guard worst.lineCount >= 1500 else { return [] }
-        let name = worst.path.split(separator: "/").last ?? "?"
-        return ["\(name) \(NumberFormat.grouped(worst.lineCount)) 行，远超单文件上限"]
+        let name = String(worst.path.split(separator: "/").last ?? "?")
+        return [localizedFormat("%1$@ %2$@ 行，远超单文件上限", name, NumberFormat.grouped(worst.lineCount))]
     }
 
     private func codeQualityAdvice(_ worst: FileHotspot) -> [String] {
@@ -149,9 +152,13 @@ extension WeightedHealthScorer {
                                                totalLines: code.totalLines)
         var outcome = DimensionOutcome(curve: curve)
         if curve.score >= 95 {
-            outcome.strengths.append(String(format: "注释密度适中（%.1f%%）", code.commentRatio * 100))
+            // 同一个占比在 detail 里也是 `HealthCurves.percent` 打的，这里不再另用 `%.1f%%`
+            // 自己格式化一遍（两套记法在同一页里并存过：见批次 P5 的千分位同款病）。
+            outcome.strengths.append(localizedFormat("注释密度适中（%1$@）", HealthCurves.percent(code.commentRatio)))
         }
-        if curve.score < 70 { outcome.recommendations.append("为公共 API 与复杂分支补充说明性注释") }
+        if curve.score < 70 {
+            outcome.recommendations.append(localizedCopy("为公共 API 与复杂分支补充说明性注释"))
+        }
         return outcome
     }
 }

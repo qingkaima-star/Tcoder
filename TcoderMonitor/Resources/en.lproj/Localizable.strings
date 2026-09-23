@@ -881,3 +881,29 @@
 "均值为全仓 %1$@ 个函数" = "Mean over all %1$@ functions in the repository";
 "均值为全仓" = "Mean over the whole repository";
 "%1$@；CC≥16 与最大 CC 只统计热点榜前 %2$@ 个" = "%1$@; the CC≥16 count and the maximum are tallied only over the top %2$@ hotspot functions";
+
+# 批次 P59a（健康评分：建议/短板/垫白一族）——`Services/Health` 里这些句子原先是裸字面量，
+# 经 `Text(变量)` 直接上屏，压根没查表：登记了也白登记（守卫 1 只看 `localized*` 的实参，看不见它们）。
+"查询失败" = "Query failed";
+"版本未解析" = "Version unresolved";
+"生态不支持" = "Ecosystem unsupported";
+"未进查询批次" = "Left out of the query batch";
+"未发起核对" = "Never attempted";
+"%1$@ %2$@ 条" = "%1$@: %2$@";
+"其余维度处于可接受区间。" = "The remaining dimensions sit inside the acceptable range.";
+"建议保持观察，待各维度数据补齐后复核。" = "Keep observing; revisit once the missing dimension data is collected.";
+"函数复杂度可控（最高 CC %1$@）" = "Complexity is contained (max CC %1$@)";
+"%1$@ 个函数圈复杂度 ≥16，最高 %2$@" = "%1$@ functions at cyclomatic complexity ≥16, max %2$@";
+"优先拆分最高复杂度函数，用早返回替代嵌套分支" = "Split the most complex functions first; replace nested branches with early returns";
+"抽取重复块为共享工具或基类，优先处理跨服务重复" = "Extract duplicated blocks into shared helpers or base classes, starting with cross-service repeats";
+"文件规模健康，巨大文件占比低" = "File sizes are healthy; few oversized files";
+"%1$@ %2$@ 行，远超单文件上限" = "%1$@ has %2$@ lines, far beyond the single-file limit";
+"注释密度适中（%1$@）" = "Comment density is moderate (%1$@)";
+"为公共 API 与复杂分支补充说明性注释" = "Add explanatory comments to public APIs and complex branches";
+"当前无明显短板：在场维度都落在可接受区间，综合分只由这些分量按权重算出，没有额外加分项。" = "No obvious weak spot: every present dimension sits in the acceptable range, and the overall score is only these components weighted - nothing earns a bonus.";
+"本次所有参与计分的维度都属于代码口径，因此它与综合分同源同值。" = "Every scored dimension in this run belongs to the code basis, so it shares the overall score's source and value.";
+"代码口径只统计靠改本仓库代码就能抬起来的维度；已排除 %1$@——它们量的是提交历史的节奏与署名分布、第三方依赖与运行日志，不是这份代码本身的好坏。" = "The code basis counts only the dimensions a change in this repository can lift; excluded %1$@ - they measure commit cadence and authorship, third-party dependencies and runtime logs, not the quality of this code.";
+"先在侧栏「添加项目」选择本地仓库目录，或点右上角「重新分析」采集指标。" = "Use \"Add Project\" in the sidebar to pick a local repository, or \"Re-analyse\" in the top-right to collect metrics.";
+"尚无可用指标" = "No metrics available yet";
+"尚无可用指标，无法给出健康评分；选择项目目录后会自动完成采集。" = "No metrics are available, so no health score can be given; selecting a project directory collects them automatically.";
+"已采集到输入，但%1$@各维度都缺少可计分证据，本次不给出综合分，避免把没测到当成好结果。" = "Inputs were collected, but every dimension among %1$@ lacks scoreable evidence, so no overall score is given this run - never read \"not measured\" as a good result.";

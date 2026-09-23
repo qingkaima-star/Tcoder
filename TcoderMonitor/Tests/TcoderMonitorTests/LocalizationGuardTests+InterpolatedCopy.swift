@@ -78,4 +78,113 @@ extension LocalizationGuardTests {
         XCTAssertTrue(Self.interpolatedHanLiterals(in: pureInterpolation).isEmpty,
                       "没有汉字的纯数字插值被误伤")
     }
+
+
+    // MARK: - 守卫 1h（P59）：**是文案就必须查表**（与上面 P26 那条同族：那条管插值，这条管裸串）
+
+    /// P26 与 1g 只抓"含插值的中文段"，抓不到这一族：
+    /// `return ["优先拆分最高复杂度函数"]` —— 没有插值、没有 `+`、也没被 `localized*` 包住，
+    /// 三条键守卫全是绿的，而 `Text(变量)` 天生不查表 ⇒ **登记了也白登记**。
+    /// 本条判的是：`Services/Health` 里**含汉字的字面量**必须是某个查表调用的第一个实参。
+    ///
+    /// 只判"字面量里有没有汉字"，所以标点字符（`"。"`、`"、"`）与英文串天然豁免；
+    /// 查表调用**与字面量分了行**也不算违例（先把 `localized*( "…" )` 整段等长涂白，
+    /// 再在原文坐标系上找剩下的汉字字面量 —— 行号仍是原文行号）。
+    static func bareChineseLiterals(in content: String) -> [(line: Int, text: String)] {
+        let literal = try? NSRegularExpression(pattern: #""(?:[^"\\\n]|\\.)*""#)
+        let lookedUp = try? NSRegularExpression(
+            pattern: #"localized(?:Copy|Count|Format)\(\s*"(?:[^"\\\n]|\\.)*""#)
+        let han = try? NSRegularExpression(pattern: #"[\p{Han}]"#)
+        guard let literal, let lookedUp, let han else {
+            XCTFail("正则构造失败 ⇒ 这条判据根本没在跑")
+            return []
+        }
+        let kept = content.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { raw -> String in
+                let line = String(raw)
+                return SurfaceScanKit.isCode(line) ? Self.strippingTrailingComment(line) : ""
+            }
+            .joined(separator: "\n")
+        let whole = NSRange(kept.startIndex..., in: kept)
+        var blanked = kept
+        for match in lookedUp.matches(in: kept, range: whole).reversed() {
+            guard let source = Range(match.range, in: kept),
+                  let target = Range(match.range, in: blanked) else { continue }
+            // **等长涂白，但换行必须原样留着**：把换行也换成空格会让后面每一行的行号
+            // 集体前移（元测试钉的就是这一条：报错指不到地方，等于把人往错的地方支）。
+            let preserved = String(kept[source].map { $0.isNewline ? $0 : " " })
+            blanked.replaceSubrange(target, with: preserved)
+        }
+        let blankedRange = NSRange(blanked.startIndex..., in: blanked)
+        return literal.matches(in: blanked, range: blankedRange).compactMap { match in
+            guard let span = Range(match.range, in: blanked) else { return nil }
+            let text = String(blanked[span])
+            let textRange = NSRange(text.startIndex..., in: text)
+            guard han.firstMatch(in: text, range: textRange) != nil else { return nil }
+            let line = blanked[blanked.startIndex..<span.lowerBound].unicodeScalars
+                .reduce(into: 0) { total, scalar in if scalar == "\n" { total += 1 } } + 1
+            return (line, text)
+        }
+    }
+
+    /// **已收口名单**（形状与 1d/1g 同源：名单里的文件一个都不许有，只许往长里加）。
+    /// P59a 首批六个；`HealthBreakdown` / `HealthRuntimeDimensions` / `HealthTeamDimensions`
+    /// 三个文件还有 98 处裸字面量，收完再点进来（现量由打印出声，不伪装成通过）。
+    static let copyLookedUpFiles: [String] = [
+        "Services/Health/ScoreCurves.swift",
+        "Services/Health/ScoreCurvesCode.swift",
+        "Services/Health/ScoreCurvesTeamRuntime.swift",
+        "Services/Health/GitCadenceEvidence.swift",
+        "Services/Health/HealthCodeDimensions.swift",
+        "Services/Health/WeightedHealthScorer.swift",
+    ]
+
+    func test_copyInLookedUpFilesAlwaysGoesThroughTheCatalog() throws {
+        let files = try SurfaceScanKit.sourceFiles(under: "")
+        let scanned = Dictionary(uniqueKeysWithValues: files.map { ($0.path, $0.content) })
+        let absent = Self.copyLookedUpFiles.filter { scanned[$0] == nil }
+        XCTAssertTrue(absent.isEmpty,
+                      "已收口名单点名的文件不在扫描面上（改名？挪走？）：\(absent)")
+        let offenders = Self.copyLookedUpFiles.flatMap { path in
+            Self.bareChineseLiterals(in: scanned[path] ?? "")
+                .map { "\(path):\($0.line) \($0.text)" }
+        }
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些中文文案字面量没走查表 ⇒ 英文态直接把中文铺上屏，而三条键守卫全绿"
+                    + "（`Text(变量)` 不查表，登记了也白登记）：\n  "
+                    + offenders.sorted().joined(separator: "\n  "))
+        // 名单外的现量**只数 `Services/**`**：`Views/**` 里 `Text("中文")` 走的是
+        // `LocalizedStringKey` 自己的查表，那是合法写法，按本条判据数进去会得到一个
+        // 谁都不该去还的假债（1,673 处里绝大多数就是这一族）。
+        let rest = files.filter { !Self.copyLookedUpFiles.contains($0.path)
+                                 && $0.path.hasPrefix("Services/") }
+            .reduce(0) { $0 + Self.bareChineseLiterals(in: $1.content).count }
+        print("【文案必查表】已收口 \(Self.copyLookedUpFiles.count) 个文件 → 名单内 0 处；"
+            + "`Services/**` 其余文件仍有 \(rest) 处（Views 不算：`Text(字面量)` 自己查表）")
+    }
+
+    /// 元测试：四种"没查表"的形状都要被抓到，三种合法写法一条不许误伤。
+    func test_meta_bareCopyRulerCatchesUnlookedLiteralsAndSparesLegalShapes() {
+        let dirty = [
+            #"return ["优先拆分最高复杂度函数"]"#,
+            #"outcome.strengths.append(String(format: "注释密度适中（%.1f%%）", x))"#,
+            #"label: "工程质量（代码口径）","#,
+            #"let pads = ["其余维度处于可接受区间。", "建议保持观察。"]"#,
+        ]
+        let found = dirty.map { Self.bareChineseLiterals(in: $0).count }
+        XCTAssertEqual(found, [1, 1, 1, 2], "漏一种形状，那一族就继续假绿：\(found)")
+        let legal = [
+            #"return [localizedCopy("优先拆分最高复杂度函数")]"#,
+            "texts.recommendations.append(localizedCopy(\n    \"当前无明显短板：综合分只由这些分量按权重算出。\"))",
+            #"if character == "。" || character == "、" { }"#,
+            #"let key = "AppleLanguages""#,
+        ]
+        for line in legal {
+            XCTAssertTrue(Self.bareChineseLiterals(in: line).isEmpty, "合法写法被误报：\(line)")
+        }
+        // 行号必须指到**原文**那一行（涂白不许让偏移漂），跨行调用也要算对。
+        let across = "let a = 1\nlet b = [localizedCopy(\n  \"整句键\")]\nlet c = [\"裸中文\"]"
+        XCTAssertEqual(Self.bareChineseLiterals(in: across).map(\.line), [4],
+                       "行号漂了 ⇒ 报错指不到地方，而跨行的查表调用还被误判：\(Self.bareChineseLiterals(in: across))")
+    }
 }
