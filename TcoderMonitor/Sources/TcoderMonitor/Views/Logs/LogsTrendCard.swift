@@ -39,10 +39,18 @@ struct LogsTrendCard: View {
         return logs.trend.sorted { $0.date < $1.date }
     }
 
+    /// 卡头副标题：**两个复数槽**（天、条）。
+    ///
+    /// 为什么不能留成插值，也不能拆成两条 `localizedCount`：
+    /// 英语这一格里「天」和「条」各自要选单复数（`1 day · peak 1 entry` vs
+    /// `2 days · peak 5 entries`），而中文没有这个区分 —— 插值写法在英文态整句中文，
+    /// 单数键写法在英文态语法错。两条各查各的键更不行：` · ` 是句子的一部分，
+    /// 拆开后没有任何一本目录能决定"哪个槽在前"。
+    /// 走 `localizedCount(_:slots:)`（批次 P69c 立的那一枚）。
     private var subtitle: String? {
         guard let logs, !logs.trend.isEmpty else { return nil }
         let peak = logs.trend.map { $0.errors + $0.exceptions + $0.crashes + $0.warnings }.max() ?? 0
-        return "共 \(NumberFormat.grouped(logs.trend.count)) 天 · 单日峰值 \(NumberFormat.grouped(peak)) 条"
+        return localizedCount("共 %lld 天 · 单日峰值 %lld 条", slots: [logs.trend.count, peak])
     }
 
     private func footnote(_ buckets: [LogBucket]) -> String {
