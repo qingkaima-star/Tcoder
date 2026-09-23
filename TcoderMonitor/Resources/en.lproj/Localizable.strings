@@ -800,7 +800,7 @@
 "重复代码 %1$@，共 %2$@ 处重复块（明细已全部列出）" = "Duplicated code %1$@ across %2$@ duplicate blocks (every block is listed)";
 "重复代码 %1$@，榜内只列 %2$@ 处重复块，总处数本次未统计" = "Duplicated code %1$@; the board lists %2$@ duplicate blocks, and no total was counted this time";
 "贡献分布合理（%1$@ 个署名，头号署名占 %2$@；署名按工作流计，不等于 %1$@ 个人）" = "Contribution is well spread (%1$@ identities, the top one holds %2$@; identities are workflows, not %1$@ people)";
-"「%1$@」这个署名占 %2$@ 提交，单点风险高（署名按工作流计，不等同于一个人头）" = "Identity \u201c%1$@\u201d holds %2$@ of commits \u2014 single-point risk (identities are workflows, not people)";
+"「%1$@」这个署名占 %2$@ 提交，单点风险高（署名按工作流计，不等同于一个人头）" = "Identity “%1$@” holds %2$@ of commits — single-point risk (identities are workflows, not people)";
 
 // ── RD-15（WS-R17 · 扫描范围进契约）：`code.scanSurface` 那 12 格的上屏两句 ──────────
 // 之前这些数只活在 `scanLimitations` 的中文句子里，读 JSON 与看终端的人拿不到数。
