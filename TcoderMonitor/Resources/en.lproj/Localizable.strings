@@ -903,8 +903,8 @@
 "均值为全仓" = "Mean over the whole repository";
 "%1$@；CC≥16 与最大 CC 只统计热点榜前 %2$@ 个" = "%1$@; the CC≥16 count and the maximum are tallied only over the top %2$@ hotspot functions";
 
-# 批次 P59a（健康评分：建议/短板/垫白一族）——`Services/Health` 里这些句子原先是裸字面量，
-# 经 `Text(变量)` 直接上屏，压根没查表：登记了也白登记（守卫 1 只看 `localized*` 的实参，看不见它们）。
+// 批次 P59a（健康评分：建议/短板/垫白一族）——`Services/Health` 里这些句子原先是裸字面量，
+// 经 `Text(变量)` 直接上屏，压根没查表：登记了也白登记（守卫 1 只看 `localized*` 的实参，看不见它们）。
 "查询失败" = "Query failed";
 "版本未解析" = "Version unresolved";
 "生态不支持" = "Ecosystem unsupported";

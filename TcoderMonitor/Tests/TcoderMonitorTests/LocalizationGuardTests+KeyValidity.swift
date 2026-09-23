@@ -179,6 +179,88 @@ extension LocalizationGuardTests {
                        "把键算进去 ⇒ 每条键都违规，判据立刻失去意义")
     }
 
+    // MARK: - 守卫 1i（P59）：目录里**每一条键**都必须在运行时查得中
+
+    /// 这条是 P59 被活界面抓出来之后立的。我往 `.strings` 追加了一批键，
+    /// 注释行误用了 `#`（那是 python/shell 的记号，不是 `.strings` 的），
+    /// 于是**运行时解析器从那一行起整段读不到**：
+    /// `plutil -lint` 说 OK、按正则数键的四条守卫全绿、代码里也确实调了 `localizedFormat`，
+    /// 而屏上还是中文 —— 只有"拿 App 用的那把解析器逐键查一遍"能看见。
+    ///
+    /// 所以这里不用正则、也不用 `plutil`，用的是 **`Bundle` 自己**：
+    /// 与 `localizedCopy` 在运行时走的是同一个解析器，读不到就是读不到。
+    /// 分母是**整本目录**，不是抽样：抽样会放过"从某一行起全废"这种形状。
+    /// 目录里键是**带转义写法**存的（`"…\\n…"`），而 `Bundle` 读文件时会把 `\n` 还原成真换行。
+    /// 本守卫的目录解析器是按正则取原文的（它不看转义），所以拿去查之前必须先还原，
+    /// 否则十条"空态两行句"会被误报成"运行时查不到"——**两把尺子的差别必须显式桥接**，
+    /// 不能靠"看起来一样"。
+    static func runtimeForm(of key: String) -> String {
+        var characters = key.makeIterator()
+        var out = ""
+        while let character = characters.next() {
+            guard character == "\\", let next = characters.next() else { out.append(character); continue }
+            switch next {
+            case "n": out.append("\n")
+            case "t": out.append("\t")
+            case "\"": out.append("\"")
+            case "\\": out.append("\\")
+            default: out.append(character); out.append(next)
+            }
+        }
+        return out
+    }
+
+    static func unresolvedCatalogKeys(_ entries: [(key: String, value: String)],
+                                      in bundle: Bundle) -> [String] {
+        entries.map(\.key).filter {
+            bundle.localizedString(forKey: runtimeForm(of: $0), value: unresolvedSentinel, table: nil)
+                == unresolvedSentinel
+        }
+    }
+
+    private static let unresolvedSentinel = "\u{FFFF}"
+
+    func test_everyCatalogKeyResolvesThroughTheRuntimeParser() throws {
+        let entries = try Self.catalog()
+        XCTAssertFalse(entries.isEmpty, "目录读空 ⇒ 这条判据在空转")
+        let url = Self.packageRoot.appendingPathComponent("Resources/en.lproj")
+        guard let bundle = Bundle(url: url) else {
+            return XCTFail("打不开 \(url.path) ⇒ 英文资源不在原位，本条不能算通过（静默跳过等于关掉判据）")
+        }
+        let unresolved = Self.unresolvedCatalogKeys(entries, in: bundle)
+        XCTAssertTrue(unresolved.isEmpty,
+                      "这 \(unresolved.count) 条键写在目录里、运行时却查不到 ⇒ 英文态照旧铺中文，"
+                    + "而按正则数键的守卫全绿。先看注释记号是不是 `//`（`#` 会让解析器从那一行起整段放弃）：\n  "
+                    + unresolved.prefix(20).joined(separator: "\n  "))
+        // 读数必须来自判据自己算的那个变量（这是本仓第四次抓到"打印写死好消息"）。
+        print("【运行时逐键可查】整本目录 \(entries.count) 条 → 查不到 \(unresolved.count) 条（用的就是 App 那把 Bundle 解析器）")
+    }
+
+    /// 已知答案：一条不存在的键必须被判"查不到"，一条真键必须被判"查得到"。
+    /// 没有这一半，上面那条绿只说明"bundle 是空的、而 filter 恰好没跑"。
+    func test_meta_runtimeRulerCatchesABogusKeyAndSparesARealOne() throws {
+        let url = Self.packageRoot.appendingPathComponent("Resources/en.lproj")
+        guard let bundle = Bundle(url: url) else {
+            return XCTFail("打不开 \(url.path) —— 元测试也需要真解析器")
+        }
+        let entries = try Self.catalog()
+        XCTAssertFalse(entries.isEmpty, "目录读空 ⇒ 元测试没有对照")
+        let real = entries[0].key
+        XCTAssertEqual(Self.unresolvedCatalogKeys([(key: real, value: "x")], in: bundle), [],
+                       "真键被判查不到 ⇒ 这把尺子在误报，上面那条绿不可信")
+        XCTAssertEqual(Self.unresolvedCatalogKeys([(key: "这一条目录里绝对不存在 P59 元测试夹具", value: "x")], in: bundle).count, 1,
+                       "假键没被抓到 ⇒ 上面那条绿只说明 filter 根本没在跑")
+        // 转义桥接：目录里带 `\n` 的键，**不还原就查不到**（首版就是这么误报十条空态句的）。
+        let escaped = entries.first { $0.key.contains("\\n") }
+        XCTAssertNotNil(escaped, "目录里应当有带 \\n 的键（空态两行句），否则这条对照没有对象")
+        if let escaped {
+            XCTAssertEqual(Self.unresolvedCatalogKeys([escaped], in: bundle), [],
+                           "还原转义之后仍查不到 ⇒ 要么这把尺子又偏了，要么那句空态文案真的白登记")
+            XCTAssertFalse(Self.runtimeForm(of: escaped.key).contains("\\n"),
+                           "runtimeForm 没把 \\n 换成真换行 ⇒ 桥接没生效")
+        }
+    }
+
     // MARK: - 守卫 1e：语言探针键不许消失
 
     /// `Theme.Layout.isChineseUI` 靠"查这条键回不回原词"判断界面语言。
