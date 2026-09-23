@@ -58,7 +58,8 @@ struct LogSummary: Codable, Equatable, Sendable {
     /// 装配口只有一个：`CrashEvidenceReadout`（逐字取台账读数，一个数都不重算）。
     var crashEvidence: CrashEvidenceSnapshot? = nil
 
-    var topErrors: [ErrorCluster] = []    var trend: [LogBucket] = []
+    var topErrors: [ErrorCluster] = []
+    var trend: [LogBucket] = []
     var affectedFiles: [String: Int] = [:]
 
     var todayErrorCount: Int {
