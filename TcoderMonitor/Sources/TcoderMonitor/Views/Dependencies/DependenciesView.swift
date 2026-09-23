@@ -28,12 +28,13 @@ struct DependenciesView: View {
             if let deps = report?.dependencies {
                 if deps.ecosystems.isEmpty {
                     EmptyStateView(
-                        icon: .package,
+                        icon: CodeGitSymbol.resolve(.package),  // 收 `IconName` 的那个初始化器不转发 `help:`
                         title: "项目中未发现可识别的依赖清单",
                         // 一整句 = 一个键。原来拆成 `"…\n" + "…"` 两段拼，
                         // 运行时送进查表的是**拼接后的整串**，目录里那条半句键永远查不中
                         // （英文态照旧显示中文，而守卫 1/2/3 全绿 —— 批次 P5 新守卫抓到）。
-                        message: "扫描完成，但没有找到 package.json、Package.swift、pom.xml、go.mod 等清单文件。\n如果依赖声明在自定义脚本里，这一页为空是真实结果。"
+                        message: "扫描完成，但没有找到 package.json、Package.swift、pom.xml、go.mod 等清单文件。",
+                        help: "如果依赖声明在自定义脚本里，这一页为空是真实结果。"
                     )
                 } else {
                     GroupStack {
@@ -57,9 +58,10 @@ struct DependenciesView: View {
                 }
             } else {
                 EmptyStateView(
-                    icon: .package,
+                    icon: CodeGitSymbol.resolve(.package),
                     title: "尚未执行依赖分析",
-                    message: "该项目还没有依赖分析结果。点击「重新分析」开始扫描。\n需要最新版本与漏洞库在线核对时，先打开上方的联网开关。"
+                    message: "该项目还没有依赖分析结果。点击「重新分析」开始扫描。",
+                    help: "需要最新版本与漏洞库在线核对时，先打开上方的联网开关。"
                 )
             }
         }

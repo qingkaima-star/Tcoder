@@ -23,11 +23,21 @@ extension GitDataAbsence {
 enum GitInsightsEmptyState {
     static var missingAnalysis: some View {
         EmptyStateView(
-            icon: .git,
+            // 图标传解析后的串而不是 `icon: .git`：收 `IconName` 的那个初始化器不转发 `help:`，
+            // 要用空态自带的 ⓘ 槽就得走合成初始化器；`CodeGitSymbol.resolve` 正是它内部的
+            // 同一句调用 ⇒ 屏上那个符号一个像素都没变。
+            icon: CodeGitSymbol.resolve(.git),
             title: "尚未分析 Git 历史",
-            message: "选择一个本地仓库目录后点击「重新分析」。\n分析完成后这里会显示提交趋势、24×7 活跃分布与最近提交记录。\n"
-                + ShellGitAnalyzer.attemptedLocationsText(upward: ShellGitAnalyzer.maxUpwardHops,
-                                                         nested: ShellGitAnalyzer.maxNestedDepth)
+            // 盘点表 D14 判「留短藏长」，这一格实际做成了**整条藏**，原因是两条判据撞在一起：
+            //   ① 屏上必须常驻的那半句是 `Services/Git` 产出的「我们往哪些位置找过仓库」
+            //     （`attemptedLocationsText`，规范 §Y 第 2 条：页面流无权搬它）；
+            //   ② 本文件在 `LocalizationGuardTests.compositionFreeFiles` 已收口名单里 ⇒
+            //     一条消息里不许出现 `+` 拼中文，而"留哪半句上屏"都要与 ① 那半句拼 ⇒ 只能整条搬。
+            // 藏掉的仍是**原样整句键**（与目录键逐字相等，含末尾 `\n`），中文一字未改；
+            // 「点哪个按钮」不是诚实性承诺，而工具栏里那颗「重新分析」一直站在页顶。
+            message: ShellGitAnalyzer.attemptedLocationsText(upward: ShellGitAnalyzer.maxUpwardHops,
+                                                             nested: ShellGitAnalyzer.maxNestedDepth),
+            help: "选择一个本地仓库目录后点击「重新分析」。\n分析完成后这里会显示提交趋势、24×7 活跃分布与最近提交记录。\n"
         )
     }
 }
