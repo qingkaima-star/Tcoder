@@ -179,8 +179,49 @@ extension LocalizationGuardTests {
                        "把键算进去 ⇒ 每条键都违规，判据立刻失去意义")
     }
 
-    // MARK: - 守卫 1i（P59）：目录里**每一条键**都必须在运行时查得中
+    // MARK: - 守卫 1k（P65）：值里不许留 JSON 式的 `\uXXXX` 转义
 
+    /// `.strings` 认的是 `\UXXXX`（**大写** U）与 `\n`/`\t`/`\"`/`\\`；写成 JSON 式的 `\u201c`
+    /// 时，运行时解析器**吃掉反斜杠、留下字面的 `u201c`**，屏上就长出
+    /// 「Identity u201cTcoder Teamu201d holds 75% of co…」这种机器串
+    /// （2026-09-23 英文窄态截断普查抓到的，同一行还顺带把弯引号丢了）。
+    /// 它对 `plutil -lint`、按正则数键的四条守卫、以及"逐键查得到"（1i）**全都成立**：
+    /// 键查得到、值也非空，只是值被解析器改了形状 ⇒ 判据必须钉**写法**本身。
+    static func jsonStyleUnicodeEscapes(in text: String) -> [Substring] {
+        let pattern = #"\\u[0-9a-fA-F]{4}"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            XCTFail("转义判据的正则构造失败，本条不能算通过")
+            return []
+        }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.matches(in: text, range: range).compactMap { match in
+            Range(match.range, in: text).map { text[$0] }
+        }
+    }
+
+    func test_englishCatalogValuesHaveNoJSONStyleUnicodeEscapes() throws {
+        let entries = try Self.catalog()
+        XCTAssertFalse(entries.isEmpty, "目录读空 ⇒ 这条判据在空转")
+        let offenders = entries.filter { !Self.jsonStyleUnicodeEscapes(in: $0.value).isEmpty }
+            .map { "\(Self.jsonStyleUnicodeEscapes(in: $0.value)) 残在 \"\($0.key)\" 的值里" }
+        XCTAssertTrue(offenders.isEmpty,
+                      "英文值里写着 `.strings` 不认的 JSON 式转义 ⇒ 运行时会被解析器改成字面串上屏，"
+                    + "要弯引号/破折号就直接写字符：\n  " + offenders.sorted().joined(separator: "\n  "))
+        print("【目录转义写法】扫 \(entries.count) 条 → JSON 式 \\uXXXX 写法 \(offenders.count) 条")
+    }
+
+    /// 元测试：脏样例必须被抓，三种**合法**写法一种都不许误判。
+    func test_meta_jsonEscapeRulerCatchesLowercaseUAndSparesLegalForms() {
+        let dirty = #"Identity \u201cTeam\u201d holds \u201475%"#
+        XCTAssertEqual(Self.jsonStyleUnicodeEscapes(in: dirty).count, 3,
+                       "三个 JSON 式转义只抓到一部分 ⇒ 判据在按位置漏")
+        XCTAssertTrue(Self.jsonStyleUnicodeEscapes(in: #"Identity \U201CTeam\U201D"#).isEmpty,
+                      "大写 \\U 是 `.strings` 的正写法，不该被报")
+        XCTAssertTrue(Self.jsonStyleUnicodeEscapes(in: #"两行\n句与\"引号\"，还有真引号 “字”"#).isEmpty,
+                      "合法转义与字面字符被误判 ⇒ 这条守卫会拦掉正常登记")
+    }
+
+    // MARK: - 守卫 1i（P59）：目录里**每一条键**都必须在运行时查得中
     /// 这条是 P59 被活界面抓出来之后立的。我往 `.strings` 追加了一批键，
     /// 注释行误用了 `#`（那是 python/shell 的记号，不是 `.strings` 的），
     /// 于是**运行时解析器从那一行起整段读不到**：

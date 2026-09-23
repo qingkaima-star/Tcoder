@@ -184,6 +184,10 @@ struct HealthHeroCard: View {
             Text(text)
                 .font(Theme.Typo.narrative.font)
                 .lineLimit(1)
+                // 中文态一句约 440pt，1080 那一档放得下；英文态同一句要 614pt、只给 540pt
+                // ⇒ 被裁掉的恰好是"署名按工作流计，不等同于一个人头"这半个括号（英文窄态普查抓到）。
+                // 与 `SeriesLegend.basis` 同一条修法：定宽行宁可截，但**截了必须有去处**。
+                .help(text)
         }
     }
 }
