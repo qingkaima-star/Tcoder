@@ -365,3 +365,31 @@ selfcheck_section_wiring() {  # selfcheck_section_wiring <outdir>
     || { fail "$sm 不读 meta.section ⇒ 页维度有写没读（同第 28 项那条老账）"; bad=1; }
   [ "$bad" = "0" ] && ok "MEASURE_SECTION 三处接线齐（启动行真的用它 / meta 落盘 / 报表读回），且没接线的形状会被抓"
 }
+
+selfcheck_warmup_dimension() {  # selfcheck_warmup_dimension <outdir>
+  # 第七维·预热：etime 解析 + 未预热要拒 + 启动档不参与。
+  # 样例照 `ps -o etime=` 的真排版喂（前置空格），**正反两个方向都要**：
+  # 只测拒的一面，"永远拒"这种同样坏的形状就抓不住。
+  # ⚠ 顺带钉住一条更一般的规矩：**被 source 的库不许设 shell 选项**——
+  #   这个分片自己就是靠"单独 source preflight"跑的，一旦哪层库加了 `set -u`，
+  #   整条链会在第一个未绑定变量处静默退出（实测过：拒跑分支不再落 REFUSED、rc=127）。
+  local bad=0 got
+  got=$(bash -c '
+    ps() { printf "  %s\n" "$FAKE"; }          # 覆盖外部命令：喂夹具，跑的仍是函数本体
+    source scripts/perf_preflight.sh || { echo "source preflight 失败"; exit 1; }
+    for pair in "01:23:83" "12:34:56:45296" "1-02:03:04:93784" "00:07:7"; do
+      FAKE="${pair%:*}"; want="${pair##*:}"
+      got=$(instance_uptime_seconds 12345)
+      [ "$got" = "$want" ] || { echo "解析错：$FAKE ⇒ $got（要 $want）"; exit 1; }
+    done
+    FAKE="abc"; [ "$(instance_uptime_seconds 12345)" = "取不到" ] || { echo "坏排版没判成取不到"; exit 1; }
+    uptime_secs=30; hard=0; PREFLIGHT_TIER=measure; preflight_gates_warmup >/dev/null 2>&1
+    [ "$hard" = "1" ] || { echo "低于预热线却没有拒跑"; exit 1; }
+    uptime_secs=300; hard=0; preflight_gates_warmup >/dev/null 2>&1
+    [ "$hard" = "0" ] || { echo "已预热却被拒"; exit 1; }
+    uptime_secs=5; hard=0; PREFLIGHT_TIER=launch; preflight_gates_warmup >/dev/null 2>&1
+    [ "$hard" = "0" ] || { echo "启动档被预热线拒了"; exit 1; }
+    exit 0' 2>&1) || bad=1
+  [ "$bad" = "0" ] || { fail "预热这一维不成立：$got"; return; }
+  ok "预热维成立：四种 etime 排版逐个对得上、坏排版判「取不到」（不回落成 0）、未预热判拒、已预热判放、启动档不参与"
+}
