@@ -41,9 +41,25 @@ extension EvidenceFreshnessTests {
 
     /// 逐行解析挂账表（本仓规矩：机械文本手术一律按整行处理，不按偏移切）。
     /// 返回 `(可用条目, 格式坏的行的说明)` —— 坏行绝不静默跳过。
+    /// 拆成 `backlogRows` / `backlogCells` / `backlogEntry` 三小段是
+    /// `X3TestSizeAuditTests` 那条「Tests 里函数圈复杂度 <16」的线逼的（合成一段实测 CC=20）：
+    /// **闸门不许抬，只能拆**。三段各自仍可单独被元测试喂合成输入。
     static func backlog(in markdown: String) -> (entries: [BacklogEntry], malformed: [String]) {
         var entries: [BacklogEntry] = []
         var malformed: [String] = []
+        for line in backlogRows(in: markdown) {
+            if let entry = backlogEntry(from: line) {
+                entries.append(entry)
+            } else {
+                malformed.append("\(line)　←要 5 格齐全：页 / 停在(sha) / 拧过期的提交(sha) / 挂账人 / UTC 分钟")
+            }
+        }
+        return (entries, malformed)
+    }
+
+    /// 本节里的**数据行**：剥引用块前缀、跳过空行与表头分隔行，遇到下一个 `##` 或 `---` 就结束。
+    static func backlogRows(in markdown: String) -> [String] {
+        var rows: [String] = []
         var inside = false
         for raw in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
             var line = String(raw)
@@ -55,27 +71,34 @@ extension EvidenceFreshnessTests {
             guard inside else { continue }
             if line.hasPrefix("##") || line.hasPrefix("---") { break }        // 本节结束
             if line.isEmpty || !line.hasPrefix("|") { continue }
-            // `split` 默认丢掉首尾空段，必须显式留着再 drop，否则第一格与最后一格会被一起吃掉
-            let cells = line.split(separator: "|", omittingEmptySubsequences: false)
-                .dropFirst().dropLast()
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-            if cells.count != 5 || cells[0].hasPrefix("---") || cells[0].contains("页") { continue }
-            let pages = cells[0].split(separator: "/").map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-            let head = cells[1].replacingOccurrences(of: "`", with: "")
-            let agedBy = cells[2].replacingOccurrences(of: "`", with: "")
-            let owner = cells[3]
-            let when = backlogDate(from: cells[4])
-            let isSha = agedBy.count >= 7 && agedBy.allSatisfy { $0.isHexDigit }
-            let isHead = head.count >= 7 && head.allSatisfy { $0.isHexDigit }
-            if pages.isEmpty || !isHead || !isSha || owner.isEmpty || owner == "—" || when == nil {
-                malformed.append("\(line)　←要 5 格齐全：页 / 停在(sha) / 拧过期的提交(sha) / 挂账人 / UTC 分钟")
-                continue
-            }
-            entries.append(BacklogEntry(pages: pages, head: head, agedBy: agedBy,
-                                        owner: owner, loggedAt: when!))
+            let first = backlogCells(line).first ?? ""
+            if first.hasPrefix("---") || first.contains("页") { continue }      // 表头与分隔行
+            rows.append(line)
         }
-        return (entries, malformed)
+        return rows
+    }
+
+    /// 一行切成格子。`split` 默认丢掉首尾空段，必须显式留着再 drop，
+    /// 否则第一格与最后一格会被一起吃掉（本仓踩过）。
+    static func backlogCells(_ line: String) -> [String] {
+        line.split(separator: "|", omittingEmptySubsequences: false)
+            .dropFirst().dropLast()
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    /// 一行 ⇒ 一条挂账；任何一格不合规就返回 `nil`，由调用方点名（不许静默放行）。
+    static func backlogEntry(from line: String) -> BacklogEntry? {
+        let cells = backlogCells(line)
+        guard cells.count == 5, let when = backlogDate(from: cells[4]) else { return nil }
+        let pages = cells[0].split(separator: "/").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let head = cells[1].replacingOccurrences(of: "`", with: "")
+        let agedBy = cells[2].replacingOccurrences(of: "`", with: "")
+        let owner = cells[3]
+        let isSha = agedBy.count >= 7 && agedBy.allSatisfy { $0.isHexDigit }
+        let isHead = head.count >= 7 && head.allSatisfy { $0.isHexDigit }
+        guard !pages.isEmpty, isHead, isSha, !owner.isEmpty, owner != "—" else { return nil }
+        return BacklogEntry(pages: pages, head: head, agedBy: agedBy, owner: owner, loggedAt: when)
     }
 
     private static func backlogDate(from text: String) -> Date? {
