@@ -187,7 +187,10 @@ print("|".join("%s=%s" % (k, "Y" if pe({"period":"interaction","input_source":v}
 #     范围只扫性能轮自己的文档（并行多流时各家只守自己名下目录）。
 #
 #     【分母的历史，别写成死的数】09-23 早上 3→4（备忘涨到 810 行撞 ≤800 棘轮，
-#     按"拆，不拧阈值"搬出 §N~§U），09-23 晚上 4→5（卷二又涨到 787 行，§AK 起搬进卷三）。
+#     按"拆，不拧阈值"搬出 §N~§U），09-23 晚上 4→5（卷二又涨到 787 行，§AK 起搬进卷三），
+  #     09-24 凌晨 5→6（工单本体涨到 795 行，§0.8/§0.8.1/§0.9 搬进 2026-09-24-perf-paydown-order.md）。
+  #     三次搬家都是同一把 ≤800 尺子逼的，而每一次漏扫搬出去那份的概率都比上一次高——
+  #     所以分母只能由这个循环自己长大，不许任何地方再抄一份份数。
 #     这里原来钉着 `[ "$n" = "4" ]`——同一件事的第二处入口，且是个会烂的数：一天搬两次家，
 #     它每次都慢一步变成假话，报的"应为 4 份"还会把人往错方向修（拆完卷三被它拦下时，
 #     我先怀疑自己搬错文件，才怀疑到那个数写歪了）。要的不变式是"**点名的每份都在**"，
@@ -204,7 +207,8 @@ selfcheck_md_tables_unbroken() {  # selfcheck_md_tables_unbroken <outdir>
            ../docs/superpowers/plans/2026-09-20-perf-followup-tickets.md \
            ../docs/superpowers/plans/2026-09-21-perf-handoff-notes.md \
            ../docs/superpowers/plans/2026-09-22-perf-handoff-notes-round2.md \
-           ../docs/superpowers/plans/2026-09-23-perf-handoff-notes-round3.md; do
+           ../docs/superpowers/plans/2026-09-23-perf-handoff-notes-round3.md \
+           ../docs/superpowers/plans/2026-09-24-perf-paydown-order.md; do
     [ -f "$f" ] || { fail "少了 $f——分母变小也是失效，不许静默跳过"; bad=1; continue; }
     n=$((n + 1))
     # 判据与手工核对时用的那条 python 完全同一形状（不是再写一把近似的）：
