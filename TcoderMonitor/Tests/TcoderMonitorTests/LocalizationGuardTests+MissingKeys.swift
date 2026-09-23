@@ -178,6 +178,10 @@ extension LocalizationGuardTests {
     static let compositionFreeFiles: [String] = [
         "Views/CodeGit/GitHistoryScope.swift",
         "Views/Git/GitInsightsSections.swift",
+        // P69a：复杂度风险页那五条建议/空态正文原来都是 3~6 段字面量 `+` 起来的，
+        // 收成整句键之后文件里一个 `+` 拼接都不剩，点进来把形状钉死不许长回去。
+        "Views/Code/CodeRiskAdvice.swift",
+        "Views/Code/CodeRiskView.swift",
     ]
 
     func test_compositionFreeFilesStayFreeOfJoinedChineseCopy() throws {
@@ -260,6 +264,11 @@ extension LocalizationGuardTests {
         // 只有多生态的仓库才会走到这条分支（本仓依赖清单为空），所以十八趟 dogfooding 读数从没抓到过。
         "Services/Dependencies/DependencySnapshot.swift",
         "Services/Dependencies/ManifestDependencyAnalyzerVersionEvidence.swift",
+        // P69a：复杂度风险页。这两份是 P69 清单里「代码风险这一片」7 条的落点，
+        // 整句键化之后两份在 1d（`+` 拼接）与 1g（自己肚子里插值）两把尺子下都是 0 处 ——
+        // 点进名单的意义是**下一句新写的中文必须一开始就用整句键**，否则当场红。
+        "Views/Code/CodeRiskAdvice.swift",
+        "Views/Code/CodeRiskView.swift",
     ]
 
     func test_keyizedCopyFilesHoldNoInterpolatedChineseLiterals() throws {
