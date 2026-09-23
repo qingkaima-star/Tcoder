@@ -142,18 +142,21 @@ final class CLIEntryArgsProcessGuardTests: XCTestCase {
                 return .min
             }
         }
-        return Self.foreignCountUnderTree(seen, excluding: ownPID, treeRoot: Self.treeRoot)
+        guard let bin = Self.attributionBinaryPath else {
+            XCTFail("拿不到被测产物路径 ⇒ 归属判不出来，这一维不许静默放行")
+            return .min
+        }
+        return Self.foreignCountUnderTree(seen, excluding: ownPID, binaryPath: bin)
     }
 
-    /// 归属树根：本测试所在的那棵树（`#filePath` 往上三级 = 仓库根）。
-    private static let treeRoot: String = {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()   // TcoderMonitorTests
-            .deletingLastPathComponent()   // Tests
-            .deletingLastPathComponent()   // TcoderMonitor
-            .deletingLastPathComponent()   // 仓库根
-            .path
-    }()
+    /// 归属基准：**与被测产物同一个可执行文件路径**（不是"树根前缀"）。
+    ///
+    /// 原来按树根前缀数，而主树里 `#filePath` 往上四级得到的正是**共享的 git 根**
+    /// `/Users/one/Documents/Tcoder/` ⇒ 任何一棵 `.worktrees/<别家>/dist/…` 的常驻实例
+    /// 都命中前缀，于是"别人挂着一枚实例"在主树门禁里被读成"这次误用起了第二个窗口"。
+    /// （2026-09-24 实测假红一次：`extraProcessPeak` 读到 1，而那枚进程是 perf-base 树的。）
+    /// 换成"同一个 bundle 路径相等"之后牙没丢：误用真去起 GUI，起的必然就是被测这个 bundle。
+    private static let attributionBinaryPath: String? = try? CLIProcessTests.productBinary()
 
     private enum PathRead { case ok(String), gone, broken }
 
@@ -183,23 +186,29 @@ final class CLIEntryArgsProcessGuardTests: XCTestCase {
     /// （它只能是被测产物自己拉起来的），所以照样计数、照样红。
     static func foreignCountUnderTree(_ seen: [(pid: Int, path: String)],
                                       excluding ownPID: Int,
-                                      treeRoot: String) -> Int {
-        seen.filter { $0.pid != ownPID && $0.path.hasPrefix(treeRoot) }.count
+                                      binaryPath: String) -> Int {
+        seen.filter { $0.pid != ownPID && $0.path == binaryPath }.count
     }
 
     /// 双向元测试：别人那棵树的一个不算、本树的一个要算、自己那一个永远不算。
     func test_extraProcessAttributionIsByTreeNotMachineWide() {
-        let root = "/Users/one/Documents/Tcoder/.worktrees/perf-base/"
-        let mine = [(pid: 111, path: root + "TcoderMonitor/dist/Tcoder.app/Contents/MacOS/TcoderMonitor")]
+        let root = "/Users/one/Documents/Tcoder/.worktrees/perf-base/TcoderMonitor/dist/Tcoder.app/Contents/MacOS/TcoderMonitor"
+        let mine = [(pid: 111, path: root)]
+        // 别家树：路径不同 ⇒ 不算。**主树里它曾经被树根前缀命中过**，那一格就是这次的假红。
         let other = [(pid: 222, path: "/Users/one/Documents/Tcoder/.worktrees/x9/TcoderMonitor/dist/Tcoder.app/Contents/MacOS/TcoderMonitor")]
-        XCTAssertEqual(Self.foreignCountUnderTree(mine, excluding: 111, treeRoot: root), 0,
+        // 同 bundle 的第二个进程（真起了 GUI）：必须算 —— 这是这条判据的牙。
+        let sameBundleSecondCopy = [(pid: 333, path: root)]
+        XCTAssertEqual(Self.foreignCountUnderTree(mine, excluding: 111, binaryPath: root), 0,
                        "自己那一个必须减掉，否则正例假红（第一版就栽在这里）")
-        XCTAssertEqual(Self.foreignCountUnderTree(mine, excluding: 999, treeRoot: root), 1,
-                       "本树里多出来的一个必须算——这是这条判据的牙")
-        XCTAssertEqual(Self.foreignCountUnderTree(other, excluding: 999, treeRoot: root), 0,
-                       "别人那棵树里的常驻实例不算我的读数（全机计数=误红的来源）")
-        XCTAssertEqual(Self.foreignCountUnderTree(mine + other, excluding: 111, treeRoot: root), 0,
-                       "混合场景：减掉自己、排除他树 ⇒ 只剩本树的外来者，此处应为 0")
+        XCTAssertEqual(Self.foreignCountUnderTree(sameBundleSecondCopy, excluding: 999, binaryPath: root), 1,
+                       "同一个被测 bundle 多出来一个必须算——这是这条判据的牙")
+        XCTAssertEqual(Self.foreignCountUnderTree(other, excluding: 999, binaryPath: root), 0,
+                       "别人那棵树里的常驻实例不算我的读数（按树根前缀数=主树必然误红）")
+        XCTAssertEqual(Self.foreignCountUnderTree(mine + other, excluding: 111, binaryPath: root), 0,
+                       "混合场景：减掉自己、排除他树 ⇒ 只剩同一个 bundle 的外来者，此处应为 0")
+        XCTAssertEqual(Self.foreignCountUnderTree(mine + other + sameBundleSecondCopy,
+                                                  excluding: 111, binaryPath: root), 1,
+                       "混合场景里混进一个同 bundle 的第二个进程必须被抓到 ⇒ 牙不能被别的树冲淡")
     }
 
     private func launch(_ args: [String], limit: TimeInterval) throws -> Run {

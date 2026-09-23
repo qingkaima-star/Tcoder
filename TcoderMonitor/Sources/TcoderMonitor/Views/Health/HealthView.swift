@@ -141,7 +141,7 @@ struct HealthHero: View {
     static func relocationNotice(root: String) -> String {
         localizedFormat("仓库归属类维度（%1$@）按外层仓库 %2$@ 计算，不是所选目录本身。",
                         HealthDimension.repositoryScoped.map { localizedCopy($0.rawValue) }
-                            .joined(separator: "、"),
+                            .joined(separator: localizedListSeparator()),
                         root)
     }
 

@@ -298,7 +298,7 @@ enum CoverageMergePlanner {
     private static func blockerDetail(_ ledger: CoverageLineLedger?) -> String? {
         guard let ledger else { return nil }
         let blockers = ledger.blockers
-        return blockers.isEmpty ? nil : blockers.map { $0.rawValue }.joined(separator: "、")
+        return blockers.isEmpty ? nil : blockers.map { $0.rawValue }.joined(separator: localizedListSeparator())
     }
 
 }

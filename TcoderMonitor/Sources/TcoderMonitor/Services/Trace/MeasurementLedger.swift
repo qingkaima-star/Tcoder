@@ -123,10 +123,10 @@ struct MeasurementLedger: Equatable {
                                + "乙栏每一项都写明它由哪几项算来）"]
         lines.append("  甲·量出来的 \(measuredRows.count) 项：")
         lines.append(contentsOf: measuredRows.map { "    \($0.path) · \($0.item) = \($0.value)"
-            + "（\($0.source.joined(separator: "、"))）" })
+            + "（\($0.source.joined(separator: localizedListSeparator()))）" })
         lines.append("  乙·算出来的 \(derivedRows.count) 项：")
         lines.append(contentsOf: derivedRows.map { "    \($0.path) · \($0.item) = \($0.value)"
-            + " ← 由「" + $0.source.joined(separator: "、") + "」算来" })
+            + " ← 由「" + $0.source.joined(separator: localizedListSeparator()) + "」算来" })
         let orphans = derivedWithoutNamedSource.count
         if orphans > 0 {
             lines.append("    ⚠ \(orphans) 项派生读数没点名来源 —— 这些项不许当结论读")
@@ -134,7 +134,7 @@ struct MeasurementLedger: Equatable {
         let dangling = danglingSources
         if dangling.isEmpty == false {
             lines.append("    ⚠ \(dangling.count) 个来源名在本表与上游清单里都不存在："
-                         + dangling.joined(separator: "、") + " —— 台账有出处写错了")
+                         + dangling.joined(separator: localizedListSeparator()) + " —— 台账有出处写错了")
         }
         return lines
     }
@@ -357,7 +357,7 @@ extension MeasurementLedger {
                                 from: [MeasuredItem.codeScopeMembers, MeasuredItem.componentScores,
                                        MeasuredItem.componentWeights]))
             rows.append(measured(scorerPath, MeasuredItem.codeScopeMembers,
-                                 scope.includedDimensions.joined(separator: "、"),
+                                 scope.includedDimensions.joined(separator: localizedListSeparator()),
                                  from: ["HealthSubScore.includedDimensions（名单由评分器给，不在这里挑）"]))
         }
         return rows

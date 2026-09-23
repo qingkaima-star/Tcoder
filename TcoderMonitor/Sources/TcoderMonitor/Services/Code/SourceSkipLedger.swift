@@ -162,11 +162,11 @@ struct SourceSkipLedger: Sendable {
             if linesCounted, reason.linesAreCountable, !bucket.lineRules.isEmpty {
                 let causes = bucket.lineRules.sorted(by: Self.byCountThenName).prefix(topRootCauses)
                     .map { "\($0.key) \(NumberFormat.grouped($0.value)) 行" }
-                    .joined(separator: "、")
+                    .joined(separator: localizedListSeparator())
                 line += "；按根因：\(causes)"
             } else if bucket.rules.isEmpty == false {
                 let causes = bucket.rules.sorted(by: Self.byCountThenName).prefix(topRootCauses)
-                    .map { "\($0.key) ×\($0.value)" }.joined(separator: "、")
+                    .map { "\($0.key) ×\($0.value)" }.joined(separator: localizedListSeparator())
                 line += "；命中：\(causes)"
             }
             return line

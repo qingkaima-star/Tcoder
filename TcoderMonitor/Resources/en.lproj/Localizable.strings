@@ -337,7 +337,6 @@
 "本次提交触达 %@ 个文件" = "This commit touched %@ files";
 "该仓库含合并共 %@ 次提交" = "This repository has %@ commits including merges";
 "评分趋势，%@ 个历史点" = "Score trend, %@ history points";
-"错误趋势，%@ 天" = "Error trend, %@ days";
 "移除分组规则「%@」，只删规则，不干预任何进程" = "Remove group rule “%@” — removes the rule only; never touches a process";
 "严重度：%@" = "Severity: %@";
 "满分可得 %1$@，这一维度拖了 %2$@ 分" = "Full marks %1$@; this dimension cost %2$@ points";
@@ -1086,3 +1085,5 @@
 "未找到仓库" = "No repository found";
 // 两个数都是**分数、不是可数名词** ⇒ 收 `String` 的 localizedFormat 就够，不进 stringsdict。
 "历史末点 %1$@ 与本次 %2$@ 不一致。" = "The last stored score %1$@ does not match this run's %2$@.";
+// 批次 P70：这枚空态正文原来把页名插在自己肚子里（`Text(变量)` 永不查表）⇒ 整串从来没有键。
+"点击「重新分析」开始扫描该目录。\n完成后这里会显示真实的文件数、行数与%1$@。" = "Tap Re-analyse to scan this directory.\nWhen it finishes, the real file count, line count and %1$@ appear here.";

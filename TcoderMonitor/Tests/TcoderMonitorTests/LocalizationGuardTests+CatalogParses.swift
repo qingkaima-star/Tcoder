@@ -341,4 +341,38 @@ extension LocalizationGuardTests {
             [(file: "Views/Nowhere/Gone.swift", literal: "x")], in: [:]).count, 1,
             "文件消失被当成通过 ⇒ 改名/挪走就能悄悄关掉判据")
     }
+
+    // MARK: - 批次 P70：清单分隔符也不许写死成顿号
+
+    /// 与 `endingSentence` 同族：`、` 是 U+3001（中日韩标点段），写死在 `joined(separator:)` 里
+    /// 就会长成 `Swift、Homebrew、Ruby`。它**不在任何一条键上** ⇒ 按目录查的守卫全绿，
+    /// 只有按码点量残留的那把尺子看得见 —— 所以这条必须钉在**源码形状**上。
+    func test_sourcesNeverJoinListsWithTheIdeographicComma() throws {
+        let files = try SurfaceScanKit.sourceFiles(under: "")
+        XCTAssertFalse(files.isEmpty, "一个源码文件都没扫到 ⇒ 这条判据在空转")
+        let offenders = Self.ideographicCommaJoins(in: files.map { ($0.path, $0.content) })
+        XCTAssertTrue(offenders.isEmpty,
+                      "这 \(offenders.count) 处把清单分隔符写死成顿号 ⇒ 英文态句中会长出中日韩标点，"
+                    + "改用 localizedListSeparator()：\n  " + offenders.joined(separator: "\n  "))
+    }
+
+    /// 纯函数（元测试在内存里造坏样例，不往仓库塞临时夹具）。返回命中文件的路径。
+    static func ideographicCommaJoins(in files: [(path: String, content: String)]) -> [String] {
+        files.filter { $0.content.contains("joined(separator: \"、\")") }.map(\.path)
+    }
+
+    func test_meta_ideographicCommaRulerCatchesTheOldShapeAndSparesTheNew() {
+        XCTAssertEqual(Self.ideographicCommaJoins(in: [
+            (path: "a", content: #"names.joined(separator: "、")"#),
+            (path: "b", content: #"names.joined(separator: localizedListSeparator())"#),
+            (path: "c", content: #"names.joined(separator: ", ")"#),
+        ]), ["a"], "坏形状没被抓到 / 合法写法被误判 ⇒ 上面那条绿不可信")
+    }
+
+    /// 两个分支都要咬得住：测试宿主里探针恒判中文，英文那一支靠入参驱动。
+    func test_listSeparatorFollowsTheActiveLanguage() {
+        XCTAssertEqual(localizedListSeparator(chinese: true), "、")
+        XCTAssertEqual(localizedListSeparator(chinese: false), ", ",
+                       "英文清单用顿号 ⇒ 十八趟读数按码点判它残留中文")
+    }
 }
