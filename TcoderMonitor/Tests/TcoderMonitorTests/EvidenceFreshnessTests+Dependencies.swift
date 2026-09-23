@@ -65,10 +65,20 @@ extension EvidenceFreshnessTests {
         guard unreadable.isEmpty else { return unreadable }
         let listed = Set(row.paths)
         return producers.compactMap { producer in
-            guard !listed.contains(producer.file),
+            guard !listed.contains(where: { covers($0, producer.file) }),
                   references(producer.type, in: code) else { return nil }
             return "\(page) 的页内文件引用了 \(producer.type)，那一行却没列 \(producer.file)"
         }
+    }
+
+    /// 表里点名的路径**覆盖**某个生产者，当且仅当它就是这个文件，**或者它是这个文件的祖先目录**。
+    ///
+    /// 为什么必须按目录读：`git log -- <目录>` 与 `code(at:)` 两边都认目录（P45 就为此专门
+    /// 给 `code(at:)` 开了递归），只有这一条"列没列"的比对是按字面路径查集合 —— 于是
+    /// P58 把健康评分那一行从 `Services/Health/HealthBreakdown.swift` 扩成 `Services/Health`
+    /// （覆盖面**变大**了）反而被判"缺列"。尺子在惩罚自己最想鼓励的写法，就必须修尺子。
+    static func covers(_ listed: String, _ producerFile: String) -> Bool {
+        listed == producerFile || producerFile.hasPrefix(listed + "/")
     }
 
     /// 表里既有"一个文件"的写法，也有"整片目录"的写法（`Views/Performance` 这种，
@@ -139,5 +149,19 @@ extension EvidenceFreshnessTests {
         let unreadable = Self.missingProducerColumns(for: typo, producers: [producer], read: read)
         XCTAssertEqual(unreadable.count, 1, "路径读不到必须报，不许当成\"没引用\"放过：\(unreadable)")
         XCTAssertTrue(unreadable[0].contains("读不到"), "报的得说清是读不到：\(unreadable)")
+
+        // P58 的形状：列**祖先目录**算已经覆盖。反过来，只共享一段前缀的兄弟目录不算
+        // （`Views/Code` 覆盖不了 `Views/CodeGit/Producer.swift` —— 少了那道 `/` 就会自己长出牙缝）。
+        XCTAssertTrue(Self.covers("Views/CodeGit/Producer.swift", "Views/CodeGit/Producer.swift"))
+        XCTAssertTrue(Self.covers("Views/CodeGit", "Views/CodeGit/Producer.swift"))
+        XCTAssertTrue(Self.covers("Views", "Views/CodeGit/Producer.swift"))
+        XCTAssertFalse(Self.covers("Views/Code", "Views/CodeGit/Producer.swift"))
+        XCTAssertFalse(Self.covers("Views/CodeGit/Producer.swift/", "Views/CodeGit/Producer.swift"))
+        let byDirectory = Row(pages: ["健康评分"], batch: "b", head: "abc1234",
+                              paths: ["Views/Git/Page.swift", "Views/CodeGit"])
+        XCTAssertTrue(Self.missingProducerColumns(for: byDirectory, producers: [producer],
+                                                  read: { files[$0] ?? "struct Producer { var headline: String { \"\" } }" })
+                            .isEmpty,
+                      "把一行的覆盖面从单个文件扩成整片目录，判据反而报缺列 ⇒ 尺子在惩罚它最想鼓励的写法")
     }
 }
