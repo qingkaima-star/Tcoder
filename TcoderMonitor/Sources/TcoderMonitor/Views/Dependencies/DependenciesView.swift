@@ -301,8 +301,11 @@ struct DependencyTable: View {
             }
             if sorted.count > DependencyEcosystemSection.rowLimit {
                 // 展开/收起是**控件**，所以 accent 在它身上合法（契约 5 的交互语义）。
+                // 计数走 `DisclosureNoun` 那把整句键（P56）：这里以前是
+                // `"展开其余 \(n) 项"` 拼串 ⇒ 英文态整句中文，且英语的单复数无处安放。
                 GlassButton(isExpanded ? "收起"
-                            : "展开其余 \(NumberFormat.grouped(sorted.count - DependencyEcosystemSection.rowLimit)) 项",
+                            : localizedCount(DisclosureNoun.items.expandKey,
+                                             sorted.count - DependencyEcosystemSection.rowLimit),
                             style: .bordered, action: toggle)
             }
             // ⓘ 收纳轮（盘点表 H 组「DependencyTable.countNote」判留短藏长）：

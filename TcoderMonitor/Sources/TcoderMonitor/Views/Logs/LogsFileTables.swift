@@ -109,7 +109,7 @@ struct LogsScannedFilesCard: View {
                 if files.count > Self.rowLimit {
                     DataDisclosureButton(expanded: expanded,
                                          hiddenCount: files.count - Self.rowLimit,
-                                         noun: "个文件") {
+                                         noun: .files) {
                         expanded.toggle()
                     }
                 }

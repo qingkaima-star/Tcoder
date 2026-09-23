@@ -221,7 +221,7 @@ struct ContributorRankingSection: View {
                 if authors.count > Self.displayLimit {
                     DataDisclosureButton(expanded: expanded,
                                          hiddenCount: authors.count - Self.displayLimit,
-                                         noun: "位贡献者") {
+                                         noun: .contributors) {
                         expanded.toggle()
                     }
                 }

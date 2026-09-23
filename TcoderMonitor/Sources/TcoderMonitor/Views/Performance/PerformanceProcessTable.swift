@@ -50,7 +50,7 @@ struct PerformanceProcessTableCard: View {
                 if rows.count > Self.rowLimit {
                     DataDisclosureButton(expanded: expanded,
                                          hiddenCount: rows.count - Self.rowLimit,
-                                         noun: "个进程") {
+                                         noun: .processes) {
                         expanded.toggle()
                     }
                 }
