@@ -150,7 +150,9 @@ final class TooltipMigrationGuardTests: XCTestCase {
     /// → 54（P69 合流：26 段半句并成 10 条整句键）
     /// → **86（P70 重播种：不是新增债，是量具坏了** —— 分类器原先看不见包在 `localizedFormat(…)` 里的常驻句，
     /// 机制与双向元测试见 `+CaliberMerges.swift` 的 `stripLookupWrappers`；旧曲线 88→54 里有一部分是"句子变得看不见"）。
-    private static let visibleCaliberCeiling = 86
+    /// → **72**（P71 三路收纳 14 条：A 代码页 5 处 / C 性能·日志·外壳 5 片 / B Git·依赖·健康 3 笔；
+    /// 同批 tooltip 46 → 65、总量 132 → 137 —— 上漂那 5 是"屏上半句 + ⓘ 整句"各计一次，A 在 `CodeGitTooltipTests` 里逐条算过哪两句不该降账）。
+    private static let visibleCaliberCeiling = 72
 
     /// 总量下限 = 播种时的可见 + tooltip 之和 **减去已核准的删除数**。
     ///
