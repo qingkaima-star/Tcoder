@@ -220,7 +220,11 @@ final class LogEvidenceIdentityAndStabilityTests: XCTestCase {
         XCTAssertFalse(footnote.contains("待 LogSummary 落盘"),
                        "欠账那句是假话，细账已经算完了：" + footnote)
         // 同一句话在没有细账时不许装作说得出原因（未知态与"没原因"是两件事）。
-        let withoutLedger = outcome.summary.crashEvidenceFootnote(windowDays: 30)
+        // ⚠️ RD-60 第二半之后 `analyzeWithEvidence` 交回的 summary **自带九格快照**，
+        //    "没有细账"这一态只能由**旧报告落盘的形状**代表：整键缺席（不是抹成一串 0）。
+        var legacy = outcome.summary
+        legacy.crashEvidence = nil
+        let withoutLedger = legacy.crashEvidenceFootnote(windowDays: 30)
         XCTAssertTrue(withoutLedger.contains("本次未统计"), withoutLedger)
     }
 }

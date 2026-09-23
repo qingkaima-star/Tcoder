@@ -127,7 +127,9 @@ enum CLIRouter {
             return outcome.exit.rawValue
         }
         guard req.mode == .scan else {
-            CLIOutput.line(CLIScoreText.render(report, exit: outcome.exit))
+            // `windowDays` 必须一路传到崩溃那句脚注：本次扫描用的是 `--window-days`，
+            // 读数里那句「最近 N 天为窗口」要是写死一个默认值就自相矛盾（RD-60 的 CLI 出口）。
+            CLIOutput.line(CLIScoreText.render(report, exit: outcome.exit, windowDays: req.windowDays))
             return outcome.exit.rawValue
         }
         let json = (try? CLIScan.json(report, compact: req.compact)) ?? "{}"

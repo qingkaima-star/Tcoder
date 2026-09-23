@@ -22,7 +22,8 @@ enum CLIScoreText {
         return "溯源：\(p.oneLineSummary) · 范围 \(p.scannedRoot ?? "未记录") · 入口 \(p.producedBy ?? "未记录")"
     }
 
-    static func render(_ report: ProjectReport, exit: CLIExit) -> String {
+    static func render(_ report: ProjectReport, exit: CLIExit,
+                       windowDays: Int = CLIScan.logWindowDays) -> String {
         var lines: [String] = [openingLine(report)]
         lines.append(provenanceLine(report))
         if exit == .allFailed {
@@ -56,6 +57,9 @@ enum CLIScoreText {
         // RD-50：覆盖率那本账（总数 vs 被上限切掉的）在界面上有读者之前，
         // CLI 先用**同一个装配口**读一遍 —— 不许在这里另写一份中文。
         lines.append(contentsOf: coverageAccountingLines(report))
+        // RD-60：崩溃证据那本细账同理。位置与覆盖率那行并排（都在分数之前），
+        // 理由同「失败路在分数之前」：先说清这个崩溃数是怎么来的，再给分。
+        lines.append(contentsOf: crashEvidenceLines(report, windowDays: windowDays))
 
         guard let health = report.health else {
             lines.append("没有评分结果：五路都没给出可评的输入。")
@@ -130,6 +134,22 @@ enum CLIScoreText {
     static func coverageAccountingLines(_ report: ProjectReport) -> [String] {
         guard let coverage = report.coverage, let note = coverage.boardAccountingNote else { return [] }
         return [note]
+    }
+
+    /// 崩溃证据那本细账（RD-60 第二半）：`scan` 落的九格快照（`logs.crashEvidence`）在文本读数里
+    /// 也得有一行，否则"八种原因分开算好了"这句话只有打开界面的人才看得到 ——
+    /// 而 CLI 恰恰是 AI 调用的那一路（AGENTS §5.9 第 4 条）。
+    ///
+    /// **复用界面那一个装配口** `LogSummary.crashEvidenceFootnote(windowDays:)`（它自己只逐字引
+    /// `CrashEvidenceReadout`）：CLI 不另拼一句中文，与上面 `coverageAccountingLines` 复用
+    /// `CoverageMetrics.boardAccountingNote` 同一条纪律。
+    /// 判"有没有可说的"也走界面同一个入口 `hasCrashEvidenceToReport` —— 两处各写一遍就会长成两个条件。
+    ///
+    /// `windowDays` 必须由调用方传**本次真的用了几天**：写死一个 7 会在 `--window-days=30` 时
+    /// 说出一句与扫描范围不同的话（与 `Views/Logs/LogsMetricGrid` 那条 `windowDays` 的理由同源）。
+    static func crashEvidenceLines(_ report: ProjectReport, windowDays: Int) -> [String] {
+        guard let logs = report.logs, logs.hasCrashEvidenceToReport else { return [] }
+        return [logs.crashEvidenceFootnote(windowDays: windowDays)]
     }
 
     // MARK: - 首行：总体

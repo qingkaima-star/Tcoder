@@ -17,14 +17,12 @@ final class FileLogAnalyzer: LogAnalysisProviding {
 
     /// 与 `analyze` 同一条流水线，只是**额外**交回崩溃证据台账。
     ///
-    /// 为什么要两个口子：四态计数（疑似 / 解析失败 / 无事件时间 / 旧构建 / 去重合并）
-    /// 需要 `LogSummary` 的新字段才能落盘，而 `Models/**` 是冻结区（AGENTS §3）。
-    /// ⚠️ RD-60 实测到位：**台账算得完，却送不到屏上** —— 唯一能上屏的载体是 `LogSummary`，
-    /// 而它没有承接格，所以 `CrashEvidenceReadout` 在生产路径上只能收到 `evidence: nil`，
-    /// 屏上因此说的是「本次未统计」（真话），而不是拿趋势桶估一个数（假话）。
-    /// 契约缺口已按字段名 / 谁写谁读 / 为什么不能放别处报给总工（Obsidian `130`），
-    /// 落地后把 `evidence` 接上 `Views/Logs` 是一行。
-    /// **不许**因为字段没地方放就把这些状态折进 `crashCount` 或干脆不算。
+    /// 为什么要两个口子：`analyze` 是冻结协议 `LogAnalysisProviding` 的签名（只回 `LogSummary`），
+    /// GUI 与 CLI 都走它；`analyzeWithEvidence` 多交回一本台账，给要逐条原因的用例与直接调用方。
+    /// RD-60 第二半之后**两条路说的是同一句真话**：八种原因已经由上面那段直传进
+    /// `summary.crashEvidence`（九格快照），所以 `analyze` 交回的 `LogSummary` 自己就带着细账，
+    /// 视图与 CLI 从落盘字段按名字接回即可，不必再拿到台账本体。
+    /// **不许**因为字段放不下就把这些状态折进 `crashCount` 或干脆不算。
     func analyzeWithEvidence(projectRoot: URL, extraLogURLs: [URL], withinDays: Int) throws
         -> (summary: LogSummary, evidence: CrashEvidenceLedger) {
         let windowDays = max(1, withinDays)
@@ -61,6 +59,24 @@ final class FileLogAnalyzer: LogAnalysisProviding {
         summary.warningCount = aggregate.warningCount
         // 台账已经按四态分过类，这里**不再**从 aggregate 二次推导崩溃数。
         summary.crashCount = ledger.countedCrashCount
+        // RD-60 的**写者**：八种原因直传**同一个 `ledger`** —— 就是上面那一枚、同一次遍历、
+        // 同一次窗口裁剪。为凑字段再 build 一遍台账就是第二把尺子（RD-38/43 那一族）。
+        // 两枚读数**同刻同源**钉在这里：`crashCount` 与 `crashEvidence.countedCrashCount`
+        // 读的都是 `ledger.countedCrashCount` 这同一个表达式，由 `CrashEvidenceWiringTests`
+        // 两条各钉一次（真分析后的值相等 + 源码形状必须同指一个 ledger）。
+        // 九格全是台账自己算好的数，这里一个不加不减：`nil`=没统计、`0`=查过真的是 0，
+        // 两者不许互相冒充。崩溃这一路跑过就一定写满九格；"没跑"走到不了这一行
+        // （那一版报告整键缺席，由 `CrashEvidenceContractTests` 钉旧 JSON 照样解得开）。
+        summary.crashEvidence = CrashEvidenceSnapshot(
+            countedCrashCount: ledger.countedCrashCount,
+            historicalConfirmedCount: ledger.historicalConfirmedCount,
+            staleBuildConfirmedCount: ledger.staleBuildConfirmedCount,
+            undatedConfirmedCount: ledger.undatedConfirmedCount,
+            suspectedCount: ledger.suspectedCount,
+            parseFailedCount: ledger.parseFailedCount,
+            readFailedCount: ledger.readFailedCount,
+            duplicateCount: ledger.duplicateCount,
+            filesWithCountedEvidence: ledger.countablePaths.count)
         summary.fatalCount = aggregate.fatalCount
         summary.infoLineCount = aggregate.infoLineCount
         // 分母 = **真日志行**（RD-46b）：崩溃报告的正文已经在 `crashCount` 那一路扣过分，
@@ -191,9 +207,9 @@ extension LogSummary {
     /// `CrashEvidenceReadout` 那一处）。本文件是它在 `Sources/**` 里的唯一调用点，
     /// 因此这个类型不是「只有单测在用」的实现文件（`SourceFileReachabilityTests` 只认代码调用点）。
     ///
-    /// - Parameter evidence: 同一次分析的崩溃证据台账。**传进来才说得出的那几件事**：
-    ///   历史报告在窗口外、旧构建未算当前版本、无事件时间单列、疑似与解析失败分开、
-    ///   同一事件去重合并几份。不传 = 这次没有细账 ⇒ 明说未统计，
+    /// - Parameter evidence: 同一次分析的崩溃证据台账。**来路三态**（装配口决定，这里不判断）：
+    ///   ① 传台账 ⇒ 逐字引台账那两句；② 不传而 `crashEvidence` 九格齐全 ⇒ **按名字从落盘接回**
+    ///   （视图与 CLI 走的就是这一条，RD-60 那座桥）；③ 两者都没有 ⇒ 明说本次未统计，
     ///   **绝不**回落到趋势桶去估一个数（那是 RD-60 立掉的那把第二把尺子）。
     ///
     /// ⚠️ 签名里**没有** `now` 这个参数，这是有意的：窗口由台账在分析那一刻裁一次，
@@ -202,5 +218,15 @@ extension LogSummary {
         CrashEvidenceReadout.footnote(
             CrashEvidenceReadout.reading(from: self, evidence: evidence, windowDays: windowDays),
             readFailureReasons: CrashEvidenceReadout.readFailureDistribution(self))
+    }
+
+    /// 崩溃那一段脚注**有没有可说的**（界面 ⓘ 与 CLI 的文本读数共用这一个判据 ——
+    /// 两处各写一遍就会长成两个条件，迟早只改一处）。
+    ///
+    /// `crashCount == 0` 而崩溃通道里读到过报告，正是"查过了、真的没有"那一句该出声的场合，
+    /// 所以这里不能只看 `crashCount`。反过来，一份崩溃证据都没有的项目不必被塞一行空账
+    /// （那会把"没账"读成"有账且干净"）。
+    var hasCrashEvidenceToReport: Bool {
+        crashCount > 0 || CrashEvidenceReadout.crashChannelFiles(in: self) > 0
     }
 }

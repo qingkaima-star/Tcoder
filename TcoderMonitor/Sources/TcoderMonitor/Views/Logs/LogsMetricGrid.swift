@@ -110,7 +110,10 @@ struct LogsMetricGrid: View {
             let reasons = grouped.keys.sorted().map { "\($0) ×\(NumberFormat.grouped(grouped[$0]?.count ?? 0))" }
             lines.append("已跳过 \(NumberFormat.grouped(failed.count)) 份读取失败，原因分布：\(reasons.joined(separator: "、"))。")
         }
-        if logs.crashCount > 0 || logs.scannedFiles.contains(where: { $0.role == .crash }) {
+        if logs.hasCrashEvidenceToReport {
+            // 八种原因**逐条分开**上屏：整句由 `CrashEvidenceReadout` 从落盘的九格快照按名字接回
+            // （RD-60 那座桥）。判"有没有可说的"与 CLI 用的是同一个入口（`hasCrashEvidenceToReport`），
+            // 视图这里只接已经拼好的整句，一个汉字都不在这里拼。
             lines.append(logs.crashEvidenceFootnote(windowDays: windowDays))
         }
         return lines.isEmpty ? nil : lines.joined(separator: "\n")

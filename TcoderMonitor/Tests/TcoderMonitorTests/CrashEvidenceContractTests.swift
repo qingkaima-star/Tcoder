@@ -10,11 +10,22 @@ final class CrashEvidenceContractTests: XCTestCase {
 
     /// 反例（最重要的一条）：把整键删掉，旧 JSON 必须照常解码，且这一格读成 `nil`。
     /// 非 Optional（哪怕带默认值）会让**整份**用户报告 `try?` 失败 ⇒ 静默丢档。
+    ///
+    /// ⚠️ R24 改的是**夹具形状**，三条断言一字未动：原来这里喂的是只含三枚键的手写 JSON，
+    /// 而 `LogSummary` 用的是合成 `Codable` —— `analyzedAt` 这类**非 Optional 带默认值**的旧键
+    /// 缺了照样 `keyNotFound`（`ProjectStore` 全程 `try?`，所以真旧报告里那些键一定在）。
+    /// 那样这份夹具会红在解码器上、而不是红在"缺 `crashEvidence` 键"上（同 `LogDenominatorAccountingTests`
+    /// 那条的教训一字不差）。形状照它抄：**旧版本一定会写的那些键全在，只缺这一格**。
     func testReportWithoutTheCrashEvidenceKeyStillDecodesAsNil() throws {
-        let json = try JSONSerialization.data(withJSONObject: [
-            "errorCount": 3, "crashCount": 1, "totalLinesScanned": 42,
-        ])
-        let summary = try JSONDecoder().decode(LogSummary.self, from: json)
+        let legacy = """
+        {"analyzedAt":"2026-09-22T10:00:00Z","scannedFiles":[],"errorCount":3,"exceptionCount":0,
+         "warningCount":0,"crashCount":1,"fatalCount":0,"infoLineCount":0,"totalLinesScanned":42,
+         "topErrors":[],"trend":[],"affectedFiles":{}}
+        """
+        let decoder = JSONDecoder()
+        // 与 `ProjectStore` / CLI 落盘同一把日期尺子（`.iso8601`）。
+        decoder.dateDecodingStrategy = .iso8601
+        let summary = try decoder.decode(LogSummary.self, from: Data(legacy.utf8))
         XCTAssertNil(summary.crashEvidence, "这一格缺席必须读成「没统计」，不是零值")
         XCTAssertEqual(summary.crashCount, 1, "旧报告其余字段不许被牵连")
     }

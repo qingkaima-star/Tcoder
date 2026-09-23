@@ -23,20 +23,33 @@
 //     `unknownStatement`（本函数只做串接与加窗口标签），一个数都不重新推导。
 //     趋势桶那条路已经断开 —— 它把 `.fatal` 与 `.crash` 折进同一个格子
 //     （`LogClustering.buckets`），拿它说「确认崩溃」是把两种证据混成一桶。
-//  3. **细账缺席就说未统计**：拿不到台账（旧报告落盘的 JSON、崩溃那一路失败）时，
+//  3. **细账缺席就说未统计**：拿不到台账、落盘九格也不齐（旧报告落盘的 JSON、崩溃那一路没跑）时，
 //     逐条原因一律说「本次未统计」，**绝不**回落到任何一把平行尺子去估一个数。
 //     `nil`（没统计）与 `0`（统计过、真的没有）在本文件里是两个不同的出口。
+//     八种原因的**来路**也分三态记在 `Reading.origin` 上：台账直接在场 / 只从落盘九格接回 /
+//     两者都没有。第三种来路决定「哪些没测准」那句说不说得出（见 `persistedFieldsGapsNotice`）。
 //  4. **量纲不许混**：旧脚注那句 `max(0, 崩溃通道文件数 - crashCount)` 是**份数减次数**
 //     ——一份报告可以含两次事件，于是这个差在两种方向上都会错。
 //     现在份数只与份数相减（`crashChannelFileCount - filesWithCountedEvidence`），
 //     而 `filesWithCountedEvidence` 只能由台账给出 ⇒ 细账缺席时这一格必须是 nil。
 //
-//  ⚠️ 契约缺口（写在 Obsidian `130 WS-R20 崩溃证据细账.md`，由总工落 `Models/LogInsights.swift`）：
-//  `LogSummary` 里没有承接台账的格子，所以**视图现在拿不到 evidence**，
-//  `evidence` 参数在生产路径上恒为 nil（只有单测与 `analyzeWithEvidence` 的直接调用方喂得出真值）。
-//  字段落地后接线是一行：把 `evidence:` 传进来。本文件那一条**假话**已经先改掉：
-//  旧脚注写着「逐条原因待 LogSummary 落盘崩溃证据字段后展示」，
-//  而账其实早就算完了 —— 那是 RD-60 ③ 点名的未完成项，不在这里留。
+//  ## 接线状态（RD-60 第二半，R24）
+//
+//  契约已由总工落在 `LogSummary.crashEvidence`（九格全 Optional，`nil`=没统计 / `0`=查过真的是 0）。
+//  三段各就各位：
+//  · **写者**：`FileLogAnalyzer.analyzeWithEvidence` 在**同一次**分析里把台账九格直传进快照
+//    （同一个 `ledger`、同一次遍历 —— 不为凑字段再 build 一遍台账）；
+//  · **读者**：`readingFromFields(from:windowDays:)` 照 `CoverageMetrics.displayShapeFromFields`
+//    的样子**按名字接回** —— 任一格缺席 ⇒ 整枚 `Reading` 为 `nil`，不重算、不换算、
+//    **不拿 `crashCount` 顶替**；
+//  · **出口**：视图 ⓘ 与 `score` 的文本读数都只经本文件的 `footnote`，八种原因逐条分开。
+//
+//  ⚠️ 仍开着的契约缺口（R24 报总工，不在这里绕过去）：九格承接的是**计数**，而
+//  `unknownStatement` 那句「哪些没测准」吃的三项输入（当前构建键、观察到的构建版本数、
+//  归属缺项的分布）在契约里没有格子 ⇒ 从落盘接回的那一路**说不出**这句。
+//  本文件不猜、也不静默省略：由 `footnote` 明说这一格未落盘（`persistedFieldsGapsNotice`）。
+//  RD-60 ③ 点名的那句"欠账已经欠出去了"的假话**已经长不回来**了
+//  （账现在就在盘上，`CrashEvidenceReadoutGuardTests` 与 `CrashEvidenceWiringTests` 各钉一条）。
 //
 
 import Foundation
@@ -44,9 +57,52 @@ import Foundation
 /// 崩溃证据细账的上屏装配口。**只拼话，不判定、不读盘、不改判据。**
 enum CrashEvidenceReadout {
 
-    /// 一次脚注要用的全部读数。构造它需要台账在场，缺哪一格就留 `nil` ——
+    /// 八种原因的分档计数 —— 那句「逐条原因」的**唯一生产者**吃的形状。
+    ///
+    /// 为什么要把这个形状单独立出来：那句话原本长在
+    /// `CrashEvidenceLedger.statement` 里，于是**只有台账在场**才说得出；而台账不落盘
+    /// （`LogAnalysisProviding.analyze` 的签名只回 `LogSummary`）。契约现在有九格快照，
+    /// 视图与 CLI 手里只剩落盘的那几格 ⇒ 措辞必须从**同一处**产出，否则屏上那句与账上那句
+    /// 迟早分叉（RD-43/51 同族）。所以：台账把自己的八枚数包成这个形状、快照按名字包成同一个形状，
+    /// 两边都交给这里拼 —— 形状照 `CoverageDisplayShape.statementParts`。
+    struct ReasonCounts: Equatable, Sendable {
+        var counted: Int
+        var historical: Int
+        var staleBuild: Int
+        var undated: Int
+        var suspected: Int
+        var parseFailed: Int
+        var readFailed: Int
+        var duplicates: Int
+
+        /// 「测到了什么」那一句。**逐字**沿用台账原来那句（一个数都不重新推导）。
+        var statement: String {
+            var parts: [String] = []
+            parts.append("确认崩溃 \(counted) 次计入")
+            if historical > 0 { parts.append("历史报告 \(historical) 次在窗口外") }
+            if staleBuild > 0 { parts.append("旧构建 \(staleBuild) 次未算当前版本") }
+            if undated > 0 { parts.append("无事件时间 \(undated) 次单列") }
+            if suspected > 0 { parts.append("疑似报告 \(suspected) 份") }
+            if parseFailed > 0 { parts.append("解析失败 \(parseFailed) 份") }
+            if readFailed > 0 { parts.append("读取失败 \(readFailed) 份") }
+            if duplicates > 0 { parts.append("同一事件去重合并 \(duplicates) 份") }
+            return parts.joined(separator: " · ")
+        }
+    }
+
+    /// 一次脚注要用的全部读数。构造它需要台账在场或落盘九格齐全，缺哪一格就留 `nil` ——
     /// `nil` 的意思是**没统计**，不是零。
     struct Reading: Equatable, Sendable {
+        /// 八种原因从哪儿来。三态分开是因为「哪些没测准」那句只有前两种来路说得出一半。
+        enum Origin: Equatable, Sendable {
+            /// 同一次分析的台账直接在场（`analyzeWithEvidence` 的直接调用方）。
+            case ledger
+            /// 只从**落盘的九格**按名字接回 —— 视图与 CLI 在生产路径上拿到的就是这一种。
+            case persistedFields
+            /// 两者都没有（旧报告落盘时还没有这一格）⇒ 明说未统计。
+            case notMeasured
+        }
+
         /// 观察窗口天数，只用于把话说明白（「最近 7 天之外」），不参与任何判定。
         var windowDays: Int
         /// 窗口内计入的确认崩溃**次数**（与 `LogSummary.crashCount` 同源，由台账算好）。
@@ -59,33 +115,80 @@ enum CrashEvidenceReadout {
         /// `nil` = 本次没有细账（旧报告 / 那一路没跑）。
         var separatedReasons: String?
         /// 「哪些没测准」那一句 —— 逐字来自 `CrashEvidenceLedger.unknownStatement`。
+        /// 从落盘九格接回的那一路**给不出**这一句（九格里没有它的判据输入）。
         var unmeasuredGaps: String?
         /// 出过可计数事件的**份数**（只能由台账给出）。`nil` = 没统计。
         var filesWithCountedEvidence: Int?
+        /// 上面这些数的来路。
+        var origin: Origin
     }
 
-    /// 唯一一次装配。`evidence` 缺席时**不猜测**：只把已落盘的三格说出口。
+    /// 唯一一次装配。`evidence` 缺席时**先看落盘的九格**，两者都没有才说未统计：
+    /// 这一条顺序就是 RD-60 要的那座桥，**不许**在中间插任何"拿 `crashCount` 估一个数"的回落。
     static func reading(from summary: LogSummary, evidence: CrashEvidenceLedger?,
                         windowDays: Int) -> Reading {
-        let channelFiles = summary.scannedFiles.filter { $0.role == .crash }.count
-        let failedFiles = (summary.readFailedFiles ?? []).filter { $0.role == .crash }.count
-        guard let evidence else {
+        if let evidence {
             return Reading(windowDays: windowDays,
                            countedCrashCount: summary.crashCount,
-                           crashChannelFileCount: channelFiles,
-                           readFailedFileCount: failedFiles,
-                           separatedReasons: nil,
-                           unmeasuredGaps: nil,
-                           filesWithCountedEvidence: nil)
+                           crashChannelFileCount: crashChannelFiles(in: summary),
+                           readFailedFileCount: crashChannelReadFailures(in: summary),
+                           separatedReasons: evidence.statement,
+                           unmeasuredGaps: evidence.unknownStatement,
+                           filesWithCountedEvidence: evidence.countablePaths.count,
+                           origin: .ledger)
+        }
+        if let fromFields = readingFromFields(from: summary, windowDays: windowDays) {
+            return fromFields
         }
         return Reading(windowDays: windowDays,
                        countedCrashCount: summary.crashCount,
-                       crashChannelFileCount: channelFiles,
-                       readFailedFileCount: failedFiles,
-                       separatedReasons: evidence.statement,
-                       unmeasuredGaps: evidence.unknownStatement,
-                       filesWithCountedEvidence: evidence.countablePaths.count)
+                       crashChannelFileCount: crashChannelFiles(in: summary),
+                       readFailedFileCount: crashChannelReadFailures(in: summary),
+                       separatedReasons: nil,
+                       unmeasuredGaps: nil,
+                       filesWithCountedEvidence: nil,
+                       origin: .notMeasured)
     }
+
+    /// 从**落盘的那九格**按名字接回一枚读数（照 `CoverageMetrics.displayShapeFromFields` 的形状）。
+    ///
+    /// · 九格**任一**缺席 ⇒ `nil`：那一版根本没统计过。把缺的格子补成 `0` 就是
+    ///   把「没数」说成「没有」（RD-26/46b 那一族），拿 `crashCount` 顶替第一格同样是造数；
+    /// · 齐了才拼「逐条原因」，措辞走唯一生产者 `ReasonCounts.statement`
+    ///   —— 与台账在场那一路**同一处**，谁也不许自己另拼一句；
+    /// · `unmeasuredGaps` 在这一路只能留 `nil`：那句吃的三项输入都不在九格里（契约缺口，
+    ///   已报总工）。`footnote` 对这一路会明说，不静默省略。
+    static func readingFromFields(from summary: LogSummary, windowDays: Int) -> Reading? {
+        guard let snapshot = summary.crashEvidence,
+              let counts = snapshot.reasonCounts,
+              let filesWithCounted = snapshot.filesWithCountedEvidence else { return nil }
+        return Reading(windowDays: windowDays,
+                       countedCrashCount: counts.counted,
+                       crashChannelFileCount: crashChannelFiles(in: summary),
+                       readFailedFileCount: crashChannelReadFailures(in: summary),
+                       separatedReasons: counts.statement,
+                       unmeasuredGaps: nil,
+                       filesWithCountedEvidence: filesWithCounted,
+                       origin: .persistedFields)
+    }
+
+    /// 崩溃通道**读到几份**（份数）。两处来路共用这一处，别处不再各数一遍。
+    static func crashChannelFiles(in summary: LogSummary) -> Int {
+        summary.scannedFiles.filter { $0.role == .crash }.count
+    }
+
+    /// 崩溃通道里**读不动**几份（份数，与上一格不重叠：失败的那些不在 `scannedFiles`）。
+    static func crashChannelReadFailures(in summary: LogSummary) -> Int {
+        (summary.readFailedFiles ?? []).filter { $0.role == .crash }.count
+    }
+
+    /// 「哪些没测准」那一句从落盘九格**接不回来**时说的实话。
+    ///
+    /// 这一句关于的是**现在还没落盘的那三项输入**（构建版本分桶与归属缺项），
+    /// 不是 RD-60 ③ 立掉的那句假话 —— 八种原因现在已经在屏上了，缺的是"哪些没测准"那一半。
+    /// 不许把它改成静默省略：省略会被读成"没有要补的账"。
+    static let persistedFieldsGapsNotice =
+        "「哪些没测准」那一句的判据输入未落盘，这里只呈现逐条原因"
 
     /// 卡头 ⓘ 里那一段完整脚注。**全仓唯一的崩溃证据上屏话**。
     static func footnote(_ reading: Reading, readFailureReasons: [String: Int] = [:]) -> String {
@@ -117,6 +220,10 @@ enum CrashEvidenceReadout {
 
         if let gaps = reading.unmeasuredGaps {
             parts.append("未测准：" + gaps)
+        } else if reading.origin == .persistedFields {
+            // 只有落盘九格时这一句接不回来（它的三项输入没进契约）。
+            // 与其静默省略，不如明说这一格还欠着 —— 静默消失会被读成"没有要补的账"。
+            parts.append(persistedFieldsGapsNotice)
         }
 
         // 读取失败的原因分布来自已落盘的 `readFailedFiles`，与细账里那句「读取失败 N 份」
@@ -135,5 +242,44 @@ enum CrashEvidenceReadout {
         let failed = (summary.readFailedFiles ?? []).filter { $0.role == .crash }
         return Dictionary(grouping: failed.compactMap { $0.readFailure }, by: { $0 })
             .mapValues { $0.count }
+    }
+}
+
+// MARK: - 两条来路各自把「八种原因」凑成同一个形状
+
+extension CrashEvidenceLedger {
+    /// 台账的八种原因：八枚读数的**原样转发**，这里不做任何加减。
+    /// 为什么放在装配口这一侧：那句话的唯一生产者必须是 `ReasonCounts.statement` 一处，
+    /// 台账与落盘快照都往它身上包，屏上那句与账上那句才不可能分叉。
+    var reasonCounts: CrashEvidenceReadout.ReasonCounts {
+        CrashEvidenceReadout.ReasonCounts(counted: countedCrashCount,
+                                          historical: historicalConfirmedCount,
+                                          staleBuild: staleBuildConfirmedCount,
+                                          undated: undatedConfirmedCount,
+                                          suspected: suspectedCount,
+                                          parseFailed: parseFailedCount,
+                                          readFailed: readFailedCount,
+                                          duplicates: duplicateCount)
+    }
+}
+
+extension CrashEvidenceSnapshot {
+    /// 落盘九格里的**八枚原因计数**按名字接回来。任一格缺席 ⇒ `nil`：那一版根本没统计过，
+    /// 不许把缺的格子补成 `0`（`0` 说的是"查过了、真的没有"）。
+    /// 第九格 `filesWithCountedEvidence` 是**份数**、量纲不同，由
+    /// `CrashEvidenceReadout.readingFromFields` 单独按名字接，两处都齐了才谈得上接回。
+    var reasonCounts: CrashEvidenceReadout.ReasonCounts? {
+        guard let counted = countedCrashCount,
+              let historical = historicalConfirmedCount,
+              let staleBuild = staleBuildConfirmedCount,
+              let undated = undatedConfirmedCount,
+              let suspected = suspectedCount,
+              let parseFailed = parseFailedCount,
+              let readFailed = readFailedCount,
+              let duplicates = duplicateCount else { return nil }
+        return CrashEvidenceReadout.ReasonCounts(counted: counted, historical: historical,
+                                                 staleBuild: staleBuild, undated: undated,
+                                                 suspected: suspected, parseFailed: parseFailed,
+                                                 readFailed: readFailed, duplicates: duplicates)
     }
 }
