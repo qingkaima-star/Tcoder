@@ -130,7 +130,10 @@ final class WeightedHealthScorer: HealthScoringProviding {
     /// 避免读者把这个数当成全仓平均（`CodeMetrics.topComplexFunctions` 是封顶的榜单）。
     static func notingSample(_ curve: CurveResult, _ sampleCount: Int) -> CurveResult {
         guard sampleCount > 0 else { return curve }
-        return CurveResult(score: curve.score, detail: curve.detail + "（热点样本 \(sampleCount) 个的均值）",
+        return CurveResult(score: curve.score,
+                           detail: HealthCurves.noted(curve.detail,
+                                                      [localizedFormat("热点样本 %1$@ 个的均值",
+                                                                       NumberFormat.grouped(sampleCount))]),
                            risk: curve.risk)
     }
 
@@ -138,9 +141,14 @@ final class WeightedHealthScorer: HealthScoringProviding {
     /// 截断到 20 条的热点榜里数（`Models` 没给全仓分布）。不写清楚就会被读成「全仓有 N 个
     /// 函数 CC≥16」，而那个 N 实际上只是榜内计数——这是扣分项，报小了会高估健康度。
     static func notingRepoScope(_ curve: CurveResult, functionCount: Int, sampleCount: Int) -> CurveResult {
-        let meanScope = functionCount > 0 ? "均值为全仓 \(functionCount) 个函数" : "均值为全仓"
-        let riskScope = sampleCount > 0 ? "；CC≥16 与最大 CC 只统计热点榜前 \(sampleCount) 个" : ""
-        return CurveResult(score: curve.score, detail: curve.detail + "（\(meanScope)\(riskScope)）",
+        let meanScope = functionCount > 0
+            ? localizedFormat("均值为全仓 %1$@ 个函数", HealthCurves.whole(functionCount))
+            : localizedCopy("均值为全仓")
+        let note = sampleCount > 0
+            ? localizedFormat("%1$@；CC≥16 与最大 CC 只统计热点榜前 %2$@ 个",
+                              meanScope, HealthCurves.whole(sampleCount))
+            : meanScope
+        return CurveResult(score: curve.score, detail: HealthCurves.noted(curve.detail, [note]),
                            risk: curve.risk)
     }
 

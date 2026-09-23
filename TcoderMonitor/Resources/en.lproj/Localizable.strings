@@ -662,7 +662,7 @@
 "指一个本地仓库目录" = "point at a local repository folder";
 "首个采样点" = "first sample";
 "没有命中错误行。" = "No error lines were matched.";
-"用「附加日志文件」手动选择。" = "Use 「Attach Log Files」 to pick them by hand.";
+"用「附加日志文件」手动选择。" = "Use \"Attach Log Files\" to pick them by hand.";
 
 // 批次 ⓘ·双语补账第二轮：两处 `Text(变量)` 的渲染点改成 `Text(localizedCopy(…))` 之后，
 // 变量里那几句中文才真的查得到表（静态棘轮本来看不见它们，是 S1/S5 交回时点名的盲区）。
@@ -812,3 +812,72 @@
 
 // 批次 P57：维度名查表之后，"名字 + ：" 这一族改整句键（英文用半角冒号）。
 "%1$@：" = "%1$@:";
+
+// 批次 P58（健康评分·分量说明行）：`Services/Health` 的 detail 原先是
+// 「中文字面量 + 测得值」插值出来的片段，再用 `joined` 拼成一整行 ——
+// 拼完那一串永远查不中任何键，英文态整行是中文；而 `curve.detail + "（口径注记）"`
+// 那一族更糟：前半已经翻好了，后半贴上去的还是中文。
+// 现在**片段**是整句键、**分隔符与括号**也是键，测得值一律走位置参数。
+// 分隔符「，」在中文态一字未动，英文态换成「, 」。
+"，" = ", ";
+"%1$@（%2$@）" = "%1$@ (%2$@)";
+
+// —— 复杂度 / 重复度 / 代码质量 / 注释与可维护性
+"未发现可计数的函数体" = "No countable function bodies";
+"平均圈复杂度 %1$@" = "Average cyclomatic complexity %1$@";
+"%1$@ 个函数 CC≥16" = "%1$@ functions at CC≥16";
+"最大 %1$@" = "Max %1$@";
+"基准 %1$@ 分扣 %2$@ 分" = "Base %1$@ minus %2$@";
+"未发现可评估的源码文件" = "No source files available to assess";
+"重复率 %1$@" = "Duplication rate %1$@";
+"样本过小，按 %1$@ 行代码估计，置信度低" = "Small sample: estimated over %1$@ code lines, low confidence";
+"按 %1$@ 行代码统计" = "Measured over %1$@ code lines";
+"巨大文件占比 %1$@" = "Huge files %1$@";
+"平均函数 %1$@ 行" = "Average function %1$@ lines";
+"共 %1$@ 个文件" = "%1$@ files in total";
+"%1$@ 个超长函数扣 %2$@ 分" = "%1$@ over-long functions cost %2$@";
+"无源码可评估" = "No source code to assess";
+"低于 2% 最佳下限" = "below the 2% floor";
+"注释过多同样扣分" = "over-commenting costs too";
+"落在 2%~15% 最佳区间" = "inside the 2%–15% best band";
+"注释占比 %1$@（%2$@）" = "Comments %1$@ (%2$@)";
+"TODO %1$@ 个" = "%1$@ TODO";
+"FIXME %1$@ 个" = "%1$@ FIXME";
+"总行 %1$@（含空行与注释）" = "%1$@ lines total (incl. blanks and comments)";
+"标记扣 %1$@ 分" = "Markers cost %1$@";
+
+// —— 提交活跃度 / 协作分布 / 运行稳定性 / 依赖健康
+"日均 %1$@ 次提交" = "%1$@ commits per day";
+"距今 %1$@ 天无提交" = "No commits for %1$@ days";
+"未提供最近提交时间" = "Last commit time not provided";
+"累计 %1$@ 次" = "%1$@ commits in total";
+"速率偏高按碎片化折算" = "A high rate is counted as fragmentation";
+"陈旧扣 %1$@ 分" = "Staleness costs %1$@";
+"作者分布总体为 0，本维度不该计分（内部守卫）" = "The author population is 0, so this dimension must not be scored (internal guard)";
+"最高作者占比 %1$@" = "Top author share %1$@";
+"%1$@ 个活跃署名" = "%1$@ active signatures";
+"%1$@ 次非合并提交" = "%1$@ non-merge commits";
+"单一署名包揽重扣 22 分" = "One signature takes nearly everything: −22";
+"单一署名封顶 8 分" = "One signature caps this at 8";
+"每千行日志 %1$@ 个错误" = "%1$@ errors per 1,000 log lines";
+"确认崩溃 %1$@ 次" = "%1$@ confirmed crashes";
+"致命 %1$@ 次" = "%1$@ fatal";
+"异常 %1$@ 次" = "%1$@ exceptions";
+"扫描 %1$@ 行" = "%1$@ lines scanned";
+"扣 %1$@ 分" = "Costs %1$@";
+"未发现依赖清单" = "No dependency manifests found";
+"依赖 %1$@ 个" = "%1$@ dependencies";
+"漏洞 %1$@ 个" = "%1$@ vulnerabilities";
+"漏洞核对零命中" = "The vulnerability check came back clean";
+"落后 %1$@ 个占 %2$@" = "%1$@ outdated (%2$@)";
+
+// —— 口径注记（挂在 detail 后面那半句，交代"这个数是从哪个总体算出来的"）
+"历史仅 %1$@ 天 < %2$@ 天门槛，样本不足不评估节奏，本维度封顶 %3$@ 分" = "History spans only %1$@ days, below the %2$@-day floor; cadence is not assessed and the dimension is capped at %3$@";
+"速率分子按含合并总数折算" = "The rate numerator uses the merge-inclusive total";
+"首末提交时间缺失或同一瞬间，日均分母无定义，速率按 0 计" = "First and last commit times are missing or identical, so the daily denominator is undefined and the rate counts as 0";
+"榜内只列 %1$@ 个，实际 %2$@ 个" = "The board lists only %1$@ of %2$@";
+"证据太薄·未判定：仅 %1$@ 行 < %2$@ 行下限，封顶 %3$@ 分" = "Thin evidence, undetermined: %1$@ lines is below the %2$@-line floor, capped at %3$@";
+"热点样本 %1$@ 个的均值" = "mean of %1$@ hotspot samples";
+"均值为全仓 %1$@ 个函数" = "Mean over all %1$@ functions in the repository";
+"均值为全仓" = "Mean over the whole repository";
+"%1$@；CC≥16 与最大 CC 只统计热点榜前 %2$@ 个" = "%1$@; the CC≥16 count and the maximum are tallied only over the top %2$@ hotspot functions";
