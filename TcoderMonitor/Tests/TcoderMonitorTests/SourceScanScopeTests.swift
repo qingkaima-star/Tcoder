@@ -178,13 +178,92 @@ extension CodeAnalyzerTests {
     func testZeroExcludedAndNotCountedExcludedAreDifferentReadings() {
         let measured = SourceScopeCount.measured(0)
         let blind = SourceScopeCount.notCounted(reason: "非审计模式")
-        XCTAssertEqual(measured.describe(unit: "行"), "0 行")
-        XCTAssertEqual(blind.describe(unit: "行"), "未统计（非审计模式）")
-        XCTAssertNotEqual(measured.describe(unit: "行"), blind.describe(unit: "行"),
+        // ⚠ 参数是**整句量词键**（`%lld …`）而不是量词（批次 P69a）：
+        // 传 `"行"` 时 `String(format:)` 会**静默把数字丢掉**（渲染成光一个「行」字），
+        // 中文侧看着只差一个数，英文侧连数都没了。下面那条判据钉的就是这个形状。
+        XCTAssertEqual(measured.describe(unit: "%lld 行"), "0 行")
+        XCTAssertEqual(blind.describe(unit: "%lld 行"), "未统计（非审计模式）")
+        XCTAssertNotEqual(measured.describe(unit: "%lld 行"), blind.describe(unit: "%lld 行"),
                           "两句话必须不同，否则「没数」会被读成「没有」")
         XCTAssertNil(blind.measuredValue)
         XCTAssertEqual(measured.measuredValue, 0)
     }
+
+    // MARK: - 判据：`describe(unit:)` 的实参必须是**登记过的整句复数键**（P69a）
+
+    /// 为什么单独立一条：`unit:` 位上的字面量本来就站在双语守卫 1b 的入口前缀里，
+    /// 所以「没登记」它会红 —— 但 `"行"` **在 `.strings` 里是一条合法键**（它是列头标签），
+    /// 于是"传了半截量词"这一类错**尺子看不见**，运行时却把测得值整个吃掉：
+    /// `String(format: "行", 1234)` == `"行"`。缺一条判据的话，下一次有人加一个量纲
+    /// （`"棵"`、`"份"`）就是又一次「把数写成没有数」。
+    ///
+    /// 判据两半：① 字面量必须含 `%lld`（`localizedCount` 只有拿到数字才选得了一/other），
+    /// ② 必须是 `.stringsdict` 的顶层键（不是 `.strings` 的单数键）。
+    static func malformedCountKeys(in files: [(path: String, content: String)],
+                                   pluralKeys: Set<String>) -> [String] {
+        let regex = try! NSRegularExpression(pattern: #"describe\(unit:\s*"((?:[^"\\]|\\.)*)"\)"#)
+        var offenders: [String] = []
+        var seen = 0
+        for file in files {
+            let code = SurfaceScanKit.codeLines(file.content).joined(separator: "\n")
+            let range = NSRange(code.startIndex..., in: code)
+            for match in regex.matches(in: code, range: range) {
+                guard let span = Range(match.range(at: 1), in: code) else { continue }
+                let key = String(code[span])
+                seen += 1
+                if !key.contains("%lld") {
+                    offenders.append("\(file.path) → \"\(key)\" 不是 %lld 整句键（数字会被静默丢掉）")
+                } else if !pluralKeys.contains(key) {
+                    offenders.append("\(file.path) → \"\(key)\" 不在 .stringsdict 顶层键里")
+                }
+            }
+        }
+        // 分母自证：扫不到任何调用点 = 这条判据在空转（本仓当前有 3 处）。
+        XCTAssertGreaterThanOrEqual(seen, 3, "只数到 \(seen) 个 describe(unit:) 调用点 ⇒ 先怀疑扫描面")
+        return offenders
+    }
+
+    func test_describeUnitArgumentIsAlwaysARegisteredPluralKey() throws {
+        let files = try SurfaceScanKit.sourceFiles(under: "")
+        XCTAssertFalse(files.isEmpty, "一个源码文件都没扫到 ⇒ 这条判据在空转")
+        let offenders = Self.malformedCountKeys(in: files,
+                                                pluralKeys: LocalizationGuardTests.registeredStringsDictKeys())
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些 `describe(unit:)` 传的不是登记过的 `%lld` 整句量词键：\n  "
+                        + offenders.sorted().joined(separator: "\n  "))
+    }
+
+    /// 双向元测试：坏形状（半截量词、没登记的键）必须各抓到一次，合法形状不许误伤。
+    func test_meta_countKeyRulerCatchesBothBadShapesAndSparesTheGoodOne() {
+        let badUnit = [(path: "Services/Code/Fake.swift",
+                        content: #"x.describe(unit: "行")"#)]
+        XCTAssertEqual(Self.malformedCountKeys(in: badUnit + Self.countKeyFloorSample,
+                                               pluralKeys: ["%lld 行"]).count, 1,
+                       "半截量词（它在 .strings 里可是合法键！）没被抓到 ⇒ 判据没有牙")
+        let unregistered = [(path: "Services/Code/Fake.swift",
+                             content: #"x.describe(unit: "%lld 棵子树")"#)]
+        XCTAssertEqual(Self.malformedCountKeys(in: unregistered + Self.countKeyFloorSample,
+                                               pluralKeys: ["%lld 行"]).count, 1,
+                       "含 %lld 但没进 .stringsdict 的没被抓到")
+        let good = [(path: "Services/Code/Fake.swift", content: #"x.describe(unit: "%lld 行")"#)]
+        XCTAssertTrue(Self.malformedCountKeys(in: good + Self.countKeyFloorSample,
+                                              pluralKeys: ["%lld 行"]).isEmpty,
+                      "合法写法被误报 ⇒ 下次没人信这条")
+        // 注释里必须能写被禁的写法本身（与全站扫描型判据同一道边界）。
+        let documented = [(path: "Services/Code/Fake.swift",
+                           content: "// 旧写法 describe(unit: \"行\")\n")]
+        XCTAssertTrue(Self.malformedCountKeys(in: documented + Self.countKeyFloorSample,
+                                              pluralKeys: ["%lld 行"]).isEmpty,
+                      "注释里的那一条不该算")
+    }
+
+    /// 元测试夹具：分母自证要求至少 3 个调用点，这里补三份合法样例，
+    /// 让"抓到几条"这个数只反映被测那一条，而不是夹具凑数。
+    static let countKeyFloorSample: [(path: String, content: String)] = [
+        (path: "Services/Code/Floor.swift", content: #"a.describe(unit: "%lld 行")"#),
+        (path: "Services/Code/Floor.swift", content: #"b.describe(unit: "%lld 行")"#),
+        (path: "Services/Code/Floor.swift", content: #"c.describe(unit: "%lld 行")"#),
+    ]
 
     /// 一份没有范围台账的报告（旧 JSON / 只拿到 `CodeMetrics` 的下游）：句子必须自带"没统计"。
     func testReportWithoutLedgerSaysNotCountedRatherThanZero() {

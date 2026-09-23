@@ -24,11 +24,23 @@ enum SourceScopeCount: Sendable, Equatable {
         return nil
     }
 
-    /// 带单位的读数。`unit` 由调用方给（"个条目"/"行"），因为同一个三态要复用在不同量纲上。
+    /// 带单位的读数。`unit` 由调用方给，因为同一个三态要复用在不同量纲上。
+    ///
+    /// ⚠ **传进来的是「整句量词键」而不是量词**（批次 P69a）：`"%lld 个条目"` / `"%lld 行"`。
+    /// 旧写法是调用方给半截量词（`"个条目"`）、这里再拼成 `"\(grouped(value)) \(unit)"` ——
+    /// 拼出来的「1,234 个条目」不是任何语言目录里的键，英文态永远铺中文，
+    /// 而那个字面量因为站在 `unit:` 参数位上被双语棘轮记成了一笔债。
+    /// 走 `localizedCount` 之后：英语单复数由 `Localizable.stringsdict` 选
+    /// （`%lld entry` / `%lld entries`），千分位仍由它补；中文侧
+    /// `String(format: "%lld 行", 0)` 就是「0 行」，与改前逐字相同。
+    /// **传错形状（不含 `%lld`）时 `String(format:)` 会把数字静默丢掉** ——
+    /// 那条由 `SourceScanScopeTests` 的 `pluralKeyArguments…` 判据钉住（含双向元测试）。
     func describe(unit: String) -> String {
         switch self {
-        case let .measured(value): return "\(NumberFormat.grouped(value)) \(unit)"
-        case let .notCounted(reason): return "未统计（\(reason)）"
+        case let .measured(value): return localizedCount(unit, value)
+        // 原因也要查表：`未统计（本次没有范围台账）` 若只翻外面那层，
+        // 英文态就长成 `Not counted (本次没有范围台账)` —— 半英半中比整句中文更难读。
+        case let .notCounted(reason): return localizedFormat("未统计（%1$@）", localizedCopy(reason))
         }
     }
 }
@@ -241,10 +253,16 @@ struct SourceScanScopeReadout: Sendable, Equatable {
         guard undisplayedCount > 0 || excludedFileTotal > 0 || unmeasuredScope.isEmpty == false else {
             return []
         }
-        var lines: [String] = ["扫描范围：遍历看到 \(totalCount.describe(unit: "个条目"))、"
-            + "逐条留名的 \(NumberFormat.grouped(displayedCount)) 个、未留名 \(NumberFormat.grouped(undisplayedCount)) 个、"
-            + "未量准的范围 \(NumberFormat.grouped(unmeasuredScope.count)) 条。"]
-        lines.append("被剔除条目的行数：\(excludedLineCount.describe(unit: "行"))。")
+        // 整句键（P69a）：四个槽全部在产出处格式化成字符串再填进模板。旧写法是三段字面量
+        // `+` 起来 —— 拼完的那一串不是任何键，英文态整行铺中文，而静态尺子只看得见
+        // 落在 `unit:` 参数位上的那个「个条目」（其余两段连入口前缀都没有，扫不到）。
+        var lines: [String] = [localizedFormat("扫描范围：遍历看到 %1$@、逐条留名的 %2$@ 个、未留名 %3$@ 个、未量准的范围 %4$@ 条。",
+                                              totalCount.describe(unit: "%lld 个条目"),
+                                              NumberFormat.grouped(displayedCount),
+                                              NumberFormat.grouped(undisplayedCount),
+                                              NumberFormat.grouped(unmeasuredScope.count))]
+        lines.append(localizedFormat("被剔除条目的行数：%1$@。",
+                                     excludedLineCount.describe(unit: "%lld 行")))
         return lines
     }
 

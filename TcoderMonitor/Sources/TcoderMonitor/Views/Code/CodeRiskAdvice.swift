@@ -74,56 +74,71 @@ extension CodeRiskAnalysis {
     }
 
     static func complexityAdvice(_ code: CodeMetrics) -> [Item] {
-        var items: [Item] = []
-        // 2) 圈复杂度严重档：CC 数字与函数名逐条点名。
+        criticalComplexityItem(code) + highComplexityItem(code) + manyParameterItem(code)
+    }
+
+    /// 2) 圈复杂度严重档：CC 数字与函数名逐条点名。
+    ///
+    /// 整句走 `localizedFormat`（批次 P69a）：这一句原本是四段字面量 `+` 起来的，
+    /// 拼完那一串（里面嵌着测得值）不是任何语言目录里的键 ⇒ 英文态整行铺中文。
+    /// 现在键 = 中文整句，中文侧逐字回填、屏上一个字都没变。
+    /// ⚠ 句首那个「N 个函数」在英语里有单复数，而一句里另有三个槽 ⇒
+    /// `localizedCount`（只收一个 `Int`）装不下 —— 缺口按契约上报，见交回汇报。
+    private static func criticalComplexityItem(_ code: CodeMetrics) -> [Item] {
         let critical = code.topComplexFunctions.filter { $0.risk == .critical }
-        if !critical.isEmpty {
-            let named = critical.prefix(3).map {
-                "\($0.name)（CC \(NumberFormat.grouped($0.cyclomaticComplexity)) · "
-                    + "\(NumberFormat.grouped($0.lineCount)) 行 · "
-                    + "\(CodeViewFormat.fileName($0.filePath)):\(NumberFormat.grouped($0.startLine))）"
-            }
-            let highest = critical.map(\.cyclomaticComplexity).max() ?? 0
-            items.append(Item(
-                id: "complexity-critical", label: "严重复杂度", icon: .riskSevere, role: Theme.Semantic.critical,
-                text: "\(NumberFormat.grouped(critical.count)) 个函数被判为严重复杂度，"
-                    + "最高圈复杂度 \(NumberFormat.grouped(highest))：" + named.joined(separator: "、")
-                    + "。先去掉嵌套：校验与异常分支改成提前返回，再把成组的分支换成策略表/多态；"
-                    // 「压到上榜函数的最低水位以下」是一枚**从榜里长出来的目标**：榜只留前 20 条，
-                    // 第 20 名在大仓库上可能是 CC 40 —— 照它做既出不了榜也没修掉任何东西。
-                    // 换成引擎判档的那条线（冻结常量，本处**只读不改**）：低于它就是离开高档。
-                    + "先把分支数压到 CC \(NumberFormat.grouped(FileSystemCodeAnalyzer.highFunctionComplexity)) 以下"
-                    + "（那是本工具判「高」的那条线，与榜位无关）。"
-            ))
+        guard !critical.isEmpty else { return [] }
+        let named = critical.prefix(3).map {
+            localizedFormat("%1$@（CC %2$@ · %3$@ 行 · %4$@:%5$@）",
+                            $0.name,
+                            NumberFormat.grouped($0.cyclomaticComplexity),
+                            NumberFormat.grouped($0.lineCount),
+                            CodeViewFormat.fileName($0.filePath),
+                            NumberFormat.grouped($0.startLine))
         }
+        let highest = critical.map(\.cyclomaticComplexity).max() ?? 0
+        return [Item(
+            id: "complexity-critical", label: "严重复杂度", icon: .riskSevere, role: Theme.Semantic.critical,
+            text: localizedFormat("%1$@ 个函数被判为严重复杂度，最高圈复杂度 %2$@：%3$@。先去掉嵌套：校验与异常分支改成提前返回，再把成组的分支换成策略表/多态；先把分支数压到 CC %4$@ 以下（那是本工具判「高」的那条线，与榜位无关）。",
+                                  NumberFormat.grouped(critical.count),
+                                  NumberFormat.grouped(highest),
+                                  // 「、」是中文顿号，英文态该是「, 」—— 分隔符随语言这件事
+                                  // 现有三个查表出口都表达不了，同样记进契约缺口。
+                                  named.joined(separator: "、"),
+                                  // 「压到上榜函数的最低水位以下」是一枚**从榜里长出来的目标**：榜只留前 20 条，
+                                  // 第 20 名在大仓库上可能是 CC 40 —— 照它做既出不了榜也没修掉任何东西。
+                                  // 换成引擎判档的那条线（冻结常量，本处**只读不改**）：低于它就是离开高档。
+                                  NumberFormat.grouped(FileSystemCodeAnalyzer.highFunctionComplexity))
+        )]
+    }
 
-        // 3) 高档复杂度聚集。
+    /// 3) 高档复杂度聚集。
+    private static func highComplexityItem(_ code: CodeMetrics) -> [Item] {
         let high = code.topComplexFunctions.filter { $0.risk == .high }
-        if high.count >= 3 {
-            items.append(Item(
-                id: "complexity-high-cluster", label: "高复杂度聚集", icon: .complexity, role: Theme.Semantic.warning,
-                text: "同时有 \(NumberFormat.grouped(high.count)) 个函数处于高复杂度档（CC "
-                    + "\(NumberFormat.grouped(high.map(\.cyclomaticComplexity).min() ?? 0))~"
-                    + "\(NumberFormat.grouped(high.map(\.cyclomaticComplexity).max() ?? 0))）："
-                    + "先给它们补单元测试，再把分支下沉成命名清晰的小函数。"
-            ))
-        }
+        guard high.count >= 3 else { return [] }
+        return [Item(
+            id: "complexity-high-cluster", label: "高复杂度聚集", icon: .complexity, role: Theme.Semantic.warning,
+            text: localizedFormat("同时有 %1$@ 个函数处于高复杂度档（CC %2$@~%3$@）：先给它们补单元测试，再把分支下沉成命名清晰的小函数。",
+                                  NumberFormat.grouped(high.count),
+                                  NumberFormat.grouped(high.map(\.cyclomaticComplexity).min() ?? 0),
+                                  NumberFormat.grouped(high.map(\.cyclomaticComplexity).max() ?? 0))
+        )]
+    }
 
-        // 4) 参数过多的函数（真实计数）。
+    /// 4) 参数过多的函数（真实计数）。
+    private static func manyParameterItem(_ code: CodeMetrics) -> [Item] {
         let manyParams = code.topComplexFunctions.filter { $0.parameterCount >= manyParameterCount }
-        if let worst = manyParams.max(by: { $0.parameterCount < $1.parameterCount }) {
-            items.append(Item(
-                id: "parameters", label: "参数过多", symbol: CodeGitSymbol.parameters,
-                role: Theme.Semantic.warning,
-                text: "\(NumberFormat.grouped(manyParams.count)) 个上榜函数的参数达到或超过 "
-                    + "\(NumberFormat.grouped(manyParameterCount)) 个，最多的是\(worst.name)"
-                    + "（\(NumberFormat.grouped(worst.parameterCount)) 个参数 · "
-                    + "\(CodeViewFormat.fileName(worst.filePath)):\(NumberFormat.grouped(worst.startLine))）："
-                    + "把成组参数收进一个配置或值类型，调用点会同步变短。"
-            ))
-        }
-
-        return items
+        guard let worst = manyParams.max(by: { $0.parameterCount < $1.parameterCount }) else { return [] }
+        return [Item(
+            id: "parameters", label: "参数过多", symbol: CodeGitSymbol.parameters,
+            role: Theme.Semantic.warning,
+            text: localizedFormat("%1$@ 个上榜函数的参数达到或超过 %2$@ 个，最多的是%3$@（%4$@ 个参数 · %5$@:%6$@）：把成组参数收进一个配置或值类型，调用点会同步变短。",
+                                  NumberFormat.grouped(manyParams.count),
+                                  NumberFormat.grouped(manyParameterCount),
+                                  worst.name,
+                                  NumberFormat.grouped(worst.parameterCount),
+                                  CodeViewFormat.fileName(worst.filePath),
+                                  NumberFormat.grouped(worst.startLine))
+        )]
     }
 
     static func scaleAdvice(_ code: CodeMetrics) -> [Item] {
@@ -181,14 +196,17 @@ extension CodeRiskAnalysis {
         }
 
         // 9) 注释率：只在确实偏低时提，数字来自 commentLines / totalLines。
+        //    整句键（P69a）：四个槽先各自格式化成字符串再填，中文侧回填后与旧拼接逐字相同。
+        //    ⚠ 值里的百分号是**实参**带进来的（`NumberFormat.percent` 产出 "16.3%"），
+        //    键与译文里都不写裸 `%`，所以 `String(format:)` 没有可吃尾巴的地方。
         if code.totalLines > 0, code.commentRatio < lowCommentRatio {
             items.append(Item(
                 id: "comments", label: "注释率", symbol: CodeGitSymbol.comments, role: Theme.Semantic.neutral,
-                text: "注释率 \(NumberFormat.percent(code.commentRatio))"
-                    + "（\(NumberFormat.grouped(code.commentLines)) / "
-                    + "\(NumberFormat.grouped(code.totalLines)) 行）低于本页 "
-                    + "\(NumberFormat.percent(lowCommentRatio, precision: 0)) 的提示线："
-                    + "优先给对外接口和圈复杂度最高的那批函数写意图说明，直白代码不必加注释。"
+                text: localizedFormat("注释率 %1$@（%2$@ / %3$@ 行）低于本页 %4$@ 的提示线：优先给对外接口和圈复杂度最高的那批函数写意图说明，直白代码不必加注释。",
+                                      NumberFormat.percent(code.commentRatio),
+                                      NumberFormat.grouped(code.commentLines),
+                                      NumberFormat.grouped(code.totalLines),
+                                      NumberFormat.percent(lowCommentRatio, precision: 0))
             ))
         }
 

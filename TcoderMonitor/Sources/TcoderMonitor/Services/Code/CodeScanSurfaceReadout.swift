@@ -97,7 +97,7 @@ enum CodeScanSurfaceReadout {
         guard surface.linesCounted != false, let lines = surface.excludedLineCount else {
             return localizedCopy("行数未统计")
         }
-        return SourceScopeCount.measured(lines).describe(unit: "行")
+        return SourceScopeCount.measured(lines).describe(unit: "%lld 行")
     }
 
     /// 一格可选读数的上屏值：有数走千分位，没数走 `DataAbsence` 那一份 `--`。
