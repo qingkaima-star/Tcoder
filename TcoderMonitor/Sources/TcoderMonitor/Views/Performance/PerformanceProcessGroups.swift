@@ -21,13 +21,20 @@ struct PerformanceProcessGroupsCard: View {
     let onRemove: (UUID) -> Void
 
     var body: some View {
+        // **留短藏长**（盘点表 F 组「与所选项目无关」判 留短藏长 ●）：归因边界留在屏上
+        // （它挡的是"这些进程是我这个项目开销"这个误读），"怎么查找的"那半句进 ⓘ。
+        // ⓘ 里放的仍是目录里那条整句键，原文一字未改。
         GlassSection("进程分组",
-                     subtitle: "按匹配模式在全系统进程里查找，与所选项目无关",
+                     subtitle: "与所选项目无关",
+                     subtitleHelp: "按匹配模式在全系统进程里查找，与所选项目无关",
                      icon: .handles) {
             if groups.isEmpty {
+                // 空态的操作指引（去哪个卡、填什么样的词）读图不必，整句进 ⓘ；
+                // 屏上留标题那一句 —— "这里现在是空的"这个状态本身不许藏。
                 EmptyStateView(icon: IconName.add.rawValue,
                                title: "还没有分组规则",
-                               message: "在下方「匹配模式」里添加分组，例如 java、nginx、mysqld 这类通用进程名。")
+                               message: "",
+                               help: "在下方「匹配模式」里添加分组，例如 java、nginx、mysqld 这类通用进程名。")
             } else {
                 groupList
                 // **留短藏长**：屏上只留「零命中该怎么读」这半句（它挡的是"服务挂了"这个误读），

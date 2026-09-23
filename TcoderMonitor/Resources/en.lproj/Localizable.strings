@@ -1093,3 +1093,4 @@
 // 中文侧一个字没改、也没删。英文侧每条都得独立成句 —— 屏上短句在英文态也要能单独读。
 // ⚠ 注释一律 `//`：一个 `#` 会让系统解析器从那一行起整段放弃（P59 真炸过一次）。
 "这里不预先给出估算形状。" = "No estimated shape is drawn in advance.";
+"与所选项目无关" = "Unrelated to the selected project";
