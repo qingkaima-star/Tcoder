@@ -791,7 +791,14 @@
 // 模板本身从不查表 ⇒ 英文态整句是中文（屏上各 4×，是剩余 B 里最高频的一族）。
 // 改成 `localizedFormat` + 位置参数；同一个署名数在一句里出现两次，用同一个 `%1$@`。
 "重复代码率低（%1$@）" = "Low duplication rate (%1$@)";
-"重复代码 %1$@，共 %2$@ 处重复块" = "Duplicated code %1$@ across %2$@ duplicate blocks";
+// WS-R18（榜长冒充总数 · 评分解释文本那一处残留）：上面那条「共 %2$@ 处重复块」以前吃的是
+// `code.duplicatedBlocks.count` —— 那是被 `DuplicationEngine.maxBlocks` 截过的**榜长**，
+// 2026-09-23 本仓实扫榜内 20 · 榜外未列 96，句子说「共 20 处」而真总数是 116（少报 96 处）。
+// 现在按三态各一句：榜外有账 / 榜外为零 / 榜外根本没统计过（那一句不许出现「共」字）。
+// 取法只有一处：`CodeMetrics.reportedDuplicatedBlockTotalCount`（去重后口径）。
+"重复代码 %1$@，共 %2$@ 处重复块（去重后口径，榜内只列 %3$@ 处明细）" = "Duplicated code %1$@ across %2$@ duplicate blocks (deduplicated basis; the board lists only %3$@ of them)";
+"重复代码 %1$@，共 %2$@ 处重复块（明细已全部列出）" = "Duplicated code %1$@ across %2$@ duplicate blocks (every block is listed)";
+"重复代码 %1$@，榜内只列 %2$@ 处重复块，总处数本次未统计" = "Duplicated code %1$@; the board lists %2$@ duplicate blocks, and no total was counted this time";
 "贡献分布合理（%1$@ 个署名，头号署名占 %2$@；署名按工作流计，不等于 %1$@ 个人）" = "Contribution is well spread (%1$@ identities, the top one holds %2$@; identities are workflows, not %1$@ people)";
 "「%1$@」这个署名占 %2$@ 提交，单点风险高（署名按工作流计，不等同于一个人头）" = "Identity \u201c%1$@\u201d holds %2$@ of commits \u2014 single-point risk (identities are workflows, not people)";
 

@@ -315,3 +315,33 @@ struct CodeScanScope: Codable, Equatable, Sendable {
         return displayed + undisplayed
     }
 }
+
+// MARK: - 重复块总数的唯一取法（WS-R18 ·「榜长冒充总数」在评分解释文本里的那一处残留）
+//
+// 存在理由：健康评分「问题」那一栏的句子以前写「重复代码 X%，共 N 处重复块」，
+// 而那个 N 吃的是 `duplicatedBlocks.count` —— **榜长**，不是总数
+// （`duplicatedBlocks` 是被 `DuplicationEngine.maxBlocks` = 20 截过的明细榜）。
+// 2026-09-23 本仓实扫读数：榜内 20 · 榜外未列 96 ⇒ 那句"共 20 处重复块"少报了 96 处
+// （真总数 116；工单立案那批的读数是榜内 20 · 榜外 85，同一件事）。
+// 展示层那一半已由 R7 收口（`CodeBoardTruth.duplicationBoardCount` 与页尾三态句），
+// 这一处是它剩下的另一半。
+//
+// ⚠️ **口径必须自己交代**：`DuplicationScan.rankedBlocks` 先按 `DuplicatedBlock.id` 去重、
+// 再截断到上限，所以「榜内 + 榜外」是**去重之后**的重复块总数。撞同一个 id 被合并掉的
+// 原始命中没有任何读数（`docs/R6-契约字段清单.md` §7 第 2 条点名缺的那枚
+// `blocksDroppedByIdCollision`），所以这个数**只许配「去重后口径」这句限定语上屏**，
+// 不许被读成"这个仓库一共有多少处克隆"。
+extension CodeMetrics {
+    /// 去重后口径的重复块总数。**取法只此一处**：消费方（评分解释文本 / 界面 / CLI）
+    /// 都走它，不许各自再写一遍加法造第二把尺子。
+    ///
+    /// `nil` = **这份报告没统计过榜外**（旧报告没有 `duplicatedBlocksDroppedByCap` 这一格）
+    /// ⇒ 拿不出总数。它与"统计过、榜外为零"（`duplicatedBlocksDroppedByCap == 0`）
+    /// 是两件事，所以**故意不写成** `duplicatedBlocksDroppedByCap.map { … } ?? duplicatedBlocks.count`
+    /// 那种"缺席就当没漏"的兜底 —— 那是 `reportedHugeFileCount` 的旧病（把"没统计"说成
+    /// "一份没漏"），三态被压成两态之后，句子就会对一个没量过的总体说"共 N 处"。
+    var reportedDuplicatedBlockTotalCount: Int? {
+        guard let outsideBoard = duplicatedBlocksDroppedByCap else { return nil }
+        return duplicatedBlocks.count + outsideBoard
+    }
+}
