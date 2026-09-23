@@ -80,7 +80,7 @@ struct VulnerabilityRow: View {
                 .fill(role.graphicColor)
                 .frame(width: Theme.Stroke.emphasis)
                 .frame(maxHeight: .infinity)
-                .accessibilityLabel(Text(localizedFormat("严重度：%@", item.severity.rawValue)))
+                .accessibilityLabel(Text(localizedFormat("严重度：%@", localizedCopy(item.severity.rawValue))))
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
                     SemanticBadge(item.severity.rawValue, role: role, icon: severityIcon)

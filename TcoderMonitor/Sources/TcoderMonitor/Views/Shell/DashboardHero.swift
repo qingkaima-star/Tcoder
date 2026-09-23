@@ -58,7 +58,7 @@ struct HealthRing: View {
     static func accessibilityText(score: Int?, grade: HealthGrade?, trend: Int?) -> String {
         guard let score else { return scoreText(for: nil) }
         var parts = [localizedFormat("%1$@ 分", scoreText(for: score))]
-        if let grade { parts.append(localizedFormat("%1$@ 级", grade.rawValue)) }
+        if let grade { parts.append(localizedFormat("%1$@ 级", localizedCopy(grade.rawValue))) }
         if let trend, trend != 0 { parts.append(localizedFormat("较上次 %@", NumberFormat.signed(trend))) }
         return parts.joined(separator: "，")
     }
