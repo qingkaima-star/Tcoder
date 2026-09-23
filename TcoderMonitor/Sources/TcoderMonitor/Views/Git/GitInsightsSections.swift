@@ -47,7 +47,14 @@ struct GitRepositorySourceSection: View {
     var body: some View {
         let root = git.resolvedRepositoryRoot ?? ""
         if isRelocated {
-            DataNotice(text: "分析的是另一个仓库：\(root)\n\(Self.discoveryCaption(git))",
+            // 双语 P69b：这一句原来是**整段散文套整段散文** —— 外壳里插了用户路径
+            // （数据，不翻）与 `discoveryCaption` 的文案。`Text(变量)` 天生不查表，
+            // 所以拼完那一整串永远对不上目录里的任何键（英文态整条铺中文）。
+            // 改法是「外壳立一条整句键 + 在产出处查表」：`discoveryCaption` 自己**不**查表
+            // （它的另一个落点 `GlassSection(subtitle:)` 会查，先查就是翻两遍，
+            //  第二次查表会把英文串当成新的未登记残留记进运行时台账），
+            // 所以在嵌进 `%2$@` 之前查这一次。
+            DataNotice(text: Self.relocatedNotice(git: git, root: root),
                        role: git.discoveryMode == .nestedSubdirectory
                            ? Theme.Semantic.warning : Theme.Semantic.neutral,
                        icon: .riskWarning, iconLabel: "仓库定位偏离")
@@ -90,6 +97,20 @@ struct GitRepositorySourceSection: View {
         }
     }
 
+    /// 偏离那一格的整句：**外壳一条整句键 + 在产出处查表**（双语 P69b）。
+    ///
+    /// 原来写成 `"分析的是另一个仓库：\(root)\n\(Self.discoveryCaption(git))"` ——
+    /// 整段散文套整段散文，拼完那一串再交给 `Text(变量)`，而 `Text(变量)` 天生不查表，
+    /// 于是英文态这一格整块铺中文。现在：
+    /// * `%1$@` 是**用户选的仓库路径**（数据，永远不翻，也不进目录）；
+    /// * `%2$@` 是 `discoveryCaption` 产出的文案，**只在这里查这一次**。
+    ///   它另一个落点 `GlassSection(subtitle:)` 在渲染点自己查表，
+    ///   所以 `discoveryCaption` 本体必须继续返回**键**：先查就是翻两遍，
+    ///   第二次查表会把已经翻好的英文串当成新的未登记残留记进运行时台账。
+    static func relocatedNotice(git: GitInsights, root: String) -> String {
+        localizedFormat("分析的是另一个仓库：%1$@\n%2$@",
+                        root, localizedCopy(Self.discoveryCaption(git)))
+    }
 
     /// 把「为什么」和「结果」分开写：用户所选目录在仓库内部还是仓库本身不在这里再重复一遍路径。
     static func discoveryDetail(_ git: GitInsights) -> String {
@@ -252,6 +273,9 @@ struct GitNestedCandidatesSection: View {
                 // Z 类：藏掉它，用户会拿这一页的提交数当成整个目录树的数）。
                 // 后半句「怎么单独分析其中一个」是操作指引 → 进 ⓘ。ⓘ 里放**整句原句**
                 // （短标签是它的前缀），于是中英两侧的键与判据一个字都没变。
+                // 双语 P69b：短标签自己也是一条**完整整句键**（目录已登记），
+                // `GlassSection` 的 `subtitle` 位自己在渲染点查表 ⇒ 这里**不许**再包一层
+                // `localizedCopy`（第二次查表会把英文串当成新的未登记残留记进账）。
                 subtitle: "当前只分析了提交数最多的那一个",
                 icon: .package,
                 trailing: AnyView(CopyHelpBadge("当前只分析了提交数最多的那一个；要单独分析其中某个，直接把它添加为项目"))
