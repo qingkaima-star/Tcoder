@@ -180,4 +180,21 @@ extension HealthScoreCurvesTests {
                        "按字符数预算会把英文句截掉一半 ⇒ 评分卡那一行读不到完整口径")
     }
 
+    /// **换算法则不等于删掉截断**：交付头英文态实测打出
+    /// `…tallied only over the top 20 hotspo)` —— 一个 "h" 在全站任何地方都读不到。
+    /// 所以"一段都放不下预算"时的正确行为是**留整段**，让渲染层用 `lineLimit` + `.help` 去裁
+    /// （那一列本来就挂着 `.help`，P54 立的口径：被裁掉的那半必须有去处）。
+    func testP58ASingleOverBudgetSegmentIsKeptWholeRatherThanCutMidWord() {
+        // 121 格：刚好越过 120 那条线。旧写法留前 120 格 ⇒ 结尾是 `hotspo`，
+        // 新写法必须留整段 ⇒ 结尾是完整的 `hotspots`。
+        let long = String(repeating: "ab ", count: 38) + "hotspots"
+        XCTAssertEqual(HealthCurves.displayWidth(long), 122)
+        XCTAssertEqual(HealthCurves.joined([long]), long, "整段被拦腰截断 ⇒ 半个英文词全站读不到")
+        XCTAssertTrue(HealthCurves.joined([long]).hasSuffix("hotspots"),
+                      "结尾必须是一个完整的词，不是半截：\(HealthCurves.joined([long]).suffix(12))")
+        // 反向：预算仍然生效——第二段放不下就整段舍弃，并且不许留下悬空分隔符。
+        XCTAssertEqual(HealthCurves.joined(["甲", long]), "甲",
+                       "预算这条线本身还在（120 格），只是**不再拿截断当兜底**")
+    }
+
 }
