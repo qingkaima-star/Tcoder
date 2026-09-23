@@ -126,16 +126,16 @@ extension WeightedHealthScorer {
         // 本仓按流署名，一个署名通常是一条工作流；这句要是写成人数，
         // 就把"哪条流握着这块代码"说成了"多人协作已经很分散"。
         let counted = NumberFormat.grouped(git.activeAuthorCount)
-        return ["贡献分布合理（\(counted) 个署名，头号署名占 \(NumberFormat.percent(share, precision: 0))；"
-            + "署名按工作流计，不等于 \(counted) 个人）"]
+        return [localizedFormat("贡献分布合理（%1$@ 个署名，头号署名占 %2$@；署名按工作流计，不等于 %1$@ 个人）",
+                                    counted, NumberFormat.percent(share, precision: 0))]
     }
 
     private func busFactorIssues(_ top: AuthorStats, _ share: Double) -> [String] {
         guard share > 0.6 else { return [] }
         // 同一条口径：被点出来的是**一个署名**，不是"一个人"；单点风险本身照旧成立，
         // 不许因为换了称呼就把它说轻或说重。
-        return [String(format: "「%@」这个署名占 %.0f%% 提交，单点风险高（署名按工作流计，不等同于一个人头）",
-                       top.name, share * 100)]
+        return [localizedFormat("「%1$@」这个署名占 %2$@ 提交，单点风险高（署名按工作流计，不等同于一个人头）",
+                                    top.name, NumberFormat.percent(share, precision: 0))]
     }
 }
 

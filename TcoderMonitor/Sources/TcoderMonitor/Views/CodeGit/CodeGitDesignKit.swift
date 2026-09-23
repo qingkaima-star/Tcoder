@@ -323,7 +323,7 @@ extension EmptyStateView {
 struct DataDisclosureButton: View {
     let expanded: Bool
     let hiddenCount: Int
-    let noun: String
+    let noun: DisclosureNoun
     let action: () -> Void
 
     var body: some View {
@@ -346,9 +346,11 @@ struct DataDisclosureButton: View {
     }
 
     /// 文案纯函数：折叠时说清「还有多少」，展开后说清「收起」。**不出现"更多"这种无计数说法**。
-    static func title(expanded: Bool, hiddenCount: Int, noun: String) -> String {
-        if expanded { return "收起 \(NumberFormat.grouped(hiddenCount)) \(noun)" }
-        return "展开其余 \(NumberFormat.grouped(hiddenCount)) \(noun)"
+    ///
+    /// 走 `localizedCount` 而不是拼串：整句是键，英语的 single/plural 由
+    /// `Localizable.stringsdict` 决定（中文没有这个区分，机翻最容易在这里翻错）。
+    static func title(expanded: Bool, hiddenCount: Int, noun: DisclosureNoun) -> String {
+        localizedCount(expanded ? noun.collapseKey : noun.expandKey, hiddenCount)
     }
 }
 

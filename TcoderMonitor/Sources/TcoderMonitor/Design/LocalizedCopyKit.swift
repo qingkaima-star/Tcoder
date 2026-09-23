@@ -135,3 +135,60 @@ func groupedInto(_ text: String, count: Int) -> String {
     result.replaceSubrange(range, with: NumberFormat.grouped(count))
     return result
 }
+
+// MARK: - 展开/收起的量词（批次 P56）
+//
+// 为什么住在这本里：这一族是**文案词汇**，不是画法 —— 画法在
+// `Views/CodeGit/CodeGitDesignKit.swift` 的 `DataDisclosureButton`。
+// 它也不能留在原来那个文件里：那份加完 440 行，撞上实现文件 400 行线
+// （阈值冻结，拆才是修复）。
+
+/// 展开/收起按钮的**量词**。
+///
+/// 为什么从"一个中文字符串参数"改成枚举（批次 P56）：
+/// 中文不需要复数，英语需要 —— `"展开其余 \(n) " + noun` 这种写法在英文态要么整句中文
+/// （`ax_body_audit` 的 B 类里这一族有 7 句 / 14 次），要么退化成
+/// "Show 1 more commits" 这种语法错。复数只能由 `Localizable.stringsdict` 管，
+/// 而 stringsdict 认的是**整句键**，不是"前缀 + 变量"。
+///
+/// 键写成 `switch` 里的**字面量**而不是拼串：拼出来的串没有可查的整句键，
+/// 那正是 P53 立的守卫 1d【拼了查不中】要判红的那一族。
+enum DisclosureNoun {
+    case commits, functions, files, processes, contributors
+    case duplicateBlocks, cappedBlocks, undisplayed, items
+
+    /// 全站唯一一份成员清单。加一个量词只改这里，
+    /// `DisclosureNounCopyTests` 会逐个 case 点名要求两本目录里有它的两条键。
+    static let allCases: [DisclosureNoun] = [
+        .commits, .functions, .files, .processes, .contributors,
+        .duplicateBlocks, .cappedBlocks, .undisplayed, .items,
+    ]
+
+    var expandKey: String {
+        switch self {
+        case .commits: return "展开其余 %lld 条提交"
+        case .functions: return "展开其余 %lld 个函数"
+        case .files: return "展开其余 %lld 个文件"
+        case .processes: return "展开其余 %lld 个进程"
+        case .contributors: return "展开其余 %lld 位贡献者"
+        case .duplicateBlocks: return "展开其余 %lld 个重复块"
+        case .cappedBlocks: return "展开其余 %lld 个榜内重复块"
+        case .undisplayed: return "展开其余 %lld 个未展示"
+        case .items: return "展开其余 %lld 项"
+        }
+    }
+
+    var collapseKey: String {
+        switch self {
+        case .commits: return "收起 %lld 条提交"
+        case .functions: return "收起 %lld 个函数"
+        case .files: return "收起 %lld 个文件"
+        case .processes: return "收起 %lld 个进程"
+        case .contributors: return "收起 %lld 位贡献者"
+        case .duplicateBlocks: return "收起 %lld 个重复块"
+        case .cappedBlocks: return "收起 %lld 个榜内重复块"
+        case .undisplayed: return "收起 %lld 个未展示"
+        case .items: return "收起 %lld 项"
+        }
+    }
+}

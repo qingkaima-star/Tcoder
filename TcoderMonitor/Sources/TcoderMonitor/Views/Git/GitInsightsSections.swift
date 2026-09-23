@@ -122,7 +122,10 @@ struct GitCommitScopeSection: View {
 
     static func message(for scope: GitHistoryScope) -> String {
         guard scope.isWindowTruncated else { return scope.headline }
-        return scope.headline + "。趋势、时段分布与作者占比都只是这段窗口的分布，不代表全部历史。"
+        // P53：`headline` 是查过表的整句，后面这段此前是**裸字面量直拼** ——
+        // 英文态里前段变英文、这段仍是中文，同一行两种语言。
+        return localizedFormat("%1$@。趋势、时段分布与作者占比都只是这段窗口的分布，不代表全部历史。",
+                                 scope.headline)
     }
 
 }
@@ -138,7 +141,7 @@ struct GitActivitySection: View {
             // 盘点表 D9「留短藏长」：屏上留的是**那条真限制本身**（数据源只有边际分布，
             // Z 类不许整条藏），ⓘ 里是完整的近似口径原句 —— 一字未改，所以英文目录里
             // 那条整句键仍然是活的（`LocalizationGuardTests` 守卫 3 会抓烂尾键）。
-            subtitle: "数据源只有边际分布" + git.commitScope.windowSuffix,
+            subtitle: localizedFormat("数据源只有边际分布%1$@", git.commitScope.windowSuffix),
             icon: .chartLine,
             trailing: AnyView(CopyHelpBadge("数据源只有边际分布 · 单元格是小时与星期两档归一的近似强度"))
         ) {
@@ -161,8 +164,9 @@ struct GitActivitySection: View {
     }
 
     static func busiestCaption(_ git: GitInsights) -> String {
-        guard let hour = git.busiestHour else { return "小时分布为空，只有星期分布可用" }
-        return "最活跃时段：\(hour):00 · 按各作者本地时区合并，未做时区归一"
+        guard let hour = git.busiestHour else { return localizedCopy("小时分布为空，只有星期分布可用") }
+        return localizedFormat("最活跃时段：%1$@:00 · 按各作者本地时区合并，未做时区归一",
+                                 String(hour))
     }
 
 }
@@ -314,7 +318,7 @@ struct GitRecentCommitsSection: View {
                     if git.recentCommits.count > Self.displayLimit {
                         DataDisclosureButton(expanded: expanded,
                                              hiddenCount: git.recentCommits.count - Self.displayLimit,
-                                             noun: "条提交") {
+                                             noun: .commits) {
                             expanded.toggle()
                         }
                     }

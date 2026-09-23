@@ -256,7 +256,7 @@ struct CodeComplexitySection: View {
                         if code.topComplexFunctions.count > Self.rowLimit {
                             DataDisclosureButton(expanded: expanded,
                                                  hiddenCount: code.topComplexFunctions.count - Self.rowLimit,
-                                                 noun: "个函数") {
+                                                 noun: .functions) {
                                 expanded.toggle()
                             }
                         }

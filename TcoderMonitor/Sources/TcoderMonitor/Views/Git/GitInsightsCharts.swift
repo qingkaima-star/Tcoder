@@ -239,6 +239,11 @@ struct GitCommitRow: View {
                 Text(commit.subject)
                     .font(CodeGitType.prose(Theme.Typo.body))
                     .lineLimit(1)
+                    // 定宽列里长标题一定被裁（英文态实测单行需 1,183pt / 列宽 596pt）。
+                    // "宁可截不可撑"这条取舍仍然成立（抬高一行会断掉五列基线），
+                    // 但**被裁掉的那一半必须有去处** —— 否则这一屏上没人能读到完整标题。
+                    // 画法与侧栏项目名那一格同一条（`ProjectSidebar`：单行截断 + 全文进 ⓘ）。
+                    .help(commit.subject)
                 Text("\(commit.author.isEmpty ? "未知作者" : commit.author) · "
                     + "\(LogRecency.describe(commit.date)) · "
                     + "\(DateFormat.full.string(from: commit.date))")

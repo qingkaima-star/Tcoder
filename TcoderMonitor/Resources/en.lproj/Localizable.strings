@@ -530,11 +530,16 @@
 "所选目录即仓库" = "The selected folder is the repository";
 "风险：%@" = "Risk: %@";
 "高" = "High";
+// 风险五档里只有「严重」漏了键 —— 模板 `风险：%@" = "Risk: %@"` 与另外四档都在，
+// 于是英文态长成半英半中的 `Risk: 严重`（P52）。补齐这一档，术语与 `Theme.Semantic.critical` 同源。
+"严重" = "Critical";
 "中" = "Medium";
 "低" = "Low";
 "无" = "None";
 "%1$@ 个核心 · 口径与活动监视器一致" = "%1$@ cores · same basis as Activity Monitor";
-"在用 %1$@ · 压力 %2$@" = "In use %1$@ · pressure %2$@";
+// P55：这条键并进上面的「总量 %1$@ · 在用 %2$@ · 压力 %3$@」了（内存的分母从值槽挪到脚注）。
+// 短语「在用 X · 压力 Y」一字未删，只是不再是独立的一条键；留着它
+// `test_noStaleKeysInCatalog` 会判"代码里已经不存在的键"。
 "读 %1$@ / 写 %2$@" = "Read %1$@ / Write %2$@";
 "在用 %1$@ 核 / 共 %2$@ 核 · 负载 %3$@" = "Using %1$@ of %2$@ cores · load %3$@";
 "已取指标 %1$@ / 全系统 %2$@ 个进程 · 只读" = "Metrics for %1$@ of %2$@ processes system-wide · read-only";
@@ -758,7 +763,8 @@
 // 少数没走查表的落点由 LocalizationGuardTests 的「有键没查」那一半继续盯。
 "窗口内累计" = "Cumulative in window";
 "所选目录本身就是仓库根" = "The selected folder is the repository root itself";
-"数据源只有边际分布" = "Data source provides marginals only";
+// P53：这条裸句键已并进整句键 `"数据源只有边际分布%1$@"`（见下），短语本身一字未删，
+// 留着它 `test_noStaleKeysInCatalog` 会报"代码里已经不存在的键"。
 "当前为离线模式，版本与漏洞结论来自内置快照。" = "Offline mode: version and vulnerability conclusions come from the built-in snapshot.";
 "分用途统计" = "Breakdown by usage";
 "该项目没有产出覆盖率报告，不参与计分。" = "This project produced no coverage report, so it is not scored.";
@@ -775,3 +781,31 @@
 "按内存" = "By memory";
 "开启后需要重新执行分析才会生效。" = "Re-run the analysis for this setting to take effect.";
 "尚未分析覆盖率报告，不参与计分。" = "No coverage report has been analyzed, so it is not scored.";
+
+// P52：健康维度那四条「优点/问题」句子以前用 `String(format:)` 直接拼中文模板，
+// 模板本身从不查表 ⇒ 英文态整句是中文（屏上各 4×，是剩余 B 里最高频的一族）。
+// 改成 `localizedFormat` + 位置参数；同一个署名数在一句里出现两次，用同一个 `%1$@`。
+"重复代码率低（%1$@）" = "Low duplication rate (%1$@)";
+"重复代码 %1$@，共 %2$@ 处重复块" = "Duplicated code %1$@ across %2$@ duplicate blocks";
+"贡献分布合理（%1$@ 个署名，头号署名占 %2$@；署名按工作流计，不等于 %1$@ 个人）" = "Contribution is well spread (%1$@ identities, the top one holds %2$@; identities are workflows, not %1$@ people)";
+"「%1$@」这个署名占 %2$@ 提交，单点风险高（署名按工作流计，不等同于一个人头）" = "Identity \u201c%1$@\u201d holds %2$@ of commits \u2014 single-point risk (identities are workflows, not people)";
+
+// 批次 P53（Git 洞察口径句·先拼再上屏的那一族）：这一族的毛病不是"没键"，
+// 而是**先把带测得值的中文片段拼成串、再交给渲染层查表** —— 拼出来的整串里嵌着
+// 「279」「606」这样的测得值，目录里不可能有对应的键，于是英文态永远出中文；
+// 更糟的是 `windowSuffix` 被当 `%3$@` 插进**已经翻好**的整句模板，
+// 同一行前半英文后半中文。八条键：模板整句化，测得值走位置参数。
+"含 %1$@ 次合并 · 非合并 %2$@ 次" = "Including %1$@ merges · %2$@ non-merge commits";
+"无合并提交 · 已覆盖全部历史" = "No merge commits · the full history is covered";
+"含合并 · 非合并窗口 %1$@ 次" = "Merges included · non-merge window covers %1$@ commits";
+"旧报告未记录窗口口径" = "This older report does not record the window basis";
+"近 %1$@ 次提交窗口内 · %2$@ 人" = "Within the last %1$@ commits · %2$@ authors";
+" · 近 %1$@ 次提交窗口内" = " · within the last %1$@-commit window";
+"%1$@。趋势、时段分布与作者占比都只是这段窗口的分布，不代表全部历史。" = "%1$@. The trend, hour-of-day distribution and author shares describe only this window, not the whole history.";
+"数据源只有边际分布%1$@" = "The data source provides marginals only%1$@";
+"最活跃时段：%1$@:00 · 按各作者本地时区合并，未做时区归一" = "Busiest hour: %1$@:00 · merged by each author's local timezone, with no timezone normalisation";
+"小时分布为空，只有星期分布可用" = "The hour distribution is empty, so only the weekday distribution is available";
+
+// 批次 P55（窄态读数带）：内存的分母从值槽挪进脚注那一行，于是脚注多一条整句键。
+// 挪的原因写在 `PerformanceSystemTiles` 的切分助手上面——单位与数字同字号是在抢宽度。
+"总量 %1$@ · 在用 %2$@ · 压力 %3$@" = "Total %1$@ · in use %2$@ · pressure %3$@";

@@ -340,6 +340,19 @@ Tests/TcoderMonitorTests/Health*Tests.swift
 2. **同一时刻只允许一个人启动 App**。`Application Support` 与 `defaults` 域全机唯一，
    不随工作树隔离。跑 UI 取证前先 `pgrep -x TcoderMonitor` 确认为 0。
    所以 WS-H/WS-I/WS-J 一律**不启动 App**，用测试驱动分析器取数。
+   **2.1（2026-09-23 由需求方定，原话：「禁止开无数个应用程序在后台，所有测试完的程序必须你自己退出。」）**
+   ① 起跑任何会碰 App 的活之前，先 `pgrep -x TcoderMonitor | wc -l` 记下**基线数**并写进汇报；
+   停笔前再数一次，**不等于基线就不算收尾**（多了就是自己留的债）。
+   ② 凡是**自己（或自己的子代理、脚本、测试）起的实例，必须由自己退出**；
+   判归属只认**可执行路径 + 启动时间窗**（`ps -o command= -p <pid>`），
+   **绝不按 bundle id 广播 quit**（`osascript tell application id … to quit` 是全机生效，会退掉别人的取证）。
+   ③ 写测试/脚本时优先设计成**不需要杀进程**：
+   用"除自己 spawn 的那个 pid 外不得多出一格"+"超时没退出即判败"这类**能判**的形状，
+   而不是"先起起来再杀掉"。**能不起就不起**——起一次就占一格全机唯一窗口。
+   ④ 派子代理时，工单的纪律段要写两句：不许启动 App（要读数用测试驱动分析器）+
+   **万一必须起，谁起的谁退出、并在交回汇报里给出前后实例数**。
+   （2026-09-23 的现场：我只写了前一句，后一句漏了，
+   于是 sabotage 那一趟真的留下 3 个 GUI 实例，靠子代理自己收掉才没留在机器上——那是运气不是设计。）
 3. **阈值不许为了刷分而动**。巨大文件行数、复杂度榜长度这类定义属冻结区；
    把阈值放宽让自己变好看，等于把工具废掉。
 4. **实现文件越过 400 行会让全仓测试变红**（`SourcesSizeAuditTests`，2026-09-21 补）。
@@ -550,6 +563,8 @@ WS-A/WS-B/WS-C 此刻在**主树里有未提交在途改动**。不允许直接�
 | `App/AppState.swift` | 五路改走 `AnalyzerLedger.timed`、收尾加 1 行台账；**删掉**自己那份 `attempt<T>` 助手（有删，理由写在这里） | 那份助手与 `CLIScan.attempt` 是「同一件事两个入口」（RD-38 同族），且它手打的路名与 `sectionFailures` 那五行不一致——同一次失败在界面叫「日志分析」、在报告里叫「错误日志」 | `SectionLabelGuardTests` 两条（AppState 一个路名字面量都不许有 + 命名位不许传字面量）各配元测试；`AnalyzerLedgerTests.testBothAssemblyPointsWriteTheLedger` |
 | `Models/CodeMetrics.swift` | 加 5 枚 Optional：`duplicatedBlockLimit` / `duplicatedBlocksDroppedByCap` / `duplicatedLinesOutsideReportedBlocks` / `duplicateFragmentsNotExpandedCount` / `duplicateFilesHittingLineCap`（既有成员一字未动；**故意不给「总块数」**） | 引擎早就算好这四个数，但契约里没有承接格 ⇒ 它们只活在 `scanLimitations` 那句中文里，界面按句式认领句子、读 JSON 的人只能解析散文。不给总数是因为 `rankedBlocks` 撞 id 削掉的块无读数，「榜内 + 榜外 == 总数」天然不平 | `DuplicateBoardAccountingTests` 6 例（真扫本仓对账「字段 == 台账句里的数」：榜内 20 · 榜外 85 块 / 584 行 · 未展开 225 处；含「不许把两者相加当总数」的结构守卫）；sabotage 摘两枚字段 ⇒ 2 红 |
 | `Models/LogInsights.swift` | 加 2 枚 Optional：`crashReportCount`（读到几份崩溃报告）/ `crashReportLineCount`（被移出密度分母的正文行数），既有成员一字未动 | RD-46b 把崩溃正文从 `totalLinesScanned` 摘出去之后，那些行只活在内部类型 `LogAggregate` 里；不落成字段，"移出分母"就和"消失"在盘上无法区分，而 RD-49 的输入（有崩溃证据、零真日志行）在报告里也就数不出来。**故意没开**两格：`crashReportDirectoryReadable`（要把"目录读不动"与"目录里没有"分开，得先给 `LogDiscovery` 加枚举失败读数 = 新能力，同形边界已写在 `LogDenominatorStatesTests` 文件头）、`unattributedCrashReportCount`（数的是**别人项目**的报告，属整机面不是项目面；"自己的报告没产出可用事件"那件事由 `stabilityEvidenceGaps` 已经在说） | `LogDenominatorAccountingTests` 5 例（真值取自盘上 `0x0A` 计数、含对账等式 `分母 + 崩溃正文 == 盘上读到的总行数`、旧 JSON 缺键 ⇒ `nil`、写者集合恰好是 `FileLogAnalyzer.swift` 一条 + 其元测试）；R11 侧另有 `LogDenominatorTests` 9 例与 sabotage（摘掉 role 分流 ⇒ 6 红） |
+| `Views/DashboardView.swift` | hero 那条最近提交标题 `Text(commit.subject)` 补 **1 个修饰符** `.help(commit.subject)`（既有布局、字号、取义一字未动） | 被裁的是**这一格自己的**文本，去处必须挂在同一个元素上 —— `ax_frames` 第 9 列量的就是"这一格挂没挂 help"，挂到邻居身上等于给尺子造假信号。Git 页提交榜（`Views/Git/**`，非冻结）同批补上，画法与侧栏项目名一致 | `scripts/ax_truncation_sweep.sh` 的主门（装不下**且无 help** 才 exit 1）+ 夹具那一格的**分档自证**（它必须落在"有 help"档，落进主门即第 9 列没读到 ⇒ 当场判不成立） |
+| `Views/DashboardView.swift` | **第二处，同上形状**：`ErrorClusterRow` 里那条崩溃标题也补 `.help(cluster.displayMessage)`（窄态 1080 实测格宽 557pt / 单行需 624pt） | 同一把尺子在窄态那一档量出来的同类缺陷：错误日志页的同类格子早就挂了 help，总览榜上这条没有 ⇒ 被裁掉的半个崩溃标题在全站任何地方都读不到 | 同上，走 `ax_truncation_sweep.sh` 窄态那趟的主门 |
 | `Models/CodeMetrics.swift` | 再加 **1 枚** Optional：`nonCodeRegionLineCount`（混合语言文件里按分区归位为非代码、未进代码统计的行数），既有成员一字未动 | RD-42「有写无读」：`ComplexitySanitizer` 从 R2 起就在算这枚数（逐行累加 + `merged` 跨区累加），全仓零读者 ⇒ "分区认出来了、N 行归位"一件没说，而"分区**没**认出来"倒另有一格在出声（`vueRegionFallbackFileCount`）。**这一格是口径不是"未量准"**，所以故意**不进** `scanLimitations`（那条在 CLI 被打成「未量准 N 条」，塞进来等于把那个数灌虚高） | `NonCodeRegionReadoutTests` 10 例：正例真值取自测试自己手写的 `.vue` 夹具（template 12 + style 8 + SFC 标签 6 ⇒ 26，先自证数对了再断言）、反例钉「这句不许进限制账」+ 对账等式、未知态（认不出分区的文件一行都不算已归位）、缺席（纯 Swift 语料整句不出声 + 旧 JSON 缺键 ⇒ `nil`）、写者恰一处与读者两出口的扫描守卫各配元测试；sabotage 一次 ⇒ 9 红 |
 | `Models/CodeMetrics.swift` | 再加 **1 枚** Optional：`duplicateBlockCoordinatesOutsideBoard`（榜外块的可点名坐标样本，直传引擎那份），既有成员一字未动 | RD-52：这些 id 原先只在 `scanLimitations` 的中文句里，而且**同一串在一份报告里印两遍**（口径句 + 扫描边界句），单条实测 2,407 字符；读 JSON 的人要定位「到底是哪几块」仍得解析散文 —— RD-48 刚消灭过的形状在坐标这格复活。⚠️ 我最初记成「全量坐标被静默截断」，复核后不对：引擎本来就只点 `outsideBoardSampleLimit` 条、未点名块数在 `droppedByCap` 里，所以修法是**散文点 3 条 + 指回字段与计数、字段给引擎那 6 条一条不减** | `OutsideBoardCoordinatesTests` 4 例（真扫本仓对账「字段在、样本数不超过引擎那把尺子、同一串只出现一次、最长限制说明 <1,200 字符」+ 装配口正例/余数反例 + 缺键 ⇒ `nil` + 抄回边界句的 sabotage ⇒ 2 红）
 
