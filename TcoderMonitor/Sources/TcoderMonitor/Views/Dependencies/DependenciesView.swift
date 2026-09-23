@@ -28,7 +28,7 @@ struct DependenciesView: View {
             if let deps = report?.dependencies {
                 if deps.ecosystems.isEmpty {
                     EmptyStateView(
-                        icon: CodeGitSymbol.resolve(.package),  // 收 `IconName` 的那个初始化器不转发 `help:`
+                        icon: .package,
                         title: "项目中未发现可识别的依赖清单",
                         // 一整句 = 一个键。原来拆成 `"…\n" + "…"` 两段拼，
                         // 运行时送进查表的是**拼接后的整串**，目录里那条半句键永远查不中
@@ -58,7 +58,7 @@ struct DependenciesView: View {
                 }
             } else {
                 EmptyStateView(
-                    icon: CodeGitSymbol.resolve(.package),
+                    icon: .package,
                     title: "尚未执行依赖分析",
                     message: "该项目还没有依赖分析结果。点击「重新分析」开始扫描。",
                     help: "需要最新版本与漏洞库在线核对时，先打开上方的联网开关。"
