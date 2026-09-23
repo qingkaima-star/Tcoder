@@ -18,7 +18,8 @@ AGENTS.md 第四轮红线 5（诚实性语义与阈值不许为任何指标放�
 import os
 import statistics
 
-from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, as_int, base_app_update_line, base_hang_line, base_hitch_frame_line, base_hitches_line, base_hotspot_line, base_main_thread_line, base_render_line, dedupe_pairs, disp_values, fmt_row, fps_counts, input_rate_qualification, load_measure, over_budget, percentile, read_json, regime_note, in_display_regime, phase_blame)
+from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, as_int, base_app_update_line, base_hang_line, base_hitch_frame_line, base_hitches_line, base_hotspot_line, base_main_thread_line, base_render_line, disp_values, fmt_row, fps_counts, input_rate_qualification, load_measure, over_budget, percentile, read_json, regime_note, in_display_regime, phase_blame)
+from perf_update_caliber import dedupe_pairs, update_caliber_note  # 事件口径唯一住处（三口径的历史见该文件）
 from perf_trace_xml import cross_check_durations, find_tag
 # 逐帧三张表的判据层：判据一字未动，只是搬出去还「巨大文件 400 行」口径的债。
 from perf_trace_frames import PER_TABLE_BUDGETS, frame_table_rows
@@ -250,10 +251,12 @@ def app_update_verdict(values, budget):
 
 def summary_app_update_row(loaded, budget):
     # 3) app-update 相位（一次 hitch 通常拆成 Brown+Red 两行，同 duration 走 ref）
-    upd = dedupe_pairs(loaded["hitches-updates"])
+    measure = loaded["hitches-updates"]
+    upd = dedupe_pairs(measure)
     if upd:
         cur, verdict = app_update_verdict(upd, budget)
-        fmt_row("app-update 单次耗时(ms)", base_app_update_line(), cur, verdict)
+        fmt_row("app-update 单次耗时(ms)", base_app_update_line(), cur,
+                verdict + update_caliber_note(measure))
     else:
         fmt_row("app-update 单次耗时(ms)", base_app_update_line(),
                 "无 app-update = 无 hitch" if loaded["hitches-updates"]["present"] else "未覆盖", "—")

@@ -243,3 +243,53 @@ PYCHK
   [ "$n" -gt 0 ] || { fail "一份性能文档都没扫到 ⇒ 表格判据正在空转"; return; }
   [ "$bad" = "0" ] && ok "$n 份性能文档的表格结构完好（无断行、每行列数=表头；分母逐份点名存在）"
 }
+
+selfcheck_update_caliber_one_rule() {  # selfcheck_update_caliber_one_rule <outdir>
+  # 54) `app-update` 只许有一个口径。09-24 在**同一份 trace** 上量到三个数
+  #     （行数 28 / 按(起,时长)去重 17 / 按值去重 16），而 sidecar 的 `values` 还只存最小的 40 个
+  #     ⇒ XML 一缺失，回落尺读到的 max 是"第 40 小"，而 T2 的判据量正是这个 max（假绿通道）。
+  local r
+  r=$( cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 - "$1" <<'PYCHK'
+import json, os, subprocess, sys
+from perf_trace_metrics import load_measure
+from perf_update_caliber import dedupe_pairs, update_caliber_note
+fx = os.path.join(sys.argv[1], "caliber-fx"); os.makedirs(fx, exist_ok=True)
+# 4 行=3 事件：第 2 行是第 1 行的 Brown/Red 双行，第 3 行与第 1 行同时长但**起点不同**（真事件）
+row = '<row><start-time id="%s" fmt="%s">%s</start-time><duration id="%s" fmt="%s">%s</duration></row>'
+ref = '<row><start-time ref="1"/><duration ref="2"/></row>'
+
+def run(dirname):   # 让被检的 CLI 自己出 sidecar，不在夹具里复刻它的算法
+    xml = os.path.join(dirname, "hitches-updates.xml")
+    subprocess.run([sys.executable, "trace_report.py", "durations", xml,
+                    "--json", os.path.join(dirname, "hitches-updates.json")],
+                   check=True, stdout=subprocess.DEVNULL)
+    return json.load(open(os.path.join(dirname, "hitches-updates.json")))
+
+
+open(os.path.join(fx, "hitches-updates.xml"), "w").write(
+    '<table><schema name="hitches-updates"/>\n'
+    + row % ("1", "0.1 ms", 100000, "2", "6.00 ms", 6000000) + "\n" + ref + "\n"
+    + row % ("3", "2000 ms", 2000000000, "4", "6.00 ms", 6000000) + "\n"
+    + row % ("5", "3000 ms", 3000000000, "6", "12.00 ms", 12000000) + "\n</table>\n")
+js = run(fx)
+xml_col = dedupe_pairs(load_measure(fx, "hitches-updates"))            # 走 XML
+side_col = dedupe_pairs({"doc": None, "json": js, "present": True})    # 走 sidecar 的 pairs
+bare = dedupe_pairs({"doc": None, "json": {"values": js["values"]}, "present": True})  # 只有裸值
+# 回落不许截断：45 行的表，最大值必须还在 `values` 里（曾 [:40] ⇒ 回落尺读到"第 40 小"当 max）
+big = os.path.join(fx, "big"); os.makedirs(big, exist_ok=True)
+open(os.path.join(big, "hitches-updates.xml"), "w").write(
+    '<table><schema name="hitches-updates"/>\n'
+    + "".join(row % (str(10 + i), "1 ms", 1000000, str(200 + i), "%d ms" % (i + 1), (i + 1) * 1000000)
+              for i in range(45)) + "\n</table>\n")
+bigjs = run(big)
+print("|".join(str(x) for x in [
+    js["n_rows"] == 4 and js["n_events"] == 3 and js["n"] == 3 and js["over_budget"] == 1,
+    [round(v, 2) for v in xml_col] == side_col,
+    len(bare) == 4 and update_caliber_note({"doc": None, "json": {"values": [1.0]}}) != "",
+    len(bigjs["values"]) == 45 and max(bigjs["values"]) == 45.0]))
+PYCHK
+)
+  [ -n "$r" ] || { fail "夹具里的 python 崩了（拿到空串）⇒ 这不是判据不符，是这条没跑"; return; }
+  [ "$r" = "True|True|True|True" ] || { fail "app-update 口径四形状没各判对（拿到 $r）⇒ 又会变成『两处入口两个数』"; return; }
+  ok "app-update 一个口径：sidecar 与汇总表同 n、双行收成事件、按值并不许少计、回落不再截 40"
+}

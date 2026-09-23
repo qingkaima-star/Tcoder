@@ -312,27 +312,6 @@ def load_measure(d, key):
     return {"doc": doc, "json": js, "present": doc is not None or js is not None}
 
 
-def dedupe_pairs(measure):
-    """按 (起始, 时长) 去重后的时长列。
-
-    hitches-updates 里一次 app update 会出两行（Brown / Red 两个 containment-level），
-    不去重就打不赢 spec §1 那列"7 个值"的形状。
-    """
-    if measure["doc"] is not None:
-        seen, out = set(), []
-        for s, v in measure["doc"].spans():
-            key = (round(s, 1), round(v, 2))
-            if key in seen:
-                continue
-            seen.add(key)
-            out.append(v)
-        return out
-    js = measure["json"]
-    if js and "values" in js:
-        return sorted(set(float(v) for v in js["values"]))
-    return []
-
-
 def fps_counts(measure):
     """displayed-surfaces-per-second → 每秒出帧数分布。"""
     if measure["doc"] is None:
