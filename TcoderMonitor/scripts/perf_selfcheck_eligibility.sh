@@ -263,6 +263,10 @@ selfcheck_phase_blame() {  # selfcheck_phase_blame <outdir>
   #     定归因（与 §R 里我自纠的那次误读同一个错，只是换了一支函数）。
   #     ⇒ 窄分布必须**闭嘴指路**，而且这一条与 `caveat_for` 共用同一条数值判据
   #     （`interval_shaped`）——判据抄成第二份的那天，两支函数就会互相打脸。
+  # 第六到第八种（09-24 #46）：归因行原来只吃两张表，于是它会把"update 相位没超"说成
+  #     "主线程没被占住"——同一张表里 `potential-hangs` 明明印着 5 次 / 2725 ms。
+  #     ⇒ 第三路输入必须有，且**第八种是反向的**：hangs 为空时旧话术要一字不动，
+  #     否则这条新维度会变成"什么都判不成立"的永真绿。
   local r
   r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
 from perf_trace_metrics import phase_blame as p, interval_shaped as ish
@@ -272,12 +276,20 @@ c = p([1.0] * 100, [10.0] * 5, 8.333)[1]                  # 一次都没超 ⇒ 
 d = p([1.0], [], 8.333)[1]                                # 无迟到帧 ⇒ 不给任何归因
 e = p([9.31] * 2090, [8.33] * 24, 8.333)[1]               # 窄分布 ⇒ 不判，只指路
 t = p([1.0] * 1000 + [9.0] * 50, [10.0] * 24, 8.333)      # 宽分布但超预算 2.1 倍 ⇒ 说"倍"且不判归因
-print("%s|%s|%s|%s|%s|%s" % ("先查主线程" in a, "分开修" in b, "全在渲染/合成侧" in c,
-                             d == "—", "不判" in e and "time-profile" in e,
-                             "倍" in t[0] and "7671" not in t[0] and t[1].startswith("不判")))')
-  [ "$r" = "True|True|True|True|True|True" ] \
-    || { fail "迟到帧归因五种形状没各判对（拿到 $r）"; return; }
-  ok "迟到帧归因分得清「查主线程 / 分开修 / 全在合成侧 / 无迟到 / 窄分布不判 / 比值悬殊不判」"
+H = [441.3, 887.2]                                        # 同一窗口主线程被占住两次的形状
+g = p([1.0] * 100, [10.0] * 5, 8.333, H)                  # #46 正身：相位没超 + 有 hangs
+h = p([1.0], [], 8.333, H)                                # 无迟到帧 + 有 hangs
+i = p([1.0] * 600 + [168.3], [10.0] * 42, 8.333, [])[1]   # 反向：hangs 为空 ⇒ 旧话术一字不动
+print("%s|%s|%s|%s|%s|%s|%s|%s|%s" % (
+    "先查主线程" in a, "分开修" in b, "全在渲染/合成侧" in c,
+    d == "—", "不判" in e and "time-profile" in e,
+    "倍" in t[0] and "7671" not in t[0] and t[1].startswith("不判"),
+    "归因未定" in g[1] and "别改视图更新常数" not in g[1] and "887" in g[1],
+    "不判" in h[1] and "887" in h[0],
+    i == b and "阻塞" not in i))')
+  [ "$r" = "True|True|True|True|True|True|True|True|True" ] \
+    || { fail "迟到帧归因八种形状没各判对（拿到 $r）"; return; }
+  ok "迟到帧归因分得清「查主线程 / 分开修 / 全在合成侧 / 无迟到 / 窄分布不判 / 比值悬殊不判 / 有 hangs 不许归给合成侧」"
 }
 
 selfcheck_pulse_window_scope() {  # selfcheck_pulse_window_scope <outdir>

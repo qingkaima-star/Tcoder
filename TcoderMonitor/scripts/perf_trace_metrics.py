@@ -144,24 +144,37 @@ def interval_shaped(values, budget_ms):
     return bool(vals) and min(vals) >= NARROW_FLOOR_RATIO * budget_ms
 
 
-def phase_blame(updates, hitch_frames, budget_ms):
+def blocked_note(blocked):
+    """主线程被占住的**第三种证据**：`potential-hangs` 里那些测量区间之外的块。
+
+    为什么单拎出来（09-24 #46）：`phase_blame` 原来只吃 `hitches-updates` 与 `hitches` 两张表，
+    于是它会说"主线程一次都没超 ⇒ 迟到全在渲染/合成侧"。可同一趟完全可能有 hangs
+    （实测 `03a2219-t2b-idle-run1`：那句话与 5 次 / 累计 2725 ms 的 hangs 并排印在同一张表里）。
+    **update 相位没超 ≠ 主线程没被占住**，前者只是后者的一个子集。
+    """
+    vals = [v for v in (blocked or []) if v is not None]
+    if not vals:
+        return ""
+    return ("｜另有主线程阻塞 %d 次 / 累计 %.0f ms（最长 %.1f ms）＝**在 update 相位的测量区间之外**"
+            % (len(vals), sum(vals), max(vals)))
+
+
+def phase_blame(updates, hitch_frames, budget_ms, blocked=None):
     """把"迟到帧"按"主线程 update 是否同时超预算"分开数 —— 决定该去查谁。
 
-    只看 hitch 数会误诊：42 个迟到帧里只有 13 次 update 超预算，
-    那意味着**大多数迟到与主线程无关**（渲染/合成侧），
+    只看 hitch 数会误诊：42 个迟到帧里只有 13 次 update 超预算 ⇒ 多数迟到与主线程无关，
     去优化 `_updateViewGraph` 的常数是白工；反之若几乎一比一，才该查视图更新。
-    两边都按"次数"报，**不假装是一次迟点对应一次 update**：
-    hitches-updates 一次迟点可能出多行（Brown/Red），602 与 42 就是这种关系。
-
-    09-23 补了两种**同样不给归因**的形状：① update 表窄分布（单位就不是占用时长）；
-    ② 超预算次数远多过迟到帧（>1.5× ⇒ 两表不同源，比值不含信息）。
-    两种都只指路另两把独立的尺子（render 相位 + time-profile 的 Main Thread 忙样本）。
+    两边都按"次数"报，**不假装一次迟点对应一次 update**（Brown/Red 会出两行）。
+    09-23 补的两种形状同样不给归因：① update 表窄分布（单位不是占用时长）；
+    ② 超预算次数 >1.5× 迟到帧（两表不同源，比值不含信息）。
+    09-24 补第三路输入 `blocked`（#46）：hangs 存在时**不许**把迟到整体归给渲染/合成侧。
     """
     ups = [v for v in (updates or []) if v is not None]
     late = [v for v in (hitch_frames or []) if v is not None]
+    note = blocked_note(blocked)
     over = sum(1 for v in ups if v > budget_ms)
     if not late:
-        return "本窗口无迟到帧", "—"
+        return ("本窗口无迟到帧" + note, "—" if not note else "不判：无迟到帧可归因，但主线程这一窗被占住过")
     if over > len(late):      # 超预算次数比迟到帧还多 ⇒ 说"倍数"，别说"百分比"（那是 7671% 那种话）
         line = "update 超预算 %d 次 vs 迟到 %d 帧（前者是后者的 %.1f 倍）" % (
             over, len(late), float(over) / len(late))
@@ -169,6 +182,10 @@ def phase_blame(updates, hitch_frames, budget_ms):
         line = "update 超预算 %d 次 vs 迟到 %d 帧（比 %.0f%%）" % (
             over, len(late), 100.0 * over / len(late))
     if over == 0:
+        if note:      # 这一格是 #46 的正身：旧话术在这里把"相位没超"说成了"主线程没被占住"
+            return line, ("update 相位一次没超，**但**这一窗主线程被占住过 ⇒ "
+                          "归因未定，先查是谁占住主线程（time-profile 忙样本），"
+                          "不许写成「迟到全在渲染/合成侧」" + note)
         return line, "主线程一次都没超 ⇒ 迟到全在渲染/合成侧，别改视图更新常数"
     if interval_shaped(ups, budget_ms):
         return line, ("不判：该表逐值下限 %.2f ms（≈%.1f 帧）＝按事件节拍计，"
@@ -185,8 +202,11 @@ def phase_blame(updates, hitch_frames, budget_ms):
                       % (float(over) / len(late)))
     if share >= 80:      # 「一比一」只在两表次数**可比**时才说
         return line, "几乎一比一 ⇒ 先查主线程 update（视图粗粒度失效那一族）"
-    return line, ("主线程只占 %d 次，其余 %d+ 次要去渲染/合成侧找 ⇒ 两件事分开修"
-                  % (over, max(0, len(late) - over)))
+    tail = ""
+    if note:      # 没有 hangs 的时候不许说"另见 hangs"（那是把不存在的证据指给读者）
+        tail = "（这一句只覆盖 update 相位）" + note
+    return line, ("主线程只占 %d 次，其余 %d+ 次要去渲染/合成侧找 ⇒ 两件事分开修%s"
+                  % (over, max(0, len(late) - over), tail))
 
 
 def in_display_regime(achieved_fps, budget_ms, ratio=0.8):

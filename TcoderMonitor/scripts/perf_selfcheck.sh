@@ -117,7 +117,7 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_disk_precondition "$out"    # 24) 前置必须**能失败**：判定要在、且全仓只有一份
   item selfcheck_display_regime "$out"       # 25) 120Hz 预算只对 120Hz 档成立：降频档里不许印"危急"
   item selfcheck_app_update_split "$out"         # 26) 一个 max 不许同时盖住"整体很快"和"有个孤例很慢"
-  item selfcheck_phase_blame "$out"              # 27) 迟到帧要说清该怪主线程还是合成侧，三种形状各判一次
+  item selfcheck_phase_blame "$out"              # 27) 迟到帧该怪谁：八种形状各判一次（含"有 hangs 不许归给合成侧"与它的反向）
   item selfcheck_input_rate_qualification "$out"  # 28) meta 里的输入节奏必须有读者
   item selfcheck_launcher_hygiene "$out"       # 29) 起实例的脚本必须有 trap、不许按 bundle id 广播
   item selfcheck_p95_crosscheck_shapes "$out"  # 33) p95 那半句由两把尺子合判，七种形状各判一次

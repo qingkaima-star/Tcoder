@@ -322,9 +322,10 @@ def summary_frame_table_rows(loaded, budget):
 
 def summary_phase_blame_row(loaded, budget):
     # 4b) 迟到帧到底该怪谁：主线程 update 也超预算的，和"主线程没问题、渲染/合成侧慢了"的
+    #     第三路输入是 hangs——update 相位没超不等于主线程没被占住（#46）
     upd = dedupe_pairs(loaded["hitches-updates"])
     late = disp_values(loaded["hitches"])
-    line, verdict = phase_blame(upd, late, budget)
+    line, verdict = phase_blame(upd, late, budget, disp_values(loaded["potential-hangs"]))
     fmt_row("迟到帧归因（update vs render）", "—", line, verdict)
 
 
