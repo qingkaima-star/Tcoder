@@ -138,7 +138,37 @@ extension LocalizationGuardTests {
         "Services/Health/HealthCodeDimensions.swift",
         "Services/Health/WeightedHealthScorer.swift",
         "Services/Health/HealthTeamDimensions.swift",
+        "Services/Health/HealthBreakdown.swift",
     ]
+
+    /// **标识符豁免**（逐条留名 + 写清它比的是什么，见《守恒线要逐条留名的豁免口》）。
+    ///
+    /// 这些中文串**不是文案，是结构化标识符**：`MissingDimensionReason.analyzerLabel` 的值要拿去
+    /// 和 `ProjectReport.failedSections`（`AppState` 写的五路路名）做**相等比较**，
+    /// 在字典里就地查表会让比较失配、缺席原因整片失效。
+    /// 它们的上屏出口是**插值那一行**，那里必须查表（本批已改成
+    /// `localizedFormat("「%1$@」完成但该分量未产出。", localizedCopy(analyzer))`），
+    /// 所以豁免只免"字典里那一份"，不免"上屏那一句"。
+    /// `overrides` 两格同理：中文 rawValue 当查表键、`重复代码率` 是规范显示名，
+    /// 紧接着就走 `localizedCopy`。
+    static let identifierLiteralsExemptedByFile: [String: [String]] = [
+        "Services/Health/HealthBreakdown.swift": ["代码扫描", "Git 分析", "错误日志", "依赖分析", "测试覆盖率",
+                                                  "重复度", "重复代码率"],
+    ]
+
+    /// 豁免表自己也要被反着钉：**列进去的标识符必须还在文件里出现**。
+    /// 否则它变成一张"以后谁把这句改坏了也不知道"的空白豁免（清单不自动长大，也不许悄悄失效）。
+    static func staleIdentifierExemptions(in scanned: [String: String]) -> [String] {
+        identifierLiteralsExemptedByFile.flatMap { path, literals in
+            guard let content = scanned[path] else { return ["豁免点名的文件不在扫描面上：\(path)"] }
+            return literals.filter { !content.contains("\"\($0)\"") }
+                .map { "\(path) 的豁免项「\($0)」在文件里已经找不到了（改名？删掉？同批清豁免）" }
+        }
+    }
+
+    static func bareChineseLiterals(in content: String, exempt: Set<String> = []) -> [(line: Int, text: String)] {
+        bareChineseLiterals(in: content).filter { !exempt.contains($0.text.trimmingCharacters(in: CharacterSet(charactersIn: "\""))) }
+    }
 
     func test_copyInLookedUpFilesAlwaysGoesThroughTheCatalog() throws {
         let files = try SurfaceScanKit.sourceFiles(under: "")
@@ -147,9 +177,14 @@ extension LocalizationGuardTests {
         XCTAssertTrue(absent.isEmpty,
                       "已收口名单点名的文件不在扫描面上（改名？挪走？）：\(absent)")
         let offenders = Self.copyLookedUpFiles.flatMap { path in
-            Self.bareChineseLiterals(in: scanned[path] ?? "")
+            Self.bareChineseLiterals(in: scanned[path] ?? "",
+                                     exempt: Set(Self.identifierLiteralsExemptedByFile[path] ?? []))
                 .map { "\(path):\($0.line) \($0.text)" }
         }
+        let staleExemptions = Self.staleIdentifierExemptions(in: scanned)
+        XCTAssertTrue(staleExemptions.isEmpty,
+                      "标识符豁免里有已经对不上号的条目（它会变成一张空白豁免，白放过以后新增的文案）：\n  "
+                    + staleExemptions.joined(separator: "\n  "))
         XCTAssertTrue(offenders.isEmpty,
                       "这些中文文案字面量没走查表 ⇒ 英文态直接把中文铺上屏，而三条键守卫全绿"
                     + "（`Text(变量)` 不查表，登记了也白登记）：\n  "
@@ -187,5 +222,9 @@ extension LocalizationGuardTests {
         let across = "let a = 1\nlet b = [localizedCopy(\n  \"整句键\")]\nlet c = [\"裸中文\"]"
         XCTAssertEqual(Self.bareChineseLiterals(in: across).map(\.line), [4],
                        "行号漂了 ⇒ 报错指不到地方，而跨行的查表调用还被误判：\(Self.bareChineseLiterals(in: across))")
+        // 标识符豁免必须**精确到串**：只免点名的那一个，同一段里的文案照样抓。
+        let mixed = "let labels = [\"代码扫描\": 1]\nlet copy = \"这句是文案\""
+        XCTAssertEqual(Self.bareChineseLiterals(in: mixed, exempt: ["代码扫描"]).map(\.text),
+                       ["\"这句是文案\""], "豁免一放宽成整片放行 ⇒ 这个文件立刻回到三条守卫的盲区")
     }
 }

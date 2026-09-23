@@ -937,3 +937,30 @@
 "作者表里没有可算分布的提交（非合并口径 0 笔，含合并共 %1$@ 笔），协作分布不参与本次计分；这一维读的是「署名分布」，要有非合并提交才谈得上分散与否。" = "The author table holds no commits to distribute (0 non-merge out of %1$@ including merges), so collaboration does not take part in this score; that dimension reads signature spread, which needs non-merge commits to mean anything.";
 "作者分布的总体只有 %1$@ 笔非合并提交、%2$@ 个活跃署名 —— 一笔提交就折合 %3$@ 占比，跨一个档位只要一两笔 ⇒ 占比无定义，协作分布不参与本次计分（也不按 0 计入）；非合并提交攒到 %4$@ 笔以上重扫即可解锁。" = "The author population is only %1$@ non-merge commits across %2$@ active signatures - one commit moves the share by %3$@ and one or two cross a band, so the share is undefined; collaboration does not take part in this score (nor is it counted as 0). Rescan once %4$@ non-merge commits have accumulated.";
 "非合并口径 %1$@ 笔、%2$@ 个活跃署名，低于评这一维所需的 %3$@ 笔总体 —— 一笔提交折合 %4$@ 占比，占比无定义，本维度不参与计分（也不按 0 计入）。" = "%1$@ non-merge commits across %2$@ active signatures, below the %3$@-commit population this dimension needs - one commit moves the share by %4$@, so the share is undefined and the dimension is not scored (nor counted as 0).";
+
+// 批次 P59c（健康评分：权重 tooltip、缺席原因、分析器名）。
+"该维度不在内置权重表里，直接采用评分器给出的权重 %1$@。" = "This dimension is not in the built-in weight table, so the scorer's own weight %1$@ is used directly.";
+"本次乘数 %1$@，与内置表原始权重 %2$@ 一致。" = "This run's multiplier %1$@ matches the table's original weight %2$@.";
+"内置权重表合计 %1$@，评分器发布前整体折算：原始 %2$@ → 本次乘数 %3$@。本次没有维度缺席。" = "The built-in weight table sums to %1$@ and was normalised before publishing: original %2$@ -> this run %3$@. No dimension was absent.";
+"%1$@ 个维度缺席，份额按在场维度等比摊入：原始 %2$@ → 本次乘数 %3$@（在场维度表权重合计 %4$@，全表合计 %5$@）。" = "%1$@ dimensions were absent and their share was spread proportionally over the present ones: original %2$@ -> this run %3$@ (present dimensions sum to %4$@ in the table, the whole table to %5$@).";
+"本次乘数 %1$@ 与内置表口径（原始 %2$@、表合计 %3$@、缺席 %4$@ 项）对不上，界面以评分器发布值为准。" = "This run's multiplier %1$@ does not reconcile with the table basis (original %2$@, table sum %3$@, %4$@ absent); the interface shows the scorer's published value.";
+"输入覆盖全部 %1$@ 个可计分维度，没有维度缺席；但内置权重表合计 %2$@，评分器发布前已整体折算，故各乘数不等于表内原始值。" = "The inputs cover all %1$@ scoreable dimensions with none absent; the built-in table sums to %2$@ and was normalised before publishing, so each multiplier differs from the table's original value.";
+"输入覆盖全部 %1$@ 个可计分维度，没有维度缺席；权重未做摊分，乘数即表内原始值。" = "The inputs cover all %1$@ scoreable dimensions with none absent; nothing was re-spread, so each multiplier is the table's original value.";
+"缺失 %1$@ 个维度不参与计分、也不按 0 计入，其份额已按在场维度等比摊入。" = "The %1$@ missing dimensions are not scored and are not counted as 0; their share was spread proportionally over the present dimensions.";
+"本次实际乘数：在场维度的乘数合计恒为 100%，故 Σ（得分 × 乘数）可复现综合分。与内置表原始值不一致的原因见各行提示。" = "Multipliers actually used: the present dimensions always sum to 100%, so the score-weighted sum reproduces the overall score. Each row's tooltip explains any difference from the table's original value.";
+"该维度不在内置口径里，本次未参与计分。" = "This dimension is not part of the built-in basis and did not take part in this score.";
+"「%1$@」完成但该分量未产出。" = "%1$@ finished but did not produce this component.";
+"上次扫描「%1$@」失败，本维度没有输入。" = "The last %1$@ scan failed, so this dimension has no input.";
+"还没有扫描结果，「%1$@」未运行。" = "There is no scan result yet; %1$@ never ran.";
+"「%1$@」没有产出代码指标。" = "%1$@ produced no code metrics.";
+"该目录不是 Git 仓库，或未取到提交历史。" = "This directory is not a Git repository, or its commit history could not be read.";
+"该仓库没有任何提交，Git 两维都没有输入。" = "The repository has no commits, so neither Git-based dimension has an input.";
+"含合并共 %1$@ 笔提交里没有一笔非合并提交，作者分布没有可算的总体，本维度不参与计分。" = "None of the %1$@ commits (merges included) is a non-merge commit, so the author distribution has no population to measure and this dimension is not scored.";
+"尚未分析日志。" = "Logs have not been analysed yet.";
+"未发现可读的日志文件。" = "No readable log files were found.";
+"未识别到依赖清单。" = "No dependency manifest was recognised.";
+"扫到 %1$@ 个覆盖率报告文件，但里面没有可用的行覆盖数字，不参与计分。" = "%1$@ coverage report files were found, but none carries usable line-coverage numbers, so this dimension is not scored.";
+"%1$@%2$@上面的结论只覆盖看得见的部分。" = "%1$@%2$@ The conclusion above covers only the part that was visible.";
+"%1$@另有 %2$@ 个目录没能读取（权限或已消失），上面的结论只覆盖读得动的部分。" = "%1$@ Another %2$@ directories could not be read (permissions, or they are gone), so the conclusion above covers only what was readable.";
+"代码扫描" = "Code analysis";
+"Git 分析" = "Git analysis";
