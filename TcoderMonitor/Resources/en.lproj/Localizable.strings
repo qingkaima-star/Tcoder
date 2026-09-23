@@ -964,3 +964,33 @@
 "%1$@另有 %2$@ 个目录没能读取（权限或已消失），上面的结论只覆盖读得动的部分。" = "%1$@ Another %2$@ directories could not be read (permissions, or they are gone), so the conclusion above covers only what was readable.";
 "代码扫描" = "Code analysis";
 "Git 分析" = "Git analysis";
+
+// 批次 P59d（运行稳定性 / 依赖健康 / 覆盖率那三路的建议与缺席句）。
+"证据不足：%1$@" = "Insufficient evidence: %1$@";
+"未采集运行时长与请求量，分母只是已扫描的日志行" = "Runtime duration and request volume are not collected, so the denominator is only the log lines scanned";
+"另有 %1$@ 份崩溃通道文件未产出可用事件证据（内容损坏 / 无可用事件时间 / 只有文件名像），未计入崩溃数" = "A further %1$@ crash-channel files produced no usable event evidence (corrupt, no usable event time, or only the filename looks like one); they are not counted as crashes";
+"已扫描 %1$@ 行日志，窗口内未见确认崩溃（不等于运行期无崩溃：未采运行时长与请求量）" = "Scanned %1$@ log lines with no confirmed crash in the window (this is not \"no crashes at runtime\": duration and request volume are not collected)";
+"%1$@出现 %2$@ 次（最近 %3$@）" = "%1$@ occurred %2$@ times (last seen %3$@)";
+"优先修复 Top Errors 首位，它通常掩盖了下游连锁异常" = "Fix the top error first; it usually masks downstream cascades";
+"没有可扫描的日志，运行稳定性不参与本次评分；把日志文件放进项目目录或 ~/Library/Logs，或在「错误日志」页点「附加日志」，这个维度才会出现。" = "There are no logs to scan, so runtime stability is not scored this run. Put log files in the project directory or ~/Library/Logs, or use \\\"Attach Log Files\\\" on the Error Logs page, for this dimension to appear.";
+"读到 %1$@ 次确认崩溃%2$@，但零真日志行 ⇒ 错误密度算不出分母，本维度不参与本次评分；崩溃明细见「错误日志」页。" = "Read %1$@ confirmed crashes%2$@ but zero real log lines, so error density has no denominator and this dimension is not scored; see the Error Logs page for the details.";
+"（%1$@ 份崩溃报告）" = "(%1$@ crash reports)";
+"（崩溃通道零份，来自日志行本身）" = "(no crash-channel files; taken from the log lines themselves)";
+"有 %1$@ 份崩溃报告没能读出来（权限不足 / 文件已消失 / 读取失败），崩溃证据不确定：本维度不参与本次评分，也不得读成「没有崩溃」。" = "%1$@ crash reports could not be read (permissions, gone, or read failure), so the crash evidence is uncertain: this dimension is not scored and must not be read as \\\"no crashes\\\".";
+"另有 %1$@ 份崩溃报告没能读出来，未计入上面的份数。" = "A further %1$@ crash reports could not be read and are not included in the count above.";
+"只读到 %1$@ 行真日志，低于评这一维所需的 %2$@ 行下限 ⇒ 证据太薄，本维度按 %3$@ 分封顶、标「证据太薄·未判定」（薄不等于稳，也不等于运行不稳）；跑够一次真实运行后重扫即可解锁。" = "Only %1$@ real log lines were read, below the %2$@-line floor this dimension needs: the evidence is thin, so it is capped at %3$@ and marked \\\"thin evidence, undetermined\\\" (thin is neither stable nor unstable). Rescan after one real run to unlock it.";
+"漏洞核对未完成（%1$@），依赖健康本维度暂不计分；补齐锁文件或重跑联网核对后再计。" = "The vulnerability check is incomplete (%1$@), so dependency health is not scored yet; add the lock files or re-run the online check.";
+"存在未覆盖项" = "uncovered items exist";
+"未做在线漏洞核对，依赖健康本维度暂不计分；开启「联网核对」后重扫才有结论。" = "No online vulnerability check was made, so dependency health is not scored; enable the online check and rescan for a conclusion.";
+"未做在线漏洞核对，依赖健康本维度暂不计分（内置规则未覆盖：%1$@）。" = "No online vulnerability check was made, so dependency health is not scored (built-in rules do not cover: %1$@).";
+"已完成漏洞核对，%1$@/%2$@ 个依赖零命中%3$@" = "Vulnerability check complete: zero hits across %1$@/%2$@ dependencies%3$@";
+"（数据源：%1$@）" = "(source: %1$@)";
+"%1$@ 个已知漏洞，%2$@ 个版本过旧" = "%1$@ known vulnerabilities, %2$@ outdated versions";
+"先升级带严重漏洞的依赖，再统一处理过期版本" = "Upgrade dependencies with critical vulnerabilities first, then handle stale versions";
+"测试覆盖率 %1$@" = "Test coverage %1$@";
+"将行覆盖率从 %1$@ 提升到 75%% 以上" = "Raise line coverage from %1$@ to above 75%%";
+"行覆盖 %1$@，分支覆盖 %2$@" = "Lines %1$@, branches %2$@";
+"无数据" = "no data";
+"列到 %1$@ 个日志文件，但一行都没读出来（空文件 / 编码不认识 / 读取失败），本维度不参与计分。" = "%1$@ log files were listed but not one line could be read (empty, unknown encoding, or read failure), so this dimension is not scored.";
+"崩溃通道读到 %1$@ 份报告、确认 %2$@ 次崩溃，但一行真日志都没有 ⇒ 错误密度没有分母，本维度不参与计分（这也不等于「零错误」）。" = "The crash channel yielded %1$@ reports and %2$@ confirmed crashes, but not a single real log line, so error density has no denominator and this dimension is not scored (which is also not \\\"zero errors\\\").";
+"%1$@ 份崩溃报告没能读出来，崩溃证据不确定，本维度不参与计分。" = "%1$@ crash reports could not be read, so the crash evidence is uncertain and this dimension is not scored.";

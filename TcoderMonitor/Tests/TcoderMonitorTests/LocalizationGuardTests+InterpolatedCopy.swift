@@ -139,6 +139,7 @@ extension LocalizationGuardTests {
         "Services/Health/WeightedHealthScorer.swift",
         "Services/Health/HealthTeamDimensions.swift",
         "Services/Health/HealthBreakdown.swift",
+        "Services/Health/HealthRuntimeDimensions.swift",
     ]
 
     /// **标识符豁免**（逐条留名 + 写清它比的是什么，见《守恒线要逐条留名的豁免口》）。
