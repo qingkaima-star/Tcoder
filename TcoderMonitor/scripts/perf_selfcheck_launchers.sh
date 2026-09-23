@@ -331,58 +331,45 @@ selfcheck_load_threshold_override() {  # 51) 公开的 LOAD_MAX 出口必须**�
   [ "$bad" = "0" ] && ok "负载阈值：默认照旧、LOAD_MAX 能变严，且话术里印的就是生效的那个门槛"
 }
 
+inwindow_fixture() {  # inwindow_fixture <目录> <tsv 内容…> —— 摆一份窗口内采样夹具
+  local d="$1"; shift; mkdir -p "$d"; printf '%b' "$*" > "$d/load-in-window.tsv"; rm -f "$d/meta.json"
+}
+
+inwindow_meta() {  # inwindow_meta <目录> [<LOAD_MAX>] —— 真跑一次判定，回显 meta 里那几格
+  local bar="${2-}"
+  LOAD_MAX="$bar" bash -c "source scripts/perf_preflight.sh >/dev/null 2>&1
+    source scripts/perf_measure_io.sh >/dev/null 2>&1
+    REV=x; DIRTY=0; cores=15; load_window_verdict \"\$1\"" _ "$1" >/dev/null 2>&1
+  python3 -c "
+import json,sys
+try: m=json.load(open(sys.argv[1]+'/meta.json',encoding='utf-8'))
+except Exception: m={}
+print(m.get('load_bar_used'), m.get('contaminated_by_foreign_load'),
+      m.get('load1_max_in_window'), m.get('heavy_max_in_window'), m.get('load_in_window'))" "$1" 2>/dev/null
+}
+
 selfcheck_inwindow_load_verdict() {  # 52) 窗口内负载采样必须能定合格/不合格（四种形状，含"没采到"）
   # 现场（§AP，09-23 17:17–17:44）：八趟里唯一落在 4.0 ms 红线内的那趟，收窗负载是 19.73——
   # 旧复核只看"起窗前"与"收窗时"两个点，放行了中段被编译挤满的窗口。
-  local d="$out/inwindow" bad=0 f
-  mkdir -p "$d"
-  probe() {  # probe <目录> —— 造好 tsv 后只跑判定，回显 meta 里那三格
-    rm -f "$1/meta.json"
-    LOAD_SAMPLE_S=1 bash -c "source scripts/perf_preflight.sh >/dev/null 2>&1
-      source scripts/perf_measure_io.sh >/dev/null 2>&1
-      REV=x; DIRTY=0; cores=15; load_window_verdict \"\$1\"" _ "$1" >/dev/null 2>&1
-    python3 -c "import json,sys;m=json.load(open(sys.argv[1]+'/meta.json',encoding='utf-8'));print(m.get('load1_max_in_window'),m.get('heavy_max_in_window'),m.get('load_in_window'),m.get('contaminated_by_foreign_load'),m.get('load_bar_used'))" "$1" 2>/dev/null
-  }
-  # (1) 整窗干净：峰值 3.0、无重活 ⇒ 不污染
-  printf '1\t2.0\t0\n2\t3.0\t0\n3\t2.5\t0\n' > "$d/clean.tsv"; mkdir -p "$d/clean"; mv "$d/clean.tsv" "$d/clean/load-in-window.tsv"
-  case "$(probe "$d/clean")" in "3.0 0 None None 22.5"*) ;; *) fail "整窗干净的一趟被判成污染（或峰值取错）：$(probe "$d/clean")"; bad=1 ;; esac
-  # (2) 中段起过高负载：默认阈值 22.5 放行，但 LOAD_MAX=4 必须判污染 ⇒ 证明这条判据与闸门同一家
-  printf '1\t2.0\t0\n2\t9.9\t0\n3\t2.5\t0\n' > "$d/mid.tsv"; mkdir -p "$d/mid"; mv "$d/mid.tsv" "$d/mid/load-in-window.tsv"
-  case "$(probe "$d/mid")" in *"None None"*|*"9.9 0 None"*) ;; *) fail "中段峰值 9.9 在默认阈值下被记成污染或没记下峰值：$(probe "$d/mid")"; bad=1 ;; esac
-  LOAD_MAX=4 bash -c "source scripts/perf_preflight.sh >/dev/null 2>&1
-    source scripts/perf_measure_io.sh >/dev/null 2>&1
-    REV=x; DIRTY=0; cores=15; load_window_verdict \"\$1\"" _ "$d/mid" >/dev/null 2>&1
-  python3 -c "
-import json,sys
-m=json.load(open('$d/mid/meta.json',encoding='utf-8'))
-sys.exit(0 if m.get('contaminated_by_foreign_load')=='1' and abs(float(m.get('load_bar_used',-1))-4)<1e-9 else 1)" \
-    || { fail "LOAD_MAX=4 收紧后没按新阈值判 ⇒ 闸门按一个数、窗口内复核按另一个数（两处各一套阈值）。实得：$(
-         python3 -c "
-import json
-m=json.load(open('$d/mid/meta.json',encoding='utf-8'))
-print('load_bar_used=%r contaminated=%r' % (m.get('load_bar_used'), m.get('contaminated_by_foreign_load')))" 2>&1)";
-           bad=1; }
-  # (3) 中段出现过重活 ⇒ 即使 load1 很低也判污染（重活与负载是两件事，别互相顶替）
-  printf '1\t2.0\t0\n2\t2.1\t1\n' > "$d/jobs.tsv"; mkdir -p "$d/jobs"; mv "$d/jobs.tsv" "$d/jobs/load-in-window.tsv"
-  LOAD_MAX="" bash -c "source scripts/perf_preflight.sh >/dev/null 2>&1
-    source scripts/perf_measure_io.sh >/dev/null 2>&1
-    REV=x; DIRTY=0; cores=15; load_window_verdict \"\$1\"" _ "$d/jobs" >/dev/null 2>&1
-  python3 -c "
-import json,sys
-m=json.load(open('$d/jobs/meta.json',encoding='utf-8'))
-sys.exit(0 if m.get('contaminated_by_foreign_load')=='1' and str(m.get('heavy_max_in_window'))=='1' else 1)" \
-    || { fail "窗口内出现过重活却没判污染 ⇒ 这条闸只看负载不看名字"; bad=1; }
-  # (4) 一个样本都没采到 ⇒ 必须出声写「未采到」，不许把空目录当成"整窗干净"（假绿里最坏的那种）
-  mkdir -p "$d/none"
-  bash -c "source scripts/perf_preflight.sh >/dev/null 2>&1
-    source scripts/perf_measure_io.sh >/dev/null 2>&1
-    REV=x; DIRTY=0; cores=15; load_window_verdict \"\$1\"" _ "$d/none" > "$d/none.txt" 2>&1
-  gap=$(python3 -c "
-import json,sys
-try: m=json.load(open('$d/none/meta.json',encoding='utf-8'))
-except Exception: m={}
-print(m.get('load_in_window','格没写'))" 2>/dev/null)
-  case "$gap" in 未采到*) ;; *) fail "一个样本都没采到时 meta 写的是「$gap」而不是「未采到」⇒ 空会被读成干净"; bad=1 ;; esac
-  grep -q "没采到" "$d/none.txt" || { fail "缺样只落盘不出声 ⇒ 屏幕上那行仍然像『整窗干净』"; bad=1; }
-  [ "$bad" = "0" ] && ok "窗口内负载采样能定合格：干净放行 / 中段越阈判污 / 重活单独也能判 / 没采到必须出声（阈值与闸门同一家）"
+  local d="$out/inwindow" bad=0 got
+  # (1) 整窗干净 ⇒ 峰值被记下、不判污染，阈值回显默认那一个
+  inwindow_fixture "$d/clean" '1\t2.0\t0\n2\t3.0\t0\n3\t2.5\t0\n'
+  got=$(inwindow_meta "$d/clean")
+  [ "$got" = "22.5 None 3.0 0 None" ] || { fail "整窗干净那趟的形状不对：「$got」"; bad=1; }
+  # (2) 中段峰值 9.9：默认阈值放行，但 LOAD_MAX=4 必须判污染 ⇒ 证明闸门与窗口内判据同一家
+  inwindow_fixture "$d/mid" '1\t2.0\t0\n2\t9.9\t0\n3\t2.5\t0\n'
+  got=$(inwindow_meta "$d/mid")
+  [ "$got" = "22.5 None 9.9 0 None" ] || { fail "默认阈值下中段峰值没被如实记下：「$got」"; bad=1; }
+  got=$(inwindow_meta "$d/mid" 4)
+  [ "$got" = "4 1 9.9 0 None" ] || { fail "LOAD_MAX=4 没让窗口内判据变严（实得「$got」）⇒ 两处各一套阈值"; bad=1; }
+  # (3) 中段出现过重活 ⇒ 负载再低也判污染：重活与负载是两件事，不许互相顶替
+  inwindow_fixture "$d/jobs" '1\t2.0\t0\n2\t2.1\t1\n'
+  got=$(inwindow_meta "$d/jobs")
+  case "$got" in *"1 2.1 1 "*) ;; *) fail "窗口内出现过重活却没判污染（实得「$got」）⇒ 这条闸只看负载不看名字"; bad=1 ;; esac
+  # (4) 一个样本都没采到 ⇒ 必须出声写「未采到」，不许把空目录读成"整窗干净"（假绿里最坏的那种）
+  mkdir -p "$d/none"; rm -f "$d/none/meta.json"
+  got=$(inwindow_meta "$d/none")
+  case "$got" in *"未采到"*) ;; *) fail "缺样时 meta 写的是「$got」而不是「未采到」⇒ 空会被读成干净"; bad=1 ;; esac
+  [ "$bad" = "0" ] && ok "窗口内负载采样能定合格：干净放行 / 中段越阈判污 / 重活单独也判 / 没采到必须出声（阈值与闸门同一家）"
 }
+
