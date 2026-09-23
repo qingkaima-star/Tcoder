@@ -999,3 +999,33 @@
 "尚未分析%1$@" = "Not analysed yet: %1$@";
 "已完成扫描，未发现%1$@" = "The scan finished without finding any %1$@";
 "无法分析：%1$@" = "Cannot analyse: %1$@";
+
+// 批次 P63（性能页图例与轴口径、进程组空态三句话、错误日志密度脚注）。
+"可信点不够画曲线（%1$@/%2$@）" = "Not enough trusted points to plot a curve (%1$@/%2$@)";
+"横轴 %1$@ · 纵轴 CPU %2$@%% / 内存 %3$@%% · %4$@" = "X axis %1$@ · Y axis CPU %2$@%% / memory %3$@%% · %4$@";
+"轴不是 0 起点" = "the axes do not start at 0";
+"两张图均为 0 起点" = "both charts start at 0";
+"内存曲线已剔除 %1$@ 个无证据读数" = "The memory curve dropped %1$@ evidence-free readings";
+"距今秒数" = "seconds ago";
+"每 %1$@ 秒一格" = "one grid line every %1$@ s";
+"横轴：窗口不足 %1$@ 秒（或少于 8 个点）时改标距今秒数——绝对时钟在这个尺度上没有区分度；否则每格步长从固定档位里选，不按点数现算，免得点数一变整个时间轴就重排。带下限的轴是为看清走势而收窄的，不是 0 起点：内存长期在九成是 macOS 的常态，0…100 的域里 93→97 的波动只够画 4pt，肉眼看是一条直线，所以峰值过 %2$@%% 收到 50…100、过 %3$@%% 收到 75…100。" = "X axis: when the window is shorter than %1$@ seconds (or fewer than 8 points) it switches to seconds-ago labels - an absolute clock has no resolution at that scale. Otherwise the step comes from a fixed ladder rather than the point count, so a change in points cannot re-flow the whole axis. A floored axis is narrowed to show the trend, not because 0 is the origin: memory sitting near ninety percent is normal on macOS, and in a 0-100 domain a 93->97 swing draws only 4pt, i.e. a flat line to the eye - so above %2$@%% the domain narrows to 50...100, and above %3$@%% to 75...100.";
+"内存在用率曲线，%1$@ 个可信点，当前 %2$@，纵轴 %3$@" = "Memory usage curve, %1$@ trusted points, now %2$@, Y axis %3$@";
+"%1$@ 秒" = "%1$@ s";
+"首个样本到达后才按匹配模式统计，不预先给出估算值。" = "Counts by match pattern begin only after the first sample arrives; no estimate is offered beforehand.";
+"保持「继续」状态，下一帧（约 %1$@后）会立即出数。" = "Keep it on \\\"Resume\\\"; the next frame (in about %1$@) produces values immediately.";
+"暂停期间不再查找进程，这里显示的是最后一次采集的结果：全系统 %1$@ 个进程里没有命中「%2$@」。" = "While paused no process lookup runs, so this is the last collected result: none of the %1$@ system processes matched \\\"%2$@\\\".";
+"点页面右上角「继续」恢复采样，再判断服务是否真的没在跑。" = "Press \\\"Resume\\\" at the top right to resume sampling before concluding the service is not running.";
+"全系统 %1$@ 个进程里没有任何条目命中「%2$@」，因此没有 CPU / 内存 / 线程 / 打开文件数值可显示。" = "None of the %1$@ system processes matched \\\"%2$@\\\", so there is no CPU / memory / thread / open-file value to show.";
+"确认该服务已启动，或在「匹配模式」里把规则改宽一点（例如从 mysqld 改成 mysql）。" = "Confirm the service is running, or widen the match pattern slightly (for example mysqld -> mysql).";
+"占全机 %1$@" = "%1$@ of the whole machine";
+"差分帧未到，不给百分比" = "No differential frame yet, so no percentage is given";
+"单进程峰值 %1$@" = "Single-process peak %1$@";
+"无成员进程" = "No member processes";
+"%1$@/%2$@ 个进程取到" = "%1$@/%2$@ processes read";
+"按代码规模归一：每千行 %1$@ 次" = "Normalised by code size: %1$@ per 1,000 lines";
+"今日错误按代码规模归一为每千行 %1$@ 次；分母来自同一次扫描的有效代码行。" = "Today's errors normalise to %1$@ per 1,000 lines; the denominator is the effective code lines from the same scan.";
+"扫描 %1$@ 行 · %2$@ 个文件" = "Scanned %1$@ lines · %2$@ files";
+" · 已跳过 %1$@ 份读取失败" = " · %1$@ unreadable files skipped";
+"已跳过 %1$@ 份读取失败，原因分布：%2$@。" = "%1$@ unreadable files were skipped; reason breakdown: %2$@.";
+"占扫描行 %1$@" = "%1$@ of scanned lines";
+"未记录原因" = "reason not recorded";

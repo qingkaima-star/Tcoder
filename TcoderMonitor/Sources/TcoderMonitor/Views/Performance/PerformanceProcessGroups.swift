@@ -176,22 +176,25 @@ struct PerformanceGroupCard: View {
     /// `monitor.sampleIntervalText`；默认值只为让纯函数面在单测里可直接调。
     static func copy(for state: GroupMatchState, pattern: String, totalProcesses: Int?,
                      intervalText: String =
-                        "\(Double(MachSystemMonitor.defaultSampleIntervalMilliseconds) / 1000) 秒") ->
+                        localizedFormat("%1$@ 秒",
+                                      String(Double(MachSystemMonitor.defaultSampleIntervalMilliseconds) / 1000))) ->
         (title: String, message: String, nextStep: String) {
         let scanned = totalProcesses.map { NumberFormat.grouped($0) } ?? Live.missing
         switch state {
         case .waitingFirstSample:
-            return ("正在采集首个样本",
-                    "首个样本到达后才按匹配模式统计，不预先给出估算值。",
-                    "保持「继续」状态，下一帧（约 \(intervalText)后）会立即出数。")
+            return (localizedCopy("正在采集首个样本"),
+                    localizedCopy("首个样本到达后才按匹配模式统计，不预先给出估算值。"),
+                    localizedFormat("保持「继续」状态，下一帧（约 %1$@后）会立即出数。", intervalText))
         case .pausedWithoutMatch:
-            return ("采样已暂停",
-                    "暂停期间不再查找进程，这里显示的是最后一次采集的结果：全系统 \(scanned) 个进程里没有命中「\(pattern)」。",
-                    "点页面右上角「继续」恢复采样，再判断服务是否真的没在跑。")
+            return (localizedCopy("采样已暂停"),
+                    localizedFormat("暂停期间不再查找进程，这里显示的是最后一次采集的结果：全系统 %1$@ 个进程里没有命中「%2$@」。",
+                                    scanned, pattern),
+                    localizedCopy("点页面右上角「继续」恢复采样，再判断服务是否真的没在跑。"))
         case .noMatch:
-            return ("未检测到匹配进程",
-                    "全系统 \(scanned) 个进程里没有任何条目命中「\(pattern)」，因此没有 CPU / 内存 / 线程 / 打开文件数值可显示。",
-                    "确认该服务已启动，或在「匹配模式」里把规则改宽一点（例如从 mysqld 改成 mysql）。")
+            return (localizedCopy("未检测到匹配进程"),
+                    localizedFormat("全系统 %1$@ 个进程里没有任何条目命中「%2$@」，因此没有 CPU / 内存 / 线程 / 打开文件数值可显示。",
+                                    scanned, pattern),
+                    localizedCopy("确认该服务已启动，或在「匹配模式」里把规则改宽一点（例如从 mysqld 改成 mysql）。"))
         case .matched:
             return ("", "", "")
         }
@@ -252,8 +255,8 @@ struct PerformanceGroupCard: View {
         return GroupMetricCell(
             label: "CPU 核当量",
             value: Live.cores(cores),
-            caption: cores.map { "占全机 \(Live.percent($0 / Double(coreCount), precision: 0))" }
-                ?? "差分帧未到，不给百分比",
+            caption: cores.map { localizedFormat("占全机 %1$@", Live.percent($0 / Double(coreCount), precision: 0)) }
+                ?? localizedCopy("差分帧未到，不给百分比"),
             tint: LoadLevel.role(for: cores.map { $0 / Double(coreCount) }).textColor,
             // 一组里唯一的重音：吃几个核。其余三格留在 13pt。
             tier: Theme.Typo.metricMid
@@ -280,7 +283,7 @@ struct PerformanceGroupCard: View {
             return coverageCaption(covered,
                                    meaningEmpty: "全部成员进程的内存都没读到（rusage 与 task_info 两路都没给值）")
         }
-        return ProcessMetric.peakMemory(of: group).map { "单进程峰值 \(Live.bytes($0))" } ?? "无成员进程"
+        return ProcessMetric.peakMemory(of: group).map { localizedFormat("单进程峰值 %1$@", Live.bytes($0)) } ?? localizedCopy("无成员进程")
     }
 
     private var threadsCell: some View {
@@ -309,7 +312,8 @@ struct PerformanceGroupCard: View {
     private func coverageCaption(_ covered: Int, meaningEmpty: String) -> String {
         guard group.processCount > 0 else { return "无成员进程" }
         if covered == 0 { return meaningEmpty }
-        return "\(NumberFormat.grouped(covered))/\(NumberFormat.grouped(group.processCount)) 个进程取到"
+        return localizedFormat("%1$@/%2$@ 个进程取到",
+                              NumberFormat.grouped(covered), NumberFormat.grouped(group.processCount))
     }
 }
 

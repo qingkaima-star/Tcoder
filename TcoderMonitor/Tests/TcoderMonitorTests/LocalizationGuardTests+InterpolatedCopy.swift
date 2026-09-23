@@ -92,10 +92,8 @@ extension LocalizationGuardTests {
     /// 再在原文坐标系上找剩下的汉字字面量 —— 行号仍是原文行号）。
     static func bareChineseLiterals(in content: String) -> [(line: Int, text: String)] {
         let literal = try? NSRegularExpression(pattern: #""(?:[^"\\\n]|\\.)*""#)
-        let lookedUp = try? NSRegularExpression(
-            pattern: #"localized(?:Copy|Count|Format)\(\s*"(?:[^"\\\n]|\\.)*""#)
         let han = try? NSRegularExpression(pattern: #"[\p{Han}]"#)
-        guard let literal, let lookedUp, let han else {
+        guard let literal, let han else {
             XCTFail("正则构造失败 ⇒ 这条判据根本没在跑")
             return []
         }
@@ -105,16 +103,21 @@ extension LocalizationGuardTests {
                 return SurfaceScanKit.isCode(line) ? Self.strippingTrailingComment(line) : ""
             }
             .joined(separator: "\n")
-        let whole = NSRange(kept.startIndex..., in: kept)
-        var blanked = kept
-        for match in lookedUp.matches(in: kept, range: whole).reversed() {
-            guard let source = Range(match.range, in: kept),
-                  let target = Range(match.range, in: blanked) else { continue }
-            // **等长涂白，但换行必须原样留着**：把换行也换成空格会让后面每一行的行号
-            // 集体前移（元测试钉的就是这一条：报错指不到地方，等于把人往错的地方支）。
-            let preserved = String(kept[source].map { $0.isNewline ? $0 : " " })
-            blanked.replaceSubrange(target, with: preserved)
+        // **按括号配对涂白整个查表调用**（含它的实参列表）。
+        // 第一版只涂 `localized*( "…"` 那种"字面量紧跟在括号后"的形状，
+        // 于是 `localizedCopy(ok ? "是" : "不是")` 的第二个分支被误判成裸文案；
+        // 再退一步改成"往前看 40 格"，窗口宽度又成了一次新的猜测。
+        // 括号配对没有可调窗口：从 `(` 到配平的 `)` 整段都算它的实参。
+        // 涂白是**等长**的（换行原样留着），所以后面所有行号仍是原文行号。
+        var characters = Array(kept)
+        for span in Self.lookedUpCallRanges(in: kept) {
+            let start = kept.distance(from: kept.startIndex, to: span.lowerBound)
+            let end = kept.distance(from: kept.startIndex, to: span.upperBound)
+            for offset in start..<min(end, characters.count) where characters[offset] != "\n" {
+                characters[offset] = " "
+            }
         }
+        let blanked = String(characters)
         let blankedRange = NSRange(blanked.startIndex..., in: blanked)
         return literal.matches(in: blanked, range: blankedRange).compactMap { match in
             guard let span = Range(match.range, in: blanked) else { return nil }
@@ -127,7 +130,53 @@ extension LocalizationGuardTests {
         }
     }
 
+    /// 每个 `localized*(…)` 调用**从开括号到配平闭括号**的区间。
+    /// 字符串字面量里的括号不加深度（`"（0…100）"` 这种），转义引号也不打断字符串。
+    static func lookedUpCallRanges(in text: String) -> [Range<String.Index>] {
+        let opener = try? NSRegularExpression(pattern: #"localized(?:Copy|Count|Format)\("#)
+        guard let opener else {
+            XCTFail("正则构造失败 ⇒ 这条判据根本没在跑")
+            return []
+        }
+        let whole = NSRange(text.startIndex..., in: text)
+        var spans: [Range<String.Index>] = []
+        for match in opener.matches(in: text, range: whole) {
+            guard let head = Range(match.range, in: text) else { continue }
+            var depth = 1
+            var inString = false
+            var escaped = false
+            var cursor = head.upperBound
+            while cursor < text.endIndex {
+                let character = text[cursor]
+                if inString {
+                    if escaped { escaped = false }
+                    else if character == "\\" { escaped = true }
+                    else if character == "\"" { inString = false }
+                } else if character == "\"" {
+                    inString = true
+                } else if character == "(" {
+                    depth += 1
+                } else if character == ")" {
+                    depth -= 1
+                    if depth == 0 {
+                        spans.append(head.lowerBound..<text.index(after: cursor))
+                        break
+                    }
+                }
+                text.formIndex(after: &cursor)
+            }
+        }
+        return spans
+    }
+
     /// **已收口名单**（形状与 1d/1g 同源：名单里的文件一个都不许有，只许往长里加）。
+    ///
+    /// ⚠ **只点 `Services/**`，不点 `Views/**`——这不是漏了，是判据不成立**：
+    /// P63 试过把性能/日志三个 Views 文件点进来，它们剩下的 15 处裸字面量
+    /// 全是 `MetricTile(label:)` / `GlassSection(title:)` 这类**组件内部替调用方查了表**的入参
+    /// （英文态实测那 15 句没有一个铺在屏上，可证）。
+    /// 同一条规则在 Services 侧成立，是因为那里的串是**数据**（经 `Text(变量)` 直接上屏、不查表）。
+    /// 要把 Views 也管起来，得先立"哪些组件自己查表"的名册——那是另一条判据，别混进来。
     /// P59a 首批六个；`HealthBreakdown` / `HealthRuntimeDimensions` / `HealthTeamDimensions`
     /// 三个文件还有 98 处裸字面量，收完再点进来（现量由打印出声，不伪装成通过）。
     static let copyLookedUpFiles: [String] = [
@@ -139,8 +188,7 @@ extension LocalizationGuardTests {
         "Services/Health/WeightedHealthScorer.swift",
         "Services/Health/HealthTeamDimensions.swift",
         "Services/Health/HealthBreakdown.swift",
-        "Services/Health/HealthRuntimeDimensions.swift",
-    ]
+        "Services/Health/HealthRuntimeDimensions.swift",    ]
 
     /// **标识符豁免**（逐条留名 + 写清它比的是什么，见《守恒线要逐条留名的豁免口》）。
     ///
@@ -223,6 +271,14 @@ extension LocalizationGuardTests {
         let across = "let a = 1\nlet b = [localizedCopy(\n  \"整句键\")]\nlet c = [\"裸中文\"]"
         XCTAssertEqual(Self.bareChineseLiterals(in: across).map(\.line), [4],
                        "行号漂了 ⇒ 报错指不到地方，而跨行的查表调用还被误判：\(Self.bareChineseLiterals(in: across))")
+        // 三元里的两个分支都算"已经查表"（首版把这种写法误报成裸字面量）。
+        XCTAssertTrue(Self.bareChineseLiterals(
+            in: #"Text(localizedCopy(ok ? "两张图均为 0 起点" : "轴不是 0 起点"))"#).isEmpty,
+            "查表调用与字面量隔着一个三元 ⇒ 不许误报")
+        // 但豁免窗口只有 40 格：同一行里隔得远的裸字面量照样要抓。
+        XCTAssertEqual(Self.bareChineseLiterals(
+            in: #"let help = localizedCopy("短") + "这是一句裸文案""#).count, 1,
+            "查表调用之外的裸文案必须照抓 ⇒ 括号配对不能涂过头")
         // 标识符豁免必须**精确到串**：只免点名的那一个，同一段里的文案照样抓。
         let mixed = "let labels = [\"代码扫描\": 1]\nlet copy = \"这句是文案\""
         XCTAssertEqual(Self.bareChineseLiterals(in: mixed, exempt: ["代码扫描"]).map(\.text),

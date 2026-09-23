@@ -75,7 +75,9 @@ struct LogsMetricGrid: View {
             if let perKilo = LogReading.perKiloCode(logs, code: code) {
                 // **留短藏长**：屏上留这个归一后的数与「按代码规模」这五个字，
                 // 分母是哪一批行（同一次扫描的有效代码行）进 ⓘ。整句是完整句，不是半句键。
-                NoteLine("按代码规模归一：每千行 \(Live.fixed(perKilo, digits: 2)) 次", help: "今日错误按代码规模归一为每千行 \(Live.fixed(perKilo, digits: 2)) 次；分母来自同一次扫描的有效代码行。")
+                NoteLine(localizedFormat("按代码规模归一：每千行 %1$@ 次", Live.fixed(perKilo, digits: 2)),
+                         help: localizedFormat("今日错误按代码规模归一为每千行 %1$@ 次；分母来自同一次扫描的有效代码行。",
+                                           Live.fixed(perKilo, digits: 2)))
             }
         }
     }
@@ -86,16 +88,17 @@ struct LogsMetricGrid: View {
             // 全读不动时 hasData 为假，只说「没有可读的日志文件」会被听成「这个项目没有日志」，
             // 而真相是「有 N 份、N 份都读不动」——**跳过份数**在这条路径上更该说出口，
             // 原因分布（权限不足 / 文件已不存在 ×N）改挂卡头那枚 ⓘ（盘点表 G 组：份数不许藏）。
-            return "没有可读的日志文件，下方数值一律 --" + skippedCountNote(logs)
+            return localizedCopy("没有可读的日志文件，下方数值一律 --") + skippedCountNote(logs)
         }
-        return "扫描 \(NumberFormat.grouped(logs.totalLinesScanned)) 行 · "
-            + "\(NumberFormat.grouped(logs.scannedFiles.count)) 个文件" + skippedCountNote(logs)
+        return localizedFormat("扫描 %1$@ 行 · %2$@ 个文件",
+                              NumberFormat.grouped(logs.totalLinesScanned),
+                              NumberFormat.grouped(logs.scannedFiles.count)) + skippedCountNote(logs)
     }
 
     /// 「已跳过 N 份读取失败」——份数留在屏上，它决定这一页的 0 能不能信。
     private func skippedCountNote(_ logs: LogSummary) -> String {
         guard let failed = logs.readFailedFiles, failed.isEmpty == false else { return "" }
-        return " · 已跳过 \(NumberFormat.grouped(failed.count)) 份读取失败"
+        return localizedFormat(" · 已跳过 %1$@ 份读取失败", NumberFormat.grouped(failed.count))
     }
 
     /// 进 ⓘ 的完整句：同样是被跳过，权限问题用户自己能修，文件消失是另一回事。
@@ -106,9 +109,11 @@ struct LogsMetricGrid: View {
         guard let logs else { return nil }
         var lines: [String] = []
         if let failed = logs.readFailedFiles, failed.isEmpty == false {
-            let grouped = Dictionary(grouping: failed.map { $0.readFailure ?? "未记录原因" }, by: { $0 })
+            let grouped = Dictionary(grouping: failed.map { $0.readFailure ?? localizedCopy("未记录原因") }, by: { $0 })
             let reasons = grouped.keys.sorted().map { "\($0) ×\(NumberFormat.grouped(grouped[$0]?.count ?? 0))" }
-            lines.append("已跳过 \(NumberFormat.grouped(failed.count)) 份读取失败，原因分布：\(reasons.joined(separator: "、"))。")
+            lines.append(localizedFormat("已跳过 %1$@ 份读取失败，原因分布：%2$@。",
+                                         NumberFormat.grouped(failed.count),
+                                         reasons.joined(separator: localizedCopy("、"))))
         }
         if logs.crashCount > 0 || logs.scannedFiles.contains(where: { $0.role == .crash }) {
             lines.append(logs.crashEvidenceFootnote(windowDays: windowDays))
@@ -149,7 +154,7 @@ struct LogsMetricGrid: View {
     private var warningCaption: String {
         LogReading.caption(logs) { _ in
             guard let share = LogReading.warningShareOfScanned(logs) else { return "窗口内累计" }
-            return "占扫描行 \(NumberFormat.percent(share, precision: 2))"
+            return localizedFormat("占扫描行 %1$@", NumberFormat.percent(share, precision: 2))
         }
     }
 }
