@@ -152,4 +152,165 @@ extension LocalizationGuardTests {
         XCTAssertTrue(endingSentence("甲").hasSuffix("。"),
                       "测试宿主里探针应当判中文；这里红了说明探针前提变了，本文件多条判据要重读")
     }
+
+    // MARK: - 批次 P69b（WS-Git / 健康页）：那 5 条存量收口之后要能自己站住
+    //
+    // 四条各管一个"绿了不代表修好了"的洞：
+    //   ① 键登记了，但**英文 bundle 里查不到**（P59 那个 `#` 注释炸的就是这一类）；
+    //   ② 键查得到，但**没有人在产出处查它**（`Text(变量)` 不查表 ⇒ 白登记）；
+    //   ③ 改成了查表，但**把中文态改坏了**（多一个空格、少一个字，既有守卫一条都不红）；
+    //   ④ 本批还过债的文件**长回插值中文串**（1b 那条全量棘轮只许降，涨回去才看得见，
+    //      但它按"入口白名单"扫 —— 三个文件里别的形状的残留它不点名，这里按文件钉死）。
+    // ①② 与 P69 那两条同族，③ 与守卫 6「整句键不许改坏中文侧」同族。
+
+    /// P69b 新登记的 4 条 `.strings` 键（第 5 条复用已在 `stringsdict` 里的量词键 `%lld 天`）。
+    static let p69bKeys: [String] = [
+        "分析的是另一个仓库：%1$@\n%2$@",
+        "当前只分析了提交数最多的那一个",
+        "Git 分析没有产出按时间分桶的提交数据。",
+        "未找到仓库",
+        "历史末点 %1$@ 与本次 %2$@ 不一致。",
+    ]
+
+    private static let p69bSentinel = "\u{FFFE}"
+
+    /// ① 每条键都必须**在真英文 bundle 上**查得到；带实参的两条填完必须是英文。
+    /// 反向自证：一条夹具假键必须判"查不到" —— 否则上面那张空清单是尺子失灵。
+    func test_p69bKeysResolveThroughTheRealEnglishBundle() throws {
+        let en = LocalizationGuardTests.packageRoot.appendingPathComponent("Resources/en.lproj")
+        guard let enBundle = Bundle(url: en) else {
+            return XCTFail("打不开 \(en.path) —— 英文资源不在原位，本条不能算通过")
+        }
+        let unresolved = Self.unresolvedCatalogKeys(Self.p69bKeys.map { (key: $0, value: "") },
+                                                   in: enBundle)
+        XCTAssertEqual(unresolved, [], "这些键写在目录里、运行时查不到 ⇒ 英文态照旧铺中文")
+        XCTAssertEqual(Self.unresolvedCatalogKeys(
+            [(key: "P69b 夹具：这条键绝不存在 %1$@", value: "")], in: enBundle).count, 1,
+            "假键没被判成查不到 ⇒ 上面那条空清单不可信")
+
+        // 外壳句：两个位置参数的**顺序**必须是「路径、定位说法」。填反了一样的绿
+        // （占位符比对只看数量与类型），但英文态会读成"另一个仓库：所选目录即仓库 / 路径"。
+        let relocated = Self.p69bKeys[0]
+        let relocatedValue = enBundle.localizedString(forKey: relocated,
+                                                      value: Self.p69bSentinel, table: nil)
+        XCTAssertFalse(relocatedValue.contains(Self.p69bSentinel), "\(relocated) 查不到")
+        XCTAssertEqual(String(format: relocatedValue, "/repo/path", "The folder is the repository"),
+                       "Analysing a different repository: /repo/path\nThe folder is the repository",
+                       "外壳句的位置参数形状与本批写法不一致（改了译文形状要同批复核这条）")
+        // 评分不一致那句：两个分数不是可数名词 ⇒ 必须是 `.strings` 单数键，
+        // 不许被塞进 `stringsdict` 硬凑单复数。
+        let mismatchKey = "历史末点 %1$@ 与本次 %2$@ 不一致。"
+        let mismatchValue = enBundle.localizedString(forKey: mismatchKey,
+                                                     value: Self.p69bSentinel, table: nil)
+        XCTAssertFalse(mismatchValue.contains(Self.p69bSentinel), "\(mismatchKey) 查不到")
+        // 两侧占位符必须同形（与守卫 4 同一把尺子，不另造一份）。
+        XCTAssertEqual(LocalizationGuardTests.formatSpecs(in: mismatchValue), ["%1$@", "%2$@"],
+                       "这条键与它的英文译文占位符不同形 ⇒ 填参会静默改义：\(mismatchValue)")
+        XCTAssertTrue(Self.cjkResidue(in: mismatchValue).isEmpty,
+                      "英文译文里残留中日韩字符 ⇒ 这一格半英半中：\(mismatchValue)")
+    }
+
+    /// ② 每条键都必须真的出现在**产出处**（源码里的字面量）。登记了没人查 = 没修。
+    ///
+    /// ⚠ 两把尺子的转义差别必须显式桥接（守卫 1i 的同一条教训）：目录解析器按正则
+    /// 取的是**原文**，所以 `.strings` 里的键写着 `\n` 两个字符；而 Swift 源码里那条
+    /// 整句键也是 `\n` 两个字符 —— 本测试数组里写的却是**真换行**（运行时形状）。
+    /// 不桥接就会把一条活键报成"没人查"。
+    func test_p69bKeysAreLookedUpAtTheirProducers() throws {
+        let bodies = try SurfaceScanKit.sourceFiles(under: "").map(\.content)
+            .reduce("") { $0 + $1 }
+        let sourceForm = Self.p69bKeys.map { $0.replacingOccurrences(of: "\n", with: "\\n") }
+        XCTAssertEqual(Self.unusedPluralKeys(sourceForm, in: bodies), [],
+                       "这些整句键登记了却没有任何调用点 ⇒ 屏上仍是拼出来的中文")
+        XCTAssertFalse(Self.unusedPluralKeys(["P69b 夹具：这条键绝不存在 %1$@"], in: bodies).isEmpty,
+                       "假键没被抓到 ⇒ 上面那条空清单不可信")
+        // 桥接本身也要有牙：不桥接就拿真换行去搜原文，必然报"没人查"（假红）。
+        XCTAssertFalse(Self.unusedPluralKeys(Self.p69bKeys, in: bodies).isEmpty,
+                       "带 \\n 的键不桥接居然也搜得到 ⇒ 这条桥接是多余的，删掉它")
+    }
+
+    /// ③ 中文态逐字不变。测试宿主里 `Bundle.main` 没有 `en.lproj` ⇒ `localizedCopy`
+    /// 恒退回键本身 = 中文，所以这里量到的就是**中文用户实际看到的那一串**，
+    /// 而且走的是**真生产者**（不是在测试里重抄一遍表达式）。
+    func test_p69bKeystayByteIdenticalInTheChineseState() {
+        for (mode, hops, expected) in [
+            (GitDiscoveryMode.selectedDirectory, 0, "所选目录即仓库"),
+            (.parentDirectory, 2, "向上 2 层找到"),
+            (.nestedSubdirectory, 12, "向下 12 层找到"),
+            (.none, 0, "未找到仓库"),
+        ] {
+            let git = GitInsights(resolvedRepositoryRoot: "/tmp/repo",
+                                  discoveryMode: mode, discoveryHops: hops)
+            XCTAssertEqual(GitRepositorySourceSection.relocatedNotice(git: git, root: "/tmp/repo"),
+                           "分析的是另一个仓库：/tmp/repo\n\(expected)",
+                           "偏离提示的中文态被改坏了（mode \(mode)）")
+        }
+        XCTAssertEqual(HealthTrendCard.spanCaption(0), "0 天")
+        XCTAssertEqual(HealthTrendCard.spanCaption(45), "45 天")
+        XCTAssertEqual(HealthTrendCard.spanCaption(1_234), "1,234 天",
+                       "量词改走 localizedCount 之后千分位必须仍在（与全站大读数同一把记法）")
+        XCTAssertEqual(HealthTrendCard.scoreMismatchNote(last: 76, current: 78),
+                       "历史末点 76 与本次 78 不一致。")
+    }
+
+    /// ④ 本批**真拆掉的三种形状**不许长回来（逐条留名，不是一片文件配额）。
+    ///
+    /// 为什么不写成"这三个文件里插值中文串必须为 0"（守卫 1g 那种名单制）：
+    /// 同三个文件里还留着**没派给我**的 4 处（`discoveryCaption` 的「向上 / 向下 N 层找到」
+    /// 两态要英语单复数、`GitNestedCandidatesSection` 卡名「所选目录下发现 N 个仓库」、
+    /// `GitInsightsView` 的「始于 …」），按文件收口就等于替别人的账签字，
+    /// 也等于把这条判据写成一条此刻根本红的东西。名单制留给真正清干净的那一天。
+    static let p69bRetiredShapes: [(file: String, literal: String)] = [
+        ("Views/Git/GitInsightsSections.swift",
+         #"DataNotice(text: "分析的是另一个仓库：\(root)\n\(Self.discoveryCaption(git))""#),
+        ("Views/Health/HealthAdviceCards.swift",
+         #"Theme.Readout.Field("跨度", "\(NumberFormat.grouped(spanDays)) 天")"#),
+        ("Views/Health/HealthAdviceCards.swift",
+         #"NoteLine("历史末点 \(last.score) 与本次 \(score) 不一致。""#),
+    ]
+
+    /// 判据体：某个文件里是否还写着这条旧形状（原样子串，不按行猜）。
+    static func retiredShapesStillWritten(_ retired: [(file: String, literal: String)],
+                                          in scanned: [String: String]) -> [String] {
+        retired.compactMap { item in
+            guard let content = scanned[item.file] else { return "\(item.file) 不在扫描面上" }
+            return content.contains(item.literal) ? "\(item.file) 又写回了 \(item.literal)" : nil
+        }
+    }
+
+    func test_p69bRetiredShapesDoNotComeBack() throws {
+        let scanned = Dictionary(uniqueKeysWithValues:
+            try SurfaceScanKit.sourceFiles(under: "").map { ($0.path, $0.content) })
+        let offenders = Self.retiredShapesStillWritten(Self.p69bRetiredShapes, in: scanned)
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些形状先拼成串再上屏，拼完那一整串永远查不中 ⇒ 英文态整行中文：\n  "
+                        + offenders.joined(separator: "\n  "))
+    }
+
+    /// 元测试（④ 的双向）：已知坏样例必须抓得到、已知合法写法一条不许误伤。
+    /// 少了这半边，上面那条绿只可能意味着"文件路径对不上、所以什么都没扫到"。
+    func test_meta_p69bRetiredShapeRulerBitesBothWays() {
+        let keyized = [#"DataNotice(text: localizedFormat("分析的是另一个仓库：%1$@\n%2$@", a, b))"#,
+                       #"Theme.Readout.Field("跨度", localizedCount("%lld 天", days))"#,
+                       #"NoteLine(localizedFormat("历史末点 %1$@ 与本次 %2$@ 不一致。", x, y))"#]
+        // 反向：把三个落点换成**成熟写法**，同一份"要禁的旧形状"清单必须一条都不报。
+        // （首版我在这里把"要找的旧形状"错传成了成熟写法本身 ⇒ 自己找自己、必然报，
+        //   记下来是为了让下一个人在这里少踩一次。）
+        XCTAssertTrue(Self.retiredShapesStillWritten(
+            Self.p69bRetiredShapes,
+            in: ["Views/Git/GitInsightsSections.swift": keyized[0],
+                 "Views/Health/HealthAdviceCards.swift": keyized[1] + "\n" + keyized[2]]).isEmpty,
+            "整句键 + 位置参数的成熟写法被误报 ⇒ 下次没人信这条")
+        // 正向：把三条旧形状原样塞回去，必须逐条抓到（分母 3，不许只抓到一部分）。
+        XCTAssertEqual(Self.retiredShapesStillWritten(
+            Self.p69bRetiredShapes,
+            in: ["Views/Git/GitInsightsSections.swift": Self.p69bRetiredShapes[0].literal,
+                 "Views/Health/HealthAdviceCards.swift":
+                     Self.p69bRetiredShapes[1].literal + "\n" + Self.p69bRetiredShapes[2].literal]
+        ).count, 3, "旧形状漏抓 ⇒ 这条判据拦不住回退")
+        // 文件不在扫描面上要单独出声（不能和"没抓到"混成同一个空清单）。
+        XCTAssertEqual(Self.retiredShapesStillWritten(
+            [(file: "Views/Nowhere/Gone.swift", literal: "x")], in: [:]).count, 1,
+            "文件消失被当成通过 ⇒ 改名/挪走就能悄悄关掉判据")
+    }
 }
