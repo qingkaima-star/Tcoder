@@ -66,12 +66,16 @@ cases = [("clean-idle", {"period": "idle"}),
          ("dirty-idle", {"period": "idle", "contaminated_by_human_input": "1"}),
          ("clean-inter", {"period": "interaction"}),
          ("nobody-inter", {"period": "interaction", "no_human_input_during_window": "1"}),
-         ("no-meta", {})]
+         ("no-meta", {}),
+         # 第三种打回形状：声明与复核**一致**，但窗口里整机在忙（包 18 的窗口内自采）。
+         # 为什么必须进来：2026-09-23 20:49 三趟 idle 全被它打回，而表头当时说"互相矛盾"，
+         # 于是我去查一个根本不存在的期间谎报 —— 归类错了的拒因比没有拒因更费人。
+         ("busy-idle", {"period": "idle", "contaminated_by_foreign_load": "1"})]
 print("|".join("%s=%s" % (k, "Y" if pe(v)[0] else "N") for k, v in cases))')
   # 注意 `case` 里的 `|` 是**或**不是"与"：写成 `a=Y|b=N` 会被读成两个候选模式，
   # 于是"全串等于预期"永远匹不上——第一版就是这么红的（红得有价值：它当场把实际值打给我看）。
-  [ "$r" = "clean-idle=Y|dirty-idle=N|clean-inter=Y|nobody-inter=N|no-meta=Y" ] \
-    || { fail "四种形状的资格判定不对（拿到 ${r:-解析失败}）——自我矛盾的样本又能蒙混了"; return; }
+  [ "$r" = "clean-idle=Y|dirty-idle=N|clean-inter=Y|nobody-inter=N|no-meta=Y|busy-idle=N" ] \
+    || { fail "五种形状的资格判定不对（拿到 ${r:-解析失败}）——该打回的样本又能蒙混了"; return; }
   # 反向钉：结论话术要跟着翻转，不能只改退出码、表头还写着"有资格"
   local yes no
   yes=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c \
@@ -81,7 +85,14 @@ print("|".join("%s=%s" % (k, "Y" if pe(v)[0] else "N") for k, v in cases))')
   case "$yes" in *有资格*) ;; *) fail "干净 interaction 样本的话术里不再有「有资格」：$yes" ;; esac
   case "$no" in *"不可当交互期样本"*) ;; *) fail "没人滚的 interaction 样本话术没翻转（还是「$no」）——退出码判了、表头在骗人" ;; esac
   [ "$yes" != "$no" ] || { fail "两种样本话术一模一样，等于没判"; return; }
-  ok "期间资格：四种形状各判一次，且表头话术跟着翻转"
+  # 反向钉（话术不许替原因说话）：表头那一句**只说打回、不指原因**，原因住在 `period_eligibility`。
+  # 钉"不许出现『互相矛盾』"而不是钉"必须出现某句新话"——前者是这次的真错，后者只会逼下一个人改期望。
+  local head
+  head=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c \
+    'from perf_trace_summary import refusal_headline as rh; print(rh())')
+  case "$head" in *"互相矛盾"*) fail "表头又把每一种打回都说成「互相矛盾」（拿到「$head」）⇒ 拒因有两处出口，且这一处会指错方向" ;; esac
+  case "$head" in *"打回"*"不得作为结论"*) ;; *) fail "打回那一行不再出声（拿到「$head」）——少印一行说明就等于让它蒙混" ;; esac
+  ok "期间资格：五种形状各判一次，表头话术跟着翻转，且打回那一行不替原因说话"
 }
 
 selfcheck_probe_self_sufficient() {  # selfcheck_probe_self_sufficient <outdir>
