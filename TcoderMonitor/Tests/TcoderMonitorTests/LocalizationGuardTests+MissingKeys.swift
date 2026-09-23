@@ -249,6 +249,10 @@ extension LocalizationGuardTests {
         "Services/Health/ScoreCurvesCode.swift",
         "Services/Health/ScoreCurvesTeamRuntime.swift",
         "Services/Health/GitCadenceEvidence.swift",
+        // P64：这条判据原来只盯 Services，而 `Views/**` 里也有"返回字符串给 `Text(变量)`"的生产者
+        // ——`markerNote` 那句 FIXME 提示就因此长期挂在英文态残留的 A 类里（两个半句各自登记过，
+        // 运行时拼起来永远查不中）。名单只往长里加，加一个文件就要把它清干净。
+        "Views/Code/CodeMetricsSections.swift",
     ]
 
     func test_keyizedCopyFilesHoldNoInterpolatedChineseLiterals() throws {
