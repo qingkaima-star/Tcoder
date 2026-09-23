@@ -71,11 +71,24 @@ extension EvidenceFreshnessTests {
             guard inside else { continue }
             if line.hasPrefix("##") || line.hasPrefix("---") { break }        // 本节结束
             if line.isEmpty || !line.hasPrefix("|") { continue }
-            let first = backlogCells(line).first ?? ""
-            if first.hasPrefix("---") || first.contains("页") { continue }      // 表头与分隔行
+            let cells = backlogCells(line)
+            if cells.first?.hasPrefix("---") == true { continue }              // 分隔行
+            // 表头按**整行的列名**认，不按"第一格里有没有『页』这个字"认。
+            // 后者放过了一条真会把账挂到空气上的失效：页名「全九页 / 外壳与共用基座」含"页"，
+            // 于是那条**数据行**被当成表头跳过 ⇒ 加完挂账行守卫照报"没挂账"（19:26 实测），
+            // 而任何含"页"字的页名从此永远挂不上账。旁证：读逐页表的那台机器
+            // （`EvidenceFreshnessTests.rows(in:)`）从来是按内容认行的（要有 `git log <头>..HEAD`），
+            // 同一张表旁边的两条尺子必须同构。
+            if isBacklogHeader(cells) { continue }
             rows.append(line)
         }
         return rows
+    }
+
+    /// 表头行 = 五格齐全 + 前两格正是文档里那份模板的列名。
+    /// 有人把列名改成"页面"会让真表头落到 `malformed` 里被点名（宁可红一行格式，不要静默少读一行）。
+    static func isBacklogHeader(_ cells: [String]) -> Bool {
+        cells.count == 5 && cells[0] == "页" && cells[1] == "停在"
     }
 
     /// 一行切成格子。`split` 默认丢掉首尾空段，必须显式留着再 drop，
@@ -193,6 +206,26 @@ extension EvidenceFreshnessTests {
             .map { "> \($0)" }.joined(separator: "\n"))
         XCTAssertEqual(quoted.entries.count, parsed.entries.count, "引用块里的同一张表要读得一样")
         XCTAssertEqual(quoted.malformed.count, parsed.malformed.count)
+    }
+
+    /// 页名里含"页"字的数据行**不许被当成表头跳过**（这条判据的来由见 `backlogRows` 里那段注释：
+    /// 「全九页 / 外壳与共用基座」挂完账，守卫照旧报"没挂账"，而报错的话术还会指向挂账人，
+    /// 让人以为是自己 sha 抄错了 —— 白绕一圈才找到解析器）。
+    /// 反向一半也要跑：真表头不许变成条目，否则 `malformed` 会为一行排版刷满屏。
+    func test_meta_backlogHeaderIsMatchedByColumnNamesNotBySubstring() throws {
+        let pageWithTheWord = "| 全九页 / 外壳与共用基座 | `2a05a28` | `363dd74` | P66 那笔的作者 | 2026-09-23 02:00 |"
+        let markdown = "\(Self.backlogHeading)\n\n| 页 | 停在 | 拧过期的提交 | 挂账人 | 挂账时间(UTC) |\n"
+            + "|---|---|---|---|---|\n" + pageWithTheWord + "\n"
+        let parsed = Self.backlog(in: markdown)
+        XCTAssertTrue(parsed.malformed.isEmpty, "两行都该被认出来：\(parsed.malformed)")
+        XCTAssertEqual(parsed.entries.map(\.pages), [["全九页", "外壳与共用基座"]],
+                       "含「页」字的页名是一条数据行，不是表头")
+        // 与实算对得上才算挂上账：页名切成两段，任一段能对上过期行的页名集合即可。
+        let stale = [(pages: ["全九页", "外壳与共用基座"], head: "2a05a28", candidates: ["363dd74"])]
+        let verdict = Self.backlogVerdict(stale: stale, entries: parsed.entries,
+                                          now: parsed.entries[0].loggedAt)
+        XCTAssertEqual(verdict.acknowledged.count, 1, "挂上了就不该再进 unlisted：\(verdict)")
+        XCTAssertTrue(verdict.unlisted.isEmpty && verdict.mismatched.isEmpty)
     }
 
     func test_meta_backlogVerdictHasFourIndependentOutcomes() throws {
