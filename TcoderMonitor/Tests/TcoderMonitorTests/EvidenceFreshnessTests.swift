@@ -5,7 +5,10 @@ import XCTest
 ///
 /// 读 `docs/界面-乱的清单.md` 里那张「每页最近一次实拍在哪个头」的表，
 /// 对每一行把它自己写出的那条 `git log <头>..HEAD -- <依赖面>` 真的跑一遍，
-/// **非空即判红**：那一页的实拍已经过期，屏上可能有没人看过的变化。
+/// **非空即过期**：那一页的实拍已经过期，屏上可能有没人看过的变化。
+/// 过期之后**必须出声**（RD-57）：要么重拍那一页并更新表里的头，
+/// 要么进同一份文档里的「### 待重拍积压」逐条挂账（页 / 停在 / 拧过期的提交 / 挂账人 / UTC 分钟，24 小时宽限）。
+/// 判红的仍然是"屏上变了却谁也没说"这一件——只是不再拿全机唯一那格 App 窗口去卡所有人。
 ///
 /// 为什么必须有它（而不是把表写漂亮就完事）：这张表第一次写出来就写错了两行 ——
 /// 初稿把 Git 洞察 / 贡献者 / 错误日志 / 依赖分析 一起记在 `fb94e88` 那批上，
@@ -158,18 +161,37 @@ final class EvidenceFreshnessTests: XCTestCase {
         XCTAssertTrue(missing.isEmpty,
                       "九页名册里这些页在表中没有行（新增页面忘了登记？）：\(missing)")
 
-        var expired: [String] = []
+        // RD-57：过期不再"立刻判红"，而是**必须出声**——过期页要么重拍、要么进「待重拍积压」逐条挂账。
+        // 依赖面算过期的一条没放宽，改的只是"过期之后谁都能被这张表卡住"那件事。
+        var stalePages: [(pages: [String], head: String, candidates: [String])] = []
         for row in found {
             let touched = try Self.runGitLog(head: row.head, paths: row.paths)
             if !touched.isEmpty {
-                expired.append("\(row.pages.joined(separator: "/")) 停在 \(row.head)，"
-                             + "此后动了 \(touched.count) 个文件：\(touched.prefix(3).joined(separator: " "))")
+                stalePages.append((pages: row.pages, head: row.head, candidates: touched))
             }
         }
-        XCTAssertTrue(expired.isEmpty,
-                      "这些页的实拍已经过期，屏上可能有没人看过的变化 —— 重拍那一页并更新表里的头：\n"
-                    + expired.joined(separator: "\n"))
-        print("【实拍新鲜度】表里 \(found.count) 行、覆盖 \(Set(found.flatMap(\.pages)).count) 页 → 过期 0 行")
+        let logged = Self.backlog(in: markdown)
+        XCTAssertTrue(logged.malformed.isEmpty,
+                      "「\(Self.backlogHeading)」这张表本身格式不对 ⇒ 它不许变成遮羞布，逐条修好：\n"
+                    + logged.malformed.joined(separator: "\n"))
+        let verdict = Self.backlogVerdict(stale: stalePages, entries: logged.entries, now: Date())
+        XCTAssertTrue(verdict.unlisted.isEmpty,
+                      "这些页的实拍已经过期，屏上可能有没人看过的变化 —— 重拍那一页并更新表里的头，"
+                    + "或（拿不到全机唯一那格 App 窗口时）在「\(Self.backlogHeading)」登记欠拍 + 挂账人：\n"
+                    + verdict.unlisted.joined(separator: "\n"))
+        XCTAssertTrue(verdict.mismatched.isEmpty,
+                      "挂账与实算对不上 ⇒ 挂账写错了页、抄了个别处的提交，或 UTC 时间写歪了：\n"
+                    + verdict.mismatched.joined(separator: "\n"))
+        XCTAssertTrue(verdict.overdue.isEmpty,
+                      "欠拍超过 \(Int(Self.backlogGrace / 3_600)) 小时宽限期还不补拍 —— "
+                    + "挂了账不等于看过了，抢一次 App 窗口把它清掉：\n"
+                    + verdict.overdue.joined(separator: "\n"))
+        for note in verdict.acknowledged {
+            print("【实拍欠拍·已挂账】" + note)      // 放行，但必须大声：不许读成"查过没事"
+        }
+        print("【实拍新鲜度】表里 \(found.count) 行、覆盖 \(Set(found.flatMap(\.pages)).count) 页 → "
+            + "过期 \(stalePages.count) 行（已挂账 \(verdict.acknowledged.count) 行、"
+            + "没挂账 \(verdict.unlisted.count) 行）")
     }
 
     /// 表里每行说的"实拍过"到底成不成立：四格图都在、且每格的 `PROVENANCE` 里
