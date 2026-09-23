@@ -32,13 +32,21 @@ final class BoardLengthReadoutRatchetTests: XCTestCase {
     ///   `Views/Code`、`Views/Health`、`Services/Code/CodeRisk*`），已列进 R7 的交回汇报。
     /// 重复块那一族真正还债的是 `AdviceWordingBoardTests`：它断言的是**页尾那句话**在
     /// 截断/未截断/台账缺席三态下各说什么，比"数原始读数"更接近这件事的本体。
+    ///
+    /// 22:5x 由 **WS-R18 DupTotal**（工单：评分解释文本里的那一处残留）按同一把尺子往下拧一格：
+    /// `Services/Health/HealthCodeDimensions.swift` **1 → 0**。凭什么：
+    /// 评分「问题」那一栏的重复块数改由契约里唯一的取法 `CodeMetrics.reportedDuplicatedBlockTotalCount`
+    /// （去重后口径 = 榜内 + 榜外）说话，三态各一句 —— 榜外有账时**真总数与榜长并排**
+    /// （就是下面 `allowedShapes` 认的那句「榜内只列 N 个，实际 M 个」，不是新发明），
+    /// 榜外为零时明说"明细已全部列出"，榜外没统计过时只报榜长且**不出现"共"字**。
+    /// 现量由本文件自己打印（`榜长冒充总数：全仓现量 N / 上限 M`），拧完必须与实跑打印相等 —— 不估。
     private static let budget: [String: Int] = [
         "Views/Code/CodeRiskView.swift": 2,           // 复杂度榜的读数与展开算术（标签已写明「上榜」）
         "Views/Code/CodeMetricsSections.swift": 2,    // ⓘ 里那句「重复块 N 个 · 复杂度上榜 M 个函数」
         "Views/Code/CodeRiskRows.swift": 1,           // complexitySubtitle 的「上榜 N 个」
         "Views/Code/CodeRiskAdvice.swift":  0,        // 已还：低档那句改成「榜内 N 个重复块」
         "Views/Code/CodeViewSupport.swift": 1,        // 榜长的唯一取法 `duplicationBoardCount` 本体
-        "Services/Health/HealthCodeDimensions.swift": 1,  // 评分 detail「共 %d 处重复块」（归 WS-C）
+        "Services/Health/HealthCodeDimensions.swift": 0,  // 已还（WS-R18）：改走 reportedDuplicatedBlockTotalCount
     ]
 
     /// 两种**合法形状**，不许被算成违例（各配一条反向元测试钉着，见下）。

@@ -88,11 +88,30 @@ extension WeightedHealthScorer {
                                     NumberFormat.percent(code.duplicationRatio, precision: 1))]
     }
 
+    /// 「问题」那一栏里重复块数的那一句，按**三态**说话。
+    ///
+    /// 病根（2026-09-23 本仓实扫：榜内 20 · 榜外未列 96）：这一句以前直接把**榜长**当总数念，
+    /// 于是评分详情对用户说"共 20 处重复块"，真相是 116 处（少报 96 处；
+    /// 工单立案那批的读数是榜内 20 · 榜外 85，同一件事）。
+    /// 需求方 §五 点名的形状（"实际 552 显示 20"）在展示层已由 R7 收口，这一处是它在
+    /// **评分解释文本**里的那一处残留。
+    ///
+    /// 三态的判据是「榜外那一半统计过没有」，不是「榜外是不是零」——
+    /// 两态会把"没统计"说成"没漏"，所以 `nil` 那一句**不许出现"共"字**。
+    /// 写法上的硬约束：`BoardLengthReadoutRatchetTests` 认的披露句式是
+    /// 「榜内只列 N 个，实际 M 个」（真总数与榜长**并排**），而它的判据按**行**认标记，
+    /// 所以整句键与它点名的两个数必须同行；换行会把这行退化成"只报了个榜长"。
     private func duplicationIssues(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
         guard curve.score <= 60 else { return [] }
-        return [localizedFormat("重复代码 %1$@，共 %2$@ 处重复块",
-                                    NumberFormat.percent(code.duplicationRatio, precision: 1),
-                                    NumberFormat.grouped(code.duplicatedBlocks.count))]
+        let ratio = NumberFormat.percent(code.duplicationRatio, precision: 1)
+        switch code.reportedDuplicatedBlockTotalCount {
+        case let total? where total > code.duplicatedBlocks.count:
+            return [localizedFormat("重复代码 %1$@，共 %2$@ 处重复块（去重后口径，榜内只列 %3$@ 处明细）", ratio, NumberFormat.grouped(total), NumberFormat.grouped(code.duplicatedBlocks.count))]
+        case let total?:
+            return [localizedFormat("重复代码 %1$@，共 %2$@ 处重复块（明细已全部列出）", ratio, NumberFormat.grouped(total))]
+        case nil:
+            return [localizedFormat("重复代码 %1$@，榜内只列 %2$@ 处重复块，总处数本次未统计", ratio, NumberFormat.grouped(code.duplicatedBlocks.count))]
+        }
     }
 
     private func duplicationAdvice(_ curve: CurveResult) -> [String] {
