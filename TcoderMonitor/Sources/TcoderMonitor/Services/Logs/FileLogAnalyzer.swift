@@ -186,4 +186,21 @@ extension LogSummary {
     var crashTileCaption: String {
         "窗口内确认崩溃；其中 FATAL \(NumberFormat.grouped(fatalCount)) 条"
     }
+
+    /// 崩溃那一格 ⓘ 的完整句 —— **一行转发**，一个汉字都不在这里拼（拼话只在
+    /// `CrashEvidenceReadout` 那一处）。本文件是它在 `Sources/**` 里的唯一调用点，
+    /// 因此这个类型不是「只有单测在用」的实现文件（`SourceFileReachabilityTests` 只认代码调用点）。
+    ///
+    /// - Parameter evidence: 同一次分析的崩溃证据台账。**传进来才说得出的那几件事**：
+    ///   历史报告在窗口外、旧构建未算当前版本、无事件时间单列、疑似与解析失败分开、
+    ///   同一事件去重合并几份。不传 = 这次没有细账 ⇒ 明说未统计，
+    ///   **绝不**回落到趋势桶去估一个数（那是 RD-60 立掉的那把第二把尺子）。
+    ///
+    /// ⚠️ 签名里**没有** `now` 这个参数，这是有意的：窗口由台账在分析那一刻裁一次，
+    /// 上屏时再按当时的 `Date()` 裁第二次，就是同一个判据两处入口（RD-38 同族）。
+    func crashEvidenceFootnote(windowDays: Int, evidence: CrashEvidenceLedger? = nil) -> String {
+        CrashEvidenceReadout.footnote(
+            CrashEvidenceReadout.reading(from: self, evidence: evidence, windowDays: windowDays),
+            readFailureReasons: CrashEvidenceReadout.readFailureDistribution(self))
+    }
 }

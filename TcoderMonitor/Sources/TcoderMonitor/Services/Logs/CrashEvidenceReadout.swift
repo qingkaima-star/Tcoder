@@ -16,7 +16,9 @@
 //  ## 本文件立的规矩
 //
 //  1. **只有一个装配口**：崩溃脚注的每一个汉字都在这里拼，别处（含 `Views/Logs/**`）
-//     只许把返回值原样上屏。`CrashEvidenceReadoutGuardsTests` 钉着这条。
+//     只许把返回值原样上屏。`CrashEvidenceReadoutGuardTests` 钉着这条。
+//     唯一的调用点是 `FileLogAnalyzer.swift` 里 `LogSummary.crashEvidenceFootnote`
+//     那一行转发（视图只认那一个入口）。
 //  2. **不重算任何数**：八种原因**逐字**取自 `CrashEvidenceLedger.statement` /
 //     `unknownStatement`（本函数只做串接与加窗口标签），一个数都不重新推导。
 //     趋势桶那条路已经断开 —— 它把 `.fatal` 与 `.crash` 折进同一个格子
@@ -133,24 +135,5 @@ enum CrashEvidenceReadout {
         let failed = (summary.readFailedFiles ?? []).filter { $0.role == .crash }
         return Dictionary(grouping: failed.compactMap { $0.readFailure }, by: { $0 })
             .mapValues { $0.count }
-    }
-}
-
-// MARK: - 上屏入口（薄壳，只转发）
-
-extension LogSummary {
-    /// 崩溃那一格 ⓘ 的完整句。
-    ///
-    /// - Parameter evidence: 同一次分析的崩溃证据台账。**传进来才说得出的那五件事**：
-    ///   历史报告在窗口外、旧构建未算当前版本、无事件时间单列、疑似与解析失败分开、
-    ///   同一事件去重合并几份。不传 = 这次没有细账 ⇒ 明说未统计，
-    ///   **绝不**回落到趋势桶去估一个数（那是 RD-60 立掉的那把第二把尺子）。
-    ///
-    /// ⚠️ 签名里**没有** `now` 这个参数，这是有意的：窗口由台账在分析那一刻裁一次，
-    /// 上屏时再按当时的 `Date()` 裁第二次，就是同一个判据两处入口（RD-38 同族）。
-    func crashEvidenceFootnote(windowDays: Int, evidence: CrashEvidenceLedger? = nil) -> String {
-        CrashEvidenceReadout.footnote(
-            CrashEvidenceReadout.reading(from: self, evidence: evidence, windowDays: windowDays),
-            readFailureReasons: CrashEvidenceReadout.readFailureDistribution(self))
     }
 }
