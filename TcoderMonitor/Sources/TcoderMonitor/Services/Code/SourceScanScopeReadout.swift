@@ -34,7 +34,8 @@ enum SourceScopeCount: Sendable, Equatable {
     /// （`%lld entry` / `%lld entries`），千分位仍由它补；中文侧
     /// `String(format: "%lld 行", 0)` 就是「0 行」，与改前逐字相同。
     /// **传错形状（不含 `%lld`）时 `String(format:)` 会把数字静默丢掉** ——
-    /// 那条由 `SourceScanScopeTests` 的 `pluralKeyArguments…` 判据钉住（含双向元测试）。
+    /// 那条由 `SourceScanScopeTests.test_describeUnitArgumentIsAlwaysARegisteredPluralKey`
+    /// 钉住（判据函数 `malformedCountKeys(in:pluralKeys:)`，双向元测试在同文件）。
     func describe(unit: String) -> String {
         switch self {
         case let .measured(value): return localizedCount(unit, value)
