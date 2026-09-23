@@ -112,7 +112,6 @@ struct GitRepositorySourceSection: View {
                         root, localizedCopy(Self.discoveryCaption(git)))
     }
 
-
     /// 把「为什么」和「结果」分开写：用户所选目录在仓库内部还是仓库本身不在这里再重复一遍路径。
     static func discoveryDetail(_ git: GitInsights) -> String {
         switch git.discoveryMode {
