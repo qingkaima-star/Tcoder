@@ -34,7 +34,6 @@ import argparse
 import collections
 import os
 import re
-import statistics
 import sys
 
 from perf_trace_metrics import (launch_ready_ms, FRAME_BUDGET_MS_DEFAULT, dist_line, interval_shaped, over_budget, percentile,
@@ -42,6 +41,7 @@ from perf_trace_metrics import (launch_ready_ms, FRAME_BUDGET_MS_DEFAULT, dist_l
 from perf_trace_summary import cmd_summary
 from perf_trace_threads import cmd_threads
 from perf_trace_xml import Doc, find_tag
+from perf_update_caliber import event_durations, sidecar_payload
 
 
 # ----------------------------------------------------------------------------
@@ -77,7 +77,13 @@ def cmd_durations(args):
     doc = Doc(args.xml)
     spans = doc.spans()
     values = [d for _, d in spans]
+    events = event_durations(spans)
     print("[%-18s] schema=%s %s" % (args.label or os.path.basename(args.xml), doc.schema(), dist_line(values)))
+    if len(events) != len(values):
+        # 首行那个 `n` 是**行数**；不点名就会又变成"两处入口两个数"（09-24：28 vs 17 同名 app-update）
+        print("%22s 口径：首行 n 是行数 ⇒ 按 (起始,时长) 收成事件=%d 个，超预算 %d 个"
+              "（汇总表与一致性尺读的是**事件**口径）"
+              % ("", len(events), over_budget(events, args.budget_ms)[0]))
     if values:
         bad, pct = over_budget(values, args.budget_ms)
         print("%22s 累计=%.0f ms 超预算(>%.3f ms)=%d (%.2f%%)"
@@ -92,15 +98,10 @@ def cmd_durations(args):
             starts = sorted(s for s, _ in spans)
             gaps = [round(b - a, 1) for a, b in zip(starts, starts[1:])]
             print("%22s 事件间隔=%s" % ("", gaps[:16]))
+    # sidecar 的字段表住在 `perf_update_caliber.sidecar_payload`（口径判据的唯一住处），
+    # 这里不再抄一遍——09-24 之前它自己算了一套行数口径的 `n`，与汇总表的 17 同名不同值。
     if args.json:
-        write_json(args.json, {
-            "label": args.label, "n": len(values),
-            "p50": round(percentile(values, 0.5), 3), "p95": round(percentile(values, 0.95), 3),
-            "p99": round(percentile(values, 0.99), 3), "max": round(max(values), 3) if values else 0.0,
-            "median": round(statistics.median(values), 3) if values else 0.0,
-            "total": round(sum(values), 1), "over_budget": over_budget(values, args.budget_ms)[0],
-            "values": [round(v, 2) for v in sorted(values)][:40],
-        })
+        write_json(args.json, sidecar_payload(args.label, spans, values, events, args.budget_ms))
     return 0
 
 

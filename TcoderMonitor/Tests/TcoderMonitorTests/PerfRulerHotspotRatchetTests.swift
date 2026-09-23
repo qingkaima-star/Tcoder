@@ -69,6 +69,10 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // 09-24 第七维·预热：`preflight_context` 涨到 410 行撞 400 口径，按"拆文件才是修复"
         // 搬出 `perf_warmup.sh`。**搬出来的那片照样要点名**——第四次用这条教训（前三次见上面注释）。
         "perf_warmup.sh",
+        // 09-24 同一条规矩的第五次：`app-update` 三口径（28/17/16）收成一条规则，
+        // 从 `perf_trace_metrics.py` 搬出 `perf_update_caliber.py`（那文件当时 408 行撞 400 口径）。
+        // 搬出来的判据照样要点名进分母——不点名就等于给它开了免检通道。
+        "perf_update_caliber.py",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。

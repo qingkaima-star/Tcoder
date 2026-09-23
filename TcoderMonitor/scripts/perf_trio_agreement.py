@@ -37,7 +37,8 @@ import json
 import os
 import sys
 
-from perf_trace_metrics import dedupe_pairs, disp_values, fps_counts, percentile
+from perf_trace_metrics import disp_values, fps_counts, percentile
+from perf_update_caliber import dedupe_pairs
 from perf_trace_summary import period_eligibility, summary_load
 
 SPREAD_BAR = 2.0          # hitch/s 极差比上限（保守）
