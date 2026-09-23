@@ -1033,3 +1033,4 @@
 "FIXME %1$@ 处通常表示已知缺陷，建议优先在对应文件里核对。" = "The %1$@ FIXME markers usually flag known defects — start with the files that hold them.";
 "共 %1$@ 个，已全部展示。" = "All %1$@ are shown.";
 "行数是单文件总行数（含空行与注释）" = "Line counts are per-file totals, blank lines and comments included.";
+"这一格是代码行，不含空行与注释；总行数（含两者）在「代码规模」页的头条。" = "This figure counts code lines only, excluding blank lines and comments; the total line count (both included) is the headline on Code Size.";
