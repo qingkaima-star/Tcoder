@@ -6,11 +6,21 @@
 # 这个文件里明写过一次教训：**搬出去才是修复，拧阈值不是**。
 # 与 `perf_selfcheck.sh` 同一做法：由 harness 在同一进程里 source 进来，
 # 所以 $SCRATCH / $TEMPLATE_LAUNCH / $SECONDS_LAUNCH 这些全局量继续可见、口径不变。
+#
+# 【为什么 `switch_page_list` 也从 harness 搬进来】自测要能**单独**调它验两个方向
+# （合法页名要过、名册外的页名要当场红）。住在 harness 里就只能整档 source，
+# 而那是会真去跑一次测量的脚本 ⇒ 判据只能挂在"能被裸 source 的文件"里（与第 22 项同一条规矩）。
+
 switch_record_page() {  # switch_record_page <page> <dir> <sandbox>：一页的全流程（录制 + 导表 + 落 meta）
   local page="$1" dir="$2" sandbox="$3"
   # 正确做法照抄 capture_pages_isolated.sh：TCODER_SUPPORT_DIR 指到自己的沙箱，
   # -ApplePersistenceIgnoreState YES 禁掉窗口恢复，否则第二页起拍到的是第一页的窗口状态。
   prepare_sandbox "$sandbox" "$PWD"
+  # 【逐页写测量环境】这一档此前**一个环境量都不落盘**（页级 meta 只有 page/pid/first_frame_ms/window_seen），
+  # 后果是现证：2026-09-23 九页量出 2.1~2.6 s，而"这是代码还是机器忙"只能靠我手边三次 `uptime` 快照去猜（§AL）。
+  # 取数与判定一律走 `preflight_context` 那把已有的尺（第三参 `launch` 只跳过"前台/在屏"两维——
+  # 写上下文那一刻窗口还不存在，不是放宽）；不合格它会当场落 REFUSED 并退，一趟脏数都采不下来。
+  preflight_context "$dir" "" launch || die "第 $n 页的环境不合格 ⇒ 不采数（REFUSED 已落在 $dir；同一台机器，后面的页不会自己变好）"
   run rm -rf "$dir/launch.trace"
   local t0 t1
   t0=$(python3 -c 'import time;print(time.time())')
@@ -82,4 +92,32 @@ cmd_switch() {
   echo "==> 逐页汇总"
   python3 "$TRACE_REPORT" switches "$out/pages" | tee "$out/switch-summary.txt"
   echo "输出目录: $out"
+}
+
+switch_page_list() {  # → 每行一个页名（**必须按行遍历**）
+  # 旧实现在这里 `tr '\n' ' '`，配合下面的 `for page in $pages` 做词分割 ——
+  # 而页名里有带空格的：`Git 洞察` 被切成 "Git" + "洞察" 两页，
+  # 九页扫描实际只覆盖 8 页，还有一页被用错名字起了一次 App。
+  # 实测抓到于 2026-09-21 14:53（日志里同时出现 `--> 4) Git` 与 `--> 5) 洞察`）。
+  local known; known=$(sections)
+  [ -n "$known" ] || return 1          # 取不到 SECTIONS 由调用方那句 die 说话，这里不重复一条话术
+  [ -n "${PAGES:-}" ] || { printf '%s\n' "$known"; return 0; }
+  # 【自定义清单必须逐个对回名册】2026-09-23 做 T4 的 A/B 时踩的第二条：
+  # 按行遍历只解决了"名册自己不被拆"，`PAGES` 却是**整串当一个页名**——
+  # `PAGES="总览 性能监控"` 建出 `pages/01-总览 性能监控/`，启动参数成了不存在的页，
+  # 于是 SwiftUI 静默回落到默认页，四趟量的全是总览，而屏幕上一个字都没说"第二页没测"。
+  # 页名含空格是本产品的常态，所以分隔符只能是换行；认不出名册的页名**当场判败**，
+  # 不许让默认页替它背书（一条会静默改写测量对象的参数，比报错危险）。
+  local p bad=""
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    grep -qxF -- "$p" <<< "$known" || bad="$bad「$p」"
+  done <<< "$PAGES"
+  if [ -n "$bad" ]; then
+    echo "!! PAGES 里有 App 不认的页名：$bad" >&2
+    echo "   不存在的页会被 SwiftUI 静默回落到默认页 ⇒ 那批读数其实只测了默认页，没有资格答九页里的任何一页。" >&2
+    echo "   `PAGES` 按**换行**分隔（页名可以含空格），名册现量：$(printf '%s' "$known" | tr '\n' ' ')" >&2
+    return 1
+  fi
+  printf '%s\n' "$PAGES"
 }

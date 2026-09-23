@@ -182,7 +182,7 @@ selfcheck_heavy_jobs_probe() {  # selfcheck_heavy_jobs_probe <outdir>
     || fail "xctrace 活性判定不对（烧 CPU 的没算重活 / 停着的算了重活 / 编译类看了增量）"
   # 话术不许再硬编码名单：那正是"加了 xctrace 却把它说成本仓编译"的来源
   declare -f concurrent_heavy_jobs_detail >/dev/null \
-    && grep -q 'concurrent_heavy_jobs_detail' <(declare -f preflight_context) \
+    && grep -q 'concurrent_heavy_jobs_detail' <(declare -f preflight_gather; declare -f preflight_context) \
     || missing="$missing 话术未走带名字的明细版"
   [ -z "$missing" ] \
     && ok "探针覆盖 6 类重活（含编译工人 swift-frontend），话术带真名字" \

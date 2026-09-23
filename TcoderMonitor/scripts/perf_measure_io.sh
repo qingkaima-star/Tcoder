@@ -135,7 +135,17 @@ meta_write() {  # meta_write <outdir> <键=值...>
   # 目录由本函数自己保证存在：cmd_switch 的 mkdir 在 per-page 循环里，
   # DRY_RUN 下整段被跳过，于是第一次 meta_write 会写进不存在的目录（实测 traceback）。
   mkdir -p "$out" 2>/dev/null || { echo "    ⚠ meta_write 建不了 $out，本条 meta 丢失" >&2; return 0; }
-  python3 - "$out/meta.json" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REV" "$DIRTY" "$@" <<'PY'
+  # 【`rev` 与 `measured_rev` 是两件事，缺一就会盖错章】
+  # `rev` 回答"哪个检出目录跑了这次测量"，`measured_rev` 回答"这份读数归属于哪份内容"。
+  # 2026-09-23 做 T4 的 A/B 时现场抓的：换 `PERF_BIN` 去量另一个 rev 的产物，
+  # 盘上只有 `rev=`（跑脚本那棵树的 HEAD）⇒ 旧产物的读数被盖上了新 rev 的章，
+  # 真相只藏在 run 级的 `binary=` 路径里，而报告读者根本不会去解析路径。
+  # 归属那把尺**只此一家**（`provenance_target_rev`，包 5 就是为这件事开的口子），这里不再拼 git 命令。
+  local measured
+  measured=$(provenance_target_rev 2>/dev/null) \
+    || measured=""
+  [ -n "$measured" ] || measured="取不到（MEASURE_REV=${MEASURE_REV:-未设}）"
+  python3 - "$out/meta.json" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REV" "$DIRTY" "measured_rev=$measured" "$@" <<'PY'
 import json, os, sys
 path, ts, rev, dirty = sys.argv[1:5]
 data = {"captured_at_utc": ts, "rev": rev, "git_dirty_lines": int(dirty)}

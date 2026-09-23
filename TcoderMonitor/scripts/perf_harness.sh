@@ -46,7 +46,9 @@
 #   SECONDS_TP=25        idle 档 Time Profiler 录制秒数（spec §1 主线程样本就是 25 s 档）
 #   SECONDS_LAUNCH=10    switch 档每页录制秒数
 #   PERF_BIN=<路径>      被采二进制（默认 dist/Tcoder.app/Contents/MacOS/TcoderMonitor）
-#   PAGES="总览 性能监控" switch 档只测这几页（默认取 capture_pages_isolated.sh 的九页）
+#   PAGES=$'总览\nGit 洞察'  switch 档只测这几页（默认取 capture_pages_isolated.sh 的九页）。
+#                          **按换行分隔**：页名里有含空格的（`Git 洞察`），空格分隔会把它当成一个不存在的页，
+#                          而 App 不认的页名现在当场判败（不再静默回落到默认页）。
 #   DRY_RUN=1            只打印将执行的命令，一条都不跑（用于自检命令拼得对不对）
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
@@ -196,7 +198,8 @@ cmd_idle() {
     "launched_by=${MEASURED_PID:+us(同窗脉冲)}" "pulse_file=${MEASURED_PULSE:-}" \
     "hitches_seconds=$SECONDS_HITCHES" "tp_seconds=$SECONDS_TP" "coexisting_instances=${COEXIST:-1}" \
     "templates=$TEMPLATE_HITCH + $TEMPLATE_TP" "build_flavor=$TARGET_FLAVOR"
-  preflight_context "$out" "$PID"
+  # 闸门说不合格就是不合格：这里必须**自己**停，不许依赖被调函数里的 die（缺 die 时它回 1 就完了）。
+  preflight_context "$out" "$PID" || die "测量环境不合格 ⇒ 这一档不采数（REFUSED 已落在 $out）"
   # 走到这里说明闸门放行、马上就要真录：清掉**上一次尝试**留下的 REFUSED。
   # 标记描述的是"最近一次尝试"，不是目录的永久属性；不清的话同名目录复用时，
   # 一份合法读数会被过期标记挡在对照表外（report 会退 1）。
@@ -283,17 +286,6 @@ idle_write_summary() {  # idle_write_summary <outdir>：4/4 汇总表（与 spec
 # =============================================================================
 # switch —— 逐页冷启动（spec §3 T4：到可交互 ≤1.0 s、首帧 ≤3 个显示节拍）
 # =============================================================================
-switch_page_list() {  # → 每行一个页名（**必须按行遍历**）
-  # 旧实现在这里 `tr '\n' ' '`，配合下面的 `for page in $pages` 做词分割 ——
-  # 而页名里有带空格的：`Git 洞察` 被切成 "Git" + "洞察" 两页，
-  # 九页扫描实际只覆盖 8 页，还有一页被用错名字起了一次 App。
-  # 实测抓到于 2026-09-21 14:53（日志里同时出现 `--> 4) Git` 与 `--> 5) 洞察`）。
-  if [ -n "${PAGES:-}" ]; then
-    printf '%s\n' "$PAGES"
-  else
-    sections
-  fi
-}
 
 switch_refuse_coexist() {  # 冷启动最容易被"别人的心跳"污染：默认要求机器上一个实例都没有
   local pre; pre=$(instance_pids)
