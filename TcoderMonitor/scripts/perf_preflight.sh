@@ -64,14 +64,18 @@ sections() {
 # 与 `verify_provenance.sh` 共用同一把手尺子（见那个文件的头注）。
 source "$(dirname "${BASH_SOURCE[0]}")/perf_provenance.sh"
 
-preflight_context() {  # preflight_context <outdir> <pid>
-  local out="$1" pid="$2" f="" cores load1 front visible others other_detail free_gib hard=0
+preflight_gather() {  # 只取数：判据住 `preflight_gates*`，写盘住 `preflight_write_context`
+  # 【这里的赋值**一律不带 local**】值要落回调用方 `preflight_context` 的那几个 local
+  # （bash 动态作用域）。在这里 local 一下，六条闸门就各自拿到空串——
+  # 那条"探针函数不在场就恒放行"的老路是它的近亲。
   cores=$(sysctl -n hw.ncpu 2>/dev/null || echo 8)
   load1=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | awk '{print $1}')
   [ -n "$load1" ] || load1=0
-  f="$out/measurement-context.txt"
   front=$(preflight_front_app)
   visible=$(preflight_window_state "$pid")
+  # 启动档：拿一个还不存在的 pid 去问"有没有在屏窗口"，答案必然是"没有"——那是探针在说它没被问对，
+  # 不是被测进程的事实。写成一句人话，免得上下文里留下一个看着像实测的"无在屏窗口"。
+  [ "$PREFLIGHT_TIER" = "launch" ] && visible="启动档：此刻窗口尚未建立"
   others=$(concurrent_heavy_jobs)
   free_gib=$(disk_free_gib)
   mkdir -p "$SCRATCH" 2>/dev/null || true   # 样本根目录：项目内、.gitignore 已忽略
@@ -80,10 +84,8 @@ preflight_context() {  # preflight_context <outdir> <pid>
   # 设了它再量帧率，量的就是台账自己的开销——所以这一维写进上下文，并且直接拒跑。
   i18n_ledger="${TCODER_I18N_RUNTIME_LEDGER:-}"
   # 人手静默：整机 load 与并发编译挡得住"机器在忙"，挡不住"有人在点这个窗口"。
-  local qline quiet
   qline=$(quiescence_probe)
   quiet=$(quietest_seconds "$qline")
-
   # 取二进制的出身（**不是**工作树 HEAD）：闸门第六维与上下文都要用
   BUILD_REV=$(provenance_manifest_value TCODER_GIT_REVISION)
   BUILD_CLEAN=$(provenance_manifest_value TCODER_GIT_CLEAN)
@@ -93,7 +95,17 @@ preflight_context() {  # preflight_context <outdir> <pid>
   # 而 `MEASURE_REV` 未设时一切照旧（比 HEAD），设了就必须比它——**这条覆盖不许变成跳过判定**。
   TARGET_REV=$(provenance_target_rev)
   HEAD_TREE=$(provenance_product_tree "${MEASURE_REV:-HEAD}")
+}
 
+preflight_context() {  # preflight_context <outdir> <pid> [档]   档=measure(默认) | launch(冷启动)
+  local out="$1" pid="$2" f="" cores load1 front visible others other_detail free_gib hard=0
+  local quiet qline i18n_ledger
+  # 动态作用域：`preflight_gather`（取数）与 `preflight_gates`（判定，含被 selfcheck 第 17 项
+  # **单独调用**那条路）读写的都是上面这几个 local，所以拆函数既没改取数顺序，也没引入新全局量；
+  # 启动档的"跳过两维"只影响从本函数进来的调用，矩阵那条不传第三参 ⇒ 行为一字不变。
+  local PREFLIGHT_TIER="${3:-measure}"
+  f="$out/measurement-context.txt"
+  preflight_gather
   preflight_write_context "$out" "$f"
   # 六条硬闸各自读上面那几个量（bash 是动态作用域：本函数的 `local` 在被调函数里照样可见，
   # 拆函数没有改变任何取数顺序，也没有引入新的全局量）。
@@ -104,7 +116,12 @@ preflight_context() {  # preflight_context <outdir> <pid>
     # （今天就真出现了三个只有 context/meta 的目录。）
     printf 'REFUSED\n这一趟没有采数：测量上下文不合格，闸门拒跑。原因见同目录 %s。\n' "$(basename "$f")" \
       > "$out/REFUSED"
-    die "测量上下文不达标（详见 $f）。IGNORE_CONTEXT_GATE=1 可强行跳过，但那批读数必须标注为『条件不合格』。"
+    echo "!! 测量上下文不达标（详见 $f）。IGNORE_CONTEXT_GATE=1 可强行跳过，但那批读数必须标注为『条件不合格』。" >&2
+    # 【只 return，不 die】`die` 住在**宿主**脚本里：单独 source 本文件（自测、排程器、手工排查）时它不在场，
+    # 2026-09-23 实测 `die: command not found` 之后这条"拒跑"分支**以 rc=0 走完**——
+    # 缺一个函数就把闸门从"拒"翻成"放"，是所有失效方向里最坏的那种。
+    # 于是判定只负责说"不合格 + 回 1"，**退不退由调用方决定**（三处调用点各自 `|| die`/`|| return 1`）。
+    return 1
   fi
   [ "$hard" = "1" ] && echo "    ⚠ IGNORE_CONTEXT_GATE=1：条件不合格，这批读数不得进任何对比表。" >&2
   echo "    上下文已落 $f"
@@ -170,11 +187,7 @@ preflight_gates_disk() {  # 【第七维：磁盘】判定只有一份（probes 
   fi
 }
 
-preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GATE 决定炸还是通报）
-  # 【bash 的坑】调用**不带括号**：写成 `preflight_gates_identity()` 会被解析成
-  # "在 preflight_gates 内部再定义一个函数"，于是这两维**一次都没执行**、也不报错——
-  # 一条静默失效的闸门。selfcheck 第 17 项（六维矩阵）抓的就是它。
-  preflight_gates_identity
+preflight_gates_contention() {  # 【并发重活】判据（认哪些名字、活性怎么算）住在 probes，这里只判"有没有"
   if [ -n "$others" ]; then
     # ${…:-} 不是洁癖：这一维在合成夹具里被单维破坏时，别的量可能是空的，
     # 而 `set -u` 下引用未声明变量会**静默中止整条闸门**（今天就是这样把 selfcheck 打断的，
@@ -183,13 +196,18 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
          "它会抢满全部核，app-update 相位会被显著抬高。等它跑完再来。" >&2
     hard=1
   fi
-  preflight_gates_disk
+}
+
+preflight_gates_load() {  # 【整机负载】阈值只写一次：测量档与启动档共用（冷启动同样怕排队）
   # 负载阈值：默认 1 分钟 load 不超过核数的 1.5 倍（LOAD_MAX=<数> 可覆盖，但覆盖了就要在报告里写）
   if awk -v l="$load1" -v c="$cores" 'BEGIN{exit !(l > c*1.5)}'; then
     echo "!! load1=$load1 已是核数($cores)的 1.5 倍以上：整机排队，任何帧节拍读数都不作数。" >&2
     echo "   等负载降下来，或显式 LOAD_MAX=<阈值> 重跑（那必须在报告里注明是降级条件）。" >&2
     hard=1
   fi
+}
+
+preflight_gates_window() {  # 【窗口形状两维：前台 + 在屏】只有"窗口已经在画"的档才判
   if ! front_is_target "$front" && [ "${ALLOW_UNFRONTMOST:-0}" != "1" ]; then
     echo "!! 被测窗口不在前台（前台是「$front」）。macOS 会节流不在前的窗口绘制，" >&2
     echo "   app-update 会**假性地好看**（实测：同二进制前台 10.8~24.8ms、后台 1.9~3.0ms）。" >&2
@@ -203,7 +221,9 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
       echo "   把窗口恢复出来（取消最小化 / 切到该 Space）再测。" >&2
       hard=1 ;;
   esac
-  # 人手静默闸：§1.3 作废的那两批基线，坏因都是"测量期间有人在动"，
+}
+
+preflight_gates_quiescence() {  # 【人手静默】§1.3 作废的那两批基线，坏因都是"测量期间有人在动"，
   # 而 load / 并发编译 / 前台这三条整机闸**看不见手**。取不到数只通报、不判败
   # （一条因为拿不到数据就永远说不合格的闸，等于没有这把尺子——前台那条就栽过这个跟头）。
   if [ -n "$quiet" ] && [ "$quiet" != "-1.00" ] \
@@ -215,6 +235,31 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
     echo "   请等人手停下再来；确实要连人一起量（例如就要量交互期）就 $0 interact 那一档。" >&2
     hard=1
   fi
+}
+
+preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GATE 决定炸还是通报）
+  # 【bash 的坑】调用**不带括号**：写成 `preflight_gates_identity()` 会被解析成
+  # "在 preflight_gates 内部再定义一个函数"，于是这两维**一次都没执行**、也不报错——
+  # 一条静默失效的闸门。selfcheck 第 17 项（六维矩阵）抓的就是它。
+  # 各维取数仍是调用方的 `local`（bash 动态作用域穿得过这层组合），
+  # 所以矩阵"单维破坏 ⇒ 拒"的形状一字未动地继续成立。
+  preflight_gates_identity
+  preflight_gates_contention
+  preflight_gates_disk
+  preflight_gates_load
+  # 【启动档（冷启动）没有"窗口形状"这两维】`PREFLIGHT_TIER=launch` 由 `preflight_context` 的第三参设。
+  # 理由不是放宽，而是**那一刻被测窗口还不存在**：App 是紧接着由 xctrace 拉起来的，
+  # 拿"前台是不是 Tcoder / 有没有在屏窗口"去判它，得到的是一条永远不可能通过的闸门
+  # （同一条教训在 `provenance_target_rev` 的注释里已经付过一次学费）。
+  # 跳过要**出声**，而且上下文文件里那两行照样写实测值（`visible` 在启动档被明写成"窗口尚未建立"，
+  # 不留一个看着像实测的"无在屏窗口"）；其余五维——身份 / 并发重活 / 盘 / load / 人手静默——照判。
+  if [ "${PREFLIGHT_TIER:-measure}" = "launch" ]; then
+    echo "    （启动档：前台与在屏两维不参与判定——写上下文时窗口还没建起来；" \
+         "身份/并发重活/盘/load1/人手静默五维照判）" >&2
+  else
+    preflight_gates_window
+  fi
+  preflight_gates_quiescence
 }
 
 

@@ -238,3 +238,73 @@ selfcheck_covered_evidence() {  # selfcheck_covered_evidence <outdir>
   [ "$rc" = "0" ] || { fail "演练档被这条判死 ⇒ selfcheck 自己会红"; bad=1; }
   [ "$bad" = "0" ] && ok "空表的一趟判不成完成：缺表判废、有表放行、演练档不误伤（三种形状）"
 }
+
+selfcheck_switch_page_names() {  # 48) 冷启动档的页名：名册里的要过、名册外的要当场红
+  # 今天的现场：`PAGES="总览 性能监控"` 被当成**一个**不存在的页 ⇒ App 静默回落到默认页，
+  # 四趟量的全是总览，而屏幕上没有任何一处说"你要的第二页没测"。页名含空格是本产品常态。
+  local pf=scripts/perf_preflight.sh sw=scripts/perf_switch.sh bad=0 d="$out/page-names"
+  mkdir -p "$d"
+  # 用 printf 造**真换行**：`$'…'` 只在源码字面量里展开，作为变量传下去就是一个
+  # 以美元符开头的普通字符串 ⇒ 合法清单会被我自己误判成"名册外的页名"。
+  local want
+  want=$(printf '总览\nGit 洞察')
+  bash -c 'source scripts/perf_preflight.sh >/dev/null 2>&1
+           source scripts/perf_switch.sh >/dev/null 2>&1
+           PAGES="$1" switch_page_list' _ "$want" > "$d/ok.txt" 2>"$d/ok.err" \
+    || { fail "两个合法页名（含带空格的 `Git 洞察`）被判不合格 ⇒ 九页里再有一页改名就整档跑不了"; bad=1; }
+  [ "$(wc -l < "$d/ok.txt" | tr -d ' ')" = "2" ] \
+    || { fail "合法清单不是两行（实得 $(wc -l < "$d/ok.txt" | tr -d ' ') 行：$(tr '\n' '|' < "$d/ok.txt")）⇒ 按行遍历又断了"; bad=1; }
+  grep -qxF 'Git 洞察' "$d/ok.txt" \
+    || { fail "带空格的页名被拆开了 ⇒ 第 27 项那条老账（`Git` + `洞察`）复活"; bad=1; }
+  if bash -c 'source scripts/perf_preflight.sh >/dev/null 2>&1
+               source scripts/perf_switch.sh >/dev/null 2>&1
+               PAGES="$1" switch_page_list' _ "总览 性能监控" > "$d/bad.txt" 2>"$d/bad.err"; then
+    fail "名册外的页名被判合格 ⇒ 它会被 SwiftUI 静默换成默认页，那批读数没有资格答任何一页"
+    bad=1
+  fi
+  grep -qF '不认的页名' "$d/bad.err" \
+    || { fail "拒是拒了，却没说是哪个页名不认 ⇒ 报出来像脚本坏了而不是参数错了"; bad=1; }
+  [ "$bad" = "0" ] && ok "冷启动页名逐个对回名册：含空格的名不被拆、名册外的当场红且点名（不许静默回落）"
+}
+
+selfcheck_switch_attribution_and_refusal() {  # 49) 冷启动档另两件：归属写给"被测内容"、没有 die 也要拒
+  # `local` 会先把名字**遮蔽成未设**再逐个赋值 ⇒ 同一条 `local` 里引用自己前半段的名字，
+# 在 `set -u` 下就是 unbound（今天撞过一次：`local d=… m="$d/…"`）。
+  local bad=0 d="$out/attr" full
+  local m="$d/meta"
+  mkdir -p "$m"
+  full=$(git rev-parse HEAD)
+  # (1) `measured_rev`：归属那一格必须跟着 `MEASURE_REV` 走，而不是跟着"跑脚本那棵树"的 HEAD。
+  #     今天的现场：换 `PERF_BIN` 量旧产物时，页级 meta 仍写着新 rev ⇒ 旧读数被盖上新章。
+  REV=abc123 DIRTY=0 MEASURE_REV=HEAD~1 meta_write "$m" "page=探测"
+  local got
+  got=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1],encoding='utf-8')).get('measured_rev',''))" \
+         "$m/meta.json" 2>/dev/null)
+  [ "$got" = "$(git rev-parse HEAD~1)" ] \
+    || { fail "meta 的 measured_rev 没跟着 MEASURE_REV（实得「$got」）⇒ 归属还是那棵树的 HEAD"; bad=1; }
+  # (2) 没设 MEASURE_REV ⇒ 必须等于 HEAD（不许留空、也不许写"取不到"）
+  rm -f "$m/meta.json"
+  REV="$full" DIRTY=0 meta_write "$m" "page=探测"
+  got=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1],encoding='utf-8')).get('measured_rev',''))" \
+         "$m/meta.json" 2>/dev/null)
+  [ "$got" = "$full" ] \
+    || { fail "不设 MEASURE_REV 时 measured_rev 不等于 HEAD（实得「$got」）⇒ 每批默认读数都要多问一句"; bad=1; }
+  # (3) 反向：rev 写错必须**说出来**，不许悄悄回落成 HEAD（第 38 项立的形状，这里在启动档再钉一次）
+  rm -f "$m/meta.json"
+  REV=x DIRTY=0 MEASURE_REV="这个rev不存在" meta_write "$m" "page=探测"
+  got=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1],encoding='utf-8')).get('measured_rev',''))" \
+         "$m/meta.json" 2>/dev/null)
+  case "$got" in 取不到*) ;; *) fail "写错的 rev 被写成「$got」⇒ 该出声的地方它没出声"; bad=1 ;; esac
+  # (4) 没有 `die` 的进程里，不合格的一趟**必须非零退出**：`die` 住在宿主脚本，单独 source 本文件时不在场。
+  #     实测（2026-09-23）：缺 die ⇒ "拒跑"分支以 rc=0 走完，闸门从拒翻成放。
+  #     放行那一侧不在这里验——第 17 项的六维矩阵已经钉过"全合格 ⇒ 通过"。
+  local rc=0
+  bash -c 'source scripts/perf_preflight.sh >/dev/null 2>&1
+           mkdir -p "$1"; MEASURE_REV="这个rev不存在" preflight_context "$1" "" launch' _ "$d/refuse" \
+    >/dev/null 2>&1 || rc=$?
+  [ "$rc" != "0" ] \
+    || { fail "宿主 `die` 不在场时，不合格的一趟仍以 rc=0 收尾 ⇒ 一条会静默放行的闸门（最坏方向）"; bad=1; }
+  [ -f "$d/refuse/REFUSED" ] \
+    || { fail "拒了却没在目录上留 REFUSED ⇒ 后来的人会把空目录读成『量过了』"; bad=1; }
+  [ "$bad" = "0" ] && ok "冷启动档：归属写给被测内容（含 rev 写错要出声），且缺 die 时仍然拒跑 + 落 REFUSED"
+}
