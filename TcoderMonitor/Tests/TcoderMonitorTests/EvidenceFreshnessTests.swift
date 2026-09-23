@@ -293,60 +293,19 @@ final class EvidenceFreshnessTests: XCTestCase {
                        "合成表只覆盖 3 页，名册必须报出缺的那些页")
     }
 
-    /// 净差异口径的**真 git 夹具**：造一次"并了 main、可那一页的内容没变"的 merge。
+    /// 净差异口径的**真 git 夹具**：造一条"历史动过这条路径、可内容与实拍端一字不差"的分支线。
     ///
-    /// 为什么必须自带夹具而不是拿本仓历史当证据：那六行空红今天确实是真实现场，
-    /// 但历史会变（rebase、新提交都会改变两端），一条守卫的口径不能靠"今天正好有这个提交"来钉。
+    /// 为什么必须自带夹具而不是拿本仓历史当证据：那六行空红今天确实是真实现场，但历史会变
+    /// （新提交、rebase 都会改变两端），一条守卫的口径不能靠"今天正好有这个提交"来钉。
     /// 不钉这一条，谁把它改回 `git log` 数提交都不会红 —— 而那正是本仓记过好几回的永真绿亲戚。
+    /// （第一版我把原因写成"merge 提交被数进来"，自己造夹具时被 git 的路径简化否证；
+    ///   现在的形状是复现得出来的那个说法。）
     func test_mergeThatChangesNoContentIsNotStale() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("tcoder-evidence-fx-" + UUID().uuidString.prefix(8))
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
-
-        func git(_ args: [String]) throws -> [String] {
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            // 夹具身份只作用于这一条命令：全局 config 的签名/hook 不许混进来。
-            p.arguments = ["-c", "user.name=fx", "-c", "user.email=fx@local",
-                           "-c", "commit.gpgsign=false", "-c", "core.hooksPath="] + args
-            p.currentDirectoryURL = root
-            let pipe = Pipe()
-            p.standardOutput = pipe
-            p.standardError = pipe
-            try p.run()
-            p.waitUntilExit()
-            let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            guard p.terminationStatus == 0 else {
-                XCTFail("git \(args.joined(separator: " ")) 失败：\(text.split(separator: "\n").first ?? "")")
-                return []
-            }
-            return text.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
-        }
-        func write(_ name: String, _ body: String) throws {
-            try body.write(to: root.appendingPathComponent(name), atomically: true, encoding: .utf8)
-        }
-
-        try git(["init", "-q", "-b", "main"])
-        try write("a.txt", "1")
-        try git(["add", "a.txt"])
-        try git(["commit", "-qm", "c1"])
-        try write("a.txt", "2")
-        try git(["commit", "-qam", "c2"])                      // ← 这一头当作"实拍所在头"
-        let shot = try git(["rev-parse", "HEAD"]).first ?? ""
-        XCTAssertFalse(shot.isEmpty, "拿不到实拍头 ⇒ 夹具没搭起来")
-        // 分支线从**更早**那头长出来：先动这一页（X），再顶回实拍端的值（Y）。
-        // 于是实拍头之后确实有提交动过这条路径，可两端内容一字不差 —— 本仓六行空红就是这个形状。
-        try git(["branch", "-f", "side", "HEAD~1"])
-        try git(["checkout", "-q", "side"])
-        try write("a.txt", "3")
-        try git(["commit", "-qam", "X 动过这一页"])
-        try write("a.txt", "2")
-        try git(["commit", "-qam", "Y 顶回实拍端的内容"])
-
-        let viaLog = try git(["log", "--format=%h", shot + "..HEAD", "--", "a.txt"])
-
-        let viaDiff = try Self.netChanges(head: shot, paths: ["a.txt"], root: root)
+        let fx = try FixtureRepo(name: "tcoder-evidence-fx-")
+        addTeardownBlock { fx.cleanup() }
+        let shot = try fx.buildHistoryThatLooksTouchedButIsNot()
+        let viaLog = try fx.git(["log", "--format=%h", shot + "..HEAD", "--", "a.txt"])
+        let viaDiff = try Self.netChanges(head: shot, paths: ["a.txt"], root: fx.root)
         XCTAssertFalse(viaLog.isEmpty,
                        "夹具没造出「历史动过、净内容未变」的形状 ⇒ 这条元测试在空转（旧口径都测不到东西）")
         XCTAssertTrue(viaDiff.isEmpty,
@@ -364,5 +323,64 @@ final class EvidenceFreshnessTests: XCTestCase {
         XCTAssertTrue(expired[0].contains("Git 洞察"), "报的要能指到页：\(expired)")
         XCTAssertTrue(Self.stale(found, log: { _, _ in [] }).isEmpty,
                       "全绿的仓库被判过期 ⇒ 这条判据会逼人删掉它")
+    }
+}
+
+/// 合成 git 仓库：只给这条守卫的元测试用。全局 `-c` 把身份、签名、hook 都钉在夹具内，
+/// 不继承宿主仓库与需求方的全局配置（否则换台机器结果就变）。
+/// 拆成类型而不是测试里的闭包：本仓 Tests 侧有一条 50 行的函数上限（`X3TestSizeAuditTests`），
+/// 上一版我把夹具全写在 `func test_…` 里，落地当场被自己的门拦住。
+private final class FixtureRepo {
+    let root: URL
+
+    init(name: String) throws {
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(name + String(UUID().uuidString.prefix(8)))
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
+    func cleanup() { try? FileManager.default.removeItem(at: root) }
+
+    @discardableResult
+    func git(_ args: [String]) throws -> [String] {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        p.arguments = ["-c", "user.name=fx", "-c", "user.email=fx@local",
+                       "-c", "commit.gpgsign=false", "-c", "core.hooksPath="] + args
+        p.currentDirectoryURL = root
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = pipe
+        try p.run()
+        p.waitUntilExit()
+        let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        guard p.terminationStatus == 0 else {
+            XCTFail("git \(args.joined(separator: " ")) 失败：\(text.split(separator: "\n").first ?? "")")
+            return []
+        }
+        return text.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+    }
+
+    private func write(_ name: String, _ body: String) throws {
+        try body.write(to: root.appendingPathComponent(name), atomically: true, encoding: .utf8)
+    }
+
+    /// 返回"实拍头"。之后 side 线把 a.txt 改成 3 再改回 2 ⇒ 历史动过这条路径、净内容与实拍头相同。
+    func buildHistoryThatLooksTouchedButIsNot() throws -> String {
+        try git(["init", "-q", "-b", "main"])
+        try write("a.txt", "1")
+        try git(["add", "a.txt"])
+        try git(["commit", "-qm", "c1"])
+        try write("a.txt", "2")
+        try git(["commit", "-qam", "c2"])                    // ← 实拍所在头
+        let shot = try git(["rev-parse", "HEAD"]).first ?? ""
+        XCTAssertFalse(shot.isEmpty, "拿不到实拍头 ⇒ 夹具没搭起来")
+        try git(["branch", "-f", "side", "HEAD~1"])
+        try git(["checkout", "-q", "side"])
+        try write("a.txt", "3")
+        try git(["commit", "-qam", "X 动过这一页"])
+        try write("a.txt", "2")
+        try git(["commit", "-qam", "Y 顶回实拍端的内容"])
+        return shot
     }
 }
