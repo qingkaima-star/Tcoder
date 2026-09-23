@@ -1094,3 +1094,5 @@
 "主语言 %1$@" = "Main language %1$@";
 "空行占 %@" = "Blank lines %@";
 "点击「重新分析」开始扫描该目录。" = "Tap Re-analyse to scan this directory.";
+// 复杂度榜空态留短藏长：屏上那句「扫过了、没函数上榜」是诚实凭据，它自己就是整句。
+"本次扫描没有函数达到引擎给出的复杂度上榜条件。" = "No function in this scan reached the engine condition to enter the complexity board.";
