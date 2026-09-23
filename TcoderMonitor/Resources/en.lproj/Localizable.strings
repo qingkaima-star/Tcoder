@@ -1044,3 +1044,21 @@
 "快照截至 %1$@（%2$@）" = "snapshot as of %1$@ (%2$@)";
 "版本声明形态：%1$@" = "declaration shapes: %1$@";
 "B 级参考线 %1$@ 分；折线只连已有历史点，不外插也不预测。" = "Grade B reference line at %1$@ points; the polyline joins existing history points only - no interpolation, no forecast.";
+
+// ── P69b（WS-Git / 健康页双语流，2026-09-24）：Git 页 + 健康评分页的存量收口 ──────
+// 全部走「整句键 + 在产出处查表」，中文侧一字不变。
+// 前两条原本就是裸字面量上屏、只缺译文（`GlassSection` 的 `subtitle` 与
+// `SectionEmptyNote` 的 `text` 都在渲染点自己查表 ⇒ 补键即生效，调用点不许再包一层）。
+// 后三条改的是形状：插值拼出来的整串从来没有键可查（`Text(变量)` 不查表）。
+// ⚠ 注释一律 `//`：一个 `#` 会让系统解析器从那一行起整段放弃（P59 真炸过一次）。
+"当前只分析了提交数最多的那一个" = "Only the one with the most commits was analysed";
+"Git 分析没有产出按时间分桶的提交数据。" = "The Git analysis produced no commit data bucketed by time.";
+// 外壳句：`%1$@` 是仓库路径（用户数据，不翻），`%2$@` 是 `discoveryCaption` 那一格
+// —— 它只在嵌进这里这**一次**查表（另一个落点 `GlassSection(subtitle:)` 会自己查，
+// 在 `discoveryCaption` 里先查就是翻两遍，第二次查表会把英文串当成新的未登记残留记进账）。
+"分析的是另一个仓库：%1$@\n%2$@" = "Analysing a different repository: %1$@\n%2$@";
+// 定位说法的「未找到」那一态（「所选目录即仓库」早已登记；
+// 「向上 / 向下 N 层找到」两态要英语单复数，属 stringsdict，本批未收，见汇报）。
+"未找到仓库" = "No repository found";
+// 两个数都是**分数、不是可数名词** ⇒ 收 `String` 的 localizedFormat 就够，不进 stringsdict。
+"历史末点 %1$@ 与本次 %2$@ 不一致。" = "The last stored score %1$@ does not match this run's %2$@.";
