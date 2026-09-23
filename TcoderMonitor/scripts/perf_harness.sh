@@ -188,6 +188,7 @@ cmd_idle() {
   arm_synth_input          # 只编译，不投递：编译不许落在闸门与录制之间（见函数注释）
   meta_write "$out" "mode=idle" "period=$period" "pid=$PID" "binary=$TARGET_BINARY" \
            "input_source=${INPUT_SOURCE:-human}" "scroll_target=${SYNTH_TARGET:-（没有人投）}" \
+           "section=${MEASURE_SECTION:-overview（默认页＝总览）}" \
     "seed=${MEASURED_SEED:-（未种：这个沙箱里没有项目）}" \
     "launched_by=${MEASURED_PID:+us(同窗脉冲)}" "pulse_file=${MEASURED_PULSE:-}" \
     "hitches_seconds=$SECONDS_HITCHES" "tp_seconds=$SECONDS_TP" "coexisting_instances=${COEXIST:-1}" \

@@ -450,6 +450,34 @@ selfcheck_measure_rev_attribution() {  # selfcheck_measure_rev_attribution <outd
   [ "$bad" = "0" ] && ok "补测改动前基线这条路照样判归属：MEASURE_REV 只改比谁、不改比不比（含空值判败与子 shell 反例）"
 }
 
+selfcheck_section_wiring() {  # selfcheck_section_wiring <outdir>
+  # 40) `MEASURE_SECTION` 必须**真的进到启动那一行**（包 11 / 任务 #25）。
+  #     为什么单列：补丁第一次 `git apply` 成功、`bash -n` 也过、selfcheck 43 项全绿，
+  #     可启动行还是 `"$bin" -ApplePersistenceIgnoreState YES &` —— 数组定义了却没被用，
+  #     于是"按页测"这句话是**假的**：跑出来的还是默认页。
+  #     ⇒ 形状类判据（"定义了变量"）不够，必须钉到**使用点**上；反例夹具证明这条判据不是摆设。
+  # 【这条判据第一次跑就抓到我自己写错文件名】`sm` 原本写成 `.sh`，
+  # 于是它报「不读 meta.section」——那句话本身是对的，只是理由错了（读的人住在 `.py` 里）。
+  # 留在这里：判据报错时先复核"我指的是哪个文件"，别急着改判据的宽严。
+  local pb=scripts/perf_probes.sh hm=scripts/perf_harness.sh sm=scripts/perf_trace_summary.py bad=0 body
+  body=$(awk '/^launch_measured_instance\(\)/,/^}/' "$pb")
+  wiring_ok() {  # 启动行引用 sec_args 的展开（不是"文件里出现过这个名字"）
+    printf '%s' "$1" | grep -Eq '"\$bin"[^&]*\$\{sec_args\[@\]'
+  }
+  wiring_ok "$body" \
+    || { fail "$pb 的启动行没用 sec_args ⇒ 传了 MEASURE_SECTION 也还是默认页"; bad=1; }
+  if printf '%s\n' '  "$bin" -ApplePersistenceIgnoreState YES >/dev/null >&1 &' \
+       | sed 's/>&1/2>\&1/' | { body=$(cat); wiring_ok "$body"; } ; then
+    fail "反向夹具（没接线的启动行）被判成合格 ⇒ 这条判据是摆设"
+    bad=1
+  fi
+  grep -qF 'section=${MEASURE_SECTION:-' "$hm" \
+    || { fail "$hm 没把页名落进 meta ⇒ 报表无从知道自己量的哪一页（§Z 的按页验收又回空）"; bad=1; }
+  grep -q 'meta.get("section")' "$sm" \
+    || { fail "$sm 不读 meta.section ⇒ 页维度有写没读（同第 28 项那条老账）"; bad=1; }
+  [ "$bad" = "0" ] && ok "MEASURE_SECTION 三处接线齐（启动行真的用它 / meta 落盘 / 报表读回），且没接线的形状会被抓"
+}
+
 selfcheck_cleanup_opt_in_state() {  # selfcheck_cleanup_opt_in_state <outdir>
   # 37) 实例清单的「kill」那一格必须分得清**三种**收尾形状：无条件 / 躲在默认关掉的开关后面 / 没有。
   #     为什么单独一条：09-23 凌晨那一串孤儿就是这么来的 —— `capture_pages_isolated.sh`

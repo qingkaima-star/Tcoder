@@ -356,10 +356,15 @@ launch_measured_instance() {  # launch_measured_instance <样本目录> <二进�
   [ -x "$bin" ] || { echo "!! 二进制不可执行：$bin（先跑 scripts/build_app.sh release）" >&2; return 1; }
   mkdir -p "$out/sandbox" || return 1
   # 被测对象必须是**有内容的 App**：空沙箱里那个页面没有东西可滚（详见 `seed_sandbox` 那段）。
+  # 【哪一页？】默认是「总览」——而 §Q 那 14 处里有 11 处**根本不在这页上**
+  # （9 个排序在代码/依赖/Git/日志四页，2 个同步 I/O 在日志页）。
+  # 不设 `MEASURE_SECTION` 时行为与今天完全一致（一个多余参数都不传）。
+  sec_args=()
+  if [ -n "${MEASURE_SECTION:-}" ]; then sec_args=(-selectedDetailSection "$MEASURE_SECTION"); fi
   seed_sandbox "$out/sandbox" || return 1
   MEASURED_PULSE="$out/pulse.txt"
   TCODER_PERF_PROBE=1 TCODER_PERF_OUT="$MEASURED_PULSE" TCODER_SUPPORT_DIR="$out/sandbox" \
-    "$bin" -ApplePersistenceIgnoreState YES >/dev/null 2>&1 &
+    "$bin" -ApplePersistenceIgnoreState YES "${sec_args[@]+"${sec_args[@]}"}" >/dev/null 2>&1 &
   MEASURED_PID=$!
   # 收尾两条：EXIT 只清；INT/TERM 清完必须真的退（原来三条共用一个写 `return` 的 handler，
   # 两条失效都实测过：日志尾巴溅错误 + TERM 杀不掉它 ⇒ 漏一个孤儿实例压死所有人的闸）。

@@ -106,6 +106,10 @@ def summary_header(meta):
 
     print("== Tcoder 性能读数（对照 spec §1 基线 rev %s，release 口径）==" % BASELINE["rev"])
     print("   测量期间：%s —— %s" % (period, verdict))
+    # 报的是**哪一页**必须跟着数走：今天所有交互档都没设 `MEASURE_SECTION`，
+    # 也就是量的都是「总览」——而 §Q 的 14 处里 11 处不在这页上。
+    # 不印这一行，下一个人就会拿"总览页的 render p50"去验收"日志页的排序"。
+    print("   测量页面：%s" % (meta.get("section") or "未记录（按默认页＝总览处理）"))
     if not eligible:
         # 自我矛盾的样本要**吵**：安静地少打一行说明，就等于让它在表里蒙混过去。
         print("   ⚠ 本目录的档位声明与收尾复核**互相矛盾**，读数只当过程记录，不得作为结论提交。")
