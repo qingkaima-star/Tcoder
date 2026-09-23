@@ -374,6 +374,12 @@ Tests/TcoderMonitorTests/Health*Tests.swift
      **明写"未覆盖"**，不许拿相邻档冒充，不许因为测不到就改判据。
    ③ 不许为了绕开这条换成"另一种模拟键鼠的写法"——**被禁的是操作 UI 这件事本身**，不是脚本名。
    ④ 停这类链时把**自己起的**进程收干净（见 2.1），别只 kill 最外层留下孤儿输入器。
+   ⑤ **合法形状已经逐行读过的那些**（别的流不必再自己判，但也别照名字抄——判的是"有没有投递输入事件"）：
+     `paired_page_evidence.sh` / `capture_pages_isolated.sh` 切页走 `-selectedDetailSection`、
+     顶/尾走 `CAPTURE_SCROLL` 启动参数（App 自己滚）；`ax_tooltip_report.sh` / `ax_body_audit.py` /
+     `ax_truncation_sweep.sh` 只起进程 + **进程外**读 AX，选项目靠写沙箱 `projects.json`。
+     反面教材：按**脚本名**监控是否违规会假阴性——2026-09-23 看门狗第 51 轮的清单只 grep
+     `synth|perf_harness|capture_pages|hover`，`ax_*` 那一族全漏，差点把合法取证报成违规。
    Why：这类活要独占一个"没人碰鼠标键盘"的窗口，本机同时还有别的流在编译与取证；
    一夜下来窗口基本都在等场与互相打断，还烧掉过数小时（一次录制挂死）。
 3. **阈值不许为了刷分而动**。巨大文件行数、复杂度榜长度这类定义属冻结区；

@@ -68,3 +68,15 @@ struct CopyHelpBadge: View {
             .help(localizedCopy(text))
     }
 }
+
+extension View {
+    /// 「截了必须有去处」这条规矩的**唯一出口**：只给真的会被裁的写法挂全文气泡。
+    ///
+    /// 为什么不做成"无条件挂 `help`"：那把尺子（`ax_truncation_sweep.sh` 主门）分的正是
+    /// **装不下 + 无 help = 字丢了** 与 **装不下 + 有 help = 有意裁短** 两档，
+    /// 一律挂上就等于把"会折行、整段还在屏上"的那些也搬进取舍档 —— 两档混成一档 = 判据被关掉。
+    @ViewBuilder
+    func help(whenClipped clipped: Bool, _ text: String) -> some View {
+        if clipped { self.help(Text(text)) } else { self }
+    }
+}
