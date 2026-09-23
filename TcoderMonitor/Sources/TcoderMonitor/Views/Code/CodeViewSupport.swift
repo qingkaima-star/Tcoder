@@ -113,8 +113,8 @@ enum CodeBoardTruth {
     }
 
     /// 展开按钮的量词（`noun:` 不是查表入口，所以这里给的是上屏原文，与"个重复块"同性质）。
-    static func duplicationHiddenRowsNoun(_ code: CodeMetrics) -> String {
-        boardAtCap(code) ? "个榜内重复块" : "个重复块"
+    static func duplicationHiddenRowsNoun(_ code: CodeMetrics) -> DisclosureNoun {
+        boardAtCap(code) ? .cappedBlocks : .duplicateBlocks
     }
 
     /// 重复率口径句里的那个词（同一句里"约 X 行 / 有效代码 Y 行"是**全仓**口径，两件事要分开）。

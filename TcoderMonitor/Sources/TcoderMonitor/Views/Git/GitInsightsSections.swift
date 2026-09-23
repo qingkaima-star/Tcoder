@@ -318,7 +318,7 @@ struct GitRecentCommitsSection: View {
                     if git.recentCommits.count > Self.displayLimit {
                         DataDisclosureButton(expanded: expanded,
                                              hiddenCount: git.recentCommits.count - Self.displayLimit,
-                                             noun: "条提交") {
+                                             noun: .commits) {
                             expanded.toggle()
                         }
                     }

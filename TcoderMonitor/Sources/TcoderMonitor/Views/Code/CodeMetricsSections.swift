@@ -128,7 +128,7 @@ struct CodeHotspotSection: View {
                 if undisplayed > 0 {
                     DataDisclosureButton(expanded: expanded,
                                         hiddenCount: undisplayed,
-                                        noun: "个未展示") {
+                                        noun: .undisplayed) {
                         expanded.toggle()
                     }
                 }

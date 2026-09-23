@@ -142,8 +142,10 @@ final class AdviceWordingBoardTests: XCTestCase {
         XCTAssertEqual(CodeBoardTruth.duplicationSlotLabel(code), "重复块", "读数标签跟着假紧")
         let capped = Self.metrics(listed: Self.capProbe, limitations: [note])
         XCTAssertEqual(CodeBoardTruth.duplicationSlotLabel(capped), "重复块（榜内）")
-        XCTAssertTrue(CodeBoardTruth.duplicationHiddenRowsNoun(capped).contains("榜内"))
-        XCTAssertEqual(CodeBoardTruth.duplicationHiddenRowsNoun(code), "个重复块")
+        // P56：量词从"中文字符串"改成枚举（英语的单复数只能由整句键承载）。
+        // 钉的还是同一件事：**量词必须跟着"榜内/全量"这一态走**，不许两态共用一个词。
+        XCTAssertEqual(CodeBoardTruth.duplicationHiddenRowsNoun(capped), .cappedBlocks)
+        XCTAssertEqual(CodeBoardTruth.duplicationHiddenRowsNoun(code), .duplicateBlocks)
     }
 
     /// 失败态：`shown > listed`（展开态与行数不同步时会出现）只能读成"已全部列出"，不许报负数。
@@ -169,7 +171,9 @@ final class AdviceWordingBoardTests: XCTestCase {
         XCTAssertEqual(CodeBoardTruth.duplicationBlockWord(capped), "榜内重复块")
         XCTAssertEqual(CodeBoardTruth.duplicationBoardCount(Self.metrics(listed: 5, limitations: nil)), 5,
                        "取法本身读错了对象")
-        XCTAssertFalse(CodeBoardTruth.duplicationHiddenRowsNoun(capped).isEmpty,
+        XCTAssertFalse(DataDisclosureButton.title(expanded: false, hiddenCount: 3,
+                                                  noun: CodeBoardTruth.duplicationHiddenRowsNoun(capped))
+                           .isEmpty,
                        "展开按钮的量词空了 —— 读起来就像「仓库里还剩这么多块」")
     }
 
