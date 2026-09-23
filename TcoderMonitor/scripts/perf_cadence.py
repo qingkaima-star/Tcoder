@@ -33,7 +33,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from perf_trace_xml import Doc                        # noqa: E402
-from perf_framepulse import parse as parse_pulse      # noqa: E402
+from perf_framepulse import parse as parse_pulse, stale_instance      # noqa: E402
 
 NOMINAL_HZ = 120.0
 SLACK = 1.01                                          # 与 FramePulse 同一条：预算 = 周期 × 1.01
@@ -96,10 +96,19 @@ def report(path, pulse_path=None, min_frames=1200):
         r = parse_pulse(open(pulse_path, encoding="utf-8", errors="replace").read())
         if r:
             bias = r["frame_p95_ms"] - p95
-            lines.append("  同窗 FramePulse：p50 %.2f / p95 %.2f ms ⇒ **回调 − 上屏 = %+.2f ms**"
-                         "（这就是 §M 要的那个系统性偏移，p50 差 %+.2f ms）"
-                         % (r["frame_p50_ms"], r["frame_p95_ms"], bias,
-                            r["frame_p50_ms"] - pct(gaps, .5)))
+            # 「同窗」这两个字我说过一次假的：摘要里的帧总数是**生命期累计**，
+            # 而本表只覆盖录制窗口。判据不自己写，走 `perf_framepulse.stale_instance`。
+            if stale_instance(r, span / 1000.0):
+                lines.append("  同一实例 FramePulse：p50 %.2f / p95 %.2f ms，但那是**生命期累计 %d 帧**"
+                             "（本窗口只有 %.0f s ≈ %d 帧）⇒ 这个 %+.2f ms 的差值"
+                             "**不是同窗对比，§M 的偏移量按未定处理**"
+                             % (r["frame_p50_ms"], r["frame_p95_ms"], int(r["frame_count"]),
+                                span / 1000.0, int(r["refresh_hz"] * span / 1000.0), bias))
+            else:
+                lines.append("  同窗 FramePulse：p50 %.2f / p95 %.2f ms ⇒ **回调 − 上屏 = %+.2f ms**"
+                             "（这才是 §M 要的那个系统性偏移，p50 差 %+.2f ms）"
+                             % (r["frame_p50_ms"], r["frame_p95_ms"], bias,
+                                r["frame_p50_ms"] - pct(gaps, .5)))
             if abs(bias) > 1.0 and p95 <= bud["measured"]:
                 lines.append("  ⇒ 注意：脉冲那把尺子越预算，主要来自仪器偏移而非呈现延迟；"
                              "**但这条不能单独当结论**（两台仪器同源于显示器时钟时才可比）。")

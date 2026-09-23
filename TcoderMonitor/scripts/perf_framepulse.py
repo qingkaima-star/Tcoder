@@ -91,7 +91,25 @@ def parse(text):
     return out
 
 
-def verdict(reading, interaction=False, min_frames=600, budget_ms=0.0):
+STALE_RATIO = 3.0    # 生命期帧数超过窗口应有帧数的 3 倍 ⇒ 这份读数是"整条命"，不是这一窗
+
+
+def stale_instance(reading, window_seconds):
+    """实例活得远比测量窗口久 ⇒ 摘要行里的**总数是生命期累计**，分位数来自环形缓冲。
+
+    09-23 09:50 实测才发现我一直说错的那句话：报表写"同窗 FramePulse"，
+    可 `帧数=26941`（≈224 s）对 20 s 的录制窗口——因为 `cmd_idle` 的顺序是
+    "起实例 → 录 hitches → 录 time-profile → 最后才读脉冲"，脉冲读的是**整个阶段**的累计。
+    环形缓冲的容量住在产品侧（`FramePulse.ringCapacity`），本尺不复述那个数，
+    只做一条纯算术判断：生命期帧数 ≫ 窗口应有帧数 ⇒ **不判**，别拿它当窗口内的 p95。
+    """
+    if not window_seconds or window_seconds <= 0:
+        return False
+    expect = float(reading["refresh_hz"]) * window_seconds
+    return expect > 0 and int(reading["frame_count"]) > STALE_RATIO * expect
+
+
+def verdict(reading, interaction=False, min_frames=600, budget_ms=0.0, window_seconds=0.0):
     """→ (逐行文字, 退出码)。见文件头「三条不许含糊的规矩」。"""
     if reading is None:
         return (["!! 文件里没有可解析的 FramePulse 摘要行：探针没开（要 TCODER_PERF_PROBE=1）"
@@ -113,6 +131,14 @@ def verdict(reading, interaction=False, min_frames=600, budget_ms=0.0):
     if reading["bad_ticks"]:
         head = ", ".join("tick%d(hitch=%d,maxGap=%.1fms)" % t for t in reading["bad_ticks"][:8])
         lines.append("  带 hitch 的拍：%s%s" % (head, " …" if len(reading["bad_ticks"]) > 8 else ""))
+    if stale_instance(reading, window_seconds):
+        lines.append("  判定：**不判窗口**——摘要里的帧总数是**生命期累计** %d 帧（≈%.0f s），"
+                     "远大于 %s s 窗口应有的 ~%d 帧；分位数又来自环形缓冲，"
+                     "所以这份 p95 不能当成「本窗口」的 p95。⇒ 只作形状参考，"
+                     "窗口内的结论交给 xctrace 侧（`hitches` / 呈现节奏）。"
+                     % (frames, frames / float(reading["refresh_hz"]), int(window_seconds),
+                        int(float(reading["refresh_hz"]) * window_seconds)))
+        return lines, 2
     if frames < min_frames:
         lines.append("  判定：**拒判**——只有 %d 帧（<%d），这点样本量算 p95 没有意义" % (frames, min_frames))
         return lines, 1
@@ -215,6 +241,9 @@ def main(argv=None):
                    help="声明测量窗口内确实在交互（滚动/拖窗）；不声明则只算 idle 读数")
     p.add_argument("--min-frames", type=int, default=600)
     p.add_argument("--budget-ms", type=float, default=0.0)
+    p.add_argument("--window-seconds", type=float, default=0.0,
+                   help="测量窗口秒数；带 --sample-dir 时默认取 meta.json 的 hitches_seconds。"
+                        "它决定这份脉冲读数是「整个生命期」还是本窗口（见 stale_instance）")
     args = p.parse_args(argv)
     pulse = args.pulse_file or (os.path.join(args.sample_dir, "pulse.txt") if args.sample_dir else "")
     if not pulse:
@@ -227,18 +256,31 @@ def main(argv=None):
         return 1
     reading = parse(text)
     budget = args.budget_ms or (reading["expected_interval_ms"] * 1.01 if reading else 0.0)
-    lines, code = verdict(reading, interaction=args.interaction,
-                          min_frames=args.min_frames, budget_ms=args.budget_ms)
+    meta = {}
     if args.sample_dir:
-        meta = {}
         try:
             with open(os.path.join(args.sample_dir, "meta.json"), encoding="utf-8") as fh:
                 meta = json.load(fh)
         except (OSError, ValueError) as exc:
             print("  ⚠ meta.json 读不到（%s）⇒ 档位声明无从确认，交叉核对按缺件处理" % exc)
+    # 窗口秒数决定"这份脉冲读数管多大范围"：不传就没法判生命期，只能在文字里说明。
+    try:
+        win = args.window_seconds or float(meta.get("hitches_seconds") or 0)
+    except (TypeError, ValueError):
+        win = 0.0
+    lines, code = verdict(reading, interaction=args.interaction,
+                          min_frames=args.min_frames, budget_ms=args.budget_ms,
+                          window_seconds=win)
+    if args.sample_dir and reading and stale_instance(reading, win):
+        lines.append("  ⇒ 交叉核对也一并**不判**：上面那份脉冲是生命期累计，"
+                     "拿它和 20 s 的上屏表比出的差值没有窗口意义（§M 那条偏移量要重测才能用）。")
+        code = 2
+    elif args.sample_dir:
         clines, ccode = crosscheck(reading, budget, *read_display_pair(args.sample_dir), meta=meta)
         lines += clines
         # 合判的码优先：脉冲自己"达标"不算数，要看另一把尺子点不点头。
+        # 但脉冲被判成**不判窗口**（rc=2 且原因是生命期）时也照样覆盖——
+        # 那种情况下更不该让合判继续拿它当"两侧都好"的证据。
         code = ccode if frames_ok(code) else code
     print("\n".join(lines))
     return code

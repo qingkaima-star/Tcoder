@@ -269,6 +269,34 @@ print("%s|%s|%s|%s|%s|%s" % ("先查主线程" in a, "分开修" in b, "全在�
   ok "迟到帧归因分得清「查主线程 / 分开修 / 全在合成侧 / 无迟到 / 窄分布不判 / 比值悬殊不判」"
 }
 
+selfcheck_pulse_window_scope() {  # selfcheck_pulse_window_scope <outdir>
+  # 41) FramePulse 的摘要行**总数是生命期累计**，不许被当成"本窗口"的读数（09-23 抓到）。
+  #     现场：报表一路写着"同窗 FramePulse"，而 `a5298d5-interact-run1` 那份是
+  #     `帧数=26941 ≈ 225 s` 对 20 s 的录制窗口 —— 因为 `cmd_idle` 的顺序是
+  #     "起实例 → 录 hitches → 录 time-profile → **最后**才读脉冲"。
+  #     受影响的不只是措辞：§M 那个"回调比上屏晚约 0.7 ms"的偏移量就是这么算出来的，
+  #     所以那条结论今天降级为**未定**，要重测（重测的前置见交接笔记 §AA）。
+  local r
+  r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_framepulse import stale_instance as st, verdict
+def R(n, hz=120.0):
+    return {"refresh_hz": hz, "expected_interval_ms": 1000.0 / hz, "frame_count": n,
+            "frame_p50_ms": 8.33, "frame_p95_ms": 9.03, "frame_p99_ms": 9.2,
+            "frame_max_ms": 25.0, "hitch_count": 0, "hitch_per_second": 0.0,
+            "ticks_with_hitch": 0, "ticks_with_hitch_total": 13, "heartbeat_max_gap_ms": 27.0,
+            "refresh_source": "fixture", "summaries": 1, "bad_ticks": []}
+a = st(R(2450), 20.0)              # 20 s × 120 Hz ≈ 2400 帧 ⇒ 新鲜
+b = st(R(26941), 20.0)             # 225 s 的累计 ⇒ 生命期
+c = st(R(26941), 0.0)              # 没给窗口 ⇒ 无从判，也不许硬说它是本窗口
+_, code = verdict(R(26941), interaction=True, window_seconds=20.0)
+txt, code2 = verdict(R(2450), interaction=True, window_seconds=20.0)
+print("%s|%s|%s|%s|%s" % (a, b, c, code, "生命期" in txt))')
+  [ "$r" = "False|True|False|2|False" ] \
+    || { fail "脉冲的『窗口 vs 生命期』四种形状没各判对（拿到 $r，应为 False|True|False|2|False）" \
+             "⇒ 报表会把一份 225 s 的累计读数写成 20 s 窗口的 p95"; return; }
+  ok "脉冲读数分得清「本窗口」与「生命期累计」：生命期一律不判窗口，交叉核对也随之停判"
+}
+
 selfcheck_trio_agreement() {  # selfcheck_trio_agreement <outdir>
   # 39) 「连测 ≥3 趟**且取值一致」**里的**后半句**必须有尺子量（spec §1.3）。
   #     触发事件是 09-23 02:35 那一幕：`[interact] rc=0 ⇒ 可用 3/3 趟` 打得理直气壮，
