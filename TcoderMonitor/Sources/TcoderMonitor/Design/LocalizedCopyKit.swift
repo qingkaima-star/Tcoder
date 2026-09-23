@@ -156,9 +156,12 @@ func localizedCount(_ key: String, slots: [Int]) -> String {
 /// —— 拆了就得让一句英文去包另一句已译好的句子，词序只能由外层模板猜。
 ///
 /// ⚠ 字符串槽**先填一枚不含数字的占位符**，补完千分位之后才换成真值。
-/// 那一格里带着 `×2` 这样的计数；它先落地的话就成了串里"第 0 段连续数字"，
-/// 千分位会被补到**别人的数字**上 —— 正是单槽版靠"第一次出现"侥幸避开、
-/// 而多槽版不能再靠侥幸的那一点。
+/// 那一格里带着 `×2` 这样的计数；位置式占位符允许模板把 `%2$@` 写在 `%1$lld` **前面**
+/// （中文这句恰好是数字在前），那种形状下先把真值落地，串里"第 0 段连续数字"
+/// 就是别人的计数，千分位会被补到它身上。占位符让"补千分位时串里只有槽自己那几段数字"
+/// 这句**与模板里两槽的先后无关**地成立。
+/// 而"实参第 1 位必须是 `lld`、第 2 位必须是 `@`"这条形状契约（反过来就是拿 `Int` 喂 `%@`，
+/// P3-4 那条启动即崩）由 `mixedSlotContractBroken` 钉在目录上，不靠注释。
 func localizedCount(_ key: String, count: Int, note: String) -> String {
     let filled = String(format: localizedCopy(key), arguments: [count, ungroupedSlotToken])
     return replacing(groupedInto(filled, counts: [count]),
@@ -174,26 +177,27 @@ private func replacing(_ text: String, token: String, by value: String) -> Strin
     text.components(separatedBy: token).joined(separator: value)
 }
 
-/// 把上一步刚填进去那串数字换成千分位。
+/// 把上一步刚填进去那串数字换成千分位（**单槽**版 = 多槽版只有一个槽）。
 ///
-/// 只替换**第一次出现的、正好等于 `count` 字面**的那一串 —— 那正是我们刚插进去的 token；
-/// 译文里自带的数字（例如某个单位串里的 "1024"）不会被误伤，因为它不会恰好等于本数的字面
-/// 且排在前面。凑不齐两位分隔的（< 1000）原样返回。
+/// 语义与 P69c 之前一字未变：只动**第一次出现的、正好等于 `count` 字面**的那一串，
+/// 凑不齐两位分隔的（< 1000）原样返回。变的是实现 —— 它现在转发给下面那枚逐槽版，
+/// 同一件事在一份文件里不许有两把尺子。
 func groupedInto(_ text: String, count: Int) -> String {
     groupedInto(text, counts: [count])
 }
 
 /// **逐槽**补千分位：第 i 个槽对应渲染串里第 i 段**完整的**连续数字。
 ///
-/// 与上面单槽那条"找第一次出现的数字字面"的区别不是顺手，是**必须**：
-/// 两个槽的字面可以相同（`共 1000 天 · 峰值 1000 条`），
-/// 从左往右找子串会把同一个位置改两遍、第二个槽照样光着；
-/// 而"完整数字段"配"槽序号"天然一一对应，顺带堵死
-/// 「槽值 1234 撞进译文里的 12345」这种半截误伤。
+/// 为什么不是把上面那条单槽规则逐槽跑一遍（"对每个数从左往右找第一次出现的字面"）：
+/// 子串规则会在**更长的数字段**上从中间咬一口 —— 串里站着 `991234` 而槽值是 `1234` 时，
+/// 它先改坏别人的数字（长出 `991,234`），真槽反而排到后面。
+/// 按"完整段 + 槽序号"配对之后，两槽字面相同（`共 1000 天 · 峰值 1000 条`）也各归各的位置。
+/// 这两种形状在 `test_p69cMultiSlotGroupingFillsEverySlotAndSparesForeignDigits` 里各有一格，
+/// 把实现换回子串规则会当场三格红（破坏验证做过）。
 ///
 /// ⚠ 成立前提是**模板自己不带数字字面**（`%1$lld` 里的 `1` 在转换符内部，不算数字段）。
 /// 这个前提不是靠"我们的译文里没有数字"这句话守的，
-/// 是由 `test_p69cRegisteredMultiSlotKeysCarryNoForeignDigitRuns` 逐条钉在目录上的。
+/// 是由 `test_p69cRegisteredSlotKeysCarryNoForeignDigitRuns` 逐条钉在目录上的。
 /// 对不上号（译文丢了占位符、数字段比槽少）就**原样返回**，不许猜着改。
 func groupedInto(_ text: String, counts: [Int]) -> String {
     let runs = digitRunOffsets(in: text)
