@@ -76,6 +76,14 @@ cleanup() {
     [ "$comm" = "TcoderMonitor" ] && kill -TERM "$p" 2>/dev/null
   done
   started_pids=""
+  # 【今晚第三次泄漏的真相：不是覆盖，是**收养**】闸门按可执行路径认"场上有且只有我这一个实例"，
+  # 于是**上一批**留下的同树实例被这一批直接接手录心跳，而它从没进过 `started_pids` ⇒ 收尾谁都不退它。
+  # 实测（09-24 02:10）：pid 85518 已经跑了 **2 小时 16 分**才被我按路径手工收掉，
+  # 而它同时把别人挡在"实例数不为 1"那条闸门外（那棵树的主人当时就量不了）。
+  # 修法只按**全路径**认（`pgrep -fx`），绝不按 bundle id 广播退出 —— AGENTS 横切约束 2.1 的判归属只认路径。
+  for p in $(pgrep -fx "$MY_BIN" 2>/dev/null); do
+    kill -0 "$p" 2>/dev/null && kill -TERM "$p" 2>/dev/null
+  done
 }
 # 【今天实测的失效】原来三件事共用 `trap cleanup EXIT INT TERM`，而 handler 里没有 exit
 # ⇒ bash 跑完 trap 就**回去继续等**：TERM/INT 都杀不掉它（今晚 kill -TERM 两次没反应）。
