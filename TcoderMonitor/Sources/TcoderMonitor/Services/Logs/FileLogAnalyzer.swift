@@ -19,8 +19,11 @@ final class FileLogAnalyzer: LogAnalysisProviding {
     ///
     /// 为什么要两个口子：四态计数（疑似 / 解析失败 / 无事件时间 / 旧构建 / 去重合并）
     /// 需要 `LogSummary` 的新字段才能落盘，而 `Models/**` 是冻结区（AGENTS §3）。
-    /// 台账先从这个口子出，界面与评分的接法已经写好，等总工按 Obsidian `110`
-    /// 的 `## 契约缺口` 落完 Optional 字段，就把 `LogSummary` 变成唯一载体、本口子收掉。
+    /// ⚠️ RD-60 实测到位：**台账算得完，却送不到屏上** —— 唯一能上屏的载体是 `LogSummary`，
+    /// 而它没有承接格，所以 `CrashEvidenceReadout` 在生产路径上只能收到 `evidence: nil`，
+    /// 屏上因此说的是「本次未统计」（真话），而不是拿趋势桶估一个数（假话）。
+    /// 契约缺口已按字段名 / 谁写谁读 / 为什么不能放别处报给总工（Obsidian `130`），
+    /// 落地后把 `evidence` 接上 `Views/Logs` 是一行。
     /// **不许**因为字段没地方放就把这些状态折进 `crashCount` 或干脆不算。
     func analyzeWithEvidence(projectRoot: URL, extraLogURLs: [URL], withinDays: Int) throws
         -> (summary: LogSummary, evidence: CrashEvidenceLedger) {
@@ -158,7 +161,7 @@ final class FileLogAnalyzer: LogAnalysisProviding {
     }
 }
 
-// MARK: - 崩溃证据的界面读数（RD-21/22/23 的"解释准确"落点）
+// MARK: - 崩溃证据的界面读数（RD-21/22/23 的"解释准确"落点；RD-60 起改走唯一装配口）
 
 /// 中文串在 Services 侧拼，与 CLI 的产品散文同一口径（AGENTS §5.9 第 4 条）。
 ///
@@ -168,47 +171,19 @@ final class FileLogAnalyzer: LogAnalysisProviding {
 /// 而 Services 侧的拼接与 CLI 一样走"产品散文"，不进那两本账。
 /// 视图只接已经拼好的变量。
 ///
-/// ⚠️ 这里能精确说出口的只有**已落盘**的部分（`crashCount` / `scannedFiles` /
-/// `readFailedFiles` / `trend`）。"无事件时间 / 旧构建 / 去重合并"三本小账目前
-/// 只能并进"未产出可计数证据"这一句里，并且**明说是待落盘的缺口** ——
-/// 需求登记在 Obsidian `110` 的 `## 契约缺口` ①（台账 §6.2 的形状）。
-/// 落完字段之后这里改成直接读 records，界面一字不用动。
+/// ⚠️ RD-60（台账 §48）：本文件原先住着 `LogSummary` 的两句话与一把**平行尺子**
+/// （`crashEvidenceFootnote` + `historicalCrashCount`，从已落盘的趋势桶按事件时间求和）。
+/// 它与细账 `CrashEvidenceLedger.historicalConfirmedCount` 分母不同（趋势桶既漏掉窗口外的
+/// 真崩溃报告、又把普通日志的 FATAL 行算成崩溃），差值已由 `CrashEvidenceRulerReproductionTests`
+/// 在同一个总体上量出来。现在：
+/// · **`historicalCrashCount` 已删**（零测试调用者、删前查过 `git stash list` 无在途实现、
+///   全仓无第二处同名实现），"窗口外历史几次"从此只能由台账说出口；
+/// · `crashTileCaption` 仍然留在这里（它不含任何重算，只读一个已落盘的数），
+///   但崩溃脚注那整段话搬去唯一装配口 `CrashEvidenceReadout`，本文件只剩一行转发。
+/// 想再把趋势桶拿来当崩溃尺子，会被 `CrashEvidenceReadoutGuardTests` 当场判红。
 extension LogSummary {
     /// 崩溃那一格的 caption：计数 + 一句边界，替代原来只写「其中 FATAL n 条」的读数。
     var crashTileCaption: String {
         "窗口内确认崩溃；其中 FATAL \(NumberFormat.grouped(fatalCount)) 条"
-    }
-
-    /// 卡头 ⓘ 的完整句：为什么这一格的数比"崩溃通道文件数"小。
-    func crashEvidenceFootnote(windowDays: Int, now: Date = Date()) -> String {
-        let channelFiles = scannedFiles.filter { $0.role == .crash }.count
-        let failed = (readFailedFiles ?? []).filter { $0.role == .crash }
-        var parts: [String] = ["窗口内确认崩溃 \(crashCount) 次，只统计有真实事件证据的报告"]
-
-        let historical = historicalCrashCount(windowDays: windowDays, now: now)
-        if historical > 0 {
-            parts.append("另有 \(historical) 次确认崩溃的事件时间在最近 \(windowDays) 天之外，属历史报告")
-        }
-        if failed.isEmpty == false {
-            let reasons = Dictionary(grouping: failed.compactMap(\.readFailure), by: { $0 })
-                .sorted { $0.key < $1.key }
-                .map { "\($0.key) ×\($0.value.count)" }
-            parts.append("读取失败 \(failed.count) 份（\(reasons.joined(separator: "、"))）未参与判定")
-        }
-        let unexplained = max(0, channelFiles - crashCount)
-        if unexplained > 0 {
-            parts.append("还有 \(unexplained) 份崩溃通道文件未产出可计数的证据"
-                + "（内容损坏 / 只有文件名像 / 无事件时间 / 构建版本不是当前 / 同一事件的另一份），"
-                + "逐条原因待 LogSummary 落盘崩溃证据字段后展示")
-        }
-        return parts.joined(separator: " · ") + "。"
-    }
-
-    /// 窗口外历史崩溃次数：**从已落盘的趋势桶推出来的**（桶按事件时间分日），
-    /// 所以这一句不是近似，是精确读数 —— 前提是该事件真有事件时间。
-    func historicalCrashCount(windowDays: Int, now: Date = Date()) -> Int {
-        guard windowDays > 0 else { return 0 }
-        let cutoff = now.addingTimeInterval(-Double(windowDays) * 86_400)
-        return trend.filter { $0.date < cutoff }.reduce(0) { $0 + $1.crashes }
     }
 }
