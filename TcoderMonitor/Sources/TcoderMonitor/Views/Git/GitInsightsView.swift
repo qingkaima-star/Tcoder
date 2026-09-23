@@ -186,6 +186,8 @@ struct GitCommitTrendSection: View {
                 // 原 `EmptyStateView` 的标题「暂无提交趋势」是卡名「提交趋势」换个说法
                 // 再讲一遍（副标题已经报了"分桶数据缺席"），按「留短藏长」判删；
                 // 屏上只留这一句事实，"因此给不出峰值与均值"仍在卡头 ⓘ。
+                // 双语 P69b：这一句是**整句键**（目录已登记），`SectionEmptyNote` 的
+                // `text` 在渲染点查表 ⇒ 调用点保持裸字面量，不要再包一层查表。
                 SectionEmptyNote(text: "Git 分析没有产出按时间分桶的提交数据。",
                                  icon: .chartLine)
             }

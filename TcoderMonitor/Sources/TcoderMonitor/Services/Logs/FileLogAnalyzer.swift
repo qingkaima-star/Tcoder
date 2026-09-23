@@ -187,19 +187,30 @@ extension LogSummary {
 
         let historical = historicalCrashCount(windowDays: windowDays, now: now)
         if historical > 0 {
-            parts.append("另有 \(historical) 次确认崩溃的事件时间在最近 \(windowDays) 天之外，属历史报告")
+            // **两个复数槽**（次、天）：英文不光量词要变，动词也得跟着第一个槽变
+            // （`1 confirmed crash has` / `3 confirmed crashes have`）。
+            parts.append(localizedCount(
+                "另有 %lld 次确认崩溃的事件时间在最近 %lld 天之外，属历史报告",
+                slots: [historical, windowDays]))
         }
         if failed.isEmpty == false {
             let reasons = Dictionary(grouping: failed.compactMap(\.readFailure), by: { $0 })
                 .sorted { $0.key < $1.key }
                 .map { "\($0.key) ×\($0.value.count)" }
-            parts.append("读取失败 \(failed.count) 份（\(reasons.joined(separator: "、"))）未参与判定")
+            // 混槽（复数 + 任意字符串）。形状钉死成 `%1$lld` + `%2$@`，
+            // 实测 stringsdict 装得下 ⇒ 没有拆成两句（拆了就得让英文去猜词序）。
+            parts.append(localizedCount("读取失败 %1$lld 份（%2$@）未参与判定",
+                                        count: failed.count,
+                                        note: reasons.joined(separator: "、")))
         }
         let unexplained = max(0, channelFiles - crashCount)
         if unexplained > 0 {
-            parts.append("还有 \(unexplained) 份崩溃通道文件未产出可计数的证据"
-                + "（内容损坏 / 只有文件名像 / 无事件时间 / 构建版本不是当前 / 同一事件的另一份），"
-                + "逐条原因待 LogSummary 落盘崩溃证据字段后展示")
+            // 这一句原先被 `+` 拆成三段（P53 立的守卫 1d 点名的正是这一族）：
+            // 运行时查的是**拼完之后**那一整串，目录里永远没有这种键 ⇒ 半句键白登记。
+            // 现在合成一条整句键，`（…）` 里的原因清单留在键内。
+            parts.append(localizedCount(
+                "还有 %lld 份崩溃通道文件未产出可计数的证据（内容损坏 / 只有文件名像 / 无事件时间 / 构建版本不是当前 / 同一事件的另一份），逐条原因待 LogSummary 落盘崩溃证据字段后展示",
+                unexplained))
         }
         return endingSentence(parts.joined(separator: " · "))
     }
