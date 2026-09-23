@@ -64,6 +64,8 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         )
         let coverage = Self.coverage(from: scan, duplication: duplication, options: options,
                                      lex: lex, roleTally: roleTally)
+        // RD-15：范围台账同批落盘（内部读数直传，一个数都不重算）。
+        metrics.scanSurface = Self.scanSurface(from: coverage)
         // RD-42：词法台账里那枚"按分区归位为非代码的行数"**直传**进契约 ——
         // 不在这里重算、也不在界面侧从中文句子里抠回来（那都是第二把尺子）。
         // ⚠️ 故意**不**并进下面那条 `scanLimitations`：那是"没量准"的账，
@@ -173,6 +175,34 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             duplicateBlockCoordinatesOutsideBoard: duplication.blocksOutsideBoard,
             duplicationBoardCaliber: duplication.blocksDroppedByCap > 0 ? duplication.boardCaliberNote : ""
         )
+    }
+
+
+    /// 扫描范围那一族读数的装配：**逐枚直传**内部台账（`scopeReadout` 与 `treeFollowing`），
+    /// 不做任何加减、不从中文句子里抠数。抽成独立函数与 `applyDuplicationBoardTruth`
+    /// 同一条理由：长度，不是判据。
+    /// ⚠️ 两格要说明：
+    /// · `linesCounted` 取 `skipLedger.linesCounted`（那是"数没数"的唯一事实来源），
+    ///   `excludedLineCount` 取三态读数里的 `measuredValue` —— 没数时它本来就是 `nil`，
+    ///   所以「`linesCounted == false` 而这一格有数」这种组合在本装配口**构造不出来**。
+    /// · `unreadableDirectoryCount` 直传扫描器那一份：**0 是有意义的读数**（每个目录都读到了），
+    ///   不许为了"干净"省略成 `nil`。
+    private static func scanSurface(from coverage: CodeScanCoverage) -> CodeScanScope {
+        let readout = coverage.scopeReadout
+        let following = coverage.treeFollowing
+        return CodeScanScope(
+            totalCount: readout.totalCount.measuredValue,
+            displayedCount: readout.displayedCount,
+            undisplayedCount: readout.undisplayedCount,
+            unmeasuredScope: readout.unmeasuredScope,
+            excludedLineCount: readout.excludedLineCount.measuredValue,
+            linesCounted: coverage.skipLedger.linesCounted,
+            nestedRepositoryCount: following.nestedRepositoryCount,
+            submoduleMarkerCount: following.submoduleMarkerCount,
+            symbolicLinkFileCount: following.symbolicLinkFileCount,
+            symbolicLinkDirectoryCount: following.symbolicLinkDirectoryCount,
+            unlistedPrunedDirectoryCount: following.unlistedPackageDirectoryCount,
+            unreadableDirectoryCount: coverage.unreadableDirectoryCount)
     }
 
 

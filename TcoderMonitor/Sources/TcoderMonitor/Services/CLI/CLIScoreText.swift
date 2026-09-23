@@ -46,6 +46,11 @@ enum CLIScoreText {
         // 只有打开界面的人才看得到，而 JSON 里有、文本读数里没有 ——
         // 看界面的人、读 CLI 的人、拿 JSON 的 AI 于是拿到三种诚实度。
         lines.append(contentsOf: precisionCaveat(report))
+        // RD-15：范围台账那两句。位置紧跟「未量准」之后、台账之前 —— 同一条理由：
+        // 先交代这份数字是在什么范围里量出来的，再说每一路做了什么，最后才给分。
+        // ⚠️ 这两句**只读 `code.scanSurface` 那族字段**，不读 `scanLimitations` 的中文句子：
+        // 落成字段就是为了让人拿到数，而不再解析散文（RD-48 同一条纪律）。
+        lines.append(contentsOf: scanSurfaceLines(report))
         // R10b 第 1 件 · 台账上屏：位置就夹在「未量准」之后、综合分之前 ——
         // 与"失败路在分数之前""未量准在分数之前"同一条理由：先说这一路到底做了什么，再给分。
         lines.append(contentsOf: AnalyzerLedgerText.section(report))
@@ -117,6 +122,20 @@ enum CLIScoreText {
     static func regionCaliberLines(_ report: ProjectReport) -> [String] {
         guard let code = report.code, let note = MixedLanguageRegionCaliber.note(code) else { return [] }
         return ["口径：\(note)"]
+    }
+
+    /// 扫描范围那两行（RD-15）：`scan` 落的 JSON 里 `code.scanSurface` 那 12 格，
+    /// 在文本读数里也得有对应的数，否则"排除了几个目录、那些有多少行、行数数没数"
+    /// 只有打开界面或解析 JSON 的人才知道。
+    ///
+    /// **复用那一个装配口** `CodeScanSurfaceReadout.accountingLines(_:)`：CLI 不另写一份中文
+    /// （与上面 `regionCaliberLines` 复用 `MixedLanguageRegionCaliber.note` 同一条纪律）。
+    /// 三态由那个装配口负责：没有台账 ⇒ 一句缺席话；什么都没排除没剪没挡 ⇒ **一行都不打**。
+    /// `code` 整路缺席时这里也**不出声** —— 那一格的事实由上面的「失败路」那一行在说，
+    /// 在这里补一句"没有范围台账"就是把别人的失败算成自己的读数。
+    static func scanSurfaceLines(_ report: ProjectReport) -> [String] {
+        guard let code = report.code else { return [] }
+        return CodeScanSurfaceReadout.accountingLines(code)
     }
 
     /// 覆盖率那本账（RD-50）：`scan` 落的 JSON 里那六格（`truncationTotalCount` /

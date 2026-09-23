@@ -143,6 +143,17 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     /// 量到了就八档都在，缺席的那一档由 `fileCount == 0` 表达。
     /// **Optional 是落盘兼容要求**：非 Optional 带默认值会让旧报告整份解码失败。
     var fileRoles: CodeFileRoles? = nil
+    /// 本次扫描的**范围台账**（RD-15 · 申请单 R6 §3）。`nil` = 这份报告没有范围台账
+    /// （旧报告 / 这一路没跑）—— 这时「排除了 0 个」这句话**不成立**，屏上只能报缺席。
+    ///
+    /// 存在理由：`SourceScanScopeReadout` 与 `SourceTreeFollowingLedger` 早就把
+    /// 「排除了几个条目、被排除的那些有多少行、行数到底是数过还是没数」算清楚了，
+    /// 但那几个数只活在 `scanLimitations` 的中文句子与单测里 ——
+    /// 读 JSON 的人拿不到数，只能解析散文（与 RD-48 那一批同形）。
+    /// **必须 Optional**：非 Optional 带默认值会让旧报告整份解码失败。
+    /// 上屏那一句的唯一装配口是 `CodeScanSurfaceReadout.accountingLine(_:)`
+    /// （住 `SourceScanScopeReadout.swift`，界面与 CLI 共用同一把尺子）。
+    var scanSurface: CodeScanScope? = nil
 
     var largestFileLineCount: Int = 0
 
@@ -248,4 +259,59 @@ struct DuplicatedBlock: Codable, Equatable, Hashable, Identifiable, Sendable {
 struct DuplicatedFragment: Codable, Equatable, Hashable, Sendable {
     var path: String
     var startLine: Int
+}
+
+// MARK: - 扫描范围（RD-15 · 申请单 R6 §3 的形状，字段名一字未改）
+
+/// 一次扫描的**范围读数**。三件事必须是三个不同的读数，所以**每一格都是 Optional**：
+/// ① 整枚 `CodeMetrics.scanSurface` 缺席 = 这份报告没有范围台账；
+/// ② 某一格缺席 = 那一项没量；③ 某一格是 `0` = 量过了、真的是 0。
+///
+/// 数值全部**直传**内部台账（`SourceScanScopeReadout` + `SourceTreeFollowingLedger`），
+/// 这里不做任何加减；唯一允许的算术是 `reportedExcludedEntryCount` 那一处取法
+/// （§5 那一族的形状：可选真总数 + 取法只留一处的计算属性，消费方不再各写一份相加）。
+///
+/// ⚠️ 上屏那一句的唯一装配口是 `CodeScanSurfaceReadout.accountingLine(_:)`
+/// （住 `Services/Code/SourceScanScopeReadout.swift`，界面与 CLI 共用同一把尺子）。
+struct CodeScanScope: Codable, Equatable, Sendable {
+    /// 遍历看到的条目数（纳入 + 剔除；目录、软链接、隐藏项这些"条目"也在内）。
+    /// `nil` = 这一份没有范围台账 —— 申请单点名的那一态：屏上只能报"没有台账"。
+    var totalCount: Int?
+    /// 逐条留了路径样本的**被排除条目**数（每个原因桶最多 `SourceSkipLedger.sampleLimit` 条）。
+    var displayedCount: Int?
+    /// 被排除但**没有**留下路径样本的条目数。
+    var undisplayedCount: Int?
+    /// 没量到的范围，一行一条（带计数）。
+    /// ⚠️ **空数组与 `nil` 是两件事**：空 = 真的没有未量到的范围（看完了）；
+    /// `nil` = 这一格没记。拿空数组冒充"看完了"是本字段的第一号反例。
+    var unmeasuredScope: [String]?
+    /// 被排除条目的**行数**。`nil` = 没读内容所以没数；`0` = 读过了、真的是 0 行。
+    /// `linesCounted == false` 时这一格**必须**为 `nil`（产品默认路径 `auditLineBudget == 0`
+    /// 就是这种组合；把 0 填进去等于把"没数"写成"没有"）。
+    var excludedLineCount: Int?
+    /// 上一格到底数没数过（审计模式才为 true）。
+    var linesCounted: Bool?
+    /// 根之下又出现的版本库标记数。口径：它们的工作树**已并入**本次统计，不按子仓库另算。
+    var nestedRepositoryCount: Int?
+    /// 其中 `.git` 是文件形状的（submodule 标记）。
+    var submoduleMarkerCount: Int?
+    /// 文件软链接数（刻意不跟随 ⇒ 不重复计数）。
+    var symbolicLinkFileCount: Int?
+    /// 目录软链接数（刻意不进入 ⇒ 其内部文件数未统计）。
+    var symbolicLinkDirectoryCount: Int?
+    /// 名单外、被系统 bundle 判定剪掉的目录数（`*.xcarchive` 这类）。修前恒为"不知道"。
+    var unlistedPrunedDirectoryCount: Int?
+    /// 本次读不动的目录数。**`0` 与 `nil` 是两个读数**：0 = 每个目录都读到了，
+    /// `nil` = 这一格没记。申请单接手那一段点名要它 —— 少了它，界面上就只有
+    /// 「这一份是没看完」那句中文、拿不到数。
+    var unreadableDirectoryCount: Int?
+
+    /// 「按规则排除了多少个条目」的**唯一取法**：点名的那半 + 没点名的那半。
+    /// 两半任缺其一就返回 `nil` —— 缺读数时补 0 就是把"没数"当成"没有"。
+    /// ⚠️ 它与 `totalCount` **不是同一个分母**（后者含被纳入的条目），两者相加不相等，
+    /// 所以任何地方都不许写死 `totalCount == displayed + undisplayed`。
+    var reportedExcludedEntryCount: Int? {
+        guard let displayed = displayedCount, let undisplayed = undisplayedCount else { return nil }
+        return displayed + undisplayed
+    }
 }
