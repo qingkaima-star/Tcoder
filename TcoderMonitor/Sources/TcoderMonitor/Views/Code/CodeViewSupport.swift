@@ -33,6 +33,10 @@ enum CodeDataGate {
         let icon: IconName
         let title: String
         let message: String
+        /// 「留短藏长」的 ⓘ 那半截（`EmptyStateView` 自带的 `help:` 槽）。
+        /// 为什么随文案一起走：这一族的三种态由本文件单点产出，页面只做一次转发；
+        /// 让页面自己再决定哪句进 ⓘ 就会出现同一空态在两个页面两种详略。
+        var help: String? = nil
     }
 
     /// 两种"没有数字可看"的说法必须不同：一个是**还没测**，一个是**测了、真的是空的**。
@@ -44,7 +48,11 @@ enum CodeDataGate {
             return EmptyCopy(
                 icon: .code,
                 title: "尚无代码扫描结果",
-                message: localizedFormat("点击「重新分析」开始扫描该目录。\n完成后这里会显示真实的文件数、行数与%1$@。", page)
+                // 盘点表「留短藏长」：屏上留"该点哪里"这一句（读完就能动手）；后半
+                // 「完成后这里会显示真实的文件数…」是**预告**（等于没说，与性能页那条
+                // 判「藏」的采样预告同形），整句进 ⓘ。「还没测」这件事由上面的 title 常驻承担。
+                message: localizedCopy("点击「重新分析」开始扫描该目录。"),
+                help: localizedFormat("点击「重新分析」开始扫描该目录。\n完成后这里会显示真实的文件数、行数与%1$@。", page)
             )
         case .measuredEmpty:
             return EmptyCopy(

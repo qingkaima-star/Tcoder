@@ -67,4 +67,38 @@ extension TooltipMigrationGuardTests {
         return (keys ?? caliberKeysThatMustSurvive).filter { !haystack.contains($0) }
     }
 
+    /// **修的是分类器的盲区，不是地板的数值**（P70；`75ae29c` 一度把它删掉，这一笔接回来）。
+    ///
+    /// `literalSlots(in:)` 靠"引号前面那截"判断一个字面量是常驻还是已藏进 ⓘ。
+    /// 键化之后那句常驻长句前面会多一层查表调用 ——
+    /// `message: localizedFormat("点击「重新分析」…", page)` ——
+    /// 前缀不再以 `message:` 结尾 ⇒ 落到 `skipped`，**这条守卫就看不见它了**。
+    /// 后果是守恒线每键化一句就掉一格：P69 合流掉 8 格、P70 又掉 1 格，
+    /// 而那两句文本都**一字未少**地常驻上屏。
+    /// 一直降地板等于给"看不见"记账；剥掉查表外壳再判，才是给"删掉了"记账。
+    /// ⚠ 为什么用它而不是我那版：我 `7f6b5c7` 是往四条正则里插 `keyedLookup`，**只能剥一层**；
+    /// 这里的循环能吃嵌套（`Text(localizedCount("…"))`），且判据本体一字不动 ⇒ 按能力合。
+    static func stripLookupWrappers(_ prefix: String) -> String {
+        var out = prefix
+        let wrapper = try! NSRegularExpression(
+            pattern: "(?:localizedCopy|localizedFormat|localizedCount)\\s*\\(\\s*$")
+        while true {
+            let range = NSRange(out.startIndex..., in: out)
+            guard let hit = wrapper.firstMatch(in: out, options: [], range: range),
+                  let cut = Range(hit.range, in: out) else { return out }
+            out = String(out[..<cut.lowerBound])
+        }
+    }
+
+    /// 双向元测试：包一层的常驻句必须算 visible、包一层的 tooltip 句必须算 tooltip、
+    /// 没有任何渲染线索的仍然要 skipped（不许把"看不见"修成"全都算"）。
+    func test_classifierLooksThroughTheLookupWrapper() {
+        let visible = Self.literalSlots(in: #"                message: localizedFormat("点击重新分析开始扫描该目录。", page)"#)
+        XCTAssertEqual(visible.map(\.slot), [.visible], "包了一层查表的常驻句没被认成常驻")
+        let nested = Self.literalSlots(in: #"            Text(localizedCount("错误趋势，%lld 天", n))"#)
+        XCTAssertEqual(nested.map(\.slot), [.visible], "两层包裹（Text 套 localizedCount）要能一路剥到 Text(")
+        let bare = Self.literalSlots(in: #"        let x = "点击重新分析开始扫描该目录。""#)
+        XCTAssertEqual(bare.map(\.slot), [.skipped], "没有渲染线索的也被算进去了 ⇒ 修过头")
+    }
+
 }

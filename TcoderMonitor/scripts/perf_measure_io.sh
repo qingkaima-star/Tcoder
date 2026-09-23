@@ -195,10 +195,18 @@ load_sample_once() {  # load_sample_once <outdir> [自己 spawn 的采集 pid] �
   mkdir -p "$out" 2>/dev/null || return 0
   l=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | awk '{print $1}')
   # 「自己那一个 xctrace 不算外部争用」——不排就等于**每批必判污染**（见 filter_out_pids 的注释）。
-  pids=$(concurrent_heavy_jobs 2>/dev/null)
+  # 取**明细**而不是光取 pid 串：02:16 那两趟的 `heavy_max_in_window` 都是 2，
+  # 一个数字分不出"别人在编译"和"我自己那个 xctrace 生了个子进程"，
+  # 而这两种结论要做的动作完全相反（等窗口 vs 修尺子）。第三列仍是计数（判定读它），
+  # 第四列是 `pid=name` 明细，只有出数的那一行会进 meta，用来回答"刚才是谁"。
+  local detail; detail=$(concurrent_heavy_jobs_detail 2>/dev/null)
+  pids=$(printf '%s' "$detail" | grep -o 'pid=[0-9]*' | cut -d= -f2 | tr '\n' ' ')
   pids=$(filter_out_pids "$pids" "$self")
   j=$(printf '%s' "$pids" | wc -w | tr -d ' ')
-  printf '%s\t%s\t%s\n' "$(date +%s)" "${l:-0}" "${j:-0}" >> "$f"
+  # 按 `pid=<n> name=<x>` 成对切（先按空格切会把 `name=` 拆丢，第一版就这么错了一次）
+  names=$(printf '%s' "$detail" | grep -oE 'pid=[0-9]+ name=[^ ]+' \
+          | grep -vF -x <(printf '%s\n' ${self:-__none__} | sed 's/^[0-9]*$/pid=&/') | tr '\n' ' ')
+  printf '%s\t%s\t%s\t%s\n' "$(date +%s)" "${l:-0}" "${j:-0}" "${names:-无}" >> "$f"
 }
 
 load_window_verdict() {  # 把**窗口内峰值**判一次并落 meta：两端干净 ≠ 整窗干净（§AP 今天八趟的现证）
@@ -208,9 +216,11 @@ load_window_verdict() {  # 把**窗口内峰值**判一次并落 meta：两端�
                    echo "    ⚠ 窗口内一个负载样本都没采到 ⇒『整窗干净』这句话没有依据（已写进 meta）" >&2
                    return 0; }
   maxl=$(cut -f2 "$f" | sort -g | tail -1); jobs=$(cut -f3 "$f" | sort -g | tail -1)
+  # 出数那一行的明细（"刚才是谁"），只给话术用，不参与判定
+  who=$(awk -F'\t' -v j="$jobs" '$3==j && $3>0 {print $4; exit}' "$f")
   n=$(wc -l < "$f" | tr -d ' '); bar=$(load_bar)
   meta_write "$out" "load1_max_in_window=${maxl:-0}" "heavy_max_in_window=${jobs:-0}" \
-                   "load_samples=$n" "load_bar_used=$bar"
+                   "heavy_names_at_peak=${who:-无}" "load_samples=$n" "load_bar_used=$bar"
   if awk -v l="${maxl:-0}" -v j="${jobs:-0}" -v b="$bar" 'BEGIN{exit !(l > b || j > 0)}'; then
     meta_write "$out" "contaminated_by_foreign_load=1"
     echo "    ⚠ 窗口内出现过高负载或重活（峰值 load1=$maxl、重活个数峰值 $jobs、采样 $n 次、阈值 $bar）" >&2
