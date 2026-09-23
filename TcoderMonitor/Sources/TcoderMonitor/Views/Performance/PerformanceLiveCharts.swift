@@ -20,9 +20,13 @@ struct PerformanceLiveCharts: View {
     var body: some View {
         GlassSection("实时曲线", subtitle: subtitle, icon: .chartLine) {
             if points.count < Self.minPointsToPlot {
+                // **留短藏长**（盘点表 F 组）：屏上留「为什么不画」那句结论——它挡的是
+                // "这块空白是不是坏了"；「几个点才出曲线」属采样实现细节，进 ⓘ。
+                // ⓘ 里放的仍是目录里那条**整句键**，原文一字未改（只换落点）。
                 EmptyStateView(icon: IconName.chartLine.rawValue,
                                title: "正在采集首个样本",
-                               message: "至少 3 个点之后才有曲线可画。这里不预先给出估算形状。")
+                               message: "这里不预先给出估算形状。",
+                               help: "至少 3 个点之后才有曲线可画。这里不预先给出估算形状。")
             } else {
                 // 两张图是两个同级并列的叙事单元 → 组间 `group`(32)。
                 // 原来它们与脚注都挤在 `md`(16) 上，跟图例与图之间同一个数，
