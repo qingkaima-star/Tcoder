@@ -719,6 +719,8 @@ ls -d /tmp/tcoder-capture.lock 2>/dev/null     # 取证锁必须空闲
 
 → 搬进独立文件继续更新：[`2026-09-21-perf-handoff-notes.md`](./2026-09-21-perf-handoff-notes.md)；
 　§N 起（09-22 中午之后）又在 09-23 撞了同一条 ≤800 棘轮，那半截在 [`2026-09-22-perf-handoff-notes-round2.md`](./2026-09-22-perf-handoff-notes-round2.md)。
+　同一把闸门 09-23 晚上逼了第三次搬家：**§AK 起在 [`2026-09-23-perf-handoff-notes-round3.md`](./2026-09-23-perf-handoff-notes-round3.md)**；
+　本文件下面点到的 §AG / §AI 仍在卷二，编号一字未重排。
 　（A 迁移欠账 / B 禁则基线 / C 守卫留档 / D 采样纪律 / E 证据标记要有读者 / E′ 存量复扫 / F 性能侧欠大家 / G 你们每并一批之后请自己重跑）
 
 ## 0.7 渲染路径债那 14 处：**不复制清单**，只补一条验收改判（2026-09-23 14:54）
