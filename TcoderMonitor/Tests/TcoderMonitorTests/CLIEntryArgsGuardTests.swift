@@ -211,15 +211,26 @@ final class CLIEntryArgsProcessGuardTests: XCTestCase {
                        "混合场景里混进一个同 bundle 的第二个进程必须被抓到 ⇒ 牙不能被别的树冲淡")
     }
 
+    /// 两份一次性读数文件（用完即删）。**为什么不用 `Pipe`**：Pipe 的内核缓冲只有 64 KiB，
+    /// 而 `scan` 那一路会把整份报告打到 stdout（实测 66,823 字节）⇒ 子进程写满管道后阻塞在 write，
+    /// 父进程还在 `waitUntilExit`，谁也不动谁 ⇒ 顶到 limit、被判"没退干净"、rc=15。
+    /// 2026-09-24 主树三次复现（含一次定向单跑），同一条命令手工跑是 0 秒 rc=0 ⇒ 死锁在判据的管线上。
+    private func capturePaths() -> (out: URL, err: URL) {
+        let fm = FileManager.default
+        let out = r19Scratch().appendingPathComponent("stdout-\(UUID().uuidString).txt")
+        let err = r19Scratch().appendingPathComponent("stderr-\(UUID().uuidString).txt")
+        for path in [out, err] { fm.createFile(atPath: path.path, contents: Data()) }
+        return (out, err)
+    }
+
     private func launch(_ args: [String], limit: TimeInterval) throws -> Run {
         let bin = try CLIProcessTests.productBinary()
-        let out = Pipe()
-        let err = Pipe()
+        let capture = capturePaths()
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: bin)
         proc.arguments = args
-        proc.standardOutput = out
-        proc.standardError = err
+        proc.standardOutput = try FileHandle(forWritingTo: capture.out)
+        proc.standardError = try FileHandle(forWritingTo: capture.err)
         let started = Date()
         try proc.run()
         let own = Int(proc.processIdentifier)
@@ -243,12 +254,15 @@ final class CLIEntryArgsProcessGuardTests: XCTestCase {
             // 只收**本测试自己 spawn 的那一个** pid：它的路径就是上面核对过的 `bin`，
             // 绝不按 bundle id 或进程名广播退出（那会杀到别人正在跑的实例）。
             proc.terminate()
-            proc.waitUntilExit()
-        } else {
-            proc.waitUntilExit()
         }
-        let stdout = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        proc.waitUntilExit()
+        try? (proc.standardOutput as? FileHandle)?.close()
+        try? (proc.standardError as? FileHandle)?.close()
+        let stdout = (try? Data(contentsOf: capture.out)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let stderr = (try? Data(contentsOf: capture.err)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let fm = FileManager.default
+        try? fm.removeItem(at: capture.out)
+        try? fm.removeItem(at: capture.err)
         return Run(rc: proc.terminationStatus, stdout: stdout, stderr: stderr,
                    seconds: Date().timeIntervalSince(started),
                    stillRunningAtLimit: stuckAtLimit, extraProcessPeak: peak)
