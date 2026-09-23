@@ -928,3 +928,12 @@
 "尚无可用指标" = "No metrics available yet";
 "尚无可用指标，无法给出健康评分；选择项目目录后会自动完成采集。" = "No metrics are available, so no health score can be given; selecting a project directory collects them automatically.";
 "已采集到输入，但%1$@各维度都缺少可计分证据，本次不给出综合分，避免把没测到当成好结果。" = "Inputs were collected, but every dimension among %1$@ lacks scoreable evidence, so no overall score is given this run - never read \"not measured\" as a good result.";
+
+// 批次 P59b（协作分布与活跃度的建议/缺席句）：整句键，测得值一律走位置参数。
+"提交节奏稳定（日均 %1$@ 次；这个频率只在曲线里折算一次，本句不另加分）" = "Cadence is steady (%1$@ commits per day; the curve already folds this rate in once, so this line adds no credit)";
+"提交历史仅 %1$@ 天，样本不足，活跃度不宣称节奏、按 %2$@ 分封顶；跑满一周后重扫即可解锁。" = "History spans only %1$@ days, too small a sample: cadence is not claimed and activity is capped at %2$@. Rescan after a full week to unlock it.";
+"提交历史缺可用的首末时间，日均无法计算，活跃度按曲线最低档计，等重新分析补齐两端再评。" = "The history has no usable first/last commit time, so a daily average cannot be computed; activity scores at the curve's floor until a re-analysis fills both ends.";
+"已 %1$@ 天无提交" = "%1$@ days without commits";
+"作者表里没有可算分布的提交（非合并口径 0 笔，含合并共 %1$@ 笔），协作分布不参与本次计分；这一维读的是「署名分布」，要有非合并提交才谈得上分散与否。" = "The author table holds no commits to distribute (0 non-merge out of %1$@ including merges), so collaboration does not take part in this score; that dimension reads signature spread, which needs non-merge commits to mean anything.";
+"作者分布的总体只有 %1$@ 笔非合并提交、%2$@ 个活跃署名 —— 一笔提交就折合 %3$@ 占比，跨一个档位只要一两笔 ⇒ 占比无定义，协作分布不参与本次计分（也不按 0 计入）；非合并提交攒到 %4$@ 笔以上重扫即可解锁。" = "The author population is only %1$@ non-merge commits across %2$@ active signatures - one commit moves the share by %3$@ and one or two cross a band, so the share is undefined; collaboration does not take part in this score (nor is it counted as 0). Rescan once %4$@ non-merge commits have accumulated.";
+"非合并口径 %1$@ 笔、%2$@ 个活跃署名，低于评这一维所需的 %3$@ 笔总体 —— 一笔提交折合 %4$@ 占比，占比无定义，本维度不参与计分（也不按 0 计入）。" = "%1$@ non-merge commits across %2$@ active signatures, below the %3$@-commit population this dimension needs - one commit moves the share by %4$@, so the share is undefined and the dimension is not scored (nor counted as 0).";

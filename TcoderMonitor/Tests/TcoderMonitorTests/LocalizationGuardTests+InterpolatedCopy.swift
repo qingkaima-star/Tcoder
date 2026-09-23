@@ -137,6 +137,7 @@ extension LocalizationGuardTests {
         "Services/Health/GitCadenceEvidence.swift",
         "Services/Health/HealthCodeDimensions.swift",
         "Services/Health/WeightedHealthScorer.swift",
+        "Services/Health/HealthTeamDimensions.swift",
     ]
 
     func test_copyInLookedUpFilesAlwaysGoesThroughTheCatalog() throws {
