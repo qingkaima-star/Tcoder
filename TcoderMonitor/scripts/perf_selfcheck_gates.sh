@@ -525,3 +525,62 @@ selfcheck_cleanup_opt_in_state() {  # selfcheck_cleanup_opt_in_state <outdir>
   [ "$bad" = "0" ] \
     && ok "收尾形状分得清『无条件 / 躲在开关后面 / 没有』，且核身份的门不算选装（三夹具双向）"
 }
+
+selfcheck_record_bounded() {  # selfcheck_record_bounded <outdir>
+  # 43) 录制要有墙钟兜底 + 被测进程存活复核 + 「一张表都没有」不许被印成完成。
+  #     触发条（09-23 10:38→11:50 实测）：被测实例在录制中途消失，而 `--time-limit 20s`
+  #     **从不触发**（它计的是采到的时间），xctrace 挂在死目标上一整小时，
+  #     整条 M2 收尾链白烧一个稀缺窗口；而那五张表全空的趟照样被印成「✓ 第 1 趟完成」。
+  #     真子进程测（不是读代码）：假 `xcrun` 三种行为各判一次 + 覆盖判据正反两向。
+  #     假目标一律 `disown`：不脱手就会把 `Terminated: 15  sleep 300` 这种 job-control
+  #     噪声印进 selfcheck 的输出，看着像有一项崩了（今天第一次跑就是这样）。
+  local fx="$1/recordfx" path0="$PATH" bad=0 out rc left
+  rm -rf "$fx"; mkdir -p "$fx/bin"
+  printf '%s\n' '#!/bin/bash' \
+    'case "${FAKE_XC:-ok}" in' \
+    '  hang) trap "exit 0" TERM; while :; do sleep 0.2; done ;;' \
+    '  die)  kill -TERM "${FAKE_TARGET:-0}" 2>/dev/null; sleep 0.3 ;;' \
+    '  *)    exit 0 ;;' \
+    'esac' > "$fx/bin/xcrun"
+  chmod +x "$fx/bin/xcrun"
+  PATH="$fx/bin:$PATH"; export PATH
+  local RECORD_SLACK_S=2 RECORD_POLL_S=1
+
+  out="$fx/hang"; mkdir -p "$out"
+  sleep 300 & PID=$!; disown; FAKE_XC=hang export FAKE_XC
+  ( record_bounded "$out" "$out/x.trace" T 1 ) >"$out/run.txt" 2>&1; rc=$?
+  left=$(pgrep -f "$fx/bin/xcrun" | wc -l | tr -d ' ')
+  [ "$rc" != "0" ] && [ -f "$out/REFUSED" ] && grep -q 墙钟 "$out/REFUSED" \
+    || { fail "录制挂死被当成成功（rc=$rc，REFUSED 缺或不含墙钟）⇒ 又会永等"; bad=1; }
+  [ "$left" = "0" ] || { fail "墙钟兜底之后场上还剩 $left 个假采集进程 ⇒ 自己起的必须自己退"; bad=1; }
+  kill -TERM "$PID" 2>/dev/null; wait "$PID" 2>/dev/null
+
+  out="$fx/died"; mkdir -p "$out"
+  sleep 300 & PID=$!; disown; FAKE_TARGET="$PID" export FAKE_TARGET; FAKE_XC=die export FAKE_XC
+  ( record_bounded "$out" "$out/x.trace" T 1 ) >"$out/run.txt" 2>&1; rc=$?
+  [ "$rc" != "0" ] && [ -f "$out/REFUSED" ] && grep -q 消失 "$out/REFUSED" \
+    || { fail "被测进程中途消失没被判废（rc=$rc）⇒ 五张表全空的样本又会进对比表"; bad=1; }
+  kill -0 "$PID" 2>/dev/null || true
+
+  out="$fx/ok"; mkdir -p "$out"
+  sleep 300 & PID=$!; disown; FAKE_XC=ok export FAKE_XC
+  ( record_bounded "$out" "$out/x.trace" T 1 ) >"$out/run.txt" 2>&1; rc=$?
+  [ "$rc" = "0" ] && [ ! -f "$out/REFUSED" ] \
+    || { fail "正常收尾的趟被误判成挂死（rc=$rc）⇒ 墙钟余量太紧，会把好样本全砍光"; bad=1; }
+  kill -TERM "$PID" 2>/dev/null; wait "$PID" 2>/dev/null
+
+  out="$fx/cover"; mkdir -p "$out"
+  ( require_covered_evidence "$out" ) >"$out/a.txt" 2>&1; rc=$?
+  [ "$rc" != "0" ] && [ -f "$out/REFUSED" ] \
+    || { fail "一张表都没有的目录被判成可用（rc=$rc）⇒ 「✓ 第 i 趟完成」又是空口号"; bad=1; }
+  echo "<row/>" > "$out/hitches.xml"
+  ( require_covered_evidence "$out" ) >"$out/b.txt" 2>&1; rc=$?
+  [ "$rc" = "0" ] || { fail "有非空 hitches.xml 的目录仍被判废 ⇒ 这条判据只认不出也判不进"; bad=1; }
+  out="$fx/dry"; mkdir -p "$out"
+  ( DRY_RUN=1; require_covered_evidence "$out" ) >"$out/c.txt" 2>&1; rc=$?
+  [ "$rc" = "0" ] || { fail "演练档被这条判死 ⇒ selfcheck 自己会红"; bad=1; }
+
+  PATH="$path0"; export PATH
+  unset FAKE_XC FAKE_TARGET
+  [ "$bad" = "0" ] && ok "录制有墙钟兜底、被测消失当场判废、空表不算完成（六种形状，真子进程）"
+}

@@ -212,6 +212,7 @@ cmd_idle() {
   fi
   idle_parse_tables "$out"
   idle_write_summary "$out"
+  require_covered_evidence "$out"
 }
 
 idle_record_hitches() {  # idle_record_hitches <outdir> <period>
@@ -222,8 +223,7 @@ idle_record_hitches() {  # idle_record_hitches <outdir> <period>
     echo "==> 1/4 录 Animation Hitches ${SECONDS_HITCHES}s（这期间不去碰鼠标键盘，否则量的就不是心跳）"
   fi
   run rm -rf "$out/hitches.trace"
-  run xcrun xctrace record --template "$TEMPLATE_HITCH" --attach "$PID" \
-    --time-limit "${SECONDS_HITCHES}s" --output "$out/hitches.trace" --no-prompt --quiet
+  record_bounded "$out" "$out/hitches.trace" "$TEMPLATE_HITCH" "$SECONDS_HITCHES"
   for t in "${HITCH_TABLES[@]}"; do
     [ "$DRY_RUN" = "1" ] || export_table "$out/hitches.trace" "$t" "$out"
   done
@@ -240,8 +240,7 @@ idle_record_time_profiler() {  # idle_record_time_profiler <outdir>
   local out="$1"
   echo "==> 2/4 录 Time Profiler ${SECONDS_TP}s"
   run rm -rf "$out/time.trace"
-  run xcrun xctrace record --template "$TEMPLATE_TP" --attach "$PID" \
-    --time-limit "${SECONDS_TP}s" --output "$out/time.trace" --no-prompt --quiet
+  record_bounded "$out" "$out/time.trace" "$TEMPLATE_TP" "$SECONDS_TP"
   [ "$DRY_RUN" = "1" ] || export_table "$out/time.trace" "time-profile" "$out"
 }
 

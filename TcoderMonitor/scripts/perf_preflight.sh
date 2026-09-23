@@ -304,6 +304,68 @@ export_table() {  # export_table <trace> <schema> <outdir>
   fi
 }
 
+# 录制的墙钟兜底与被测进程存活复核（包 14）。默认值可被夹具改小，不改判定形状。
+RECORD_SLACK_S="${RECORD_SLACK_S:-120}"
+RECORD_POLL_S="${RECORD_POLL_S:-5}"
+
+refuse_sample() {  # refuse_sample <outdir> <原因…>：一趟当场自认没采到数
+  # 形状与上面那道上下文闸门一致（同一个 `REFUSED` 文件、同一个读者）：
+  # `usable_sample` 与 `perf_trio_agreement` 都按这个文件跳趟。
+  # **不再另开一枚 meta 键**：理由写进正文就已经有读者，再开键就是第二个入口。
+  printf 'REFUSED\n%s\n' "$2" > "$1/REFUSED"
+}
+
+record_bounded() {  # record_bounded <outdir> <trace 路径> <模板> <时长秒>
+  # 触发这条的实测（09-23 10:38→11:50）：被测实例在录制中途消失，而 `--time-limit 20s`
+  # **从不触发**——它计的是采到的时间，目标没了就没有时间可计。于是 xctrace 挂在死目标上
+  # 一整小时（trace 停在 52 KB），整条 M2 收尾链白烧一个稀缺窗口。
+  # 导表那一侧的诚实性是好的（五张表全报「未覆盖」、没编数），坏的是没有墙钟上限、
+  # 也没有"被测进程活到窗口末尾没有"这一步复核。
+  # 本机没有 coreutils 的 `timeout`（那个叫 gtimeout），所以用"后台起 + 轮询 +
+  # 只收自己 spawn 的那个 pid"（横切约束 2.1：绝不按名字广播 kill）。
+  local out="$1" trace="$2" template="$3" secs="$4" pid rc=0 waited=0
+  local limit=$((secs + RECORD_SLACK_S))
+  echo "    \$ xcrun xctrace record --template $template --attach $PID --time-limit ${secs}s --output $(basename "$trace")（墙钟上限 ${limit}s）"
+  [ "$DRY_RUN" = "1" ] && return 0
+  xcrun xctrace record --template "$template" --attach "$PID" \
+    --time-limit "${secs}s" --output "$trace" --no-prompt --quiet &
+  pid=$!
+  while [ "$waited" -lt "$limit" ]; do
+    kill -0 "$pid" 2>/dev/null || break     # kill -0 只探活，不发信号
+    sleep "$RECORD_POLL_S"; waited=$((waited + RECORD_POLL_S))
+  done
+  local stuck=0
+  if kill -0 "$pid" 2>/dev/null; then
+    stuck="$waited"
+    echo "    ⚠ 录制到墙钟上限 ${limit}s 仍未收尾 ⇒ 只收自己起的采集进程 pid=$pid"
+    kill -TERM "$pid" 2>/dev/null
+  fi
+  wait "$pid" 2>/dev/null || rc=$?
+  if ! kill -0 "$PID" 2>/dev/null; then
+    refuse_sample "$out" "这一趟判废：被测进程 pid=$PID 在录制期间消失（走了 ${waited}s，卡住 ${stuck}s）——那份 trace 里必然没有数。"
+    die "被测进程在录制期间消失 ⇒ 这一趟判废（宁可没数，也不要一份五张表全空的『读数』）"
+  fi
+  if [ "$stuck" != "0" ]; then
+    refuse_sample "$out" "这一趟判废：xctrace 未在墙钟上限 ${limit}s 内自行停表（挂死 ${stuck}s）。"
+    die "录制挂死 ⇒ 这一趟判废"
+  fi
+  [ "$rc" = "0" ] || echo "    ⚠ xctrace record 退出码 $rc（导表那一步会如实报缺哪张表）"
+  return 0
+}
+
+require_covered_evidence() {  # require_covered_evidence <outdir>：一张表都没行数 ⇒ 这趟不算完成
+  # 为什么必须在代码里：`perf_wait_window.sh` 的 `✓ 第 i 趟完成` 只看本脚本的退出码，
+  # 而 `set -uo pipefail`（无 -e）让失败的 xctrace 一路走到 summary 照样退 0 ⇒
+  # 今天那趟五张表全空也被印成「✓ 完成」，只差没被计进 3/3。
+  local out="$1" t
+  [ "$DRY_RUN" = "1" ] && return 0     # 演练档本来就不导表，不拿这条判它
+  for t in hitches hitches-renders time-profile; do
+    [ -s "$out/$t.xml" ] && return 0
+  done
+  refuse_sample "$out" "这一趟判废：三张关键表（hitches / hitches-renders / time-profile）一张都没有行数。"
+  die "采不到任何一张关键表 ⇒ 这趟不许被印成『完成』（见同目录 REFUSED）"
+}
+
 meta_write() {  # meta_write <outdir> <键=值...>
   local out="$1"; shift
   # 目录由本函数自己保证存在：cmd_switch 的 mkdir 在 per-page 循环里，

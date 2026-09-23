@@ -122,6 +122,7 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_trio_agreement "$out"       # 39) ≥3 趟那半句「且取值一致」：五种形状各判一次，缺件/不足都不许报 3/3
   item selfcheck_cadence_two_budgets "$out"    # 35) p95 判据必须两把预算并排印、且真会分歧
   item selfcheck_md_tables_unbroken "$out"     # 30) markdown 表格不许有夹在行中间的裸续行
+  item selfcheck_record_bounded "$out"          # 43) 录制要有墙钟兜底：被测进程一消失就当场判废，别永等
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：这三行必须在 cmd_selfcheck 之前，
