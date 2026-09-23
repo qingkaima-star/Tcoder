@@ -66,16 +66,7 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
                                      lex: lex, roleTally: roleTally)
         // RD-15：范围台账同批落盘（内部读数直传，一个数都不重算）。
         metrics.scanSurface = Self.scanSurface(from: coverage)
-        // RD-42：词法台账里那枚"按分区归位为非代码的行数"**直传**进契约 ——
-        // 不在这里重算、也不在界面侧从中文句子里抠回来（那都是第二把尺子）。
-        // ⚠️ 故意**不**并进下面那条 `scanLimitations`：那是"没量准"的账，
-        // 而分区归位是已经量到了、只是分类不同（口径）。读者见 `MixedLanguageRegionCaliber`。
-        metrics.nonCodeRegionLineCount = lex.integrity.nonCodeRegionLineCount
-        // 契约接入（P7-C 3-2）：判据用 `limitationSummary` 非空而不是 `isPartial` —— 前者还含
-        // 「按规则排除了多少条目」这类**范围**事实，读者要知道数字是在什么范围内测出来的。
-        let limits = coverage.limitationSummary + coverage.surfaceNotes
-            + ComplexityEngine.JavaSignatureDeclines.notes(for: files)
-        metrics.scanLimitations = limits.isEmpty ? nil : limits
+        Self.applyLedgerReadouts(lex: lex, coverage: coverage, files: files, to: &metrics)
         return AnalysisOutcome(metrics: metrics, coverage: coverage)
     }
 
