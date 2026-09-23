@@ -356,13 +356,15 @@ enum StabilityEvidence {
     static func downgraded(_ curve: CurveResult, logs: LogSummary) -> CurveResult {
         let capped = Swift.min(curve.score, thinEvidenceScoreCeiling)
         let risk = capped < curve.score ? GitCadenceEvidence.risk(afterCappingTo: capped) : curve.risk
-        return CurveResult(score: capped, detail: curve.detail + thinNote(logs), risk: risk)
+        return CurveResult(score: capped, detail: HealthCurves.noted(curve.detail, [thinNote(logs)]), risk: risk)
     }
 
     /// 评分卡那一行后面的标记：这一维**未判定**，不是"判定为普通"。
+    /// 注记本身不带括号 —— 括号在整句键里（中文「（）」、英文「()」）。
     static func thinNote(_ logs: LogSummary) -> String {
-        "（证据太薄·未判定：仅 \(NumberFormat.grouped(logs.totalLinesScanned)) 行 < "
-            + "\(NumberFormat.grouped(minimumLogLines)) 行下限，封顶 "
-            + "\(GitCadenceEvidence.fixed(thinEvidenceScoreCeiling)) 分）"
+        localizedFormat("证据太薄·未判定：仅 %1$@ 行 < %2$@ 行下限，封顶 %3$@ 分",
+                        NumberFormat.grouped(logs.totalLinesScanned),
+                        NumberFormat.grouped(minimumLogLines),
+                        GitCadenceEvidence.fixed(thinEvidenceScoreCeiling))
     }
 }

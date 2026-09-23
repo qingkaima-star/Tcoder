@@ -10,6 +10,9 @@ import Foundation
 /// 共用的插值原语（`ScoreCurve.piecewise` / `clamped`）、标定常量
 /// `HealthCurves.smallSampleCodeLines`、格式化与风险分档工具都留在 `ScoreCurves.swift`，
 /// 这里只是调用方——同一个原语不留第二份（两份口径并存时，错的那套常在喂数据）。
+///
+/// ⚠ 批次 P58 改过本文件的 detail 文案**写法**（片段插值 → 整句键 + 位置参数）：
+/// 中文态输出逐字未变，变的是英文态能不能查到译文。锚点表一个数字都没动。
 extension HealthCurves {
 
     // MARK: - 复杂度
@@ -21,7 +24,7 @@ extension HealthCurves {
     /// 在均值/分母/热点榜三者都没有证据时让整个维度缺席，而不是调到这里。
     static func complexity(averageCC: Double, highRiskCount: Int, maxCC: Int, functionCount: Int) -> CurveResult {
         if functionCount == 0 {
-            return CurveResult(score: 100, detail: "未发现可计数的函数体", risk: .none)
+            return CurveResult(score: 100, detail: localizedCopy("未发现可计数的函数体"), risk: .none)
         }
         let base = ScoreCurve.piecewise(averageCC, through: [
             (x: 1, score: 100), (x: 3, score: 92), (x: 5, score: 80), (x: 8, score: 60),
@@ -32,10 +35,10 @@ extension HealthCurves {
         let deducted = highRiskPenalty + outlierPenalty
         let score = ScoreCurve.clamped(base - deducted)
         let detail = joined([
-            "平均圈复杂度 \(decimal(averageCC))",
-            "\(whole(highRiskCount)) 个函数 CC≥16",
-            "最大 \(maxCC)",
-            deducted > 0 ? "基准 \(decimal(base)) 分扣 \(decimal(deducted)) 分" : ""
+            localizedFormat("平均圈复杂度 %1$@", decimal(averageCC)),
+            localizedFormat("%1$@ 个函数 CC≥16", whole(highRiskCount)),
+            localizedFormat("最大 %1$@", whole(maxCC)),
+            deducted > 0 ? localizedFormat("基准 %1$@ 分扣 %2$@ 分", decimal(base), decimal(deducted)) : ""
         ])
         return CurveResult(score: score, detail: detail, risk: graded(score, 80, 60, 40, 22))
     }
@@ -52,9 +55,15 @@ extension HealthCurves {
         let lines = Swift.max(0, codeLines)
         let detail: String
         if lines < smallSampleCodeLines {
-            detail = joined(["重复率 \(percent(value))", "样本过小，按 \(whole(lines)) 行代码估计，置信度低"])
+            detail = joined([
+                localizedFormat("重复率 %1$@", percent(value)),
+                localizedFormat("样本过小，按 %1$@ 行代码估计，置信度低", whole(lines))
+            ])
         } else {
-            detail = joined(["重复率 \(percent(value))", "按 \(whole(lines)) 行代码统计"])
+            detail = joined([
+                localizedFormat("重复率 %1$@", percent(value)),
+                localizedFormat("按 %1$@ 行代码统计", whole(lines))
+            ])
         }
         return CurveResult(score: score, detail: detail, risk: graded(score, 90, 70, 45, 15))
     }
@@ -63,7 +72,7 @@ extension HealthCurves {
 
     static func codeQuality(hugeFileRatio: Double, averageFunctionLength: Int, longFunctions: Int, totalFiles: Int) -> CurveResult {
         if totalFiles == 0 {
-            return CurveResult(score: 100, detail: "未发现可评估的源码文件", risk: .none)
+            return CurveResult(score: 100, detail: localizedCopy("未发现可评估的源码文件"), risk: .none)
         }
         let hugeScore = ScoreCurve.piecewise(ScoreCurve.clamped(hugeFileRatio, 0, 1), through: [
             (x: 0, score: 100), (x: 0.02, score: 92), (x: 0.05, score: 78),
@@ -76,10 +85,11 @@ extension HealthCurves {
         let longPenalty = Swift.min(20.0, Double(Swift.max(0, longFunctions) / 10) * 2)
         let score = ScoreCurve.clamped((hugeScore + lengthScore) / 2 - longPenalty)
         let detail = joined([
-            "巨大文件占比 \(percent(hugeFileRatio))",
-            "平均函数 \(whole(averageFunctionLength)) 行",
-            "共 \(whole(totalFiles)) 个文件",
-            longPenalty > 0 ? "\(whole(longFunctions)) 个超长函数扣 \(decimal(longPenalty)) 分" : ""
+            localizedFormat("巨大文件占比 %1$@", percent(hugeFileRatio)),
+            localizedFormat("平均函数 %1$@ 行", whole(averageFunctionLength)),
+            localizedFormat("共 %1$@ 个文件", whole(totalFiles)),
+            longPenalty > 0 ? localizedFormat("%1$@ 个超长函数扣 %2$@ 分",
+                                              whole(longFunctions), decimal(longPenalty)) : ""
         ])
         return CurveResult(score: score, detail: detail, risk: graded(score, 90, 70, 45, 15))
     }
@@ -91,7 +101,7 @@ extension HealthCurves {
     /// 免得一个占位值参与加权、把在场维度的权重摊薄。
     static func documentation(commentRatio: Double, todoCount: Int, fixmeCount: Int, totalLines: Int) -> CurveResult {
         if totalLines == 0 {
-            return CurveResult(score: 50, detail: "无源码可评估", risk: graded(50, 85, 65, 45, 25))
+            return CurveResult(score: 50, detail: localizedCopy("无源码可评估"), risk: graded(50, 85, 65, 45, 25))
         }
         // 峰值在 5%，2%~15% 为最佳带；两端都掉分——注释过多同样是维护成本，50% 只给 20 分。
         let ratio = ScoreCurve.clamped(commentRatio, 0, 1)
@@ -105,15 +115,15 @@ extension HealthCurves {
         let deducted = todoPenalty + fixmePenalty
         let score = ScoreCurve.clamped(base - deducted)
         let band: String
-        if ratio < 0.02 { band = "低于 2% 最佳下限" }
-        else if ratio > 0.15 { band = "注释过多同样扣分" }
-        else { band = "落在 2%~15% 最佳区间" }
+        if ratio < 0.02 { band = localizedCopy("低于 2% 最佳下限") }
+        else if ratio > 0.15 { band = localizedCopy("注释过多同样扣分") }
+        else { band = localizedCopy("落在 2%~15% 最佳区间") }
         let detail = joined([
-            "注释占比 \(percent(ratio))（\(band)）",
-            "TODO \(whole(todoCount)) 个",
-            "FIXME \(whole(fixmeCount)) 个",
-            "总行 \(whole(totalLines))（含空行与注释）",
-            deducted > 0 ? "标记扣 \(decimal(deducted)) 分" : ""
+            localizedFormat("注释占比 %1$@（%2$@）", percent(ratio), band),
+            localizedFormat("TODO %1$@ 个", whole(todoCount)),
+            localizedFormat("FIXME %1$@ 个", whole(fixmeCount)),
+            localizedFormat("总行 %1$@（含空行与注释）", whole(totalLines)),
+            deducted > 0 ? localizedFormat("标记扣 %1$@ 分", decimal(deducted)) : ""
         ])
         return CurveResult(score: score, detail: detail, risk: graded(score, 85, 65, 45, 25))
     }

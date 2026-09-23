@@ -43,7 +43,7 @@ extension WeightedHealthScorer {
     private func activityShortHistory(_ curve: CurveResult, _ cadence: GitCadenceEvidence) -> DimensionOutcome {
         let capped = Swift.min(curve.score, GitCadenceEvidence.shortHistoryScoreCeiling)
         return DimensionOutcome(
-            curve: CurveResult(score: capped, detail: curve.detail + cadence.shortHistoryNote,
+            curve: CurveResult(score: capped, detail: HealthCurves.noted(curve.detail, [cadence.shortHistoryNote]),
                                risk: capped < curve.score ? GitCadenceEvidence.risk(afterCappingTo: capped) : curve.risk),
             recommendations: ["提交历史仅 "
                 + "\(GitCadenceEvidence.fixed(cadence.spanDays)) 天，样本不足，"
@@ -53,7 +53,8 @@ extension WeightedHealthScorer {
 
     private func activityUnknown(_ curve: CurveResult, _ cadence: GitCadenceEvidence,
                                  _ daysSinceLast: Double?) -> DimensionOutcome {
-        DimensionOutcome(curve: CurveResult(score: curve.score, detail: curve.detail + cadence.unknownNote,
+        DimensionOutcome(curve: CurveResult(score: curve.score,
+                                            detail: HealthCurves.noted(curve.detail, [cadence.unknownNote]),
                                             risk: curve.risk),
                          issues: ActivityAdvice.staleIssues(daysSinceLast),
                          recommendations: ["提交历史缺可用的首末时间，日均无法计算，"

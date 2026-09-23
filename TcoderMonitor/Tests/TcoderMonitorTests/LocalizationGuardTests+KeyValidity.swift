@@ -110,6 +110,75 @@ extension LocalizationGuardTests {
         XCTAssertFalse(keys.contains("one"), "把子层的 one/other 当成了顶层键")
         XCTAssertFalse(keys.contains("NSStringLocalizedFormatKey"), "把元数据键当成了文案键")
     }
+    // MARK: - 守卫 1f（P58）：英文目录的值里不许留中日韩文字或标点
+
+    /// **登记了 ≠ 翻完了**：值里只要还留着一个中日韩字符，英文态那一行就是半英半中，
+    /// 而"查表必有键"那条守卫对它完全绿灯 —— 它只看键在不在，不看值。
+    ///
+    /// 为什么不复用仓里已有的两把 `containsHan`（`ScoreCurves` 与
+    /// `DependencyWordingGuardTests`）：那两条判的是「这算不算一个汉字**词**」，
+    /// 明令把全角标点排除在外；本条判的是「这段英文还**残留**着中文的痕迹吗」，
+    /// 所以 `「」`、`。`、`，` 一个都不许放过。**两个判据不同，别合并成一把尺子。**
+    static func cjkResidue(in text: String) -> [Character] {
+        text.filter { isCJKCodePoint($0) }
+    }
+
+    private static func isCJKCodePoint(_ character: Character) -> Bool {
+        character.unicodeScalars.contains { scalar in
+            let value = scalar.value
+            return (0x2E80...0x303F).contains(value)   // 中日韩部首、标点、假名
+                || (0x3041...0x33FF).contains(value)   // 平假名/片假名/中日韩符号
+                || (0x3400...0x4DBF).contains(value)   // 汉字扩展 A
+                || (0x4E00...0x9FFF).contains(value)   // 汉字
+                || (0xAC00...0xD7A3).contains(value)   // 韩文音节
+                || (0xF900...0xFAFF).contains(value)   // 兼容汉字
+                || (0xFE30...0xFE6F).contains(value)   // 兼容标点
+                || (0xFF00...0xFF60).contains(value)   // 全角形式（含「，」（））
+        }
+    }
+
+    static func entriesWithCJKResidue(_ entries: [(key: String, value: String)]) -> [String] {
+        entries.filter { !cjkResidue(in: $0.value).isEmpty }
+            .map { "\(cjkResidue(in: $0.value)) → \"\($0.key)\" = \"\($0.value)\"" }
+    }
+
+    func test_englishCatalogValuesCarryNoChineseResidue() throws {
+        let entries = try Self.catalog()
+        XCTAssertFalse(entries.isEmpty, "目录读空 ⇒ 这条判据在空转")
+        let offenders = Self.entriesWithCJKResidue(entries)
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些英文译文里还留着中日韩文字或标点 ⇒ 英文态那一行半英半中，"
+                    + "而「查表必有键」那条看不见它（它只看键在不在）：\n  "
+                    + offenders.sorted().joined(separator: "\n  "))
+        print("【英文目录纯净】扫 \(entries.count) 条 → 值里残留中日韩文字/标点 0 条"
+            + "（P58 首测 642 条里抓到 1 条：书名号「」）")
+    }
+
+    /// 元测试：书名号与汉字两种残留都要被抓到，半角引号/破折号/省略号不许误伤。
+    /// 没有这半边，上面那条绿只可能意味着"过滤器没匹配上任何东西"。
+    func test_meta_cjkResidueRulerCatchesBracketsAndSparesLatinPunctuation() {
+        let dirty = [
+            (key: "用「附加日志文件」手动选择。", value: "Use 「Attach Log Files」 by hand."),
+            (key: "任何汉字", value: "still 中文 here"),
+            (key: "全角逗号", value: "one，two"),
+        ].map { (key: $0.key, value: $0.value) }
+        XCTAssertEqual(Self.entriesWithCJKResidue(dirty).count, 3,
+                       "三种残留形状漏一种，那一族就会继续在英文目录里假绿")
+        // 英文译文里合法的标点：半角引号、en dash、省略号、中点、×
+        let clean = [
+            "Use \"Attach Log Files\" by hand.", "2%–15% band", "…coming later",
+            "Merges included · non-merge", "CC≥16", "−22 points", "Errors per 1,000 log lines",
+        ].map { (key: "k", value: $0) }
+        XCTAssertTrue(Self.entriesWithCJKResidue(clean).isEmpty,
+                      "合法英文标点被误判 ⇒ 下次有人为了过守卫去改译文")
+        // 反向自查：汉字这一档仍然判得出（上面 clean 全是拉丁文，漏了它也会"绿"）。
+        XCTAssertFalse(Self.cjkResidue(in: "键本身当然还是中文").isEmpty,
+                       "汉字判不出 ⇒ 这条尺子根本没有牙")
+        // **键**是中文原文，判据只量值：整本目录的键都含汉字，键算进去它就没法用了。
+        XCTAssertEqual(Self.entriesWithCJKResidue([(key: "中文键", value: "English value")]).count, 0,
+                       "把键算进去 ⇒ 每条键都违规，判据立刻失去意义")
+    }
+
     // MARK: - 守卫 1e：语言探针键不许消失
 
     /// `Theme.Layout.isChineseUI` 靠"查这条键回不回原词"判断界面语言。
