@@ -206,7 +206,7 @@ struct MetricTile: View {
                     // 只有**被限了行**的摘要才可能整段消失 ⇒ 给它挂全文去处。
                     // 英文窄态实测：复杂度风险页那格长成 `Peak line count for a single…`，
                     // 括号外的口径读不到。不限行的脚注自己折得开，挂上去反而把两行塞进气泡。
-                    .help(whenClipped: captionLineLimit != nil, localizedCopy(caption))
+                    .help(whenClipped: captionLineLimit != nil, caption)
                     if let captionHelp {
                         CopyHelpBadge(captionHelp)
                     }

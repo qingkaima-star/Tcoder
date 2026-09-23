@@ -77,6 +77,9 @@ extension View {
     /// 一律挂上就等于把"会折行、整段还在屏上"的那些也搬进取舍档 —— 两档混成一档 = 判据被关掉。
     @ViewBuilder
     func help(whenClipped clipped: Bool, _ text: String) -> some View {
-        if clipped { self.help(Text(text)) } else { self }
+        // 查表只放在这一处：这里是 tooltip 的唯一出口。调用点再查一次，在开着
+        // `TCODER_I18N_RUNTIME_LEDGER` 的那趟里会把**已经译好的英文串**当成一个新键记进 `.misses`
+        // （`record` 按"查完是否变样"判漏翻），漏翻台账就这么被自己人多喂了一条假条目。
+        if clipped { self.help(Text(localizedCopy(text))) } else { self }
     }
 }
