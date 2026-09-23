@@ -146,6 +146,33 @@ final class LogEvidenceIdentityAndStabilityTests: XCTestCase {
         XCTAssertTrue(record?.hasEventTime == true, "有 timestamp 就该有事件时间")
     }
 
+    /// RD-60 的第一条验收：**两把尺子先互相复现**，再谈契约。
+    ///
+    /// 精细那把是 `CrashEvidenceLedger`（四态逐条），粗的那把是界面现在能读的
+    /// `LogSummary` 近似（`scannedFiles` 里 role == .crash 的份数 − `crashCount`）。
+    /// 两把分母不同（一份报告可能含多次崩溃、副本各占一个文件），所以不许要求相等，
+    /// 但**必须**要求：计入次数两边同一个数；且粗尺的差额 ≥ 细尺里"没算的那几态"之和
+    /// —— 差额小于细账就是界面把没算的事说小了（那条红线比"不等"严重）。
+    func testCoarseRulerReproducesTheFineLedger() async throws {
+        try writePackageManifest(products: [])
+        try writeReport("ShopApp", version: "2.0 (9)", incident: "A1A1A1A1-1111-2222-3333-444444444444")
+        try writeReport("ShopApp", version: "2.0 (9)", incident: "B2B2B2B2-1111-2222-3333-444444444444",
+                        daysAgo: 40)
+        try write("Reports/empty.ips", "")
+        let (summary, evidence) = try await FileLogAnalyzer()
+            .analyzeWithEvidence(projectRoot: root, extraLogURLs: [], withinDays: 7)
+        XCTAssertEqual(summary.crashCount, evidence.countedCrashCount,
+                       "两把尺子的「计入了几次」必须是同一个数")
+        let coarseChannelFiles = summary.scannedFiles.filter { $0.role == .crash }.count
+        let uncounted = evidence.suspectedCount + evidence.parseFailedCount
+            + evidence.undatedConfirmedCount + evidence.historicalConfirmedCount
+            + evidence.staleBuildConfirmedCount + evidence.duplicateCount
+        XCTAssertGreaterThanOrEqual(coarseChannelFiles, uncounted + evidence.countedCrashCount,
+                                    "粗尺看到的崩溃通道文件数少于一件件数得来的总和 ⇒ 有一把在漏")
+        XCTAssertTrue(summary.crashEvidenceFootnote(windowDays: 7).contains("未产出可计数的证据"),
+                      "差额要在屏上出声，不能只活在细账里")
+    }
+
     // MARK: E · 稳定性输入（RD-24）
 
     private func logsFixture(errors: Int, lines: Int) -> LogSummary {
