@@ -77,6 +77,8 @@ preflight_gather() {  # 只取数：判据住 `preflight_gates*`，写盘住 `pr
   # 不是被测进程的事实。写成一句人话，免得上下文里留下一个看着像实测的"无在屏窗口"。
   [ "$PREFLIGHT_TIER" = "launch" ] && visible="启动档：此刻窗口尚未建立"
   others=$(concurrent_heavy_jobs)
+  # 第七维·预热：被测实例跑了多久（读不到留「取不到」，**不回落成 0**——0 会被读成"刚起来"）。
+  uptime_secs=$(instance_uptime_seconds "${pid:-}" || true)
   free_gib=$(disk_free_gib)
   mkdir -p "$SCRATCH" 2>/dev/null || true   # 样本根目录：项目内、.gitignore 已忽略
   other_detail=$(concurrent_heavy_jobs_detail)
@@ -97,9 +99,15 @@ preflight_gather() {  # 只取数：判据住 `preflight_gates*`，写盘住 `pr
   HEAD_TREE=$(provenance_product_tree "${MEASURE_REV:-HEAD}")
 }
 
+# 第七维·预热（`instance_uptime_seconds` / `preflight_gates_warmup`）住在旁边那个文件，
+# 由**本文件**自己 source 进来（不是调用方拼）：selfcheck 里有「单独 source preflight」那条路，
+# 它必须照样看得见全部函数 —— 两个入口各拿一半函数是这条链上写死不许发生的形状。
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/perf_warmup.sh"
+
 preflight_context() {  # preflight_context <outdir> <pid> [档]   档=measure(默认) | launch(冷启动)
   local out="$1" pid="$2" f="" cores load1 front visible others other_detail free_gib hard=0
-  local quiet qline i18n_ledger
+  local quiet qline i18n_ledger uptime_secs
   # 动态作用域：`preflight_gather`（取数）与 `preflight_gates`（判定，含被 selfcheck 第 17 项
   # **单独调用**那条路）读写的都是上面这几个 local，所以拆函数既没改取数顺序，也没引入新全局量；
   # 启动档的"跳过两维"只影响从本函数进来的调用，矩阵那条不传第三参 ⇒ 行为一字不变。
@@ -141,6 +149,7 @@ preflight_write_context() {  # preflight_write_context <outdir> <context 文件�
     echo "产物构建rev=${BUILD_REV:-未记录}  构建时树clean=${BUILD_CLEAN:-未记录}  ← 必须与上面 HEAD= 同一份代码，否则读数归错对象"
     [ -n "${PROVENANCE_NOTE:-}" ] && echo "   ※ 归属靠产物码 tree 放行（rev 不同）：${PROVENANCE_NOTE}"
     echo "实例数=${COEXIST:-1}  前台App=$front  被测进程visible=$visible"
+    echo "被测实例已跑=${uptime_secs:+${uptime_secs}s}${uptime_secs:-取不到}  预热线=${WARMUP_MIN_SECONDS:-120}s（低于线 ⇒ 量到的是启动首扫，不是稳态心跳）"
     echo "load1=$load1  核数=$cores  并发重活=${other_detail:-无}"
     echo "人输入静默=${quiet:-取不到}s  明细=${qline:-（探针没跑起来）}"
     echo "hitches_seconds=$SECONDS_HITCHES  tp_seconds=$SECONDS_TP"
@@ -275,6 +284,7 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
     preflight_gates_window
   fi
   preflight_gates_quiescence
+  preflight_gates_warmup
 }
 
 

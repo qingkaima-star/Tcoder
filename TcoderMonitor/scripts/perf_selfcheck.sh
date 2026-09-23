@@ -129,6 +129,7 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_md_tables_unbroken "$out"     # 30) markdown 表格不许有夹在行中间的裸续行
   item selfcheck_record_bounded "$out"          # 43) 录制要有墙钟兜底：被测进程一消失就当场判废，别永等
   item selfcheck_covered_evidence "$out"        # 44) 三张关键表都没行数的一趟，不许被印成「✓ 第 i 趟完成」
+  item selfcheck_warmup_dimension "$out"        # 53) 第七维·预热：etime 解析要对、未预热要拒、启动档不参与（列在最后：新维度不与既有项抢顺序）
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：这三行必须在 cmd_selfcheck 之前，

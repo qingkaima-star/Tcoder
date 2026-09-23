@@ -66,6 +66,9 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // （这条教训在上面 09-21 那段注释里已经写过一次，今天是第二次用到它）。
         "perf_measure_io.sh", "perf_report.sh", "perf_trace_frames.py",
         "perf_selfcheck_launchers.sh", "perf_selfcheck_tables.sh",
+        // 09-24 第七维·预热：`preflight_context` 涨到 410 行撞 400 口径，按"拆文件才是修复"
+        // 搬出 `perf_warmup.sh`。**搬出来的那片照样要点名**——第四次用这条教训（前三次见上面注释）。
+        "perf_warmup.sh",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。
