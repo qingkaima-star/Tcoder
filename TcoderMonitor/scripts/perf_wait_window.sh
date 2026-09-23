@@ -60,14 +60,22 @@ POLL=5
 START_BIN="$PWD/dist/Tcoder.app"
 
 started_pid=""
+started_pids=""                      # **这一批起过的每一个**（不是一个）
 launches_done=0                      # 本次排程已经起过几次 App（上限见下面 LAUNCH_MAX）
 LAUNCH_MAX="${LAUNCH_MAX:-2}"        # 只封顶"反复弹窗"这件事，不封顶等窗口：等待本身仍然到 DEADLINE 才放弃
 cleanup() {
-  # 只收拾自己起的那个；别人的实例一个都不碰。
-  if [ -n "$started_pid" ] && kill -0 "$started_pid" 2>/dev/null; then
-    local comm; comm=$(ps -o comm= -p "$started_pid" 2>/dev/null | sed 's#.*/##')
-    [ "$comm" = "TcoderMonitor" ] && kill -TERM "$started_pid" 2>/dev/null
-  fi
+  # 只收拾自己起的那些；别人的实例一个都不碰。
+  # 【今晚漏两次的那格】原来只记 `started_pid` 一个，而一批里最多允许起 LAUNCH_MAX=2 次
+  # （第 2 趟之后场上被录制档收干净 ⇒ 第 3 趟重新起一个，`started_pid` 被覆盖）
+  # ⇒ **前一个再也没有人收**，变成下一个人的"实例数不为 1"。22:03 与 22:35 两批各漏一个，
+  # 22:44 我自己的 `switch` 档就被这漏下来的那个拒跑（同一台机器上第二个受害者是我）。
+  local p comm
+  for p in $started_pids; do
+    kill -0 "$p" 2>/dev/null || continue
+    comm=$(ps -o comm= -p "$p" 2>/dev/null | sed 's#.*/##')
+    [ "$comm" = "TcoderMonitor" ] && kill -TERM "$p" 2>/dev/null
+  done
+  started_pids=""
 }
 # 【今天实测的失效】原来三件事共用 `trap cleanup EXIT INT TERM`，而 handler 里没有 exit
 # ⇒ bash 跑完 trap 就**回去继续等**：TERM/INT 都杀不掉它（今晚 kill -TERM 两次没反应）。
@@ -182,7 +190,8 @@ cond_instance_ready() {  # 场上恰有"我这一个"实例才算好；一个都
   launches_done=$((launches_done + 1))
   open "$START_BIN" && sleep 4
   started_pid=$(my_instance_pid)
-  echo "    已起自己的实例 pid=${started_pid:-?}（收尾只 TERM 这一个）"
+  [ -n "$started_pid" ] && started_pids="$started_pids $started_pid"
+  echo "    已起自己的实例 pid=${started_pid:-?}（本批累计起过：${started_pids:-无}；收尾逐个 TERM）"
   [ -n "$started_pid" ] || { echo "    起了却没认到 pid ⇒ 不往下走：收尾会漏掉它，那就是一格没人负责的窗口"; return 1; }
   return 0
 }
