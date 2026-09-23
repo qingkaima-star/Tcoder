@@ -66,7 +66,11 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
                                      lex: lex, roleTally: roleTally)
         // RD-15：范围台账同批落盘（内部读数直传，一个数都不重算）。
         metrics.scanSurface = Self.scanSurface(from: coverage)
-        Self.applyLedgerReadouts(lex: lex, coverage: coverage, files: files, to: &metrics)
+        // RD-42：词法台账里那枚"按分区归位为非代码的行数"**直传**进契约。
+        // ⚠️ 这一格的**唯一写者必须是本文件**（`NonCodeRegionReadoutTests` 按文件名点名写者）：
+        //     搬去别处 = 第二把尺子的入口，所以只搬下面那条限制说明，这一行留在原地。
+        metrics.nonCodeRegionLineCount = lex.integrity.nonCodeRegionLineCount
+        Self.applyLedgerReadouts(coverage: coverage, files: files, to: &metrics)
         return AnalysisOutcome(metrics: metrics, coverage: coverage)
     }
 

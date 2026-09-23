@@ -167,7 +167,7 @@ extension FileSystemCodeAnalyzer {
     }
 }
 
-// MARK: - 「直传型」台账装配（RD-42 归位行数、P7-C 扫描边界账）
+// MARK: - 「直传型」边界账装配（P7-C 扫描限制说明）
 //
 // 搬进本文件的理由是长度，不是主题：这一组连注释 12 行，留在
 // `FileSystemCodeAnalyzer.analyzeWithCoverage` 里就把本包 50 行闸门顶破了
@@ -175,15 +175,9 @@ extension FileSystemCodeAnalyzer {
 // 两批各加几行，合流后实测 52 行）。红了的正确反应是**搬**，不是抬闸门。
 // ⚠️ 一个数都不在这里重算：全部直传生产者读数（重算就是第二把尺子）。
 extension FileSystemCodeAnalyzer {
-    static func applyLedgerReadouts(lex: ComplexityEngine.LexAggregate,
-                                    coverage: CodeScanCoverage,
+    static func applyLedgerReadouts(coverage: CodeScanCoverage,
                                     files: [ScannedSourceFile],
                                     to metrics: inout CodeMetrics) {
-        // RD-42：词法台账里那枚"按分区归位为非代码的行数"直传进契约 ——
-        // 不在这里重算、也不在界面侧从中文句子里抠回来。
-        // ⚠️ 故意**不**并进下面那条 `scanLimitations`：那是"没量准"的账，
-        // 而分区归位是已经量到了、只是分类不同（口径）。读者见 `MixedLanguageRegionCaliber`。
-        metrics.nonCodeRegionLineCount = lex.integrity.nonCodeRegionLineCount
         // 契约接入（P7-C 3-2）：判据用 `limitationSummary` 非空而不是 `isPartial` —— 前者还含
         // 「按规则排除了多少条目」这类**范围**事实，读者要知道数字是在什么范围内测出来的。
         let limits = coverage.limitationSummary + coverage.surfaceNotes
