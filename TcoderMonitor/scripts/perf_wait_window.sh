@@ -60,6 +60,8 @@ POLL=5
 START_BIN="$PWD/dist/Tcoder.app"
 
 started_pid=""
+launches_done=0                      # 本次排程已经起过几次 App（上限见下面 LAUNCH_MAX）
+LAUNCH_MAX="${LAUNCH_MAX:-2}"        # 只封顶"反复弹窗"这件事，不封顶等窗口：等待本身仍然到 DEADLINE 才放弃
 cleanup() {
   # 只收拾自己起的那个；别人的实例一个都不碰。
   if [ -n "$started_pid" ] && kill -0 "$started_pid" 2>/dev/null; then
@@ -159,8 +161,27 @@ cond_quiet() {  # idle 档：等"整段够久没人动"。参数=门槛秒数，
   return 1
 }
 
-cond_quiet_before_launch() {  # 只用在**起跑那一次**：下面马上要 open + 顶前台，门槛换成分两档里高的那条
-  cond_quiet "$LAUNCH_QUIET_WANT"
+cond_instance_ready() {  # 场上恰有"我这一个"实例才算好；一个都没有就**当场起**（起之前用高的那条静默门槛）
+  # 【为什么"要不要起"必须留在等待循环里】2026-09-23 16:47 现场：起跑那一瞬别人主树的实例还在
+  # （场上=1，但不是本树起的）⇒ 一次性的判断落成"不起"；三分钟后它退场，排程器却继续在
+  # 「实例数恰为 1」上等到超时，屏幕上还印着那个**已经消失的 pid**。人以为在排队，其实永远等不到。
+  if [ "$HARNESS_LAUNCHES" = "1" ]; then cond_no_instance; return; fi   # 那一档的实例归录制档起，多起一个就是 attach 错人
+  local n; n=$(instance_count)
+  if [ "$n" != "0" ]; then cond_one_instance; return; fi
+  cond_quiet "$LAUNCH_QUIET_WANT" || return 1
+  # 【起手机会要有上限】这条判断现在每 5 秒重跑一次；万一"认到自己那个实例"这一步失败，
+  # 不加封顶就等于**每 5 秒把 App 提到前台一次**——那不是测量，是对着别人干活的地方反复弹窗。
+  # 到顶就停手并报出来，让人来看，而不是自己一直试。
+  launches_done=$((launches_done + 1))
+  if [ "$launches_done" -gt "$LAUNCH_MAX" ]; then
+    echo "    已经起过 $LAUNCH_MAX 次仍没拿到'只有我这一个实例'的状态 ⇒ 停手，不每 5 秒重弹一次窗口"
+    return 1
+  fi
+  open "$START_BIN" && sleep 4
+  started_pid=$(my_instance_pid)
+  echo "    已起自己的实例 pid=${started_pid:-?}（收尾只 TERM 这一个）"
+  [ -n "$started_pid" ] || { echo "    起了却没认到 pid ⇒ 不往下走：收尾会漏掉它，那就是一格没人负责的窗口"; return 1; }
+  return 0
 }
 
 cond_someone_active() {  # interact 档：**必须检测到有人正在动**才开录
@@ -209,16 +230,10 @@ echo "==> 等窗口：$SAMPLES 趟 ${MODE}（release 口径，rev=$TAG），最�
 
 # 1) 起手先等静默：两档都要——interact 档要的是"录起来之后有人滚"，
 #    不是"现在就可以插进去"。人正忙着的时候起 App，只会把别人的焦点抢走。
-#    【起跑线按"接下来要不要自己起 App"分两档】判据与它印出的数字写在同一个 if 里，
-#    免得将来只改一条 ⇒ 屏幕上印的门槛和真正用的门槛不是一回事（§AJ 那一晚就是这么被弹走的）。
-FIRST_QUIET_COND=cond_quiet
-FIRST_QUIET_WANT="$QUIET_WANT"
-if [ "$MODE" != "interact" ] && [ "$LAUNCH_APP" = "1" ] && [ "$(instance_count)" = "0" ]; then
-  FIRST_QUIET_COND=cond_quiet_before_launch
-  FIRST_QUIET_WANT="$LAUNCH_QUIET_WANT"
-  echo "    本档接下来会自己起 App 并顶到前台 ⇒ 起跑线抬到人手静默 ≥${FIRST_QUIET_WANT}s（场上已有人在使用，见文件头那条实测）"
-fi
-wait_for "人手静默 ≥${FIRST_QUIET_WANT}s" "$FIRST_QUIET_COND" || exit 1
+#    【"要自己起 App"的高门槛不在这里判】它住在 `cond_instance_ready` 里——**紧挨着 open 那一行**，
+#    因此每一趟、每一次重试都算数。写在起跑处会漏：起跑时场上还有别人的实例（就不抬），
+#    别人的实例随后退场，后面那次真正的弹窗口就只按 8 秒过关了（§AJ 那晚的形状）。
+wait_for "人手静默 ≥${QUIET_WANT}s" cond_quiet || exit 1
 
 # 2) 起一个实例（或复用已有的那一个），并确认前台是它
 #    MEASURE_LAUNCH=1 时反过来：排程器**不起**，只等场上清零（见上面 HARNESS_LAUNCHES 那段）。
@@ -227,13 +242,12 @@ if [ "$HARNESS_LAUNCHES" = "1" ]; then
   wait_for "本仓没有重活在跑" cond_no_heavy_jobs || exit 1
   wait_for "场上没有 TcoderMonitor 实例" cond_no_instance || exit 1
 else
-  if [ "$(instance_count)" = "0" ] && [ "$LAUNCH_APP" = "1" ]; then
-    open "$START_BIN" && sleep 4
-    started_pid=$(my_instance_pid)
-    echo "    已起自己的实例 pid=${started_pid:-?}（收尾只 TERM 这一个）"
-  fi
   wait_for "本仓没有重活在跑" cond_no_heavy_jobs || exit 1
-  wait_for "实例数恰为 1" cond_one_instance || exit 1
+  if [ "$LAUNCH_APP" = "1" ]; then
+    wait_for "场上有且只有我这一个实例" cond_instance_ready || exit 1
+  else
+    wait_for "实例数恰为 1" cond_one_instance || exit 1
+  fi
   wait_for "前台是被测 App" cond_front_is_ours || exit 1
 fi
 
@@ -252,13 +266,12 @@ for i in $(seq 1 "$SAMPLES"); do
     wait_for "本仓没有重活在跑" cond_no_heavy_jobs || break
     wait_for "场上没有 TcoderMonitor 实例" cond_no_instance || break
   else
-  if [ "$(instance_count)" = "0" ] && [ "$LAUNCH_APP" = "1" ]; then
-    open "$START_BIN" && sleep 4
-    started_pid=$(my_instance_pid)
-    echo "    已起自己的实例 pid=${started_pid:-?}（收尾只 TERM 这一个）"
-  fi
   wait_for "本仓没有重活在跑" cond_no_heavy_jobs || break
-  wait_for "实例数恰为 1" cond_one_instance || break
+  if [ "$LAUNCH_APP" = "1" ]; then
+    wait_for "场上有且只有我这一个实例" cond_instance_ready || break
+  else
+    wait_for "实例数恰为 1" cond_one_instance || break
+  fi
   wait_for "前台是被测 App" cond_front_is_ours || break
   if [ "$MODE" = "interact" ]; then
     # 【开录时机：等"有人正在动"，不是等"没人动"】前三轮交互期全作废（`窗口内没人`），
