@@ -768,6 +768,7 @@
 "当前为离线模式，版本与漏洞结论来自内置快照。" = "Offline mode: version and vulnerability conclusions come from the built-in snapshot.";
 "分用途统计" = "Breakdown by usage";
 "该项目没有产出覆盖率报告，不参与计分。" = "This project produced no coverage report, so it is not scored.";
+"看得见的部分里没有发现覆盖率报告，不参与计分。" = "No coverage report was found within the part we could read, so it is not scored.";
 "这是「在用」" = "This is in-use, not free";
 "CPU 占用率" = "CPU utilization";
 "内存在用率" = "Memory utilization";
@@ -782,14 +783,34 @@
 "开启后需要重新执行分析才会生效。" = "Re-run the analysis for this setting to take effect.";
 "尚未分析覆盖率报告，不参与计分。" = "No coverage report has been analyzed, so it is not scored.";
 
+// WS-R16（RD-14 角色分档进契约）：`CLIScoreText.fileRoleLines` 的两句整句键。
+// 占位符顺序与键一致（`test_catalogPlaceholdersMatch` 逐条比），译文不许增删 %n$@。
+"文件角色分档：生产源码 %1$@ 个 / %2$@ 代码行 · 弱判定 %3$@ 个 · 八档全量与判据分布见 scan 落盘的 code.fileRoles.shares。" = "File roles: %1$@ production files / %2$@ code lines · %3$@ attributed on language evidence alone · the full eight-bucket table and the criterion counts live in code.fileRoles.shares of the scan JSON.";
+"文件角色分档对不平：八档合计 %1$@ 个文件，而本次扫到 %2$@ 个，相差 %3$@ 个 —— 两边不是同一个总体，要么有文件没归进任何一档，要么有文件被记进了两档，这份分档要按读数打折使用。" = "File role buckets do not reconcile: the eight buckets total %1$@ files while this scan saw %2$@, a difference of %3$@ - the two sides are not the same population, so either some files were never bucketed or some landed in two buckets; discount this breakdown.";
 // P52：健康维度那四条「优点/问题」句子以前用 `String(format:)` 直接拼中文模板，
 // 模板本身从不查表 ⇒ 英文态整句是中文（屏上各 4×，是剩余 B 里最高频的一族）。
 // 改成 `localizedFormat` + 位置参数；同一个署名数在一句里出现两次，用同一个 `%1$@`。
 "重复代码率低（%1$@）" = "Low duplication rate (%1$@)";
-"重复代码 %1$@，共 %2$@ 处重复块" = "Duplicated code %1$@ across %2$@ duplicate blocks";
+// WS-R18（榜长冒充总数 · 评分解释文本那一处残留）：上面那条「共 %2$@ 处重复块」以前吃的是
+// `code.duplicatedBlocks.count` —— 那是被 `DuplicationEngine.maxBlocks` 截过的**榜长**，
+// 2026-09-23 本仓实扫榜内 20 · 榜外未列 96，句子说「共 20 处」而真总数是 116（少报 96 处）。
+// 现在按三态各一句：榜外有账 / 榜外为零 / 榜外根本没统计过（那一句不许出现「共」字）。
+// 取法只有一处：`CodeMetrics.reportedDuplicatedBlockTotalCount`（去重后口径）。
+"重复代码 %1$@，共 %2$@ 处重复块（去重后口径，榜内只列 %3$@ 处明细）" = "Duplicated code %1$@ across %2$@ duplicate blocks (deduplicated basis; the board lists only %3$@ of them)";
+"重复代码 %1$@，共 %2$@ 处重复块（明细已全部列出）" = "Duplicated code %1$@ across %2$@ duplicate blocks (every block is listed)";
+"重复代码 %1$@，榜内只列 %2$@ 处重复块，总处数本次未统计" = "Duplicated code %1$@; the board lists %2$@ duplicate blocks, and no total was counted this time";
 "贡献分布合理（%1$@ 个署名，头号署名占 %2$@；署名按工作流计，不等于 %1$@ 个人）" = "Contribution is well spread (%1$@ identities, the top one holds %2$@; identities are workflows, not %1$@ people)";
 "「%1$@」这个署名占 %2$@ 提交，单点风险高（署名按工作流计，不等同于一个人头）" = "Identity \u201c%1$@\u201d holds %2$@ of commits \u2014 single-point risk (identities are workflows, not people)";
 
+// ── RD-15（WS-R17 · 扫描范围进契约）：`code.scanSurface` 那 12 格的上屏两句 ──────────
+// 之前这些数只活在 `scanLimitations` 的中文句子里，读 JSON 与看终端的人拿不到数。
+// 装配口 `CodeScanSurfaceReadout.accountingLines(_:)` 是界面与 CLI 共用的**唯一**那一个。
+// 三态各一句：没有台账 ⇒ 缺席话；量到的 0 ⇒ 一个字都不许多；有数 ⇒ 下面那两句纯数字。
+// ⚠️ 值里一律不出现 ASCII 双引号（本目录踩过：那会让整份目录解析失败而守卫全绿）。
+"扫描范围：本次没有范围台账 —— 这一路没跑过，或这份报告出自没有这一格的旧结构，所以「排除了几个」这类读数一个都不成立。" = "Scan scope: this report carries no scope ledger — that path never ran, or the report predates this field, so no reading of the excluded counts holds here.";
+"扫描范围台账：遍历看到 %1$@ 个条目 · 按规则排除 %2$@ 个（逐条点名 %3$@ · 未点名 %4$@）· 没量到的范围 %5$@ 条。" = "Scan scope ledger: %1$@ entries seen · %2$@ excluded by rule (%3$@ named one by one · %4$@ unnamed) · %5$@ ranges were not measured.";
+"排除条目的行数：%1$@ · 仓库标记 %2$@ 个 · 其中 submodule 形状 %3$@ 个 · 软链接文件 %4$@ 个 · 目录软链接 %5$@ 个 · 名单外被系统判定剪掉的目录 %6$@ 个 · 读不动的目录 %7$@ 个。" = "Lines in the excluded entries: %1$@ · repository markers %2$@ · of them submodule-shaped %3$@ · symlinked files %4$@ · symlinked directories %5$@ · directories pruned by the system bundle rule off our list %6$@ · unreadable directories %7$@.";
+"行数未统计" = "Line count not measured";
 // 批次 P53（Git 洞察口径句·先拼再上屏的那一族）：这一族的毛病不是"没键"，
 // 而是**先把带测得值的中文片段拼成串、再交给渲染层查表** —— 拼出来的整串里嵌着
 // 「279」「606」这样的测得值，目录里不可能有对应的键，于是英文态永远出中文；
@@ -881,3 +902,29 @@
 "均值为全仓 %1$@ 个函数" = "Mean over all %1$@ functions in the repository";
 "均值为全仓" = "Mean over the whole repository";
 "%1$@；CC≥16 与最大 CC 只统计热点榜前 %2$@ 个" = "%1$@; the CC≥16 count and the maximum are tallied only over the top %2$@ hotspot functions";
+
+# 批次 P59a（健康评分：建议/短板/垫白一族）——`Services/Health` 里这些句子原先是裸字面量，
+# 经 `Text(变量)` 直接上屏，压根没查表：登记了也白登记（守卫 1 只看 `localized*` 的实参，看不见它们）。
+"查询失败" = "Query failed";
+"版本未解析" = "Version unresolved";
+"生态不支持" = "Ecosystem unsupported";
+"未进查询批次" = "Left out of the query batch";
+"未发起核对" = "Never attempted";
+"%1$@ %2$@ 条" = "%1$@: %2$@";
+"其余维度处于可接受区间。" = "The remaining dimensions sit inside the acceptable range.";
+"建议保持观察，待各维度数据补齐后复核。" = "Keep observing; revisit once the missing dimension data is collected.";
+"函数复杂度可控（最高 CC %1$@）" = "Complexity is contained (max CC %1$@)";
+"%1$@ 个函数圈复杂度 ≥16，最高 %2$@" = "%1$@ functions at cyclomatic complexity ≥16, max %2$@";
+"优先拆分最高复杂度函数，用早返回替代嵌套分支" = "Split the most complex functions first; replace nested branches with early returns";
+"抽取重复块为共享工具或基类，优先处理跨服务重复" = "Extract duplicated blocks into shared helpers or base classes, starting with cross-service repeats";
+"文件规模健康，巨大文件占比低" = "File sizes are healthy; few oversized files";
+"%1$@ %2$@ 行，远超单文件上限" = "%1$@ has %2$@ lines, far beyond the single-file limit";
+"注释密度适中（%1$@）" = "Comment density is moderate (%1$@)";
+"为公共 API 与复杂分支补充说明性注释" = "Add explanatory comments to public APIs and complex branches";
+"当前无明显短板：在场维度都落在可接受区间，综合分只由这些分量按权重算出，没有额外加分项。" = "No obvious weak spot: every present dimension sits in the acceptable range, and the overall score is only these components weighted - nothing earns a bonus.";
+"本次所有参与计分的维度都属于代码口径，因此它与综合分同源同值。" = "Every scored dimension in this run belongs to the code basis, so it shares the overall score's source and value.";
+"代码口径只统计靠改本仓库代码就能抬起来的维度；已排除 %1$@——它们量的是提交历史的节奏与署名分布、第三方依赖与运行日志，不是这份代码本身的好坏。" = "The code basis counts only the dimensions a change in this repository can lift; excluded %1$@ - they measure commit cadence and authorship, third-party dependencies and runtime logs, not the quality of this code.";
+"先在侧栏「添加项目」选择本地仓库目录，或点右上角「重新分析」采集指标。" = "Use \"Add Project\" in the sidebar to pick a local repository, or \"Re-analyse\" in the top-right to collect metrics.";
+"尚无可用指标" = "No metrics available yet";
+"尚无可用指标，无法给出健康评分；选择项目目录后会自动完成采集。" = "No metrics are available, so no health score can be given; selecting a project directory collects them automatically.";
+"已采集到输入，但%1$@各维度都缺少可计分证据，本次不给出综合分，避免把没测到当成好结果。" = "Inputs were collected, but every dimension among %1$@ lacks scoreable evidence, so no overall score is given this run - never read \"not measured\" as a good result.";

@@ -4,11 +4,11 @@ import XCTest
 /// OWNER: 总工（设计总监线）—— 九页实拍复核的**过期判据**。
 ///
 /// 读 `docs/界面-乱的清单.md` 里那张「每页最近一次实拍在哪个头」的表，
-/// 对每一行把它登记的头与 `HEAD` 之间那条依赖面**净差异**真的问一遍 git，
-/// **非空即判红**：那一页的实拍已经过期，屏上可能有没人看过的变化。
-/// （2026-09-23：执行从 `git log <头>..HEAD` 改成 `git diff --name-only <头> HEAD`。
-///   表里第三列仍写 `git log …` 给人看依赖面，取数不变；改的是"问过 git 哪一种问题"，
-///   理由见 `netChanges` 上面那段——历史形状不等于内容差异，实测六行净差异为 0 却被判过期。）
+/// 对每一行把它自己写出的那条 `git log <头>..HEAD -- <依赖面>` 真的跑一遍，
+/// **非空即过期**：那一页的实拍已经过期，屏上可能有没人看过的变化。
+/// 过期之后**必须出声**（RD-57）：要么重拍那一页并更新表里的头，
+/// 要么进同一份文档里的「### 待重拍积压」逐条挂账（页 / 停在 / 拧过期的提交 / 挂账人 / UTC 分钟，24 小时宽限）。
+/// 判红的仍然是"屏上变了却谁也没说"这一件——只是不再拿全机唯一那格 App 窗口去卡所有人。
 ///
 /// 为什么必须有它（而不是把表写漂亮就完事）：这张表第一次写出来就写错了两行 ——
 /// 初稿把 Git 洞察 / 贡献者 / 错误日志 / 依赖分析 一起记在 `fb94e88` 那批上，
@@ -129,25 +129,11 @@ final class EvidenceFreshnessTests: XCTestCase {
 
     // MARK: - 真判据
 
-    /// 这一页的依赖面从实拍那个头到现在**净变了哪些文件**（净差异口径）。
-    ///
-    /// 为什么不是 `git log <头>..HEAD`（提交数）——2026-09-23 实测的结构性误红：
-    /// 十行里有六行的 `log` 非空（3~7 个提交）而**净差异为 0 个文件**：
-    /// 性能监控 / Git 洞察 / 贡献者 / 错误日志 / 依赖分析 / 全九页外壳。
-    /// 形状是"这条分支的历史上有提交动过这条路径，可顶到最后内容与实拍端一字不差"
-    /// ——常见来源就是并 main（分支旧内容被顶回去），但**根因不是 merge，是拿历史形状当内容差异**。
-    /// （第一版我把原因写成"merge 提交被 git log 数出来"，自己造夹具时被 git 的路径简化剪掉而否证；
-    ///   结论方向没变，措辞按夹具能复现的那个说法改定。）
-    /// ⇒ 实拍过期问的本来就是一句话：**屏上的内容变了没有** —— 那是净差异，不是历史形状。
-    ///
-    /// ⚠ 表里第三列仍登记 `git log <rev>..HEAD -- <路径>`：那是**人读的形状**（一眼看全依赖面），
-    /// 头与路径的取数不变；变的只有执行时问 git 哪一种问题。
-    static func netChanges(head: String, paths: [String],
-                           root: URL = EvidenceFreshnessTests.repoRoot) throws -> [String] {
+    static func runGitLog(head: String, paths: [String]) throws -> [String] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["diff", "--name-only", head, "HEAD", "--"] + paths
-        process.currentDirectoryURL = root
+        process.arguments = ["log", "--format=%h", "\(head)..HEAD", "--"] + paths
+        process.currentDirectoryURL = repoRoot
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
@@ -155,10 +141,10 @@ final class EvidenceFreshnessTests: XCTestCase {
         process.waitUntilExit()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         let text = String(decoding: data, as: UTF8.self)
-        // git 报错（头不存在、路径不存在）也要算"变了"：宁可误红，不可漏红。这一条照旧。
+        // git 报错（头不存在、路径不存在）也要算"动过"：宁可误红，不可漏红。
         guard process.terminationStatus == 0 else {
             let firstLine = text.split(separator: "\n").first.map(String.init) ?? "无输出"
-            return ["git 失败（exit " + String(process.terminationStatus) + "）：" + firstLine]
+            return ["git log 失败（exit " + String(process.terminationStatus) + "）：" + firstLine]
         }
         return text.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
     }
@@ -175,18 +161,37 @@ final class EvidenceFreshnessTests: XCTestCase {
         XCTAssertTrue(missing.isEmpty,
                       "九页名册里这些页在表中没有行（新增页面忘了登记？）：\(missing)")
 
-        var expired: [String] = []
+        // RD-57：过期不再"立刻判红"，而是**必须出声**——过期页要么重拍、要么进「待重拍积压」逐条挂账。
+        // 依赖面算过期的一条没放宽，改的只是"过期之后谁都能被这张表卡住"那件事。
+        var stalePages: [(pages: [String], head: String, candidates: [String])] = []
         for row in found {
-            let touched = try Self.netChanges(head: row.head, paths: row.paths)
+            let touched = try Self.runGitLog(head: row.head, paths: row.paths)
             if !touched.isEmpty {
-                expired.append("\(row.pages.joined(separator: "/")) 停在 \(row.head)，"
-                             + "此后动了 \(touched.count) 个文件：\(touched.prefix(3).joined(separator: " "))")
+                stalePages.append((pages: row.pages, head: row.head, candidates: touched))
             }
         }
-        XCTAssertTrue(expired.isEmpty,
-                      "这些页的实拍已经过期，屏上可能有没人看过的变化 —— 重拍那一页并更新表里的头：\n"
-                    + expired.joined(separator: "\n"))
-        print("【实拍新鲜度】表里 \(found.count) 行、覆盖 \(Set(found.flatMap(\.pages)).count) 页 → 过期 \(expired.count) 行")
+        let logged = Self.backlog(in: markdown)
+        XCTAssertTrue(logged.malformed.isEmpty,
+                      "「\(Self.backlogHeading)」这张表本身格式不对 ⇒ 它不许变成遮羞布，逐条修好：\n"
+                    + logged.malformed.joined(separator: "\n"))
+        let verdict = Self.backlogVerdict(stale: stalePages, entries: logged.entries, now: Date())
+        XCTAssertTrue(verdict.unlisted.isEmpty,
+                      "这些页的实拍已经过期，屏上可能有没人看过的变化 —— 重拍那一页并更新表里的头，"
+                    + "或（拿不到全机唯一那格 App 窗口时）在「\(Self.backlogHeading)」登记欠拍 + 挂账人：\n"
+                    + verdict.unlisted.joined(separator: "\n"))
+        XCTAssertTrue(verdict.mismatched.isEmpty,
+                      "挂账与实算对不上 ⇒ 挂账写错了页、抄了个别处的提交，或 UTC 时间写歪了：\n"
+                    + verdict.mismatched.joined(separator: "\n"))
+        XCTAssertTrue(verdict.overdue.isEmpty,
+                      "欠拍超过 \(Int(Self.backlogGrace / 3_600)) 小时宽限期还不补拍 —— "
+                    + "挂了账不等于看过了，抢一次 App 窗口把它清掉：\n"
+                    + verdict.overdue.joined(separator: "\n"))
+        for note in verdict.acknowledged {
+            print("【实拍欠拍·已挂账】" + note)      // 放行，但必须大声：不许读成"查过没事"
+        }
+        print("【实拍新鲜度】表里 \(found.count) 行、覆盖 \(Set(found.flatMap(\.pages)).count) 页 → "
+            + "过期 \(stalePages.count) 行（已挂账 \(verdict.acknowledged.count) 行、"
+            + "没挂账 \(verdict.unlisted.count) 行）")
     }
 
     /// 表里每行说的"实拍过"到底成不成立：四格图都在、且每格的 `PROVENANCE` 里
@@ -232,24 +237,37 @@ final class EvidenceFreshnessTests: XCTestCase {
         return gaps
     }
 
+    /// 只挑出"这一批产物**在本树里**"的行。
+    ///
+    /// 为什么要这一道（**RD-58，总工改**）：`.scratch/` 是 gitignore 的 ⇒ 取证产物只存在于
+    /// 拍图的那一棵树。上一版 RD-55 的口径是"本树一份 `evidence-*` 都没有才跳"，
+    /// 那是**全有或全无**：一条流按需求方要的样子**只补拍变化的那一页**，
+    /// 本树就从"整个跳过"翻成"整个都要查"，于是**表里其余每一行都变成红**，
+    /// 而红的原因与当次改动无关 —— 既不证明证据存在，也不证明它不存在。
+    /// 现在的口径是**逐行按批次判**：批次在本树 ⇒ 那一行四格齐全、rev 对得上，缺一样照旧红；
+    /// 批次不在本树 ⇒ 那行不查，但**行名要打印出来**（不许把"没查"读成"查过没事"）。
+    static func rowsWithEvidence(_ rows: [Row], batchPresent: (String) -> Bool) -> (checked: [Row], absent: [String]) {
+        let hit = rows.filter { batchPresent($0.batch) }
+        return (hit, rows.filter { !batchPresent($0.batch) }.map(\.batch))
+    }
+
     func test_everyRowActuallyHasAllFourShotsAtTheHeadItClaims() throws {
         let url = Self.repoRoot.appendingPathComponent(Self.catalogPath)
         let rows = Self.rows(in: try String(contentsOf: url, encoding: .utf8))
         XCTAssertFalse(rows.isEmpty, "表读不出行 ⇒ 下面这条会空转")
         let evidenceRoot = Self.repoRoot.appendingPathComponent(".scratch")
-        // RD-55（总工改）：`.scratch/` 是 gitignore 的 ⇒ 取证产物只存在于**拍图的那棵树**。
-        // 这一格的职责是「账里声称有证据，证据就得齐、rev 就得对」，不是「每棵树都得自己拍过一遍」；
-        // 后者让任何非拍图树（别人的工作树、CI、另一台机器）门禁必红，而红的原因与当次改动无关 ——
-        // 那既不证明证据存在，也不证明它不存在，只是把一条好守卫变成落地路障。
-        // 所以：**一棵树里一份 evidence-* 都没有 ⇒ 显式跳过并点名路径**；
-        // 目录只要在，就照原样逐格钉（少一张图、rev 不符、缺 PROVENANCE 都仍然红）。
-        let hasAnyEvidence = ((try? FileManager.default.contentsOfDirectory(atPath: evidenceRoot.path)) ?? [])
-            .contains { $0.hasPrefix("evidence-") }
-        if hasAnyEvidence == false {
-            throw XCTSkip("这棵树没有取证产物（\(evidenceRoot.path) 下无 evidence-*）"
+        let scoped = Self.rowsWithEvidence(rows) { batch in
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: evidenceRoot.appendingPathComponent(batch).path,
+                                                 isDirectory: &isDir) else { return false }
+            return isDir.boolValue
+        }
+        XCTAssertFalse(rows.allSatisfy { $0.batch.isEmpty }, "表里连批次名都没解析出来 ⇒ 这条在空转")
+        if scoped.checked.isEmpty {
+            throw XCTSkip("这棵树没有表里引用的任何一批产物（\(evidenceRoot.path)；表里 \(rows.count) 行的批次都不在）"
                 + " ⇒ 本条只钉「有产物就要齐」，产物生成在哪棵树不归它管")
         }
-        let gaps = Self.evidenceGaps(in: rows, root: evidenceRoot,
+        let gaps = Self.evidenceGaps(in: scoped.checked, root: evidenceRoot,
                                      exists: { FileManager.default.fileExists(atPath: $0.path) },
                                      provenanceRev: { file in
             guard let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
@@ -261,9 +279,10 @@ final class EvidenceFreshnessTests: XCTestCase {
         XCTAssertTrue(gaps.isEmpty,
                       "逐页账里有 \(gaps.count) 格证据不成立（口径是深浅 × 顶尾四格齐全，且 rev 对得上）：\n"
                         + gaps.map { "\($0.page) @ \($0.batch)：\($0.what)" }.joined(separator: "\n"))
-        let shots = rows.reduce(0) { $0 + Self.expectedShots(for: $1).count } * Self.evidenceModes.count
-        print("【实拍格数】表里 \(rows.count) 行 → 实际查 \(shots) 格，不成立的格 \(gaps.count) 处")
-    }
+        let shots = scoped.checked.reduce(0) { $0 + Self.expectedShots(for: $1).count } * Self.evidenceModes.count
+        print("【实拍格数】表里 \(rows.count) 行 · 本树有产物 \(scoped.checked.count) 行 → 实查 \(shots) 格，"
+            + "不成立的格 \(gaps.count) 处"
+            + (scoped.absent.isEmpty ? "" : "；不在本树的批次 \(Set(scoped.absent).count) 个：\(Set(scoped.absent).sorted().joined(separator: " "))"))    }
 
     // MARK: - 元测试：两个方向都要红过一次
 
@@ -276,6 +295,26 @@ final class EvidenceFreshnessTests: XCTestCase {
         """
 
     /// 解析器自己：行、页名拆分、以及**省略号写法整行不作数**。
+    /// RD-58 的元测试：逐行按批次判这一道**两个方向都要红过一次**。
+    /// 只喂合成输入，不碰盘上真产物 —— 这条判据要的正是"批次在不在"这一件事，与图本身无关。
+    func test_rowsWithEvidenceChecksOnlyRowsWhoseBatchIsPresent() throws {
+        let rows = Self.rows(in: Self.syntheticTable)
+        XCTAssertEqual(rows.count, 2, "夹具自检：合成表该读出两行")
+        let firstOnly = Self.rowsWithEvidence(rows) { $0 == "evidence-abc1234-x" }
+        XCTAssertEqual(firstOnly.checked.map(\.batch), ["evidence-abc1234-x"],
+                       "只有一批产物时，另那行不许被拖成红（RD-58 修的就是这个）")
+        XCTAssertEqual(firstOnly.absent, ["evidence-def5678-y"], "没查的行必须被点名，不许静默")
+
+        let nonePresent = Self.rowsWithEvidence(rows) { _ in false }
+        XCTAssertTrue(nonePresent.checked.isEmpty, "一批都不在还去查，等于把「没看见」当成「通过」")
+        XCTAssertEqual(Set(nonePresent.absent), Set(["evidence-abc1234-x", "evidence-def5678-y"]))
+
+        // 反向：两批都在 ⇒ 两行都要查（这条判据不许被"按批次跳过"变成永真绿）。
+        let allPresent = Self.rowsWithEvidence(rows) { _ in true }
+        XCTAssertEqual(allPresent.checked.count, 2, "批次齐的时候它必须逐行钉，一格都不能少查")
+        XCTAssertTrue(allPresent.absent.isEmpty)
+    }
+
     func test_tableParserReadsRowsAndRefusesAbbreviatedPaths() {
         let found = Self.rows(in: Self.syntheticTable)
         XCTAssertEqual(found.count, 2, "两行都该解析出来（第二行管两页）")
@@ -293,25 +332,6 @@ final class EvidenceFreshnessTests: XCTestCase {
                        "合成表只覆盖 3 页，名册必须报出缺的那些页")
     }
 
-    /// 净差异口径的**真 git 夹具**：造一条"历史动过这条路径、可内容与实拍端一字不差"的分支线。
-    ///
-    /// 为什么必须自带夹具而不是拿本仓历史当证据：那六行空红今天确实是真实现场，但历史会变
-    /// （新提交、rebase 都会改变两端），一条守卫的口径不能靠"今天正好有这个提交"来钉。
-    /// 不钉这一条，谁把它改回 `git log` 数提交都不会红 —— 而那正是本仓记过好几回的永真绿亲戚。
-    /// （第一版我把原因写成"merge 提交被数进来"，自己造夹具时被 git 的路径简化否证；
-    ///   现在的形状是复现得出来的那个说法。）
-    func test_mergeThatChangesNoContentIsNotStale() throws {
-        let fx = try FixtureRepo(name: "tcoder-evidence-fx-")
-        addTeardownBlock { fx.cleanup() }
-        let shot = try fx.buildHistoryThatLooksTouchedButIsNot()
-        let viaLog = try fx.git(["log", "--format=%h", shot + "..HEAD", "--", "a.txt"])
-        let viaDiff = try Self.netChanges(head: shot, paths: ["a.txt"], root: fx.root)
-        XCTAssertFalse(viaLog.isEmpty,
-                       "夹具没造出「历史动过、净内容未变」的形状 ⇒ 这条元测试在空转（旧口径都测不到东西）")
-        XCTAssertTrue(viaDiff.isEmpty,
-                      "净差异口径下这种历史不该算过期（实拍仍然有效），却报变了：\(viaDiff)")
-    }
-
     /// 过期判据两个方向：动了的必须抓到，谁都没动的不许乱咬。
     func test_staleRulerFlagsOnlyRowsWhoseDependenciesMoved() {
         let found = Self.rows(in: Self.syntheticTable)
@@ -323,64 +343,5 @@ final class EvidenceFreshnessTests: XCTestCase {
         XCTAssertTrue(expired[0].contains("Git 洞察"), "报的要能指到页：\(expired)")
         XCTAssertTrue(Self.stale(found, log: { _, _ in [] }).isEmpty,
                       "全绿的仓库被判过期 ⇒ 这条判据会逼人删掉它")
-    }
-}
-
-/// 合成 git 仓库：只给这条守卫的元测试用。全局 `-c` 把身份、签名、hook 都钉在夹具内，
-/// 不继承宿主仓库与需求方的全局配置（否则换台机器结果就变）。
-/// 拆成类型而不是测试里的闭包：本仓 Tests 侧有一条 50 行的函数上限（`X3TestSizeAuditTests`），
-/// 上一版我把夹具全写在 `func test_…` 里，落地当场被自己的门拦住。
-private final class FixtureRepo {
-    let root: URL
-
-    init(name: String) throws {
-        root = FileManager.default.temporaryDirectory
-            .appendingPathComponent(name + String(UUID().uuidString.prefix(8)))
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-    }
-
-    func cleanup() { try? FileManager.default.removeItem(at: root) }
-
-    @discardableResult
-    func git(_ args: [String]) throws -> [String] {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        p.arguments = ["-c", "user.name=fx", "-c", "user.email=fx@local",
-                       "-c", "commit.gpgsign=false", "-c", "core.hooksPath="] + args
-        p.currentDirectoryURL = root
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = pipe
-        try p.run()
-        p.waitUntilExit()
-        let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        guard p.terminationStatus == 0 else {
-            XCTFail("git \(args.joined(separator: " ")) 失败：\(text.split(separator: "\n").first ?? "")")
-            return []
-        }
-        return text.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
-    }
-
-    private func write(_ name: String, _ body: String) throws {
-        try body.write(to: root.appendingPathComponent(name), atomically: true, encoding: .utf8)
-    }
-
-    /// 返回"实拍头"。之后 side 线把 a.txt 改成 3 再改回 2 ⇒ 历史动过这条路径、净内容与实拍头相同。
-    func buildHistoryThatLooksTouchedButIsNot() throws -> String {
-        try git(["init", "-q", "-b", "main"])
-        try write("a.txt", "1")
-        try git(["add", "a.txt"])
-        try git(["commit", "-qm", "c1"])
-        try write("a.txt", "2")
-        try git(["commit", "-qam", "c2"])                    // ← 实拍所在头
-        let shot = try git(["rev-parse", "HEAD"]).first ?? ""
-        XCTAssertFalse(shot.isEmpty, "拿不到实拍头 ⇒ 夹具没搭起来")
-        try git(["branch", "-f", "side", "HEAD~1"])
-        try git(["checkout", "-q", "side"])
-        try write("a.txt", "3")
-        try git(["commit", "-qam", "X 动过这一页"])
-        try write("a.txt", "2")
-        try git(["commit", "-qam", "Y 顶回实拍端的内容"])
-        return shot
     }
 }

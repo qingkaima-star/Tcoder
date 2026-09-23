@@ -60,15 +60,32 @@ struct CoverageDisplayShape: Equatable, Sendable {
             unmeasuredScope: scopeParts.isEmpty ? nil : scopeParts.joined(separator: "、"))
     }
 
+    /// 「另有 N 份未合并」那一句的**唯一措辞**（RD-51）。
+    ///
+    /// 为什么只能有一处：历史上形状里写「…：坐标…等（逐条清单见 undisplayedReports）」、
+    /// `CoverageMetrics.capDisclosureText` 另写一套「…（逐条点名见 undisplayedReports）」——
+    /// 同一个 `droppedByCap` 在覆盖率页与健康页长成两句话，
+    /// 而后一句**声称逐条点名却一个名字都不给**，读的人按它去 JSON 里找点名，
+    /// 找到的那套其实早已被这一套替代。
+    /// 点名给**相对路径**而不是 basename：一棵树里 40 份都叫 `lcov.info`，只报文件名等于没点。
+    static func capSentence(dropped: Int, coordinates: [String]) -> String {
+        let head = "另有 \(dropped) 份未合并"
+        let named = coordinates.prefix(3).map(coverageCoordinateShort)
+        guard !named.isEmpty else {
+            // 计数在、坐标不在 ⇒ 那是两次统计拼出来的账，不许装作点过名。
+            return head + "（这一版没留下逐条坐标，点不出名）"
+        }
+        return head + "：" + named.joined(separator: "、")
+            + (coordinates.count > named.count ? "等（逐条清单见 undisplayedReports）" : "（已点名）")
+    }
+
     /// 上屏那几句（**唯一**的披露生产者；`CoverageMergeLedger.statement` 只负责把它们拼进去）。
     var statementParts: [String] {
         var parts: [String] = []
         if droppedByCap > 0 {
-            // 判据：命中上限的每一份都要能点名（摘掉这句 ⇒ `CoverageContractFieldTests` 转红）。
-            // 点到**相对路径**而不是文件名：一棵树里 40 份都叫 `lcov.info`，只报 basename 等于没点。
-            let named = undisplayedReports.prefix(3).map(coverageCoordinateShort)
-            parts.append("另有 \(droppedByCap) 份未合并：" + named.joined(separator: "、")
-                + (undisplayedReports.count > named.count ? "等（逐条清单见 undisplayedReports）" : "（已点名）"))
+            // 摘掉这句 ⇒ `CoverageContractFieldTests` 转红（超限每一份都要能点名）。
+            parts.append(CoverageDisplayShape.capSentence(dropped: droppedByCap,
+                                                          coordinates: undisplayedReports))
         }
         if let scope = unmeasuredScope {
             parts.append("⚠ 扫描面不完整：" + scope
@@ -109,20 +126,36 @@ extension CoverageMetrics {
     }
 
     /// 「有没有东西被上限摘掉」这句。**三态分开**，`nil` 不许渲染成"没有问题"。
+    /// `droppedByCap > 0` 那一档**逐字转发** `capSentence`（RD-51：这里以前自己写了一套说法）。
     var capDisclosureText: String {
         guard let droppedByCap else { return "未统计是否有报告被上限丢弃" }
         guard droppedByCap > 0 else { return "没有报告因命中上限被丢弃" }
-        return "另有 \(droppedByCap) 份未合并（逐条点名见 undisplayedReports）"
+        return CoverageDisplayShape.capSentence(dropped: droppedByCap,
+                                                coordinates: undisplayedReports ?? [])
     }
 
     /// §6.1 那几格合起来的那句**产品侧披露**（唯一生产者）：
     /// 健康分的"这一维为什么缺"那句就拼在它后面 —— 有了它，`unmeasuredScope` /
     /// `droppedByCap` / `undisplayedReports` 三格才算**有读者**（RD-34 钉的是"有写无读"）。
+    ///
+    /// ⚠️ 六格齐全时**不自己造话**，直接取 `statementParts`（RD-51）：
+    /// 覆盖率页尾与 CLI 读的是那一份，健康页若另拼一套，同一个数就会在两页上长成两句话——
+    /// 尤其丢掉「⇒ 这里说的『没找到报告』不等于『该项目没有覆盖率报告』」那半边（RD-26 要的退让句）。
+    /// 六格不齐（旧报告没统计过）才退到 `unmeasuredScope` + `capDisclosureText` 的既有修辞。
     var displayDisclosureText: String? {
+        if let shape = displayShapeFromFields {
+            return Self.disclosureSentence(shape.statementParts)
+        }
         var parts: [String] = []
         if let unmeasuredScope { parts.append(unmeasuredScope) }
         if let droppedByCap, droppedByCap > 0 { parts.append(capDisclosureText) }
-        return parts.isEmpty ? nil : parts.joined(separator: "；") + "。"
+        return Self.disclosureSentence(parts)
+    }
+
+    /// 披露句子串成上屏那一句的**唯一**排法（分隔符与句末标点也只有一处）。
+    /// 空清单 ⇒ `nil`：扫描面完整、也没摘掉东西时，页上不许留一个空壳句子。
+    private static func disclosureSentence(_ parts: [String]) -> String? {
+        parts.isEmpty ? nil : parts.joined(separator: "；") + "。"
     }
 
     /// "这个项目到底有没有覆盖率报告"这句话成不成立。
@@ -168,8 +201,7 @@ extension CoverageMetrics {
     ///   `CoverageDisplayShape.statementParts`（本函数只做串接，不拼一个汉字的修辞）。
     var boardAccountingNote: String? {
         guard let shape = displayShapeFromFields else { return capDisclosureText }
-        let parts = shape.statementParts
-        return parts.isEmpty ? nil : parts.joined(separator: "；") + "。"
+        return Self.disclosureSentence(shape.statementParts)
     }
 }
 

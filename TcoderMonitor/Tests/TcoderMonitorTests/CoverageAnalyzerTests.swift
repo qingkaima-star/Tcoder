@@ -186,8 +186,13 @@ final class CoverageAnalyzerTests: XCTestCase {
         XCTAssertEqual(metrics.unexaminedDirectories, ["locked"],
                        "没看的目录要逐条给稳定坐标，一行摘要不算台账")
         XCTAssertFalse(metrics.absenceClaimIsSound, "有目录没看 ⇒ \"该项目没有报告\"这句不成立")
-        XCTAssertTrue(note.hasPrefix("该项目没有产出覆盖率报告"),
-                      "前半句仍是那句结论，后半句才补上我们没看完：\(note)")
+        // RD-55：这条以前钉的是 `hasPrefix("该项目没有产出覆盖率报告")` ——
+        // 也就是**要求**页面上先印一句同一个测试对象刚刚判为不成立的结论，
+        // 再补一句把它推翻的话。前半句收窄成"看得见的部分里"才是这句话的本意。
+        XCTAssertTrue(note.hasPrefix("看得见的部分里没有发现覆盖率报告"),
+                      "有目录没看 ⇒ 前半句必须自己收窄范围：\(note)")
+        XCTAssertFalse(note.contains("该项目没有产出覆盖率报告"),
+                       "不成立的结论照样上屏（两本账打脸）：\(note)")
     }
 
     /// Third-party coverage is not our project's coverage, but `build/` and

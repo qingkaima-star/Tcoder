@@ -326,8 +326,13 @@ enum MissingDimensionReason {
         if coverage.scannedFileCount > 0 {
             base = "扫到 \(NumberFormat.grouped(coverage.scannedFileCount)) 个覆盖率报告文件，"
                 + "但里面没有可用的行覆盖数字，不参与计分。"
-        } else {
+        } else if coverage.absenceClaimIsSound {
             base = localizedCopy("该项目没有产出覆盖率报告，不参与计分。")
+        } else {
+            // RD-55：这一档以前无条件印上面那句，而同一个对象里的 `absenceClaimIsSound`
+            // 刚刚判它**不成立**（有目录没下潜 / 有报告被上限摘掉）⇒ 两本账在同一句话里打脸，
+            // 而读的人只看前半句。不成立时前半句必须自己收窄范围。
+            base = localizedCopy("看得见的部分里没有发现覆盖率报告，不参与计分。")
         }
         // 「没找到」与「没看到」是两件事：有目录读不动时，"没有产出报告"这句站不住，
         // 必须把扫描面不完整这件事一起说出来（`unreadableDirectoryCount == 0` 才是一句真话，

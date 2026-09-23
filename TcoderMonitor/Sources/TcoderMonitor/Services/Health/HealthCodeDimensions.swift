@@ -50,18 +50,21 @@ extension WeightedHealthScorer {
 
     private func complexityStrengths(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
         guard curve.score >= 85, !code.topComplexFunctions.isEmpty else { return [] }
-        return ["函数复杂度可控（最高 CC \(complexityWorstCC(code))）"]
+        return [localizedFormat("函数复杂度可控（最高 CC %1$@）",
+                                HealthCurves.whole(complexityWorstCC(code)))]
     }
 
     private func complexityIssues(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
         guard curve.score <= 60, !code.topComplexFunctions.isEmpty else { return [] }
         let highRisk = code.topComplexFunctions.filter { $0.cyclomaticComplexity >= 16 }.count
-        return ["\(highRisk) 个函数圈复杂度 ≥16，最高 \(complexityWorstCC(code))"]
+        return [localizedFormat("%1$@ 个函数圈复杂度 ≥16，最高 %2$@",
+                                HealthCurves.whole(highRisk),
+                                HealthCurves.whole(complexityWorstCC(code)))]
     }
 
     private func complexityAdvice(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
         guard curve.score <= 60, !code.topComplexFunctions.isEmpty else { return [] }
-        return ["优先拆分最高复杂度函数，用早返回替代嵌套分支"]
+        return [localizedCopy("优先拆分最高复杂度函数，用早返回替代嵌套分支")]
     }
 
     // MARK: - 重复度
@@ -85,16 +88,35 @@ extension WeightedHealthScorer {
                                     NumberFormat.percent(code.duplicationRatio, precision: 1))]
     }
 
+    /// 「问题」那一栏里重复块数的那一句，按**三态**说话。
+    ///
+    /// 病根（2026-09-23 本仓实扫：榜内 20 · 榜外未列 96）：这一句以前直接把**榜长**当总数念，
+    /// 于是评分详情对用户说"共 20 处重复块"，真相是 116 处（少报 96 处；
+    /// 工单立案那批的读数是榜内 20 · 榜外 85，同一件事）。
+    /// 需求方 §五 点名的形状（"实际 552 显示 20"）在展示层已由 R7 收口，这一处是它在
+    /// **评分解释文本**里的那一处残留。
+    ///
+    /// 三态的判据是「榜外那一半统计过没有」，不是「榜外是不是零」——
+    /// 两态会把"没统计"说成"没漏"，所以 `nil` 那一句**不许出现"共"字**。
+    /// 写法上的硬约束：`BoardLengthReadoutRatchetTests` 认的披露句式是
+    /// 「榜内只列 N 个，实际 M 个」（真总数与榜长**并排**），而它的判据按**行**认标记，
+    /// 所以整句键与它点名的两个数必须同行；换行会把这行退化成"只报了个榜长"。
     private func duplicationIssues(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
         guard curve.score <= 60 else { return [] }
-        return [localizedFormat("重复代码 %1$@，共 %2$@ 处重复块",
-                                    NumberFormat.percent(code.duplicationRatio, precision: 1),
-                                    NumberFormat.grouped(code.duplicatedBlocks.count))]
+        let ratio = NumberFormat.percent(code.duplicationRatio, precision: 1)
+        switch code.reportedDuplicatedBlockTotalCount {
+        case let total? where total > code.duplicatedBlocks.count:
+            return [localizedFormat("重复代码 %1$@，共 %2$@ 处重复块（去重后口径，榜内只列 %3$@ 处明细）", ratio, NumberFormat.grouped(total), NumberFormat.grouped(code.duplicatedBlocks.count))]
+        case let total?:
+            return [localizedFormat("重复代码 %1$@，共 %2$@ 处重复块（明细已全部列出）", ratio, NumberFormat.grouped(total))]
+        case nil:
+            return [localizedFormat("重复代码 %1$@，榜内只列 %2$@ 处重复块，总处数本次未统计", ratio, NumberFormat.grouped(code.duplicatedBlocks.count))]
+        }
     }
 
     private func duplicationAdvice(_ curve: CurveResult) -> [String] {
         guard curve.score <= 60 else { return [] }
-        return ["抽取重复块为共享工具或基类，优先处理跨服务重复"]
+        return [localizedCopy("抽取重复块为共享工具或基类，优先处理跨服务重复")]
     }
 
     // MARK: - 代码质量
@@ -125,13 +147,13 @@ extension WeightedHealthScorer {
     }
 
     private func codeQualityStrengths(_ curve: CurveResult) -> [String] {
-        curve.score >= 85 ? ["文件规模健康，巨大文件占比低"] : []
+        curve.score >= 85 ? [localizedCopy("文件规模健康，巨大文件占比低")] : []
     }
 
     private func codeQualityIssues(_ worst: FileHotspot) -> [String] {
         guard worst.lineCount >= 1500 else { return [] }
-        let name = worst.path.split(separator: "/").last ?? "?"
-        return ["\(name) \(NumberFormat.grouped(worst.lineCount)) 行，远超单文件上限"]
+        let name = String(worst.path.split(separator: "/").last ?? "?")
+        return [localizedFormat("%1$@ %2$@ 行，远超单文件上限", name, NumberFormat.grouped(worst.lineCount))]
     }
 
     private func codeQualityAdvice(_ worst: FileHotspot) -> [String] {
@@ -149,9 +171,13 @@ extension WeightedHealthScorer {
                                                totalLines: code.totalLines)
         var outcome = DimensionOutcome(curve: curve)
         if curve.score >= 95 {
-            outcome.strengths.append(String(format: "注释密度适中（%.1f%%）", code.commentRatio * 100))
+            // 同一个占比在 detail 里也是 `HealthCurves.percent` 打的，这里不再另用 `%.1f%%`
+            // 自己格式化一遍（两套记法在同一页里并存过：见批次 P5 的千分位同款病）。
+            outcome.strengths.append(localizedFormat("注释密度适中（%1$@）", HealthCurves.percent(code.commentRatio)))
         }
-        if curve.score < 70 { outcome.recommendations.append("为公共 API 与复杂分支补充说明性注释") }
+        if curve.score < 70 {
+            outcome.recommendations.append(localizedCopy("为公共 API 与复杂分支补充说明性注释"))
+        }
         return outcome
     }
 }
