@@ -195,7 +195,17 @@ enum WeightShiftCause: Hashable {
 enum DimensionDisplay {
     static let overrides: [String: String] = ["重复度": "重复代码率"]
 
-    static func name(_ raw: String) -> String { overrides[raw] ?? raw }
+    /// 维度中文名 ⇒ **上屏的那一份要查表**（P57）。
+    ///
+    /// 为什么这一行值这么贵：维度名不只出现在健康页那一列，它还被当 `%1$@` 插进
+    /// 多条**已经翻好**的整句（`localizedFormat("「%1$@」完成但该分量未产出。", …)` 那一族）。
+    /// 名字不查表 ⇒ 英文态同一句里前半英文、后半中文 —— 与 P53 的 `windowSuffix`
+    /// 是同一个形状，只是这次漏在**词汇**层而不是句子层。
+    /// 九个维度的键**早就在目录里**（P3 逐页迁移时登记的），只是从来没人查。
+    ///
+    /// 顺序不能反：**先按中文 rawValue 查 override，再翻译**。
+    /// 反过来先翻，`overrides` 的中文键就永远对不上，「重复度→重复代码率」这条规范词会静默失效。
+    static func name(_ raw: String) -> String { localizedCopy(overrides[raw] ?? raw) }
     static func name(_ dimension: HealthDimension) -> String { name(dimension.rawValue) }
 }
 
