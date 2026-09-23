@@ -170,6 +170,22 @@ heavy_job_names() {  # 名单**只在这儿列一次**：闸门取 pid、话术�
   printf '%s\n' swiftc swift-frontend swift-test swiftTestDriver xctest xctrace
 }
 
+filter_out_pids() {  # filter_out_pids <候选 pid 串> <要排除的 pid 串> → 剩下的（空格分隔）
+  # 为什么要有它：**录制窗口里必然有我们自己 spawn 的 xctrace**，而 xctrace 在重活名单里
+  # （它暂停/恢复被测进程，确实是最重的争用）。于是"窗口内重活个数"这一维把每一批都判污染
+  # ——2026-09-23 22:03 三趟的 heavy 峰值 3/2/3 里就有自己那一个，机器空不空都过不了。
+  # 排除只按 **pid** 排（按名字排会把别人那一趟 xctrace 一起放掉，那是关掉一条真判据）。
+  local keep="" cand drop x
+  for cand in ${1:-}; do
+    drop=0
+    for x in ${2:-}; do
+      [ "$cand" = "$x" ] && { drop=1; break; }
+    done
+    [ "$drop" = "0" ] && keep="$keep $cand"
+  done
+  printf '%s\n' "${keep# }"
+}
+
 concurrent_heavy_jobs_detail() {  # → `pid=42493 name=xctrace` 一串，只给话术用
   # 为什么单独一个函数：原来话术里硬写着"swiftc / swift-test / xctest"，
   # 名单加了第四个名字之后，那句话就把 xctrace 说成了"本仓编译"——

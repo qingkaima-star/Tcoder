@@ -103,7 +103,7 @@ record_bounded() {  # record_bounded <outdir> <trace 路径> <模板> <时长秒
     sleep "$RECORD_POLL_S"; waited=$((waited + RECORD_POLL_S))
     # 这个循环本来就每 5 s 在窗口内醒一次 ⇒ 顺手采一发整机负载。
     # 没有这一发，闸门就只看得到"起窗前"和"收窗时"两个点，中段起的那趟编译看不见（§AP）。
-    load_sample_once "$out"
+    load_sample_once "$out" "$pid"
   done
   local stuck=0
   if kill -0 "$pid" 2>/dev/null; then
@@ -167,18 +167,21 @@ if os.path.isfile(path):
 json.dump(data, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 PY
 }
-load_sample_once() {  # load_sample_once <outdir>：往 <out>/load-in-window.tsv 追加一行「时刻 / load1 / 重活个数」
+load_sample_once() {  # load_sample_once <outdir> [自己 spawn 的采集 pid] —— 追加一行「时刻 / load1 / 重活个数」
   # 为什么挂在 `record_bounded` 的轮询里而不是自己起后台子壳：那个 poll 循环本来就在窗口内每 5 s 醒一次，
   # 借它顺手采样**不新增进程**，也就不会有"录制链半路 die 掉、留下一个还在写 tsv 的孤儿"这种形状
   # （`record_bounded` 自己就得对付挂死与被测消失两条路，别再给它加一条）。
-  local out="$1" l j
+  local out="$1" self="${2:-}" l j pids
   # 分两行声明：同一条 `local` 里引用自己前半段的名字，$out 还是空的
   # （今天在第 49 项的夹具里刚踩过同一条，两处一起改）。⇒ 路径必须单独一步拼。
   local f="$out/load-in-window.tsv"
   [ -n "$out" ] || return 0
   mkdir -p "$out" 2>/dev/null || return 0
   l=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | awk '{print $1}')
-  j=$(concurrent_heavy_jobs 2>/dev/null | wc -w | tr -d ' ')
+  # 「自己那一个 xctrace 不算外部争用」——不排就等于**每批必判污染**（见 filter_out_pids 的注释）。
+  pids=$(concurrent_heavy_jobs 2>/dev/null)
+  pids=$(filter_out_pids "$pids" "$self")
+  j=$(printf '%s' "$pids" | wc -w | tr -d ' ')
   printf '%s\t%s\t%s\n' "$(date +%s)" "${l:-0}" "${j:-0}" >> "$f"
 }
 

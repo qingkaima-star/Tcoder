@@ -370,6 +370,17 @@ selfcheck_inwindow_load_verdict() {  # 52) 窗口内负载采样必须能定合�
   mkdir -p "$d/none"; rm -f "$d/none/meta.json"
   got=$(inwindow_meta "$d/none")
   case "$got" in *"未采到"*) ;; *) fail "缺样时 meta 写的是「$got」而不是「未采到」⇒ 空会被读成干净"; bad=1 ;; esac
-  [ "$bad" = "0" ] && ok "窗口内负载采样能定合格：干净放行 / 中段越阈判污 / 重活单独也判 / 没采到必须出声（阈值与闸门同一家）"
+  # (5) 窗口内的"重活"必须排掉**我们自己 spawn 的那个采集进程**：`xctrace` 在重活名单里
+  #     （它确实是最重的争用），而录制窗口里必然有它一个 ⇒ 不排就是**每一批必判污染**。
+  #     实证是 2026-09-23 22:03 那三趟：起窗时「并发重活=无」，窗口内 heavy 峰值却有 3/2/3。
+  declare -f filter_out_pids >/dev/null \
+    || { fail "source 链里没有 filter_out_pids ⇒ 这一维看不见东西，拒绝判定（恒放行比恒拒更危险）"; bad=1; }
+  [ "$(filter_out_pids "111 222" "111")" = "222" ] \
+    || { fail "外部那个 pid 被一起排掉了（拿到「$(filter_out_pids "111 222" "111")」）⇒ 按名字排会把别人的采集也放掉"; bad=1; }
+  [ -z "$(filter_out_pids "111" "111")" ] \
+    || { fail "只剩自己那一个时没排干净 ⇒ 自己的 xctrace 又会把整批判污染"; bad=1; }
+  [ -z "$(filter_out_pids "" "111")" ] \
+    || { fail "空名单被排出了东西"; bad=1; }
+  [ "$bad" = "0" ] && ok "窗口内负载采样能定合格：干净放行 / 中段越阈判污 / 重活单独也判 / 没采到必须出声 / 自己那一个采集进程不算外部争用"
 }
 
