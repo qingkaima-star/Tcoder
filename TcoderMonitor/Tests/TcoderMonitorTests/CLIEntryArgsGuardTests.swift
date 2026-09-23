@@ -132,7 +132,74 @@ final class CLIEntryArgsProcessGuardTests: XCTestCase {
         proc.waitUntilExit()                      // pgrep 自己会退，这里只是收读数，不动别人的 pid
         let text = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let pids = text.split(separator: "\n").compactMap { Int($0) }
-        return pids.filter { $0 != ownPID }.count
+        var seen: [(pid: Int, path: String)] = []
+        for pid in pids {
+            switch Self.processPath(pid) {
+            case .ok(let path): seen.append((pid, path))
+            case .gone: continue                     // 探测与查路径之间自己退了：正常竞态
+            case .broken:
+                XCTFail("ps 读路径失败（pid=\(pid)）⇒ 归属判不出来，这一维不许静默放行")
+                return .min
+            }
+        }
+        return Self.foreignCountUnderTree(seen, excluding: ownPID, treeRoot: Self.treeRoot)
+    }
+
+    /// 归属树根：本测试所在的那棵树（`#filePath` 往上三级 = 仓库根）。
+    private static let treeRoot: String = {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // TcoderMonitorTests
+            .deletingLastPathComponent()   // Tests
+            .deletingLastPathComponent()   // TcoderMonitor
+            .deletingLastPathComponent()   // 仓库根
+            .path
+    }()
+
+    private enum PathRead { case ok(String), gone, broken }
+
+    /// 只读地拿某个 pid 的可执行文件全路径（`comm=` 在 macOS 上给的是全路径；
+    /// `args=` 在本机被拒，那条已经记在案）。读不到 ≠ 坏：进程刚好退了是正常竞态。
+    private static func processPath(_ pid: Int) -> PathRead {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/ps")
+        proc.arguments = ["-o", "comm=", "-p", String(pid)]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        let errPipe = Pipe()
+        proc.standardError = errPipe
+        do { try proc.run() } catch { return .broken }
+        proc.waitUntilExit()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let text = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        if proc.terminationStatus != 0 { return text.isEmpty ? .gone : .broken }
+        return text.isEmpty ? .gone : .ok(text)
+    }
+
+    /// **只数「从本棵树起起来的」那些**：并行多流时，别人那棵 `.worktrees/<别家>/dist` 里
+    /// 长期挂着一个实例是常态（今晚取证、门禁、复拍都在起），按全机计数就是把
+    /// 别人的正常状态读成"这次误用起了第二个窗口"——一条**受别人影响的判据**，
+    /// 与"量纲里混进环境量"同族，只是这次混进来的是进程而不是路径长度。
+    /// 牙没丢：误用真去起 GUI，那个新进程的可执行文件必然在**本棵树**里
+    /// （它只能是被测产物自己拉起来的），所以照样计数、照样红。
+    static func foreignCountUnderTree(_ seen: [(pid: Int, path: String)],
+                                      excluding ownPID: Int,
+                                      treeRoot: String) -> Int {
+        seen.filter { $0.pid != ownPID && $0.path.hasPrefix(treeRoot) }.count
+    }
+
+    /// 双向元测试：别人那棵树的一个不算、本树的一个要算、自己那一个永远不算。
+    func test_extraProcessAttributionIsByTreeNotMachineWide() {
+        let root = "/Users/one/Documents/Tcoder/.worktrees/perf-base/"
+        let mine = [(pid: 111, path: root + "TcoderMonitor/dist/Tcoder.app/Contents/MacOS/TcoderMonitor")]
+        let other = [(pid: 222, path: "/Users/one/Documents/Tcoder/.worktrees/x9/TcoderMonitor/dist/Tcoder.app/Contents/MacOS/TcoderMonitor")]
+        XCTAssertEqual(Self.foreignCountUnderTree(mine, excluding: 111, treeRoot: root), 0,
+                       "自己那一个必须减掉，否则正例假红（第一版就栽在这里）")
+        XCTAssertEqual(Self.foreignCountUnderTree(mine, excluding: 999, treeRoot: root), 1,
+                       "本树里多出来的一个必须算——这是这条判据的牙")
+        XCTAssertEqual(Self.foreignCountUnderTree(other, excluding: 999, treeRoot: root), 0,
+                       "别人那棵树里的常驻实例不算我的读数（全机计数=误红的来源）")
+        XCTAssertEqual(Self.foreignCountUnderTree(mine + other, excluding: 111, treeRoot: root), 0,
+                       "混合场景：减掉自己、排除他树 ⇒ 只剩本树的外来者，此处应为 0")
     }
 
     private func launch(_ args: [String], limit: TimeInterval) throws -> Run {
