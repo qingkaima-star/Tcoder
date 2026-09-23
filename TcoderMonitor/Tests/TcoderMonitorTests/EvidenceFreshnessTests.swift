@@ -4,8 +4,11 @@ import XCTest
 /// OWNER: 总工（设计总监线）—— 九页实拍复核的**过期判据**。
 ///
 /// 读 `docs/界面-乱的清单.md` 里那张「每页最近一次实拍在哪个头」的表，
-/// 对每一行把它自己写出的那条 `git log <头>..HEAD -- <依赖面>` 真的跑一遍，
+/// 对每一行把它登记的头与 `HEAD` 之间那条依赖面**净差异**真的问一遍 git，
 /// **非空即判红**：那一页的实拍已经过期，屏上可能有没人看过的变化。
+/// （2026-09-23：执行从 `git log <头>..HEAD` 改成 `git diff --name-only <头> HEAD`。
+///   表里第三列仍写 `git log …` 给人看依赖面，取数不变；改的是"问过 git 哪一种问题"，
+///   理由见 `netChanges` 上面那段——历史形状不等于内容差异，实测六行净差异为 0 却被判过期。）
 ///
 /// 为什么必须有它（而不是把表写漂亮就完事）：这张表第一次写出来就写错了两行 ——
 /// 初稿把 Git 洞察 / 贡献者 / 错误日志 / 依赖分析 一起记在 `fb94e88` 那批上，
@@ -126,11 +129,25 @@ final class EvidenceFreshnessTests: XCTestCase {
 
     // MARK: - 真判据
 
-    static func runGitLog(head: String, paths: [String]) throws -> [String] {
+    /// 这一页的依赖面从实拍那个头到现在**净变了哪些文件**（净差异口径）。
+    ///
+    /// 为什么不是 `git log <头>..HEAD`（提交数）——2026-09-23 实测的结构性误红：
+    /// 十行里有六行的 `log` 非空（3~7 个提交）而**净差异为 0 个文件**：
+    /// 性能监控 / Git 洞察 / 贡献者 / 错误日志 / 依赖分析 / 全九页外壳。
+    /// 形状是"这条分支的历史上有提交动过这条路径，可顶到最后内容与实拍端一字不差"
+    /// ——常见来源就是并 main（分支旧内容被顶回去），但**根因不是 merge，是拿历史形状当内容差异**。
+    /// （第一版我把原因写成"merge 提交被 git log 数出来"，自己造夹具时被 git 的路径简化剪掉而否证；
+    ///   结论方向没变，措辞按夹具能复现的那个说法改定。）
+    /// ⇒ 实拍过期问的本来就是一句话：**屏上的内容变了没有** —— 那是净差异，不是历史形状。
+    ///
+    /// ⚠ 表里第三列仍登记 `git log <rev>..HEAD -- <路径>`：那是**人读的形状**（一眼看全依赖面），
+    /// 头与路径的取数不变；变的只有执行时问 git 哪一种问题。
+    static func netChanges(head: String, paths: [String],
+                           root: URL = EvidenceFreshnessTests.repoRoot) throws -> [String] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["log", "--format=%h", "\(head)..HEAD", "--"] + paths
-        process.currentDirectoryURL = repoRoot
+        process.arguments = ["diff", "--name-only", head, "HEAD", "--"] + paths
+        process.currentDirectoryURL = root
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
@@ -138,10 +155,10 @@ final class EvidenceFreshnessTests: XCTestCase {
         process.waitUntilExit()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         let text = String(decoding: data, as: UTF8.self)
-        // git 报错（头不存在、路径不存在）也要算"动过"：宁可误红，不可漏红。
+        // git 报错（头不存在、路径不存在）也要算"变了"：宁可误红，不可漏红。这一条照旧。
         guard process.terminationStatus == 0 else {
             let firstLine = text.split(separator: "\n").first.map(String.init) ?? "无输出"
-            return ["git log 失败（exit " + String(process.terminationStatus) + "）：" + firstLine]
+            return ["git 失败（exit " + String(process.terminationStatus) + "）：" + firstLine]
         }
         return text.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
     }
@@ -160,7 +177,7 @@ final class EvidenceFreshnessTests: XCTestCase {
 
         var expired: [String] = []
         for row in found {
-            let touched = try Self.runGitLog(head: row.head, paths: row.paths)
+            let touched = try Self.netChanges(head: row.head, paths: row.paths)
             if !touched.isEmpty {
                 expired.append("\(row.pages.joined(separator: "/")) 停在 \(row.head)，"
                              + "此后动了 \(touched.count) 个文件：\(touched.prefix(3).joined(separator: " "))")
@@ -274,6 +291,66 @@ final class EvidenceFreshnessTests: XCTestCase {
         XCTAssertTrue(abbreviated.isEmpty, "省略号路径必须让整行不作数：\(abbreviated)")
         XCTAssertFalse(Self.pagesWithoutRows(in: found).isEmpty,
                        "合成表只覆盖 3 页，名册必须报出缺的那些页")
+    }
+
+    /// 净差异口径的**真 git 夹具**：造一次"并了 main、可那一页的内容没变"的 merge。
+    ///
+    /// 为什么必须自带夹具而不是拿本仓历史当证据：那六行空红今天确实是真实现场，
+    /// 但历史会变（rebase、新提交都会改变两端），一条守卫的口径不能靠"今天正好有这个提交"来钉。
+    /// 不钉这一条，谁把它改回 `git log` 数提交都不会红 —— 而那正是本仓记过好几回的永真绿亲戚。
+    func test_mergeThatChangesNoContentIsNotStale() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tcoder-evidence-fx-" + UUID().uuidString.prefix(8))
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        func git(_ args: [String]) throws -> [String] {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            // 夹具身份只作用于这一条命令：全局 config 的签名/hook 不许混进来。
+            p.arguments = ["-c", "user.name=fx", "-c", "user.email=fx@local",
+                           "-c", "commit.gpgsign=false", "-c", "core.hooksPath="] + args
+            p.currentDirectoryURL = root
+            let pipe = Pipe()
+            p.standardOutput = pipe
+            p.standardError = pipe
+            try p.run()
+            p.waitUntilExit()
+            let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            guard p.terminationStatus == 0 else {
+                XCTFail("git \(args.joined(separator: " ")) 失败：\(text.split(separator: "\n").first ?? "")")
+                return []
+            }
+            return text.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+        }
+        func write(_ name: String, _ body: String) throws {
+            try body.write(to: root.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+
+        try git(["init", "-q", "-b", "main"])
+        try write("a.txt", "1")
+        try git(["add", "a.txt"])
+        try git(["commit", "-qm", "c1"])
+        try write("a.txt", "2")
+        try git(["commit", "-qam", "c2"])                      // ← 这一头当作"实拍所在头"
+        let shot = try git(["rev-parse", "HEAD"]).first ?? ""
+        XCTAssertFalse(shot.isEmpty, "拿不到实拍头 ⇒ 夹具没搭起来")
+        // 分支线从**更早**那头长出来：先动这一页（X），再顶回实拍端的值（Y）。
+        // 于是实拍头之后确实有提交动过这条路径，可两端内容一字不差 —— 本仓六行空红就是这个形状。
+        try git(["branch", "-f", "side", "HEAD~1"])
+        try git(["checkout", "-q", "side"])
+        try write("a.txt", "3")
+        try git(["commit", "-qam", "X 动过这一页"])
+        try write("a.txt", "2")
+        try git(["commit", "-qam", "Y 顶回实拍端的内容"])
+
+        let viaLog = try git(["log", "--format=%h", shot + "..HEAD", "--", "a.txt"])
+
+        let viaDiff = try Self.netChanges(head: shot, paths: ["a.txt"], root: root)
+        XCTAssertFalse(viaLog.isEmpty,
+                       "夹具没造出「历史动过、净内容未变」的形状 ⇒ 这条元测试在空转（旧口径都测不到东西）")
+        XCTAssertTrue(viaDiff.isEmpty,
+                      "净差异口径下这种历史不该算过期（实拍仍然有效），却报变了：\(viaDiff)")
     }
 
     /// 过期判据两个方向：动了的必须抓到，谁都没动的不许乱咬。
