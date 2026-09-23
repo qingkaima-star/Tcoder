@@ -260,6 +260,10 @@ extension LocalizationGuardTests {
         // 只有多生态的仓库才会走到这条分支（本仓依赖清单为空），所以十八趟 dogfooding 读数从没抓到过。
         "Services/Dependencies/DependencySnapshot.swift",
         "Services/Dependencies/ManifestDependencyAnalyzerVersionEvidence.swift",
+        // P69c（WS-多槽复数流）：`crashEvidenceFootnote` 那三句从"插值 + `+` 拼半句"换成
+        // 整句槽型键（两条多槽、一条混槽、一条把三段并成一条）之后，本文件里
+        // 已经没有"把测得值插在自己肚子里"的中文字面量了。
+        "Services/Logs/FileLogAnalyzer.swift",
     ]
 
     func test_keyizedCopyFilesHoldNoInterpolatedChineseLiterals() throws {

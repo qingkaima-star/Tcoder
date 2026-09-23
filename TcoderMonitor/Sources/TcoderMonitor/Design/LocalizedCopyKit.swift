@@ -118,8 +118,60 @@ func localizedFormat(_ key: String, _ args: String...) -> String {
 /// （打出来是字面量 `'lld 行`），而 `stringsdict` 的复数规则又必须拿到数字才能选
 /// `one` / `other` ⇒ 分组只能在填完之后做。见 `LocalizedCopyKitTests.testCountsGetTheSameSeparators`。
 func localizedCount(_ key: String, _ count: Int) -> String {
-    let filled = String(format: localizedCopy(key), count)
-    return groupedInto(filled, count: count)
+    localizedCount(key, slots: [count])
+}
+
+/// **多槽**复数句的入口（批次 P69c：一句话里有两个复数槽）。
+///
+/// 为什么必须新立这一枚而不是把 `localizedCount` 改成变参（P69 总工登记的那道缺口）：
+/// 「共 N 天 · 单日峰值 M 条」这类句子的**两个槽各自有单复数**
+/// （`1 day · peak 1 entry` vs `2 days · peak 5 entries`），
+/// 英语还得让**动词**跟着第一个槽变（`1 crash has` / `3 crashes have`）。
+/// 一条只能收一个 `Int` 的出口对这一族只有两种坏出路：
+/// 降级成单数键（英文语法错），或者留在插值里（英文态整句中文）。
+///
+/// `stringsdict` 本身支持一个键里多个复数变量
+/// （`NSStringLocalizedFormatKey` 写 `%#@a@ %#@b@`，各带 `one`/`other`，
+/// 实参按**出现顺序**喂）—— 这一条不是照抄文档，是先用真 bundle 探出来的：
+/// `LocalizationGuardTests+MultiSlotCopy.test_p69cMultiSlotKeyActuallyPicksTwoIndependentBranches`
+/// 把 (1,1)(1,5)(3,1)(3,5) 四格逐支点名。
+/// 那次实测还抓出一件文档没写的事：**每个复数变量只按它自己绑的那个数选支**，
+/// 所以"要跟另一个槽一致"的词（动词单复数）只能写进**它自己那个槽**的形态里 ——
+/// 写错位置，中文态一切正常，英文态在交叉格上长出 `3 crashes has`。
+///
+/// **形状选的是 `slots: [Int]`，不是 `counts: Int...`。**
+/// 变参会和既有的 `localizedCount(_:_:Int)` 撞成一对歧义重载 ⇒ 要么删旧口
+/// （全仓 24 个调用点一步换到新路径上），要么留着两个都能接的洞。
+/// 带标签的数组是**逐键显式认领**：旧句子继续走它原来那一行填法，
+/// 只有真有两个槽的句子才改写本行 —— 一次改动换一批风险，不换 24 批。
+func localizedCount(_ key: String, slots: [Int]) -> String {
+    groupedInto(String(format: localizedCopy(key), arguments: slots), counts: slots)
+}
+
+/// 一个复数槽 **+ 一个任意字符串槽**混用的整句键（批次 P69c）。
+///
+/// 键的形状**钉死**：第 1 槽 `%1$lld`（复数）、第 2 槽 `%2$@`（原样插入的串）。
+/// 这个形状 stringsdict 装得下（实测 `%1$#@var@ (%2$@) …` 两支都选对，
+/// 见 `test_p69cMixedSlotKeyResolvesPluralAndTextInEnglish`），所以**没有**拆成两句
+/// —— 拆了就得让一句英文去包另一句已译好的句子，词序只能由外层模板猜。
+///
+/// ⚠ 字符串槽**先填一枚不含数字的占位符**，补完千分位之后才换成真值。
+/// 那一格里带着 `×2` 这样的计数；它先落地的话就成了串里"第 0 段连续数字"，
+/// 千分位会被补到**别人的数字**上 —— 正是单槽版靠"第一次出现"侥幸避开、
+/// 而多槽版不能再靠侥幸的那一点。
+func localizedCount(_ key: String, count: Int, note: String) -> String {
+    let filled = String(format: localizedCopy(key), arguments: [count, ungroupedSlotToken])
+    return replacing(groupedInto(filled, counts: [count]),
+                     token: ungroupedSlotToken, by: note)
+}
+
+/// 混槽出口那枚"不含数字"的占位符。两头夹控制字符 ⇒ 译文里不可能出现它。
+private let ungroupedSlotToken = "\u{1F}tcodernote\u{1F}"
+
+/// 字面替换。不走正则也不走 `replacingOccurrences(of:with:options:)`
+/// —— 带 `.regularExpression` 时 `with` 里的 `$` 会被当模板，这里连那个机会都不给。
+private func replacing(_ text: String, token: String, by value: String) -> String {
+    text.components(separatedBy: token).joined(separator: value)
 }
 
 /// 把上一步刚填进去那串数字换成千分位。
@@ -128,12 +180,54 @@ func localizedCount(_ key: String, _ count: Int) -> String {
 /// 译文里自带的数字（例如某个单位串里的 "1024"）不会被误伤，因为它不会恰好等于本数的字面
 /// 且排在前面。凑不齐两位分隔的（< 1000）原样返回。
 func groupedInto(_ text: String, count: Int) -> String {
-    guard count >= 1_000 else { return text }
-    let digits = String(count)
-    guard let range = text.range(of: digits) else { return text }
-    var result = text
-    result.replaceSubrange(range, with: NumberFormat.grouped(count))
-    return result
+    groupedInto(text, counts: [count])
+}
+
+/// **逐槽**补千分位：第 i 个槽对应渲染串里第 i 段**完整的**连续数字。
+///
+/// 与上面单槽那条"找第一次出现的数字字面"的区别不是顺手，是**必须**：
+/// 两个槽的字面可以相同（`共 1000 天 · 峰值 1000 条`），
+/// 从左往右找子串会把同一个位置改两遍、第二个槽照样光着；
+/// 而"完整数字段"配"槽序号"天然一一对应，顺带堵死
+/// 「槽值 1234 撞进译文里的 12345」这种半截误伤。
+///
+/// ⚠ 成立前提是**模板自己不带数字字面**（`%1$lld` 里的 `1` 在转换符内部，不算数字段）。
+/// 这个前提不是靠"我们的译文里没有数字"这句话守的，
+/// 是由 `test_p69cRegisteredMultiSlotKeysCarryNoForeignDigitRuns` 逐条钉在目录上的。
+/// 对不上号（译文丢了占位符、数字段比槽少）就**原样返回**，不许猜着改。
+func groupedInto(_ text: String, counts: [Int]) -> String {
+    let runs = digitRunOffsets(in: text)
+    guard !runs.isEmpty, counts.contains(where: { $0 >= 1_000 }) else { return text }
+    var characters = Array(text)
+    // 从最右边的槽往回改：改完一个槽只让它**右侧**的坐标漂移，
+    // 左边那些 range 仍在原文坐标系上，不必每改一次重算一遍。
+    for slot in counts.indices.reversed() {
+        let count = counts[slot]
+        guard count >= 1_000, slot < runs.count else { continue }
+        let (offset, length) = runs[slot]
+        guard String(characters[offset..<(offset + length)]) == String(count) else { continue }
+        characters.replaceSubrange(offset..<(offset + length),
+                                   with: Array(NumberFormat.grouped(count)))
+    }
+    return String(characters)
+}
+
+/// 渲染串里所有**完整**连续 ASCII 数字段的（起点，长度），按出现顺序。
+private func digitRunOffsets(in text: String) -> [(offset: Int, length: Int)] {
+    var runs: [(offset: Int, length: Int)] = []
+    var offset = 0, opened: Int?
+    for character in text {
+        let isDigit = character.asciiValue.map { (0x30...0x39).contains($0) } ?? false
+        if isDigit {
+            if opened == nil { opened = offset }
+        } else if let start = opened {
+            runs.append((start, offset - start))
+            opened = nil
+        }
+        offset += 1
+    }
+    if let start = opened { runs.append((start, offset - start)) }
+    return runs
 }
 
 /// 给一句已经组装好的产品散文补句末标点，**标点随语言走**。
