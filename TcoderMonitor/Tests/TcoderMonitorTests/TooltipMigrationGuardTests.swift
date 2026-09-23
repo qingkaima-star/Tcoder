@@ -23,11 +23,15 @@ final class TooltipMigrationGuardTests: XCTestCase {
 
     private static let longCaliberWidth = 24
 
+    /// 槽位标签与字面量之间允许插一层**查表出口**（WHY 与元测试见
+    /// `TooltipMigrationGuardTests+HelpSlots.swift`）。
+    static let keyedLookup = "(?:localizedCopy|localizedFormat|localizedCount)\\(\\s*"
+
     /// 可见槽位：字面上屏的那些入口（与 `LocalizationGuardTests` 的入口族同源）。
     private static let visibleSlotPattern =
-        "(?:subtitle|caption|note|footnote|emptyNote|message|text|label|title)\\s*:\\s*\""
+        "(?:subtitle|caption|note|footnote|emptyNote|message|text|label|title)\\s*:\\s*(?:" + keyedLookup + ")?\""
         + "|(?:GlassSection|NoteLine|DataFootnote|DataCaption|Text|BannerRow|StatLine"
-        + "|SectionEmptyNote|EmptyStateView)\\s*\\("
+        + "|SectionEmptyNote|EmptyStateView)\\s*\\((?:" + keyedLookup + ")?"
 
     /// tooltip 承载位：`.help(...)`、共用的 `CopyHelpBadge(...)`，以及**带 `help:` 标签的槽位**
     /// （`NoteLine(_, help:)`、`DataFieldRow(help:)`、`EmptyStateView(help:)` 都是官方推荐形状）。
@@ -35,8 +39,9 @@ final class TooltipMigrationGuardTests: XCTestCase {
     /// 少了最后这一支就是**尺子在惩罚用对 API 的人**：S2 交回时报"搬了字现量不减"，
     /// 因为它把长句放进 `help:` 后，那一行仍被 `NoteLine(` 认成可见槽位 —— 于是它只好绕开
     /// 推荐形状去直接写 `CopyHelpBadge`。画法仍然唯一，但那是被坏尺子逼出来的。
-    private static let tooltipCarrierPattern = "\\.help\\s*\\(|CopyHelpBadge\\s*\\("
-        + "|(?:subtitleHelp|captionHelp|help)\\s*:\\s*\""
+    private static let tooltipCarrierPattern = "\\.help\\s*\\((?:" + keyedLookup + ")?"
+        + "|CopyHelpBadge\\s*\\((?:" + keyedLookup + ")?"
+        + "|(?:subtitleHelp|captionHelp|help)\\s*:\\s*(?:" + keyedLookup + ")?\""
 
     private static let literalPattern = "\"((?:[^\"\\\\]|\\\\.)*?)\""
     private static let hanPattern = "[\\u4E00-\\u9FFF]"
@@ -46,12 +51,12 @@ final class TooltipMigrationGuardTests: XCTestCase {
     enum LiteralSlot { case visible, tooltip, skipped }
 
     /// 直接压在引号前面的槽位线索（比逐行判定精确一档）。
-    private static let tooltipPrefixPattern = "(?:\\.help|CopyHelpBadge)\\s*\\(\\s*$"
-        + "|(?:subtitleHelp|captionHelp|help)\\s*:\\s*$"
+    private static let tooltipPrefixPattern = "(?:\\.help|CopyHelpBadge)\\s*\\((?:" + keyedLookup + ")?\\s*$"
+        + "|(?:subtitleHelp|captionHelp|help)\\s*:\\s*(?:" + keyedLookup + ")?$"
     private static let visiblePrefixPattern =
-        "(?:subtitle|caption|note|footnote|emptyNote|message|text|label|title)\\s*:\\s*$"
+        "(?:subtitle|caption|note|footnote|emptyNote|message|text|label|title)\\s*:\\s*(?:" + keyedLookup + ")?$"
         + "|(?:GlassSection|NoteLine|DataFootnote|DataCaption|Text|BannerRow|StatLine"
-        + "|SectionEmptyNote|EmptyStateView)\\s*\\(\\s*$"
+        + "|SectionEmptyNote|EmptyStateView)\\s*\\((?:" + keyedLookup + ")?\\s*$"
 
     /// **逐字面量**判槽位，判不出来才退回整行线索。
     ///
@@ -72,7 +77,7 @@ final class TooltipMigrationGuardTests: XCTestCase {
         for match in literal.matches(in: line, options: [], range: lineRange) {
             guard let whole = Range(match.range, in: line),
                   let inner = Range(match.range(at: 1), in: line) else { continue }
-            let prefix = Self.stripLookupWrappers(String(line[line.startIndex..<whole.lowerBound]))
+            let prefix = String(line[line.startIndex..<whole.lowerBound])
             let prefixRange = NSRange(prefix.startIndex..., in: prefix)
             let slot: LiteralSlot
             if tooltipPrefix.firstMatch(in: prefix, options: [], range: prefixRange) != nil {
@@ -147,9 +152,10 @@ final class TooltipMigrationGuardTests: XCTestCase {
     /// 88 → 76（S2 代码两页）→ 74（S3 Git 与贡献者）→ 72（尺子改逐字面量判槽位 + S6 键登记）
     /// → 69（S1 总览与外壳）→ **62（S5 性能与日志 19 处、S4 依赖 3 处、S7 总览三处收进 ⓘ）**。
     /// 同批 tooltip 承载 13 → 49、总量 101 → 111：**B 一句没删**，降下来的 26 条全部搬进了 ⓘ。
-    /// → 54（P69 合流：26 段半句并成 10 条整句键）
-    /// → **86（P70 重播种：不是新增债，是量具坏了** —— 分类器原先看不见包在 `localizedFormat(…)` 里的常驻句，
-    /// 机制与双向元测试见 `+CaliberMerges.swift` 的 `stripLookupWrappers`；旧曲线 88→54 里有一部分是"句子变得看不见"）。
+    /// ⚠ 上面那条 62 **打在一把瞎的尺子上**：入口族认了查表出口之后，同一份内容是 **54 → 86**
+    /// （86 条里只有 7 条住在 P69 改过的文件 ⇒ 大部分是先前就躲着的）。机制与逐条名单见
+    /// `TooltipMigrationGuardTests+HelpSlots.swift`；从此按修好的口径只减不增。
+    /// （沿革：62 → 54 是 P69 合流把 26 段半句并成 10 条整句键；54 → 86 是本笔修口径后同一份内容的真实读数。）
     private static let visibleCaliberCeiling = 86
 
     /// 总量下限 = 播种时的可见 + tooltip 之和 **减去已核准的删除数**。
@@ -157,10 +163,6 @@ final class TooltipMigrationGuardTests: XCTestCase {
     /// 为什么必须有豁免口：盘点表里 16 处判的是「删」（同屏两遍、卡名换个说法再讲一遍），
     /// 那些不是"藏起来"，是本来就不该占两处。一条只许往上的守恒线会把合理的删句一起拦下，
     /// 而被人嫌烦的守卫活不过下一轮 —— 所以给一个**逐条留名**的口，而不是放宽判据。
-    /// 101 → **100（P69 合流，2026-09-24）**：三条流把 26 段"插值 + `+` 拼的半句"并成 10 条整句键，
-    /// **文本一字未少、可数的单元少 8 个**（守卫 B 数的是字面量条数，是个单元代理）。
-    /// 这不是放宽：那 10 句现在由 `+CaliberMerges.swift` 逐句钉着必须还在树里，
-    /// 地板每降一次都要有存活句抵一次。删除仍只能走 `acceptedCaliberDeletions` 逐条留名。
     private static let totalCaliberFloor = 100 - acceptedCaliberDeletions.count
 
     /// 已核准「删掉而不是藏进 ⓘ」的口径句：片段 → 为什么该删。
@@ -249,7 +251,7 @@ final class TooltipMigrationGuardTests: XCTestCase {
         let (visible, tooltip) = Self.scan(files)
         XCTAssertFalse(visible.isEmpty, "一条常驻长句都没扫到 —— 尺子失灵，不是页面变干净了")
         print("ⓘ 收纳棘轮：可见长句 \(visible.count) / 上限 \(Self.visibleCaliberCeiling)"
-              + "（tooltip 承载 \(tooltip.count) 条 / 扫描面 \(files.count) 个文件）")
+              + "（tooltip 承载 \(tooltip.count) 条 / 扫描面 \(files.count) 个文件）" + Self.dump(visible))
         XCTAssertLessThanOrEqual(visible.count, Self.visibleCaliberCeiling,
                                  "常驻长句从 \(Self.visibleCaliberCeiling) 涨到 \(visible.count)："
                                  + "新增解释文案要么走 tooltip，要么别再写")
