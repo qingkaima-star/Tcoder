@@ -273,7 +273,7 @@ struct HealthCodeScopeReadout: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             Theme.Readout.Field(scope.label,
-                                localizedFormat("%1$@ · %2$@ 级", String(scope.overall), scope.grade.rawValue),
+                                localizedFormat("%1$@ · %2$@ 级", String(scope.overall), localizedCopy(scope.grade.rawValue)),
                                 help: scope.note)
             Text(membershipLine)
                 .typed(Theme.Typo.narrative)

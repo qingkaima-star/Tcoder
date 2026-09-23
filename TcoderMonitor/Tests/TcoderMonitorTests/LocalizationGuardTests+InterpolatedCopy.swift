@@ -228,4 +228,84 @@ extension LocalizationGuardTests {
         XCTAssertEqual(Self.bareChineseLiterals(in: mixed, exempt: ["代码扫描"]).map(\.text),
                        ["\"这句是文案\""], "豁免一放宽成整片放行 ⇒ 这个文件立刻回到三条守卫的盲区")
     }
+
+
+    // MARK: - 守卫 1j（P62）：枚举档名直接插进模板 ⇒ 同一行半英半中
+
+    /// 实测形状（英文态 18 趟抓到）：`… overall risk 严重` ——
+    /// 模板翻成了英文，插进去的那个**档名**还是中文，因为它是 `risk.rawValue`。
+    /// 与 P57 的维度名同一条病，只是这次漏在**枚举档名**上；
+    /// 五条档名（`无/低/中/高/严重`）目录里**早就有键**，只是从来没人查。
+    ///
+    /// 判据：每个 `.rawValue` 往前看 120 格，若这一段里有 `localizedFormat(` 而**没有** `localizedCopy(`
+    /// ⇒ 这个档名没查表就被喂进了模板。窗口取 120 格（不是只看同一行），
+    /// 因为实参常常换行；判"包没包上"看的是紧邻的 `localizedCopy(`。
+    static func unwrappedEnumWords(in content: String) -> [(line: Int, text: String)] {
+        let kept = content.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { raw -> String in
+                let line = String(raw)
+                return SurfaceScanKit.isCode(line) ? Self.strippingTrailingComment(line) : ""
+            }.joined(separator: "\n")
+        let needle = ".rawValue"
+        var hits: [(line: Int, text: String)] = []
+        var search = kept.startIndex
+        while let found = kept.range(of: needle, range: search..<kept.endIndex) {
+            let windowStart = kept.index(found.lowerBound,
+                                         offsetBy: -120,
+                                         limitedBy: kept.startIndex) ?? kept.startIndex
+            let window = String(kept[windowStart..<found.lowerBound])
+            if window.contains("localizedFormat("), !window.contains("localizedCopy(") {
+                let line = kept[kept.startIndex..<found.lowerBound].reduce(into: 0) { total, c in
+                    if c == "\n" { total += 1 }
+                } + 1
+                hits.append((line, window.suffix(58).trimmingCharacters(in: .whitespaces) + needle))
+            }
+            search = found.upperBound
+        }
+        return hits
+    }
+
+    /// 已认证的文件（P62 全部改完；名单只许往长里加，理由同 1d/1g/1h）。
+    static let enumWordCertifiedFiles: [String] = [
+        "Views/Code/CodeRiskView.swift",
+        "Views/Shell/DashboardHero.swift",
+        "Views/Shell/ShellLayout.swift",
+        "Views/Health/HealthView.swift",
+        "Views/Dependencies/DependencyAdvisoryRows.swift",
+        "Views/PerfLogs/LiveReadings.swift",
+        "Views/Performance/PerformanceSystemTiles.swift",
+        "Design/ReadoutStripKit.swift",
+    ]
+
+    func test_certifiedFilesNeverFeedARawEnumWordIntoATemplate() throws {
+        let files = try SurfaceScanKit.sourceFiles(under: "")
+        let scanned = Dictionary(uniqueKeysWithValues: files.map { ($0.path, $0.content) })
+        let absent = Self.enumWordCertifiedFiles.filter { scanned[$0] == nil }
+        XCTAssertTrue(absent.isEmpty, "名单点名的文件不在扫描面上：\(absent)")
+        let offenders = Self.enumWordCertifiedFiles.flatMap { path in
+            Self.unwrappedEnumWords(in: scanned[path] ?? "").map { "\(path):\($0.line) …\($0.text)" }
+        }
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些枚举档名没查表就被插进整句模板 ⇒ 英文态一行里前半英文、后半中文：\n  "
+                    + offenders.sorted().joined(separator: "\n  "))
+        let rest = files.filter { !Self.enumWordCertifiedFiles.contains($0.path) }
+            .reduce(0) { $0 + Self.unwrappedEnumWords(in: $1.content).count }
+        print("【档名先查表】已认证 \(Self.enumWordCertifiedFiles.count) 个文件 → 名单内 0 处；"
+            + "其余文件仍有 \(rest) 处（P62 首测全仓）")
+    }
+
+    func test_meta_enumWordRulerCatchesUnwrappedAndSparesWrapped() {
+        XCTAssertEqual(Self.unwrappedEnumWords(in: #"CopyHelpBadge(localizedFormat("综合风险 %1$@", code.overallRisk.rawValue))"#).count, 1,
+                       "裸档名没抓到 ⇒ 这一族继续在英文态半中半英")
+        XCTAssertTrue(Self.unwrappedEnumWords(
+            in: #"localizedFormat("综合风险 %1$@", localizedCopy(code.overallRisk.rawValue))"#).isEmpty,
+            "查过表还报 ⇒ 下次没人信这条")
+        // 换行实参也要抓到（窗口 120 格，不是只看同一行）。
+        XCTAssertEqual(Self.unwrappedEnumWords(
+            in: "localizedFormat(\"明细 %1$@\",\n            risk.rawValue)").count, 1)
+        // 与文案无关的 `.rawValue`（比较、取 id）不许误伤。
+        XCTAssertTrue(Self.unwrappedEnumWords(
+            in: "guard state == .failed else { return nil }\nlet key = subject.rawValue").isEmpty,
+            "档名判据咬到非文案用法 ⇒ 逼人写绕路代码")
+    }
 }

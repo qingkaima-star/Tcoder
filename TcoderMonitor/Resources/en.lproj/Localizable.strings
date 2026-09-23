@@ -994,3 +994,8 @@
 "列到 %1$@ 个日志文件，但一行都没读出来（空文件 / 编码不认识 / 读取失败），本维度不参与计分。" = "%1$@ log files were listed but not one line could be read (empty, unknown encoding, or read failure), so this dimension is not scored.";
 "崩溃通道读到 %1$@ 份报告、确认 %2$@ 次崩溃，但一行真日志都没有 ⇒ 错误密度没有分母，本维度不参与计分（这也不等于「零错误」）。" = "The crash channel yielded %1$@ reports and %2$@ confirmed crashes, but not a single real log line, so error density has no denominator and this dimension is not scored (which is also not \\\"zero errors\\\").";
 "%1$@ 份崩溃报告没能读出来，崩溃证据不确定，本维度不参与计分。" = "%1$@ crash reports could not be read, so the crash evidence is uncertain and this dimension is not scored.";
+
+// 批次 P62（词汇层）：枚举档名进文案一律先查表，模板不再吃 `\(x.rawValue)`。
+"尚未分析%1$@" = "Not analysed yet: %1$@";
+"已完成扫描，未发现%1$@" = "The scan finished without finding any %1$@";
+"无法分析：%1$@" = "Cannot analyse: %1$@";

@@ -61,7 +61,7 @@ struct CodeRiskOverviewSection: View {
                     DataHeroReadout(value: NumberFormat.percent(code.duplicationRatio, precision: 1),
                                     note: "的代码行落在重复块内")
                     CopyHelpBadge(localizedFormat("的代码行落在重复块内 —— 综合风险 %1$@，明细见下方「重复代码率」",
-                                                  code.overallRisk.rawValue))
+                                                  localizedCopy(code.overallRisk.rawValue)))
                 }
 
                 // 盘点表 C2（DataCaption 口径，留短藏长 ●）：屏上留三个数本身（口径的**内容**
