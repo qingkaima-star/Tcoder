@@ -188,7 +188,6 @@
 "累计变更" = "Total Changes";
 "贡献集中度结论" = "Concentration Conclusion";
 "近 30 天活跃" = "Active in Last 30 Days";
-"选择一个本地仓库目录后点击「重新分析」。\n分析完成后这里会显示贡献者排行、代码变更量与活跃时段分布。" = "Choose a local repository folder and click Re-analyse.\nOnce the analysis finishes, the contributor ranking, line changes and active hour distribution appear here.";
 "24 小时与星期的近似活跃分布矩阵" = "Approximate activity matrix by hour of day and weekday";
 "提交活跃度按星期与小时近似分布；强度为两条边际归一边际的平均值，是近似值" = "Commit activity is distributed approximately by weekday and hour; strength is the average of the two normalised marginals, so it is an approximation";
 "Git 分析没有产出按时间分桶的提交数据，因此这里无法给出峰值或均值。" = "The Git analysis produced no commit data bucketed by time, so no peak or average can be shown here.";
@@ -211,7 +210,6 @@
 "触达文件" = "Files Touched";
 "路径" = "Path";
 "远端" = "Remote";
-"选择一个本地仓库目录后点击「重新分析」。\n分析完成后这里会显示提交趋势、24×7 活跃分布与最近提交记录。\n" = "Choose a local repository folder and click Re-analyse.\nThe commit trend, 24×7 activity distribution and recent commit records appear here once the analysis finishes.\n";
 "首次提交" = "First Commit";
 "以下均为测得值，口径见上方口径条" = "All of the following are measured values; see the basis bar above";
 "作者统计基准" = "Author Statistics Basis";
@@ -243,7 +241,6 @@
 "对当前项目重新执行全部分析器" = "Re-run every analyser on the current project.";
 "尚未执行依赖分析" = "Dependencies not analysed yet";
 "开发依赖不随产物发布" = "Development dependencies are not shipped with the build output.";
-"扫描完成，但没有找到 package.json、Package.swift、pom.xml、go.mod 等清单文件。\n如果依赖声明在自定义脚本里，这一页为空是真实结果。" = "Scan finished, but no manifest files such as package.json, Package.swift, pom.xml or go.mod were found.\n If dependencies are declared in a custom script, an empty page is the true result.";
 "按清单文件统计" = "Counted by manifest file";
 "条" = "findings";
 "框架标记" = "Framework Markers";
@@ -258,7 +255,6 @@
 "联网核对会显著变慢，离线时仍会用内置快照" = "Online verification is noticeably slower; offline runs still use the built-in snapshot";
 "联网核对说明" = "Online Verification Notes";
 "该清单没有解析出可枚举的依赖项。" = "This manifest did not resolve to any enumerable dependencies.";
-"该项目还没有依赖分析结果。点击「重新分析」开始扫描。\n需要最新版本与漏洞库在线核对时，先打开上方的联网开关。" = "This project has no dependency analysis results yet. Click Re-analyse to start a scan.\n To check latest versions and the vulnerability database online, turn on the network switch above first.";
 "运行时 / 开发" = "Runtime / Dev";
 "锁文件" = "Lock File";
 "项" = "items";
@@ -1087,3 +1083,54 @@
 "历史末点 %1$@ 与本次 %2$@ 不一致。" = "The last stored score %1$@ does not match this run's %2$@.";
 // 批次 P70：这枚空态正文原来把页名插在自己肚子里（`Text(变量)` 永不查表）⇒ 整串从来没有键。
 "点击「重新分析」开始扫描该目录。\n完成后这里会显示真实的文件数、行数与%1$@。" = "Tap Re-analyse to scan this directory.\nWhen it finishes, the real file count, line count and %1$@ appear here.";
+
+// 批次 P71A（碎文案收纳·代码页族）：以下三条是「留短藏长」**屏上那半句**的键。
+// 整句仍是一条完整的键住在 ⓘ 里（屏上半句 = 原句的逐字前缀，不是被劈开的后半），
+// 所以这四条不是半句键：运行时上屏的就是这一串本身，查得到、也翻得动。
+"主语言 %1$@" = "Main language %1$@";
+"空行占 %@" = "Blank lines %@";
+"点击「重新分析」开始扫描该目录。" = "Tap Re-analyse to scan this directory.";
+// 复杂度榜空态留短藏长：屏上那句「扫过了、没函数上榜」是诚实凭据，它自己就是整句。
+"本次扫描没有函数达到引擎给出的复杂度上榜条件。" = "No function in this scan reached the engine condition to enter the complexity board.";
+// ── P71c（WS-性能·日志·外壳片，2026-09-24）：「留短藏长」屏上那半截的短标签 ──────
+// 每条都是它所属整句的**前缀或后段子串**（不新造修辞），整句原样搬进同一个元素的 ⓘ 槽
+// （`EmptyStateView.help:` / `SectionEmptyNote.help:` / `GlassSection.subtitleHelp:`），
+// 中文侧一个字没改、也没删。英文侧每条都得独立成句 —— 屏上短句在英文态也要能单独读。
+// ⚠ 注释一律 `//`：一个 `#` 会让系统解析器从那一行起整段放弃（P59 真炸过一次）。
+"这里不预先给出估算形状。" = "No estimated shape is drawn in advance.";
+"与所选项目无关" = "Unrelated to the selected project";
+"新增分组规则" = "Add a group rule";
+"暂无趋势数据" = "No trend data yet";
+"点击右上角「重新分析」" = "Click Re-analyse in the top-right";
+
+// ── P71B（WS-P71B Git/依赖/健康族，2026-09-24）：四格空态正文「留短藏长」──────────
+// 原来这四格都是**一条键装两句话**（用 `\n` 连在一起）。收纳轮把「屏上留哪句」与
+// 「ⓘ 里挂哪句」拆成两个槽，于是每一句都必须自己是一条完整键（半句键查不中，见
+// `LocalizationGuardTests` 守卫 3 与 `DependenciesView` 那条例注）。中文侧一字未改：
+// 屏上那句就是原来 `\n` 之前的部分，ⓘ 那句是之后的部分；英文值沿用被删掉的四条合并键
+// 的原译文，只去掉行首的 `\n `。逐条判定（为什么留下的那半句够用、藏掉的那半句不丢诚实性）：
+// 1. 依赖页·无清单空态：屏上留「扫描完成，但没有找到…清单文件。」= ② 态测得事实；
+//    藏「如果依赖声明在自定义脚本里，这一页为空是真实结果。」= 对这一屏没显示出来的
+//    那种情形的补充，且空态里一个数字都没有，不会被读成「依赖数为 0」。
+// 2. 依赖页·未分析空态：屏上留「还没有依赖分析结果。点击「重新分析」开始扫描。」；
+//    藏「需要最新版本与漏洞库在线核对时，先打开上方的联网开关。」= 指路句，控件就在页顶；
+//    「没联网核对」另有两处常驻在说（本页 `deps.networkLookupNote` 那条 DataNotice，
+//    与安全公告空态那句「0 条命中只是没有查」）⇒ 不会把「没查」读成「没有病」。
+// 3. 贡献者页空态：屏上留「选择一个本地仓库目录后点击「重新分析」。」（新键，只此一处落点）；
+//    藏「分析完成后这里会显示贡献者排行、代码变更量与活跃时段分布。」= 对还不存在的东西的预告，
+//    与规范 F 组「预告，等于没说」同判。
+// 4. Git 洞察页空态：整条藏（键原样保留在下面，含末尾的 `\n`）。这条不是懒得拆，是两条判据
+//    撞在一起：屏上必须常驻的那半句产自 `Services/Git`（规范 §Y 第 2 条契约缺口），而本文件在
+//    `LocalizationGuardTests.compositionFreeFiles` 已收口名单里 ⇒ 一条消息里不许出现 `+` 拼中文
+//    ⇒ 「留半句上屏 + 另半句进 ⓘ」在这一格做不出来，只能整条搬进 ⓘ。
+//    屏上因此只剩 Services 那句「我们往哪些位置找过仓库」（② 态，本来就必须常驻）。
+// ⚠ 注释一律 `//`：一个 `#` 会让系统解析器从那一行起整段放弃（P59 真炸过一次）。
+// ⚠ 英文值只用 ASCII 标点：`24×7` 在英文里写成 `24x7`（键侧仍是中文原样 `24×7`）。
+"扫描完成，但没有找到 package.json、Package.swift、pom.xml、go.mod 等清单文件。" = "Scan finished, but no manifest files such as package.json, Package.swift, pom.xml or go.mod were found.";
+"如果依赖声明在自定义脚本里，这一页为空是真实结果。" = "If dependencies are declared in a custom script, an empty page is the true result.";
+"该项目还没有依赖分析结果。点击「重新分析」开始扫描。" = "This project has no dependency analysis results yet. Click Re-analyse to start a scan.";
+"需要最新版本与漏洞库在线核对时，先打开上方的联网开关。" = "To check latest versions and the vulnerability database online, turn on the network switch above first.";
+"选择一个本地仓库目录后点击「重新分析」。" = "Choose a local repository folder and click Re-analyse.";
+"分析完成后这里会显示贡献者排行、代码变更量与活跃时段分布。" = "Once the analysis finishes, the contributor ranking, line changes and active hour distribution appear here.";
+// Git 洞察页那条整句键（P71B 把它从消息位搬进 ⓘ 位，键与译文逐字未改，故在此复原）。
+"选择一个本地仓库目录后点击「重新分析」。\n分析完成后这里会显示提交趋势、24×7 活跃分布与最近提交记录。\n" = "Choose a local repository folder and click Re-analyse.\nThe commit trend, 24x7 activity distribution and recent commit records appear here once the analysis finishes.\n";

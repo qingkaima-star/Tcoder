@@ -33,7 +33,8 @@ struct CodeRiskView: View {
                 }
             } else if let copy = CodeDataGate.emptyCopy(for: report?.code,
                                                        page: "复杂度、重复率与改进建议") {
-                EmptyStateView(icon: copy.icon, title: copy.title, message: copy.message)
+                EmptyStateView(icon: copy.icon, title: copy.title, message: copy.message,
+                               help: copy.help)
             }
         }
     }
@@ -211,9 +212,13 @@ struct CodeComplexitySection: View {
                     icon: .noRisk,
                     title: "已完成扫描，没有函数上榜",
                     // 整句键（P69a）：与上面那句空态同一个坑 —— 三段拼完的串不是键。
-                    message: localizedFormat("本次扫描没有函数达到引擎给出的复杂度上榜条件。参考数字：超长函数 %1$@ 个 · 平均函数长度 %2$@ 行。",
-                                             NumberFormat.grouped(code.longFunctions),
-                                             NumberFormat.grouped(code.averageFunctionLength))
+                    // 盘点表「留短藏长」：屏上留「扫过了、没函数上榜」这半句（它是这一卡的
+                    // 诚实凭据，藏了就会被读成"没扫"）；「参考数字：超长函数 N 个 · 平均函数长度
+                    // M 行」整句进 ⓘ —— 那两个数在本页「风险总览」的读数带里已各占一格。
+                    message: localizedCopy("本次扫描没有函数达到引擎给出的复杂度上榜条件。"),
+                    help: localizedFormat("本次扫描没有函数达到引擎给出的复杂度上榜条件。参考数字：超长函数 %1$@ 个 · 平均函数长度 %2$@ 行。",
+                                          NumberFormat.grouped(code.longFunctions),
+                                          NumberFormat.grouped(code.averageFunctionLength))
                 )
             } else {
                 VStack(alignment: .leading, spacing: Theme.Spacing.md) {

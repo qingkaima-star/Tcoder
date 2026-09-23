@@ -31,9 +31,19 @@ struct ContributorsView: View {
                 }
             } else {
                 EmptyStateView(
-                    icon: .people,
+                    // 图标传解析后的串而不是 `icon: .people`：收 `IconName` 的那个初始化器
+                    // （`Views/CodeGit/CodeGitDesignKit.swift`）只转发 title/message，
+                    // 要用空态自带的 ⓘ 槽就得走合成初始化器。`CodeGitSymbol.resolve` 正是
+                    // 那个初始化器内部的同一句调用 ⇒ 屏上的符号一个像素没变。
+                    icon: CodeGitSymbol.resolve(.people),
                     title: "尚未分析 Git 历史",
-                    message: "选择一个本地仓库目录后点击「重新分析」。\n分析完成后这里会显示贡献者排行、代码变更量与活跃时段分布。"
+                    // 留短藏长（盘点表 E1）：屏上只留「该点哪个按钮」这一句 —— 它才是
+                    // 这一屏唯一能推动用户的东西。「分析完成后这里会显示贡献者排行、
+                    // 代码变更量与活跃时段分布」是对**还不存在的东西**的预告，不改变任何
+                    // 读法（同一形状在性能页 F18 那一条被判的就是「藏：预告，等于没说」）。
+                    // 两句各自立整句键，ⓘ 走 `EmptyStateView` 自带的 `help:` 槽。
+                    message: "选择一个本地仓库目录后点击「重新分析」。",
+                    help: "分析完成后这里会显示贡献者排行、代码变更量与活跃时段分布。"
                 )
             }
         }

@@ -127,9 +127,15 @@ struct ContributorRow: View {
                     Text("\(NumberFormat.signed(author.additions)) / \(NumberFormat.signed(-author.deletions))")
                         .font(CodeGitType.number(Theme.Typo.monoSmall))
                         .foregroundStyle(.secondary)
-                        .help(Text(localizedFormat("代码变更量 %1$@ 行 · 触达 %2$@ 个文件",
-                                                   NumberFormat.grouped(author.totalChurn),
-                                                   NumberFormat.grouped(author.filesTouched))))
+                        // 这里的 `Text(...)` 壳是多余的：`localizedFormat` 已经查过表，
+                        // `.help` 另有收 `String` 的重载（本文件 `shareAbsence.help(denominator:)`
+                        // 那一格、`GitInsightsView` 的 `.help(Self.latestCommitCaption(git))` 都是它）。
+                        // 屏上、悬停上的一模一样，改的只有**尺子能不能看见这句住在 hover**：
+                        // `TooltipMigrationGuardTests` 的承载位正则认 `.help(localizedFormat("…`，
+                        // 中间夹一层 `Text(` 就落到 `.skipped` ⇒ 一句真 hover 被数成常驻长句。
+                        .help(localizedFormat("代码变更量 %1$@ 行 · 触达 %2$@ 个文件",
+                                              NumberFormat.grouped(author.totalChurn),
+                                              NumberFormat.grouped(author.filesTouched)))
                     Text(author.lastActiveDescription)
                         .monospacedDigit()
                         .foregroundStyle(.secondary)

@@ -88,9 +88,14 @@ struct HealthComponentTable: View {
 
             LiveNumber(Live.fixed(row.contribution, digits: 1), tier: Theme.Typo.monoSmall)
                 .tableCell(DataColumns.column(DataColumns.healthComponents, 3))
-                .help(Text(localizedFormat("满分可得 %1$@，这一维度拖了 %2$@ 分",
-                            Live.fixed(row.fullMarks, digits: 1),
-                            Live.fixed(row.lostPoints, digits: 1))))
+                // 与上一格 `weightHelp(row)` 同一形状（`.help` 收 `String` 的重载）。
+                // 原来多套一层 `Text(` —— 悬停上没有任何区别，但收纳尺子认不出这一格
+                // 是 hover 承载位，于是把一句真 ⓘ 算成了常驻长句（`+HelpSlots` 那条
+                // "换壳不换读数"的元测试钉的就是这一族形状，只是它当时没覆盖到
+                // `.help(Text(localizedFormat("…")))` 这一种夹法，已记进本轮汇报的盲区）。
+                .help(localizedFormat("满分可得 %1$@，这一维度拖了 %2$@ 分",
+                                      Live.fixed(row.fullMarks, digits: 1),
+                                      Live.fixed(row.lostPoints, digits: 1)))
 
             Text(row.component.detail)
                 .font(Theme.Typo.narrative.font)
