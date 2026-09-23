@@ -807,7 +807,7 @@
 // 装配口 `CodeScanSurfaceReadout.accountingLines(_:)` 是界面与 CLI 共用的**唯一**那一个。
 // 三态各一句：没有台账 ⇒ 缺席话；量到的 0 ⇒ 一个字都不许多；有数 ⇒ 下面那两句纯数字。
 // ⚠️ 值里一律不出现 ASCII 双引号（本目录踩过：那会让整份目录解析失败而守卫全绿）。
-"扫描范围：本次没有范围台账 —— 这一路没跑过，或这份报告出自没有这一格的旧结构，所以「排除了几个」这类读数一个都不成立。" = "Scan scope: this report carries no scope ledger — that path never ran, or the report predates this field, so no 「how many were excluded」 reading holds here.";
+"扫描范围：本次没有范围台账 —— 这一路没跑过，或这份报告出自没有这一格的旧结构，所以「排除了几个」这类读数一个都不成立。" = "Scan scope: this report carries no scope ledger — that path never ran, or the report predates this field, so no reading of the excluded counts holds here.";
 "扫描范围台账：遍历看到 %1$@ 个条目 · 按规则排除 %2$@ 个（逐条点名 %3$@ · 未点名 %4$@）· 没量到的范围 %5$@ 条。" = "Scan scope ledger: %1$@ entries seen · %2$@ excluded by rule (%3$@ named one by one · %4$@ unnamed) · %5$@ ranges were not measured.";
 "排除条目的行数：%1$@ · 仓库标记 %2$@ 个 · 其中 submodule 形状 %3$@ 个 · 软链接文件 %4$@ 个 · 目录软链接 %5$@ 个 · 名单外被系统判定剪掉的目录 %6$@ 个 · 读不动的目录 %7$@ 个。" = "Lines in the excluded entries: %1$@ · repository markers %2$@ · of them submodule-shaped %3$@ · symlinked files %4$@ · symlinked directories %5$@ · directories pruned by the system bundle rule off our list %6$@ · unreadable directories %7$@.";
 "行数未统计" = "Line count not measured";
