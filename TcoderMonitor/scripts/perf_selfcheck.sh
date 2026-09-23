@@ -102,6 +102,8 @@ items_gates() {          # items_gates <outdir> —— 14..19 前置与开录闸
   item selfcheck_py_rulers_compile "$out"       # 36) 每支 .py 尺子都要能被 compile() 读懂（ASCII 引号第 6 次）
   item selfcheck_section_wiring "$out"      # 40) MEASURE_SECTION 必须进到启动那一行（定义了没用＝假接线）
   item selfcheck_measure_rev_attribution "$out"  # 38) 补测改动前基线：归属照样判，只是判另一个 rev
+  item selfcheck_load_threshold_override "$out"  # 51) LOAD_MAX 这个出口必须真的改判并回显生效阈值
+  item selfcheck_inwindow_load_verdict "$out"  # 52) 窗口内负载峰值要能定合格（四形状，含"没采到要出声"）
   item selfcheck_switch_page_names "$out"        # 48) 冷启动档的页名：含空格的要过、名册外的要当场红
   item selfcheck_switch_attribution_and_refusal "$out"  # 49) 归属写给被测内容；宿主 die 不在场时也要拒跑
   item selfcheck_cleanup_opt_in_state "$out"   # 37) 收尾形状三分：无条件 kill / 躲在开关后面 / 没有（三夹具双向）

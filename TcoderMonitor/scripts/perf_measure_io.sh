@@ -22,11 +22,15 @@ post_window_load() {  # post_window_load <outdir> —— 窗口**结束那一刻
   load1=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | awk '{print $1}'); load1=${load1:-0}
   jobs=$(concurrent_heavy_jobs 2>/dev/null)
   meta_write "$out" "load1_at_end=$load1" "heavy_at_end=${jobs:-无}"
-  if [ -n "$jobs" ] || awk -v l="$load1" -v c="$cores" 'BEGIN{exit !(l > c*1.5)}'; then
+  # 阈值走 `load_bar`：**不在这里重写一遍式子**——两处式子早晚各判各的（闸门放行、复核说脏）
+  if [ -n "$jobs" ] || awk -v l="$load1" -v b="$(load_bar)" 'BEGIN{exit !(l > b)}'; then
     meta_write "$out" "contaminated_by_foreign_load=1"
     echo "    ⚠ 窗口结束时整机在忙（load1=$load1/$cores，重活=${jobs:-无}）" >&2
     echo "      ⇒ 这批 hitch 分布会被外部争用主导，**不作数**（闸门只看了窗口开始那一刻）。" >&2
   fi
+  # 两端之外还要问"中段呢"：窗口内那几发的峰值在这里定合格与否（§AP：八趟里只有一趟落在红线内，
+  # 而那趟的收窗负载是 19.73——旧复核放行它，就是因为只看两端）。
+  load_window_verdict "$out"
 }
 
 post_window_quiescence() {  # post_window_quiescence <outdir> <窗口秒数>；按 PERIOD 决定"什么样的收尾算合格"
@@ -97,6 +101,9 @@ record_bounded() {  # record_bounded <outdir> <trace 路径> <模板> <时长秒
   while [ "$waited" -lt "$limit" ]; do
     kill -0 "$pid" 2>/dev/null || break     # kill -0 只探活，不发信号
     sleep "$RECORD_POLL_S"; waited=$((waited + RECORD_POLL_S))
+    # 这个循环本来就每 5 s 在窗口内醒一次 ⇒ 顺手采一发整机负载。
+    # 没有这一发，闸门就只看得到"起窗前"和"收窗时"两个点，中段起的那趟编译看不见（§AP）。
+    load_sample_once "$out"
   done
   local stuck=0
   if kill -0 "$pid" 2>/dev/null; then
@@ -159,4 +166,37 @@ if os.path.isfile(path):
         pass
 json.dump(data, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 PY
+}
+load_sample_once() {  # load_sample_once <outdir>：往 <out>/load-in-window.tsv 追加一行「时刻 / load1 / 重活个数」
+  # 为什么挂在 `record_bounded` 的轮询里而不是自己起后台子壳：那个 poll 循环本来就在窗口内每 5 s 醒一次，
+  # 借它顺手采样**不新增进程**，也就不会有"录制链半路 die 掉、留下一个还在写 tsv 的孤儿"这种形状
+  # （`record_bounded` 自己就得对付挂死与被测消失两条路，别再给它加一条）。
+  local out="$1" l j
+  # 分两行声明：同一条 `local` 里引用自己前半段的名字，$out 还是空的
+  # （今天在第 49 项的夹具里刚踩过同一条，两处一起改）。⇒ 路径必须单独一步拼。
+  local f="$out/load-in-window.tsv"
+  [ -n "$out" ] || return 0
+  mkdir -p "$out" 2>/dev/null || return 0
+  l=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | awk '{print $1}')
+  j=$(concurrent_heavy_jobs 2>/dev/null | wc -w | tr -d ' ')
+  printf '%s\t%s\t%s\n' "$(date +%s)" "${l:-0}" "${j:-0}" >> "$f"
+}
+
+load_window_verdict() {  # 把**窗口内峰值**判一次并落 meta：两端干净 ≠ 整窗干净（§AP 今天八趟的现证）
+  local out="$1" maxl=0 jobs=0 n=0 bar
+  local f="$out/load-in-window.tsv"   # 同上：$out 要先声明完再用
+  [ -s "$f" ] || { meta_write "$out" "load_in_window=未采到"
+                   echo "    ⚠ 窗口内一个负载样本都没采到 ⇒『整窗干净』这句话没有依据（已写进 meta）" >&2
+                   return 0; }
+  maxl=$(cut -f2 "$f" | sort -g | tail -1); jobs=$(cut -f3 "$f" | sort -g | tail -1)
+  n=$(wc -l < "$f" | tr -d ' '); bar=$(load_bar)
+  meta_write "$out" "load1_max_in_window=${maxl:-0}" "heavy_max_in_window=${jobs:-0}" \
+                   "load_samples=$n" "load_bar_used=$bar"
+  if awk -v l="${maxl:-0}" -v j="${jobs:-0}" -v b="$bar" 'BEGIN{exit !(l > b || j > 0)}'; then
+    meta_write "$out" "contaminated_by_foreign_load=1"
+    echo "    ⚠ 窗口内出现过高负载或重活（峰值 load1=$maxl、重活个数峰值 $jobs、采样 $n 次、阈值 $bar）" >&2
+    echo "      ⇒ 起窗与收窗都干净也没用：这批量的是别人占着机器时的主线程，不作数。" >&2
+  else
+    echo "    窗口内负载采样：$n 次，峰值 load1=$maxl ≤ 阈值 $bar、重活峰值 $jobs ⇒ 整窗干净"
+  fi
 }

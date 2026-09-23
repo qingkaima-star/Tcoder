@@ -165,18 +165,21 @@ cond_instance_ready() {  # 场上恰有"我这一个"实例才算好；一个都
   # 【为什么"要不要起"必须留在等待循环里】2026-09-23 16:47 现场：起跑那一瞬别人主树的实例还在
   # （场上=1，但不是本树起的）⇒ 一次性的判断落成"不起"；三分钟后它退场，排程器却继续在
   # 「实例数恰为 1」上等到超时，屏幕上还印着那个**已经消失的 pid**。人以为在排队，其实永远等不到。
-  if [ "$HARNESS_LAUNCHES" = "1" ]; then cond_no_instance; return; fi   # 那一档的实例归录制档起，多起一个就是 attach 错人
   local n; n=$(instance_count)
   if [ "$n" != "0" ]; then cond_one_instance; return; fi
   cond_quiet "$LAUNCH_QUIET_WANT" || return 1
   # 【起手机会要有上限】这条判断现在每 5 秒重跑一次；万一"认到自己那个实例"这一步失败，
   # 不加封顶就等于**每 5 秒把 App 提到前台一次**——那不是测量，是对着别人干活的地方反复弹窗。
   # 到顶就停手并报出来，让人来看，而不是自己一直试。
-  launches_done=$((launches_done + 1))
-  if [ "$launches_done" -gt "$LAUNCH_MAX" ]; then
-    echo "    已经起过 $LAUNCH_MAX 次仍没拿到'只有我这一个实例'的状态 ⇒ 停手，不每 5 秒重弹一次窗口"
+  if [ "${launches_done:-0}" -ge "$LAUNCH_MAX" ]; then
+    echo "    已经起过 $LAUNCH_MAX 次仍没拿到『只有我这一个实例』的状态 ⇒ 停手，不每 5 秒重弹一次窗口"
     return 1
   fi
+  # **挨着 open 的那道闸不许挪走**：`MEASURE_LAUNCH=1` 那一档的实例归录制档起，
+  # 排程器多起一个就是"两边各起一个 ⇒ 多实例拒跑"或"attach 错人"（第 32 项按
+  # "guard 与 open 相隔 8 行以内"这个形状认它，也是它真该在的位置——最后一道闸）。
+  if [ "$HARNESS_LAUNCHES" = "1" ]; then cond_no_instance; return; fi
+  launches_done=$((launches_done + 1))
   open "$START_BIN" && sleep 4
   started_pid=$(my_instance_pid)
   echo "    已起自己的实例 pid=${started_pid:-?}（收尾只 TERM 这一个）"

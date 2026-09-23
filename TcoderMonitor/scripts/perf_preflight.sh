@@ -198,14 +198,22 @@ preflight_gates_contention() {  # 【并发重活】判据（认哪些名字、�
   fi
 }
 
+load_bar() {  # 负载阈值的**唯一**口径：默认 核数×1.5，`LOAD_MAX=<数>` 显式覆盖
+  # 单独一个函数的理由：这条式子原本在**两处**各写了一遍（闸门里 `c*1.5`、
+  # 收尾复核里又 `c*1.5`），而注释说的 `LOAD_MAX` 出口两处都没实现。
+  # 两个入口迟早分叉，而分叉的方向永远是"闸门放行了、收尾复核却说脏"（或反过来）。
+  local c="${cores:-}"
+  [ -n "$c" ] || c=$(sysctl -n hw.ncpu 2>/dev/null || echo 8)
+  awk -v c="$c" -v o="${LOAD_MAX:-}" 'BEGIN{ if (o != "") print o+0; else print c*1.5 }'
+}
+
 preflight_gates_load() {  # 【整机负载】阈值只写一次：测量档与启动档共用（冷启动同样怕排队）
   # 默认 1 分钟 load 不超过核数的 1.5 倍。`LOAD_MAX=<数>` 是**写在这条判据旁边的公开出口**，
   # 但 2026-09-23 17:17 实测它是个**空头的旋钮**：注释说可覆盖，代码里阈值写死成 `c*1.5`，
   # 我拿 `LOAD_MAX=5` 去要一个更严的窗口，它照旧按 22.5 放行（现场：load1=13.44/15 那趟量出 24.8 ms，
   # 而同一个二进制在 load 4.6 起的那趟量出 1.59 ms ⇒ 这条闸在 1.5× 核数上太宽，心跳档根本用不了）。
   # 判据与它印出来的数字必须同源：所以下面把真正生效的那个数回显出来，不许"印 22.5、判 5"。
-  local bar
-  bar=$(awk -v c="$cores" -v o="${LOAD_MAX:-}" 'BEGIN{ if (o != "") print o+0; else print c*1.5 }')
+  local bar; bar=$(load_bar)
   if awk -v l="$load1" -v b="$bar" 'BEGIN{exit !(l > b)}'; then
     echo "!! load1=$load1 超过阈值 $bar（核数 $cores；默认 = 核数×1.5，$([ -n "${LOAD_MAX:-}" ] && echo "本次由 LOAD_MAX 显式覆盖" || echo "未设 LOAD_MAX")）" >&2
     echo "   整机在排队 ⇒ 任何帧节拍与主线程占用读数都不作数。等负载降下来；" >&2
