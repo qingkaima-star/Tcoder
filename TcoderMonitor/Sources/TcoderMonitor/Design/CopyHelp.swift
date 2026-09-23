@@ -75,11 +75,14 @@ extension View {
     /// 为什么不做成"无条件挂 `help`"：那把尺子（`ax_truncation_sweep.sh` 主门）分的正是
     /// **装不下 + 无 help = 字丢了** 与 **装不下 + 有 help = 有意裁短** 两档，
     /// 一律挂上就等于把"会折行、整段还在屏上"的那些也搬进取舍档 —— 两档混成一档 = 判据被关掉。
+    ///
+    /// 参数收成**可选**是为了这一族只有一把尺子：调用点要么交一句原文、要么交 `nil`
+    /// （`nil` = 这一格不需要去处），不再各写一遍 `if let` 的分支壳。
     @ViewBuilder
-    func help(whenClipped clipped: Bool, _ text: String) -> some View {
+    func clippedHelp(_ text: String?, whenClipped clipped: Bool = true) -> some View {
         // 查表只放在这一处：这里是 tooltip 的唯一出口。调用点再查一次，在开着
         // `TCODER_I18N_RUNTIME_LEDGER` 的那趟里会把**已经译好的英文串**当成一个新键记进 `.misses`
         // （`record` 按"查完是否变样"判漏翻），漏翻台账就这么被自己人多喂了一条假条目。
-        if clipped { self.help(Text(localizedCopy(text))) } else { self }
+        if clipped, let text { self.help(Text(localizedCopy(text))) } else { self }
     }
 }

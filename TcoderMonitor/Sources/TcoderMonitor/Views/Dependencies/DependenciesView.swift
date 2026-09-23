@@ -326,10 +326,8 @@ struct DependencyTable: View {
         }
     }
 
-    /// 屏上那一句：原句里"计数"那一层，逐字取前半。
-    /// **整句键**：这几句原来把测得值插在自己肚子里（还有一处用 `+` 拼两个半句），
-    /// 英文态整串永远查不中——本仓依赖清单是空的，所以这条分支只在**换一个大仓**时才上屏
-    /// （2026-09-23 拿 Homebrew 复验抓到）。
+    /// 屏上那一句：原句里"计数"那一层，逐字取前半。**整句键**——写成插值字面串就等于让
+    /// 英文态那句英文中间掉进一段中文；本仓依赖清单为空，这条分支只在换个大仓时才上屏（P67 拿 Homebrew 抓到）。
     static func countLabel(total: Int, shown: Int) -> String {
         guard total > shown else {
             return localizedFormat("共 %1$@ 项，已全部展示。", NumberFormat.grouped(total))
@@ -341,9 +339,8 @@ struct DependencyTable: View {
     /// 折叠必须被计数交代：只显示 12 行而不说「共 N 项」，用户会把 12 当成全部。
     /// **整句**（含排序口径）现在是 ⓘ 里那一句，屏上的短句是它的前半 —— 两个落点不重叠。
     static func countNote(total: Int, shown: Int) -> String {
-        guard total > shown else {
-            return localizedFormat("共 %1$@ 项，已全部展示。", NumberFormat.grouped(total))
-        }
+        // 全部展示时"完整读法"与"屏上短句"是同一句话 ⇒ 引用，不留第二份字面。
+        guard total > shown else { return countLabel(total: total, shown: shown) }
         return localizedFormat("当前展示 %1$@ / %2$@ 项 · 按名称排序。",
                                NumberFormat.grouped(shown), NumberFormat.grouped(total))
     }

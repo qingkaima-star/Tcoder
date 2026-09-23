@@ -105,7 +105,7 @@ struct DataReadout: View {
                 .lineLimit(1)
                 // 名字被裁 = 那一格数字失去归属（英文窄态实测 `Average Cyclomatic Complexity`
                 // 165pt 对 140pt 的列）。同 caption 一条规矩：截了必须有去处。
-                .help(whenClipped: true, label)
+                .clippedHelp(label)
                 .monospacedDigit()
             HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
                 Text(localizedCopy(value))
@@ -131,7 +131,7 @@ struct DataReadout: View {
                     // `Counts only functions of ≥2 lines.` —— 中文态同一句更短所以一直没露头。
                     // 走 `help(whenClipped:)` 这个唯一出口：只有会被裁的写法挂全文，
                     // 否则截断尺子的两档（字丢了 / 有意裁短）会被混成一档。
-                    .help(whenClipped: true, caption)
+                    .clippedHelp(caption)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
