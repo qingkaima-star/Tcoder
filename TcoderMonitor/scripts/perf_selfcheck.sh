@@ -124,12 +124,13 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_cadence_two_budgets "$out"    # 35) p95 判据必须两把预算并排印、且真会分歧
   item selfcheck_md_tables_unbroken "$out"     # 30) markdown 表格不许有夹在行中间的裸续行
   item selfcheck_record_bounded "$out"          # 43) 录制要有墙钟兜底：被测进程一消失就当场判废，别永等
+  item selfcheck_covered_evidence "$out"        # 44) 三张关键表都没行数的一趟，不许被印成「✓ 第 i 趟完成」
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：这三行必须在 cmd_selfcheck 之前，
 # 因为编排器一跑就要点到里面的函数名。
 # shellcheck source=/dev/null
-for _part in ruler_shapes gates eligibility; do
+for _part in ruler_shapes gates eligibility launchers tables; do
   source "scripts/perf_selfcheck_${_part}.sh"
 done
 unset _part

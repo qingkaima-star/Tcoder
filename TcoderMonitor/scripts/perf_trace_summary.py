@@ -20,6 +20,8 @@ import statistics
 
 from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, as_int, base_app_update_line, base_hang_line, base_hitch_frame_line, base_hitches_line, base_hotspot_line, base_main_thread_line, base_render_line, dedupe_pairs, disp_values, fmt_row, fps_counts, input_rate_qualification, load_measure, over_budget, percentile, read_json, regime_note, in_display_regime, phase_blame)
 from perf_trace_xml import cross_check_durations, find_tag
+# 逐帧三张表的判据层：判据一字未动，只是搬出去还「巨大文件 400 行」口径的债。
+from perf_trace_frames import PER_TABLE_BUDGETS, frame_table_rows
 
 
 # ----------------------------------------------------------------------------
@@ -291,48 +293,6 @@ def summary_hitch_rows(loaded, seconds, budget):
                 "未覆盖", "—")
 
 
-PER_TABLE_BUDGETS = (("hitches-framewait", 1.5, "每帧排队等待(ms)"),
-                     ("hitches-gpu", 1.0, "每帧 GPU 用时(ms)"),
-                     ("hitches-frame-lifetimes", None, "每帧内容寿命(ms)"))
-
-
-def frame_table_rows(loaded, budget):
-    """逐帧三张表 ⇒ [(标签, 现量, 判定)]。**每张表配自己的预算**（spec §6.1 的 §AC）。
-
-    为什么非分开不可：`hitches-frame-lifetimes` 一帧一行，p50 天生就是 **25 ms（≈3 帧）**——
-    拿 8.333 ms 去判它，会得到"100% 超预算"这种毫无意义的话（与包 10 的 `hitches-updates`
-    同一类单位错）。而 `framewait` 的 p50 ≈ 8.9 ms 是"每帧排队的等待"，
-    对 1.5× 帧预算才是有意义的判据；`gpu` 对 1× 帧预算。
-    做成纯返回（不 print）是为了能被合成夹具双向钉住（selfcheck 第 42 项）。
-    """
-    rows = []
-    for key, mult, label in PER_TABLE_BUDGETS:
-        m = loaded.get(key) or {"present": False}
-        # 先判表在不在，**再**去取它的数：`disp_values` 会读 `measure["doc"]`，
-        # 而缺席的那个合成字典根本没有 `doc` 这一格（夹具按 `frame_table_rows({})`
-        # 一调就 KeyError —— 生产里 `loaded` 总有键，所以这条只有夹具能撞见）。
-        if not m.get("present"):
-            # 判定列要自己出声：读者扫的是第三列，写「—」就等于把"这张表没导出"藏起来
-            # （与 §6.6「缺数据按未覆盖明写」同一条纪律，也是第 42 项现在钉的东西）。
-            rows.append((label, "未覆盖（这份 trace 里没有这张表）", "未覆盖 ⇒ 不判"))
-            continue
-        vals = [v for v in disp_values(m) if v is not None]
-        if not vals:
-            rows.append((label, "0 帧（表在但没读数）", "0 读数 ⇒ 不判"))
-            continue
-        p50, p95 = percentile(vals, .5), percentile(vals, .95)
-        cur = "p50 %.2f / p95 %.2f / max %.2f（n=%d，一帧 %.2f ms）" % (
-            p50, p95, max(vals), len(vals), budget)
-        if mult is None:
-            rows.append((label, cur, "不判单帧预算：内容寿命天生是几帧（p50 ≈ %.1f 帧）"
-                         % (p50 / budget)))
-            continue
-        bar = budget * mult
-        over = sum(1 for v in vals if v > bar)
-        rows.append((label, cur,
-                     "达标（0 帧超 %.2f ms）" % bar if not over
-                     else "%d 帧超 %.2f ms（%.2f%%）" % (over, bar, 100.0 * over / len(vals))))
-    return rows
 
 
 def summary_frame_table_rows(loaded, budget):

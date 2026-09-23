@@ -55,20 +55,33 @@ def _seconds(meta):
     return 0.0
 
 
+def _meta_or_none(d):
+    """一个 run 目录 → 可用的 meta；缺文件、解不动、或被收尾复核打回 ⇒ None。
+
+    分出去只为了让 `read_run` 留在复杂度门内（CC<16、≤50 行），判据一字未动：
+    解不动 JSON 与"档位复核不合格"本来就是同一件事（这一趟不参与），归到一个出口更清楚。
+    """
+    path = os.path.join(d, "meta.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        meta = json.load(open(path, encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+    # 被收尾复核打回的样本，不参与一致性判定
+    if not period_eligibility(meta)[0]:
+        return None
+    return meta
+
+
 def read_run(d):
     """一个 run 目录 → dict；读不到 hitch 表 / 没有秒数 / 档位复核不合格 ⇒ None。
 
     取数一律走 `summary_load`（与报表同一把尺），**不在这里再解析一遍 XML**：
     同一个问题上多一把尺，两把量错的时候没人怀疑新那把。
     """
-    if not os.path.isfile(os.path.join(d, "meta.json")):
-        return None
-    try:
-        meta = json.load(open(os.path.join(d, "meta.json"), encoding="utf-8"))
-    except (ValueError, OSError):
-        return None
-    ok, _why = period_eligibility(meta)
-    if not ok:                                   # 被收尾复核打回的样本，不参与一致性判定
+    meta = _meta_or_none(d)
+    if meta is None:
         return None
     secs = _seconds(meta)
     loaded = summary_load(d)
@@ -95,21 +108,9 @@ def _spread(vals, unit, bar):
         unit, lo, hi, ratio, bar)
 
 
-def verdict(runs, dirs):
-    """→ (逐行文字, 退出码)。缺件与不足都**不许**伪装成"一致"。
-
-    【判据量按档位分】这是第一版被我自己的尺子抓出来的错：拿 hitch/s 的极差比去量
-    **idle 档**，得到"0.00 ~ 0.95 ⇒ 19.0× ⇒ 不一致"——而 idle 档的 hitch 本来就该在 0 附近
-    （静止窗口 ProMotion 还会降频，spec §6.2 明写那一档只记形状不判档）。
-    一个真值≈0 的量做除法散布，任何噪声都是"严重不一致"。
-    ⇒ 每个档位只比**该档的判据量**：`interaction` 比 hitch/s，`idle` 比 `app-update` 的最大值
-    （T2 的既有判据），出帧那一维两档都看。混档一律不判。
-    """
-    if not runs:
-        return ["!! 一个 run 目录都没给 ⇒ 这支尺子没被喂过数据，别把「没输出」当「通过」"], 2
-    got = [r for r in runs if r]
-    missing = [os.path.basename(str(d).rstrip("/")) for d, r in zip(dirs, runs) if not r]
-    lines = ["== 同档连测的一致性（协议：≥3 趟 **且取值一致**）=="]
+def _roster_lines(got, missing):
+    """把每一趟的现量逐行印出来（缺件的那几趟点名，但不进散布）。"""
+    lines = []
     for r in got:
         lines.append("   %-44s 档=%-11s %5.1fs  hitch %4d ⇒ %5.2f /s   render p50 %s  update max %s  出帧 p50 %s"
                      % (r["dir"], r["period"], r["seconds"], r["hitch_n"], r["hitch_per_s"],
@@ -119,16 +120,20 @@ def verdict(runs, dirs):
     if missing:
         lines.append("   缺件/读不出/被复核打回：%s ⇒ **不参与**散布（缺的那趟不许当 hitch=0）"
                      % ", ".join(missing))
-    if len(got) < 3:
-        lines.append("   判定：**样本不足**（只有 %d 趟可用，协议要 ≥3）⇒ 不许报「3/3 达标」" % len(got))
-        return lines, 2
-    periods = set(r["period"] for r in got)
-    if len(periods) > 1:
-        lines.append("   判定：**不判**——这些趟的档位不同（%s），混档比散布没有意义"
-                     % " / ".join(sorted(periods)))
-        return lines, 2
-    period = periods.pop()
-    bad = []
+    return lines
+
+
+def _judge_spread(got, period):
+    """按档位取判据量做散布 ⇒ (告警清单, 要印的行, 判据量名, 该量的现量)。
+
+    【判据量按档位分】这是第一版被我自己的尺子抓出来的错：拿 hitch/s 的极差比去量
+    **idle 档**，得到"0.00 ~ 0.95 ⇒ 19.0× ⇒ 不一致"——而 idle 档的 hitch 本来就该在 0 附近
+    （静止窗口 ProMotion 还会降频，spec §6.2 明写那一档只记形状不判档）。
+    一个真值≈0 的量做除法散布，任何噪声都是"严重不一致"。
+    ⇒ 每个档位只比**该档的判据量**：`interaction` 比 hitch/s，`idle` 比 `app-update` 的最大值
+    （T2 的既有判据），出帧那一维两档都看。
+    """
+    bad, out = [], []
     if period == "idle":
         q = [r["update_max_ms"] for r in got if r.get("update_max_ms") is not None]
         name, bar = "app-update 最大值(ms)", 2.0
@@ -140,13 +145,37 @@ def verdict(runs, dirs):
                    % (len(got) - len(q), name))
     if q:
         ratio, over, text = _spread(q, name, bar)
-        lines.append("   " + text + ("（idle 档按 T2 判据量比，不比 hitch：那量真值≈0，除法散布无意义）"
-                                     if period == "idle" else ""))
+        out.append("   " + text + ("（idle 档按 T2 判据量比，不比 hitch：那量真值≈0，除法散布无意义）"
+                                   if period == "idle" else ""))
         if over:
             bad.append("%s 极差比 %.1f× > %.1f×" % (name, ratio, bar))
     fps = [r["surfaces_p50_fps"] for r in got if r.get("surfaces_p50_fps")]
     if len(fps) >= 2 and (max(fps) - min(fps)) > FPS_SPREAD_BAR:
         bad.append("出帧 p50 极差 %.0f 帧/s > %.0f" % (max(fps) - min(fps), FPS_SPREAD_BAR))
+    return bad, out, name, q
+
+
+def verdict(runs, dirs):
+    """→ (逐行文字, 退出码)。缺件与不足都**不许**伪装成"一致"。
+
+    判据量的选择与散布怎么算都在 `_judge_spread` 里（连同一句"为什么 idle 档不比 hitch"），
+    这里只管三件事：够不够 3 趟、档位齐不齐、结论落在哪个退出码。混档一律不判。
+    """
+    if not runs:
+        return ["!! 一个 run 目录都没给 ⇒ 这支尺子没被喂过数据，别把「没输出」当「通过」"], 2
+    got = [r for r in runs if r]
+    missing = [os.path.basename(str(d).rstrip("/")) for d, r in zip(dirs, runs) if not r]
+    lines = ["== 同档连测的一致性（协议：≥3 趟 **且取值一致**）=="] + _roster_lines(got, missing)
+    if len(got) < 3:
+        lines.append("   判定：**样本不足**（只有 %d 趟可用，协议要 ≥3）⇒ 不许报「3/3 达标」" % len(got))
+        return lines, 2
+    periods = set(r["period"] for r in got)
+    if len(periods) > 1:
+        lines.append("   判定：**不判**——这些趟的档位不同（%s），混档比散布没有意义"
+                     % " / ".join(sorted(periods)))
+        return lines, 2
+    bad, out, name, q = _judge_spread(got, periods.pop())
+    lines += out
     if bad:
         lines.append("   判定：**不一致** —— " + "；".join(bad))
         lines.append("   ⇒ 这一档**不能**报「3/3 达标」。要么继续加趟直到有一组取值一致，"

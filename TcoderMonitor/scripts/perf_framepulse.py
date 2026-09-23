@@ -231,6 +231,39 @@ def crosscheck(reading, budget, max_hz, surf_p50, surf_p95, seconds, meta):
     return lines, 1
 
 
+def _pulse_text(path):
+    """读脉冲文件；读不到就出声并返回 None（判据一字未动，只是从 main 里搬出来）。"""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    except OSError as exc:
+        print("!! 读不到 %s（%s）" % (path, exc), file=sys.stderr)
+        return None
+
+
+def _sample_meta(sample_dir):
+    """`--sample-dir` 那份 meta；读不到就明说「档位声明无从确认」，返回空 dict。"""
+    if not sample_dir:
+        return {}
+    try:
+        with open(os.path.join(sample_dir, "meta.json"), encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError) as exc:
+        print("  ⚠ meta.json 读不到（%s）⇒ 档位声明无从确认，交叉核对按缺件处理" % exc)
+        return {}
+
+
+def _window_seconds(args, meta):
+    """窗口秒数：显式参数 > `meta.hitches_seconds` > 0。
+
+    0 不是"窗口 0 秒"，是**判不了生命期**——那时只能在文字里说明，不许拿累计数答瞬时问题。
+    """
+    try:
+        return args.window_seconds or float(meta.get("hitches_seconds") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description="FramePulse 落盘文件 → 帧间隔判定（＋同窗上屏交叉核对）")
     p.add_argument("pulse_file", nargs="?", default="",
@@ -248,26 +281,13 @@ def main(argv=None):
     pulse = args.pulse_file or (os.path.join(args.sample_dir, "pulse.txt") if args.sample_dir else "")
     if not pulse:
         p.error("既没给脉冲文件也没给 --sample-dir ⇒ 不知道要读谁（故意不猜）")
-    try:
-        with open(pulse, "r", encoding="utf-8", errors="replace") as fh:
-            text = fh.read()
-    except OSError as exc:
-        print("!! 读不到 %s（%s）" % (pulse, exc), file=sys.stderr)
+    text = _pulse_text(pulse)
+    if text is None:
         return 1
     reading = parse(text)
     budget = args.budget_ms or (reading["expected_interval_ms"] * 1.01 if reading else 0.0)
-    meta = {}
-    if args.sample_dir:
-        try:
-            with open(os.path.join(args.sample_dir, "meta.json"), encoding="utf-8") as fh:
-                meta = json.load(fh)
-        except (OSError, ValueError) as exc:
-            print("  ⚠ meta.json 读不到（%s）⇒ 档位声明无从确认，交叉核对按缺件处理" % exc)
-    # 窗口秒数决定"这份脉冲读数管多大范围"：不传就没法判生命期，只能在文字里说明。
-    try:
-        win = args.window_seconds or float(meta.get("hitches_seconds") or 0)
-    except (TypeError, ValueError):
-        win = 0.0
+    meta = _sample_meta(args.sample_dir)
+    win = _window_seconds(args, meta)
     lines, code = verdict(reading, interaction=args.interaction,
                           min_frames=args.min_frames, budget_ms=args.budget_ms,
                           window_seconds=win)
