@@ -537,7 +537,9 @@
 "低" = "Low";
 "无" = "None";
 "%1$@ 个核心 · 口径与活动监视器一致" = "%1$@ cores · same basis as Activity Monitor";
-"在用 %1$@ · 压力 %2$@" = "In use %1$@ · pressure %2$@";
+// P55：这条键并进上面的「总量 %1$@ · 在用 %2$@ · 压力 %3$@」了（内存的分母从值槽挪到脚注）。
+// 短语「在用 X · 压力 Y」一字未删，只是不再是独立的一条键；留着它
+// `test_noStaleKeysInCatalog` 会判"代码里已经不存在的键"。
 "读 %1$@ / 写 %2$@" = "Read %1$@ / Write %2$@";
 "在用 %1$@ 核 / 共 %2$@ 核 · 负载 %3$@" = "Using %1$@ of %2$@ cores · load %3$@";
 "已取指标 %1$@ / 全系统 %2$@ 个进程 · 只读" = "Metrics for %1$@ of %2$@ processes system-wide · read-only";
