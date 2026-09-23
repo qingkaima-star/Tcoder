@@ -50,7 +50,9 @@ ROOT=$(git rev-parse --show-toplevel)
 SCRATCH="${TCODER_SCRATCH:-$ROOT/.scratch}"
 BOX="$SCRATCH/tcoder-ax-truncation"
 SANDBOX="$BOX/sandbox"
-OUT="$BOX/dump"
+# 窄态那趟的产物**另起一个目录**：与默认宽度的 dump 同名互相覆盖的话，
+# 台账里"主门 0 处"就说不清是哪一档量出来的了。
+OUT="$BOX/dump${SWEEP_WINDOW_WIDTH:+-$SWEEP_WINDOW_WIDTH}"
 FRAMES="$SCRATCH/ax_frames"
 BIN="$PWD/dist/Tcoder.app/Contents/MacOS/TcoderMonitor"
 UUID="11111111-2222-3333-4444-555555555555"
@@ -78,7 +80,12 @@ json.dump({"projects": [{"id": uuid, "name": name, "path": path,
 PY
 
 LANG_ARGS=(); [ "${CAPTURE_LANG:-}" = "en" ] && LANG_ARGS=(-AppleLanguages "(en)")
-echo "== 被拍产物 $BIN；沙箱 $SANDBOX；语言态 ${CAPTURE_LANG:-zh}；正文字号 ${FONT}pt（猜的，见头注）"
+# 窗口宽。**不设 = 产品默认的 1280**；传 1080 = 本 App 自己的 `minWidth`（窄态那一档）。
+# 为什么要开这个口子：这把尺子过去只在 1280 上量过，而"读数带被撑高 / 值折两行"
+# 这一类缺陷**只在窄态现形**（乱的清单 §6 第 0 条就是这么漏掉的）。
+# 宽度打进抬头，一批的口径因此是写在产物里的，不靠人记得"那次是窄态跑的"。
+WIDTH_ARGS=(); [ -n "${SWEEP_WINDOW_WIDTH:-}" ] && WIDTH_ARGS=(TCODER_CAPTURE_WINDOW_WIDTH="$SWEEP_WINDOW_WIDTH")
+echo "== 被拍产物 $BIN；沙箱 $SANDBOX；语言态 ${CAPTURE_LANG:-zh}；窗口宽 ${SWEEP_WINDOW_WIDTH:-1280（产品默认）}pt；正文字号 ${FONT}pt（猜的，见头注）"
 
 pids=(); FAILED=0
 cleanup() {  # 只对自己起的、二进制路径核对过的那几个 pid 发 TERM（规约：绝不按 bundle id 广播）
@@ -93,7 +100,7 @@ trap cleanup EXIT INT TERM
 
 for page in "${SECTIONS[@]}"; do
     export TCODER_SUPPORT_DIR="$SANDBOX"
-    "$BIN" -ApplePersistenceIgnoreState YES -selectedDetailSection "$page" "${LANG_ARGS[@]+"${LANG_ARGS[@]}"}" \
+    env ${WIDTH_ARGS[@]+"${WIDTH_ARGS[@]}"} "$BIN" -ApplePersistenceIgnoreState YES -selectedDetailSection "$page" "${LANG_ARGS[@]+"${LANG_ARGS[@]}"}" \
         > "$OUT/$page.instance.log" 2>&1 &
     pid=$!; pids+=("$pid")
     sleep 20
@@ -173,10 +180,12 @@ TOLERANCE = [
     ("的代码行落在重复块内", "F", "代码规模页 99pt 小格标签，超 9pt = 字号猜 11pt 的分辨率内"),
     ("仅统计 ≥2 行的函数", "F", "同上族，88pt / 超 8pt"),
     ("条 / 千行有效代码", "F", "同上族，79pt / 超 7pt"),
-    ("第一次 3 天前 · 最近 3 天前", "F", "错误日志页 124pt 时间标签，超 12pt（F 档上界内）"),
-    ("第一次 昨天 · 最近 昨天", "F", "同上，106pt / 超 10pt"),
-    ("首次 3 天前 · 最近 3 天前", "F", "总览 hero 同一句话的短形式，114pt / 超 11pt"),
-    ("首次 昨天 · 最近 昨天", "F", "同上，96pt / 超 9pt"),
+    # 豁免的键**不许含测得值**。P54 那四条写的是「第一次 3 天前 · 最近 3 天前」这种整串，
+    # P55 拿窄态（1080）复跑时数据自己变成「2 天前」⇒ 前缀对不上 ⇒ 两条当场掉回主门。
+    # 一条会因为**被扫的仓库又提交了一次**而失效的豁免，等于没有豁免。
+    # 现在只钉到数字前面那个空格为止（这两句的句式是固定的，变的是里面的天数）。
+    ("第一次 ", "F", "错误日志页的『第一次 / 最近』时间标签，窄态 124pt / 超 ≤12pt"),
+    ("首次 ", "F", "总览 hero 同一句话的短形式，窄态 114pt / 超 ≤11pt"),
 ]
 
 

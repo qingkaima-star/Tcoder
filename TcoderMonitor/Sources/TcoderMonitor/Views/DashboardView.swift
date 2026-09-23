@@ -379,9 +379,9 @@ private struct ErrorClusterRow: View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
             SeverityBadge(severity: cluster.severity)
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                // 裁一行可以，被裁掉的那一半必须有去处（P55 窄态实测：格宽 557pt / 单行需 624pt）
                 Text(cluster.displayMessage)
-                    .font(Theme.Typo.monoSmall.font)
-                    .lineLimit(1)
+                    .font(Theme.Typo.monoSmall.font).lineLimit(1).help(cluster.displayMessage)
                 Text(localizedFormat("首次 %1$@ · 最近 %2$@",
                                       cluster.firstSeenDescription,
                                       cluster.lastSeenDescription))
