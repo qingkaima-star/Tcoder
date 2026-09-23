@@ -136,6 +136,23 @@ func groupedInto(_ text: String, count: Int) -> String {
     return result
 }
 
+/// 给一句已经组装好的产品散文补句末标点，**标点随语言走**。
+///
+/// 为什么要有这一枚：`crashEvidenceFootnote` 那一族是"若干整句键 + ` · ` 组装"，
+/// 每一句自己不带句号（带上就多分句中间全是句号），句号只能在**最后**补一次。
+/// 写死 `"。"` 的话，英文态那一格会长这样：
+/// `Crash confirmed 4 times… · 2 more…。` —— 尾巴是一个汉字标点，
+/// 而屏上正文台账那把尺子按**码点**判"这段还残留中文"，
+/// 于是这一行修完键照样是红的（`。` = U+3002，落在中日韩标点段内）。
+///
+/// `chinese` 有默认值、调用方一律不传：测试宿主的 `Bundle.main` 里没有 `en.lproj`，
+/// 语言探针在那儿**恒判中文**，两个分支只有一个能在进程内测到。
+/// 把它做成入参，是为了让元测试能把英文那一支也咬一次（正对照），
+/// 英文态真实渲染另有十八趟读数在外process复核。
+func endingSentence(_ text: String, chinese: Bool = Theme.Layout.isChineseUI) -> String {
+    text + (chinese ? "。" : ".")
+}
+
 // MARK: - 展开/收起的量词（批次 P56）
 //
 // 为什么住在这本里：这一族是**文案词汇**，不是画法 —— 画法在

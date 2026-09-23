@@ -1043,3 +1043,4 @@
 "共 %1$@ 条 · 影响 %2$@ 个依赖" = "%1$@ advisories · affecting %2$@ dependencies";
 "快照截至 %1$@（%2$@）" = "snapshot as of %1$@ (%2$@)";
 "版本声明形态：%1$@" = "declaration shapes: %1$@";
+"B 级参考线 %1$@ 分；折线只连已有历史点，不外插也不预测。" = "Grade B reference line at %1$@ points; the polyline joins existing history points only - no interpolation, no forecast.";

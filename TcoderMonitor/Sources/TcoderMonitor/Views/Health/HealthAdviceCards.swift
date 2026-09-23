@@ -113,7 +113,8 @@ struct HealthTrendCard: View {
                     // 「不是 0 起点」与「不外推」是这张图的两条防误读声明，留在屏上；
                     // B 级参考线的具体分值与"只连已有点"的实现细节进 ⓘ（线本身已经画出来了）。
                     NoteLine("纵轴固定 0…100 分 · 不做任何外推。",
-                             help: "B 级参考线 \(Int(Self.gradeBLine)) 分；折线只连已有历史点，不外插也不预测。")
+                             help: localizedFormat("B 级参考线 %1$@ 分；折线只连已有历史点，不外插也不预测。",
+                                                   NumberFormat.grouped(Int(Self.gradeBLine))))
                     consistencyNote
                 }
             } else {

@@ -525,5 +525,73 @@
 			<string>Collapse %lld items</string>
 		</dict>
 	</dict>
+	<!-- 批次 P69：屏上正文台账 §7 那三条"未登记话术"（B 类）。
+		键 = 中文整句（含 `%lld`），与 `FileLogAnalyzer` / `LogsErrorClusters` 里
+		`localizedCount` 传的字面量一字不差。英文值只用 ASCII 标点：
+		`。`/`，`/`（）` 落在中日韩标点段内，会被守卫 1f 和十八趟读数判成残留。 -->
+	<key>窗口内确认崩溃；其中 FATAL %lld 条</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@fatalEntries@</string>
+		<key>fatalEntries</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Crash confirmed inside the window; %lld FATAL entry among them</string>
+			<key>other</key>
+			<string>Crash confirmed inside the window; %lld FATAL entries among them</string>
+		</dict>
+	</dict>
+	<key>窗口内确认崩溃 %lld 次，只统计有真实事件证据的报告</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@confirmedCrashes@</string>
+		<key>confirmedCrashes</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Crash confirmed %lld time inside the window; only reports with real event evidence are counted</string>
+			<key>other</key>
+			<string>Crash confirmed %lld times inside the window; only reports with real event evidence are counted</string>
+		</dict>
+	</dict>
+	<key>共 %lld 类签名</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@signatureClasses@</string>
+		<key>signatureClasses</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld signature class in total</string>
+			<key>other</key>
+			<string>%lld signature classes in total</string>
+		</dict>
+	</dict>
+	<key>共 %lld 类签名 · 按出现次数排序</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@sortedSignatureClasses@</string>
+		<key>sortedSignatureClasses</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld signature class in total, sorted by occurrences</string>
+			<key>other</key>
+			<string>%lld signature classes in total, sorted by occurrences</string>
+		</dict>
+	</dict>
 </dict>
 </plist>
