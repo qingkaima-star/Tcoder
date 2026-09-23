@@ -194,9 +194,8 @@ final class LocalizationGuardTests: XCTestCase {
     /// 「代码风险这一片」7 条之后守卫自己打印的那一行，逐条清单同一趟落盘核对）。
     /// 7 条全改成**整句键 + 在产出处查表**：5 条 `localizedFormat`（一句两槽以上）、
     /// 1 条 `localizedCount` + `.stringsdict`（`%lld 个条目`）、1 条 `describe(unit:)` 量词整句化。
-    /// ✅ 上面那条"英语单复数表达不了"的缺口已由 P69c 立出口关掉（`localizedCount(_:slots:)` 与
-    /// `localizedCount(_:count:note:)`）。**4 → 1**：1 = 三条流合进 main 后守卫自报的现量，取数命令
-    private static let unregisteredLiteralCeiling = 1   // `TCODER_I18N_LEDGER=<路径> …test --filter test_unregisteredLiteral…`
+    /// ✅ 上面那条"英语单复数表达不了"的缺口已由 P69c 立出口关掉（`localizedCount(_:slots:)` 与 `(_:count:note:)`）。**4 → 1** = 三条流合进 main 后守卫自报的现量，取数命令：`TCODER_I18N_LEDGER=<路径> ./scripts/locked_build.sh test --filter test_unregisteredLiteralInventoryPrintsAndShrinks`，逐条清单同一趟落盘核对。
+    private static let unregisteredLiteralCeiling = 1
 
     func test_unregisteredLiteralInventoryPrintsAndShrinks() throws {
         let registered = Set(try Self.catalog().map(\.key)).union(Self.registeredStringsDictKeys())
