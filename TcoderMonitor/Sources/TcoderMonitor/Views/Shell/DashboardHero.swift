@@ -148,10 +148,14 @@ struct HealthHeroCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
+            // **留短藏长**（盘点表 A 组 `HealthHeroCard.narrative`）：屏上留那句可做的动作，
+            // "扫哪四路、扫完这里出现什么"整句进 ⓘ。标题那一格 `ShellCopy.notAnalyzed` 一直常驻，
+            // 所以"没查过 ≠ 查了是空的"这层读法没有被搬走（它也不许搬，见 ShellTooltipTests ③）。
             EmptyStateView(
                 icon: IconName.emptyUnknown.rawValue,
                 title: ShellCopy.notAnalyzed(.thisProject),
-                message: "点击右上角「重新分析」，扫描代码规模、Git 历史、日志与依赖之后这里会出现评分与结论。"
+                message: "点击右上角「重新分析」",
+                help: "点击右上角「重新分析」，扫描代码规模、Git 历史、日志与依赖之后这里会出现评分与结论。"
             )
         }
     }
