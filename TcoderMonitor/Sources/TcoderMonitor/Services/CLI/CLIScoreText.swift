@@ -56,6 +56,10 @@ enum CLIScoreText {
         // RD-50：覆盖率那本账（总数 vs 被上限切掉的）在界面上有读者之前，
         // CLI 先用**同一个装配口**读一遍 —— 不许在这里另写一份中文。
         lines.append(contentsOf: coverageAccountingLines(report))
+        // RD-14：文件角色分档（`code.fileRoles`）在文本读数里也得有一行 ——
+        // 否则「生产码有多少行」只有打开界面或自己解析 JSON 的人才拿得到，
+        // 而这一族读数的立案理由正是"别让读数只活在句子里"。
+        lines.append(contentsOf: fileRoleLines(report))
 
         guard let health = report.health else {
             lines.append("没有评分结果：五路都没给出可评的输入。")
@@ -131,6 +135,37 @@ enum CLIScoreText {
         guard let coverage = report.coverage, let note = coverage.boardAccountingNote else { return [] }
         return [note]
     }
+
+    /// 文件角色分档那一句（RD-14 · 申请单 §2 的第三个读者：CLI 文本）。
+    ///
+    /// **只读** `CodeMetrics.fileRoles`，不在这里重跑判据 —— 判据只有
+    /// `SourceFileRoleRule.decide` 那一份，CLI 再数一遍就是第二把尺子。
+    /// 三态各自成立：
+    /// * 整枚字段缺席（旧报告 / 这一路没跑）⇒ **一行都不打**，
+    ///   不许打成「生产源码 0 个」（那会把「没量到」画成「这个仓库没有生产码」）；
+    /// * 生产码那一档缺席 ⇒ 三个槽位打「未记录」，与 `ScanProvenance.oneLineSummary`
+    ///   的缺席口径同一族。八档本应全量列出，缺档读作**没量到**而不是 0；
+    /// * `attributedFileCount` 与 `totalFiles` 不等 ⇒ 另起一句把差额说出来，
+    ///   方向不猜（少了＝有文件没归上档，多了＝有文件被记进两档），**不许静默抹平**。
+    static func fileRoleLines(_ report: ProjectReport) -> [String] {
+        guard let code = report.code, let roles = code.fileRoles else { return [] }
+        let production = roles.share(for: .production)
+        let absent = "未记录"
+        var out = [localizedFormat(fileRoleStatement,
+                                   production.map { NumberFormat.grouped($0.fileCount) } ?? absent,
+                                   production.map { NumberFormat.grouped($0.codeLines) } ?? absent,
+                                   production?.weakEvidenceFiles.map(NumberFormat.grouped) ?? absent)]
+        if let attributed = roles.attributedFileCount, attributed != code.totalFiles {
+            let gap = code.totalFiles > attributed ? code.totalFiles - attributed : attributed - code.totalFiles
+            out.append(localizedFormat(fileRoleGapStatement, NumberFormat.grouped(attributed),
+                                       NumberFormat.grouped(code.totalFiles), NumberFormat.grouped(gap)))
+        }
+        return out
+    }
+
+    /// 整句键（拆成两段再 `+` 会让双语守卫只看到前半，键就分叉了）。
+    static let fileRoleStatement = "文件角色分档：生产源码 %1$@ 个 / %2$@ 代码行 · 弱判定 %3$@ 个 · 八档全量与判据分布见 scan 落盘的 code.fileRoles.shares。"
+    static let fileRoleGapStatement = "文件角色分档对不平：八档合计 %1$@ 个文件，而本次扫到 %2$@ 个，相差 %3$@ 个 —— 两边不是同一个总体，要么有文件没归进任何一档，要么有文件被记进了两档，这份分档要按读数打折使用。"
 
     // MARK: - 首行：总体
 

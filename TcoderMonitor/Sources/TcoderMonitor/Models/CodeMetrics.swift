@@ -127,6 +127,23 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     /// **Optional 是落盘兼容要求**：非 Optional 带默认值会让旧报告整份解码失败。
     var nonCodeRegionLineCount: Int? = nil
 
+    // MARK: 文件角色分档（RD-14 / RD-20 · 申请单 docs/R6-契约字段清单.md §2）
+    //
+    // 存在理由：「文件角色分档」这句话在此之前**只是文本**。判据（`SourceFileRoleRule.decide`）
+    // 与累计（`SourceRoleTally`）都早已实现并有独立真值用例钉着，但契约里没有承接格，
+    // 于是八档的读数只活在 `scanLimitations` 的中文句子与单测里 ——
+    // 读 JSON 的人拿不到「生产码有多少行」、评分的人也没有按角色收窄的分母。
+    // 为什么不能放在别处：角色说的是「这一份 codeLines 是在什么范围内量出来的」，
+    // 只有挂在 `CodeMetrics` 上才与 `totalLines` / `codeLines` 同属一次快照；
+    // 放 `CodeScanCoverage` 就停在内存里（那个类型不落盘，正是 `scanLimitations` 之前的老问题）。
+    //
+    /// 本次扫描的文件角色分档（八档全量，含 0）。
+    /// `nil` = **这份报告没有这个读数**（旧报告 / 这一路没跑）——
+    /// 不许被读成「一个文件都没归上档」，也不许由消费方补成空数组或全 0；
+    /// 量到了就八档都在，缺席的那一档由 `fileCount == 0` 表达。
+    /// **Optional 是落盘兼容要求**：非 Optional 带默认值会让旧报告整份解码失败。
+    var fileRoles: CodeFileRoles? = nil
+
     var largestFileLineCount: Int = 0
 
     var overallRisk: RiskLevel = .none
@@ -148,6 +165,54 @@ struct LanguageShare: Codable, Equatable, Hashable, Identifiable, Sendable {
         self.fileCount = fileCount
         self.lineCount = lineCount
         self.share = share
+    }
+}
+
+// MARK: - 文件角色分档（RD-14 · 形状逐字照 docs/R6-契约字段清单.md §2）
+
+/// 一个文件角色的分档读数。
+///
+/// `role` 存 `SourceFileRole.rawValue`（枚举 case 名原样，如 `production`、`buildArtifact`；
+/// 稳定坐标），**不存中文档名** ——
+/// 中文只由枚举的 `displayName` 一处产出；在文案里手写第二份档名名单，
+/// 新增一档时那句话就会静默漏报（与 `HealthDimension.repositoryScoped` 同一条教训）。
+struct CodeFileRoleShare: Codable, Equatable, Sendable {
+    var role: String
+    var fileCount: Int
+    var codeLines: Int
+    var totalLines: Int
+    /// 「只有语言证据、路径没有任何角色线索」却被归进本档的文件数（弱判定）。
+    /// **只有 `production` 档会带这一格**；其余档一律 `nil` = 这一问题不适用，
+    /// 不许被读成「该档有 0 个弱判定」。
+    var weakEvidenceFiles: Int?
+    /// 可点名的相对路径样本（上限是 `SourceRoleTally.exampleLimit`，现量 6 条）。
+    /// 样本的意义是「能被反驳」：只给一个总数的分档，读的人无从核对。
+    /// `nil` = 本次没取样；空数组 = 取过样而这一档确实一个文件都没有。
+    var samplePaths: [String]?
+
+    /// 回到枚举坐标：消费方按这个比对，不要再手写 `"production"` 这类字面量。
+    /// `nil` = 这份读数的档名不在当前枚举里（工具降档/改名后的旧报告），
+    /// 那种情况下消费方只能按 `role` 原样透出，不许猜成一个已知的档。
+    var roleValue: SourceFileRole? { SourceFileRole(rawValue: role) }
+}
+
+/// 一次扫描的角色分档读数。设计是**八档全量列出（含 0）**：
+/// 缺档 = 那一档没量到，而不是「该档为 0」—— 后者由 `fileCount == 0` 表达。
+struct CodeFileRoles: Codable, Equatable, Sendable {
+    /// 八档全量（含 0），顺序即 `SourceFileRole.allCases`。
+    var shares: [CodeFileRoleShare]
+    /// 判据分布（`SourceRoleCriterion.rawValue` → 命中次数），回答「生成码是靠什么认出来的」。
+    /// `nil` = 本次没有判据账；空字典 = 跑过了而没有任何文件进入判定（空目录）。
+    var criterionCounts: [String: Int]?
+    /// 参与分档的文件数，由装配口保证等于 `shares` 各档 `fileCount` 之和。
+    /// 与 `CodeMetrics.totalFiles` **不等** ⇒ 有文件没归到任何一档（判据漏了）；
+    /// 那句差额必须被读者说出来，不许静默抹平。
+    var attributedFileCount: Int?
+
+    /// 取某一档的**唯一取法**：消费方不再各自写一份 `first { $0.role == "…" }`
+    /// （那会得到第二把按字符串认领的尺子）。
+    func share(for role: SourceFileRole) -> CodeFileRoleShare? {
+        shares.first { $0.role == role.rawValue }
     }
 }
 
