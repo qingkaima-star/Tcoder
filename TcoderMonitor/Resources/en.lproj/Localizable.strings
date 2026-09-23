@@ -1041,3 +1041,5 @@
 "已比对版本数据，未发现落后项" = "Version data compared — nothing outdated";
 "%1$@（只说明可复现，未计入依赖数）" = "%1$@ (reproducibility only; not counted as a dependency)";
 "共 %1$@ 条 · 影响 %2$@ 个依赖" = "%1$@ advisories · affecting %2$@ dependencies";
+"快照截至 %1$@（%2$@）" = "snapshot as of %1$@ (%2$@)";
+"版本声明形态：%1$@" = "declaration shapes: %1$@";

@@ -256,6 +256,10 @@ extension LocalizationGuardTests {
         // P67：依赖页那五句只有换成别的仓库才上屏（本仓依赖清单是空的），
         // 拿 Homebrew 复验才抓到「共 8 项，已全部展示。」既没登记、又把测得值插在自己肚子里。
         "Views/Dependencies/DependenciesView.swift",
+        // P67：这两句是**嵌在已译长句里**的片段，英文态实拍成 "…, 快照截至 2026-09-19（4 days ago）; …"。
+        // 只有多生态的仓库才会走到这条分支（本仓依赖清单为空），所以十八趟 dogfooding 读数从没抓到过。
+        "Services/Dependencies/DependencySnapshot.swift",
+        "Services/Dependencies/ManifestDependencyAnalyzerVersionEvidence.swift",
     ]
 
     func test_keyizedCopyFilesHoldNoInterpolatedChineseLiterals() throws {
