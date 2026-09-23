@@ -150,6 +150,7 @@ enum DuplicationEngine {
                                  filesHittingLineCap: indexed.filesHittingLineCap,
                                  blocksDroppedByCap: ranked.droppedByCap,
                                  linesOutsideReportedBlocks: ranked.linesOutsideReportedBlocks,
-                                 blocksOutsideBoard: Array(ranked.outsideBoardCoordinates))
+                                 blocksOutsideBoard: DuplicationScan.relativeCoordinates(
+                                    ranked.outsideBoardCoordinates, files: files))
     }
 }

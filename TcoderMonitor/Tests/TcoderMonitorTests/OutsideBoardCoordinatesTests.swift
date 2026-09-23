@@ -31,6 +31,12 @@ final class OutsideBoardCoordinatesTests: SelfScanHarnessCase {
         }
         XCTAssertLessThanOrEqual(coordinates.count, DuplicationScan.outsideBoardSampleLimit,
                                  "点名的条数由引擎那一把尺子管，界面与句子都不许自己加")
+        // 坐标必须是**相对被扫根**的路径。这条不是风格问题：绝对路径会把"仓库被检到哪里"
+        // 混进本文件下面那条 ≤1200 字符的判据里（2026-09-23 实测同一条门在 main 树 1,060、
+        // 在 .worktrees/perf-base 树 1,740 ⇒ `premerge_check` 只在 worktree 里跑，
+        // 于是它会拦下每一条并行流）。判据本身一个字没动，动的是披露串的取数口径。
+        XCTAssertTrue(coordinates.allSatisfy { !$0.hasPrefix("/") },
+                      "榜外坐标里出现绝对路径 ⇒ 披露长度随检出位置变：\(coordinates.first ?? "")")
 
         guard let first = coordinates.first else { return }
         let occurrences = (metrics.scanLimitations ?? []).reduce(0) { total, line in
