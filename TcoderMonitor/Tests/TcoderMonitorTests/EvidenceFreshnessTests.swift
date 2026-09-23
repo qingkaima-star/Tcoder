@@ -202,38 +202,9 @@ final class EvidenceFreshnessTests: XCTestCase {
             stalePages.append((pages: row.pages, head: row.head,
                                candidates: try Self.runGitLog(head: row.head, paths: row.paths)))
         }
-        let logged = Self.backlog(in: markdown)
-        XCTAssertTrue(logged.malformed.isEmpty,
-                      "「\(Self.backlogHeading)」这张表本身格式不对 ⇒ 它不许变成遮羞布，逐条修好：\n"
-                    + logged.malformed.joined(separator: "\n"))
-        let verdict = Self.backlogVerdict(stale: stalePages, entries: logged.entries, now: Date())
-        XCTAssertTrue(verdict.unlisted.isEmpty,
-                      "这些页的实拍已经过期，屏上可能有没人看过的变化 —— 重拍那一页并更新表里的头，"
-                    + "或（拿不到全机唯一那格 App 窗口时）在「\(Self.backlogHeading)」登记欠拍 + 挂账人：\n"
-                    + verdict.unlisted.joined(separator: "\n"))
-        XCTAssertTrue(verdict.mismatched.isEmpty,
-                      "挂账与实算对不上 ⇒ 挂账写错了页、抄了个别处的提交，或 UTC 时间写歪了：\n"
-                    + verdict.mismatched.joined(separator: "\n"))
-        XCTAssertTrue(verdict.overdue.isEmpty,
-                      "欠拍超过 \(Int(Self.backlogGrace / 3_600)) 小时宽限期还不补拍 —— "
-                    + "挂了账不等于看过了，抢一次 App 窗口把它清掉：\n"
-                    + verdict.overdue.joined(separator: "\n"))
-        for note in verdict.acknowledged {
-            print("【实拍欠拍·已挂账】" + note)      // 放行，但必须大声：不许读成"查过没事"
-        }
-        // 四类必须**加起来等于过期行数**（每条过期页恰好落进一个桶）。01:23 实测反证：
-        // 我把 UTC 那一格写成了本地时间 ⇒ 四条全落进 `mismatched`，
-        // 而汇总只印两个桶，现场是「过期 4 行（已挂账 0 行、没挂账 0 行）」——
-        // 一个 0+0=4 的谎话，读的人只会理解成"都挂上了"。断言补上之后这种事当场红。
-        let buckets = verdict.acknowledged.count + verdict.unlisted.count
-            + verdict.mismatched.count + verdict.overdue.count
-        XCTAssertEqual(buckets, stalePages.count,
-                       "过期页有 \(stalePages.count) 行，四个桶只装到 \(buckets) 行 ⇒ "
-                     + "`backlogVerdict` 漏了一类归属，汇总行会少报欠拍")
-        print("【实拍新鲜度】表里 \(found.count) 行、覆盖 \(Set(found.flatMap(\.pages)).count) 页 → "
-            + "过期 \(stalePages.count) 行（已挂账 \(verdict.acknowledged.count) 行、"
-            + "没挂账 \(verdict.unlisted.count) 行、挂错 \(verdict.mismatched.count) 行、"
-            + "超宽限 \(verdict.overdue.count) 行）")
+        // 四桶判定与汇总出声搬进 `judgeBacklog`（同一个文件里那个测试方法越过 50 行线，
+        // 而本文件又撞上 400 行口径——按「拆开它、不抬线」处理，一条断言都没少）。
+        Self.judgeBacklog(stale: stalePages, markdown: markdown, now: Date(), rows: found)
     }
 
     /// 净差异口径的**真 git 夹具**，两个方向都要钉住（需求方授权的窄修，见 `netChanged` 上方注释）：
