@@ -109,10 +109,11 @@ extension WeightedHealthScorer {
                                            averageFunctionLength: code.averageFunctionLength,
                                            longFunctions: code.longFunctions,
                                            totalFiles: code.totalFiles)
+        // 注记**提到外面算**：披露助手那一行必须同时装着标记与榜长
+        // （`BoardLengthReadoutRatchetTests` 按行认合法披露句，拆两行就把一句诚实的话判成违例）。
+        let boardNote = HealthCurves.boardOnlyNote(raw.detail, listed: code.hugeFiles.count, total: hugeCount)
         let curve = hugeCount > code.hugeFiles.count
-            ? CurveResult(score: raw.score,
-                          detail: raw.detail + "（榜内只列 \(code.hugeFiles.count) 个，实际 \(hugeCount) 个）",
-                          risk: raw.risk)
+            ? CurveResult(score: raw.score, detail: boardNote, risk: raw.risk)
             : raw
         guard let worst = code.hugeFiles.max(by: { $0.lineCount < $1.lineCount }) else {
             return DimensionOutcome(curve: curve, strengths: codeQualityStrengths(curve))

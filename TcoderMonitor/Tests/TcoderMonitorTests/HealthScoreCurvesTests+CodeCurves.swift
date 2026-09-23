@@ -129,4 +129,72 @@ extension HealthScoreCurvesTests {
         )
     }
 
+    // MARK: - 批次 P58：detail 改整句键之后，**中文态输出必须逐字不变**
+    //
+    // 这一组黄金串是**照改前的表达式手算出来的**，不是跑一遍新代码抄回来的：
+    // 抄新输出只能证明"没改坏别的东西"，证明不了"中文态一字未动"。
+    // 三条都挑了**离 60 字线很远**的入参 —— 宽度预算从 60 字改成 120 格时，
+    // 只有靠近边界的串才会改变取舍，拿那种串做黄金值等于把两条判据混成一条。
+
+    func testP58ChineseDetailOutputIsUnchangedForTheThreeCodeCurves() {
+        XCTAssertEqual(
+            HealthCurves.complexity(averageCC: 4.2, highRiskCount: 0, maxCC: 20, functionCount: 300).detail,
+            "平均圈复杂度 4.2，0 个函数 CC≥16，最大 20")
+        XCTAssertEqual(
+            HealthCurves.duplication(ratio: 0.125, codeLines: 12_000).detail,
+            "重复率 12.5%，按 12,000 行代码统计")
+        let thin = HealthCurves.smallSampleCodeLines - 1
+        XCTAssertEqual(
+            HealthCurves.duplication(ratio: 0.125, codeLines: thin).detail,
+            "重复率 12.5%，样本过小，按 \(thin) 行代码估计，置信度低")
+        XCTAssertEqual(
+            HealthCurves.documentation(commentRatio: 0.05, todoCount: 3, fixmeCount: 1, totalLines: 900).detail,
+            "注释占比 5%（落在 2%~15% 最佳区间），TODO 3 个，FIXME 1 个，总行 900（含空行与注释）")
+    }
+
+    /// 口径注记那一族原先是 `detail + "（中文）"`（拼完的整串永远查不中）。
+    /// 现在走整句键，中文态括号照旧、多段之间照旧用「，」。
+    func testP58DetailNotesStillReadAsOneChineseSentence() {
+        XCTAssertEqual(HealthCurves.noted("重复率 12.5%", ["榜内只列 20 个，实际 38 个"]),
+                       "重复率 12.5%（榜内只列 20 个，实际 38 个）")
+        XCTAssertEqual(HealthCurves.noted("A", ["B", "C"]), "A（B，C）",
+                       "多段注记的分隔符必须仍走那一条键")
+        XCTAssertEqual(HealthCurves.noted("A", ["", "B"]), "A（B）", "空段不许留下悬空分隔符")
+        XCTAssertEqual(HealthCurves.noted("A", []), "A", "没有注记时不许凭空长出一对括号")
+    }
+
+    /// 预算换算法则的已知答案：中文那条物理线一格没动，英文拿到的才是**宽度**而不是字数。
+    func testP58WidthBudgetKeepsTheChineseLineAndFreesTheEnglishOne() {
+        XCTAssertEqual(HealthCurves.displayWidth("中文"), 4)
+        XCTAssertEqual(HealthCurves.displayWidth("abc"), 3)
+        XCTAssertEqual(HealthCurves.displayWidth("中文abc"), 7)
+        XCTAssertEqual(HealthCurves.detailWidthBudget, 120,
+                       "120 格 = 60 个整字，就是改造前那条 60 字线；改这个数等于改版面")
+        let sixtyHan = String(repeating: "中", count: 60)
+        XCTAssertEqual(HealthCurves.joined([sixtyHan, "尾"]), sixtyHan,
+                       "60 个整字已经占满那一行，后面一段必须被舍弃")
+        // 英文态这一句旧尺子会拦腰截断（100 个拉丁字符 > 60「字」⇒ 只留前 60 个），
+        // 新尺子给的是同一条**宽度**线，于是一整句读得完。
+        let english = String(repeating: "abcdefghij", count: 10)
+        XCTAssertEqual(HealthCurves.joined([english]), english,
+                       "按字符数预算会把英文句截掉一半 ⇒ 评分卡那一行读不到完整口径")
+    }
+
+    /// **换算法则不等于删掉截断**：交付头英文态实测打出
+    /// `…tallied only over the top 20 hotspo)` —— 一个 "h" 在全站任何地方都读不到。
+    /// 所以"一段都放不下预算"时的正确行为是**留整段**，让渲染层用 `lineLimit` + `.help` 去裁
+    /// （那一列本来就挂着 `.help`，P54 立的口径：被裁掉的那半必须有去处）。
+    func testP58ASingleOverBudgetSegmentIsKeptWholeRatherThanCutMidWord() {
+        // 121 格：刚好越过 120 那条线。旧写法留前 120 格 ⇒ 结尾是 `hotspo`，
+        // 新写法必须留整段 ⇒ 结尾是完整的 `hotspots`。
+        let long = String(repeating: "ab ", count: 38) + "hotspots"
+        XCTAssertEqual(HealthCurves.displayWidth(long), 122)
+        XCTAssertEqual(HealthCurves.joined([long]), long, "整段被拦腰截断 ⇒ 半个英文词全站读不到")
+        XCTAssertTrue(HealthCurves.joined([long]).hasSuffix("hotspots"),
+                      "结尾必须是一个完整的词，不是半截：\(HealthCurves.joined([long]).suffix(12))")
+        // 反向：预算仍然生效——第二段放不下就整段舍弃，并且不许留下悬空分隔符。
+        XCTAssertEqual(HealthCurves.joined(["甲", long]), "甲",
+                       "预算这条线本身还在（120 格），只是**不再拿截断当兜底**")
+    }
+
 }
