@@ -199,10 +199,17 @@ preflight_gates_contention() {  # 【并发重活】判据（认哪些名字、�
 }
 
 preflight_gates_load() {  # 【整机负载】阈值只写一次：测量档与启动档共用（冷启动同样怕排队）
-  # 负载阈值：默认 1 分钟 load 不超过核数的 1.5 倍（LOAD_MAX=<数> 可覆盖，但覆盖了就要在报告里写）
-  if awk -v l="$load1" -v c="$cores" 'BEGIN{exit !(l > c*1.5)}'; then
-    echo "!! load1=$load1 已是核数($cores)的 1.5 倍以上：整机排队，任何帧节拍读数都不作数。" >&2
-    echo "   等负载降下来，或显式 LOAD_MAX=<阈值> 重跑（那必须在报告里注明是降级条件）。" >&2
+  # 默认 1 分钟 load 不超过核数的 1.5 倍。`LOAD_MAX=<数>` 是**写在这条判据旁边的公开出口**，
+  # 但 2026-09-23 17:17 实测它是个**空头的旋钮**：注释说可覆盖，代码里阈值写死成 `c*1.5`，
+  # 我拿 `LOAD_MAX=5` 去要一个更严的窗口，它照旧按 22.5 放行（现场：load1=13.44/15 那趟量出 24.8 ms，
+  # 而同一个二进制在 load 4.6 起的那趟量出 1.59 ms ⇒ 这条闸在 1.5× 核数上太宽，心跳档根本用不了）。
+  # 判据与它印出来的数字必须同源：所以下面把真正生效的那个数回显出来，不许"印 22.5、判 5"。
+  local bar
+  bar=$(awk -v c="$cores" -v o="${LOAD_MAX:-}" 'BEGIN{ if (o != "") print o+0; else print c*1.5 }')
+  if awk -v l="$load1" -v b="$bar" 'BEGIN{exit !(l > b)}'; then
+    echo "!! load1=$load1 超过阈值 $bar（核数 $cores；默认 = 核数×1.5，$([ -n "${LOAD_MAX:-}" ] && echo "本次由 LOAD_MAX 显式覆盖" || echo "未设 LOAD_MAX")）" >&2
+    echo "   整机在排队 ⇒ 任何帧节拍与主线程占用读数都不作数。等负载降下来；" >&2
+    echo "   要收紧就 LOAD_MAX=<更小的数>（那批要在报告里注明条件更严），要放宽就在报告里注明是降级条件。" >&2
     hard=1
   fi
 }
