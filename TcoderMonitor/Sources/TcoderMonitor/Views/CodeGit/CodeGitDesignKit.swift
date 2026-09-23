@@ -307,8 +307,12 @@ extension MetricTile {
 
 extension EmptyStateView {
     /// 空态图标改走登记表，避免页面里写 `"checkmark.seal"` 这类未登记裸串。
-    init(icon: IconName, title: String, message: String) {
-        self.init(icon: CodeGitSymbol.resolve(icon), title: title, message: message)
+    ///
+    /// `help:` 是「留短藏长」那半截的去处（基座自带的 ⓘ 槽）。**必须在这一层一起转发**：
+    /// 少了它，带 `help:` 的调用点会退回基座那个 `icon: String` 的初始化器，
+    /// 编译期报的是「IconName 转不成 String」，看着像基座坏了，其实是这层壳没收参数。
+    init(icon: IconName, title: String, message: String, help: String? = nil) {
+        self.init(icon: CodeGitSymbol.resolve(icon), title: title, message: message, help: help)
     }
 }
 
