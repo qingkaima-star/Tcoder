@@ -121,7 +121,11 @@ final class CrashEvidenceWiringTests: XCTestCase {
         }
     }
 
-    /// 不拿 `crashCount` 顶替：落盘那格说 1、`crashCount` 说 9 时，屏上必须说 1。
+    /// 不拿 `crashCount` 顶替：落盘那格说 1、`crashCount` 说 9 时，
+    /// **接回来的那一格本身**与屏上那句都必须说 1。
+    /// ⚠️ 只断言屏上那句是不够的：`countedCrashCount` 这格在"逐条原因"分支里不被引用，
+    ///    拿 `crashCount` 顶替它会是个抓不到的等效变异体（R24 sabotage S2 实测就是这么漏的，
+    ///    补的就是下面这条直接读格子的断言）。
     func test_readerNeverSubstitutesCrashCount() throws {
         var summary = LogSummary()
         summary.crashCount = 9
@@ -130,6 +134,8 @@ final class CrashEvidenceWiringTests: XCTestCase {
                                                       suspectedCount: 0, parseFailedCount: 0,
                                                       readFailedCount: 0, duplicateCount: 0,
                                                       filesWithCountedEvidence: 1)
+        let reading = try XCTUnwrap(CrashEvidenceReadout.readingFromFields(from: summary, windowDays: 7))
+        XCTAssertEqual(reading.countedCrashCount, 1, "接回来的必须是那一格，而不是 `crashCount`")
         let footnote = summary.crashEvidenceFootnote(windowDays: 7)
         XCTAssertTrue(footnote.contains("确认崩溃 1 次计入"), footnote)
         XCTAssertFalse(footnote.contains("9"), "把 crashCount 顶进来就是造一个没量过的数：" + footnote)
