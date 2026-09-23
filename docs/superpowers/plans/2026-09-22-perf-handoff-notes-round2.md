@@ -720,3 +720,26 @@ locked_build.sh test --filter PerfHitchGuardTests
    而屏幕上没有任何一处说"你要的第二页没测"。本仓在 `perf_preflight.sh` 头注里就写过这个回落风险。
    ⇒ 页名带空格是这个产品的常态（`Git 洞察`），所以 `PAGES` 必须按行分隔（与 `switch_page_list` 同形状），
    并且**认不出页名要当场判败**，不许让默认页替它背书。
+
+## §AN 包 16 落在一棵分支上（`47e6550`），并且这次按 §AK 立的那条规矩走
+
+`AGENTS.md` §7 说主树只作集成用，而我上一小时才自招过一次（§AK）。这次改的是**共享测量代码**，
+所以形状走全：主树里改完 → 逐文件搬进 `.worktrees/perf-base`（先 `merge --ff-only main` 对齐）→
+在那棵树提交 → 回主树把自己那 7 份文件恢复到 HEAD（内容双向留底：分支提交 + `.scratch/ws-p16.patch` 373 行）
+→ `premerge_check ws/perf-base <绝对路径>`（相对路径会被脚本 `cd` 到它自己那棵树下面，见记忆里第 ⑩ 条）。
+
+三处改动与它们的现场来源，一条一句：
+1. **逐页写测量环境**（§AL 的根因）：`preflight_context "$dir" "" launch`，取数与判定复用那把尺，
+   第三参只跳过"前台/在屏"两维——那一刻窗口还不存在，判它就是造一条永不可能通过的闸门。
+2. **归属写给被测内容**（§AM 第 1 条）：`meta_write` 增加 `measured_rev`，跟着 `MEASURE_REV` 走；
+   rev 写错要写成「取不到」，不许悄悄回落成 HEAD。
+3. **名册外的页名当场红**（§AM 第 2 条）：`PAGES` 逐个对回九页名册，分隔符只能是换行（页名含空格是常态）。
+
+结构代价与一条白捡的修复：闸门按维度拆成四支（`preflight_gates` 原本 55 行，撞自己那条 50 行线），
+取数另立 `preflight_gather`。拆的时候顺手抓到一条**会静默放行**的老形状——
+`preflight_context` 拒跑靠宿主的 `die`，而单独 source 时 `die: command not found` ⇒ "拒"以 rc=0 走完。
+改成只 `return 1`、由三处调用点各自决定退不退（与 `perf_measure_rev.sh` 那条"die 在子 shell 里杀不死父进程"同族）。
+
+验证：`selfcheck` **50 项 0 失败**（基线 48，两项是新增的、一项都没减）；
+`PerfRulerHotspotRatchetTests|SourcesSizeAuditTests|PerfHitchGuardTests` 20 例 0 失败；
+禁则现量 1/2/9/2/62 未动（本次零改 `Views/**`）。门禁全量在跑，绿了才合。
