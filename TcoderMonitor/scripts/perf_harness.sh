@@ -107,7 +107,10 @@ DOMAIN="com.tcoder.monitor"
 UUID="11111111-2222-3333-4444-555555555555"
 DRY_RUN="${DRY_RUN:-0}"
 # idle 档要导出的六张表（spec §4.1）；time-profile 来自第二份 trace，单独导。
+# 包 13（§AC）：三张**一帧一行**的表。不导出来，T1 就只剩 `hitches` 那一个下游计数，
+# 而它同一份内容能报 14 / 22 / 364 行——判据不能建在那上面。
 HITCH_TABLES=(hitches hitches-updates hitches-renders potential-hangs
+              hitches-framewait hitches-gpu hitches-frame-lifetimes
               device-display-info displayed-surfaces-per-second)
 
 die() { echo "!! $1" >&2; exit 1; }
@@ -230,6 +233,7 @@ idle_record_hitches() {  # idle_record_hitches <outdir> <period>
   # 录制窗口一结束就问一次人手探针：这是"这批能不能进对比表"的判据，必须在导表之后、
   # 在下一个窗口（Time Profiler）开始之前问，否则两个窗口的静默读数会互相顶包。
   [ "$DRY_RUN" = "1" ] || post_window_quiescence "$out" "$SECONDS_HITCHES"
+  [ "$DRY_RUN" = "1" ] || post_window_load "$out"   # 收尾负载指纹（见该函数注释）
   # 每轮收尾固定动作：确认自己起的采集进程真退了 + 扫 $TMPDIR 里的 .ktrace 残骸。
   # 盘满不是"报错退出"那种失败——它会让 xctrace 写不进中间产物，
   # 样本**照样出一份看起来合理的表**，所以必须在代码里做，不能靠人记得。
@@ -252,7 +256,7 @@ idle_parse_tables() {  # idle_parse_tables <outdir>：3/4 那一节，按表名�
       --thread "Main Thread" --json "$out/time-profile.json" | tee "$out/threads.txt"
     for t in "${HITCH_TABLES[@]}"; do
       case "$t" in
-        hitches|hitches-updates|hitches-renders|potential-hangs)
+        hitches|hitches-updates|hitches-renders|potential-hangs|hitches-framewait|hitches-gpu|hitches-frame-lifetimes)
           [ -s "$out/$t.xml" ] && python3 "$TRACE_REPORT" durations "$out/$t.xml" \
             --label "$t" --with-phases --json "$out/$t.json" | sed 's/^/    /' ;;
         device-display-info)
@@ -446,3 +450,4 @@ main() {
   esac
 }
 main "$@"
+

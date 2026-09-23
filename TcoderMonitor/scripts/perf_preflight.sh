@@ -218,6 +218,25 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
 
 
 
+post_window_load() {  # post_window_load <outdir> —— 窗口**结束那一刻**再看一次整机负载
+  # 为什么要有它（09-23 10:17 现算出来的形态）：同一台机器、同一份内容，hitch 的**间隔分布**就是争用的指纹：
+  #   干净时 p50 ≈ **1800 ms**（每 216 帧一次，基本就是 1.5 s 心跳那一拍）
+  #   被争用污染时塌成 **58 ms**（每 7 帧一次，20 s 报 364 个）甚至 **8.3 ms**（**每帧一次**，432 个）
+  # 而闸门只在**窗口开始之前**采一次负载与并发重活 ⇒ 别人在窗口中途起一趟编译，这批数照样「合格」。
+  # spec §6 第 8 条早写过"五道闸看不见外部争用"，今天第一次量出它长什么样。
+  # 阈值一律复用闸门那两个（`concurrent_heavy_jobs` 与 load1 ≤ 1.5×核数），这里不造新数。
+  local out="$1" cores load1 jobs
+  cores=$(sysctl -n hw.ncpu 2>/dev/null || echo 8)
+  load1=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | awk '{print $1}'); load1=${load1:-0}
+  jobs=$(concurrent_heavy_jobs 2>/dev/null)
+  meta_write "$out" "load1_at_end=$load1" "heavy_at_end=${jobs:-无}"
+  if [ -n "$jobs" ] || awk -v l="$load1" -v c="$cores" 'BEGIN{exit !(l > c*1.5)}'; then
+    meta_write "$out" "contaminated_by_foreign_load=1"
+    echo "    ⚠ 窗口结束时整机在忙（load1=$load1/$cores，重活=${jobs:-无}）" >&2
+    echo "      ⇒ 这批 hitch 分布会被外部争用主导，**不作数**（闸门只看了窗口开始那一刻）。" >&2
+  fi
+}
+
 post_window_quiescence() {  # post_window_quiescence <outdir> <窗口秒数>；按 PERIOD 决定"什么样的收尾算合格"
   # 收尾**再问一次**探针：若"距离上次人手事件"仍短于刚录的窗口，说明窗口里有人动过手。
   # idle 档要的是"整窗没人动"；interact 档要的正好相反——没人动那批只能退回当 idle 数。

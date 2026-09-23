@@ -41,6 +41,7 @@ def cmd_summary(args):
     summary_render_rows(loaded, budget, seconds)
     summary_app_update_row(loaded, budget)
     summary_hitch_rows(loaded, seconds, budget)
+    summary_frame_table_rows(loaded, budget)
     summary_phase_blame_row(loaded, budget)
     summary_hang_rows(loaded, budget)
     summary_time_profile_rows(loaded)
@@ -57,6 +58,7 @@ def cmd_summary(args):
 # 只有跨节共享的两个量（`loaded` 与 `budget`）改成显式传参。
 # 对照证据：`/tmp/x5-before.txt` 与 `/tmp/x5-after.txt` 逐字相同（驱动器见笔记）。
 SUMMARY_KEYS = ("hitches", "hitches-updates", "hitches-renders", "potential-hangs",
+                "hitches-framewait", "hitches-gpu", "hitches-frame-lifetimes",
                 "device-display-info", "displayed-surfaces-per-second", "time-profile")
 
 
@@ -79,6 +81,11 @@ def period_eligibility(meta):
     ⇒ 写进 meta 不等于被看见；判资格必须把复核读回来。
     """
     period = str(meta.get("period") or "idle")
+    # 窗口结束时整机在忙 ⇒ 两档都不作数（争用会把 hitch 间隔压到每帧一次，见交接笔记 §AB）。
+    # 与「人手污染」同一条纪律：**写进 meta 的标记必须有读者**，否则等于没记。
+    if str(meta.get("contaminated_by_foreign_load") or "") == "1":
+        return False, ("窗口结束时负载显示整机在忙（meta.load1_at_end / heavy_at_end）"
+                       "⇒ 这批量的是别人占着机器时的帧，不得作为结论提交")
     # 输入来源**与投递节奏**决定这句话能不能说"真人"、能不能答"到不到 120Hz"。
     # 25 Hz 的合成滚动器（每 40 ms 一拍）比 8.333 ms 的帧预算还慢，出帧上限是仪器锁的
     # —— 今晚实测过，那两批差点被当"交互期 hitch 读数"直接引用（现已移出充数）。
@@ -284,6 +291,59 @@ def summary_hitch_rows(loaded, seconds, budget):
                 "未覆盖", "—")
 
 
+PER_TABLE_BUDGETS = (("hitches-framewait", 1.5, "每帧排队等待(ms)"),
+                     ("hitches-gpu", 1.0, "每帧 GPU 用时(ms)"),
+                     ("hitches-frame-lifetimes", None, "每帧内容寿命(ms)"))
+
+
+def frame_table_rows(loaded, budget):
+    """逐帧三张表 ⇒ [(标签, 现量, 判定)]。**每张表配自己的预算**（spec §6.1 的 §AC）。
+
+    为什么非分开不可：`hitches-frame-lifetimes` 一帧一行，p50 天生就是 **25 ms（≈3 帧）**——
+    拿 8.333 ms 去判它，会得到"100% 超预算"这种毫无意义的话（与包 10 的 `hitches-updates`
+    同一类单位错）。而 `framewait` 的 p50 ≈ 8.9 ms 是"每帧排队的等待"，
+    对 1.5× 帧预算才是有意义的判据；`gpu` 对 1× 帧预算。
+    做成纯返回（不 print）是为了能被合成夹具双向钉住（selfcheck 第 42 项）。
+    """
+    rows = []
+    for key, mult, label in PER_TABLE_BUDGETS:
+        m = loaded.get(key) or {"present": False}
+        # 先判表在不在，**再**去取它的数：`disp_values` 会读 `measure["doc"]`，
+        # 而缺席的那个合成字典根本没有 `doc` 这一格（夹具按 `frame_table_rows({})`
+        # 一调就 KeyError —— 生产里 `loaded` 总有键，所以这条只有夹具能撞见）。
+        if not m.get("present"):
+            # 判定列要自己出声：读者扫的是第三列，写「—」就等于把"这张表没导出"藏起来
+            # （与 §6.6「缺数据按未覆盖明写」同一条纪律，也是第 42 项现在钉的东西）。
+            rows.append((label, "未覆盖（这份 trace 里没有这张表）", "未覆盖 ⇒ 不判"))
+            continue
+        vals = [v for v in disp_values(m) if v is not None]
+        if not vals:
+            rows.append((label, "0 帧（表在但没读数）", "0 读数 ⇒ 不判"))
+            continue
+        p50, p95 = percentile(vals, .5), percentile(vals, .95)
+        cur = "p50 %.2f / p95 %.2f / max %.2f（n=%d，一帧 %.2f ms）" % (
+            p50, p95, max(vals), len(vals), budget)
+        if mult is None:
+            rows.append((label, cur, "不判单帧预算：内容寿命天生是几帧（p50 ≈ %.1f 帧）"
+                         % (p50 / budget)))
+            continue
+        bar = budget * mult
+        over = sum(1 for v in vals if v > bar)
+        rows.append((label, cur,
+                     "达标（0 帧超 %.2f ms）" % bar if not over
+                     else "%d 帧超 %.2f ms（%.2f%%）" % (over, bar, 100.0 * over / len(vals))))
+    return rows
+
+
+def summary_frame_table_rows(loaded, budget):
+    """三张逐帧表 + 一行把 `hitches` **降级为旁证**的说明。"""
+    for label, cur, verdict in frame_table_rows(loaded, budget):
+        fmt_row(label, "—", cur, verdict)
+    fmt_row("hitch 行数（下游计数）", "—", "只作旁证，不单独定达标",
+            "判 T1 用上面三张逐帧表 + 呈现侧 p95：同一份内容三趟报过 14 / 22 / 364 行，"
+            "变的只是流水线延迟档位（§AC）")
+
+
 def summary_phase_blame_row(loaded, budget):
     # 4b) 迟到帧到底该怪谁：主线程 update 也超预算的，和"主线程没问题、渲染/合成侧慢了"的
     upd = dedupe_pairs(loaded["hitches-updates"])
@@ -347,5 +407,6 @@ def summary_fps_row(loaded):
                 % (fps.get("fps_p50"), fps.get("fps_p95"), fps.get("seconds")), "参考")
     else:
         fmt_row("实测出帧/s", "参考项", "未覆盖", "参考")
+
 
 

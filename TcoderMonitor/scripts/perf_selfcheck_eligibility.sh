@@ -436,6 +436,39 @@ print("%d|%d|%d|%s|%s" % (ca, cb, cc,
   ok "p95 判据两把预算并排印且真会分歧：精确周期=过、8.5ms 步进=名义不过/实测过、样本不足=拒判"
 }
 
+selfcheck_frame_table_budgets() {  # selfcheck_frame_table_budgets <outdir>
+  # 42) 逐帧三张表**各配自己的预算**（§AC）。触发这条的是我自己刚才差一点又犯的老错：
+  #     第一版拿 8.333 ms 去判 `hitches-frame-lifetimes`，得到"2431/2431 帧超预算（100%）"——
+  #     那句毫无意义（帧内容寿命天生是 3 帧 ≈ 25 ms），与包 10 的 `hitches-updates` 同族。
+  #     所以这里反向钉一次：**全 25 ms 的寿命表必须判"不判单帧预算"，且不许出现"超预算"**。
+  local r
+  r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_trace_summary import frame_table_rows
+L = {"hitches-framewait": {"present": True, "doc": None, "json": {"values": [8.9] * 98 + [14.0, 15.0]}},
+     "hitches-gpu": {"present": True, "doc": None, "json": {"values": [3.4] * 100}},
+     "hitches-frame-lifetimes": {"present": True, "doc": None, "json": {"values": [25.0] * 100}}}
+# 返回的是 [(标签, 现量, 判定)]：**按标签索引**，别按 L 的键（上一版就在这儿 KeyError，
+# 拿到空串被当成判定不符，看着像尺子坏了，其实是夹具自己崩了）。
+rows = frame_table_rows(L, 8.333)
+d = dict((lbl, verdict) for lbl, _, verdict in rows)
+c = dict((lbl, cur) for lbl, cur, _ in rows)
+w = [verdict for lbl, _, verdict in rows if "等待" in lbl][0]
+e = frame_table_rows({}, 8.333)
+z = dict((lbl, verdict) for lbl, _, verdict in frame_table_rows(
+        {"hitches-framewait": {"present": True, "doc": None, "json": {"values": []}}}, 8.333))
+print("%s|%s|%s|%s|%s|%s" % (
+    "不判单帧预算" in d["每帧内容寿命(ms)"] and "超" not in d["每帧内容寿命(ms)"],
+    "2 帧超" in w,
+    "达标" in d["每帧 GPU 用时(ms)"],
+    all("未覆盖" in verdict for _, _, verdict in e),
+    "n=100" in c["每帧排队等待(ms)"] and "15.00" in c["每帧排队等待(ms)"],
+    "不判" in z["每帧排队等待(ms)"]))')
+  [ -n "$r" ] || { fail "夹具里的 python 崩了（拿到空串）⇒ 这不是判据不符，是这条没跑"; return; }
+  [ "$r" = "True|True|True|True|True|True" ] \
+    || { fail "逐帧表的预算六种形状没各判对（拿到 $r）⇒ 会重新写出「100% 超预算」那种废话"; return; }
+  ok "逐帧三张表各配预算：寿命不判单帧、等待对 1.5×、GPU 对 1×，缺表与 0 读数都在判定列出声（六种形状）"
+}
+
 selfcheck_input_rate_qualification() {  # selfcheck_input_rate_qualification <outdir>
 
   # 28) 【标记要有读者】`meta.input_source` 从今晚起带投递节奏（`synth@8ms`），
@@ -463,3 +496,4 @@ print("|".join("%s=%s" % (k, "Y" if pe({"period":"interaction","input_source":v}
   [ "$slow" != "$fast" ] || { fail "两种节奏的话术一模一样，等于没判"; return; }
   ok "输入节奏有读者：五种形状各判一次，慢节奏与无节奏都不许冒充 T1 证据"
 }
+
