@@ -320,56 +320,6 @@ extension EmptyStateView {
 /// 存在理由：自查清单第 4 条要求「一组里 > 6 行同类条目就拆组或收进可展开区」。
 /// 旧页里巨大文件榜默认 20 行、贡献者排行 30 行、最近提交 20 行，全部一次摊开，
 /// 于是「不规整拥挤」。折叠掉的部分必须由**计数**交代清楚，不能静默截断。
-/// 展开/收起按钮的**量词**。
-///
-/// 为什么从"一个中文字符串参数"改成枚举（批次 P56）：
-/// 中文不需要复数，英语需要 —— `"展开其余 \(n) " + noun` 这种写法在英文态要么整句中文
-/// （`ax_body_audit` 的 B 类里这一族有 7 句 / 14 次），要么退化成
-/// "Show 1 more commits" 这种语法错。复数只能由 `Localizable.stringsdict` 管，
-/// 而 stringsdict 认的是**整句键**，不是"前缀 + 变量"。
-///
-/// 键写成 `switch` 里的**字面量**而不是拼串：拼出来的串没有可查的整句键，
-/// 那正是 P53 立的守卫 1d【拼了查不中】要判红的那一族。
-enum DisclosureNoun {
-    case commits, functions, files, processes, contributors
-    case duplicateBlocks, cappedBlocks, undisplayed, items
-
-    /// 全站唯一一份成员清单。加一个量词只改这里，
-    /// `DisclosureNounCopyTests` 会逐个 case 点名要求两本目录里有它的两条键。
-    static let allCases: [DisclosureNoun] = [
-        .commits, .functions, .files, .processes, .contributors,
-        .duplicateBlocks, .cappedBlocks, .undisplayed, .items,
-    ]
-
-    var expandKey: String {
-        switch self {
-        case .commits: return "展开其余 %lld 条提交"
-        case .functions: return "展开其余 %lld 个函数"
-        case .files: return "展开其余 %lld 个文件"
-        case .processes: return "展开其余 %lld 个进程"
-        case .contributors: return "展开其余 %lld 位贡献者"
-        case .duplicateBlocks: return "展开其余 %lld 个重复块"
-        case .cappedBlocks: return "展开其余 %lld 个榜内重复块"
-        case .undisplayed: return "展开其余 %lld 个未展示"
-        case .items: return "展开其余 %lld 项"
-        }
-    }
-
-    var collapseKey: String {
-        switch self {
-        case .commits: return "收起 %lld 条提交"
-        case .functions: return "收起 %lld 个函数"
-        case .files: return "收起 %lld 个文件"
-        case .processes: return "收起 %lld 个进程"
-        case .contributors: return "收起 %lld 位贡献者"
-        case .duplicateBlocks: return "收起 %lld 个重复块"
-        case .cappedBlocks: return "收起 %lld 个榜内重复块"
-        case .undisplayed: return "收起 %lld 个未展示"
-        case .items: return "收起 %lld 项"
-        }
-    }
-}
-
 struct DataDisclosureButton: View {
     let expanded: Bool
     let hiddenCount: Int

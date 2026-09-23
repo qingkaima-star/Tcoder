@@ -104,6 +104,40 @@ final class DisclosureNounCopyTests: XCTestCase {
                        "展开其余 5 个榜内重复块")
     }
 
+    /// 复数**真的生效**吗 —— 直接在 en 资源包上走一遍查表 + 填数。
+    ///
+    /// 为什么要在进程内补这一条：英文态九页审计量到的样本都是复数（12 / 35 / 7），
+    /// "只剩 1 项"那一档在真数据里没出现过；而这一族改成整句键的**唯一动机**就是
+    /// 英语的单复数。没有 1 的读数，就只能算"结构对了"，不能算"翻对了"。
+    ///
+    /// 测试宿主的 `Bundle.main` 里没有 `en.lproj`（`ShellTooltipTests` 记过这个前提），
+    /// 所以这里显式指向包内资源那一份；取不到就当场失败，不许静默跳过。
+    func test_englishPluralActuallyResolvesToOneAndOtherForms() throws {
+        let resources = LocalizationGuardTests.packageRoot.appendingPathComponent("Resources")
+        let en = resources.appendingPathComponent("en.lproj")
+        guard let enBundle = Bundle(url: en) else {
+            return XCTFail("打不开 \(en.path) —— 英文资源不在原位，本条不能算通过")
+        }
+        // 先钉"这个 bundle 不是空壳"：连既有的「%lld 行」都查不到，后面四条就是在
+        // 一个假的 bundle 上取到哨兵值，绿得没有意义。
+        XCTAssertFalse(enBundle.localizedString(forKey: "%lld 行", value: "\u{FFFF}", table: nil)
+            .contains("\u{FFFF}"), "stringsdict 连既有的「%lld 行」都查不到 ⇒ 这个 bundle 不是真的")
+        XCTAssertEqual(Self.english(DisclosureNoun.commits, count: 1, in: enBundle),
+                       "Show 1 more commit")
+        XCTAssertEqual(Self.english(DisclosureNoun.commits, count: 12, in: enBundle),
+                       "Show 12 more commits")
+        XCTAssertEqual(Self.english(DisclosureNoun.contributors, count: 1, in: enBundle),
+                       "Show 1 more contributor")
+        XCTAssertEqual(Self.english(DisclosureNoun.items, count: 3, in: enBundle),
+                       "Show 3 more items")
+    }
+
+    /// 走一遍 Apple 的复数机制：`NSLocalizedString` 风格的键查表 + `String(format:)` 填数。
+    /// 与产品侧 `localizedCount` 同一条路（那边是 `String(format: localizedCopy(key), count)`）。
+    private static func english(_ noun: DisclosureNoun, count: Int, in bundle: Bundle) -> String {
+        String(format: bundle.localizedString(forKey: noun.expandKey, value: "\u{FFFF}", table: nil), count)
+    }
+
     /// 计数不许在改写过程中被丢掉（这条键的全部意义就是"折叠被计数交代"）。
     func test_disclosureTitleAlwaysCarriesTheCount() {
         for noun in DisclosureNoun.allCases {
