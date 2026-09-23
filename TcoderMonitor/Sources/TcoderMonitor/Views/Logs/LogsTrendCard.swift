@@ -22,11 +22,15 @@ struct LogsTrendCard: View {
                     NoteLine(Self.trendReading, help: footnote(buckets))
                 }
             } else if logs == nil {
-                SectionEmptyNote(text: "尚未分析，点「重新分析」后这里按天展示错误、异常与崩溃的分布。",
-                                 icon: .chartLine)
+                // **留短藏长**（盘点表 G 组）：屏上留状态那一句（下面为什么没有图），
+                // "点了之后这里会出现什么"那句预告进 ⓘ。两支的整句都是目录里原有的键，一字未改。
+                SectionEmptyNote(text: "尚未分析", icon: .chartLine,
+                                 help: "尚未分析，点「重新分析」后这里按天展示错误、异常与崩溃的分布。")
             } else {
-                SectionEmptyNote(text: "暂无趋势数据：日志行里没有可解析的时间戳时无法按天分桶，这里不画空柱。",
-                                 icon: .chartLine)
+                // 「不画空柱」是这两支共同的诚实性底线（没有分桶依据就不画），屏上的
+                // 「暂无趋势数据」已经把"这里没有数"说出口，藏掉的只是**为什么不**。
+                SectionEmptyNote(text: "暂无趋势数据", icon: .chartLine,
+                                 help: "暂无趋势数据：日志行里没有可解析的时间戳时无法按天分桶，这里不画空柱。")
             }
         }
     }
