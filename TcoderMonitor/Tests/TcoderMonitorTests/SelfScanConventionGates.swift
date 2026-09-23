@@ -52,7 +52,9 @@ final class SelfScanConventionGates: SelfScanHarnessCase {
 
         // ③ **分母也必须上屏**：均值为 4 的可信度完全取决于"4 是多少个函数的 4"，
         //    不报样本量的均值没有意义。
-        XCTAssertTrue(complexity.detail.contains("\(census.functionCount)"),
+        //    P58 起 detail 里的整数走全站那把 `NumberFormat.grouped`（`HealthCurves.whole`），
+        //    所以期望值也用同一把尺子写 —— **改的是读数的写法，不是"分母必须出现"这个判定**。
+        XCTAssertTrue(complexity.detail.contains(NumberFormat.grouped(census.functionCount)),
                       "detail 没报出分母（独立普查 \(census.functionCount) 个函数）："
                     + "不报样本量的均值没有意义。当前 detail：\(complexity.detail)")
 

@@ -54,6 +54,9 @@ final class BoardLengthReadoutRatchetTests: XCTestCase {
         (">", "门槛比较：`榜.count > rowLimit` 决定要不要出展开按钮，不是把榜长当总数"),
         ("<", "同上，反方向的比较"),
         ("榜内只列", "披露句式：真总数与榜长**并排**写出来（榜内只列 N 个，实际 M 个），正解形状"),
+        // P58 补的第二种写法：整句键化之后，`榜内只列 %1$@ 个` 挪进了 `localizedFormat` 的模板里，
+        // 而**按行**认标记的这把尺子看不见"模板与实参分了行"。名字本身就是那个标记。
+        ("boardOnlyNote", "披露助手本体（`HealthCurves.boardOnlyNote`）：榜长以 `listed:` 的身份进去，助手内部把真总数并排写出来"),
     ]
 
     // MARK: - 棘轮本体
@@ -114,6 +117,8 @@ final class BoardLengthReadoutRatchetTests: XCTestCase {
             "if code.duplicatedBlocks.count > Self.rowLimit { expanded.toggle() }",
             "let curve = hugeCount > code.hugeFiles.count",
             "detail: raw.detail + \"（榜内只列 \\(code.hugeFiles.count) 个，实际 \\(hugeCount) 个）\",",
+            // P58 之后产品侧的写法：整句键 + 具名披露助手，标记与榜长同行。
+            "let note = HealthCurves.boardOnlyNote(raw.detail, listed: code.hugeFiles.count, total: hugeCount)",
         ].joined(separator: "\n")
         XCTAssertEqual(countHits(in: legal, path: "Synthetic.swift"), 0,
                        "合法形状被误判 —— 守卫开始咬自己人")

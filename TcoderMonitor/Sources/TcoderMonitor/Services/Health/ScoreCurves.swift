@@ -268,22 +268,82 @@ enum HealthCurves {
         return .critical
     }
 
-    /// 文案预算 60 字：核心数字段在前，放不下的段直接舍弃，宁可少说也不截断数字或换行。
+    /// 文案预算按**显示宽度**算，不按字符数：中日韩全角一格折 2、拉丁与数字折 1。
+    /// 中文态 120 格 = 60 个整字，与改造前那条「60 字」线是**同一条物理线**，评分卡那一行不动；
+    /// 英文态拿到的因此是同样的**宽度**而不是同样的**字符数** —— 旧写法给英文也只数 60 格，
+    /// 一行塞得下三四个词，后面的口径段整段被舍弃（P58 的动机）。
+    static let detailWidthBudget = 120
+
+    /// 分隔符本身也必须查表。它挂在 `joined` 这一处，而不是散在每条文案里各写一遍：
+    /// 拼出来的整串永远查不中（守卫 1d），所以能查表的只有这些**片段之间**的标点。
+    static var detailSeparator: String { localizedCopy("，") }
+
+    /// 核心数字段在前，放不下的段直接舍弃，宁可少说也不截断数字或换行。
     static func joined(_ segments: [String]) -> String {
         var result = ""
         for segment in segments {
             if segment.isEmpty { continue }
-            let candidate = result.isEmpty ? segment : result + "，" + segment
-            if candidate.count > 60 { continue }
+            let candidate = result.isEmpty ? segment : result + detailSeparator + segment
+            if displayWidth(candidate) > detailWidthBudget { continue }
             result = candidate
         }
         return result.isEmpty ? bounded(segments.first ?? "") : result
     }
 
+    /// 把**口径注记**挂到一条已经翻好的 detail 后面。
+    ///
+    /// ⚠ 这里只能是整句键：`curve.detail + "（中文）"` 拼完的那一串查不中任何键，
+    /// 英文态会长成「前半英文 + 后半中文」—— 比整句中文更难读，而三条静态键守卫全是绿的。
+    /// 括号本身也在模板里（中文「（）」、英文「()」），所以注记一律给**不带括号**的片段。
+    static func noted(_ detail: String, _ notes: [String]) -> String {
+        let note = joined(notes)
+        guard !note.isEmpty else { return detail }
+        return localizedFormat("%1$@（%2$@）", detail, note)
+    }
+
+    /// 榜单被截断时的披露注记：**榜长与真总数并排**写出来，谁都不许单独充当对方。
+    ///
+    /// 为什么要有这个具名助手（而不是一处一行 `localizedFormat`）：
+    /// `BoardLengthReadoutRatchetTests` 数的是"把 `code.<榜>.count` 当总数用"的原始读数，
+    /// 而它认合法披露句的办法是**同一行上有标记**。P58 把注记改成整句键之后，
+    /// 参数换行会把标记与读数分到两行去 ⇒ 一句诚实的话被判成新增违例。
+    /// 名字本身就是那个标记，调用点必须写成一行。
+    static func boardOnlyNote(_ detail: String, listed: Int, total: Int) -> String {
+        noted(detail, [localizedFormat("榜内只列 %1$@ 个，实际 %2$@ 个", whole(listed), whole(total))])
+    }
+
+    /// 一个字符占几格：CJK 全角（含汉字、全角标点、假名、韩文音节）算 2，其余算 1。
+    static func displayWidth(_ text: String) -> Int {
+        text.reduce(0) { $0 + (isFullWidth($1) ? 2 : 1) }
+    }
+
+    private static func isFullWidth(_ character: Character) -> Bool {
+        guard let scalar = character.unicodeScalars.first else { return false }
+        let value = scalar.value
+        return (0x1100...0x115F).contains(value)      // 韩文字母
+            || (0x2E80...0x303E).contains(value)      // 中日韩部首、标点、假名补充
+            || (0x3041...0x33FF).contains(value)      // 平假名/片假名/中日韩符号
+            || (0x3400...0x4DBF).contains(value)      // 扩展 A
+            || (0x4E00...0x9FFF).contains(value)      // 汉字
+            || (0xA000...0xA4CF).contains(value)      // 彝文
+            || (0xAC00...0xD7A3).contains(value)      // 韩文音节
+            || (0xF900...0xFAFF).contains(value)      // 兼容汉字
+            || (0xFE30...0xFE6F).contains(value)      // 兼容标点
+            || (0xFF00...0xFF60).contains(value)      // 全角形式
+            || (0xFFE0...0xFFE6).contains(value)      // 全角符号
+            || (0x1F300...0x1FAFF).contains(value)    // 表情符号
+            || (0x20000...0x2FFFD).contains(value)    // 扩展 B 及以上
+    }
+
     private static func bounded(_ text: String) -> String {
-        let characters = Array(text)
-        guard characters.count > 60 else { return text }
-        return String(characters.prefix(60))
+        var width = 0
+        var kept = ""
+        for character in text {
+            width += isFullWidth(character) ? 2 : 1
+            if width > detailWidthBudget { break }
+            kept.append(character)
+        }
+        return kept
     }
 
     /// 手写定点格式化，不走 Locale，保证任何系统语言下 detail 里的数字都一致。
