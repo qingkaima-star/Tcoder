@@ -74,6 +74,22 @@ def _meta_or_none(d):
     return meta
 
 
+def _run_reading(d, loaded, secs):
+    """把一行的现量凑成 dict。**缺件的格子给 None，不给 0**：
+    0 会被下一行读成"这趟测到了 0 帧/0 ms"，而真相是没采到。
+    """
+    late = [v for v in disp_values(loaded["hitches"]) if v is not None]
+    rends = [v for v in disp_values(loaded["hitches-renders"]) if v is not None]
+    upd = [v for v in dedupe_pairs(loaded["hitches-updates"]) if v is not None]
+    surfaces = loaded["displayed-surfaces-per-second"]
+    fps = surfaces["json"] or fps_counts(surfaces)
+    return {"dir": os.path.basename(d.rstrip("/")), "seconds": secs,
+            "hitch_n": len(late), "hitch_per_s": len(late) / secs,
+            "render_p50_ms": percentile(rends, .5) if rends else None,
+            "update_max_ms": max(upd) if upd else None,
+            "surfaces_p50_fps": (float(fps["fps_p50"]) if fps and fps.get("fps_p50") else None)}
+
+
 def read_run(d):
     """一个 run 目录 → dict；读不到 hitch 表 / 没有秒数 / 档位复核不合格 ⇒ None。
 
@@ -87,16 +103,9 @@ def read_run(d):
     loaded = summary_load(d)
     if secs <= 0 or not loaded["hitches"]["present"]:
         return None
-    late = [v for v in disp_values(loaded["hitches"]) if v is not None]
-    rends = [v for v in disp_values(loaded["hitches-renders"]) if v is not None]
-    upd = [v for v in dedupe_pairs(loaded["hitches-updates"]) if v is not None]
-    fps = loaded["displayed-surfaces-per-second"]["json"] or fps_counts(loaded["displayed-surfaces-per-second"])
-    return {"dir": os.path.basename(d.rstrip("/")), "seconds": secs,
-            "hitch_n": len(late), "hitch_per_s": len(late) / secs,
-            "period": str(meta.get("period") or "?"),
-            "render_p50_ms": percentile(rends, .5) if rends else None,
-            "update_max_ms": max(upd) if upd else None,
-            "surfaces_p50_fps": (float(fps["fps_p50"]) if fps and fps.get("fps_p50") else None)}
+    reading = _run_reading(d, loaded, secs)
+    reading["period"] = str(meta.get("period") or "?")
+    return reading
 
 
 def _spread(vals, unit, bar):
