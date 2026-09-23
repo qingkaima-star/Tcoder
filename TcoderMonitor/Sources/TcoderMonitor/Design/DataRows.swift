@@ -103,6 +103,9 @@ struct DataReadout: View {
                 .font(CodeGitType.readoutLabel)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                // 名字被裁 = 那一格数字失去归属（英文窄态实测 `Average Cyclomatic Complexity`
+                // 165pt 对 140pt 的列）。同 caption 一条规矩：截了必须有去处。
+                .help(whenClipped: true, label)
                 .monospacedDigit()
             HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
                 Text(localizedCopy(value))
@@ -122,6 +125,13 @@ struct DataReadout: View {
                     .font(CodeGitType.prose(Theme.Typo.microLabel))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
+                    // 这一族是**读数带里的小字摘要**，定宽一行、装不下就整段消失。
+                    // 英文窄态（1080 = 本 App 的 `minWidth`）实拍抓到三格：
+                    // `Peak line count for a single…`、`Of code lines inside duplicate blocks`、
+                    // `Counts only functions of ≥2 lines.` —— 中文态同一句更短所以一直没露头。
+                    // 走 `help(whenClipped:)` 这个唯一出口：只有会被裁的写法挂全文，
+                    // 否则截断尺子的两档（字丢了 / 有意裁短）会被混成一档。
+                    .help(whenClipped: true, caption)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
