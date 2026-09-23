@@ -196,7 +196,7 @@ struct DependencyOverviewSection: View {
                                  // 离线态下只是"没查"（批次 P7-B）。这一格改走同一份判定。
                                  valueColor: DependencySafetyVerdict(deps).role.textColor)
                     DataRowSeparator()
-                    DataFieldRow(label: "生态", value: deps.distinctEcosystemNames.joined(separator: "、"),
+                    DataFieldRow(label: "生态", value: deps.distinctEcosystemNames.joined(separator: localizedListSeparator()),
                                  style: .text)
                 }
 

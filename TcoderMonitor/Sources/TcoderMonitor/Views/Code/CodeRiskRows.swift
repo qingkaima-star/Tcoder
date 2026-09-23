@@ -110,7 +110,7 @@ enum CodeRiskAnalysis {
         let names = Array(block.occurrences.prefix(2))
             .map { "\(CodeViewFormat.fileName($0.path)):\(NumberFormat.grouped($0.startLine))" }
         let rest = block.occurrences.count - names.count
-        let joined = names.joined(separator: "、")
+        let joined = names.joined(separator: localizedListSeparator())
         return rest > 0 ? "\(joined) 等文件" : joined
     }
 

@@ -712,5 +712,23 @@
 			<string>%lld crash-channel files produced no countable evidence (corrupt, only the filename looks like one, no usable event time, the build version is not the current one, or they are other copies of the same event); per-file reasons appear once LogSummary carries the crash evidence fields</string>
 		</dict>
 	</dict>
+	<!-- 批次 P70：无障碍标签那枚被降级成 `%@` 的复数（旧英文值写死 "days"，1 天也说 days）。
+		键 = 中文整句；`.strings` 里那条旧的 `错误趋势，%@ 天` 同步删掉 —— 留着就是烂尾键。 -->
+	<key>错误趋势，%lld 天</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@trendDayCount@</string>
+		<key>trendDayCount</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Error trend, %lld day</string>
+			<key>other</key>
+			<string>Error trend, %lld days</string>
+		</dict>
+	</dict>
 </dict>
 </plist>

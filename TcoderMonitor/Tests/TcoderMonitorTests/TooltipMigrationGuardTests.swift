@@ -72,7 +72,7 @@ final class TooltipMigrationGuardTests: XCTestCase {
         for match in literal.matches(in: line, options: [], range: lineRange) {
             guard let whole = Range(match.range, in: line),
                   let inner = Range(match.range(at: 1), in: line) else { continue }
-            let prefix = String(line[line.startIndex..<whole.lowerBound])
+            let prefix = Self.stripLookupWrappers(String(line[line.startIndex..<whole.lowerBound]))
             let prefixRange = NSRange(prefix.startIndex..., in: prefix)
             let slot: LiteralSlot
             if tooltipPrefix.firstMatch(in: prefix, options: [], range: prefixRange) != nil {
@@ -147,8 +147,10 @@ final class TooltipMigrationGuardTests: XCTestCase {
     /// 88 → 76（S2 代码两页）→ 74（S3 Git 与贡献者）→ 72（尺子改逐字面量判槽位 + S6 键登记）
     /// → 69（S1 总览与外壳）→ **62（S5 性能与日志 19 处、S4 依赖 3 处、S7 总览三处收进 ⓘ）**。
     /// 同批 tooltip 承载 13 → 49、总量 101 → 111：**B 一句没删**，降下来的 26 条全部搬进了 ⓘ。
-    /// → **54（P69 合流：26 段半句并成 10 条整句键，可见单元再合掉 8 个，文本零丢失）**。
-    private static let visibleCaliberCeiling = 54
+    /// → 54（P69 合流：26 段半句并成 10 条整句键）
+    /// → **86（P70 重播种：不是新增债，是量具坏了** —— 分类器原先看不见包在 `localizedFormat(…)` 里的常驻句，
+    /// 机制与双向元测试见 `+CaliberMerges.swift` 的 `stripLookupWrappers`；旧曲线 88→54 里有一部分是"句子变得看不见"）。
+    private static let visibleCaliberCeiling = 86
 
     /// 总量下限 = 播种时的可见 + tooltip 之和 **减去已核准的删除数**。
     ///

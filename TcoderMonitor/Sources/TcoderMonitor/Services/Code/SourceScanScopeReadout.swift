@@ -156,7 +156,7 @@ struct SourceTreeFollowingLedger: Sendable, Equatable {
         var line = "包状目录不下潜 \(NumberFormat.grouped(listedPackageDirectoryCount)) 个（按名单）"
         if unlistedPackageDirectoryCount > 0 {
             line += "、\(NumberFormat.grouped(unlistedPackageDirectoryCount)) 个（按系统 bundle 判定，"
-                + "名单外：\(unlistedPackageDirectoryExamples.prefix(3).joined(separator: "、"))）"
+                + "名单外：\(unlistedPackageDirectoryExamples.prefix(3).joined(separator: localizedListSeparator()))）"
         }
         line += "：`.lproj`/`.app`/`.framework` 这类目录里放的是资源与二进制，不是手写源码，"
             + "枚举器交出目录后就止步；**其内部文件数在审计模式之外不统计**（台账里那条 0 读作「没数」）。"

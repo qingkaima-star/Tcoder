@@ -109,7 +109,7 @@ enum DependencyRowStatus: Equatable {
         if let latest = identity.latestKnownVersion { base += "；最新已知 \(latest)" }
         switch self {
         case .vulnerable(let count):
-            return "\(base)；\(count) 条已知漏洞：\(record.knownVulnerabilities.joined(separator: "、"))"
+            return "\(base)；\(count) 条已知漏洞：\(record.knownVulnerabilities.joined(separator: localizedListSeparator()))"
         case .outdated:
             return "\(base)；按已解析/声明的确切版本比较为落后；漏洞核对状态：\(vulnerability.rawValue)"
         case .verifiedSafe:

@@ -91,7 +91,7 @@ struct SourceRoleTally: Sendable, Equatable {
             var line = "\(role.displayName) · \(NumberFormat.grouped(value.files)) 个 · "
                 + "\(NumberFormat.grouped(value.codeLines)) 代码行"
             if !value.examples.isEmpty {
-                line += "；例：\(value.examples.joined(separator: "、"))"
+                line += "；例：\(value.examples.joined(separator: localizedListSeparator()))"
             }
             if role == .production, let weak = weakEvidenceNote { line += "；\(weak)" }
             return line
@@ -143,7 +143,7 @@ struct SourceRoleTally: Sendable, Equatable {
         let detail = outsiders
             .filter { !share($0).isEmpty }
             .map { "\($0.displayName) \(NumberFormat.grouped(files($0)))" }
-            .joined(separator: "、")
+            .joined(separator: localizedListSeparator())
         lines.append("代码规模的分母本轮**未按角色收窄**：\(NumberFormat.grouped(outsiderFiles)) 个非生产源码文件"
             + "（\(NumberFormat.grouped(outsiderLines)) 代码行：\(detail)）与生产码同分母。"
             + "要按角色分档出数或让构建产物不恶化生产码评分，需等 `Models/CodeMetrics` 的角色字段"
@@ -172,14 +172,14 @@ struct SourceRoleTally: Sendable, Equatable {
             let hits = count(criterion)
             return hits > 0 ? "\(label) \(NumberFormat.grouped(hits))" : nil
         }
-        return parts.isEmpty ? "无" : parts.joined(separator: "、")
+        return parts.isEmpty ? "无" : parts.joined(separator: localizedListSeparator())
     }
 
     /// 样本串：最多点 3 个名字，剩下的只报条数 —— 限制说明要能一眼读完，
     /// 但**必须留名**，只给一个总数的句子无从反驳。
     private func examplesText(_ examples: [String]) -> String {
         guard examples.isEmpty == false else { return "（未取样）" }
-        let shown = examples.prefix(3).joined(separator: "、")
+        let shown = examples.prefix(3).joined(separator: localizedListSeparator())
         let rest = examples.count > 3 ? "…（另 \(examples.count - 3) 条样本）" : ""
         return shown + rest
     }

@@ -57,7 +57,7 @@ struct CoverageDisplayShape: Equatable, Sendable {
             undisplayedReports: overCap,
             unexaminedDirectories: unexamined,
             droppedByCap: overCap.count,
-            unmeasuredScope: scopeParts.isEmpty ? nil : scopeParts.joined(separator: "、"))
+            unmeasuredScope: scopeParts.isEmpty ? nil : scopeParts.joined(separator: localizedListSeparator()))
     }
 
     /// 「另有 N 份未合并」那一句的**唯一措辞**（RD-51）。
@@ -75,7 +75,7 @@ struct CoverageDisplayShape: Equatable, Sendable {
             // 计数在、坐标不在 ⇒ 那是两次统计拼出来的账，不许装作点过名。
             return head + "（这一版没留下逐条坐标，点不出名）"
         }
-        return head + "：" + named.joined(separator: "、")
+        return head + "：" + named.joined(separator: localizedListSeparator())
             + (coordinates.count > named.count ? "等（逐条清单见 undisplayedReports）" : "（已点名）")
     }
 
@@ -122,7 +122,7 @@ extension CoverageMetrics {
             missing.contains { $0.moduleKey == nil } ? "模块未知" : nil,
             missing.contains { $0.sourceFingerprint == nil } ? "未绑定提交" : nil,
         ].compactMap { $0 }
-        return slots.isEmpty ? head : head + "（" + slots.joined(separator: "、") + "），已分开呈现"
+        return slots.isEmpty ? head : head + "（" + slots.joined(separator: localizedListSeparator()) + "），已分开呈现"
     }
 
     /// 「有没有东西被上限摘掉」这句。**三态分开**，`nil` 不许渲染成"没有问题"。

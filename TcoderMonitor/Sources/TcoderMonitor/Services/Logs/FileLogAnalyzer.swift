@@ -201,7 +201,7 @@ extension LogSummary {
             // 实测 stringsdict 装得下 ⇒ 没有拆成两句（拆了就得让英文去猜词序）。
             parts.append(localizedCount("读取失败 %1$lld 份（%2$@）未参与判定",
                                         count: failed.count,
-                                        note: reasons.joined(separator: "、")))
+                                        note: reasons.joined(separator: localizedListSeparator())))
         }
         let unexplained = max(0, channelFiles - crashCount)
         if unexplained > 0 {

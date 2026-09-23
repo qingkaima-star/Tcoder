@@ -36,7 +36,7 @@ enum CLIScoreText {
 
         if !report.failedSections.isEmpty {
             lines.append("失败路 \(report.failedSections.count)/\(CLIScan.sectionLabels.count)："
-                         + report.failedSections.joined(separator: "、")
+                         + report.failedSections.joined(separator: localizedListSeparator())
                          + " —— 下面的分是在这些维度缺席时算出来的")
         }
         // 「哪些没量准」必须在**分数之前**出声，与"失败路在分数之前"同一条理由。
@@ -216,7 +216,7 @@ enum CLIScoreText {
             DimensionDisplay.name($0) + " — " + MissingDimensionReason.text(for: $0, report: report)
         }
         if !failed.isEmpty {
-            parts.append(failed.map(DimensionDisplay.name).joined(separator: "、")
+            parts.append(failed.map(DimensionDisplay.name).joined(separator: localizedListSeparator())
                          + " — 所属分析路本次失败，原因见上面「失败路」那一行")
         }
         return ["缺席维度 \(missing.count) 项（不参与计分、也不按 0 计入）：" + parts.joined(separator: " · ")]
@@ -269,8 +269,8 @@ enum CLIScoreText {
             return ["工程质量（代码口径） = 无（没有代码维度参与计分）"]
         }
         return ["工程质量（代码口径） = \(scope.overall)",
-                "  计入：\(scope.includedDimensions.joined(separator: "、"))",
-                "  不含：\(scope.excludedDimensions.isEmpty ? "（无）" : scope.excludedDimensions.joined(separator: "、"))",
+                "  计入：\(scope.includedDimensions.joined(separator: localizedListSeparator()))",
+                "  不含：\(scope.excludedDimensions.isEmpty ? "（无）" : scope.excludedDimensions.joined(separator: localizedListSeparator()))",
                 "  口径：\(scope.note)"]
     }
 

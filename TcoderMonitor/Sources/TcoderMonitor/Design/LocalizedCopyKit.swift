@@ -251,6 +251,19 @@ func endingSentence(_ text: String, chinese: Bool = Theme.Layout.isChineseUI) ->
     text + (chinese ? "。" : ".")
 }
 
+/// 列表分隔符也要随语言（批次 P70，与 `endingSentence` 同族）。
+///
+/// 中文这一路一直用顿号 `、`（U+3001，落在中日韩标点段内）把"三个名字"这类清单连起来。
+/// 键化之后整句翻成英文了，**分隔符却是代码里写死的那一枚** ⇒ 英文态屏上会长成
+/// `Swift、Homebrew、Ruby` —— 一个中日韩标点夹在英文单词中间。
+/// 量残留的那把尺子按**码点**判，所以这跟"英文句子尾巴挂一个 `。`"是同一类缺陷，
+/// 只是它藏在 `joined(separator:)` 里、不在任何一条键上，按目录查的守卫看不见它。
+///
+/// 英文用 `, `（与全站既有英文值里的列表写法一致）。
+func localizedListSeparator(chinese: Bool = Theme.Layout.isChineseUI) -> String {
+    chinese ? "、" : ", "
+}
+
 // MARK: - 展开/收起的量词（批次 P56）
 //
 // 为什么住在这本里：这一族是**文案词汇**，不是画法 —— 画法在

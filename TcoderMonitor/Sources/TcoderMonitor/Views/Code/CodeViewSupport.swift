@@ -44,7 +44,7 @@ enum CodeDataGate {
             return EmptyCopy(
                 icon: .code,
                 title: "尚无代码扫描结果",
-                message: "点击「重新分析」开始扫描该目录。\n完成后这里会显示真实的文件数、行数与\(page)。"
+                message: localizedFormat("点击「重新分析」开始扫描该目录。\n完成后这里会显示真实的文件数、行数与%1$@。", page)
             )
         case .measuredEmpty:
             return EmptyCopy(

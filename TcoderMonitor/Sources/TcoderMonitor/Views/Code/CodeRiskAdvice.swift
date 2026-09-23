@@ -103,7 +103,7 @@ extension CodeRiskAnalysis {
                                   NumberFormat.grouped(highest),
                                   // 「、」是中文顿号，英文态该是「, 」—— 分隔符随语言这件事
                                   // 现有三个查表出口都表达不了，同样记进契约缺口。
-                                  named.joined(separator: "、"),
+                                  named.joined(separator: localizedListSeparator()),
                                   // 「压到上榜函数的最低水位以下」是一枚**从榜里长出来的目标**：榜只留前 20 条，
                                   // 第 20 名在大仓库上可能是 CC 40 —— 照它做既出不了榜也没修掉任何东西。
                                   // 换成引擎判档的那条线（冻结常量，本处**只读不改**）：低于它就是离开高档。

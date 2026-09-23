@@ -140,6 +140,6 @@ struct LogTrendChart: View {
                     .foregroundStyle(Color.secondary)
             }
         }
-        .accessibilityLabel(Text(localizedFormat("错误趋势，%@ 天", NumberFormat.grouped(buckets.count))))
+        .accessibilityLabel(Text(localizedCount("错误趋势，%lld 天", buckets.count)))
     }
 }
