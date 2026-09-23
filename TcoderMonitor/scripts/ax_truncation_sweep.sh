@@ -43,6 +43,9 @@
 # 用法: ./scripts/ax_truncation_sweep.sh [页名...]        默认九页全跑
 #   CAPTURE_LANG=en     以英文态跑（英文串更长，这才是截断真正会咬人的地方）
 #   BODY_FONT_PT=11     正文字号（AX 不给字体，只能注明是猜的；改字号=换一把尺子）
+#   SWEEP_TARGET=<目录> 被扫对象（默认 = 本仓）。溢出这一轴有一半缺陷只在**数据形状不同**时露头，
+#                       所以"只量本仓"不等于"量过了"；换目标时正对照仍必须被报出来，否则判据不成立。
+#   WAIT_BUDGET=<秒>    等第一轮分析落盘的预算（默认 420；判据见 `wait_for_reports.sh`）
 #   退出码：0 = 正对照成立且扫完；1 = 正对照不成立或有页面没读到树；2 = 前置缺失
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
@@ -50,6 +53,13 @@ ROOT=$(git rev-parse --show-toplevel)
 SCRATCH="${TCODER_SCRATCH:-$ROOT/.scratch}"
 BOX="$SCRATCH/tcoder-ax-truncation"
 SANDBOX="$BOX/sandbox"
+# 被扫对象。默认 = 本仓（dogfooding）；`SWEEP_TARGET=<目录>` 拿去量别的仓库。
+# 为什么要开这个口子：**溢出这一轴的缺陷有一半只在"数据形状不同"时才露头**
+# ——长路径、几千个作者、六位数的行数。只量本仓等于只量一种形状。
+# ⚠ 正对照（那条超长项目名）与本仓无关，换目标它照样必须被报出来。
+TARGET="${SWEEP_TARGET:-$ROOT}"
+WAIT_BUDGET="${WAIT_BUDGET:-420}"
+source "$(dirname "$0")/wait_for_reports.sh"
 # 窄态那趟的产物**另起一个目录**：与默认宽度的 dump 同名互相覆盖的话，
 # 台账里"主门 0 处"就说不清是哪一档量出来的了。
 OUT="$BOX/dump${SWEEP_WINDOW_WIDTH:+-$SWEEP_WINDOW_WIDTH}"
@@ -70,7 +80,7 @@ if [ $# -gt 0 ]; then SECTIONS=("$@"); else
   SECTIONS=("总览" "代码规模" "复杂度风险" "Git 洞察" "贡献者" "性能监控" "错误日志" "依赖分析" "健康评分")
 fi
 rm -rf "$SANDBOX" "$OUT"; mkdir -p "$SANDBOX/reports" "$OUT" || exit 2
-python3 - "$SANDBOX" "$UUID" "$ROOT" "$LONG_NAME" <<'PY' || exit 2
+python3 - "$SANDBOX" "$UUID" "$TARGET" "$LONG_NAME" <<'PY' || exit 2
 import json, sys, datetime
 support, uuid, path, name = sys.argv[1:5]
 now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -85,7 +95,7 @@ LANG_ARGS=(); [ "${CAPTURE_LANG:-}" = "en" ] && LANG_ARGS=(-AppleLanguages "(en)
 # 这一类缺陷**只在窄态现形**（乱的清单 §6 第 0 条就是这么漏掉的）。
 # 宽度打进抬头，一批的口径因此是写在产物里的，不靠人记得"那次是窄态跑的"。
 WIDTH_ARGS=(); [ -n "${SWEEP_WINDOW_WIDTH:-}" ] && WIDTH_ARGS=(TCODER_CAPTURE_WINDOW_WIDTH="$SWEEP_WINDOW_WIDTH")
-echo "== 被拍产物 $BIN；沙箱 $SANDBOX；语言态 ${CAPTURE_LANG:-zh}；窗口宽 ${SWEEP_WINDOW_WIDTH:-1280（产品默认）}pt；正文字号 ${FONT}pt（猜的，见头注）"
+echo "== 被拍产物 $BIN；沙箱 $SANDBOX；被扫对象 $TARGET；语言态 ${CAPTURE_LANG:-zh}；窗口宽 ${SWEEP_WINDOW_WIDTH:-1280（产品默认）}pt；正文字号 ${FONT}pt（猜的，见头注）"
 
 pids=(); FAILED=0
 cleanup() {  # 只对自己起的、二进制路径核对过的那几个 pid 发 TERM（规约：绝不按 bundle id 广播）
@@ -103,7 +113,10 @@ for page in "${SECTIONS[@]}"; do
     env ${WIDTH_ARGS[@]+"${WIDTH_ARGS[@]}"} "$BIN" -ApplePersistenceIgnoreState YES -selectedDetailSection "$page" "${LANG_ARGS[@]+"${LANG_ARGS[@]}"}" \
         > "$OUT/$page.instance.log" 2>&1 &
     pid=$!; pids+=("$pid")
-    sleep 20
+    # 以前这里是写死的 `sleep 20`：本仓约 10 秒扫完所以刚好够用，
+    # **换一个更大的仓库就会在界面还空着时去读树**——那会儿"主门 0 处"读的是"还没画出来"。
+    # 现在与 tooltip 读数器共用同一条判据（文件数与体积连续两轮不变）。
+    wait_for_reports "$pid" || FAILED=1
     "$FRAMES" "$pid" "$FONT" > "$OUT/$page.txt" 2>&1
     rc=$?
     echo "   $page：退出码 $rc  $(grep -o 'SUMMARY .*' "$OUT/$page.txt" | head -1)"

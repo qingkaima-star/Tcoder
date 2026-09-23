@@ -164,7 +164,7 @@
 "第一次 %1$@ · 最近 %2$@" = "First seen %1$@ · latest %2$@";
 "来源文件 %@" = "Source file %@";
 "缺失维度 %1$@ 项" = "%1$@ missing dimensions";
-"按 %1$@ 分桶 · 共 %2$@ 桶%3$@" = "Bucketed by %1$@ · %2$@ buckets%3$@";
+"按%1$@分桶 · 共 %2$@ 桶%3$@" = "Bucketed by %1$@ · %2$@ buckets%3$@";
 "%@ 个空桶" = "%@ empty buckets";
 
 /* ===== P5-c 第三批：性能/Git/日志侧的整句键 ===== */
@@ -1033,3 +1033,13 @@
 "FIXME %1$@ 处通常表示已知缺陷，建议优先在对应文件里核对。" = "The %1$@ FIXME markers usually flag known defects — start with the files that hold them.";
 "共 %1$@ 个，已全部展示。" = "All %1$@ are shown.";
 "行数是单文件总行数（含空行与注释）" = "Line counts are per-file totals, blank lines and comments included.";
+"这一格是代码行，不含空行与注释；总行数（含两者）在「代码规模」页的头条。" = "This figure counts code lines only, excluding blank lines and comments; the total line count (both included) is the headline on Code Size.";
+"共 %1$@ 项，已全部展示。" = "All %1$@ entries are shown.";
+"当前展示 %1$@ / %2$@ 项。" = "Showing %1$@ of %2$@ entries.";
+"当前展示 %1$@ / %2$@ 项 · 按名称排序。" = "Showing %1$@ of %2$@ entries, sorted by name.";
+"占依赖总数 %1$@" = "%1$@ of all dependencies";
+"已比对版本数据，未发现落后项" = "Version data compared — nothing outdated";
+"%1$@（只说明可复现，未计入依赖数）" = "%1$@ (reproducibility only; not counted as a dependency)";
+"共 %1$@ 条 · 影响 %2$@ 个依赖" = "%1$@ advisories · affecting %2$@ dependencies";
+"快照截至 %1$@（%2$@）" = "snapshot as of %1$@ (%2$@)";
+"版本声明形态：%1$@" = "declaration shapes: %1$@";

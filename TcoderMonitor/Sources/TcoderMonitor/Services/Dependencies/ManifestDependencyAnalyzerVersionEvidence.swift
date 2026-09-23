@@ -125,7 +125,8 @@ extension ManifestDependencyAnalyzer {
         // RD-13b：三态分开说，且"由父级管理"绝不计入"没写版本"。
         let declaration = DependencyEvidence.declarationPhrases(DependencyEvidence.ledger(for: report))
         if !declaration.isEmpty {
-            parts.append("版本声明形态：" + declaration.joined(separator: localizedCopy("、")))
+            parts.append(localizedFormat("版本声明形态：%1$@",
+                                          declaration.joined(separator: localizedCopy("、"))))
         }
         if !resolvedArtifacts.isEmpty {
             parts.append(localizedFormat("读到已解析产物 %1$@ 份（%2$@），按其解析出实际版本",

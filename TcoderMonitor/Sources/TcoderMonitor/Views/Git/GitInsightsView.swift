@@ -164,7 +164,7 @@ struct GitCommitTrendSection: View {
         if let granularity = git.commitsPerPeriod.first?.granularity {
             GlassSection(
                 "提交趋势",
-                subtitle: localizedFormat("按 %1$@ 分桶 · 共 %2$@ 桶%3$@",
+                subtitle: localizedFormat("按%1$@分桶 · 共 %2$@ 桶%3$@",
                                            gitBucketLabel(granularity),
                                            NumberFormat.grouped(git.commitsPerPeriod.count),
                                            git.commitScope.windowSuffix),

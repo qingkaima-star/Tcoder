@@ -38,7 +38,11 @@ enum DependencySnapshot {
     /// 措辞里刻意不出现「失败」二字：`VulnerabilityEvidence.classify` 拿
     /// `networkLookupNote.contains("失败")` 当降级判据，这句话会被拼进那个 note。
     static var asOfText: String {
-        "快照截至 \(snapshotDayText)（\(DateFormat.sinceDescription(snapshotDate))）"
+        // **整句键**：这句会被插进一条已经翻译的长句里，写成插值字面串就等于
+        // 英文态在那句英文中间掉进一段中文（2026-09-23 拿 Homebrew 复验实拍抓到：
+        // "…built-in snapshot (npm / Maven / Python), 快照截至 2026-09-19（4 days ago）; …"）。
+        localizedFormat("快照截至 %1$@（%2$@）",
+                        snapshotDayText, DateFormat.sinceDescription(snapshotDate))
     }
 
     /// 全仓共用的日期格式化器只有 `DateFormat.full`（`yyyy-MM-dd HH:mm`），
