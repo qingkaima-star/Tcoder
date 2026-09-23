@@ -116,7 +116,7 @@ switch_page_list() {  # → 每行一个页名（**必须按行遍历**）
   if [ -n "$bad" ]; then
     echo "!! PAGES 里有 App 不认的页名：$bad" >&2
     echo "   不存在的页会被 SwiftUI 静默回落到默认页 ⇒ 那批读数其实只测了默认页，没有资格答九页里的任何一页。" >&2
-    echo "   `PAGES` 按**换行**分隔（页名可以含空格），名册现量：$(printf '%s' "$known" | tr '\n' ' ')" >&2
+    echo "   PAGES 按**换行**分隔（页名可以含空格），名册现量：$(printf '%s' "$known" | tr '\n' ' ')" >&2
     return 1
   fi
   printf '%s\n' "$PAGES"

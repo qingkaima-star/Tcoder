@@ -316,7 +316,7 @@ done
 # 而窗口内的自采复核（包 18）会在事后把整批打回。2026-09-23 20:49 实测：
 # 这里印「3/3 趟可用」，同一批在 report/一致性那里是「0 趟可用」——
 # 同一个词两个意思，读的人拿到的是相反结论。资格只由判的地方出声。
-echo "==> 采集跑完：$((SAMPLES - fails))/$SAMPLES 趟没被开录闸门拦下（档=$MODE）；**能不能进表由 `report` 与同档一致性判**；产物 $SCRATCH/tcoder-perf-$TAG-$MODE-run*/"
+echo "==> 采集跑完：$((SAMPLES - fails))/$SAMPLES 趟没被开录闸门拦下（档=$MODE）；**能不能进表由 report 档与同档一致性判**；产物 $SCRATCH/tcoder-perf-$TAG-$MODE-run*/"
 echo "    重打读数：./scripts/perf_harness.sh report $SCRATCH/tcoder-perf-$TAG-$MODE-run1"
 echo "    （表头会写明测量期间；interact 档才有资格答 T1，idle 档只答心跳期）"
 [ "$fails" -lt "$SAMPLES" ] || exit 1
