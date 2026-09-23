@@ -167,6 +167,22 @@ if os.path.isfile(path):
 json.dump(data, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 PY
 }
+filter_out_pids() {  # filter_out_pids <候选 pid 串> <要排除的 pid 串> → 剩下的（空格分隔）
+  # 为什么要有它：**录制窗口里必然有我们自己 spawn 的 xctrace**，而 xctrace 在重活名单里
+  # （它暂停/恢复被测进程，确实是最重的争用）。于是"窗口内重活个数"这一维把每一批都判污染
+  # ——2026-09-23 22:03 三趟的 heavy 峰值 3/2/3 里就有自己那一个，机器空不空都过不了。
+  # 排除只按 **pid** 排（按名字排会把别人那一趟 xctrace 一起放掉，那是关掉一条真判据）。
+  local keep="" cand drop x
+  for cand in ${1:-}; do
+    drop=0
+    for x in ${2:-}; do
+      [ "$cand" = "$x" ] && { drop=1; break; }
+    done
+    [ "$drop" = "0" ] && keep="$keep $cand"
+  done
+  printf '%s\n' "${keep# }"
+}
+
 load_sample_once() {  # load_sample_once <outdir> [自己 spawn 的采集 pid] —— 追加一行「时刻 / load1 / 重活个数」
   # 为什么挂在 `record_bounded` 的轮询里而不是自己起后台子壳：那个 poll 循环本来就在窗口内每 5 s 醒一次，
   # 借它顺手采样**不新增进程**，也就不会有"录制链半路 die 掉、留下一个还在写 tsv 的孤儿"这种形状
