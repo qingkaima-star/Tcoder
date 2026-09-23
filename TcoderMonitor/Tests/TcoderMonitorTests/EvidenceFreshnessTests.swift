@@ -221,9 +221,19 @@ final class EvidenceFreshnessTests: XCTestCase {
         for note in verdict.acknowledged {
             print("【实拍欠拍·已挂账】" + note)      // 放行，但必须大声：不许读成"查过没事"
         }
+        // 四类必须**加起来等于过期行数**（每条过期页恰好落进一个桶）。01:23 实测反证：
+        // 我把 UTC 那一格写成了本地时间 ⇒ 四条全落进 `mismatched`，
+        // 而汇总只印两个桶，现场是「过期 4 行（已挂账 0 行、没挂账 0 行）」——
+        // 一个 0+0=4 的谎话，读的人只会理解成"都挂上了"。断言补上之后这种事当场红。
+        let buckets = verdict.acknowledged.count + verdict.unlisted.count
+            + verdict.mismatched.count + verdict.overdue.count
+        XCTAssertEqual(buckets, stalePages.count,
+                       "过期页有 \(stalePages.count) 行，四个桶只装到 \(buckets) 行 ⇒ "
+                     + "`backlogVerdict` 漏了一类归属，汇总行会少报欠拍")
         print("【实拍新鲜度】表里 \(found.count) 行、覆盖 \(Set(found.flatMap(\.pages)).count) 页 → "
             + "过期 \(stalePages.count) 行（已挂账 \(verdict.acknowledged.count) 行、"
-            + "没挂账 \(verdict.unlisted.count) 行）")
+            + "没挂账 \(verdict.unlisted.count) 行、挂错 \(verdict.mismatched.count) 行、"
+            + "超宽限 \(verdict.overdue.count) 行）")
     }
 
     /// 净差异口径的**真 git 夹具**，两个方向都要钉住（需求方授权的窄修，见 `netChanged` 上方注释）：
