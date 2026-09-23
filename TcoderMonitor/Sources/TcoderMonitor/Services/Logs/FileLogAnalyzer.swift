@@ -176,14 +176,14 @@ final class FileLogAnalyzer: LogAnalysisProviding {
 extension LogSummary {
     /// 崩溃那一格的 caption：计数 + 一句边界，替代原来只写「其中 FATAL n 条」的读数。
     var crashTileCaption: String {
-        "窗口内确认崩溃；其中 FATAL \(NumberFormat.grouped(fatalCount)) 条"
+        localizedCount("窗口内确认崩溃；其中 FATAL %lld 条", fatalCount)
     }
 
     /// 卡头 ⓘ 的完整句：为什么这一格的数比"崩溃通道文件数"小。
     func crashEvidenceFootnote(windowDays: Int, now: Date = Date()) -> String {
         let channelFiles = scannedFiles.filter { $0.role == .crash }.count
         let failed = (readFailedFiles ?? []).filter { $0.role == .crash }
-        var parts: [String] = ["窗口内确认崩溃 \(crashCount) 次，只统计有真实事件证据的报告"]
+        var parts: [String] = [localizedCount("窗口内确认崩溃 %lld 次，只统计有真实事件证据的报告", crashCount)]
 
         let historical = historicalCrashCount(windowDays: windowDays, now: now)
         if historical > 0 {
@@ -201,7 +201,7 @@ extension LogSummary {
                 + "（内容损坏 / 只有文件名像 / 无事件时间 / 构建版本不是当前 / 同一事件的另一份），"
                 + "逐条原因待 LogSummary 落盘崩溃证据字段后展示")
         }
-        return parts.joined(separator: " · ") + "。"
+        return endingSentence(parts.joined(separator: " · "))
     }
 
     /// 窗口外历史崩溃次数：**从已落盘的趋势桶推出来的**（桶按事件时间分日），

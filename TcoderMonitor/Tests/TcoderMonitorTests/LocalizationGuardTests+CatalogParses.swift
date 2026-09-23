@@ -85,4 +85,71 @@ extension LocalizationGuardTests {
         XCTAssertEqual(localizedCount("%lld 行", 46330), "46,330 行", "端到端：目录 + stringsdict 那条路也要补")
         XCTAssertEqual(localizedCount("%lld 行", 5), "5 行", "小数量词一字不变")
     }
+
+    // MARK: - 批次 P69：屏上正文那三条"未登记话术"的复数键（B 类收口）
+
+    /// 这四条整句复数键必须**在真英文 bundle 上**选出 one / other 两支。
+    ///
+    /// 为什么不能只靠"键登记进目录了"那条守卫：`stringsdict` 的键不在 `.strings` 里，
+    /// 按正则数键的尺子看不见它，而 `localizedCount` 查不中时的表现是
+    /// **退回中文原句**——英文态照样铺中文，且一条守卫都不红。
+    /// 所以这里走产品同一条路（`localizedString(forKey:)` + `String(format:)`），
+    /// 并把 1 这一档单独钉住：十八趟读数里的样本全是复数，
+    /// 没有 1 的读数就只能算"结构对了"，不能算"翻对了"。
+    func test_p69CountSentencesResolveBothPluralFormsInEnglish() throws {
+        let en = LocalizationGuardTests.packageRoot.appendingPathComponent("Resources/en.lproj")
+        guard let enBundle = Bundle(url: en) else {
+            return XCTFail("打不开 \(en.path) —— 英文资源不在原位，本条不能算通过")
+        }
+        XCTAssertFalse(enBundle.localizedString(forKey: "%lld 行", value: "\u{FFFF}", table: nil)
+            .contains("\u{FFFF}"), "连既有的「%lld 行」都查不到 ⇒ 这个 bundle 不是真的")
+        let cases: [(key: String, many: Int, one: String, other: String)] = [
+            ("窗口内确认崩溃；其中 FATAL %lld 条", 4,
+             "Crash confirmed inside the window; 1 FATAL entry among them",
+             "Crash confirmed inside the window; 4 FATAL entries among them"),
+            ("窗口内确认崩溃 %lld 次，只统计有真实事件证据的报告", 4,
+             "Crash confirmed 1 time inside the window; only reports with real event evidence are counted",
+             "Crash confirmed 4 times inside the window; only reports with real event evidence are counted"),
+            ("共 %lld 类签名", 7, "1 signature class in total", "7 signature classes in total"),
+            ("共 %lld 类签名 · 按出现次数排序", 7,
+             "1 signature class in total, sorted by occurrences",
+             "7 signature classes in total, sorted by occurrences"),
+        ]
+        for item in cases {
+            let englishValue = enBundle.localizedString(forKey: item.key, value: "\u{FFFF}", table: nil)
+            XCTAssertFalse(englishValue.contains("\u{FFFF}"), "\(item.key) 在 stringsdict 里查不到")
+            XCTAssertEqual(String(format: englishValue, 1), item.one, "\(item.key) 的单数形态")
+            XCTAssertEqual(String(format: englishValue, item.many), item.other, "\(item.key) 的复数形态")
+        }
+    }
+
+    /// 正向：这四条键确实被 `localizedCount` 用着。反向（元测试）：一条不存在的键必须报出来。
+    /// 没有反向那一半，"逐条都在源码里"这条绿只说明扫描面是空的。
+    func test_p69CountKeysAreLookedUpAtTheirProducers() throws {
+        let files = try SurfaceScanKit.sourceFiles(under: "")
+        let bodies = files.map(\.content).reduce("") { $0 + $1 }
+        let keys = ["窗口内确认崩溃；其中 FATAL %lld 条",
+                    "窗口内确认崩溃 %lld 次，只统计有真实事件证据的报告",
+                    "共 %lld 类签名",
+                    "共 %lld 类签名 · 按出现次数排序"]
+        XCTAssertEqual(Self.unusedPluralKeys(keys, in: bodies), [],
+                       "整句复数键登记了却没人查 ⇒ 屏上仍是拼出来的中文")
+        XCTAssertFalse(Self.unusedPluralKeys(["P69 夹具：这条键绝不存在 %lld 条"], in: bodies).isEmpty,
+                       "假键没被抓到 ⇒ 上面那条绿不可信")
+    }
+
+    static func unusedPluralKeys(_ keys: [String], in bodies: String) -> [String] {
+        keys.filter { !bodies.contains($0) }
+    }
+
+    /// 句末标点随语言：中文 `。`、英文 `.`。
+    /// 探针在测试宿主里恒判中文（`Bundle.main` 没有 `en.lproj`），
+    /// 所以英文那一支用入参驱动 —— 两支都要咬得住。
+    func test_endingSentencePicksTheTerminatorOfTheActiveLanguage() {
+        XCTAssertEqual(endingSentence("窗口内确认崩溃", chinese: true), "窗口内确认崩溃。")
+        XCTAssertEqual(endingSentence("Crash confirmed", chinese: false), "Crash confirmed.",
+                       "英文句子尾巴挂一个 U+3002 ⇒ 十八趟读数按码点仍判它残留中文")
+        XCTAssertTrue(endingSentence("甲").hasSuffix("。"),
+                      "测试宿主里探针应当判中文；这里红了说明探针前提变了，本文件多条判据要重读")
+    }
 }

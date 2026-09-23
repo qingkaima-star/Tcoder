@@ -27,14 +27,14 @@ struct LogsErrorClustersCard: View {
     /// 屏上只留**数量**（它是这一节的信息量所在），排序口径进 ⓘ。
     private var subtitle: String? {
         guard let logs, logs.hasData, let clusters = clusters else { return nil }
-        return "共 \(NumberFormat.grouped(clusters.count)) 类签名"
+        return localizedCount("共 %lld 类签名", clusters.count)
     }
 
     /// ⓘ 里那句是完整口径：数量 + 排序依据。数量在屏上重复一次是故意的——
     /// 读屏与 hover 都要能独立成句（半句键在英文态语序必坏）。
     private var sortHelp: AnyView? {
-        guard let subtitle, let clusters else { return nil }
-        return AnyView(CopyHelpBadge("\(subtitle) · 按出现次数排序"))
+        guard logs?.hasData == true, let clusters else { return nil }
+        return AnyView(CopyHelpBadge(localizedCount("共 %lld 类签名 · 按出现次数排序", clusters.count)))
     }
 
     @ViewBuilder
