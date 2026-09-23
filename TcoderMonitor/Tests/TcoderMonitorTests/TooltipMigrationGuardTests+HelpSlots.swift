@@ -58,6 +58,10 @@ extension TooltipMigrationGuardTests {
     /// 合并时 main 那侧（P70）已经独立得出同一个数、改用 `stripLookupWrappers` 归一 prefix
     /// （能剥嵌套的 `Text(localizedFormat(`，我那版只能剥一层）⇒ **我的正则撤了**，
     /// 这条元测试留着当**第二双眼睛**：它不依赖任何实现细节，只钉"换壳不换读数"。
+    /// ⚠ 后来又绕了一下：main 的 `75ae29c` 反过来删了他们那份、留了我的正则
+    /// ⇒ 两边各撤一次之后树里只剩调用没有定义（合不上也编不过）。这一笔按**能力**定：
+    ///   留能吃嵌套的 `stripLookupWrappers`（在 `+CaliberMerges.swift`），我那四条正则版撤掉；
+    ///   两条元测试都不依赖实现细节 ⇒ 谁在都能当场抓住倒退。
     /// ⇒ 这条元测试钉的是**形状不变式**：同一句话，换壳不换读数。
     func test_meta_keyedLookupInsideSlotKeepsTheSameReading() {
         let sentence = "先去掉嵌套：校验与异常分支改成提前返回，再把成组的分支换成策略表"

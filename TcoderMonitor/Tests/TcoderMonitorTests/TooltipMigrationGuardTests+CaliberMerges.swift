@@ -19,6 +19,12 @@ import XCTest
 //      从此地板降一次，必须有这里逐句点名过的一条整句键在树里活着来抵；
 //      只降地板、不登记存活句，本文件当场红。
 
+// 从主文件搬来的四行（主文件正好卡在 Tests 侧 400 行线，内容一字未删）：
+    // 101 → **100（P69 合流，2026-09-24）**：三条流把 26 段"插值 + `+` 拼的半句"并成 10 条整句键，
+    // **文本一字未少、可数的单元少 8 个**（守卫 B 数的是字面量条数，是个单元代理）。
+    // 这不是放宽：那 10 句现在由 `+CaliberMerges.swift` 逐句钉着必须还在树里，
+    // 地板每降一次都要有存活句抵一次。删除仍只能走 `acceptedCaliberDeletions` 逐条留名。
+
 extension TooltipMigrationGuardTests {
 
     /// P69a/b/c 并成整句键的那 10 句口径原文（**照抄源码里的键，含 `%1$@` / `%lld` 占位符**）。
@@ -61,7 +67,7 @@ extension TooltipMigrationGuardTests {
         return (keys ?? caliberKeysThatMustSurvive).filter { !haystack.contains($0) }
     }
 
-    /// **修的是分类器的盲区，不是地板的数值**（P70，第二次被同一处咬到之后做的）。
+    /// **修的是分类器的盲区，不是地板的数值**（P70；`75ae29c` 一度把它删掉，这一笔接回来）。
     ///
     /// `literalSlots(in:)` 靠"引号前面那截"判断一个字面量是常驻还是已藏进 ⓘ。
     /// 键化之后那句常驻长句前面会多一层查表调用 ——
@@ -70,6 +76,8 @@ extension TooltipMigrationGuardTests {
     /// 后果是守恒线每键化一句就掉一格：P69 合流掉 8 格、P70 又掉 1 格，
     /// 而那两句文本都**一字未少**地常驻上屏。
     /// 一直降地板等于给"看不见"记账；剥掉查表外壳再判，才是给"删掉了"记账。
+    /// ⚠ 为什么用它而不是我那版：我 `7f6b5c7` 是往四条正则里插 `keyedLookup`，**只能剥一层**；
+    /// 这里的循环能吃嵌套（`Text(localizedCount("…"))`），且判据本体一字不动 ⇒ 按能力合。
     static func stripLookupWrappers(_ prefix: String) -> String {
         var out = prefix
         let wrapper = try! NSRegularExpression(
@@ -92,4 +100,5 @@ extension TooltipMigrationGuardTests {
         let bare = Self.literalSlots(in: #"        let x = "点击重新分析开始扫描该目录。""#)
         XCTAssertEqual(bare.map(\.slot), [.skipped], "没有渲染线索的也被算进去了 ⇒ 修过头")
     }
+
 }
