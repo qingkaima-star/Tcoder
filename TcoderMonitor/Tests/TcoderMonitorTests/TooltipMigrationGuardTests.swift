@@ -147,14 +147,19 @@ final class TooltipMigrationGuardTests: XCTestCase {
     /// 88 → 76（S2 代码两页）→ 74（S3 Git 与贡献者）→ 72（尺子改逐字面量判槽位 + S6 键登记）
     /// → 69（S1 总览与外壳）→ **62（S5 性能与日志 19 处、S4 依赖 3 处、S7 总览三处收进 ⓘ）**。
     /// 同批 tooltip 承载 13 → 49、总量 101 → 111：**B 一句没删**，降下来的 26 条全部搬进了 ⓘ。
-    private static let visibleCaliberCeiling = 62
+    /// → **54（P69 合流：26 段半句并成 10 条整句键，可见单元再合掉 8 个，文本零丢失）**。
+    private static let visibleCaliberCeiling = 54
 
     /// 总量下限 = 播种时的可见 + tooltip 之和 **减去已核准的删除数**。
     ///
     /// 为什么必须有豁免口：盘点表里 16 处判的是「删」（同屏两遍、卡名换个说法再讲一遍），
     /// 那些不是"藏起来"，是本来就不该占两处。一条只许往上的守恒线会把合理的删句一起拦下，
     /// 而被人嫌烦的守卫活不过下一轮 —— 所以给一个**逐条留名**的口，而不是放宽判据。
-    private static let totalCaliberFloor = 101 - acceptedCaliberDeletions.count
+    /// 101 → **100（P69 合流，2026-09-24）**：三条流把 26 段"插值 + `+` 拼的半句"并成 10 条整句键，
+    /// **文本一字未少、可数的单元少 8 个**（守卫 B 数的是字面量条数，是个单元代理）。
+    /// 这不是放宽：那 10 句现在由 `+CaliberMerges.swift` 逐句钉着必须还在树里，
+    /// 地板每降一次都要有存活句抵一次。删除仍只能走 `acceptedCaliberDeletions` 逐条留名。
+    private static let totalCaliberFloor = 100 - acceptedCaliberDeletions.count
 
     /// 已核准「删掉而不是藏进 ⓘ」的口径句：片段 → 为什么该删。
     /// **只由总工写**：切片负责人在自己汇报里列《建议删除》清单，由总工在合流时逐条登记。
@@ -369,7 +374,7 @@ final class TooltipMigrationGuardTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(why.trimmingCharacters(in: .whitespaces).count, 8,
                                         "「\(fragment)」的删除理由太短，无法被反驳：" + why)
         }
-        XCTAssertEqual(Self.totalCaliberFloor, 101 - Self.acceptedCaliberDeletions.count,
+        XCTAssertEqual(Self.totalCaliberFloor, 100 - Self.acceptedCaliberDeletions.count,
                        "下界只能被登记数逐条抵掉，不许另写一个更小的数")
     }
 
