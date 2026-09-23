@@ -74,7 +74,16 @@ for pass in light-top light-tail dark-top dark-tail; do
   sleep 1
   got=$(appearance)
   [ "$got" = "$want_dark" ] || fail "外观没翻过去（要 $want_dark，读到 $got）—— 这一趟不拍"
+  # `CAPTURE_TERM` 默认开：**这条驱动自己起的实例，自己收尾**。
+  # AGENTS §2.1（需求方 2026-09-23 定的通则）：谁起的谁退，起跑前后各数一次实例数。
+  # 直接起因（2026-09-23 12:04 实测）：本驱动四趟跑完，`pgrep -x TcoderMonitor` 数到 **4 个孤儿**
+  # （ppid=1，启动时刻 11:58:53 / 11:59:10 / 11:59:28 / 11:59:45，正好一趟一个），
+  # 而 perf 那条流的 `perf_wait_window.sh` 因此已经白等了 1 小时 14 分钟 ——
+  # 全机只有一个取证窗口，留着孤儿不是"等人工 Cmd+Q"，是**占着别人的窗口**。
+  # 底层脚本仍保留 `CAPTURE_TERM=0` 那条保守路径（只通报 pid），但**只发给自己的 pid、
+  # 且先核对二进制路径**，绝不按 bundle id 广播 quit（那会全机生效，误杀别家正在拍的实例）。
   CAPTURE_WINDOW_HEIGHT="$VIEWPORT" CAPTURE_WINDOW_WIDTH="$WIDTH" CAPTURE_SCROLL="$scroll" \
+    CAPTURE_TERM="${CAPTURE_TERM:-1}" \
     ./scripts/capture_pages_isolated.sh "$out" > "$OUT_ROOT/$pass.capture.log" 2>&1
   inner=$?
   mkdir -p "$out"
