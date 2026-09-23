@@ -30,7 +30,17 @@ final class RealRepositoryEvidenceTests: XCTestCase {
     private static let truthRubyLinesExclVendor = 239_668
     private static let truthSourceFilesExclVendor = 1_798
     private static let truthTodoExclVendor = 87       // grep -o，出现次数
-    private static let truthFixmeExclVendor = 16
+    /// FIXME 的基线口径 = **注释位上的标记**，不是"字符串出现次数"。
+    /// 2026-09-24 00:15 独立复测（大仓自 2026-07-04 起没动过，所以差不是漂移）：
+    ///   `grep -roh FIXME --exclude-dir=vendor` = **16**，但其中三处不是标记 ——
+    ///   `dev-cmd/bump-formula-pr.rb:378` 的 `%w[TODO FIXME]`（字面量清单）、
+    ///   同文件 `:380` 的 `"- [ ] TODO and FIXME comments have been checked."`（UI 文案）、
+    ///   `yard/docstring_parser.rb:27` 的 `/^\s*(TODO|FIXME):\s*/i`（正则）。
+    ///   按注释位取：`grep -rnE '#[[:space:]]*FIXME' --exclude-dir=vendor` = **13**，与 App 一致。
+    /// ⇒ 原来钉的 16 是**基线口径错**（拿字符串出现次数当标记数），App 那一侧是对的。
+    ///   同一条 dogfooding 教训的反面：本仓自己那次是"界面文案喂进计数器"导致**多算**，
+    ///   这次是大仓同一形状导致基线**多算**——两边都要求"标记"按注释位取，不按子串取。
+    private static let truthFixmeExclVendor = 13
 
     private func requireRealRepo() throws -> URL {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["TCODER_REAL_REPO"] == "1",
@@ -128,7 +138,8 @@ final class RealRepositoryEvidenceTests: XCTestCase {
         XCTAssertGreaterThan(todoRatio, 0.75, "TODO 计数远低于 grep，疑似漏统计")
         XCTAssertLessThan(todoRatio, 1.6, "TODO 计数远高于 grep，疑似重复统计或算进了第三方代码")
         XCTAssertEqual(code.fixmeCount, Self.truthFixmeExclVendor,
-                       "FIXME 计数与 grep 精确一致，是本轮唯一可钉死 exact 的标记指标")
+                       "FIXME 计数与**按注释位取的** grep 精确一致（不是 `grep -o` 的字符串出现次数，"
+                     + "见 `truthFixmeExclVendor` 上面那段），这是唯一可钉死 exact 的标记指标")
     }
 
     // MARK: - 缺数据必须诚实为空，不能伪装成好数据
