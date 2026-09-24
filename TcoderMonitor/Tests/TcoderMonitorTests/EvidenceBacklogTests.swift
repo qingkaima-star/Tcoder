@@ -225,6 +225,16 @@ extension EvidenceFreshnessTests {
         let bucketsLine = "（已挂账 \(verdict.acknowledged.count) 行、没挂账 \(verdict.unlisted.count) 行、"
             + "挂错 \(verdict.mismatched.count) 行、超宽限 \(verdict.overdue.count) 行）"
         print(tally + bucketsLine)
+        recordFreshnessLedger(tally: tally + bucketsLine, acknowledged: verdict.acknowledged)
+    }
+
+    /// 第二条出口（RD-64）：【实拍新鲜度】汇总与【实拍欠拍·已挂账】逐条这两类 `print` 在全量跑里
+    /// 命中 0（机制未定位）。除 stdout 外，把同一批读数落一份带被测头的账，写完读回断言相等——
+    /// 让「这条判据这次真跑过」这件事不再依赖 stdout。**四桶判据一字未动**，这里只是多一个出口。
+    /// 拆成独立小方法是为了不把 `judgeBacklog` 顶过 `X3TestSizeAuditTests` 的 50 行函数线。
+    private static func recordFreshnessLedger(tally: String, acknowledged: [String]) {
+        GuardLedger.record(guard: "EvidenceFreshnessTests",
+                           readings: [tally] + acknowledged.map { "【实拍欠拍·已挂账】" + $0 })
     }
 
     // MARK: - 元测试（两个方向都要红过一次，本仓规矩：扫描/解析型判据不配元测试迟早永真绿）

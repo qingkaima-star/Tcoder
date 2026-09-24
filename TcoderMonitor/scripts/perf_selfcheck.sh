@@ -117,14 +117,14 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_disk_precondition "$out"    # 24) 前置必须**能失败**：判定要在、且全仓只有一份
   item selfcheck_display_regime "$out"       # 25) 120Hz 预算只对 120Hz 档成立：降频档里不许印"危急"
   item selfcheck_app_update_split "$out"         # 26) 一个 max 不许同时盖住"整体很快"和"有个孤例很慢"
-  item selfcheck_phase_blame "$out"              # 27) 迟到帧要说清该怪主线程还是合成侧，三种形状各判一次
+  item selfcheck_phase_blame "$out"              # 27) 迟到帧该怪谁：八种形状各判一次（含"有 hangs 不许归给合成侧"与它的反向）
   item selfcheck_input_rate_qualification "$out"  # 28) meta 里的输入节奏必须有读者
   item selfcheck_launcher_hygiene "$out"       # 29) 起实例的脚本必须有 trap、不许按 bundle id 广播
   item selfcheck_p95_crosscheck_shapes "$out"  # 33) p95 那半句由两把尺子合判，七种形状各判一次
   item selfcheck_update_table_caveat "$out"    # 34) update 表窄分布形状不许被当成主线程忙时
   item selfcheck_frame_table_budgets "$out"  # 42) 逐帧三张表各配自己的预算（寿命不判单帧，防「100% 超预算」）
   item selfcheck_pulse_window_scope "$out"   # 41) FramePulse 的总数是生命期累计：不许冒充本窗口（§M 因此降级未定）
-  item selfcheck_trio_agreement "$out"       # 39) ≥3 趟那半句「且取值一致」：五种形状各判一次，缺件/不足都不许报 3/3
+  item selfcheck_trio_agreement "$out"       # 39) ≥3 趟那半句「且取值一致」：十种形状各判一次（idle 档极值不当判据的正反一对在内）
   item selfcheck_cadence_two_budgets "$out"    # 35) p95 判据必须两把预算并排印、且真会分歧
   item selfcheck_md_tables_unbroken "$out"     # 30) markdown 表格不许有夹在行中间的裸续行
   item selfcheck_record_bounded "$out"          # 43) 录制要有墙钟兜底：被测进程一消失就当场判废，别永等
