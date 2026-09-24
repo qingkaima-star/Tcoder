@@ -192,8 +192,12 @@ enum CrashEvidenceReadout {
     /// 这一句关于的是**现在还没落盘的那三项输入**（构建版本分桶与归属缺项），
     /// 不是 RD-60 ③ 立掉的那句假话 —— 八种原因现在已经在屏上了，缺的是"哪些没测准"那一半。
     /// 不许把它改成静默省略：省略会被读成"没有要补的账"。
-    static let persistedFieldsGapsNotice =
-        "「哪些没测准」那一句的判据输入未落盘，这里只呈现逐条原因"
+    static var persistedFieldsGapsNotice: String {
+        // 无实参的整句 ⇒ 走 `localizedCopy`（纯查表、不过 `String(format:)`，句里的「」是普通字符）。
+        // 从 `static let` 改成计算属性：查表结果取决于运行语言，`let` 会把**首次访问那一刻**的
+        // 取值冻进进程，之后这一句再也不过表（守卫查的是源码里的字面量，看不见这种冻结）。
+        localizedCopy("「哪些没测准」那一句的判据输入未落盘，这里只呈现逐条原因")
+    }
 
     /// 卡头 ⓘ 里那一段完整脚注。**全仓唯一的崩溃证据上屏话**。
     static func footnote(_ reading: Reading, readFailureReasons: [String: Int] = [:]) -> String {
@@ -245,7 +249,11 @@ enum CrashEvidenceReadout {
         }
 
         if let gaps = reading.unmeasuredGaps {
-            parts.append("未测准：" + gaps)
+            // 带槽的**整句框架键**（本仓既有形状，如 `已跳过 %1$@ 份读取失败，原因分布：%2$@。`）：
+            // 「未测准：」不单独登记成半句键，它和载荷在同一个键里，英文侧自己决定词序。
+            // 载荷 `unknownStatement` 由 `CrashEvidence.swift` 生产（不在本文件、也不在本单口径内），
+            // 它自己那几句尚未键化 —— 已在交回里点名，不在这里绕。
+            parts.append(localizedFormat("未测准：%1$@", gaps))
         } else if reading.origin == .persistedFields {
             // 只有落盘九格时这一句接不回来（它的三项输入没进契约）。
             // 与其静默省略，不如明说这一格还欠着 —— 静默消失会被读成"没有要补的账"。
@@ -257,9 +265,15 @@ enum CrashEvidenceReadout {
         let reasons = readFailureReasons.sorted { $0.key < $1.key }
             .map { "\($0.key) ×\($0.value)" }
         if reasons.isEmpty == false {
-            parts.append("读取失败的原因分布：" + reasons.joined(separator: "、"))
+            // 同一族：整句框架键 + 清单分隔符随语言。
+            // 原来这里写死顿号 `、`（U+3001，中日韩标点段）——`test_sourcesNeverJoinListsWithTheIdeographicComma`
+            // 第一步那趟就是抓到这**一处**并报红的；换成 `localizedListSeparator()` 后中文态仍是顿号。
+            parts.append(localizedFormat("读取失败的原因分布：%1$@",
+                                         reasons.joined(separator: localizedListSeparator())))
         }
-        return parts.joined(separator: " · ") + "。"
+        // 句号随语言（批次 P70 立的 `endingSentence`）：写死 `。` 的话英文态尾巴挂一个中日韩标点，
+        // 中文态一字不变（`LocalizationGuardTests+CatalogParses` 钉着 `endingSentence("窗口内确认崩溃", chinese: true)`）。
+        return endingSentence(parts.joined(separator: " · "))
     }
 
     /// 把 `LogSummary.readFailedFiles` 里的原因归成「原因 → 几份」。
