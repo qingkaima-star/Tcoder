@@ -195,7 +195,7 @@ final class DependencyAttemptedVsCheckedTests: XCTestCase {
             XCTAssertEqual(DependencyEvidence.vulnerabilityState(of: record), .checked)
             XCTAssertEqual(DependencyRowStatus.of(record), .verifiedSafe)
         }
-        XCTAssertEqual(DependencySafetyVerdict(report), .clean(coveredCount: 2, total: 2))
+        XCTAssertEqual(DependencySafetyVerdict(report), .clean(total: 2))
         XCTAssertTrue(DependencyEvidence.findingsStatement(for: report, ledger: ledger)
                       .contains("未发现已知漏洞"), "四件里只有这一件配说这句")
         print("【R3 反例④】查询成功且零命中：\(ledger.vulnerabilityCheckedCount)/\(ledger.totalCount)"

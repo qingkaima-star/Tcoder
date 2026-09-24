@@ -155,7 +155,11 @@ enum DependencySafetyVerdict: Equatable {
     /// 没联网、也没拿到任何在线公告 —— 零命中只是"未判定"。
     case unchecked(coveredCount: Int, total: Int, uncoveredEcosystems: [String])
     /// **每一条依赖都核对过**且零命中：只有这一态配说"安全"、配发绿（RD-68）。
-    case clean(coveredCount: Int, total: Int)
+    /// ⚠ 故意**只带 `total`、不带 `coveredCount`**（RD-77 的同族收窄）：这一态的定义就是
+    ///   "核成的条数 == 总条数"，再挂一枚 `coveredCount` 是一个**没人读、却能被填成任何数**的 payload
+    ///   —— 一旦有人手填 `.clean(coveredCount: 4, total: 6)`，出口照它会打出「已核对 6 / 6」，
+    ///   于是"档位选对了、数在说谎"这句话就没有任何东西拦得住。类型里放不下，就只能由类型来管。
+    case clean(total: Int)
     /// 核成了几条、还剩几条没核成 —— 与"干净"是两件不同的事（RD-68）。
     /// 绿色、`mayClaimSafe`、「已完成核对」这一句在这一态一律不成立。
     case partiallyCovered(coveredCount: Int, total: Int)
@@ -177,7 +181,7 @@ enum DependencySafetyVerdict: Equatable {
         }
         switch coverage {
         case .full(let total):
-            self = .clean(coveredCount: total, total: total)
+            self = .clean(total: total)
         case .partial(let covered, let total):
             self = .partiallyCovered(coveredCount: covered, total: total)
         case .none(let total):
@@ -258,7 +262,7 @@ enum DependencySafetyVerdict: Equatable {
                 text += localizedFormat("· 未覆盖生态：%@", uncovered.joined(separator: localizedCopy("、")))
             }
             return text
-        case .clean(_, let total):
+        case .clean(let total):
             // 这里只是把 init **已经分好档**的那一档取出来交给装配口，
             // 本文件一次都没有比较条数（RD-68：判据只有一处、话术只有一处）。
             return DependencyVulnerabilityCoverage.full(total: total).statement
