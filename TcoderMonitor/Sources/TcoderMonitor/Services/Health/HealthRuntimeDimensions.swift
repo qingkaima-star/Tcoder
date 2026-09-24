@@ -95,9 +95,16 @@ extension WeightedHealthScorer {
                                 HealthCurves.whole(worst.count), worst.lastSeenDescription)]
     }
 
+    /// 两处一起修：①「Top Errors」是界面已经改口的旧名（《口径与已知限制》§8 用词对照表
+    /// 记的就是这最后一处残留），屏上再也找不到叫这个名字的地方；
+    /// ② 这句手里就拿着那条高频错误的原文、次数与来源文件，却不点名 ⇒ 同一族「建议不可执行」。
     private func stabilityAdvice(_ logs: LogSummary) -> [String] {
         guard let worst = logs.topErrors.first, worst.count >= 10 else { return [] }
-        return [localizedCopy("优先修复 Top Errors 首位，它通常掩盖了下游连锁异常")]
+        let label = worst.displayMessage.isEmpty ? worst.signature : worst.displayMessage
+        return [localizedFormat("先修这条高频错误：「%1$@」（窗口内 %2$@ 次 · 来自 %3$@），它通常掩盖了下游连锁异常",
+                                label,
+                                NumberFormat.grouped(worst.count),
+                                (worst.sourceFile as NSString).lastPathComponent)]
     }
 
     private enum StabilityAdvice {

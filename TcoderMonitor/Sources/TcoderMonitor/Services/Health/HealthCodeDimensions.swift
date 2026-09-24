@@ -62,9 +62,16 @@ extension WeightedHealthScorer {
                                 HealthCurves.whole(complexityWorstCC(code)))]
     }
 
+    /// 建议要**能照着做**：这句话手里就拿着热点榜第一名（名字、文件、行号、CC 全在
+    /// `topComplexFunctions.first`），却只说「最高复杂度函数」——读的人还得自己回表里找一遍。
+    /// 榜上同一行印的就是这些字段，所以这里点名它，句子和表格说的是同一个东西。
     private func complexityAdvice(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
-        guard curve.score <= 60, !code.topComplexFunctions.isEmpty else { return [] }
-        return [localizedCopy("优先拆分最高复杂度函数，用早返回替代嵌套分支")]
+        guard curve.score <= 60, let worst = code.topComplexFunctions.first else { return [] }
+        return [localizedFormat("先拆这一个：「%1$@」（%2$@ 第 %3$@ 行 · 圈复杂度 %4$@），用早返回替代嵌套分支",
+                                worst.name,
+                                (worst.filePath as NSString).lastPathComponent,
+                                String(worst.startLine),
+                                String(worst.cyclomaticComplexity))]
     }
 
     // MARK: - 重复度
