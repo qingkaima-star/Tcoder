@@ -246,7 +246,7 @@ final class CLIHeadlessTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
         // 故意用「别名短写 + 尾随斜杠」这一个输入：两个坑一次测掉。
-        let alias = "/tmp/" + dir.path.dropFirst("/private/".count) + "/"
+        let alias = dir.path.replacingOccurrences(of: "/private/tmp/", with: "/tmp/") + "/"
         XCTAssertEqual(CLIScan.validatedURL(for: alias)?.path, dir.path,
                        "别名短写与尾随斜杠都该归到同一个物理串，且归向真实写法")
     }

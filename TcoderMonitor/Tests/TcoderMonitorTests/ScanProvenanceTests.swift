@@ -136,8 +136,11 @@ final class ScanProvenanceTests: XCTestCase {
         var git = makeGit(headSHA: "outer01")
         git.resolvedRepositoryRoot = "/tmp/outer"
         let p = ScanProvenance(report: makeReport(git: git), scannedRoot: "/tmp/outer/sub", producedBy: "cli")
-        XCTAssertEqual(p.resolvedGitRoot, "/tmp/outer")
-        XCTAssertTrue(p.oneLineSummary.contains("提交号来自外层仓库 /tmp/outer"), p.oneLineSummary)
+        // 两格自 #60 起都是**物理写法**（`ScannedPath.canonical`）：传进来的别名短写会被归一，
+        // 于是同一份报告里 `scannedRoot` 与 `resolvedGitRoot` 不会一个带 `/private` 一个不带。
+        // 断言的语义没改（「提交号来自外层那个仓库，要说清是哪一层」），只是形状换了。
+        XCTAssertEqual(p.resolvedGitRoot, "/private/tmp/outer")
+        XCTAssertTrue(p.oneLineSummary.contains("提交号来自外层仓库 /private/tmp/outer"), p.oneLineSummary)
     }
 
     func testSameRootDoesNotPrintRelocationNote() {
@@ -176,11 +179,12 @@ final class ScanProvenanceTests: XCTestCase {
         let p = try XCTUnwrap(restored.provenance)
         XCTAssertEqual(p.sourceCommit, "cafe123")
         XCTAssertEqual(p.sourceBranch, "ws/x")
-        XCTAssertEqual(p.resolvedGitRoot, "/tmp/elsewhere")
+        XCTAssertEqual(p.resolvedGitRoot, "/private/tmp/elsewhere")
         XCTAssertEqual(p.workingTreeDirty, true)
         XCTAssertEqual(p.dirtyEntryCount, 7)
         XCTAssertEqual(p.producedBy, "gui")
-        XCTAssertEqual(p.scannedRoot, "/tmp/provenance-fixture")
+        XCTAssertEqual(p.scannedRoot, "/private/tmp/provenance-fixture",
+                       "进报告的被扫根统一成物理写法（#60），旧报告缺这一格照旧解得开")
         XCTAssertEqual(p.schemaVersion, ScanProvenance.currentSchemaVersion)
         XCTAssertNotNil(p.toolVersion)
         XCTAssertNotNil(p.rulesVersion)

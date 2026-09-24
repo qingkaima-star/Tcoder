@@ -138,7 +138,9 @@ final class ProjectStoreRoundTripTests: XCTestCase {
         XCTAssertEqual(registry.projects.map(\.id), [project.id], "projects.json 里的项目集合不对")
         let storedProject = try XCTUnwrap(registry.projects.first)
         XCTAssertEqual(storedProject.name, "落盘往返")
-        XCTAssertEqual(storedProject.path, "/tmp/wsv-store-subject")
+        // 注册表存的是**物理写法**（#60：同一个目录在两个面只许一个串），而上面那行传的是别名短写；
+        // 这条夹具路径并不存在，`ScannedPath` 对不存在的路径只做字面别名归一、不去 stat 改写成别的目录。
+        XCTAssertEqual(storedProject.path, "/private/tmp/wsv-store-subject")
         // 注册表是在 upsertReport 之后写的，所以它必须与报告里的 project 同步带上扫描时间。
         XCTAssertEqual(storedProject.lastScanAt, Self.fixedGeneratedAt,
                        "注册表与单份报告里的 lastScanAt 不一致，重启后总览页会退回「未扫描」")
@@ -234,7 +236,7 @@ final class ProjectStoreRoundTripTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
 
-        let first = store.add(path: "/tmp/" + dir.path.dropFirst("/private/".count))
+        let first = store.add(path: dir.path.replacingOccurrences(of: "/private/tmp/", with: "/tmp/"))
         XCTAssertEqual(first.path, dir.path, "存进去的必须是物理写法，而不是用户给的那个短写")
         XCTAssertEqual(first.name, dir.lastPathComponent, "显示名仍按给定的写法取末段：不能替用户改项目名")
         let second = store.add(path: dir.path)
