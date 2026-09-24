@@ -76,6 +76,10 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // 09-24 同一天第六次：`phase_blame` 加了第三路输入后 CC 涨到 18（门 CC<16），
         // 按"拆，不抬线"把归因判据层搬进 `perf_blame_caliber.py`（一格一个函数）。搬出来必须点名。
         "perf_blame_caliber.py",
+        // 09-25 包 45/46：「同树只许一条测量链」这道闸与归属行的有界显示搬成库文件
+        // （排程器本体不可 source——一 source 就开始等窗口，反例点不到函数）。
+        // 新建文件必须当场被量：这是这条规矩第五次被用到（前面四次都写在上面上面的注释里）。
+        "perf_chain_guard.sh", "perf_selfcheck_chain.sh",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。

@@ -23,6 +23,7 @@
 # -----------------------------------------------------------------------------
 source "$(dirname "${BASH_SOURCE[0]}")/perf_probes.sh"  # 探针族搬出去了，见那个文件的头注
 source "$(dirname "${BASH_SOURCE[0]}")/perf_measure_io.sh"  # 采集与落盘那一层，见那个文件的头注
+source "$(dirname "${BASH_SOURCE[0]}")/perf_chain_guard.sh"  # 「同树只一条链」＋归属行的有界显示（`path_for_display`）
 # ── 磁盘卫生：第七维（2026-09-21 把这台机器吃到只剩 4.4 GiB 之后加的）────────
 # 根因不在我的样本目录，而在 **xctrace 的中间产物**：`instruments*.ktrace`
 # 默认落在 `$TMPDIR`，而采集进程被 kill、超时或崩溃时**不会自己清**。
@@ -287,8 +288,8 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
   preflight_gates_warmup
 }
 
-
-
+# 归属行的显示宽度与「同树只许一条链」的判据住在一起：`perf_chain_guard.sh`。
+# 为什么不在这里重复一份：两处入口两个数是本仓记账记得最多的一类错（包 10/包 36/包 41）。
 require_idle_target() {  # 返回全局 PID；!= 1 个实例即拒跑（除非显式 ATTACH_PID=<pid>）
   local pids n
   pids=$(instance_pids)
@@ -305,7 +306,7 @@ require_idle_target() {  # 返回全局 PID；!= 1 个实例即拒跑（除非�
     echo "      spec §7.5 的「采样期间独占实例」前提**不成立**，这批读数的绝对值只能与同样"
     echo "      多实例条件下取的另一批比，不能直接和 §1 的独占基线比。meta.json 里已记 coexist=$n。"
     COEXIST="$n"
-    echo "    目标实例 pid=$PID，来源：$(pid_binary "$PID" | cut -c1-100)"
+    echo "    目标实例 pid=$PID，来源：$(path_for_display "$(pid_binary "$PID")")"
     note_target_flavor "$PID"
     return 0
   fi
@@ -328,7 +329,7 @@ require_idle_target() {  # 返回全局 PID；!= 1 个实例即拒跑（除非�
   COEXIST=1
   local exe
   exe=$(basename "$(pid_binary "$PID")")
-  echo "    目标实例 pid=$PID（${exe:-未知}），来源：$(pid_binary "$PID" | cut -c1-100)"
+  echo "    目标实例 pid=$PID（${exe:-未知}），来源：$(path_for_display "$(pid_binary "$PID")")"
   note_target_flavor "$PID"
 }
 
