@@ -57,7 +57,13 @@ enum VulnerabilityEvidence: String, Sendable, Equatable {
         guard ledger.totalCount > 0 else { return .unchecked }
         let counts = ledger.vulnerabilityStateCounts
         let checked = counts[.checked] ?? 0
-        if checked == ledger.totalCount { return .verified }
+        // RD-73：「每一条都核对成了没有」只由 `DependencyEvidence.vulnerabilityCoverage` 判一次。
+        // 这里原先自己写了一遍 `checked == ledger.totalCount` —— 与那把闸门**同一件事实的第二把尺子**，
+        // 而且因为换了个局部变量的写法，`DependencyGateUniquenessTests` 按字面扫**看不见它**。
+        // ⚠ 只搬"全覆盖"这一支：`.degraded` 与 `.unchecked` 的分界是**另一根轴**
+        //   （这一路到底发没发起过），三档覆盖度里放不下它，不许为了"收成一个家"把保守方向折掉。
+        // 两把尺子今天算的是同一个数（`isCovered` 就是 `== .checked`），所以这次改动**不动任何分数**。
+        if DependencyEvidence.vulnerabilityCoverage(ledger).isFull { return .verified }
         // `.degraded` 与 `.unchecked` 的分界是"这一路发没发起过"：
         // 有失败、有被预算挡在门外的 ⇒ 发起了但没走到底 ⇒ degraded（旧文案判据正是这一支，
         // 保守方向不许松）；一条都没发起（全 notAttempted / 版本未解析 / 生态不支持）才是 unchecked。
