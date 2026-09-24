@@ -227,15 +227,21 @@ enum CrashEvidenceReadout {
                                             silentFiles))
             }
         } else if reading.crashChannelFileCount > 0 {
-            parts.append("崩溃通道读到 \(reading.crashChannelFileCount) 份报告；"
-                + "未产出可计数的证据是几种原因、各占几份，本次未统计（这份报告落盘时还没有崩溃证据细账）")
+            // 原来这一句是**两条中文字面量用 `+` 拼**出去的（守卫 1d 点名的形状：
+            // 拼完的整串永远对不上任何一条键，英文态半英半中）。现在登记成一整条键，
+            // 一个 `%lld` 槽，中文态填完与原来那两段的接续一字不差。
+            parts.append(localizedCount(
+                "崩溃通道读到 %lld 份报告；未产出可计数的证据是几种原因、各占几份，本次未统计（这份报告落盘时还没有崩溃证据细账）",
+                reading.crashChannelFileCount))
             // 台账在场时「读取失败 N 份」是八种原因之一，已由上面那句带出来；
             // 缺席时这一格只剩已落盘的那本账可说，份数不许与次数相减去推。
             if reading.readFailedFileCount > 0 {
-                parts.append("其中 \(reading.readFailedFileCount) 份读取失败，未参与判定")
+                parts.append(localizedCount("其中 %lld 份读取失败，未参与判定",
+                                            reading.readFailedFileCount))
             }
         } else if reading.readFailedFileCount > 0 {
-            parts.append("崩溃通道里 \(reading.readFailedFileCount) 份读取失败，未参与判定")
+            parts.append(localizedCount("崩溃通道里 %lld 份读取失败，未参与判定",
+                                         reading.readFailedFileCount))
         }
 
         if let gaps = reading.unmeasuredGaps {
