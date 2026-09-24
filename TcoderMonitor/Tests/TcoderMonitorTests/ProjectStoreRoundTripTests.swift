@@ -10,16 +10,15 @@ import XCTest
 /// **静默丢掉用户已存的报告而不报任何错**。本文件第 ③ 组就是把
 /// 「不许给落盘契约加非 Optional 字段」从口头约定变成会红的测试。
 ///
-/// 覆盖边界（诚实交代，别把这份文件当成「load() 也端到端测过了」）：
-/// `ProjectStore.init()` 把 `storageDirectory` 硬编码到
-/// `~/Library/Application Support/TcoderMonitor` 并**立刻** `load()`；`load()` 是
-/// `private`，`storageDirectory` 只能在 init 之后改——测试无法让 `load()` 去读临时夹具。
-/// 所以本文件：① 驱动真实的**写**路径（`add`/`upsertReport`/`rename`/`remove`/
-/// `setSelectedProject`/`recordScore`，全是 store 自己的方法）；② 把落到临时目录的
-/// **字节**用与 store 同配置（`.iso8601`）的解码器读回来断言等价，那正是 `load()`
-/// 依赖的 schema 契约；③ 兼容性两组直接对磁盘字节增删键，不依赖注入点。
-/// 契约缺口（报总工）：`ProjectStore` 若加一个 `init(storageDirectory: URL? = nil)`，
-/// 「坏 JSON → 静默回退空列表」就能端到端钉住，而不只钉在 schema 层。
+/// 覆盖边界（2026-09-25 更正，原来这段是**过期的自我限制**）：
+/// 这里曾写着「`init()` 把 `storageDirectory` 硬编码到 `~/Library/Application Support/TcoderMonitor`
+/// 并立刻 `load()`；`load()` 是 private ⇒ 测试无法让 `load()` 去读临时夹具」，
+/// 并把"加一个 `init(storageDirectory:)`"当成报给总工的契约缺口。
+/// **两样都不成立了**：`init()` 从 09-21 起认 `TCODER_SUPPORT_DIR`（绝对路径才认），
+/// 于是 `setenv` + 真 `init()` 就能端到端驱动 `load()`——那条"缺口"报出去之后一直没做，
+/// 因为不需要新入口。可执行的例子见 `ProjectStoreIsolationTests` 的
+/// `testEnvironmentOverrideDrivesRealInitialization` 与 `testRetiredSampleRowIsPurgedOnTheNextLaunch`。
+/// 本文件仍然只做①写路径 ②字节 schema ③兼容性增删键三件事，不去复制那两条端到端。
 ///
 /// 两条环境事实，用例必须对它们免疫：
 /// 1. `init()` 会把**你机器上真实的** `Application Support/TcoderMonitor/projects.json`
