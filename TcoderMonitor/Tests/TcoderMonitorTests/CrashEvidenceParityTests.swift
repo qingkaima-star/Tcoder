@@ -83,58 +83,16 @@ final class CrashEvidenceParityTests: XCTestCase {
         return out
     }
 
-    /// GUI 侧：五路走**同一个装配助手** `AnalyzerLedger.timed`，`ProjectStore` 那套编码器
-    /// 落进沙箱支持目录。⚠️ 这份测试副本重演的是 GUI 装配而不是调用它（不许起 App）——
-    /// 所以它与 `CoverageChainProofTests.persistGuiSideReport` 同形：**同一条装配助手**，
-    /// 否则 `analyzerLedger` / `failedSections` 两格会凭空多出来一处不等（那是尺子不齐，不是读数不齐）。
+    /// GUI 侧：走 `GuiSideReportReplay` 那**一个**入口 —— 与 `CoverageChainProofTests` 那条对表
+    /// 共用同一份装配，五路、台账、溯源块（含 RD-31 的两枚指纹）都只有一处会落后。
+    /// ⚠️ 这份入口重演的是 GUI 装配而不是调用它（不许起 App），所以 `analyzerLedger` /
+    ///    `failedSections` 两格必须由同一个形状产出，否则对表比的是两把尺子而不是两枚读数。
     @MainActor
     private func persistGuiSideReport() async throws -> URL {
-        let sandbox = scratch.appendingPathComponent("support", isDirectory: true)
-        // `save` 里是 `try?`：目录没建就会**静默不写文件**。
-        try FileManager.default.createDirectory(at: sandbox.appendingPathComponent("reports"),
-                                                withIntermediateDirectories: true)
-        let store = ProjectStore()
-        store.storageDirectory = sandbox
-        let project = store.add(path: target.path, name: "R24 对表夹具")
-        var report = ProjectReport(project: project)
-        let labels = AnalyzerLedger.sectionLabels
-        let code = await AnalyzerLedger.timed(labels[0]) {
-            try await FileSystemCodeAnalyzer().analyze(root: target, options: .default)
-        }
-        let git = await AnalyzerLedger.timed(labels[1]) {
-            try await ShellGitAnalyzer().analyze(repositoryURL: target)
-        }
-        let logs = await AnalyzerLedger.timed(labels[2]) {
-            try await FileLogAnalyzer().analyze(projectRoot: target, extraLogURLs: [], withinDays: 7)
-        }
-        let deps = await AnalyzerLedger.timed(labels[3]) {
-            try await ManifestDependencyAnalyzer().analyze(projectRoot: target, allowNetwork: false)
-        }
-        let coverage = await AnalyzerLedger.timed(labels[4]) {
-            try await CoverageAnalyzer().analyze(projectRoot: target, options: .default)
-        }
-        var attempts = [code.attempt, git.attempt, logs.attempt, deps.attempt, coverage.attempt]
-        attempts[0].limitsHit = code.value?.scanLimitations ?? []
-        report.code = code.value
-        report.git = git.value
-        report.logs = logs.value
-        report.dependencies = deps.value
-        report.coverage = coverage.value
-        report.health = WeightedHealthScorer().score(HealthInputs(code: report.code, git: report.git,
-                                                                  logs: report.logs,
-                                                                  dependencies: report.dependencies,
-                                                                  coverage: report.coverage,
-                                                                  previousScore: nil))
-        report.generatedAt = Date()
-        report.attemptedAt = Date()
-        report.failedSections = attempts.compactMap { $0.failureReason == nil ? nil : $0.label }
-        report.analyzerLedger = AnalyzerLedger.records(from: attempts)
-        report.provenance = ScanProvenance(report: report, scannedRoot: target.path, producedBy: "gui")
-        store.save(report: report)
-        return try XCTUnwrap(
-            FileManager.default.contentsOfDirectory(at: sandbox.appendingPathComponent("reports"),
-                                                    includingPropertiesForKeys: nil).first,
-            "GUI 侧没落出报告文件（目录没建就会静默不写）")
+        try await GuiSideReportReplay.persist(projectDirectory: target,
+                                              sandbox: scratch.appendingPathComponent("support",
+                                                                                       isDirectory: true),
+                                              projectName: "R24 对表夹具")
     }
 
     // MARK: - 尺子
