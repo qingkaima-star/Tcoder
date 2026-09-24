@@ -134,7 +134,8 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_warmup_dimension "$out"        # 53) 第七维·预热：etime 解析要对、未预热要拒、启动档不参与（列在最后：新维度不与既有项抢顺序）
   item selfcheck_update_caliber_one_rule "$out"  # 54) app-update 只有一个口径：sidecar 与表同 n、少计方向要拒、回落不再截 40
   item selfcheck_refused_not_pooled "$out"  # 55) 被当场拒收（有 REFUSED）的那一趟混不进散布；没 REFUSED 的必须还能读成可用
-  item selfcheck_chain_guard_and_path_display "$out"  # 56) 同树只许一条链（无链要放行／同树假链要拒）＋归属行必须保住文件名（列在最后：不与既有项抢顺序）
+  item selfcheck_chain_guard_one_per_tree "$out"  # 56) 同树只许一条链：无链要放行／同树假链要点名拒跑／跨闸要出声（列在最后：新项不与既有项抢顺序）
+  item selfcheck_path_display_keeps_the_tail "$out"  # 57) 归属行两头有牙：长路径保住文件名、短路径一字不改
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：那个 for 必须在 cmd_selfcheck 之前，
