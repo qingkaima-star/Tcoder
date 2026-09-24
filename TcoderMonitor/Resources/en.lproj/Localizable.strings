@@ -1182,3 +1182,4 @@
 // 这次它第一次有了上屏读者（此前只被一个零调用方的函数用着）；下面两枚是新增的部分覆盖/零覆盖档。
 "已核对 %1$@ / %2$@ 个依赖，另外 %3$@ 个没查 —— 这是「没查全」，不是「没有漏洞」" = "Checked %1$@ / %2$@ dependencies; %3$@ more went unchecked - an incomplete sweep, not a statement that there are no vulnerabilities";
 "共 %1$@ 个依赖，一条都没核对 —— 这是「没查全」，不是「没有漏洞」" = "None of the %1$@ dependencies were checked - nothing was swept, which is not a statement that there are no vulnerabilities";
+"时间窗口按文件挑、不逐行过滤：只读最近 %1$@ 天内被改动过的日志文件，文件一旦进来就整份计入 ⇒ 「每千行日志 N 个错误」与「扫描 N 行」的分母是这些文件的全部扫描行，不是最近 %1$@ 天的日志行。" = "The time window selects files, not lines: only log files modified within the last %1$@ days are read, and each such file counts in full - so the denominator of the errors-per-1000-log-lines figure and of the scanned-lines figure is every line scanned in those files, not the lines from the last %1$@ days.";
