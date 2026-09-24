@@ -4,13 +4,13 @@
 # 这一档只做一件事：**造真夹具 → 跑真分析器（无头 CLI 真子进程）→ 把原始字段与
 # 那句话原文抄出来**。它不判绿不判红（判定在 Tests/TcoderMonitorTests/
 # ScoreBranchReachabilityTests.swift 里，那边才有断言），因为 AGENTS §8 第 6.1 条
-# 要的就是"现量原始输出"，一份被断言加工过的读数不算。
+# 要的就是「现量原始输出」，一份被断言加工过的读数不算。
 #
 # ⚠️ 夹具根**必须**在被测仓库之外、且祖先链上没有任何 `.git`：
 #    · `ShellGitAnalyzer.resolveRepository` 会向上爬 6 层父目录找仓库，
 #      `LogProjectIdentity.projectAnchor` 向上爬 8 层 —— 夹具只要落在
 #      `/Users/one/Documents/Tcoder`（含 `.worktrees/**/.scratch`）任何一层，
-#      "不是仓库"这一格就永远造不出来，Git 那一维会读到**宿主仓库**的历史
+#      「不是仓库」这一格就永远造不出来，Git 那一维会读到**宿主仓库**的历史
 #      （本仓踩过：放在主仓库树内的无关项目夹具继承宿主 git 身份，造出假缺陷）。
 #    · 只用 `mktemp` 式的**唯一子目录**并事前拒绝已存在、事后自清，
 #      这是另一类坑（`/tmp` 里的孤儿夹具喂假绿）的解法。
@@ -79,7 +79,7 @@ make_repo() {
 
 # 一份真形状 .ips：**首行 header 紧凑 JSON + 其余整段 body 缩进 JSON**（苹果报告的形状）。
 # 这个分段不是审美：`CrashReportParser.ipsJSONSections` 只按第一个换行切两段，
-# body 若是"多行多个 JSON 对象"就整体解不开 ⇒ 退化成 header ⇒ 判「解析失败」，
+# body 若是「多行多个 JSON 对象」就整体解不开 ⇒ 退化成 header ⇒ 判「解析失败」，
 # 崩溃数就变成 0，那一格要说的句子也跟着换一支（实测踩过，故写在这里）。
 write_ips() { # $1=路径 $2=进程名 $3=总行数
   python3 - "$1" "$2" "${3:-400}" <<'PY'

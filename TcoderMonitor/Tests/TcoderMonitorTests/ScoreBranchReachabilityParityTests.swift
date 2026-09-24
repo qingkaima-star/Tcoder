@@ -8,7 +8,7 @@ import XCTest
 ///      不静默跳过的尺子）；
 ///   2. 落盘 JSON（CLI `scan --out`，与 GUI 同一套 coder 配置）；
 ///   3. 界面那一格的装配口 —— GUI 侧一律走 `GuiSideReportReplay` **唯一入口**（RD-31×RD-60
-///      的教训就是"测试里两份 GUI 装配副本"），再把落盘报告解回来读
+///      的教训就是「测试里两份 GUI 装配副本」），再把落盘报告解回来读
 ///      `MissingDimensionReason.text` 与 `HealthBreakdown.rows`，也就是
 ///      `Views/Health/HealthComponentTable.swift` 读的那两格。**本文件不抄任何 GUI 装配**。
 ///
@@ -108,7 +108,7 @@ final class ScoreBranchReachabilityParityTests: XCTestCase {
 
     // MARK: - 元测试：对账闸门必须有牙
 
-    /// 喂一份"根本没读夹具"的假读数，盘上真值闸门必须报出来（否则前面的正例是永真绿）。
+    /// 喂一份「根本没读夹具」的假读数，盘上真值闸门必须报出来（否则前面的正例是永真绿）。
     func test_meta_diskTruthGuardBitesOnAFabricatedReading() throws {
         let url = sandbox.appendingPathComponent("app.log")
         try R11DenominatorFixture.logText(lines: 3, every: 0).write(to: url, atomically: true, encoding: .utf8)
@@ -131,7 +131,7 @@ final class ScoreBranchReachabilityParityTests: XCTestCase {
     }
 
     /// 在形状①的夹具里**多埋一份 2,500 行日志** ⇒ 那一格就不成立了。
-    /// 这条钉的是"结论来自夹具形状"而不是"分析器反正会读到空"。
+    /// 这条钉的是「结论来自夹具形状」而不是「分析器反正会读到空」。
     func test_meta_plantedDecoyFlipsTheZeroDenominatorShape() async throws {
         let root = try R37ReachFixture.makeProject(named: "R37DecoyApp", under: sandbox)
         _ = try R37ReachFixture.writeCrashReport(in: root, product: "R37DecoyApp", lines: 400)

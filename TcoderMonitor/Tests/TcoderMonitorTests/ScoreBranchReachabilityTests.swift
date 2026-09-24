@@ -4,17 +4,17 @@ import XCTest
 /// OWNER: WS-R37 评分支路可达性（分支 `ws/rd27-reach`）—— 工单交付 ①②③④⑤ 的本体。
 ///
 /// **这一族证的是另一件事**。`ScoreEvidenceFloorTests` / `ScoreEvidenceFloorCrashStatesTests`
-/// 那一族是"手搓 `HealthInputs` 喂给评分器 ⇒ 评分器在那个数上会说什么"；
+/// 那一族是「手搓 `HealthInputs` 喂给评分器 ⇒ 评分器在那个数上会说什么」；
 /// 本族一个 `HealthInputs` 都不手搓，只把**真夹具目录**交给 `CLIScan`
 /// （与 GUI 同一批分析器、同一个 `WeightedHealthScorer`、同一套缺席装配），
-/// 于是它回答的是台账里那句"先证明可达再动"：
+/// 于是它回答的是台账里那句「先证明可达再动」：
 ///
 /// | 形状 | 结论（本文件逐条钉住） |
 /// |---|---|
 /// | ① 只有崩溃报告、零真日志行 | **可达**（RD-49 第②态真的会长出来） |
 /// | ② 3 行日志、0 错误 | **可达**（走 `isThin` 降档，不是满分） |
 /// | ③ `git init` 后零提交 | `commitBasis == 0` **成立**，但 fail-loud 那一支**走不到** —— 被 `HealthTeamDimensions.busFactorOutcome` 的 `totalCommits > 0` 挡在前面 |
-/// | ③b 有提交、作者表却是空的 | fail-loud 那一支**可达**，真正的入口形状是"作者日期年份五位数 ⇒ 上游整条丢行"，不是"零提交" |
+/// | ③b 有提交、作者表却是空的 | fail-loud 那一支**可达**，真正的入口形状是「作者日期年份五位数 ⇒ 上游整条丢行」，不是「零提交」 |
 /// | ④ 不是仓库的普通目录 | **可达**（Git 那一维整维缺席） |
 /// | ⑤ 提交全在一个署名下 | **可达**（单人占比那一支，进加权） |
 ///
@@ -52,7 +52,7 @@ final class ScoreBranchReachabilityTests: XCTestCase {
         let scan = try await productScan(root)
         let logs = try XCTUnwrap(scan.logs)
 
-        // 盘上独立真值：这份读数是夹具喂出来的，不是"什么都没读到"。
+        // 盘上独立真值：这份读数是夹具喂出来的，不是「什么都没读到」。
         try assertFixtureFeedsAnalyzer(logs, urls: [ips])
         XCTAssertEqual(logs.totalLinesScanned, 0, "只有崩溃报告 ⇒ 分母必须是 0")
         XCTAssertEqual(logs.crashCount, 1, "崩溃报告真被认成了确认崩溃（不是 0）")
@@ -158,7 +158,8 @@ final class ScoreBranchReachabilityTests: XCTestCase {
         try R37ReachFixture.git(["init", "-q", "-b", "main"], in: root)
         try "x\n".write(to: root.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
         try R37ReachFixture.git(["add", "-A"], in: root)
-        let bogus = "@999999999999 +0800"        // 33658 年：git 收，本仓解析器不收
+        // 33658 年：git 收下单、本仓时间戳解析器不收 —— 上游静默丢行才产出「作者表为空」。
+        let bogus = "@999999999999 +0800"
         try R37ReachFixture.git(["-c", "commit.gpgsign=false", "-c", "core.hooksPath=",
                                  "commit", "-qm", "a five-digit author year"], in: root,
                                 environment: ["GIT_AUTHOR_DATE": bogus, "GIT_COMMITTER_DATE": bogus,
@@ -180,7 +181,7 @@ final class ScoreBranchReachabilityTests: XCTestCase {
             XCTAssertNil(component(of: scan, dimension))
             XCTAssertTrue(try missing(of: scan).contains(dimension))
         }
-        // 三出口分叉点（报告里点名）：屏上这一格读的是"这一路失败"，不是"不是仓库"那句。
+        // 三出口分叉点（报告里点名）：屏上这一格读的是「这一路失败」，不是「不是仓库」那句。
         XCTAssertEqual(MissingDimensionReason.text(for: .busFactor, report: scan),
                        "上次扫描「Git 分析」失败，本维度没有输入。")
     }
@@ -197,7 +198,7 @@ final class ScoreBranchReachabilityTests: XCTestCase {
         XCTAssertEqual(git.activeAuthorCount, 1)
         XCTAssertEqual(git.topAuthor?.commits, 12)
 
-        // 地板只管多人：单人再小的总体也不许被兜成"无从评估"，这里连总体都够。
+        // 地板只管多人：单人再小的总体也不许被兜成「无从评估」，这里连总体都够。
         let busFactor = try XCTUnwrap(component(of: scan, .busFactor),
                                       "单人占比这一支必须进加权，实得 \(recommendations(of: scan))")
         XCTAssertLessThan(busFactor.score, 40, "包揽必须是低分，实得 \(busFactor.score)")
@@ -217,7 +218,7 @@ final class ScoreBranchReachabilityTests: XCTestCase {
     private func productScan(_ root: URL, expectingRepository: Bool = true) async throws -> ProjectReport {
         var outcome = await CLIScan().outcome(path: root.path, allowNetwork: false)
         // 环境抖动的合法形状：本机 load 高时 `git log` 会**空等到整个超时**（源码里
-        // `ShellGitAnalyzer.runResilient` 的注释就记着这件事），于是"仓库"被读成"没有对象"。
+        // `ShellGitAnalyzer.runResilient` 的注释就记着这件事），于是「仓库」被读成「没有对象」。
         // 这里只在**独立真值确认它是仓库**、而装配这一路把 Git 判失败时重跑一次；
         // 重跑仍失败就照常判败，并把两次的台账一起抄出来（不改任何判据、不放宽任何东西）。
         if expectingRepository, R37ReachFixture.isGitRepository(at: root),
@@ -235,7 +236,7 @@ final class ScoreBranchReachabilityTests: XCTestCase {
     func gitSectionMissing(_ report: ProjectReport?) -> Bool { report?.git == nil }
 
     /// 每条用例开跑前先对一次盘上独立真值：**分析器没读到夹具就当场判败**，
-    /// 后面那些"这句话出来了"的断言才不会建立在一份空跑上。
+    /// 后面那些「这句话出来了」的断言才不会建立在一份空跑上。
     private func assertFixtureFeedsAnalyzer(_ logs: LogSummary, urls: [URL]) throws {
         XCTAssertFalse(urls.isEmpty, "夹具里一个日志类文件都没有 ⇒ 这一格谈不上「分母从哪来」")
         let onDisk = try urls.map { (url: $0, lines: try R11DenominatorFixture.newlineCount(of: $0)) }
@@ -263,7 +264,7 @@ private extension ScoreBranchReachabilityTests {
     func strengths(of report: ProjectReport) -> [String] { report.health?.strengths ?? [] }
     func issues(of report: ProjectReport) -> [String] { report.health?.issues ?? [] }
 
-    /// 五路台账压成一行，失败时把它抄进判败消息（只看"这一路是 nil"看不出为什么）。
+    /// 五路台账压成一行，失败时把它抄进判败消息（只看「这一路是 nil」看不出为什么）。
     func ledgerLine(_ report: ProjectReport) -> String {
         (report.analyzerLedger ?? []).map { record in
             "\(record.name)=\(record.state.rawValue)" + (record.failureReason.map { "(\($0))" } ?? "")

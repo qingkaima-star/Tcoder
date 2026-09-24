@@ -4,18 +4,18 @@ import XCTest
 
 /// OWNER: WS-R37 评分支路可达性（分支 `ws/rd27-reach`）—— 本族夹具与**盘上独立真值**。
 ///
-/// 这一族只回答一个问题：**那几条"缺证据不给分"的评分支路，真项目走不走得到。**
+/// 这一族只回答一个问题：**那几条「缺证据不给分」的评分支路，真项目走不走得到。**
 /// 所以夹具必须满足两条，缺一条整个族的结论就不成立：
 ///
-/// 1. **不经手搓 `HealthInputs`**。`ScoreEvidenceFloorTests` 那一族证的是"评分器在那个数的
-///    基础上会说什么"，本族证的是"真分析器会不会长出那个数"。入口只有 `CLIScan`
+/// 1. **不经手搓 `HealthInputs`**。`ScoreEvidenceFloorTests` 那一族证的是「评分器在那个数的
+///    基础上会说什么」，本族证的是「真分析器会不会长出那个数」。入口只有 `CLIScan`
 ///    （与 GUI 同一批分析器、同一个 `WeightedHealthScorer`）与 `GuiSideReportReplay`。
 /// 2. **夹具根在被测仓库之外，祖先链上没有任何 `.git`**。`ShellGitAnalyzer.resolveRepository`
 ///    向上爬 6 层、`LogProjectIdentity.projectAnchor` 向上爬 8 层 —— 只要夹具落在
 ///    `/Users/one/Documents/Tcoder`（含各工作树的 `.scratch/`）任何一层，
-///    "不是仓库"那一格就永远造不出来，Git 两维会读到**宿主仓库**的历史（本仓踩过这个坑）。
+///    「不是仓库」那一格就永远造不出来，Git 两维会读到**宿主仓库**的历史（本仓踩过这个坑）。
 ///    另一头 `/tmp` 里的**孤儿夹具**会喂假绿，所以这里每次开一个带 UUID 的唯一子目录、
-///    事前拒绝已存在、事后自清，并把"盘上到底有什么"独立数一遍交给 `discrepancies` 对账。
+///    事前拒绝已存在、事后自清，并把「盘上到底有什么」独立数一遍交给 `discrepancies` 对账。
 enum R37ReachFixture {
 
     /// 本族夹具的产品名/署名前缀（唯一化，避免与本机真实 App 的崩溃报告撞名）。
@@ -51,7 +51,7 @@ enum R37ReachFixture {
         return nil
     }
 
-    /// 一个"别的路都正常"的项目底座：清单给日志一个产品名，源码给代码那一路一点输入。
+    /// 一个「别的路都正常」的项目底座：清单给日志一个产品名，源码给代码那一路一点输入。
     static func makeProject(named name: String, under sandbox: URL) throws -> URL {
         let root = sandbox.appendingPathComponent(name, isDirectory: true)
         let manager = FileManager.default
@@ -81,7 +81,7 @@ enum R37ReachFixture {
 
     /// 建一个有 `count` 笔提交的仓库，作者轮流署名，提交时间每天错开一笔（节奏档要够真）。
     /// ⚠ 署名只认 **`GIT_AUTHOR_NAME` 环境变量**：`-c user.name=` 会被它盖掉
-    ///   （实测：不这么写，12 笔全落在默认身份上，"多人/单人"那一格就造不出真形状）。
+    ///   （实测：不这么写，12 笔全落在默认身份上，「多人/单人」那一格就造不出真形状）。
     static func makeRepository(at root: URL, count: Int, authors: [String] = ["R37 Solo"]) throws {
         try git(["init", "-q", "-b", "main"], in: root)
         for index in 1...max(1, count) {
@@ -146,7 +146,7 @@ enum R37ReachFixture {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         // 全局/系统配置一律不读：宿主机器上的 user.name、commit.gpgsign、init.defaultBranch
-        // 都不该决定夹具形状（否则换台机器结论就变，正是"继承宿主 git 身份"那一类假缺陷）。
+        // 都不该决定夹具形状（否则换台机器结论就变，正是「继承宿主 git 身份」那一类假缺陷）。
         process.arguments = ["-c", "core.excludesFile=/dev/null",
                              "-c", "init.defaultBranch=main"] + args
         process.currentDirectoryURL = root
@@ -200,7 +200,7 @@ enum R37ReachFixture {
 
     /// 分析器读数与盘上真值对账，交回**每一条不合**。空数组 = 这份读数是夹具喂出来的。
     ///
-    /// 这一枚是本族的"喂了假输入就判败"闸门：它同时检查
+    /// 这一枚是本族的「喂了假输入就判败」闸门：它同时检查
     /// ① 盘上有的文件分析器必须认到（没认到＝上游根本没读夹具，后面的断言都是空的）、
     /// ② 每个文件的行数必须与盘上一字相同、
     /// ③ `totalLinesScanned` 必须等于**非崩溃**那些文件的盘上行数之和（RD-46b 的分母口径）。
@@ -241,7 +241,7 @@ private extension String {
 
 extension DateFormatter {
     /// `.ips` 的文件名时间戳：苹果那一套是 `yyyy-MM-dd-HHmmss`，归属判定按 `-20xx-` 切主名，
-    /// 换个格式就会掉进"只有文件名像"那一档而不是"确认崩溃"。
+    /// 换个格式就会掉进「只有文件名像」那一档而不是「确认崩溃」。
     static let r37FileName: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -249,7 +249,7 @@ extension DateFormatter {
         return formatter
     }()
 
-    /// 提交日期（`GIT_AUTHOR_DATE` 吃 ISO 8601）。逐笔错开一天，避免"首末同一瞬间"。
+    /// 提交日期（`GIT_AUTHOR_DATE` 吃 ISO 8601）。逐笔错开一天，避免「首末同一瞬间」。
     static func r37CommitStamp(daysAgo: Int) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
