@@ -509,6 +509,10 @@
 "标记事项与扫描信息" = "Markers and Scan Details";
 "仅内置快照" = "Built-in snapshot only";
 "未核对" = "Not verified";
+// RD-70（台账卷五 §81）：生态卡头那一格的状态词。它与「未核对」同一族（短标签、会换行的散文不算），
+// 之前只由 `DependencySafetyVerdict.badgeText` 上屏、一直没登记 ⇒ 英文态吐中文，这次一起补上。
+"部分核对" = "Partially verified";
+"已核对" = "Verified";
 "未配置" = "Not configured";
 "未发现" = "Not found";
 "零命中" = "No matches";

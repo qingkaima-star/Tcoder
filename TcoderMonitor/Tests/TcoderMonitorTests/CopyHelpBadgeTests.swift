@@ -22,8 +22,15 @@ final class CopyHelpBadgeTests: XCTestCase {
     /// 鼠标得先猜"这枚胶囊能 hover 吗"。它们不归本流写（`Views/Dependencies/**` 属 WS-L），
     /// 所以按**文件**点名而不是静默排除。还掉的那一天守卫会自己变红，提醒把条目划掉 ——
     /// 与 `SourcesSizeAuditTests.hugeFileWorkList` 同一种写法。
+    ///
+    /// ⚠️ 2026-09-24 RD-70 换过一次**宿主文件名**（条目数没变、画法一个字没变）：
+    /// 生态卡头那一格连同它上面的 `.help(...)` 从 `DependenciesView.swift` 搬进
+    /// `DependencyAdvisoryRows.swift` —— 搬的原因是 `SourcesSizeAuditTests` 的 400 行线，
+    /// **不是**这笔债还掉了。守卫按"文件"点名，所以宿主搬家必须同步改名；
+    /// 留着旧名就是让这条守卫对旧文件永远不再说话（同一形状见台账 RD-72「锚点活着、判据搬家」）。
+    /// 真正还掉它的动作是改走 `CopyHelpBadge`，那属 WS-X8 与设计那一页的账。
     static let knownAdHocHelpIconFiles: Set<String> = [
-        "Views/Dependencies/DependenciesView.swift",
+        "Views/Dependencies/DependencyAdvisoryRows.swift",
     ]
 
     // MARK: - 判据 ①：画法全仓唯一
