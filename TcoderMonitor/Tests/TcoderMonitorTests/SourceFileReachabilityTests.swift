@@ -158,7 +158,13 @@ final class SourceFileReachabilityTests: XCTestCase {
     ///   顶上来的是 `Services/Code/ProductionCodeScaleReadout.swift`（`47e251f` 新增，
     ///   真读者是两个上屏出口 —— `CodeMetricsView` 里那格 `DataCaption` 与
     ///   `HealthHero` 的 ⓘ，不是只被自己的单测引用；守卫实报同一趟 `unused` 为空）。
-    static let censusBaseline = 184
+    ///   2026-09-25 **184 → 185**（RD-81，总工本人这一笔）：顶上来的是
+    ///   `Models/ScanRulesVersion.swift`（规则版本台账 + `rulesLedgerDefects`，从 `ScanProvenance.swift`
+    ///   整块另起文件，理由是那文件离 400 行闸门只剩几十行）。
+    ///   真读者两处、不是单测：`ScanProvenance.rulesVersionStamp` 从这里取第一格（⇒ 每份报告的溯源栏、
+    ///   `score` 那行都走它），以及 `CLIRouter.doctorIdentityLines()` 新加的两行
+    ///   （「该版收进的判据」与「规则台账自检」）。守卫 = `ScanRulesVersionLedgerTests`（正例 + 六条反例）。
+    static let censusBaseline = 185
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
