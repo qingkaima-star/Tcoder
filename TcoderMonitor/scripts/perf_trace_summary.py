@@ -18,7 +18,8 @@ AGENTS.md 第四轮红线 5（诚实性语义与阈值不许为任何指标放�
 import os
 import statistics
 
-from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, as_int, base_app_update_line, base_hang_line, base_hitch_frame_line, base_hitches_line, base_hotspot_line, base_main_thread_line, base_render_line, disp_values, fmt_row, fps_counts, input_rate_qualification, load_measure, over_budget, percentile, read_json, regime_note, in_display_regime, phase_blame)
+from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, as_int, base_app_update_line, base_hang_line, base_hitch_frame_line, base_hitches_line, base_hotspot_line, base_main_thread_line, base_render_line, disp_values, fmt_row, fps_counts, input_rate_qualification, load_measure, over_budget, percentile, read_json, regime_note, in_display_regime)
+from perf_blame_caliber import phase_blame            # 迟到帧归因的判据层（CC 门逼出来的拆法）
 from perf_update_caliber import dedupe_pairs, update_caliber_note  # 事件口径唯一住处（三口径的历史见该文件）
 from perf_trace_xml import cross_check_durations, find_tag
 # 逐帧三张表的判据层：判据一字未动，只是搬出去还「巨大文件 400 行」口径的债。
@@ -322,9 +323,10 @@ def summary_frame_table_rows(loaded, budget):
 
 def summary_phase_blame_row(loaded, budget):
     # 4b) 迟到帧到底该怪谁：主线程 update 也超预算的，和"主线程没问题、渲染/合成侧慢了"的
+    #     第三路输入是 hangs——update 相位没超不等于主线程没被占住（#46）
     upd = dedupe_pairs(loaded["hitches-updates"])
     late = disp_values(loaded["hitches"])
-    line, verdict = phase_blame(upd, late, budget)
+    line, verdict = phase_blame(upd, late, budget, disp_values(loaded["potential-hangs"]))
     fmt_row("迟到帧归因（update vs render）", "—", line, verdict)
 
 

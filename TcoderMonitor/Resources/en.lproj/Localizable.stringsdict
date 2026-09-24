@@ -696,22 +696,11 @@
 			<string>%1$lld unreadable crash files</string>
 		</dict>
 	</dict>
-	<key>还有 %lld 份崩溃通道文件未产出可计数的证据（内容损坏 / 只有文件名像 / 无事件时间 / 构建版本不是当前 / 同一事件的另一份），逐条原因待 LogSummary 落盘崩溃证据字段后展示</key>
-	<dict>
-		<key>NSStringLocalizedFormatKey</key>
-		<string>%#@unexplainedCrashFiles@</string>
-		<key>unexplainedCrashFiles</key>
-		<dict>
-			<key>NSStringFormatSpecTypeKey</key>
-			<string>NSStringPluralRuleType</string>
-			<key>NSStringFormatValueTypeKey</key>
-			<string>lld</string>
-			<key>one</key>
-			<string>%lld crash-channel file produced no countable evidence (corrupt, only the filename looks like one, no usable event time, the build version is not the current one, or it is the other copy of the same event); per-file reasons appear once LogSummary carries the crash evidence fields</string>
-			<key>other</key>
-			<string>%lld crash-channel files produced no countable evidence (corrupt, only the filename looks like one, no usable event time, the build version is not the current one, or they are other copies of the same event); per-file reasons appear once LogSummary carries the crash evidence fields</string>
-		</dict>
-	</dict>
+	<!-- RD-60 收尾轮（R3 第 4 步）：这条键整块删掉。
+		它那句「逐条原因待 LogSummary 落盘崩溃证据字段后展示」是一句**过期且假的承诺** ——
+		这次整改正是把那个字段落了盘 ⇒ 屏上不再出这句话、也没人再拿它当夹具。
+		现在说这句实话的是 `另有 %lld 份崩溃通道文件未产出可计数的证据，逐条原因见上`
+		与 `崩溃通道读到 %lld 份报告；…本次未统计（…）` 两枚在产键。 -->
 	<!-- 批次 P70：无障碍标签那枚被降级成 `%@` 的复数（旧英文值写死 "days"，1 天也说 days）。
 		键 = 中文整句；`.strings` 里那条旧的 `错误趋势，%@ 天` 同步删掉 —— 留着就是烂尾键。 -->
 	<key>错误趋势，%lld 天</key>
@@ -728,6 +717,219 @@
 			<string>Error trend, %lld day</string>
 			<key>other</key>
 			<string>Error trend, %lld days</string>
+		</dict>
+	</dict>
+	<!-- RD-60 第二半（R25b）：崩溃证据细账「逐条原因」那八句的**唯一生产者**
+		`CrashEvidenceReadout.ReasonCounts.statement` 由裸插值接回查表。
+		八句都是整句槽型键（量词 `次`/`份` 在句子中间，英文语序会反转），
+		所以一枚键一个复数变量，不许拆成「前缀 + 数字 + 后缀」。
+		英文值只用 ASCII 标点：`。`/`，`/`（）` 落在中日韩标点段，守卫 1f 判残留。 -->
+	<key>确认崩溃 %lld 次计入</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceCounted@</string>
+		<key>crashEvidenceCounted</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld confirmed crash counted</string>
+			<key>other</key>
+			<string>%lld confirmed crashes counted</string>
+		</dict>
+	</dict>
+	<key>历史报告 %lld 次在窗口外</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceHistorical@</string>
+		<key>crashEvidenceHistorical</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld historical report outside the window</string>
+			<key>other</key>
+			<string>%lld historical reports outside the window</string>
+		</dict>
+	</dict>
+	<key>旧构建 %lld 次未算当前版本</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceStaleBuild@</string>
+		<key>crashEvidenceStaleBuild</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld stale-build occurrence not counted as the current build</string>
+			<key>other</key>
+			<string>%lld stale-build occurrences not counted as the current build</string>
+		</dict>
+	</dict>
+	<key>无事件时间 %lld 次单列</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceUndated@</string>
+		<key>crashEvidenceUndated</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld occurrence listed separately, it has no event time</string>
+			<key>other</key>
+			<string>%lld occurrences listed separately, they have no event time</string>
+		</dict>
+	</dict>
+	<key>疑似报告 %lld 份</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceSuspected@</string>
+		<key>crashEvidenceSuspected</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld suspected report</string>
+			<key>other</key>
+			<string>%lld suspected reports</string>
+		</dict>
+	</dict>
+	<key>解析失败 %lld 份</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceParseFailed@</string>
+		<key>crashEvidenceParseFailed</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld file failed to parse</string>
+			<key>other</key>
+			<string>%lld files failed to parse</string>
+		</dict>
+	</dict>
+	<key>读取失败 %lld 份</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceReadFailed@</string>
+		<key>crashEvidenceReadFailed</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld file could not be read</string>
+			<key>other</key>
+			<string>%lld files could not be read</string>
+		</dict>
+	</dict>
+	<key>同一事件去重合并 %lld 份</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceDuplicates@</string>
+		<key>crashEvidenceDuplicates</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld file merged as another copy of the same event</string>
+			<key>other</key>
+			<string>%lld files merged as further copies of the same event</string>
+		</dict>
+	</dict>
+	<key>最近 %1$lld 天为窗口，逐条原因如下：%2$@</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%1$#@crashEvidenceWindowDays@; per-reason breakdown: %2$@</string>
+		<key>crashEvidenceWindowDays</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>The window is the last %1$lld day</string>
+			<key>other</key>
+			<string>The window is the last %1$lld days</string>
+		</dict>
+	</dict>
+	<key>另有 %lld 份崩溃通道文件未产出可计数的证据，逐条原因见上</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceSilentFiles@</string>
+		<key>crashEvidenceSilentFiles</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>A further %lld crash-channel file produced no countable evidence; the per-reason breakdown is above</string>
+			<key>other</key>
+			<string>A further %lld crash-channel files produced no countable evidence; the per-reason breakdown is above</string>
+		</dict>
+	</dict>
+	<key>崩溃通道读到 %lld 份报告；未产出可计数的证据是几种原因、各占几份，本次未统计（这份报告落盘时还没有崩溃证据细账）</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceUnmeasuredFiles@</string>
+		<key>crashEvidenceUnmeasuredFiles</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>The crash channel read %lld report, but which reasons produced no countable evidence, and how many files each one covers, was not tallied this run (this report was persisted before the crash evidence ledger existed)</string>
+			<key>other</key>
+			<string>The crash channel read %lld reports, but which reasons produced no countable evidence, and how many files each one covers, was not tallied this run (this report was persisted before the crash evidence ledger existed)</string>
+		</dict>
+	</dict>
+	<key>其中 %lld 份读取失败，未参与判定</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceUnreadableAmongThem@</string>
+		<key>crashEvidenceUnreadableAmongThem</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>of which %lld file could not be read and was left out of the verdict</string>
+			<key>other</key>
+			<string>of which %lld files could not be read and were left out of the verdict</string>
+		</dict>
+	</dict>
+	<key>崩溃通道里 %lld 份读取失败，未参与判定</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceUnreadableInChannel@</string>
+		<key>crashEvidenceUnreadableInChannel</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld crash-channel file could not be read and was left out of the verdict</string>
+			<key>other</key>
+			<string>%lld crash-channel files could not be read and were left out of the verdict</string>
 		</dict>
 	</dict>
 </dict>

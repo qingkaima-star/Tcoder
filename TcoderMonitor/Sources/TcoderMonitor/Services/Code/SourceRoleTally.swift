@@ -44,8 +44,13 @@ struct SourceRoleTally: Sendable, Equatable {
     /// 逐文件累计。`files` 是**已经进入统计**的那批（`SourceScanResult.files`）；
     /// 被剔除的条目没有角色可言，它们的去向由 `SourceSkipLedger` 与
     /// `SourceScanScopeReadout` 回答，不在这里重复记账。
+    ///
+    /// **按相对路径升序累计**，而不是按递进来的顺序：样本是"取前 N 个"，
+    /// 按遇到顺序取就等于让并发调度的偶然决定屏上点谁的名（RD-63 实测：同一棵夹具树
+    /// GUI 与 CLI 各点一枚，三趟里两趟对不表、方向还会反过来）。
+    /// 累计量本身与顺序无关（都是加法），所以这条排序只改"点哪几条名"，不改任何数。
     init(of files: [ScannedSourceFile], exampleLimit: Int = SourceRoleTally.exampleLimit) {
-        for file in files {
+        for file in files.sorted(by: { $0.relativePath < $1.relativePath }) {
             let decision = Self.decision(for: file)
             var share = shares[decision.role] ?? SourceRoleShare()
             share.files += 1

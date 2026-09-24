@@ -73,6 +73,9 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // 从 `perf_trace_metrics.py` 搬出 `perf_update_caliber.py`（那文件当时 408 行撞 400 口径）。
         // 搬出来的判据照样要点名进分母——不点名就等于给它开了免检通道。
         "perf_update_caliber.py",
+        // 09-24 同一天第六次：`phase_blame` 加了第三路输入后 CC 涨到 18（门 CC<16），
+        // 按"拆，不抬线"把归因判据层搬进 `perf_blame_caliber.py`（一格一个函数）。搬出来必须点名。
+        "perf_blame_caliber.py",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。
