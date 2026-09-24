@@ -26,8 +26,10 @@ if [ -z "$SCRATCH" ]; then
 fi
 LEDGER_DIR="$SCRATCH/guard-ledger"
 
-# 这次跑**应当**在场的三张账：缺任意一张 = 那条守卫这次没落账 = 断言失败的一种。
-REQUIRED=("ConflictMarkerGuardTests" "BoardLengthReadoutRatchetTests" "EvidenceFreshnessTests")
+# 这次跑**应当**在场的四张账：缺任意一张 = 那条守卫这次没落账 = 断言失败的一种。
+# DocReferenceRatchetTests 是 RD-66 那把裸用例名尺子加进来的（AGENTS §8 第 6.1 条）。
+REQUIRED=("ConflictMarkerGuardTests" "BoardLengthReadoutRatchetTests" "EvidenceFreshnessTests"
+          "DocReferenceRatchetTests")
 
 if [ ! -d "$LEDGER_DIR" ]; then
   echo "❌ 读不到台账目录 $LEDGER_DIR ⇒ 没有账可汇总（这不是「都过了」，是根本没落账）"
