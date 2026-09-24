@@ -166,4 +166,33 @@ final class ProjectStoreIsolationTests: XCTestCase {
                        ["暂时没插上的盘", "别的演示方案"],
                        "清行的判据一旦比退役常量宽，就会开始删没被点名过的行")
     }
+
+    /// 假数据守卫（`FunctionalHonestyGuardTests`）把 `demo://` 列为禁字，而清理表**必须**带着它才删得掉那一行。
+    /// 豁免按 **(文件, needle) 成对**给 ⇒ 四条各钉一次，防止它退化成"这个文件免检"或"这个字免检"，
+    /// 也防止它变成**死条目**（哪天常量搬走了，豁免留着就是给未来的假数据留门）。
+    /// 这条用例放在本文件而不是守卫那份里，理由：它钉的正是这枚常量，**豁免与常量要一起被读到**。
+    func testFabricationExemptionStaysPairwiseAndNotDead() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        for entry in FunctionalHonestyGuardTests.fabricationExemptions {
+            let url = packageRoot.appendingPathComponent("Sources/TcoderMonitor/\(entry.path)")
+            let content = try String(contentsOf: url, encoding: .utf8)
+            XCTAssertTrue(content.contains(entry.needle),
+                          "豁免点名的 \(entry.needle) 已经不在 \(entry.path) 里 ⇒ 这条豁免要跟着删")
+            XCTAssertGreaterThanOrEqual(entry.reason.count, 20,
+                                        "豁免理由没写够，读的人无从判断它免的是什么：\(entry.path)")
+        }
+        XCTAssertTrue(FunctionalHonestyGuardTests.fabricationHits(
+            in: [(path: "Services/ProjectStore.swift",
+                  content: "static let retired = [\"demo://tcoder-sample\"]\n")]).isEmpty,
+                      "豁免没生效 ⇒ 门禁会一直红在清理表自己身上")
+        XCTAssertFalse(FunctionalHonestyGuardTests.fabricationHits(
+            in: [(path: "Services/ProjectStore.swift",
+                  content: "let p = MonitoredProject(name: \"n\", path: \"/x\", isDemo: true)\n")]).isEmpty,
+                       "豁免给了文件级单边口子：同一文件里 `isDemo` 回来也不会红")
+        XCTAssertFalse(FunctionalHonestyGuardTests.fabricationHits(
+            in: [(path: "Services/SomewhereElse.swift",
+                  content: "let u = URL(string: \"demo://tcoder-sample\")!\n")]).isEmpty,
+                       "豁免被当成全局免检：别处把示例数据请回来也不会红")
+    }
 }
