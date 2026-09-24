@@ -30,12 +30,10 @@ struct ScanProvenance: Codable, Equatable, Sendable {
     /// `ProjectReport` 落盘结构的版本。改字段形状（不是新增 Optional）必须抬它。
     static let currentSchemaVersion = 1
 
-    /// 检测规则戳。**人工维护**：改判据（阈值 / 正则 / 口径 / 归类）时与代码同批改这一行。
-    ///
-    /// 边界（不许假装没有）：本仓还没有「从规则表自动导出版本号」的机制，
-    /// 所以这一栏只保证「抬过戳的报告能被区分」，**不保证没人漏抬**。
-    /// 漏抬的后果由「同一提交复扫读数变化」那条对表兜，而不是由它自己兜。
-    static let rulesVersionStamp = "2026.09-r1"
+    // 检测规则戳 `rulesVersionStamp` 自 RD-81 起**不在这个文件里定义**：
+    // 它取自 `ScanRulesVersion.swift` 的规则版本台账最新一格（同类型的成员，换个文件放而已）。
+    // 抬戳的姿势 = 去那张表加一行，别在这里改字符串 ——
+    // 「挪了戳没记账」与「记了账没挪戳」两件事都由 `ScanProvenance.rulesLedgerDefects` 判红。
 
     /// 当前构建配置。CLI 的 `--version` 与报告溯源共用这一把尺子（原来在 `CLIConfig` 里，已指到这里）。
     static let buildConfiguration: String = {
