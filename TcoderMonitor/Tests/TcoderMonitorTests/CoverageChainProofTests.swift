@@ -276,56 +276,17 @@ extension CoverageChainProofTests {
         try runReportParityScript(gui: guiJSON, cli: cliJSON, target: target)
     }
 
-    /// GUI 侧那份报告：与 `AppState.scan(project:)` 同一组分析器入口 + `ProjectStore` 那套编码器，
-    /// 落进沙箱支持目录（不抢全机唯一的 `~/Library/Application Support`）。
+    /// GUI 侧那份报告：走 `GuiSideReportReplay` 那**一个**入口（与崩溃证据那条对表同源）。
+    /// 原来这里自己写了一份五路装配，于是 `AppState` 后面加的字段（provenance、analyzerLedger、
+    /// RD-31 的两枚指纹）这份副本一概不知道 —— 抽成共用入口后只剩一处会落后。
+    /// ⚠️ 这份**测试副本**重演的仍是 GUI 装配而不是调用它（不许起 App）：
+    ///    屏上那一路仍要靠 `ScanSourceDriftTests` 点名 Sources 两个写者。
     @MainActor
     private func persistGuiSideReport(in directory: URL) async throws -> URL {
-        let sandbox = base.appendingPathComponent("support", isDirectory: true)
-        // `save` 里是 `try?`：目录没建就会**静默不写文件**（实测第一版就是这么"没落出报告"的）。
-        try FileManager.default.createDirectory(at: sandbox.appendingPathComponent("reports"),
-                                                withIntermediateDirectories: true)
-        let store = ProjectStore()
-        store.storageDirectory = sandbox
-        let project = store.add(path: directory.path, name: "R5 对表夹具")
-        var report = ProjectReport(project: project)
-        // 五路走**同一个装配助手** `AnalyzerLedger.timed`：原来这里自己写了一份 `run`，
-        // 于是 `AppState` 后面加的字段（provenance、analyzerLedger）这份副本一概不知道。
-        let code = await AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[0]) {
-            try await FileSystemCodeAnalyzer().analyze(root: directory, options: .default)
-        }
-        let git = await AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[1]) {
-            try await ShellGitAnalyzer().analyze(repositoryURL: directory)
-        }
-        let logs = await AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[2]) {
-            try await FileLogAnalyzer().analyze(projectRoot: directory, extraLogURLs: [], withinDays: 7)
-        }
-        let deps = await AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[3]) {
-            try await ManifestDependencyAnalyzer().analyze(projectRoot: directory, allowNetwork: false)
-        }
-        let coverage = await AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[4]) {
-            try await CoverageAnalyzer().analyze(projectRoot: directory, options: .default)
-        }
-        var attempts = [code.attempt, git.attempt, logs.attempt, deps.attempt, coverage.attempt]
-        attempts[0].limitsHit = code.value?.scanLimitations ?? []
-        report.code = code.value
-        report.git = git.value
-        report.logs = logs.value
-        report.dependencies = deps.value
-        report.coverage = coverage.value
-        report.health = WeightedHealthScorer().score(HealthInputs(
-            code: report.code, git: report.git, logs: report.logs,
-            dependencies: report.dependencies, coverage: report.coverage, previousScore: nil))
-        report.attemptedAt = Date()
-        report.failedSections = attempts.compactMap { $0.failureReason == nil ? nil : $0.label }
-        report.analyzerLedger = AnalyzerLedger.records(from: attempts)
-        // ⚠️ 这份**测试副本**重演了 GUI 装配而不是调用它 ⇒ AppState 每加一个字段这里就静默落后
-        //    一格（实测就漏过 provenance）。抽成共用装配函数是 R10 第 0.5 条的契约缺口。
-        report.provenance = ScanProvenance(report: report, scannedRoot: directory.path, producedBy: "gui")
-        store.save(report: report)
-        return try XCTUnwrap(
-            FileManager.default.contentsOfDirectory(at: sandbox.appendingPathComponent("reports"),
-                                                    includingPropertiesForKeys: nil).first,
-            "GUI 侧没落出报告文件")
+        try await GuiSideReportReplay.persist(projectDirectory: directory,
+                                              sandbox: base.appendingPathComponent("support",
+                                                                                   isDirectory: true),
+                                              projectName: "R5 对表夹具")
     }
 
     /// 覆盖率段先自己比一遍（抹掉 `*At`），免得只能等脚本吐一行不带上下文的不等。

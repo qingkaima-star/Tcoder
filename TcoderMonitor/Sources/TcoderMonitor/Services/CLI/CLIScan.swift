@@ -54,6 +54,9 @@ final class CLIScan {
         let codeAnalyzer = code, gitAnalyzer = git, logAnalyzer = logs
         let depAnalyzer = deps, coverageAnalyzer = coverage
         let extraLogURLs = extraLogPaths.map { URL(fileURLWithPath: $0) }
+        // RD-31：开工前先采一枚**元数据指纹**（不读任何文件内容），收工后再采一枚。
+        // 采在五路之前、比对在装配之前，两侧用的是同一个 `SourceTreeFingerprint.probe`。
+        let fingerprintAtStart = SourceTreeFingerprint.probe(root: root)
 
         async let codeResult = AnalyzerLedger.timed(Self.sectionLabels[0]) {
             try await codeAnalyzer.analyze(root: root, options: .default)
@@ -97,7 +100,11 @@ final class CLIScan {
         report.analyzerLedger = AnalyzerLedger.records(from: [codeAttempt, gi.attempt, ls.attempt, dp.attempt, cv.attempt])
         // 溯源块最后装配：它要读 Git 那一路已经拿到的提交号与工作区状态，
         // 自己不再起第二个 git 进程（两处各查一次迟早分叉）。
-        report.provenance = ScanProvenance(report: report, scannedRoot: root.path, producedBy: "cli")
+        var provenance = ScanProvenance(report: report, scannedRoot: root.path, producedBy: "cli")
+        // 五路跑完之后、装配报告之前再采一枚：这两枚之间隔着的就是"扫描这段时间"。
+        provenance.recordDrift(startingFrom: fingerprintAtStart,
+                               endingAt: SourceTreeFingerprint.probe(root: root))
+        report.provenance = provenance
 
         return CLIScanOutcome(report: report,
                               exit: CLIExit.failedSections(failures.count),

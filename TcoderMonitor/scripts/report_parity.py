@@ -52,11 +52,16 @@ def walk(a, b, path=""):
     if isinstance(a, dict) and isinstance(b, dict):
         for k in sorted(set(a) | set(b)):
             p = f"{path}.{k}" if path else k
+            # ⚠️ 缺席那一侧要点名对：`k not in a`（a=GUI）说的是 **GUI 没有、只有 CLI 有**。
+            # 这两句原先写反了（2026-09-24 RD-31×RD-60 那次对表就是被它带偏方向的：
+            # 真缺键的是 GUI 侧那份测试装配副本，打印出来却像 CLI 侧没量到。
+            # 判败/判容忍的分类与计数都不受影响，改的只是这条读数说谁）——
+            # 方向由 `ProvenanceParityToleranceTests.test_absenceLabelsNameTheSideThatActuallyMisses` 钉住。
             if k not in a:
-                (soft if is_tolerated(p) else hard).append(f"{p}: 只有 GUI 有（CLI 缺）")
+                (soft if is_tolerated(p) else hard).append(f"{p}: 只有 CLI 有（GUI 缺）")
                 continue
             if k not in b:
-                (soft if is_tolerated(p) else hard).append(f"{p}: 只有 CLI 有（GUI 缺）")
+                (soft if is_tolerated(p) else hard).append(f"{p}: 只有 GUI 有（CLI 缺）")
                 continue
             h, s = walk(a[k], b[k], p)
             hard += h
