@@ -57,6 +57,9 @@ def find_violations(text: str):
 
 
 def report(text: str, label: str) -> int:
+    if not text.strip():
+        print(f"❌ {label}: 读不到任何正文 ⇒ 不许把「没内容」读成「干净」，判用法错")
+        return 2
     hits = find_violations(text)
     for no, col, snippet in hits:
         print(f"{label}:{no}:{col}: {snippet}")
