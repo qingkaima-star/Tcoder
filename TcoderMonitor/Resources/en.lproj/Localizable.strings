@@ -1146,3 +1146,10 @@
 "条数 %1$@ → %2$@ · 字节 %3$@ → %4$@ · 路径摘要 %5$@ → %6$@" = "files %1$@ -> %2$@, bytes %3$@ -> %4$@, path digest %5$@ -> %6$@";
 "开工侧指纹没量到：%1$@" = "The scan-start fingerprint was not measured: %1$@";
 "收工侧指纹没量到：%1$@" = "The scan-end fingerprint was not measured: %1$@";
+// RD-60 第二半（R25b）：崩溃证据那几句里**不含数字**的三句 —— 一枚整句键 + 两枚整句框架键。
+// 框架键的 `%1$@` 槽装的是别处已经查过表的整串，词序由英文侧自己定；
+// 没有把「未测准：」「读取失败的原因分布：」登记成半句键（半句键拼完的整串永远查不中）。
+// 注释一律 `//`（一个 `#` 会让系统解析器从那一行起整段放弃）；英文值只用 ASCII 标点、不含裸引号。
+"「哪些没测准」那一句的判据输入未落盘，这里只呈现逐条原因" = "The criteria inputs behind the 'which parts were not measured accurately' sentence are not persisted, so only the per-reason breakdown is shown here.";
+"未测准：%1$@" = "Not measured accurately: %1$@";
+"读取失败的原因分布：%1$@" = "Reason breakdown for the unreadable files: %1$@";

@@ -296,19 +296,13 @@ struct CrashEvidenceLedger: Sendable, Equatable {
 
     // MARK: 说人话
 
-    /// 一句「测到了什么」。分数旁边的解释与界面脚注共用它，避免出现两个口径。
-    var statement: String {
-        var parts: [String] = []
-        parts.append("确认崩溃 \(countedCrashCount) 次计入")
-        if historicalConfirmedCount > 0 { parts.append("历史报告 \(historicalConfirmedCount) 次在窗口外") }
-        if staleBuildConfirmedCount > 0 { parts.append("旧构建 \(staleBuildConfirmedCount) 次未算当前版本") }
-        if undatedConfirmedCount > 0 { parts.append("无事件时间 \(undatedConfirmedCount) 次单列") }
-        if suspectedCount > 0 { parts.append("疑似报告 \(suspectedCount) 份") }
-        if parseFailedCount > 0 { parts.append("解析失败 \(parseFailedCount) 份") }
-        if readFailedCount > 0 { parts.append("读取失败 \(readFailedCount) 份") }
-        if duplicateCount > 0 { parts.append("同一事件去重合并 \(duplicateCount) 份") }
-        return parts.joined(separator: " · ")
-    }
+    /// 一句「测到了什么」。分数旁边的解释、界面脚注与 CLI 的文本读数共用它。
+    ///
+    /// RD-60 之后**措辞不在这个文件里**：它住在唯一生产者 `CrashEvidenceReadout.ReasonCounts.statement`，
+    /// 这里只把台账自己那八枚读数包成那个形状再交出去。为什么必须这样：`LogSummary.crashEvidence`
+    /// 落盘的是**计数**，视图与 CLI 手里只有那些计数，如果台账自己再拼一句、快照另拼一句，
+    /// 屏上那句与账上那句迟早分叉（RD-43/51 同族）。八种原因一条都不许在这里被合成一个数。
+    var statement: String { reasonCounts.statement }
 
     /// 「哪些没测准」——缺证据的一律留在这里出声，而不是变成一个 0。
     var unknownStatement: String? {
