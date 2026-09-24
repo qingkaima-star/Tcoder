@@ -863,5 +863,37 @@
 			<string>%lld files merged as further copies of the same event</string>
 		</dict>
 	</dict>
+	<key>最近 %1$lld 天为窗口，逐条原因如下：%2$@</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%1$#@crashEvidenceWindowDays@; per-reason breakdown: %2$@</string>
+		<key>crashEvidenceWindowDays</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>The window is the last %1$lld day</string>
+			<key>other</key>
+			<string>The window is the last %1$lld days</string>
+		</dict>
+	</dict>
+	<key>另有 %lld 份崩溃通道文件未产出可计数的证据，逐条原因见上</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceSilentFiles@</string>
+		<key>crashEvidenceSilentFiles</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>A further %lld crash-channel file produced no countable evidence; the per-reason breakdown is above</string>
+			<key>other</key>
+			<string>A further %lld crash-channel files produced no countable evidence; the per-reason breakdown is above</string>
+		</dict>
+	</dict>
 </dict>
 </plist>

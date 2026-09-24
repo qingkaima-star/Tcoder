@@ -200,7 +200,13 @@ enum CrashEvidenceReadout {
         var parts: [String] = []
 
         if let reasons = reading.separatedReasons {
-            parts.append("最近 \(reading.windowDays) 天为窗口，逐条原因如下：" + reasons)
+            // 混槽整句键：第 1 槽 `%1$lld`（窗口天数，英文要分 `1 day` / `30 days`）、
+            // 第 2 槽 `%2$@`（已经各自查过表的逐条原因整串）。
+            // 原来这一句是「中文字面量 + 变量」拼出去的 ⇒ 拼完的整串永远查不中（守卫 1d 那一族）。
+            // 走 `localizedCount(_:count:note:)` 这条路（本仓既有的混槽出口，不另造机制）：
+            // 字符串槽先以一枚不含数字的占位符落地，补完千分位才换回真值。
+            parts.append(localizedCount("最近 %1$lld 天为窗口，逐条原因如下：%2$@",
+                                         count: reading.windowDays, note: reasons))
         } else {
             // 整句键，且是**目录里已有**的那一枚（批次 P69c 登记、`Localizable.stringsdict`
             // 顶层键 `窗口内确认崩溃 %lld 次，只统计有真实事件证据的报告`，one/other 两支）。
@@ -215,7 +221,10 @@ enum CrashEvidenceReadout {
         if let counted = reading.filesWithCountedEvidence {
             let silentFiles = Swift.max(0, reading.crashChannelFileCount - counted)
             if silentFiles > 0 {
-                parts.append("另有 \(silentFiles) 份崩溃通道文件未产出可计数的证据，逐条原因见上")
+                // 整句键：量词 `份` 与数字分槽，英文侧 `A further %lld file …` / `… %lld files …`
+                // 两支由 `.stringsdict` 选；中文态填完就是原来那句，一字未动。
+                parts.append(localizedCount("另有 %lld 份崩溃通道文件未产出可计数的证据，逐条原因见上",
+                                            silentFiles))
             }
         } else if reading.crashChannelFileCount > 0 {
             parts.append("崩溃通道读到 \(reading.crashChannelFileCount) 份报告；"
