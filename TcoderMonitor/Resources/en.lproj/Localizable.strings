@@ -1162,3 +1162,12 @@
 "未产出该类报告" = "No Report Of This Category";
 "单元测试：%1$@" = "Unit Tests: %1$@";
 "集成测试：%1$@" = "Integration Tests: %1$@";
+
+// RD-68（R39）：「能不能说没有已知漏洞」收成一道的闸门
+// `DependencyEvidence.vulnerabilityCoverage`，三档话术只产自
+// `Services/Dependencies/DependencyEvidence.swift` 的 `DependencyVulnerabilityCoverage.statement`；
+// 屏上结论格、安全公告空态、无头出口、报告级陈述句四处逐字同源。
+// 全覆盖那枚（「已核对 %1$@ / %2$@ 个依赖，未发现已知漏洞」）P67 之前就登记过、未重复登记，
+// 这次它第一次有了上屏读者（此前只被一个零调用方的函数用着）；下面两枚是新增的部分覆盖/零覆盖档。
+"已核对 %1$@ / %2$@ 个依赖，另外 %3$@ 个没查 —— 这是「没查全」，不是「没有漏洞」" = "Checked %1$@ / %2$@ dependencies; %3$@ more went unchecked - an incomplete sweep, not a statement that there are no vulnerabilities";
+"共 %1$@ 个依赖，一条都没核对 —— 这是「没查全」，不是「没有漏洞」" = "None of the %1$@ dependencies were checked - nothing was swept, which is not a statement that there are no vulnerabilities";

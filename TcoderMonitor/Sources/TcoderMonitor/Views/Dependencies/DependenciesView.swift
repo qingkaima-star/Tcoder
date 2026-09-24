@@ -387,14 +387,9 @@ struct DependencyAdvisoriesSection: View {
     }
 
     /// 空列表不等于「没有漏洞」：默认离线时 `vulnerableCount` 恒为 0，那是「没查」。
+    /// RD-68：分派收回 `DependencySafetyVerdict.advisoryEmptyCaption` —— 视图里再 `switch`
+    /// 一次"是不是 `.clean`"就是第二把尺子（那正是「已完成核对」在部分覆盖时上屏的走法）。
     static func emptyCaption(_ deps: DependencyReport) -> String {
-        switch DependencySafetyVerdict(deps) {
-        case .unchecked:
-            return "本次未联网核对，0 条命中只是「没有查」，不是「没有病」。"
-        case .clean:
-            return "已完成核对，未发现已知漏洞。"
-        case .findings:
-            return "有命中，见上方列表。"
-        }
+        DependencySafetyVerdict(deps).advisoryEmptyCaption
     }
 }
