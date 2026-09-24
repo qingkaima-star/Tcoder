@@ -170,6 +170,12 @@ extension ComplexityEngine {
     static func curlyEnd(start: Int, _ src: SanitizedSource, _ profile: LangProfile) -> (closing: Int, brace: Int)? {
         let n = src.cleaned.count
         let base = src.prefix[start]
+        // RD-79：本条语句「说完」在哪一行。往后出现的 `{` 如果越过这一行，它属于**下一条**语句，
+        // 不能当自己的边界。没有这条上界时，一个不带花括号的箭头体（`const add = (a, b) => a + b`）
+        // 会把紧随其后的对象字面量 / `if` 块整段吃成自己的体，而被吃掉的区间里**真有函数也不再被扫到**
+        // （扫描线 `cursor = endLine + 1` 一步跨过）。探针实测：1 行的箭头被读成 4 行 / CC=1。
+        // 只在需要往后找 `{` 的那一刻算一次（签名行自带 `{` 的常态一次都不算，见下面的 cursor == start + 1）。
+        var statementLimit: Int?
         var cursor = start
         var braceLine = -1
         while cursor < n {
@@ -181,6 +187,8 @@ extension ComplexityEngine {
                 // 向后找 `{` 的窗口里又出现一条新签名，说明本行只是无函数体的声明
                 // （Swift 协议要求、@objc 声明、C 原型），不能把下一个函数的 `{` 当成自己的边界
                 if cursor > start, matchSignature(src.cleaned[cursor], profile) != nil { return nil }
+                if cursor == start + 1 { statementLimit = statementEnd(start: start, src.cleaned) }
+                if cursor > start, let statementLimit, cursor > statementLimit { return nil }
                 if src.opens[cursor] > 0 {
                     braceLine = cursor
                     if src.prefix[cursor + 1] <= base { return (cursor, cursor) }

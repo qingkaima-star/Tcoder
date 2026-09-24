@@ -197,8 +197,18 @@ extension ComplexityEngine {
         func bodyBoundary() -> (closing: Int?, signatureEnd: Int) {
             switch profile.family {
             case .curly, .shell:
-                guard let span = ComplexityEngine.curlyEnd(start: line, src, profile) else { return (nil, line) }
-                return (span.closing, span.brace)
+                if let span = ComplexityEngine.curlyEnd(start: line, src, profile) {
+                    return (span.closing, span.brace)
+                }
+                // RD-79：花括号族里没有 `{` 可接，不等于这行不是函数 ——
+                // JS/TS/Vue 的箭头**表达式体**天生不带花括号（`const f = (x) => x + 1`）。
+                // `curlyEnd` 现已拒绝去接**下一条语句**的 `{`（那是上一版把对象字面量吃成函数体的入口），
+                // 这一档就是把那种写法接回它自己的体；接不上仍按「边界推不出来」如实出声。
+                if profile.arrowExpressionBody,
+                   let body = ComplexityEngine.arrowExpressionBodyEnd(start: line, src.cleaned) {
+                    return (body.end, body.signatureEnd)
+                }
+                return (nil, line)
             case .indentation:
                 let signatureEnd = ComplexityEngine.multiLineSignatureEnd(start: line, src.cleaned,
                                                                          closingChars: [":"])
@@ -214,5 +224,96 @@ extension ComplexityEngine {
                 return (nil, line)
             }
         }
+    }
+
+    // MARK: 语句收尾（RD-79：箭头表达式体与「下一条语句的 `{`」）
+
+    /// 一行里全部定界符的净增量（`()[]{}` 一起算）。
+    /// 拿的是**清洗后**的行：字符串与注释已置空，所以字面量里的括号不会骗到计数。
+    static func delimiterDelta(_ line: String) -> Int {
+        var delta = 0
+        for character in line {
+            switch character {
+            case "(", "[", "{": delta += 1
+            case ")", "]", "}": delta -= 1
+            default: break
+            }
+        }
+        return delta
+    }
+
+    static let trailingContinuationCharacters: Set<Character> =
+        ["+", "-", "*", "/", "%", "=", "<", ">", "&", "|", "^", "?", ":", "."]
+    /// 换行开头的续行算符。**故意不含 `/`**：清洗后仍留在行首的 `/` 多半是正则或除法的尾巴，
+    /// 为一个罕见形状白担一份「把下一条语句并进来」的风险。
+    /// `-` 与 `>` 必须在：Swift / Rust 的返回类型常另起一行写 `-> X`，
+    /// 少了这一档会把这类真函数的签名判成「本行已说完」，接着把下一行的 `{` 挡在界外
+    /// （本仓自扫实测：`static func buildIndex(files:…)\n    -> (…) {` 一批 20 多处被误杀，
+    /// 由 `testMultilineSignatureWithReturnOnItsOwnLineKeepsItsBody` 钉住）。
+    static let leadingContinuationCharacters: Set<Character> =
+        ["?", ":", "&", "|", "+", "=", ".", ",", "-", ">"]
+
+    /// 本行之后这条语句**还没说完**吗（RD-79 的语句收尾判据）。
+    /// 顺序不是随便排的：先看后面**还有没有**一行有内容的 —— 文件到这就结束了，
+    /// 再像「没说完」也没有下一条可并，此刻必须判说完（三元换行收尾于 `:` 时踩过这一格）。
+    /// 然后行尾 `;` 一律判说完（C 的原型声明、JS 的语句都是它）；行尾是算符判没说；
+    /// 最后看下一非空行 —— 以 `{` 开头是 Java/C# 的「花括号独占一行」，
+    /// 以续行算符开头是点号链与三元换行，两种都算没说。
+    /// 逗号**不在**「行尾算符」里：`key: (x) => x + 1,` 那个逗号是对象语法的分隔符，
+    /// 把它读成「本行没说完」会把下一行并进体里（探针实测 `.key` 从 1 行变 2 行）。
+    static func statementContinues(after line: Int, cleaned: [String]) -> Bool {
+        var next = line + 1
+        while next < cleaned.count,
+              cleaned[next].trimmingCharacters(in: .whitespaces).isEmpty { next += 1 }
+        guard next < cleaned.count else { return false }
+        let text = cleaned[line].trimmingCharacters(in: .whitespaces)
+        if let last = text.last {
+            if last == ";" { return false }
+            if trailingContinuationCharacters.contains(last) { return true }
+        }
+        let head = cleaned[next].trimmingCharacters(in: .whitespaces)
+        if head.hasPrefix("{") { return true }
+        if leadingContinuationCharacters.contains(where: { head.hasPrefix(String($0)) }) { return true }
+        return startsWithSignatureContinuationWord(head)
+    }
+
+    /// 下一行以「只有签名收尾才会用的词」开头 —— 参数表已闭合但仍属同一条签名。
+    /// 三条真实语料逼出来的：Swift 的 `func f(...)\n    async -> T {`、
+    /// 同族的 `\n    throws -> T {`、以及 `\n    where T: X {`；Java/Kotlin 的 `throws X {` 走同一个词。
+    /// 少了这一档，本仓自扫当场误杀两处真函数（`ShellGitAnalyzer.scanNestedRepositories`
+    /// 与 `CLIProcessTests.launch`，都是返回类型另起一行写的），所以它是判据不是糖。
+    static func startsWithSignatureContinuationWord(_ head: String) -> Bool {
+        let word = String(head.prefix(while: { $0.isLetter }))
+        return signatureContinuationWords.contains(word)
+    }
+
+    static let signatureContinuationWords: Set<String> =
+        ["async", "await", "throws", "rethrows", "where"]
+
+    /// 从 `start` 行开始的这条语句在哪一行「说完」了：定界符深度回到起点、且本行之后不算续行。
+    /// 深度转负说明这一段读不通（多余的右括号 / 掩码边界切错），一律返回 nil 交回原路径 ——
+    /// 宁可不判，也不猜一个边界。窗口见 `maxStatementLookahead`：窗口内收不了尾同样返回 nil。
+    static func statementEnd(start: Int, _ cleaned: [String], window: Int? = nil) -> Int? {
+        let upper = min(cleaned.count - 1, start + (window ?? maxStatementLookahead))
+        guard start <= upper else { return nil }
+        var depth = 0
+        var cursor = start
+        while cursor <= upper {
+            depth += delimiterDelta(cleaned[cursor])
+            if depth < 0 { return nil }
+            if depth == 0, !statementContinues(after: cursor, cleaned: cleaned) { return cursor }
+            cursor += 1
+        }
+        return nil
+    }
+
+    /// 箭头的**表达式体**（`const f = (x) => x + 1`，以及点号链 / 三元铺开成几行的那种）。
+    /// 两个读数一起给：体的最后一行（边界）与**签名**的最后一行（第一个 `=>` 所在行）——
+    /// 参数计数只能吃签名那一段，否则 `const f = x => items.map((y) => y)`
+    /// 会把 `map(` 的参数表当成自己的。收尾判不出来就返回 nil，照旧走「边界推不出来」那句出声。
+    static func arrowExpressionBodyEnd(start: Int, _ cleaned: [String]) -> (end: Int, signatureEnd: Int)? {
+        guard let end = statementEnd(start: start, cleaned) else { return nil }
+        guard let signatureEnd = (start...end).first(where: { cleaned[$0].contains("=>") }) else { return nil }
+        return (end, signatureEnd)
     }
 }

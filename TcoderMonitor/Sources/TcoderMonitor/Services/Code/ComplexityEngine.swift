@@ -29,6 +29,10 @@ enum ComplexityEngine {
     static let maxCandidatesPerFile = 20_000
     /// 多行签名时向后找第一个 `{` 的最大跨度
     static let maxSignatureLookahead = 8
+    /// RD-79：判断「本条语句到哪一行说完」最多往后看多少行。
+    /// 比 `maxSignatureLookahead` 宽，因为铺开的花式写法（点号链、三元、逐行参数表）
+    /// 天然就是好几行；超出这个窗口一律不判（宁缺毋滥，交回「边界推不出来」那句出声）。
+    static let maxStatementLookahead = 16
     /// 嵌套具名函数下钻的最大深度：超过就不再展开，其判定并入直接外层，
     /// 并通过 `FunctionScanOutcome.nestedDepthTruncatedCount` 出声（R2 / RD-08）。
     /// 为什么要有上限：每下一层就要把上一层的体再扫一遍，深度无界时病态夹具会打成 N×深度。
