@@ -54,7 +54,13 @@ trap 'retire_mine; exit 143' INT TERM       # 被中断也先把实例收干净�
 
 wait_for_lock() {  # 别人的全量在跑就别抢机器（两档互踩：窗内重活那一维会把自己那批打回）
   local waited=0
-  while pgrep -f "locked_build.sh test" >/dev/null 2>&1; do
+  # 认**整条 `locked_build.sh`**，不认到子命令：门禁有两种压满机器的形状——
+  # `premerge_check.sh` 先 `locked_build.sh build --build-tests`（编译段）再 `… test`（跑测段），
+  # `build_app.sh` 又是 `locked_build.sh build -c release`。09-25 07:05 现场 `ps` 抓到 59643 是 test 段，
+  # 而 t19 那两趟 `contaminated_by_foreign_load=1` 正是死在全量**尾巴**上——尾巴里编译和测试没区别。
+  # ⚠ 这条管不到不用 locked_build 的负载（别家直接 xctest、xctrace、Time Machine），
+  #    那些仍由第七维"窗内在场重活"兜；这里只补最常见的那一格。
+  while pgrep -f "locked_build\.sh" >/dev/null 2>&1; do
     nap 20; waited=$((waited + 20))
     [ "$waited" -ge 1800 ] && { echo "!! 等了 30 分钟还有别家全量在跑 ⇒ 这一批不开了" >&2; return 1; }
   done
