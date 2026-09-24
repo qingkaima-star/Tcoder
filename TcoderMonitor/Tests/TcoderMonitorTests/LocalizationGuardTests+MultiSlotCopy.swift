@@ -24,19 +24,37 @@ extension LocalizationGuardTests {
     //   ① 先用**真 bundle** 证明多槽 stringsdict 真的各支独立选对（不成立就别往上盖房子）；
     //   ② 再把"模板不许自带数字"钉成目录判据 —— 逐槽千分位的全部前提就是这一条；
     //   ③ 千分位算法自己的元测试（正对照 + 不误伤），含"两个槽字面相同"那一格；
-    //   ④ 中文侧逐字不变（含走真产品路径的那三句）；
-    //   ⑤ 每条键都在自己的生产者那里被查。
+    //   ④ 中文侧逐字不变（RD-60 收尾轮 R2 之后**射程收回到仍然一字未变的那几句**，见该条注释）；
+    //   ⑤ 每条键都在自己的生产者那里被查 —— 只量 `p69cSlotKeys` 那一份名单。
+    //
+    // RD-60 收尾轮（R3 裁定）之后这一族**分两个文件**住：①b 的混槽那一支、② 的元测试、
+    // 以及那份"只为契约保活"的夹具名单和它的分母断言，都在
+    // `LocalizationGuardTests+P69cFixtureRoster.swift`（同一个类型，400 行闸门逼着分片）。
 
     /// 本批登记的槽型键：`pluralSlots` = 复数（`%lld`）槽数，`textSlots` = 字符串（`%@`）槽数。
     /// 守卫按这张表逐条量目录 —— **加了键没登记进表 = 表与目录分叉当场红**。
     /// 键一律写成**一整条字面量**（不许 `+` 拼）：这张表本身就是"运行时送进查表那一串"的副本，
     /// 拼出来的话它就变成守卫 1d 点名的那族半句键，判据自己先失真。
+    ///
+    /// ⚠ **RD-60 收尾轮（R3 裁定）把这份名单收死成一句话**：这里**只放有生产者的键**，
+    /// 因为 ⑤ 那句「每条键都在自己的生产者那里被查」是全名单量词 —— 掺进一枚夹具键，
+    /// 那句真话就被稀释成"大概都有人查"。只为契约保活、屏上不出现的那两枚夹具键
+    /// 搬去同类型的 `p69cFixtureOnlySlotKeys`（在 `+P69cFixtureRoster.swift`），
+    /// 那边自带分母断言，不许它变成空壳。
     private static let p69cSlotKeys: [(key: String, pluralSlots: Int, textSlots: Int)] = [
         ("共 %lld 天 · 单日峰值 %lld 条", 2, 0),
-        ("另有 %lld 次确认崩溃的事件时间在最近 %lld 天之外，属历史报告", 2, 0),
-        ("读取失败 %1$lld 份（%2$@）未参与判定", 1, 1),
-        ("还有 %lld 份崩溃通道文件未产出可计数的证据（内容损坏 / 只有文件名像 / 无事件时间 / 构建版本不是当前 / 同一事件的另一份），逐条原因待 LogSummary 落盘崩溃证据字段后展示", 1, 0),
+        // 混槽那一枚原先登记的是夹具键 `读取失败 %1$lld 份（%2$@）未参与判定`（RD-60 把那句
+        // 换成了两条在产键 ⇒ 它成了孤儿）。R3 第 2 步：混槽夹具**改指到生产路径上真实被查的
+        // 同形状键**（`%1$lld` + `%2$@`，生产者 = `CrashEvidenceReadout.footnote`）。
+        ("最近 %1$lld 天为窗口，逐条原因如下：%2$@", 1, 1),
     ]
+
+    /// ② 那把目录尺子（"模板不许自带数字" + 复数变量个数 + 混槽崩溃契约）读的是
+    /// **两份名单之和**：夹具键屏上不出现，可它的目录块照样能把千分位补到别人的数字上 ⇒ 不漏它。
+    /// 反过来 ⑤ 只读 `p69cSlotKeys` —— 分家就分在这两行的差集上。
+    static var p69cAllSlotKeys: [(key: String, pluralSlots: Int, textSlots: Int)] {
+        p69cSlotKeys + p69cFixtureOnlySlotKeys
+    }
 
     /// ① 多槽 stringsdict **真的**各支独立选对了吗。
     ///
@@ -62,6 +80,10 @@ extension LocalizationGuardTests {
         // 把它写在第二个槽的 one/other 上，(3,1) 就会输出
         // `3 confirmed crashes has…` —— 中文永远测不出来，只有交叉格能量到。
         let days = "共 %lld 天 · 单日峰值 %lld 条"
+        // 这一枚是**夹具键**（`p69cFixtureOnlySlotKeys`）：RD-60 之后屏上不再出这句，
+        // 但"动词只能跟第一个槽"这个结论**只有它的英文值带动词**能撑住
+        // （全目录现量：两枚两复数槽键里另一枚 `共 %lld 天…` 的英文值是名词短语、无动词可错），
+        // 所以 R3 第 3 步判它**不删**，改成夹具名单成员，⑤ 不再要求它有生产者。
         let historical = "另有 %lld 次确认崩溃的事件时间在最近 %lld 天之外，属历史报告"
         let cases: [(key: String, slots: [Int], expect: String)] = [
             (days, [1, 1], "1 day · single-day peak 1 entry"),
@@ -89,23 +111,6 @@ extension LocalizationGuardTests {
         }
     }
 
-    /// ①b 混槽（复数 + 任意字符串）这一支：字符串落在**它自己的位置**上，
-    /// 复数仍然按数字选形态。这条成立了，`读取失败 N 份（原因）未参与判定`
-    /// 才允许留成一条整句键；它不成立就得拆两句（见 `localizedCount(_:count:note:)` 注释）。
-    func test_p69cMixedSlotKeyResolvesPluralAndTextInEnglish() throws {
-        let en = LocalizationGuardTests.packageRoot.appendingPathComponent("Resources/en.lproj")
-        guard let bundle = Bundle(url: en) else {
-            return XCTFail("打不开 \(en.path) —— 英文资源不在原位，本条不能算通过")
-        }
-        let key = "读取失败 %1$lld 份（%2$@）未参与判定"
-        let template = bundle.localizedString(forKey: key, value: "\u{FFFF}", table: nil)
-        XCTAssertFalse(template.contains("\u{FFFF}"), "混槽键在 stringsdict 里查不到")
-        XCTAssertEqual(String(format: template, arguments: [1, "perm denied"] as [CVarArg]),
-                       "1 unreadable crash file (perm denied) left out of the verdict")
-        XCTAssertEqual(String(format: template, arguments: [4, "perm denied"] as [CVarArg]),
-                       "4 unreadable crash files (perm denied) left out of the verdict")
-    }
-
     /// ② 目录判据：**槽型键的模板里不许有非转换符的数字**。
     ///
     /// 为什么这条必须存在而不是"记得别写数字"：`groupedInto(_:counts:)` 的配对规则是
@@ -113,15 +118,17 @@ extension LocalizationGuardTests {
     /// （`{1,2,2.5,5}×10ⁿ`、`0…100`、`1,000 lines` 这种），段数就比槽数多，
     /// 千分位会补到别人的数字上 —— 而且中文态看不出来（中文那几个数本来就不分组）。
     /// 中文键与英文两支形态**都要量**：中文那一份走的是 `String(format: 键, …)` 这条路。
+    /// 分家之后（R3 第 3 步）这一条读的是 `p69cAllSlotKeys` = **有生产者的那份 + 夹具那份**，
+    /// 夹具键屏上不出现，可它的目录块照样能把千分位补错地方 ⇒ 一条都不许少。
     func test_p69cRegisteredSlotKeysCarryNoForeignDigitRuns() throws {
         let path = LocalizationGuardTests.packageRoot
             .appendingPathComponent("Resources/en.lproj/Localizable.stringsdict").path
         let text = try String(contentsOfFile: path, encoding: .utf8)
         XCTAssertFalse(text.isEmpty, "读不到 stringsdict ⇒ 本条在空转")
-        XCTAssertFalse(Self.p69cSlotKeys.isEmpty, "槽型键名单是空的 ⇒ 本条在空转")
+        XCTAssertFalse(Self.p69cAllSlotKeys.isEmpty, "槽型键名单是空的 ⇒ 本条在空转")
 
         var problems: [String] = []
-        for item in Self.p69cSlotKeys {
+        for item in Self.p69cAllSlotKeys {
             guard let block = Self.stringsDictEntry(for: item.key, in: text) else {
                 problems.append("\(item.key)：stringsdict 里没有这条顶层键（缩进不是一个 tab？）")
                 continue
@@ -156,44 +163,10 @@ extension LocalizationGuardTests {
                         + problems.joined(separator: "\n  "))
     }
 
-    /// 元测试（判据的判据）：一条**真带数字**的模板必须被上面那把尺子点出来，
-    /// 而 `LogsTrendCard.footnote` 那种真实存在的旧形状（`{1,2,2.5,5}×10ⁿ`、`0…100`）
-    /// 就是它的样子 —— 拿本仓自己的句子当坏样例，不是编一个。
-    /// 反向：本批四条真键一条都不许被误伤（上面那条已经绿，但那条是"全都要过"，
-    /// 这一条才说明过滤器没有把一切都判死）。
-    func test_meta_p69cDigitRulerCatchesRealShapesAndSparesThisBatch() throws {
-        let dirty = [
-            "纵轴 0…%1$@ 条，按 {1,2,2.5,5}×10ⁿ 台阶取轴。",
-            "%@ per 1,000 lines",
-            "%1$lld 天 · 峰值 %2$lld 条（近 30 日）",
-        ]
-        for sample in dirty {
-            XCTAssertNotNil(Self.foreignDigits(in: sample), "带数字的模板没被抓到：\(sample)")
-        }
-        let clean = [
-            "共 %lld 天 · 单日峰值 %lld 条",
-            "读取失败 %1$lld 份（%2$@）未参与判定",
-            "%1$#@unreadableCrashFiles@ (%2$@) left out of the verdict",
-            "single-day peak %lld entries · 占全机 %1$@ 的写法不含数字？不含。",
-        ]
-        for sample in clean {
-            XCTAssertNil(Self.foreignDigits(in: sample), "合法模板被误伤：\(sample)")
-        }
-        // 分母自证：本批四条键确实逐条被上面那条读到（名单写了却一条都没在目录里 ⇒
-        // `problems` 非空，但过滤器坏掉时它是空的，所以要正面数一次）。
-        let path = LocalizationGuardTests.packageRoot
-            .appendingPathComponent("Resources/en.lproj/Localizable.stringsdict").path
-        let text = try String(contentsOfFile: path, encoding: .utf8)
-        let found = Self.p69cSlotKeys.filter { Self.stringsDictEntry(for: $0.key, in: text) != nil }
-        XCTAssertEqual(found.count, Self.p69cSlotKeys.count, "有键的整块取不到 ⇒ 上面那条判据在空转")
-        // 混槽形状契约：把两个槽的编号对调 ⇒ 必须判坏（对调后是"Int 喂 %@"，启动即崩那一族）。
-        XCTAssertNotNil(Self.mixedSlotContractBroken(key: "读取失败 %1$@ 份（%2$lld）未参与判定",
-                                                     formatKey: "%2$#@f@ (%1$@) left out"),
-                        "对调过的混槽键没被抓到 ⇒ 那条崩溃只剩运行时看得见")
-        XCTAssertNil(Self.mixedSlotContractBroken(key: "读取失败 %1$lld 份（%2$@）未参与判定",
-                                                  formatKey: "%1$#@f@ (%2$@) left out"),
-                     "本批真正在用的形状被判坏 ⇒ 契约写歪了")
-    }
+    /// 上面那条 ② 的元测试（`test_meta_p69cDigitRulerCatchesRealShapesAndSparesThisBatch`）
+    /// 与它一起测的那三格混槽形状契约，搬去了
+    /// `LocalizationGuardTests+P69cFixtureRoster.swift`：400 行闸门逼着分片，
+    /// 而那个文件正是"夹具名册 + 混槽那一支"住的地方 —— **判据本身一条没改**。
 
     /// ③ 多槽千分位算法自己的元测试。这一条是"新出口 = 新判据"里**咬人**的那一半。
     func test_p69cMultiSlotGroupingFillsEverySlotAndSparesForeignDigits() {
@@ -236,11 +209,77 @@ extension LocalizationGuardTests {
             "读取失败 1,234 份（文件已不存在 ×1234、权限不足 ×2）未参与判定")
     }
 
-    /// ④ 中文侧逐字不变。**改的是怎么取文案，不是文案本身。**
-    /// 期望值是从改前的源码抄下来的字面量，右半边是**按老写法现算**出来的同形串，
-    /// 两边都必须相等 —— 只写一边的话抄错了也测不出来。
+    /// ④ 中文侧逐字不变 —— **改的是怎么取文案，不是文案本身**。
+    /// 机制没换：**左边抄一份改前的中文字面量、右边用改前那个表达式现算**，两边必须相等；
+    /// 只写一边的话抄错了也测不出来（上面那两句原话，一条没丢）。
+    ///
+    /// ⚠ **射程（RD-60 收尾轮 · R2 裁定）**：④ 的前提是「四句一字不变」，而 RD-60 在 09-24
+    /// 把脚注那三句**换成了真话** —— 原句承诺「逐条原因待 LogSummary 落盘崩溃证据字段后展示」，
+    /// 这次整改正是把那个字段落了盘 ⇒ 那句承诺已经**过期且是假的**；原句里的"历史报告 N 次"
+    /// 现在由逐条原因台账分开点名。前提不成立的那部分从这条里收出去，收法三条：
+    ///   · **仍然一字未变的那句**（`窗口内确认崩溃 4 次，只统计有真实事件证据的报告`，
+    ///     R25b 复用既有键、措辞未变）**继续走双判据**：抄本 ⇄ 改前那个表达式现算；
+    ///   · **脚注整体**改钉**新值**，形状照旧（左字面量 + 右现算，右半边按夹具自己重数）；
+    ///   · 旧那两句**不许回屏**这件事已经有别人在钉，本条不再抄第二把同款尺子：
+    ///     `CrashEvidenceReadoutGuardTests.testEvidenceBackedFootnoteQuotesTheLedgerVerbatim`（①）
+    ///     与 `CrashEvidenceReadoutGuardTests.testMissingLedgerSaysUnmeasuredAndNeverEstimates`（③）。
+    /// 趋势卡副标题那三行**一字未动**，仍在最下面。
     func test_p69cChineseSideOfTheFourSentencesIsUnchanged() throws {
         let fixed = Date(timeIntervalSince1970: 1_800_000_000)
+        let summary = Self.p69cFootnoteFixture(now: fixed)
+        // RD-60：签名里的 `now` 是**有意删掉**的（窗口只在分析那一刻裁一次，上屏再裁第二次
+        // 就是同一个判据两处入口）。这里跟着换成新签名，**断言一条都没动**。
+        let rendered = summary.crashEvidenceFootnote(windowDays: 30)
+        // 存活那句的**右半边**：与改前**同一个表达式**现算。`retiredTrendHistoricalCrashes`
+        // 是那把被 RD-60 立掉的平行尺子的复现 —— 它在这里只当"抄本没抄错"的复算锚，
+        // 它算出来的那半句**不再是本条钉的产品输出**（不许把它读成"这句还该在屏上"）。
+        let legacyHead = "窗口内确认崩溃 \(summary.crashCount) 次，只统计有真实事件证据的报告"
+            + " · 另有 \(Self.retiredTrendHistoricalCrashes(summary, windowDays: 30, now: fixed)) 次确认崩溃的事件"
+            + "时间在最近 30 天之外，属历史报告"
+        // 左半边：抄自改前的 `FileLogAnalyzer.crashEvidenceFootnote`（两处插值 + 一次 `+` 拼接）。
+        XCTAssertEqual(legacyHead, "窗口内确认崩溃 4 次，只统计有真实事件证据的报告"
+                                 + " · 另有 2 次确认崩溃的事件时间在最近 30 天之外，属历史报告",
+                       "抄本与改前那个表达式对不上 ⇒ 是这里抄错了，不是产品把字改了")
+        // 存活那句 ⇄ 屏上第一段：措辞未变由这一格钉住，装配链上改一个字就红。
+        XCTAssertEqual(rendered.components(separatedBy: " · ").first,
+                       legacyHead.components(separatedBy: " · ").first,
+                       "R25b 复用既有键的那句在屏上换了措辞")
+        // 脚注整体：**09-24 被 RD-60 换成真话**之后的那份新值 —— 左字面量。
+        XCTAssertEqual(rendered, Self.p69cFootnoteNewValueCopy)
+        // 右半边：同一份新值按**夹具自己**重数一遍（读成功几份、读不动几份各数各的，
+        // 份数不与次数相减 —— 那是 RD-60 立掉的那把量纲混用的尺子，见 `CrashEvidenceReadout` 文件头）。
+        let readFiles = summary.scannedFiles.filter { $0.role == .crash }.count
+        let failedFiles = (summary.readFailedFiles ?? []).filter { $0.role == .crash }.count
+        XCTAssertEqual(rendered, Self.p69cFootnoteNewValueRecomputed(summary: summary,
+                                                                     readFiles: readFiles,
+                                                                     failedFiles: failedFiles))
+        // 趋势卡副标题：老写法是 `NumberFormat.grouped` 两处，新写法是填完之后补千分位。
+        for (days, peak) in [(7, 1_234), (1, 9), (1_000, 1_000), (365, 0)] {
+            XCTAssertEqual(localizedCount("共 %lld 天 · 单日峰值 %lld 条", slots: [days, peak]),
+                           "共 \(NumberFormat.grouped(days)) 天 · 单日峰值 \(NumberFormat.grouped(peak)) 条",
+                           "槽 (\(days), \(peak)) 的中文态与老写法分叉")
+        }
+    }
+
+    /// ⑤ 每条键都真的被它那个生产者查着（正向），假键必须报出来（反向）。
+    /// 没有反向那一半，"逐条都在源码里"这条绿只说明扫描面是空的。
+    /// ⚠ 判据对象是 `p69cSlotKeys` **那一份**名单（有生产者的键）：夹具键住在
+    /// `p69cFixtureOnlySlotKeys`，它们屏上不出现、要求不了生产者 —— 分家正是为了让这条
+    /// 那句"每枚都有生产者"继续是真话，而不是靠名单里塞豁免条目蒙过去。
+    func test_p69cSlotKeysAreLookedUpAtTheirProducers() throws {
+        let bodies = try SurfaceScanKit.sourceFiles(under: "").map(\.content).reduce("") { $0 + $1 }
+        XCTAssertEqual(Self.unusedPluralKeys(Self.p69cSlotKeys.map(\.key), in: bodies), [],
+                       "槽型键登记了却没人查 ⇒ 屏上仍是拼出来的中文")
+        XCTAssertFalse(Self.unusedPluralKeys(["P69c 夹具：这条键绝不存在 %lld 天"], in: bodies).isEmpty,
+                       "假键没被抓到 ⇒ 上面那条绿不可信")
+    }
+
+    // MARK: P69c 用的小工具
+
+    /// ④ 的那枚 `LogSummary` 夹具：窗口内 4 次确认崩溃、趋势桶里另压着 2 次窗口外的、
+    /// 崩溃通道读到 6 份、其中 2 份读不动（各带一种原因）。
+    /// 搬成函数只为躲 `X3TestSizeAuditTests` 那条函数体量线（**逐字节搬动，一个值都没改**）。
+    static func p69cFootnoteFixture(now fixed: Date) -> LogSummary {
         var summary = LogSummary()
         summary.crashCount = 4
         summary.trend = [
@@ -258,45 +297,28 @@ extension LocalizationGuardTests {
             ScannedLogFile(path: "/tmp/p69c-f2.log", sizeBytes: 10, lineCount: 0,
                            modifiedAt: fixed, role: .crash, readFailure: "文件已不存在"),
         ]
-        // RD-60：签名里的 `now` 是**有意删掉**的（窗口只在分析那一刻裁一次，上屏再裁第二次
-        // 就是同一个判据两处入口）。这里跟着换成新签名，**断言一条都没动**。
-        let rendered = summary.crashEvidenceFootnote(windowDays: 30)
-        // 抄自改前的 `FileLogAnalyzer.crashEvidenceFootnote`（四处插值 + 一次 `+` 拼接）。
-        XCTAssertEqual(rendered,
-                       "窗口内确认崩溃 4 次，只统计有真实事件证据的报告"
-                     + " · 另有 2 次确认崩溃的事件时间在最近 30 天之外，属历史报告"
-                     + " · 读取失败 2 份（文件已不存在 ×1、权限不足 ×1）未参与判定"
-                     + " · 还有 2 份崩溃通道文件未产出可计数的证据（内容损坏 / 只有文件名像 / "
-                     + "无事件时间 / 构建版本不是当前 / 同一事件的另一份），"
-                     + "逐条原因待 LogSummary 落盘崩溃证据字段后展示。")
-        // 右半边：与改前**同一个表达式**现算，防止上面那份抄本自己抄错。
-        let legacy = "窗口内确认崩溃 \(summary.crashCount) 次，只统计有真实事件证据的报告"
-            + " · 另有 \(Self.retiredTrendHistoricalCrashes(summary, windowDays: 30, now: fixed)) 次确认崩溃的事件"
-            + "时间在最近 30 天之外，属历史报告"
-            + " · 读取失败 2 份（文件已不存在 ×1、权限不足 ×1）未参与判定"
-            + " · 还有 2 份崩溃通道文件未产出可计数的证据（内容损坏 / 只有文件名像 / "
-            + "无事件时间 / 构建版本不是当前 / 同一事件的另一份），"
-            + "逐条原因待 LogSummary 落盘崩溃证据字段后展示。"
-        XCTAssertEqual(rendered, legacy)
-        // 趋势卡副标题：老写法是 `NumberFormat.grouped` 两处，新写法是填完之后补千分位。
-        for (days, peak) in [(7, 1_234), (1, 9), (1_000, 1_000), (365, 0)] {
-            XCTAssertEqual(localizedCount("共 %lld 天 · 单日峰值 %lld 条", slots: [days, peak]),
-                           "共 \(NumberFormat.grouped(days)) 天 · 单日峰值 \(NumberFormat.grouped(peak)) 条",
-                           "槽 (\(days), \(peak)) 的中文态与老写法分叉")
-        }
+        return summary
     }
 
-    /// ⑤ 每条键都真的被它那个生产者查着（正向），假键必须报出来（反向）。
-    /// 没有反向那一半，"逐条都在源码里"这条绿只说明扫描面是空的。
-    func test_p69cSlotKeysAreLookedUpAtTheirProducers() throws {
-        let bodies = try SurfaceScanKit.sourceFiles(under: "").map(\.content).reduce("") { $0 + $1 }
-        XCTAssertEqual(Self.unusedPluralKeys(Self.p69cSlotKeys.map(\.key), in: bodies), [],
-                       "槽型键登记了却没人查 ⇒ 屏上仍是拼出来的中文")
-        XCTAssertFalse(Self.unusedPluralKeys(["P69c 夹具：这条键绝不存在 %lld 天"], in: bodies).isEmpty,
-                       "假键没被抓到 ⇒ 上面那条绿不可信")
-    }
+    /// ④ 新值的**左半边**：逐字抄自 09-24 改后的那条装配链（`CrashEvidenceReadout.footnote`，
+    /// 细账缺席那一支）。这份抄本抄错了由下面那枚"右半边"现算抓。
+    static let p69cFootnoteNewValueCopy =
+        "窗口内确认崩溃 4 次，只统计有真实事件证据的报告"
+      + " · 崩溃通道读到 6 份报告；未产出可计数的证据是几种原因、各占几份，"
+      + "本次未统计（这份报告落盘时还没有崩溃证据细账）"
+      + " · 其中 2 份读取失败，未参与判定"
+      + " · 读取失败的原因分布：文件已不存在 ×1、权限不足 ×1。"
 
-    // MARK: P69c 用的小工具
+    /// ④ 新值的**右半边**：同一句话按夹具自己重数一遍（次数取 `crashCount`、
+    /// 两份数各数各的，谁也不与谁相减）。
+    static func p69cFootnoteNewValueRecomputed(summary: LogSummary,
+                                               readFiles: Int, failedFiles: Int) -> String {
+        "窗口内确认崩溃 \(summary.crashCount) 次，只统计有真实事件证据的报告"
+            + " · 崩溃通道读到 \(readFiles) 份报告；未产出可计数的证据是几种原因、各占几份，"
+            + "本次未统计（这份报告落盘时还没有崩溃证据细账）"
+            + " · 其中 \(failedFiles) 份读取失败，未参与判定"
+            + " · 读取失败的原因分布：文件已不存在 ×1、权限不足 ×1。"
+    }
 
     /// 复现**已被 RD-60 删掉**的那把平行尺子（原 `LogSummary.historicalCrashCount`）：
     /// 从已落盘的趋势桶按事件时间求和。
@@ -305,6 +327,9 @@ extension LocalizationGuardTests {
     /// 那个表达式**现算，两边必须相等」——只留左边那份抄本，抄错了就测不出来（原注释明说）。
     /// 生产侧的尺子删得对（分母不同，`CrashEvidenceRulerReproductionTests` 量过双向偏差），
     /// 但删掉它不等于可以把这条的右半边一起抹掉：抹掉＝把双判据降级成单判据。
+    /// ⚠ R2 裁定之后它的**位置**变了：它只给 ④ 里"仍然一字未变的那句"当复算锚
+    /// （`legacyHead` 那两行），脚注整体那一条已经改钉新值 ⇒ 它算出来的那半句
+    /// **不再是被断言的产品输出**，别把它读成"这句还该在屏上"。
     /// 同一个复现在 `CrashEvidenceRulerReproductionTests.retiredTrendRuler` 也有，
     /// 那一份是**私有**的、跨不了文件，所以这里只能照原式再落一份，不做第二套算法。
     static func retiredTrendHistoricalCrashes(_ summary: LogSummary, windowDays: Int,
@@ -331,20 +356,9 @@ extension LocalizationGuardTests {
         }
     }
 
-    /// 混槽出口的键形状契约：`localizedCount(_:count:note:)` 按 `[count, note]` 喂，
-    /// 所以**第 1 号槽必须是 `lld`、第 2 号必须是 `@`**。
-    /// 写成 `%1$@ … %2$lld` 的话，运行时是拿一个 `Int` 去喂 `%@`
-    /// —— 本仓用 `EXC_BAD_ACCESS` 换回来的那条崩溃（编译得过、启动即崩）。
-    /// 所以这一条不是格式洁癖，它是那一族崩溃唯一的静态出口。
-    static func mixedSlotContractBroken(key: String, formatKey: String) -> String? {
-        if !(key.contains("%1$lld") && key.contains("%2$@")) {
-            return "混槽键必须给复数槽 %1$lld、给字符串槽 %2$@（实参按 [count, note] 顺序喂）"
-        }
-        if !(formatKey.contains("%1$") || formatKey.contains("%#@")) {
-            return "英文侧的 NSStringLocalizedFormatKey 没给这两个槽留位置：\"\(formatKey)\""
-        }
-        return nil
-    }
+    /// 混槽出口的键形状契约 `mixedSlotContractBroken` 搬去了
+    /// `LocalizationGuardTests+P69cFixtureRoster.swift`（400 行闸门，同一类型不分判据；
+    /// 它服务的两枚混槽键现在都住在那一份里）。
 
     /// 剥掉**所有**转换符之后还剩 ASCII 数字吗？剩就是"模板自带的数字字面"，返回它们。
     /// 顺序要紧：`%1$#@var@` 要按整条剥（先 `%[0-9]*[$]?#@…@`，再普通转换符，最后裸 `%`）。
