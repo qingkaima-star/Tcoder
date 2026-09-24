@@ -5,19 +5,21 @@
 # 宿主的 $REV / $TRACE_REPORT / $PULSE_REPORT / $QUIESCE_SRC 与 quiescence_probe /
 # quietest_seconds / human_input_in_window / die 这些同进程的量。
 #
-# 本文件现在只有 `cmd_selfcheck` + 三段 `items_*`（32 处 `item` 调用按主题分三段）；
+# 本文件现在只有 `cmd_selfcheck` 与几段 `items_*`（`item` 调用按主题分块，块数不抄在这里）；
 # 【两个分母别混】末行印的「N 项通过」数的是 `ok` 调用次数（一项可以印两行 ✓），
 # 与「`item` 调用的处数」不是同一个数（那把尺现量：`grep -cE '^[[:space:]]+item selfcheck_' scripts/perf_selfcheck.sh`）。
 # 以前这里写死过"32 处"，加一项就烂一次 —— 手写分母要么每次跟着改，要么换成能跑的命令；
 # 09-22 加第 32、33 项时就把两个数混过一回，别再留第三个腐烂的数字在这里。
-# 32 处反例的**判据本体**按主题住在同目录三块文件里
-# （`_ruler_shapes` 形状与三态话术 / `_gates` 前置与闸门 / `_eligibility` 样本资格），
-# 由下面三行 source 进来。**为什么要拆**：`SelfScanDogfoodTests` 的 ≤800 行棘轮
+# 反例的**判据本体**按主题住在同目录的若干块文件里（`_ruler_shapes` 形状与三态话术 /
+# `_gates` 前置与闸门 / `_eligibility` 样本资格 / `_launchers` 起实例与收尾 / `_tables` 文档表 /
+# `_chain` 链的归属与同树链闸）。**块清单只有一个来源：下面那个 `for` 的那一行**，
+# 这里刻意不再抄一个数字（第 12 行那句"别再留腐烂的数字"说的就是这类抄件）。
+# 由那个 for source 进来。**为什么要拆**：`SelfScanDogfoodTests` 的 ≤800 行棘轮
 # **分母含 `.sh`** 且 ceiling=0（`SourceLanguageCatalog` 认 Shell），2026-09-21 本文件
 # 涨到 835 行，把并完 main 的那次门禁当场判红。
 # **拆开它才是修复，拧阈值不是**（2026-09-20 就是 trace_report.py 长到 819 行把 main
 # 判红过一次，那次没人提前发现，因为没人跑过 selfcheck 的这一项）。
-# 三块文件都进了尺子热点棘轮的点名清单（"尺子文件名单"那条门，在 Tests 侧）——
+# 每一块文件都进了尺子热点棘轮的点名清单（`rulerScripts` 那条门，在 Tests 侧）——
 # 搬出去不等于免检，"拆"一旦成为免检通道，这条棘轮就只剩装饰作用。
 # （这里刻意不写点号形式的符号名：文档锚点门只核验 `Sources/**` 里的标识符，
 #   指着 Tests 侧的符号会被判成失效引用——2026-09-21 实测踩过一次。）
@@ -61,7 +63,7 @@ cmd_selfcheck() {
 }
 
 # -----------------------------------------------------------------------------
-# 32 处 `item` 调用按主题分成三段。
+# `item` 调用按主题分成若干块（块清单在下面那个 for，只有那一处是权威）。
 #
 # **为什么还要再拆一次**（2026-09-22）：这段以前是一串直白写在 `cmd_selfcheck` 里的
 # `item …`，加到第 30 项之后函数体 53 行，被**尺子自己的**「函数 ≤50 行 / CC<16」棘轮判红。
@@ -71,7 +73,7 @@ cmd_selfcheck() {
 # ⇒ 这不是"守卫突然苛刻"，是**这把尺子以前瞎**。（正解仍是拆开它，不是抬 50 这条线。）
 #
 # 拆法刻意**保持调用顺序逐字不变**：这样"拆前后行为一致"可以用 selfcheck 自己的
-# 输出逐字 diff 来证，而不是靠"应该没影响"。三段各自只用 `item` / `$out`，
+# 输出逐字 diff 来证，而不是靠"应该没影响"。各段都只用 `item` / `$out`，
 # 而 `item` 是编排器里的嵌套函数、`out`/`checked`/`fails` 是它的 `local`
 # —— bash 是**动态作用域**，被调函数照样看得见（这一条是本文件头就验过的老事实）。
 # -----------------------------------------------------------------------------
@@ -132,12 +134,13 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_warmup_dimension "$out"        # 53) 第七维·预热：etime 解析要对、未预热要拒、启动档不参与（列在最后：新维度不与既有项抢顺序）
   item selfcheck_update_caliber_one_rule "$out"  # 54) app-update 只有一个口径：sidecar 与表同 n、少计方向要拒、回落不再截 40
   item selfcheck_refused_not_pooled "$out"  # 55) 被当场拒收（有 REFUSED）的那一趟混不进散布；没 REFUSED 的必须还能读成可用
+  item selfcheck_chain_guard_and_path_display "$out"  # 56) 同树只许一条链（无链要放行／同树假链要拒）＋归属行必须保住文件名（列在最后：不与既有项抢顺序）
 }
 
-# 反例分块（每块一个文件，宿主只留编排）：这三行必须在 cmd_selfcheck 之前，
+# 反例分块（每块一个文件，宿主只留编排）：那个 for 必须在 cmd_selfcheck 之前，
 # 因为编排器一跑就要点到里面的函数名。
 # shellcheck source=/dev/null
-for _part in ruler_shapes gates eligibility launchers tables; do
+for _part in ruler_shapes gates eligibility launchers tables chain; do
   source "scripts/perf_selfcheck_${_part}.sh"
 done
 unset _part

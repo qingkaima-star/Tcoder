@@ -28,6 +28,13 @@ declare -f concurrent_heavy_jobs >/dev/null || {
   echo "!! source 链里没有 concurrent_heavy_jobs（现在住在 scripts/perf_probes.sh）—— 这一维看不见东西，拒绝起跑" >&2
   exit 3
 }
+# 同一族：闸门的本体搬进 `perf_chain_guard.sh`（经 preflight 的 source 链进来）。
+# 它不在，第二条链就会被**静默放行**（函数名打错时 bash 报 127 但主流程照跑），
+# 那正是 §BM 烧掉一整批时缺的那道闸——所以看不见就拒跑，别"默认通过"。
+declare -f refuse_second_chain >/dev/null || {
+  echo "!! source 链里没有 refuse_second_chain（住在 scripts/perf_chain_guard.sh）—— 同树链数看不见，拒绝起跑" >&2
+  exit 3
+}
 
 TAG="${1:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
 SAMPLES="${2:-3}"
@@ -259,6 +266,8 @@ cond_front_is_ours() {
   printf '前台是「%s」' "${f:-未知}"
   return 1
 }
+
+refuse_second_chain   # 同树只许一条链（§BM 那一坑的闸门版；要并行必须显式 ALLOW_CONCURRENT_CHAIN=1 且出声）
 
 echo "==> 等窗口：$SAMPLES 趟 ${MODE}（release 口径，rev=$TAG），最长 ${DEADLINE_SECS}s"
 [ -x "$START_BIN/Contents/MacOS/TcoderMonitor" ] || { echo "!! 没有 release 产物 $START_BIN；先跑 scripts/build_app.sh release"; exit 2; }
