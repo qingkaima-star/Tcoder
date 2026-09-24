@@ -44,10 +44,15 @@ struct DependenciesView: View {
                         // 测试与构建依赖被并进"运行时"，那句"开发依赖不随产物发布"就没有依据。
                         DependencyScopeBreakdown(deps: deps)
                     }
+                    // RD-70：卡头那一格读的是**本生态子账**的覆盖度档位。
+                    // 报告级档位会冤枉那个真查全了的生态（npm 全量核完 + SwiftPM 一条没查
+                    // ⇒ 报告级是 `.partial`，用它就把 npm 那张卡也涂成「没查全」）。
+                    let reportLedger = DependencyEvidence.ledger(for: deps)
                     ForEach(deps.ecosystems) { eco in
                         DependencyEcosystemSection(
                             eco: eco,
-                            vulnerabilityUnchecked: deps.hasVulnerabilityCoverage == false,
+                            vulnerabilityCoverage: DependencyEvidence.vulnerabilityCoverage(
+                                reportLedger.subledger(forEcosystem: eco.ecosystem)),
                             isExpanded: expanded.contains(eco.id),
                             toggle: { toggle(eco.id) }
                         )
@@ -221,26 +226,21 @@ struct DependencyOverviewSection: View {
 
 struct DependencyEcosystemSection: View {
     let eco: EcosystemReport
-    /// 整份报告**没有漏洞核对覆盖**（默认不联网、也没带回公告）。
-    /// 这时"这个生态无风险"是一句没有证据的话：`eco.riskLevel` 里的 `.none`
-    /// 混着"查了没病"与"根本没查"两种意思，展示层必须把它们分开
-    /// （判定本体不动，评分与排序仍读 `riskLevel`）。批次 P7-B。
-    let vulnerabilityUnchecked: Bool
+    /// **本生态**的漏洞核对覆盖度（RD-70）。分档只由 `DependencyEvidence.vulnerabilityCoverage`
+    /// 产出、由调用方按 `subledger(forEcosystem:)` 取子账喂进来 —— 视图这里只匹配档位。
+    /// ⚠ **故意不给默认值**：给了默认值就能被漏传，于是同一句话在一页上响一处沉默一处。
+    /// `eco.riskLevel` 里的 `.none` 混着"查了没病"与"根本没查"两种意思，判定本体不动
+    /// （评分与排序仍读 `riskLevel`），分开由卡头那一格做。批次 P7-B → RD-70。
+    let vulnerabilityCoverage: DependencyVulnerabilityCoverage
     let isExpanded: Bool
     let toggle: () -> Void
 
     static let rowLimit = 12
 
-    /// 卡头的风险槽。**只有"没查出问题"这一档需要核对覆盖背书**：
-    /// `.low`/`.medium` 来自锁文件里的过期比例，那是离线也算得出的事实，照旧显示。
-    @ViewBuilder
+    /// 卡头的风险槽。"哪一档才配 `RiskBadge(.none)` 的绿底对勾"这条分派
+    /// 与总览的 `SafetyVerdictBadge` 同处一个文件、同一套色与图标（`DependencyEcosystemBadge`）。
     private var riskSlot: some View {
-        if vulnerabilityUnchecked && eco.riskLevel == .none {
-            SemanticBadge("未核对", role: Theme.Semantic.neutral, icon: .unverified)
-                .help(localizedCopy("默认不联网时漏洞判定恒为 0 条，这是「没有查」，不是「没有病」"))
-        } else {
-            RiskBadge(risk: eco.riskLevel)
-        }
+        DependencyEcosystemBadge(eco: eco, coverage: vulnerabilityCoverage)
     }
 
     var body: some View {

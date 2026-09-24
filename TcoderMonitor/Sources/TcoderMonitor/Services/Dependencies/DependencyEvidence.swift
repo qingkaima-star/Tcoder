@@ -53,6 +53,22 @@ struct DependencyEvidenceLedger: Sendable {
                                            name: record.name, declaredRange: record.version)
     }
 
+    /// 按生态取**子账**（RD-70：生态卡头那一格要判的是「这个生态核对完了没有」）。
+    ///
+    /// 为什么不能用报告级档位：npm 全量核完 + SwiftPM 一条没查时，报告级是 `.partial`，
+    /// 拿它去涂卡头就把 npm 那张也说成「没查全」—— 那是**另一种不准**。
+    /// 本函数**只筛行**：`totalCount` 与 `vulnerabilityCheckedCount` 仍是下面那两枚定义算的数，
+    /// 这里一个数都不重算、也不许出现 `> 0`（RD-68：那条算式全仓只许一处）。
+    /// ⚠ 三格报告级事实（`versionLookup` / `vulnerabilityLookup` / `scopeBreakdown`）**原样透传**：
+    /// 账本里没有「按生态分开」的那本账，子账目前只用于覆盖度分档，
+    /// 谁将来读这三格，读到的是**整份报告**的数而不是这一个生态的 —— 这条边界就写在这里。
+    func subledger(forEcosystem ecosystem: DependencyEcosystem) -> DependencyEvidenceLedger {
+        DependencyEvidenceLedger(records: records.filter { $0.ecosystem == ecosystem },
+                                 versionLookup: versionLookup,
+                                 vulnerabilityLookup: vulnerabilityLookup,
+                                 scopeBreakdown: scopeBreakdown)
+    }
+
     var totalCount: Int { records.count }
     var vulnerabilityCheckedCount: Int { records.filter { $0.vulnerabilityState.isCovered }.count }
     var versionCheckedCount: Int { records.filter { $0.versionState.isCovered }.count }
@@ -374,23 +390,5 @@ enum DependencyScopeLines {
             if row.vulnerable > 0 { text += "，命中 \(row.vulnerable)" }
             return text
         }
-    }
-}
-
-// MARK: - 生态可跟踪性（版本核对这一路的"支持"判据）
-
-enum DependencyLockSupport {
-    /// 这个生态**有没有办法量到"装的到底是哪个版本"**：
-    /// ① 有锁文件候选、② 有已解析产物候选（effective-POM / 依赖树 / SBOM，RD-13b）、
-    /// ③ 内置快照收录过它、④ OSV/registry 覆盖它。四条从同一批表里**推导**，
-    /// 不另抄清单（抄一份就会在增删后腐烂）。
-    /// 判据落空的后果很具体：`versionState` 会说"结构性测不到"，而那句话会变成
-    /// 事实上的"请你去补个文件" —— 本轮不背这个债。
-    static func isEcosystemTrackable(_ ecosystem: DependencyEcosystem) -> Bool {
-        if !ManifestParsers.lockfileCandidates[ecosystem, default: []].isEmpty { return true }
-        if !ManifestParsers.resolvedArtifactCandidates[ecosystem, default: []].isEmpty { return true }
-        if OsvPackageQuery.osvEcosystem(for: ecosystem) != nil { return true }
-        let scopes = DependencySnapshot.lookupScopes(for: ecosystem)
-        return scopes.contains { scope in DependencySnapshot.table.keys.contains { $0.hasPrefix(scope + "|") } }
     }
 }

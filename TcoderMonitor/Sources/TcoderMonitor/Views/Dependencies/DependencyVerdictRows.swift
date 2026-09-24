@@ -309,6 +309,13 @@ struct SafetyVerdictBadge: View {
     }
 }
 
+// MARK: 生态卡头（RD-70：那份账的第四个出口）
+//
+// `DependencyEcosystemRiskSlot` 与 `DependencyEcosystemBadge` 住在**同目录的
+// `DependencyAdvisoryRows.swift`**：它们是「画 + 一次档位匹配」，不是判据（判据在
+// `Services/Dependencies/DependencyEvidence.swift` 的 `vulnerabilityCoverage`），
+// 而本文件加不下那一格（`SourcesSizeAuditTests` 的 400 行线，超限名额为 0）。
+
 // MARK: 依赖行
 
 struct DependencyRow: View {
