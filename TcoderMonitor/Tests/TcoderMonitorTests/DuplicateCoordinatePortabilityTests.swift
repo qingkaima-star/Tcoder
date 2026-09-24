@@ -298,3 +298,62 @@ final class DuplicateCoordinatePortabilityTests: XCTestCase {
                       "\(offenders.count)/\(files.count) 个文件的坐标不是真后缀剥离：\(offenders.first?.url.path ?? "")")
     }
 }
+
+// MARK: - #60：被扫根的唯一写法（同一个目录不许在两个面印成两个串）
+
+/// `ScannedPath.canonical` 的判据。为什么住在这一枚文件、不单开 `ScannedPathTests.swift`：
+/// 新建一份 Tests 要动三处写死的普查分母（本仓先例见 P56 那笔「枚举搬进
+/// `Design/LocalizedCopyKit.swift`」的说明），而这一类管的正是上面那类同一个词——路径写法。
+///
+/// 现证（2026-09-25，同一枚提交 `4180abf`、同一台机器、两棵位置不同的验证树）：
+/// `/private/tmp` 那棵 **2 failures**、仓库内那棵 **0 failures**。红的两条同源：
+/// CLI 把被扫根印成 `/tmp/…`（`standardizedFileURL` 把真实写法**倒剥**成别名短写），
+/// 界面印 `/private/tmp/…`；同一个不等还把 `provenance.resolvedGitRoot` 从「两边都没有」
+/// 变成「只有一边有」⇒ 屏上那句「仓库根被重定位」是假的。
+final class ScannedPathTests: XCTestCase {
+
+    private let physical = "/private/tmp"
+
+    private func alias(ofPath path: String) -> String { "/tmp/" + path.dropFirst((physical + "/").count) }
+
+    private func makeSandbox() throws -> URL {
+        let dir = URL(fileURLWithPath: physical, isDirectory: true)
+            .appendingPathComponent("tcoder-scanpath-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        return dir
+    }
+
+    /// **方向**也要钉：只断言「两种写法判同一个」是不双向的——把尺子换成「都剥成 `/tmp`」
+    /// 它照样全绿，而那正是本次的红源。归向物理写法才有唯一理由：`git`、`lsof`、`ps`
+    /// 与界面选路打的都是物理路径。
+    func test_aliasPrefixCollapsesToThePhysicalForm() throws {
+        let dir = try makeSandbox()
+        XCTAssertEqual(ScannedPath.canonical(alias(ofPath: dir.path)), dir.path, "短写要归到真实写法")
+        XCTAssertEqual(ScannedPath.canonical(dir.path), dir.path, "真实写法必须是自己的不动点")
+        XCTAssertEqual(ScannedPath.canonical(dir.path + "/"), dir.path, "尾随斜杠不许影响可比性")
+        XCTAssertEqual(ScannedPath.canonical(ScannedPath.canonical(alias(ofPath: dir.path))), dir.path,
+                       "两次解析要收敛，否则同一份报告两次落盘会写出两个串")
+    }
+
+    /// 末段**自身**是软链接时也要对齐。这一支 `canonicalPathKey` 兜不住（它不解析末段），
+    /// 只有 `resolvingSymlinksInPath` 能——所以两把 API 串起来用，缺一个就会在
+    /// 「整个项目目录是个软链接」这种常见摆位上分叉。
+    func test_symlinkedLastComponentCollapsesToItsTarget() throws {
+        let dir = try makeSandbox()
+        let target = dir.appendingPathComponent("real", isDirectory: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        let link = dir.appendingPathComponent("link", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        XCTAssertEqual(ScannedPath.canonical(link.path), ScannedPath.canonical(target.path),
+                       "软链接与被指的目录是同一个目录，必须一个写法")
+    }
+
+    /// 路径不存在时给**稳定**答案：按字面别名规则补回 `/private`，
+    /// 但不许 stat 出一个存在的路径冒充（被扫根可能在扫描期间被删，那时改写它才是撒谎）。
+    func test_missingPathIsStableWithoutStatRewritingIt() throws {
+        let ghost = physical + "/tcoder-scanpath-absent-\(UUID().uuidString.prefix(8))/gone"
+        XCTAssertEqual(ScannedPath.canonical(ghost), ghost)
+        XCTAssertEqual(ScannedPath.canonical(alias(ofPath: ghost)), ghost, "不存在的别名同样归到物理写法")
+    }
+}
