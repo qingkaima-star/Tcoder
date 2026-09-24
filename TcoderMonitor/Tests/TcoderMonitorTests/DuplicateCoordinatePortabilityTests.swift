@@ -356,4 +356,17 @@ final class ScannedPathTests: XCTestCase {
         XCTAssertEqual(ScannedPath.canonical(ghost), ghost)
         XCTAssertEqual(ScannedPath.canonical(alias(ofPath: ghost)), ghost, "不存在的别名同样归到物理写法")
     }
+
+    /// 不是文件系统路径的串**原样交回**。这一条是给真实数据立的，不是假想：
+    /// 2026-09-21 退役内置示例数据之前写进 `projects.json` 的那行 `demo://tcoder-sample`
+    /// 现在还在老用户机器的注册表里（`ProjectStore.load()` 不筛也不迁移），
+    /// 而 `URL(fileURLWithPath:)` 会把不以 `/` 开头的串按当前目录拼成一个"看着像真路径"的东西
+    /// ⇒ 那种改写不是归一而是**造假**：报告会说它扫了某个目录下并不存在的一个目录。
+    func test_nonFilesystemStringIsPassedThroughUnchanged() {
+        XCTAssertEqual(ScannedPath.canonical("demo://tcoder-sample"), "demo://tcoder-sample",
+                       "伪协议那一行不许被拼成当前目录下的真路径")
+        XCTAssertEqual(ScannedPath.canonical("relative/path"), "relative/path",
+                       "相对路径留给调用方去按 cwd 解析（CLI 那一路本来就走 `URL(fileURLWithPath:)`）")
+        XCTAssertEqual(ScannedPath.canonical(""), "")
+    }
 }
