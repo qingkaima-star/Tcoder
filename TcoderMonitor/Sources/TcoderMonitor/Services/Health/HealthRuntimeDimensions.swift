@@ -95,9 +95,16 @@ extension WeightedHealthScorer {
                                 HealthCurves.whole(worst.count), worst.lastSeenDescription)]
     }
 
+    /// 两处一起修：①「Top Errors」是界面已经改口的旧名（《口径与已知限制》§8 用词对照表
+    /// 记的就是这最后一处残留），屏上再也找不到叫这个名字的地方；
+    /// ② 这句手里就拿着那条高频错误的原文、次数与来源文件，却不点名 ⇒ 同一族「建议不可执行」。
     private func stabilityAdvice(_ logs: LogSummary) -> [String] {
         guard let worst = logs.topErrors.first, worst.count >= 10 else { return [] }
-        return [localizedCopy("优先修复 Top Errors 首位，它通常掩盖了下游连锁异常")]
+        let label = worst.displayMessage.isEmpty ? worst.signature : worst.displayMessage
+        return [localizedFormat("先修这条高频错误：「%1$@」（窗口内 %2$@ 次 · 来自 %3$@），它通常掩盖了下游连锁异常",
+                                label,
+                                NumberFormat.grouped(worst.count),
+                                (worst.sourceFile as NSString).lastPathComponent)]
     }
 
     private enum StabilityAdvice {
@@ -158,63 +165,6 @@ extension WeightedHealthScorer {
         }
     }
 
-    // MARK: - 依赖健康
-
-    func dependenciesOutcome(_ inputs: HealthInputs) -> DimensionOutcome {
-        guard let deps = inputs.dependencies, deps.totalDependencies > 0 else { return .absent }
-        // 「零漏洞」有两种可能：查过之后干净，或者压根没查。没查过就不参与评分，
-        // 绝不能把「没核对」渲染成「依赖零风险」——那是拿收费点换假绿灯。
-        switch VulnerabilityEvidence.classify(deps) {
-        case .unchecked: return DimensionOutcome(curve: nil, recommendations: [uncheckedAdvice(deps)])
-        case .degraded:
-            // 原因逐条点名（旧文案写死"部分包查询失败"，可"版本没解析出来"和"生态不支持"
-            // 根本不该被说成"查询失败" —— 那是另一种口径混用）。
-            let reasons = VulnerabilityEvidence.degradationReasons(deps).joined(separator: localizedCopy("、"))
-            return DimensionOutcome(curve: nil,
-                recommendations: [localizedFormat("漏洞核对未完成（%1$@），依赖健康本维度暂不计分；补齐锁文件或重跑联网核对后再计。",
-                                                   reasons.isEmpty ? localizedCopy("存在未覆盖项") : reasons)])
-        case .verified:
-            let curve = HealthCurves.dependencyHealth(vulnerableCount: deps.vulnerableCount,
-                                                      outdatedCount: deps.outdatedCount,
-                                                      totalDependencies: deps.totalDependencies)
-            return DimensionOutcome(curve: curve,
-                                    strengths: dependencyStrengths(deps),
-                                    issues: dependencyIssues(deps),
-                                    recommendations: dependencyAdvice(deps))
-        }
-    }
-
-    private func uncheckedAdvice(_ deps: DependencyReport) -> String {
-        let uncovered = deps.uncoveredEcosystemNames
-        return uncovered.isEmpty
-            ? localizedCopy("未做在线漏洞核对，依赖健康本维度暂不计分；开启「联网核对」后重扫才有结论。")
-            : localizedFormat("未做在线漏洞核对，依赖健康本维度暂不计分（内置规则未覆盖：%1$@）。",
-                              uncovered.joined(separator: localizedCopy("、")))
-    }
-
-    private func dependencyStrengths(_ deps: DependencyReport) -> [String] {
-        // 走到这里说明确实核对过，这句安全背书才有依据。
-        // 背书必须带**已成功核对的条数与数据源**（RD-11）：只说"N 个依赖零命中"
-        // 与只说"没查到漏洞"是同一种懒惰 —— 读的人分不清"查过干净"和"没查"。
-        guard deps.vulnerableCount == 0 else { return [] }
-        let ledger = DependencyEvidence.ledger(for: deps)
-        let source = DependencyEvidence.sourcesPhrase(ledger)
-        return [localizedFormat("已完成漏洞核对，%1$@/%2$@ 个依赖零命中%3$@",
-                                HealthCurves.whole(ledger.vulnerabilityCheckedCount),
-                                HealthCurves.whole(ledger.totalCount),
-                                source.isEmpty ? "" : localizedFormat("（数据源：%1$@）", source))]
-    }
-
-    private func dependencyIssues(_ deps: DependencyReport) -> [String] {
-        guard deps.vulnerableCount > 0 else { return [] }
-        return [localizedFormat("%1$@ 个已知漏洞，%2$@ 个版本过旧",
-                                HealthCurves.whole(deps.vulnerableCount),
-                                HealthCurves.whole(deps.outdatedCount))]
-    }
-
-    private func dependencyAdvice(_ deps: DependencyReport) -> [String] {
-        deps.vulnerableCount > 0 ? [localizedCopy("先升级带严重漏洞的依赖，再统一处理过期版本")] : []
-    }
 
     // MARK: - 测试覆盖
 

@@ -914,8 +914,7 @@
 "建议保持观察，待各维度数据补齐后复核。" = "Keep observing; revisit once the missing dimension data is collected.";
 "函数复杂度可控（最高 CC %1$@）" = "Complexity is contained (max CC %1$@)";
 "%1$@ 个函数圈复杂度 ≥16，最高 %2$@" = "%1$@ functions at cyclomatic complexity ≥16, max %2$@";
-"优先拆分最高复杂度函数，用早返回替代嵌套分支" = "Split the most complex functions first; replace nested branches with early returns";
-"抽取重复块为共享工具或基类，优先处理跨服务重复" = "Extract duplicated blocks into shared helpers or base classes, starting with cross-service repeats";
+"先拆这一个：「%1$@」（%2$@ 第 %3$@ 行 · 圈复杂度 %4$@），用早返回替代嵌套分支" = "Split this one first: %1$@ (%2$@ line %3$@, CC %4$@); replace nested branches with early returns";
 "文件规模健康，巨大文件占比低" = "File sizes are healthy; few oversized files";
 "%1$@ %2$@ 行，远超单文件上限" = "%1$@ has %2$@ lines, far beyond the single-file limit";
 "注释密度适中（%1$@）" = "Comment density is moderate (%1$@)";
@@ -970,7 +969,7 @@
 "另有 %1$@ 份崩溃通道文件未产出可用事件证据（内容损坏 / 无可用事件时间 / 只有文件名像），未计入崩溃数" = "A further %1$@ crash-channel files produced no usable event evidence (corrupt, no usable event time, or only the filename looks like one); they are not counted as crashes";
 "已扫描 %1$@ 行日志，窗口内未见确认崩溃（不等于运行期无崩溃：未采运行时长与请求量）" = "Scanned %1$@ log lines with no confirmed crash in the window (this is not \"no crashes at runtime\": duration and request volume are not collected)";
 "%1$@出现 %2$@ 次（最近 %3$@）" = "%1$@ occurred %2$@ times (last seen %3$@)";
-"优先修复 Top Errors 首位，它通常掩盖了下游连锁异常" = "Fix the top error first; it usually masks downstream cascades";
+"先修这条高频错误：「%1$@」（窗口内 %2$@ 次 · 来自 %3$@），它通常掩盖了下游连锁异常" = "Fix this frequent error first: %1$@ (%2$@ times in the window, from %3$@); it usually masks downstream cascades";
 "没有可扫描的日志，运行稳定性不参与本次评分；把日志文件放进项目目录或 ~/Library/Logs，或在「错误日志」页点「附加日志」，这个维度才会出现。" = "There are no logs to scan, so runtime stability is not scored this run. Put log files in the project directory or ~/Library/Logs, or use \\\"Attach Log Files\\\" on the Error Logs page, for this dimension to appear.";
 "读到 %1$@ 次确认崩溃%2$@，但零真日志行 ⇒ 错误密度算不出分母，本维度不参与本次评分；崩溃明细见「错误日志」页。" = "Read %1$@ confirmed crashes%2$@ but zero real log lines, so error density has no denominator and this dimension is not scored; see the Error Logs page for the details.";
 "（%1$@ 份崩溃报告）" = "(%1$@ crash reports)";
@@ -986,6 +985,9 @@
 "（数据源：%1$@）" = "(source: %1$@)";
 "%1$@ 个已知漏洞，%2$@ 个版本过旧" = "%1$@ known vulnerabilities, %2$@ outdated versions";
 "先升级带严重漏洞的依赖，再统一处理过期版本" = "Upgrade dependencies with critical vulnerabilities first, then handle stale versions";
+"先合这一处重复：%1$@ 之间有 %2$@ 行相同，抽成共享工具或基类" = "Merge this duplicate first: %1$@ shares %2$@ identical lines; extract a shared utility or base class";
+"先升级这一个：%1$@（%2$@，公告 %3$@），再统一处理过期版本" = "Upgrade this one first: %1$@ (%2$@, advisory %3$@); then handle outdated versions together";
+"先升级这一个：%1$@（%2$@，命中 %3$@ 个依赖），再统一处理过期版本" = "Upgrade this one first: %1$@ (%2$@, affects %3$@ dependencies); then handle outdated versions together";
 "测试覆盖率 %1$@" = "Test coverage %1$@";
 "将行覆盖率从 %1$@ 提升到 75%% 以上" = "Raise line coverage from %1$@ to above 75%%";
 "行覆盖 %1$@，分支覆盖 %2$@" = "Lines %1$@, branches %2$@";
