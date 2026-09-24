@@ -258,7 +258,9 @@ extension LocalizationGuardTests {
             ScannedLogFile(path: "/tmp/p69c-f2.log", sizeBytes: 10, lineCount: 0,
                            modifiedAt: fixed, role: .crash, readFailure: "文件已不存在"),
         ]
-        let rendered = summary.crashEvidenceFootnote(windowDays: 30, now: fixed)
+        // RD-60：签名里的 `now` 是**有意删掉**的（窗口只在分析那一刻裁一次，上屏再裁第二次
+        // 就是同一个判据两处入口）。这里跟着换成新签名，**断言一条都没动**。
+        let rendered = summary.crashEvidenceFootnote(windowDays: 30)
         // 抄自改前的 `FileLogAnalyzer.crashEvidenceFootnote`（四处插值 + 一次 `+` 拼接）。
         XCTAssertEqual(rendered,
                        "窗口内确认崩溃 4 次，只统计有真实事件证据的报告"
@@ -269,7 +271,7 @@ extension LocalizationGuardTests {
                      + "逐条原因待 LogSummary 落盘崩溃证据字段后展示。")
         // 右半边：与改前**同一个表达式**现算，防止上面那份抄本自己抄错。
         let legacy = "窗口内确认崩溃 \(summary.crashCount) 次，只统计有真实事件证据的报告"
-            + " · 另有 \(summary.historicalCrashCount(windowDays: 30, now: fixed)) 次确认崩溃的事件"
+            + " · 另有 \(Self.retiredTrendHistoricalCrashes(summary, windowDays: 30, now: fixed)) 次确认崩溃的事件"
             + "时间在最近 30 天之外，属历史报告"
             + " · 读取失败 2 份（文件已不存在 ×1、权限不足 ×1）未参与判定"
             + " · 还有 2 份崩溃通道文件未产出可计数的证据（内容损坏 / 只有文件名像 / "
@@ -295,6 +297,21 @@ extension LocalizationGuardTests {
     }
 
     // MARK: P69c 用的小工具
+
+    /// 复现**已被 RD-60 删掉**的那把平行尺子（原 `LogSummary.historicalCrashCount`）：
+    /// 从已落盘的趋势桶按事件时间求和。
+    ///
+    /// 为什么把它搬进测试而不是删掉右半边：④ 这条的机制是「左边抄一份字面量、右边用**改前
+    /// 那个表达式**现算，两边必须相等」——只留左边那份抄本，抄错了就测不出来（原注释明说）。
+    /// 生产侧的尺子删得对（分母不同，`CrashEvidenceRulerReproductionTests` 量过双向偏差），
+    /// 但删掉它不等于可以把这条的右半边一起抹掉：抹掉＝把双判据降级成单判据。
+    /// 同一个复现在 `CrashEvidenceRulerReproductionTests.retiredTrendRuler` 也有，
+    /// 那一份是**私有**的、跨不了文件，所以这里只能照原式再落一份，不做第二套算法。
+    static func retiredTrendHistoricalCrashes(_ summary: LogSummary, windowDays: Int,
+                                              now: Date) -> Int {
+        let cutoff = now.addingTimeInterval(-Double(windowDays) * 86_400)
+        return summary.trend.filter { $0.date < cutoff }.reduce(0) { $0 + $1.crashes }
+    }
 
     /// 取 stringsdict 里一条顶层键的**整块**文本（含它的 `<key>` 行，到下一个顶层键之前）。
     static func stringsDictEntry(for key: String, in text: String) -> String? {
