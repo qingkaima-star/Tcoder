@@ -200,13 +200,31 @@ final class LogEvidenceIdentityAndStabilityTests: XCTestCase {
                       "缺的是哪一维证据要点名，实得 \(score.recommendations)")
     }
 
-    /// 崩溃通道里有文件却没产出可计数证据时，稳定维的 detail 要说出这个差额（不许只报 0）。
+    /// 崩溃通道里有文件却没产出可计数证据时，脚注要说出这个差额**并且说得出是哪一种原因**。
+    ///
+    /// RD-60 把这条从「只断言含『未产出可计数的证据』」加强成「必须点出 0 字节这一种原因」：
+    /// 旧脚注把那五种原因合成一个数、再补一句「逐条原因待落盘后展示」，
+    /// 而细账其实早就分开算好了（`LogSummary` 里那一格是台账的 `suspectedCount`）。
+    /// 判据没有放宽 —— 现在要求得多，要求得少的那一版是假话。
     func testUncountedCrashChannelFilesAreNamedInTheDetail() async throws {
         try writePackageManifest(products: [])
         try write("Reports/empty.ips", "")   // 真值：一份 0 字节的崩溃通道文件，零次崩溃
-        let summary = try await FileLogAnalyzer().analyze(projectRoot: root, extraLogURLs: [], withinDays: 30)
-        XCTAssertEqual(summary.crashCount, 0)
-        XCTAssertTrue(summary.crashEvidenceFootnote(windowDays: 30).contains("未产出可计数的证据"),
-                      "「有 N 份报告但一次都没算」必须说得出原因，实得 \(summary.crashEvidenceFootnote(windowDays: 30))")
+        let outcome = try await FileLogAnalyzer().analyzeWithEvidence(
+            projectRoot: root, extraLogURLs: [], withinDays: 30)
+        XCTAssertEqual(outcome.summary.crashCount, 0)
+        let footnote = outcome.summary.crashEvidenceFootnote(windowDays: 30, evidence: outcome.evidence)
+        XCTAssertTrue(footnote.contains("未产出可计数的证据"),
+                      "「有 N 份报告但一次都没算」必须说得出原因，实得 \(footnote)")
+        XCTAssertTrue(footnote.contains("疑似报告 1 份"),
+                      "逐条原因要逐字来自细账，实得 \(footnote)")
+        XCTAssertFalse(footnote.contains("待 LogSummary 落盘"),
+                       "欠账那句是假话，细账已经算完了：" + footnote)
+        // 同一句话在没有细账时不许装作说得出原因（未知态与"没原因"是两件事）。
+        // ⚠️ RD-60 第二半之后 `analyzeWithEvidence` 交回的 summary **自带九格快照**，
+        //    "没有细账"这一态只能由**旧报告落盘的形状**代表：整键缺席（不是抹成一串 0）。
+        var legacy = outcome.summary
+        legacy.crashEvidence = nil
+        let withoutLedger = legacy.crashEvidenceFootnote(windowDays: 30)
+        XCTAssertTrue(withoutLedger.contains("本次未统计"), withoutLedger)
     }
 }
