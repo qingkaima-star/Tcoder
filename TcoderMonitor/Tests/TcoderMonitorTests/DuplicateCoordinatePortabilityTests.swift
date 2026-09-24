@@ -400,11 +400,18 @@ final class DuplicateCoordinatePortabilityTests: XCTestCase {
     private func scanWithProductBinary(_ root: URL, in sandbox: URL) throws -> CLIShape {
         let out = sandbox.appendingPathComponent("cli-\(UUID().uuidString).json")
         defer { try? fm.removeItem(at: out) }
+        // 子进程的 stdout/stderr **必须落盘而不是塞进 Pipe**：这份夹具的 CLI 报告会打到 stdout，
+        // 而没人读的管道一旦填满（约 64 KB）子进程就永远卡在写那一笔上。
+        // 这不是假想：S1 sabotage 那一趟（坐标退回绝对）实测就把 `scan` 卡死在 11 分钟，
+        // 而卡死点长得像"生产代码挂死"，其实缺的是这一行落盘。
+        let log = sandbox.appendingPathComponent("cli-\(UUID().uuidString).log")
+        defer { try? fm.removeItem(at: log) }
+        FileManager.default.createFile(atPath: log.path, contents: Data())
         let process = Process()
         process.executableURL = URL(fileURLWithPath: try CLIProcessTests.productBinary())
         process.arguments = ["scan", root.path, "--out=" + out.path, "--compact"]
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
+        process.standardOutput = try FileHandle(forWritingTo: log)
+        process.standardError = try FileHandle(forWritingTo: log)
         try process.run()
         process.waitUntilExit()
         XCTAssertEqual(process.terminationStatus, 0, "无头 scan 没跑成（退出码 \(process.terminationStatus)）")
