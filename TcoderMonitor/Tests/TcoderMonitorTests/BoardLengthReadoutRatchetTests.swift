@@ -93,7 +93,16 @@ final class BoardLengthReadoutRatchetTests: XCTestCase {
         let counts = hitsByFile(try scannedFiles())
         let total = counts.values.reduce(0, +)
         let cap = Self.budget.values.reduce(0, +)
-        print("榜长冒充总数：全仓现量 \(total) / 上限 \(cap)")
+        let totalReadout = "榜长冒充总数：全仓现量 \(total) / 上限 \(cap)"
+        print(totalReadout)
+        // 第二条出口（RD-64）：`榜长冒充总数` 与 `榜长棘轮` 两条 print 在全量跑里都命中 0。
+        // 这里把同一批现量/上限（取自同一个 `counts`，不是第二把尺子）连同总数一起落一份带被测头的账，
+        // 写完读回断言相等。棘轮本体的判据（下面及 `test_boardLengthReadsNeverGrowBeyondBudget`）一字未动。
+        let ratchetLines = Self.budget.keys.sorted().map {
+            "榜长棘轮：\($0) 现量 \(counts[$0] ?? 0) / 上限 \(Self.budget[$0] ?? 0)"
+        }
+        GuardLedger.record(guard: "BoardLengthReadoutRatchetTests",
+                           readings: [totalReadout] + ratchetLines)
         XCTAssertLessThanOrEqual(total, cap)
     }
 
