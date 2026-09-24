@@ -102,13 +102,20 @@ def _run_reading(d, loaded, secs):
 
 
 def read_run(d):
-    """一个 run 目录 → dict；读不到 hitch 表 / 没有秒数 / 档位复核不合格 ⇒ None。
+    """一个 run 目录 → dict；读不到 hitch 表 / 没有秒数 / 档位复核不合格 / **有 REFUSED** ⇒ None。
 
     取数一律走 `summary_load`（与报表同一把尺），**不在这里再解析一遍 XML**：
     同一个问题上多一把尺，两把量错的时候没人怀疑新那把。
+
+    ⚠ `REFUSED` 这一维本文件的头注一直写着"没被 REFUSED"，可代码里没有那个读者——
+    09-24 我自己拿一个临时探针数"这趟合格吗"时就把它读成了合格（那一趟前台是别的 App，
+    闸门当场拒收并落了 `REFUSED`）。**写进磁盘的标记必须有读者**（与包 7 同一条纪律）：
+    挂死的录制会留下上一次的表文件，"表在 + REFUSED 在"就是这格漏的入口。
     """
     meta = _meta_or_none(d)
     if meta is None:
+        return None
+    if os.path.isfile(os.path.join(d, "REFUSED")):
         return None
     secs = _seconds(meta)
     loaded = summary_load(d)
@@ -138,8 +145,8 @@ def _roster_lines(got, missing):
                         ("%.2f ms" % r["update_max_ms"]) if r.get("update_max_ms") else "—",
                         ("%.0f/s" % r["surfaces_p50_fps"]) if r.get("surfaces_p50_fps") else "—"))
     if missing:
-        lines.append("   缺件/读不出/被复核打回：%s ⇒ **不参与**散布（缺的那趟不许当 hitch=0）"
-                     % ", ".join(missing))
+        lines.append("   缺件/读不出/被复核打回/被当场拒收（有 REFUSED）：%s ⇒ **不参与**散布"
+                     "（缺的那趟不许当 hitch=0）" % ", ".join(missing))
     return lines
 
 

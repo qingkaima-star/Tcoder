@@ -285,16 +285,24 @@ enum CLIScoreText {
         if !deps.networkLookupNote.isEmpty { lines.append("漏洞核对：\(deps.networkLookupNote)") }
         guard ledger.totalCount > 0 else { return lines }
 
+        let coverage = DependencyEvidence.vulnerabilityCoverage(ledger)
         var status = "漏洞核对状态：已核对 \(NumberFormat.grouped(ledger.vulnerabilityCheckedCount))"
             + "/\(NumberFormat.grouped(ledger.totalCount))"
         let tail = DependencyEvidence.tailPieces(ledger)
         if !tail.isEmpty { status += "，未覆盖：\(tail.joined(separator: localizedCopy("、")))" }
         let source = DependencyEvidence.sourcesPhrase(ledger)
         if !source.isEmpty { status += "；数据源：\(source)" }
-        status += DependencyEvidence.mayClaimNoKnownVulnerabilities(ledger)
-            ? "（全量覆盖且零命中）"
-            : (ledger.vulnerabilityCheckedCount == ledger.totalCount
-                ? "（全量覆盖）" : " —— 这是「没查全」，不是「没有漏洞」")
+        // RD-68：这里原先自己写了一遍 `vulnerabilityCheckedCount == totalCount`，
+        // 与账本那把闸门并存 —— 同一份账在界面与无头出口能长出相反的结论。
+        // 现在三档一律由 `DependencyEvidence.vulnerabilityCoverage` 分派，
+        // 「没查全」那两句逐字取自 `DependencyVulnerabilityCoverage.statement`（与屏上同源）。
+        switch coverage {
+        case .full:
+            status += DependencyEvidence.mayClaimNoKnownVulnerabilities(ledger)
+                ? "（全量覆盖且零命中）" : "（全量覆盖）"
+        case .partial, .none:
+            status += "。" + coverage.statement
+        }
         lines.append(status)
         lines.append("版本核对状态：已核对 \(NumberFormat.grouped(ledger.versionCheckedCount))"
             + "/\(NumberFormat.grouped(ledger.totalCount))"
