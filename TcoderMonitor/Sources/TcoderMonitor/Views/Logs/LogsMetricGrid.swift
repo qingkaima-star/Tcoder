@@ -55,7 +55,8 @@ struct LogsMetricGrid: View {
     var windowDays: Int = 7
 
     var body: some View {
-        GlassSection("错误概览", subtitle: subtitle, icon: .riskSevere, trailing: headerTrailing) {
+        GlassSection("错误概览", subtitle: subtitle, subtitleHelp: windowCaliberNote,
+                     icon: .riskSevere, trailing: headerTrailing) {
             ReadoutStrip {
                 tile("今日错误", count: LogReading.count(logs) { $0.todayErrorCount },
                      caption: todayCaption, icon: .riskWarning)
@@ -80,6 +81,18 @@ struct LogsMetricGrid: View {
                                            Live.fixed(perKilo, digits: 2)))
             }
         }
+    }
+
+    /// 卡头副标题旁那枚 ⓘ（RD-82；台账卷五 §92「另立一项」欠的那句界面说明）。
+    /// 为什么非要有这句：副标题「扫描 N 行 · M 个文件」里的 N 是**这些被挑中的文件的全部扫描行**，
+    /// 而页头那个「时间窗口 30 天」框的是**挑哪些文件**（按文件 mtime），不逐行按时间过滤
+    /// —— 机制与准确读法写在 `docs/口径与已知限制.md` §4.8，可屏上从没说过，
+    /// 于是读者会把「每千行日志 N 个错误」读成「最近 N 天的错误率」：数字是真的，话不是。
+    /// 槽位选 `GlassSection.subtitleHelp:`（既有）而不是新写一行常驻长句：
+    /// 风格契约 8 是「碎文案收进 ⓘ」，而 A 棘轮 `visibleCaliberCeiling` 只管屏上长句。
+    private var windowCaliberNote: String {
+        localizedFormat("时间窗口按文件挑、不逐行过滤：只读最近 %1$@ 天内被改动过的日志文件，文件一旦进来就整份计入 ⇒ 「每千行日志 N 个错误」与「扫描 N 行」的分母是这些文件的全部扫描行，不是最近 %1$@ 天的日志行。",
+                        String(windowDays))
     }
 
     private var subtitle: String {
