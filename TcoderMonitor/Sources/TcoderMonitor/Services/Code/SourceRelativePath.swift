@@ -99,6 +99,39 @@ extension SourceFileClassifier {
     }
 }
 
+// MARK: - 重复块坐标（RD-61 第二半：落盘形状只在这一处定）
+
+extension ScannedSourceFile {
+
+    /// 写进 `DuplicatedFragment.path` 的那一格坐标：**相对被扫根**，不是绝对路径。
+    ///
+    /// 为什么必须相对（三条后果，一条比一条坏）：
+    /// 1. `DuplicatedBlock.id` 由 `occurrences` 的路径排序拼成 ⇒ 绝对路径把检出目录嵌进了
+    ///    **块身份**里：同一段克隆在两台机器、两个 worktree 下有两个 id，RD-52 承诺的
+    ///    「可点名、可 diff」不成立，两次扫描的结论集求交永远是空集。
+    /// 2. 榜外坐标那 6 条样本会进 `scanLimitations` 与落盘字段，一句上限说明的长度
+    ///    随仓库放在哪变（2026-09-23 实测同一条 ≤1,200 字符的门：主树 1,060、
+    ///    `.worktrees/r21-backlog` 1,244 ⇒ 每条并行流的门禁必红）。
+    /// 3. 屏上、JSON、句子三处读者本来就读的是同一个 `occurrences`，绝对形状等于让
+    ///    每一处各自再猜一遍「该剥掉多长的前缀」。
+    ///
+    /// 守卫方向（不静默降级）：只有当 `relativePath` 确实是 `url.path` 的一次**真后缀剥离**
+    /// 时才给相对形状；不是就退回绝对路径 —— 宁可这一条坐标随检出位置变，
+    /// 也不要它拼回根之后指到别的文件上（`SourceFileClassifier.relativePath(for:root:)`
+    /// 的第三条不变式说明 url 落在 root 之外时它会退化成裸文件名，那种形状有歧义）。
+    /// 产品路径上 url 全部出自 `enumerator(at: scanRoot)`，所以这一支只由合成输入走到；
+    /// 那条不变式由 `DuplicateCoordinatePortabilityTests` 在**真源码扫描**上逐文件复量。
+    ///
+    /// 还原成绝对路径**只有一个入口**：`CodeViewFormat.resolvedURL(_:root:)`
+    /// （Finder 定位与「用默认应用打开」两处消费点都走它）；旧报告里那批绝对坐标
+    /// 不必改写，它走的是同一函数 `hasPrefix("/")` 那一支。
+    var duplicationCoordinate: String {
+        let relative = relativePath
+        guard relative.isEmpty == false, url.path.hasSuffix("/" + relative) else { return url.path }
+        return relative
+    }
+}
+
 // MARK: - 跳过目录计划
 
 /// 跳过目录判定 + 已剔除目录的绝对路径集合（符号链接与 skipDirectories 的兜底防线）。

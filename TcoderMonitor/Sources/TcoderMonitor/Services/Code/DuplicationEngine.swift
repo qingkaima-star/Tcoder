@@ -152,7 +152,9 @@ enum DuplicationEngine {
                                  filesHittingLineCap: indexed.filesHittingLineCap,
                                  blocksDroppedByCap: ranked.droppedByCap,
                                  linesOutsideReportedBlocks: ranked.linesOutsideReportedBlocks,
-                                 blocksOutsideBoard: DuplicationScan.relativeCoordinates(
-                                    ranked.outsideBoardCoordinates, files: files))
+                                 // 榜外坐标**直传** `id`：坐标在唯一生产点（`DuplicationScanState.fragmentOf`）
+                                 // 已经是相对被扫根的形状，这里不再加工（RD-61 第二半，
+                                 // 原先这里挂过一次 `DuplicationScan.relativeCoordinates` 补剥前缀）。
+                                 blocksOutsideBoard: ranked.outsideBoardCoordinates)
     }
 }
