@@ -915,7 +915,6 @@
 "函数复杂度可控（最高 CC %1$@）" = "Complexity is contained (max CC %1$@)";
 "%1$@ 个函数圈复杂度 ≥16，最高 %2$@" = "%1$@ functions at cyclomatic complexity ≥16, max %2$@";
 "先拆这一个：「%1$@」（%2$@ 第 %3$@ 行 · 圈复杂度 %4$@），用早返回替代嵌套分支" = "Split this one first: %1$@ (%2$@ line %3$@, CC %4$@); replace nested branches with early returns";
-"抽取重复块为共享工具或基类，优先处理跨服务重复" = "Extract duplicated blocks into shared helpers or base classes, starting with cross-service repeats";
 "文件规模健康，巨大文件占比低" = "File sizes are healthy; few oversized files";
 "%1$@ %2$@ 行，远超单文件上限" = "%1$@ has %2$@ lines, far beyond the single-file limit";
 "注释密度适中（%1$@）" = "Comment density is moderate (%1$@)";
@@ -986,6 +985,9 @@
 "（数据源：%1$@）" = "(source: %1$@)";
 "%1$@ 个已知漏洞，%2$@ 个版本过旧" = "%1$@ known vulnerabilities, %2$@ outdated versions";
 "先升级带严重漏洞的依赖，再统一处理过期版本" = "Upgrade dependencies with critical vulnerabilities first, then handle stale versions";
+"先合这一处重复：%1$@ 之间有 %2$@ 行相同，抽成共享工具或基类" = "Merge this duplicate first: %1$@ shares %2$@ identical lines; extract a shared utility or base class";
+"先升级这一个：%1$@（%2$@，公告 %3$@），再统一处理过期版本" = "Upgrade this one first: %1$@ (%2$@, advisory %3$@); then handle outdated versions together";
+"先升级这一个：%1$@（%2$@，命中 %3$@ 个依赖），再统一处理过期版本" = "Upgrade this one first: %1$@ (%2$@, affects %3$@ dependencies); then handle outdated versions together";
 "测试覆盖率 %1$@" = "Test coverage %1$@";
 "将行覆盖率从 %1$@ 提升到 75%% 以上" = "Raise line coverage from %1$@ to above 75%%";
 "行覆盖 %1$@，分支覆盖 %2$@" = "Lines %1$@, branches %2$@";

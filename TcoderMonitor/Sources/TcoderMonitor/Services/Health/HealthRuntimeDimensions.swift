@@ -219,8 +219,25 @@ extension WeightedHealthScorer {
                                 HealthCurves.whole(deps.outdatedCount))]
     }
 
+    /// RD-84：要点的那一个必须与 `vulnerableCount` **同源**——计数走的是
+    /// `advisories[].affectedPackages` 与 `offlineVulnerabilities[].affectedDependencies`，
+    /// 所以点名也只能从这两处取（拿 `DependencyRecord.knownVulnerabilities` 去点会变成第三个口径，
+    /// 那是本仓「跨口径读数不可进同一统计量」点名过的错）。
+    /// 三条都落不到具体名字时才退回泛泛一句——数说"有命中"但两处来源都点不出名字，
+    /// 这本身就是"没查准"，不许编一个组件名上去。
     private func dependencyAdvice(_ deps: DependencyReport) -> [String] {
-        deps.vulnerableCount > 0 ? [localizedCopy("先升级带严重漏洞的依赖，再统一处理过期版本")] : []
+        guard deps.vulnerableCount > 0 else { return [] }
+        if let advisory = deps.advisories.first(where: { $0.affectedPackages.isEmpty == false }),
+           let package = advisory.affectedPackages.first {
+            return [localizedFormat("先升级这一个：%1$@（%2$@，公告 %3$@），再统一处理过期版本",
+                                    package, advisory.ecosystem.displayName, advisory.id)]
+        }
+        if let offline = deps.offlineVulnerabilities.first(where: { $0.affectedDependencies.isEmpty == false }) {
+            return [localizedFormat("先升级这一个：%1$@（%2$@，命中 %3$@ 个依赖），再统一处理过期版本",
+                                    offline.package, offline.ecosystem.displayName,
+                                    String(offline.affectedDependencies.count))]
+        }
+        return [localizedCopy("先升级带严重漏洞的依赖，再统一处理过期版本")]
     }
 
     // MARK: - 测试覆盖
