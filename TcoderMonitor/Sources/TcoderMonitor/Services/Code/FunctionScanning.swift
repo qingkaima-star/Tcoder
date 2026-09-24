@@ -246,8 +246,12 @@ extension ComplexityEngine {
         ["+", "-", "*", "/", "%", "=", "<", ">", "&", "|", "^", "?", ":", "."]
     /// 换行开头的续行算符。**故意不含 `/`**：清洗后仍留在行首的 `/` 多半是正则或除法的尾巴，
     /// 为一个罕见形状白担一份「把下一条语句并进来」的风险。
+    /// `-` 与 `>` 必须在：Swift / Rust 的返回类型常另起一行写 `-> X`，
+    /// 少了这一档会把这类真函数的签名判成「本行已说完」，接着把下一行的 `{` 挡在界外
+    /// （本仓自扫实测：`static func buildIndex(files:…)\n    -> (…) {` 一批 20 多处被误杀，
+    /// 由 `testMultilineSignatureWithReturnOnItsOwnLineKeepsItsBody` 钉住）。
     static let leadingContinuationCharacters: Set<Character> =
-        ["?", ":", "&", "|", "+", "=", ".", ","]
+        ["?", ":", "&", "|", "+", "=", ".", ",", "-", ">"]
 
     /// 本行之后这条语句**还没说完**吗（RD-79 的语句收尾判据）。
     /// 顺序不是随便排的：先看后面**还有没有**一行有内容的 —— 文件到这就结束了，
@@ -269,8 +273,22 @@ extension ComplexityEngine {
         }
         let head = cleaned[next].trimmingCharacters(in: .whitespaces)
         if head.hasPrefix("{") { return true }
-        return leadingContinuationCharacters.contains(where: { head.hasPrefix(String($0)) })
+        if leadingContinuationCharacters.contains(where: { head.hasPrefix(String($0)) }) { return true }
+        return startsWithSignatureContinuationWord(head)
     }
+
+    /// 下一行以「只有签名收尾才会用的词」开头 —— 参数表已闭合但仍属同一条签名。
+    /// 三条真实语料逼出来的：Swift 的 `func f(...)\n    async -> T {`、
+    /// 同族的 `\n    throws -> T {`、以及 `\n    where T: X {`；Java/Kotlin 的 `throws X {` 走同一个词。
+    /// 少了这一档，本仓自扫当场误杀两处真函数（`ShellGitAnalyzer.scanNestedRepositories`
+    /// 与 `CLIProcessTests.launch`，都是返回类型另起一行写的），所以它是判据不是糖。
+    static func startsWithSignatureContinuationWord(_ head: String) -> Bool {
+        let word = String(head.prefix(while: { $0.isLetter }))
+        return signatureContinuationWords.contains(word)
+    }
+
+    static let signatureContinuationWords: Set<String> =
+        ["async", "await", "throws", "rethrows", "where"]
 
     /// 从 `start` 行开始的这条语句在哪一行「说完」了：定界符深度回到起点、且本行之后不算续行。
     /// 深度转负说明这一段读不通（多余的右括号 / 掩码边界切错），一律返回 nil 交回原路径 ——

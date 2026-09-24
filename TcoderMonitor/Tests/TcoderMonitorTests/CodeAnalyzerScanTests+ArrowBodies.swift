@@ -89,7 +89,7 @@ extension CodeAnalyzerTests {
 
     /// 反例与限度：带花括号的体画法一字不改；单行表达式体**仍然**不进分母 ——
     /// 那不是箭头特有的规则，`minFunctionLines = 2` 是全语言口径
-    /// （同一条钉在 `testManifestLabCodeMetrics` 的手算账本里：Go 的单行函数同样不进）。
+    /// （同一条钉在 `testCodeMetricsOnKnownMarkersHugeFilesAndClones` 的手算账本里：Go 的单行函数同样不进）。
     func testBracedArrowBodiesKeepWorkingAndSingleLineOnesStayExcluded() throws {
         let root = try makeFixtureRoot()
         defer { try? fm.removeItem(at: root) }
@@ -118,5 +118,32 @@ extension CodeAnalyzerTests {
             XCTAssertTrue(ComplexityEngine.functions(in: file).isEmpty,
                           "\(name)：单行函数按 minFunctionLines 口径不进分母")
         }
+    }
+
+    /// 反向自证（新加的闸门不许回头咬真函数）：返回类型另起一行写的 Swift 签名必须照常带体。
+    /// 这条是修完当场被**本仓自扫**抓到的：加上语句上界之后，
+    /// `static func buildIndex(files: …)` 换行 `-> (…) {` 这一族在本仓一度被误杀 20 多处
+    /// （X3 普查读数 3069 → 3053），修法是给「下一行开头」补 `-` 与 `>` 两个续行符。
+    func testMultilineSignatureWithReturnOnItsOwnLineKeepsItsBody() throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+        let body = """
+        final class Reader {
+            static func buildIndex(files: [Int], total: Int)
+                -> (scan: [Int], capped: Int) {
+                if total > 1 {
+                    return (files, 0)
+                }
+                return ([], 1)
+            }
+        }
+        """
+        let file = try XCTUnwrap(classify(try write(body + "\n", to: "Reader.swift", in: root), root: root))
+        let functions = ComplexityEngine.functions(in: file)
+        XCTAssertEqual(functions.map(\.name), ["buildIndex"], "返回类型换行不得把真函数判没，实测 \(functions.map(\.name))")
+        XCTAssertEqual(functions.first?.startLine, 2, "签名从第 2 行起")
+        XCTAssertEqual(functions.first?.lineCount, 7, "体是第 2~8 行")
+        XCTAssertEqual(functions.first?.parameterCount, 2, "两个入参")
+        XCTAssertEqual(functions.first?.complexity, 2, "1 基准 + 1 个 if")
     }
 }
