@@ -226,9 +226,18 @@ final class SourceRoleTruthTests: XCTestCase {
         XCTAssertTrue(notes.contains { $0.contains("只有语言证据") } == false, "\(notes)")
         XCTAssertTrue(tally.roleLines.contains { $0.contains("只有语言证据")
             && $0.contains("scratchpad.swift") }, "\(tally.roleLines)")
-        XCTAssertTrue(notes.allSatisfy { $0.contains("字段清单") } == false
-                      || notes.contains { $0.contains("docs/R6-契约字段清单.md") },
-                      "要按角色出数的那句必须指出去哪儿看字段：\(notes)")
+        // RD-67：这枚字段**已经落地**（`code.fileRoles` 八档全量、CLI 那一行读它），
+        // 所以那句边界不许再说"要等字段"—— 把已有的东西说成没有，与把没有的说成已有，
+        // 是同一条不诚实的两个方向（本仓踩过：把口径说成没量到，是反向不诚实）。
+        let narrowed = notes.filter { $0.contains("未按角色收窄") }
+        XCTAssertEqual(narrowed.count, 1, "分母未收窄那句只许有一条：\(notes)")
+        let boundary = narrowed[0]
+        XCTAssertTrue(boundary.contains("code.fileRoles"),
+                      "既然字段已落盘，那句就必须点名可读数在哪：\(boundary)")
+        for forbidden in ["需等", "清单见", "尚缺", "字段还没有"] {
+            XCTAssertFalse(boundary.contains(forbidden),
+                           "把已落地的读数说成没有 ⇒ 反向不诚实：\(forbidden) / \(boundary)")
+        }
     }
 
     /// 一个生产码都不缺、也不缺任何线索时，**不许**出声（零命中不出声）。
