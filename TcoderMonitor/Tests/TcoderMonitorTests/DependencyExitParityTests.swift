@@ -47,7 +47,12 @@ final class DependencyExitParityTests: XCTestCase {
 
         // 第二问的反例态：还有 2 条答上了、1 条失败 —— 这一档在 CLI 必须落在「没查全」那侧。
         let text = cliText(of: report)
-        XCTAssertTrue(text.contains("已核对 2/3"), dependencyLines(text))
+        // RD-74：这一句里**同一对数字只许出现一次**（改前它会打两遍、还是两种写法：
+        // 「已核对 2/3」＋装配口那句「已核对 2 / 3 个依赖，另外 1 个没查…」）。
+        let statusLine = Self.vulnerabilityStatusLine(in: text)
+        XCTAssertTrue(statusLine.contains("已核对 2 / 3"), statusLine)
+        XCTAssertEqual(Self.occurrences(of: "已核对", in: statusLine), 1,
+                       "同一对条数在一行里印了两遍：" + statusLine)
         XCTAssertTrue(text.contains("这是「没查全」，不是「没有漏洞」"), dependencyLines(text))
         XCTAssertFalse(text.contains("全量覆盖且零命中"),
                        "部分覆盖却打了零命中那句：" + dependencyLines(text))
@@ -79,7 +84,10 @@ final class DependencyExitParityTests: XCTestCase {
         let ledger = DependencyEvidence.ledger(for: report)
         XCTAssertEqual(ledger.vulnerabilityCheckedCount, 0)
         let text = cliText(of: report)
-        XCTAssertTrue(text.contains("已核对 0/3"), dependencyLines(text))
+        let offlineLine = Self.vulnerabilityStatusLine(in: text)
+        XCTAssertTrue(offlineLine.contains("共 3 个依赖，一条都没核对"), offlineLine)
+        XCTAssertEqual(Self.occurrences(of: "已核对", in: offlineLine), 0,
+                       "一条都没核对，就不该在这一行再报一遍「已核对 N/M」：" + offlineLine)
         XCTAssertTrue(text.contains("3 个未查"), dependencyLines(text))
         XCTAssertTrue(text.contains("这是「没查全」，不是「没有漏洞」"), dependencyLines(text))
         XCTAssertFalse(text.contains("全量覆盖"), dependencyLines(text))
@@ -291,5 +299,16 @@ final class DependencyExitParityTests: XCTestCase {
             try text.write(to: url, atomically: true, encoding: .utf8)
         }
         return base
+    }
+
+    /// 只取「漏洞核对状态」**那一行**。RD-74 要判的是这一行内部有没有把同一对数印两遍，
+    /// 拿全篇 `contains` 数会被「版本核对状态」与分 scope 那几行稀释成假绿。
+    private static func vulnerabilityStatusLine(in text: String) -> String {
+        text.split(separator: "\n").first { $0.hasPrefix("漏洞核对状态") }.map(String.init) ?? ""
+    }
+
+    /// 出现次数（`components` 相减是 0 次时得 0，不额外分支）。
+    private static func occurrences(of needle: String, in haystack: String) -> Int {
+        haystack.components(separatedBy: needle).count - 1
     }
 }
