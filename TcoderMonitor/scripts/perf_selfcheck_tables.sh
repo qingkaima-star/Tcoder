@@ -204,6 +204,7 @@ selfcheck_md_tables_unbroken() {  # selfcheck_md_tables_unbroken <outdir>
   # 注释住哪儿不改判据；这里只留判据本体）。
   local f bad=0 n=0
   for f in ../docs/superpowers/specs/2026-09-20-performance-120hz-design.md \
+           ../docs/superpowers/specs/2026-09-20-perf-baseline-detail.md \
            ../docs/superpowers/plans/2026-09-20-perf-followup-tickets.md \
            ../docs/superpowers/plans/2026-09-21-perf-handoff-notes.md \
            ../docs/superpowers/plans/2026-09-22-perf-handoff-notes-round2.md \
