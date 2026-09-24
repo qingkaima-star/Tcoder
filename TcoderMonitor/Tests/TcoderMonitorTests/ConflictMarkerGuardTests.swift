@@ -74,7 +74,11 @@ final class ConflictMarkerGuardTests: XCTestCase {
         }
         // 分母出声：扫到多少文件必须打出来，"0 违例"才读得出是"查过了"还是"没查到"。
         let roots = Self.scannedRoots.joined(separator: "、")
-        print("【合并标记】扫 \(scanned) 个会被编译/解析的文件（\(roots)） → 残留 \(hits.count) 处")
+        let readout = "【合并标记】扫 \(scanned) 个会被编译/解析的文件（\(roots)） → 残留 \(hits.count) 处"
+        print(readout)
+        // 第二条出口（RD-64）：这句 print 在全量跑里会被安静丢掉，故除 stdout 外再落一份带被测头的账，
+        // 写完立刻读回断言相等。判据（下面的 XCTAssertTrue）一字未动。
+        GuardLedger.record(guard: "ConflictMarkerGuardTests", readings: [readout])
         XCTAssertTrue(hits.isEmpty,
                       "这些文件里留着没解完的合并标记 ⇒ 在 `.strings`/JSON 里它是静默的："
                     + "目录解析失败会被读成「没有数据」，而 `git status` 只看索引态、看不见已提交的标记：\n"
