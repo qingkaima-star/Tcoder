@@ -120,6 +120,28 @@ final class DependencyExitParityTests: XCTestCase {
         XCTAssertTrue(text.contains("实际安装版本没量到"), dependencyLines(text))
     }
 
+    /// D 组的失败态此前只断到解析器返回 nil（`testMalformedLocksYieldNoResolution`），
+    /// 报告与出口那一层没人接手。这条补的是「读不动绝不长成解析成功」：
+    /// 坏锁与无锁都必须停在「安装版本没量到」，且那句「安装版本由已解析产物给出」不许出现。
+    ///
+    /// ⚠️ 仍然没做到、也不许假装做到的一件事（已列进交回报告的缺口清单）：
+    /// 产品里没有任何一格能回答「有一份锁文件我读不动」——它与「这个项目根本没有锁文件」
+    /// 在三个出口长成一个样。本条只钉"不许冒充成功"这一侧，不替那一格的存在背书。
+    func testUnreadableLockNeverClaimsAResolvedVersion() async throws {
+        let declared = #"{"name":"lock-lab","dependencies":{"left-pad":"^1.2.3"}}"#
+        let broken = try await analyze(["package.json": declared, "package-lock.json": "{ not json"],
+                                       tag: "lock-unreadable", online: nil, allowNetwork: false)
+        let row = try XCTUnwrap(broken.ecosystems.flatMap(\.dependencies).first)
+        XCTAssertNil(row.resolvedVersion, "读不动的锁里编不出安装版本")
+        XCTAssertNil(row.resolvedVersionSource, "没有来源可点名的结论就不许挂上")
+        XCTAssertFalse(DependencyEvidence.declarationExplain(for: row).contains("安装版本由已解析产物给出"),
+                       DependencyEvidence.declarationExplain(for: row))
+        // 这一态现在唯一的出声口：它必须自己承认是按声明下界查的。
+        XCTAssertEqual(DependencyVersionIdentity.of(row).query?.basis, .rangeLowerBound)
+        let text = dependencyLines(cliText(of: broken))
+        XCTAssertTrue(text.contains("声明范围的下界"), text)
+    }
+
     // MARK: - ③ E 组：分 scope 的四列必须各归各的档
 
     /// 手写行为表（每档一枚不同的四元组，任何两列互换、任何两档互换都会红）：
