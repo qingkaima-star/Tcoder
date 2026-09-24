@@ -158,6 +158,12 @@ struct CoverageMetrics: Codable, Equatable, Sendable {
         return text
     }
 
+    /// 分支覆盖率总数：**先把各份的分子、分母各自相加再除**，不是「把每份的百分比取平均」。
+    ///
+    /// 09-24 删掉了逐份那枚 `CoverageReport.branchPercent`：它在 `Sources`/`Tests` 与全部
+    /// 46 个本地分支上**零读者**（含测试），留着就是一把从没对过表、却随时可能被拿去当聚合分子的尺子，
+    /// 而它算出来的东西恰恰**不该**被拿去平均。将来要做「逐份报告的分支覆盖率」那一栏时，
+    /// 必须与这一处同源（先加后除），别在视图里现算第二遍。
     var overallBranchPercent: Double? {
         let scored = reports.filter { $0.branchesTotal != nil && ($0.branchesTotal ?? 0) > 0 }
         guard !scored.isEmpty else { return nil }
@@ -283,10 +289,6 @@ struct CoverageReport: Codable, Equatable, Identifiable, Sendable {
 
     var linePercent: Double {
         linesTotal == 0 ? 0 : Double(linesCovered) / Double(linesTotal) * 100
-    }
-    var branchPercent: Double? {
-        guard let total = branchesTotal, total > 0 else { return nil }
-        return Double(branchesCovered) / Double(total) * 100
     }
     /// 全口径行覆盖率，仅用于展示与取证。分母为 0 时返回 nil 而不是 0%。
     var allLinePercent: Double? {
