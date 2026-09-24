@@ -47,9 +47,10 @@ final class DependencyExitParityTests: XCTestCase {
 
         // 第二问的反例态：还有 2 条答上了、1 条失败 —— 这一档在 CLI 必须落在「没查全」那侧。
         let text = cliText(of: report)
-        XCTAssertTrue(text.contains("已核对 2/3"), text)
-        XCTAssertTrue(text.contains("这是「没查全」，不是「没有漏洞」"), text)
-        XCTAssertFalse(text.contains("全量覆盖且零命中"), "部分覆盖却打了零命中那句：\n\(text)")
+        XCTAssertTrue(text.contains("已核对 2/3"), dependencyLines(text))
+        XCTAssertTrue(text.contains("这是「没查全」，不是「没有漏洞」"), dependencyLines(text))
+        XCTAssertFalse(text.contains("全量覆盖且零命中"),
+                       "部分覆盖却打了零命中那句：" + dependencyLines(text))
 
         // 第三问：落盘 JSON 那一格必须与 CLI 那句是同一份数（不许各自再数一遍）。
         let stored = try roundTrip(report)
@@ -67,8 +68,8 @@ final class DependencyExitParityTests: XCTestCase {
         XCTAssertEqual(ledger.vulnerabilityCheckedCount, 3, "手写推导：三条都在假源的回执里")
         XCTAssertTrue(DependencyEvidence.mayClaimNoKnownVulnerabilities(ledger))
         let text = cliText(of: report)
-        XCTAssertTrue(text.contains("已核对 3/3"), text)
-        XCTAssertTrue(text.contains("全量覆盖且零命中"), text)
+        XCTAssertTrue(text.contains("已核对 3/3"), dependencyLines(text))
+        XCTAssertTrue(text.contains("全量覆盖且零命中"), dependencyLines(text))
     }
 
     /// 「没去查」（离线，一条都没发起）与「查了没查到」是两件事：这一档 CLI 必须说未查。
@@ -78,10 +79,10 @@ final class DependencyExitParityTests: XCTestCase {
         let ledger = DependencyEvidence.ledger(for: report)
         XCTAssertEqual(ledger.vulnerabilityCheckedCount, 0)
         let text = cliText(of: report)
-        XCTAssertTrue(text.contains("已核对 0/3"), text)
-        XCTAssertTrue(text.contains("3 个未查"), text)
-        XCTAssertTrue(text.contains("这是「没查全」，不是「没有漏洞」"), text)
-        XCTAssertFalse(text.contains("全量覆盖"), text)
+        XCTAssertTrue(text.contains("已核对 0/3"), dependencyLines(text))
+        XCTAssertTrue(text.contains("3 个未查"), dependencyLines(text))
+        XCTAssertTrue(text.contains("这是「没查全」，不是「没有漏洞」"), dependencyLines(text))
+        XCTAssertFalse(text.contains("全量覆盖"), dependencyLines(text))
     }
 
     // MARK: - ② D 组：没量到安装版本 ⇒ 按下界查询这件事必须自己出声
@@ -115,8 +116,8 @@ final class DependencyExitParityTests: XCTestCase {
         XCTAssertEqual(stored.versionLookup?.lowerBoundQueries, 1, "落盘 JSON 那一格")
         XCTAssertEqual(stored.vulnerabilityLookup?.lowerBoundQueries, 1)
         let text = cliText(of: ranges)
-        XCTAssertTrue(text.contains("声明范围的下界"), "CLI 必须说出这条降级：\n\(text)")
-        XCTAssertTrue(text.contains("实际安装版本没量到"), text)
+        XCTAssertTrue(text.contains("声明范围的下界"), "CLI 必须说出这条降级：" + dependencyLines(text))
+        XCTAssertTrue(text.contains("实际安装版本没量到"), dependencyLines(text))
     }
 
     // MARK: - ③ E 组：分 scope 的四列必须各归各的档
@@ -237,6 +238,16 @@ final class DependencyExitParityTests: XCTestCase {
         report.dependencies = deps
         report.health = WeightedHealthScorer().score(HealthInputs(dependencies: deps))
         return CLIScoreText.render(report, exit: .ok)
+    }
+
+    /// 断言消息只带**依赖那几行**（单行）。
+    /// 实测教训：把整段多行 CLI 文本当消息塞进 XCTAssertEqual，红的时候日志里会
+    /// **丢掉记录**（本文件第一版 8 例 6 失败、日志只有 3 条 error 记录，复跑同形）——
+    /// 与 AGENTS §8 第 6.1 条「判据不许只有 print 一个出口」同族：红也要留得下字。
+    private func dependencyLines(_ text: String) -> String {
+        text.split(separator: "\n")
+            .filter { $0.contains("漏洞核对") || $0.contains("分 scope") || $0.contains("下界") }
+            .joined(separator: " ⏎ ")
     }
 
     private func roundTrip(_ deps: DependencyReport, dropping key: String? = nil) throws -> DependencyReport {
