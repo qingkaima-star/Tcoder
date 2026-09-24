@@ -1141,3 +1141,12 @@
 "「哪些没测准」那一句的判据输入未落盘，这里只呈现逐条原因" = "The criteria inputs behind the 'which parts were not measured accurately' sentence are not persisted, so only the per-reason breakdown is shown here.";
 "未测准：%1$@" = "Not measured accurately: %1$@";
 "读取失败的原因分布：%1$@" = "Reason breakdown for the unreadable files: %1$@";
+
+// RD-62（R33）：覆盖率「单元测试 / 集成测试」那两格的三态。句子只产自
+// `Services/Coverage/CoverageDisplayShape.swift` 的 `CoverageCategoryReadout`，
+// 屏上那两格与无头 `score` 文本共用它（「无报告」这一枚键 P0 之前就在上面第 68 行，未重复登记）。
+// 两枚框架键装的是**已经查过表的整串**，词序由英文侧自己定。
+"未标注类别" = "Category Not Labeled";
+"未产出该类报告" = "No Report Of This Category";
+"单元测试：%1$@" = "Unit Tests: %1$@";
+"集成测试：%1$@" = "Integration Tests: %1$@";

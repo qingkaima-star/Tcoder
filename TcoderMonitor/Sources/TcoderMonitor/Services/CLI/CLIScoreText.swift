@@ -62,6 +62,9 @@ enum CLIScoreText {
         // RD-50：覆盖率那本账（总数 vs 被上限切掉的）在界面上有读者之前，
         // CLI 先用**同一个装配口**读一遍 —— 不许在这里另写一份中文。
         lines.append(contentsOf: coverageAccountingLines(report))
+        // RD-62：类别那一格的三态。位置紧跟覆盖率那本账（同一族读数、都在分数之前），
+        // 句子逐字来自唯一装配口，这里不另写一份中文。
+        lines.append(contentsOf: coverageCategoryLines(report))
         // RD-60：崩溃证据那本细账同理。位置与覆盖率那行并排（都在分数之前），
         // 理由同「失败路在分数之前」：先说清这个崩溃数是怎么来的，再给分。
         lines.append(contentsOf: crashEvidenceLines(report, windowDays: windowDays))
@@ -157,6 +160,26 @@ enum CLIScoreText {
     static func coverageAccountingLines(_ report: ProjectReport) -> [String] {
         guard let coverage = report.coverage, let note = coverage.boardAccountingNote else { return [] }
         return [note]
+    }
+
+    /// 覆盖率「单元测试 / 集成测试」那两格（RD-62）：界面两格与无头这一路**同一句**，
+    /// 句子只由唯一装配口 `CoverageCategoryReadout.text(for:in:)` 生产，
+    /// 这里不另写一份中文（与上面 `coverageAccountingLines` 复用
+    /// `CoverageMetrics.boardAccountingNote` 同一条纪律）。
+    ///
+    /// 门是「这一路跑过」（`report.coverage != nil`）而不是 `hasData`：
+    /// 三态里「一份报告都没有」那一支在界面上走不到（覆盖率那张卡只在 `hasData` 时才画），
+    /// 无头这一路必须把它接出来，"三个出口同一句"才真的成立。
+    /// 这一路整条失败（`nil`）时**一行都不打** —— 别人的失败不是自己的读数
+    /// （与上面 `scanSurfaceLines` 同一条理由）。
+    static func coverageCategoryLines(_ report: ProjectReport) -> [String] {
+        guard let coverage = report.coverage else { return [] }
+        return [
+            localizedFormat("单元测试：%1$@",
+                            CoverageCategoryReadout.text(for: coverage.unit, in: coverage)),
+            localizedFormat("集成测试：%1$@",
+                            CoverageCategoryReadout.text(for: coverage.integration, in: coverage)),
+        ]
     }
 
     /// 崩溃证据那本细账（RD-60 第二半）：`scan` 落的九格快照（`logs.crashEvidence`）在文本读数里
