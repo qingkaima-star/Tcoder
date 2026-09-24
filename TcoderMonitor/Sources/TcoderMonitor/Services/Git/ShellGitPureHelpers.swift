@@ -12,12 +12,11 @@ extension ShellGitAnalyzer {
 
     /// 归一化路径：去掉符号链接差异与尾随斜杠，保证「git 报上来的根」和
     /// 「用户选的目录」可比（macOS 上 `/tmp` 是 `/private/tmp` 的符号链接）。
-    static func canonicalPath(_ path: String) -> String {
-        let url = URL(fileURLWithPath: path).standardizedFileURL
-        let resolved = url.resolvingSymlinksInPath().path
-        if resolved.count > 1, resolved.hasSuffix("/") { return String(resolved.dropLast()) }
-        return resolved
-    }
+    ///
+    /// 写法**不在这里定**：委托给 `ScannedPath.canonical`，因为 git 那一侧与
+    /// 界面/CLI 的装配口必须用同一个方向，否则「写法之差」会被读成「仓库根被重定位」
+    /// （`ScanProvenance.resolvedGitRoot` 那句要上屏；现证见 #60 的两张对表）。
+    static func canonicalPath(_ path: String) -> String { ScannedPath.canonical(path) }
 
     /// `root` 是 `path` 的第几层祖先；不是祖先返回 nil，相等返回 0。
     static func upwardHops(fromRoot root: String, to path: String) -> Int? {
