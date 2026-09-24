@@ -73,7 +73,7 @@ def report(text: str, label: str) -> int:
 
 def main(argv):
     if len(argv) < 2:
-        print("用法: commit_msg_quote_check.sh <文件|-> 或 --scan [N]")
+        print("用法: commit_msg_quote_check.py <文件|-> 或 --scan [N]")
         return 2
     if argv[1] == "--scan":
         n = int(argv[2]) if len(argv) > 2 and argv[2].isdigit() else 30
