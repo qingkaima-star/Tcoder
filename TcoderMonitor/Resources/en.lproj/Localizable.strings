@@ -1162,3 +1162,11 @@
 "未产出该类报告" = "No Report Of This Category";
 "单元测试：%1$@" = "Unit Tests: %1$@";
 "集成测试：%1$@" = "Integration Tests: %1$@";
+
+// RD-67 双分母并排（R40，2026-09-24）：「生产码 N 行 / 全量 M 行」那一句里**不含数字**的
+// 一支 —— 生产码那一档这次真的量到 0（八档都数过、这一档一个文件都没有）。
+// 装配口只有一个：`Services/Code/ProductionCodeScaleReadout.measuredZeroNotice(_:)`；
+// 三条带量词的兄弟键在 `Localizable.stringsdict`（复数只能由 stringsdict 选支）。
+// ⚠ 这一句只说这一档的分档结果，英文值里也不许长成「这个项目没有源码」那类结论；
+// 注释一律 `//`（一个 `#` 会让系统解析器从那一行起整段放弃），英文值只用 ASCII 标点。
+"生产码这一档这次量到的是零，不是没数出来" = "This production code bucket measured zero this time; it was not left unmeasured.";

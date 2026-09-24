@@ -88,8 +88,11 @@ struct SourceRoleTally: Sendable, Equatable {
     /// **弱判定**那一档：只有语言证据、路径没有任何角色线索，却被归进生产源码的文件数。
     var weakEvidenceFiles: Int { count(.productionLanguageOnly) }
 
-    /// 整张分档表（每档一行）。这一份要等 `Models` 的承接字段才能上屏，
-    /// 现在只有单测与 CLI 内部读得到 —— 已列进 R6 交回汇报的「契约缺口」。
+    /// 整张分档表（每档一行）。**当前只有单测在读**：屏上那一句不走这里，走
+    /// `ProductionCodeScaleReadout`（它读的是同一份累计**落盘**之后的 `code.fileRoles`）。
+    /// 旧注释写的是「这一份要等 `Models` 的承接字段才能上屏」—— 那是一句**过期理由**：
+    /// 字段 09-23 已落地（RD-14），09-24 起界面卡与健康分 ⓘ 也各自接上了
+    /// （RD-67 · 台账卷四 §73），不许再拿「等字段」当这一份没接线的说法。
     var roleLines: [String] {
         SourceFileRole.allCases.filter { !share($0).isEmpty }.map { role in
             let value = share(role)
@@ -115,7 +118,11 @@ struct SourceRoleTally: Sendable, Equatable {
         // 所以旧理由已经不成立。现在只剩一条真理由：同一个数已经在两处出声，
         // 再挂一条边界提示等于把"已量到并公开的东西"重复计成"又一条没量准"
         // （`CodeAnalyzerPrecisionTests.testFileCapCoverageIsExposed` 那条既有断言也容不下多出来的一行）。
-        // 句子本身留在 `roleLines`：要接的下一步是"读 `code.fileRoles` 时一并带出"，不是"等字段"。
+        // 那一段「下一步：读 `code.fileRoles` 时一并带出」**已经做掉了**（RD-67 · WS-R40）：
+        // 「读这一档要按它打折」现在由 `ProductionCodeScaleReadout.weakEvidenceHint` 读落盘的
+        // `fileRoles.share(for: .production)?.weakEvidenceFiles`，并到上屏那一句末尾
+        // （代码规模页那一格 + 健康分 ⓘ 两处）。接的是**上屏那一路**，仍不是 `scanLimitations`
+        // 这本账 —— 上面那两条理由一条没变，别把这次接线读成「该把它挪进未量准清单」。
         appendNonProductionInsideTotalsNote(into: &lines)
         appendGeneratedEvidenceNote(into: &lines)
         return lines
@@ -132,7 +139,9 @@ struct SourceRoleTally: Sendable, Equatable {
             + "未覆盖的语言/形状：\(examplesText(value.examples))。")
     }
 
-    /// 弱判定那句：进 `roleLines`（等字段上屏），**不进** `scanLimitations`。
+    /// 弱判定那句（带**样本路径**的那一份）：进 `roleLines`，**不进** `scanLimitations`
+    /// （理由见 `notes` 里那段）。屏上那一句不读这里 —— 它读落盘的 `weakEvidenceFiles`，
+    /// 生产者只有这一处：`ProductionCodeScaleReadout.weakEvidenceHint(_:)`。
     var weakEvidenceNote: String? {
         guard weakEvidenceFiles > 0 else { return nil }
         return "生产源码判定里 \(NumberFormat.grouped(weakEvidenceFiles)) 个文件**只有语言证据**、"
