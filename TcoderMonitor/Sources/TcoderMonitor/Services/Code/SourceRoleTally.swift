@@ -109,11 +109,13 @@ struct SourceRoleTally: Sendable, Equatable {
     var notes: [String] {
         var lines: [String] = []
         appendUnknownRoleNote(into: &lines)
-        // 弱判定那句**不进** `scanLimitations`：它解释的是"生产码这一档有多可信"，
-        // 而那一档要等 `Models.fileRoles` 才上屏（见 docs/R6-契约字段清单.md §2）。
-        // 现在把它塞进去 = 给一个还没露出来的读数常驻一条边界提示
-        // （会把 `CodeAnalyzerTests.testFileCapCoverageIsExposed` 那条既有断言挤掉）。
-        // 句子本身留在 `roleLines` 里，字段一落地就能用。
+        // 弱判定那句**不进** `scanLimitations`，但留在这里的理由换过（RD-67 复核）：
+        // 原先写的是「那一档要等 `Models.fileRoles` 才上屏」—— 那枚字段今天已经落地，
+        // 那一档也确实上了屏（`CLIScoreText.fileRoleStatement` 逐字点名「弱判定 N 个」），
+        // 所以旧理由已经不成立。现在只剩一条真理由：同一个数已经在两处出声，
+        // 再挂一条边界提示等于把"已量到并公开的东西"重复计成"又一条没量准"
+        // （`CodeAnalyzerPrecisionTests.testFileCapCoverageIsExposed` 那条既有断言也容不下多出来的一行）。
+        // 句子本身留在 `roleLines`：要接的下一步是"读 `code.fileRoles` 时一并带出"，不是"等字段"。
         appendNonProductionInsideTotalsNote(into: &lines)
         appendGeneratedEvidenceNote(into: &lines)
         return lines
@@ -151,8 +153,9 @@ struct SourceRoleTally: Sendable, Equatable {
             .joined(separator: localizedListSeparator())
         lines.append("代码规模的分母本轮**未按角色收窄**：\(NumberFormat.grouped(outsiderFiles)) 个非生产源码文件"
             + "（\(NumberFormat.grouped(outsiderLines)) 代码行：\(detail)）与生产码同分母。"
-            + "要按角色分档出数或让构建产物不恶化生产码评分，需等 `Models/CodeMetrics` 的角色字段"
-            + "（清单见 docs/R6-契约字段清单.md）。")
+            + "角色分档本身已经落盘并可读（`code.fileRoles` 八档全量、CLI 那一行读的就是它），"
+            + "所以这一条**不是能力缺口**，是评分与规模的分母还没接上这枚字段；"
+            + "要不要收窄属产品裁定（台账 RD-67），不许读成工具量不到。")
     }
 
     private func appendGeneratedEvidenceNote(into lines: inout [String]) {

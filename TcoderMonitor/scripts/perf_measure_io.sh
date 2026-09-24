@@ -183,6 +183,18 @@ filter_out_pids() {  # filter_out_pids <候选 pid 串> <要排除的 pid 串> �
   printf '%s\n' "${keep# }"
 }
 
+heavy_names_for_pids() {  # heavy_names_for_pids <明细串> <保留的 pid 串> → 只含这些 pid 的 `pid=name` 串
+  # 单独一支函数的理由（09-24 #49）：明细列以前用**第二种**过滤法（`grep -vF -x` 去比 `pid=<self>`），
+  # 而明细行的形状是 `pid=<self> name=xctrace`，整行永不相等 ⇒ 计数排掉了自己、明细却把自己的
+  # 采集进程写成"在场的重活"。归属说错比不说更坏：读 tsv 的人去找一个不存在的干扰源
+  # （我自己 12:33 就照着 run4 那行 `pid=32337 name=xctrace` 立过一张错单，两分钟后撤回）。
+  local detail="$1" p out=""
+  for p in ${2:-}; do
+    out="$out$(printf '%s' "$detail" | grep -oE "pid=$p name=[^ ]+" | head -1) "
+  done
+  printf '%s\n' "${out% }"
+}
+
 load_sample_once() {  # load_sample_once <outdir> [自己 spawn 的采集 pid] —— 追加一行「时刻 / load1 / 重活个数」
   # 为什么挂在 `record_bounded` 的轮询里而不是自己起后台子壳：那个 poll 循环本来就在窗口内每 5 s 醒一次，
   # 借它顺手采样**不新增进程**，也就不会有"录制链半路 die 掉、留下一个还在写 tsv 的孤儿"这种形状
@@ -203,9 +215,8 @@ load_sample_once() {  # load_sample_once <outdir> [自己 spawn 的采集 pid] �
   pids=$(printf '%s' "$detail" | grep -o 'pid=[0-9]*' | cut -d= -f2 | tr '\n' ' ')
   pids=$(filter_out_pids "$pids" "$self")
   j=$(printf '%s' "$pids" | wc -w | tr -d ' ')
-  # 按 `pid=<n> name=<x>` 成对切（先按空格切会把 `name=` 拆丢，第一版就这么错了一次）
-  names=$(printf '%s' "$detail" | grep -oE 'pid=[0-9]+ name=[^ ]+' \
-          | grep -vF -x <(printf '%s\n' ${self:-__none__} | sed 's/^[0-9]*$/pid=&/') | tr '\n' ' ')
+  # 第四列**必须复用第三列那一份已过滤的 pid 集**，不许有第二种过滤法（理由见 `heavy_names_for_pids`）。
+  local names; names=$(heavy_names_for_pids "$detail" "$pids")
   printf '%s\t%s\t%s\t%s\n' "$(date +%s)" "${l:-0}" "${j:-0}" "${names:-无}" >> "$f"
 }
 
