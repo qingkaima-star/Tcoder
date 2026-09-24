@@ -263,21 +263,33 @@ selfcheck_phase_blame() {  # selfcheck_phase_blame <outdir>
   #     定归因（与 §R 里我自纠的那次误读同一个错，只是换了一支函数）。
   #     ⇒ 窄分布必须**闭嘴指路**，而且这一条与 `caveat_for` 共用同一条数值判据
   #     （`interval_shaped`）——判据抄成第二份的那天，两支函数就会互相打脸。
+  # 第六到第八种（09-24 #46）：归因行原来只吃两张表，于是它会把"update 相位没超"说成
+  #     "主线程没被占住"——同一张表里 `potential-hangs` 明明印着 5 次 / 2725 ms。
+  #     ⇒ 第三路输入必须有，且**第八种是反向的**：hangs 为空时旧话术要一字不动，
+  #     否则这条新维度会变成"什么都判不成立"的永真绿。
   local r
   r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
-from perf_trace_metrics import phase_blame as p, interval_shaped as ish
+from perf_blame_caliber import phase_blame as p
 a = p([1.0] * 10 + [9.0] * 42, [10.0] * 42, 8.333)[1]     # 一比一 + 宽分布 ⇒ 查主线程
 b = p([1.0] * 600 + [168.3], [10.0] * 42, 8.333)[1]       # 只占极少数 ⇒ 分开修
 c = p([1.0] * 100, [10.0] * 5, 8.333)[1]                  # 一次都没超 ⇒ 全在合成侧
 d = p([1.0], [], 8.333)[1]                                # 无迟到帧 ⇒ 不给任何归因
 e = p([9.31] * 2090, [8.33] * 24, 8.333)[1]               # 窄分布 ⇒ 不判，只指路
 t = p([1.0] * 1000 + [9.0] * 50, [10.0] * 24, 8.333)      # 宽分布但超预算 2.1 倍 ⇒ 说"倍"且不判归因
-print("%s|%s|%s|%s|%s|%s" % ("先查主线程" in a, "分开修" in b, "全在渲染/合成侧" in c,
-                             d == "—", "不判" in e and "time-profile" in e,
-                             "倍" in t[0] and "7671" not in t[0] and t[1].startswith("不判")))')
-  [ "$r" = "True|True|True|True|True|True" ] \
-    || { fail "迟到帧归因五种形状没各判对（拿到 $r）"; return; }
-  ok "迟到帧归因分得清「查主线程 / 分开修 / 全在合成侧 / 无迟到 / 窄分布不判 / 比值悬殊不判」"
+H = [441.3, 887.2]                                        # 同一窗口主线程被占住两次的形状
+g = p([1.0] * 100, [10.0] * 5, 8.333, H)                  # #46 正身：相位没超 + 有 hangs
+h = p([1.0], [], 8.333, H)                                # 无迟到帧 + 有 hangs
+i = p([1.0] * 600 + [168.3], [10.0] * 42, 8.333, [])[1]   # 反向：hangs 为空 ⇒ 旧话术一字不动
+print("%s|%s|%s|%s|%s|%s|%s|%s|%s" % (
+    "先查主线程" in a, "分开修" in b, "全在渲染/合成侧" in c,
+    d == "—", "不判" in e and "time-profile" in e,
+    "倍" in t[0] and "7671" not in t[0] and t[1].startswith("不判"),
+    "归因未定" in g[1] and "别改视图更新常数" not in g[1] and "887" in g[1],
+    "不判" in h[1] and "887" in h[0],
+    i == b and "阻塞" not in i))')
+  [ "$r" = "True|True|True|True|True|True|True|True|True" ] \
+    || { fail "迟到帧归因八种形状没各判对（拿到 $r）"; return; }
+  ok "迟到帧归因分得清「查主线程 / 分开修 / 全在合成侧 / 无迟到 / 窄分布不判 / 比值悬殊不判 / 有 hangs 不许归给合成侧」"
 }
 
 selfcheck_pulse_window_scope() {  # selfcheck_pulse_window_scope <outdir>
@@ -317,23 +329,32 @@ selfcheck_trio_agreement() {  # selfcheck_trio_agreement <outdir>
   local r
   r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
 from perf_trio_agreement import verdict
-def R(n, fps=119.0, secs=20.0, rend=4.1, per="interaction", upd=None):
+def R(n, fps=119.0, secs=20.0, rend=4.1, per="interaction", upd=None, vals=None):
     return {"dir": "run", "seconds": secs, "hitch_n": int(round(n * secs)),
-            "hitch_per_s": n, "period": per, "render_p50_ms": rend,
+            "hitch_per_s": n, "period": per, "render_p50_ms": rend, "update_values": vals or [],
             "update_max_ms": upd, "surfaces_p50_fps": fps}
+TIGHT = [1.0 + 0.02 * i for i in range(14)]          # 一趟稳态心跳：p90 1.24 / max 1.26
+WIDE_MAX = [1.0 + 0.02 * i for i in range(13)] + [9.9]   # 同一形状，只多一枚孤例 max
+def idle(vals, upd):
+    return R(0.0, per="idle", upd=upd, vals=vals)
 a = verdict([R(1.2), R(1.3), R(1.5)], ["a", "b", "c"])[1]                 # 交互档：一致
 b = verdict([R(1.2), R(1.3), R(18.8)], ["a", "b", "c"])[1]                # 09-23 真形状：不一致
 c = verdict([R(1.2), R(1.3), None], ["a", "b", "x"])[1]                   # 缺件 ⇒ 不判
 d = verdict([R(1.2), R(1.3)], ["a", "b"])[1]                              # 不足 ⇒ 不判
 e = verdict([R(1.2), R(1.3, fps=88.0), R(1.5)], ["a", "b", "c"])[1]       # hitch 一致但出帧分歧
 f = verdict([R(1.2), R(1.3), R(1.5, per="idle")], ["a", "b", "c"])[1]     # 混档 ⇒ 不判
-g = verdict([R(0.0, per="idle", upd=1.8), R(0.95, per="idle", upd=2.3),   # idle 档：hitch 0~0.95 是
-             R(0.0, per="idle", upd=2.0)], ["a", "b", "c"])[1]            # 正常散布，比 T2 判据量
-print("%s|%s|%s|%s|%s|%s|%s" % (a, b, c, d, e, f, g))')
-  [ "$r" = "0|1|2|2|1|2|0" ] \
-    || { fail "一致性判定七种形状没各判对（拿到 $r，应为 0|1|2|2|1|2|0）⇒ 这条尺会把「3/3」放行"; return; }
+g = verdict([idle(TIGHT, 1.26), idle(TIGHT, 1.30), idle(TIGHT, 1.34)], ["a", "b", "c"])[1]
+h = verdict([idle(TIGHT, 1.26), idle(TIGHT, 1.30),                      # 真形状：另一趟带 12 ms 尾巴
+             idle(TIGHT[:4] + [12.0] * 4 + TIGHT[4:], 12.0)], ["a", "b", "c"])[1]
+i = verdict([idle(TIGHT, 1.26), idle([], None), idle(TIGHT, 1.34)], ["a", "b", "c"])[1]
+j = verdict([idle(TIGHT, 1.26), idle(WIDE_MAX, 9.9), idle(TIGHT, 1.34)], ["a", "b", "c"])[1]
+print("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s" % (a, b, c, d, e, f, g, h, i, j))')
+  [ "$r" = "0|1|2|2|1|2|0|1|1|0" ] \
+    || { fail "一致性判定十种形状没各判对（拿到 $r，应为 0|1|2|2|1|2|0|1|1|0）⇒ 这条尺会把「3/3」放行"; return; }
   # 第 7 条是**我自己第一版被自己的尺子抓到的**那条：idle 档的 hitch 真值≈0，
   # 拿它做除法散布会把 0.00~0.95 判成"19.0× ⇒ 严重不一致"。判据量必须跟着档位走。
-  ok "同档连测的一致性有尺子了：按档取判据量（交互比 hitch/s、idle 比 app-update 最大值），七形状各判一次"
+  # 第 10 条钉的是 09-24 需求方裁定 A：`max` 极差比 7.9× 而 p90/均值都在带宽内 ⇒ **判一致**；
+  # 同一条夹具把尾巴加进 p90（第 8 条）就必须变红 —— 两条一对，才证明这条不是"怎么都放行"。
+  ok "同档连测的一致性有尺子了：按档取判据量（交互比 hitch/s、idle 比每趟自身 p90 与均值），十形状各判一次（含极值不当判据的正反一对）"
 }
 
