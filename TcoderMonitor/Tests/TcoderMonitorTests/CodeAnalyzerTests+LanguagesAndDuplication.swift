@@ -157,7 +157,15 @@ extension CodeAnalyzerTests {
             XCTAssertEqual(Set(block.occurrences.map { "\($0.path):\($0.startLine)" }).count, block.occurrences.count,
                            "同一块里的 occurrence 位置不得重复（同文件内部粘贴允许作为独立 occurrence）")
             for occurrence in block.occurrences {
-                XCTAssertTrue(occurrence.path.hasPrefix(root.path), "重复块路径必须落在夹具根内：\(occurrence.path)")
+                // RD-61 第二半（WS-R26）：这一行原来断言 `occurrence.path.hasPrefix(root.path)`，
+                // 那是把「生产点给绝对路径」当成了契约。它真正要守的不变式没变、也没松：
+                // **坐标必须落在夹具根内，并且指向盘上真实存在的那份文件** —— 判据换成
+                // 「按夹具根解析回去 + 仍在根内 + 文件在」，与坐标是相对还是绝对无关。
+                let coordinateURL = CodeViewFormat.resolvedURL(occurrence.path, root: root.path)
+                XCTAssertTrue(coordinateURL.path.hasPrefix(root.path + "/"),
+                              "重复块坐标越出夹具根：\(occurrence.path)")
+                XCTAssertTrue(FileManager.default.fileExists(atPath: coordinateURL.path),
+                              "坐标解析出来的文件盘上没有：\(occurrence.path)")
                 XCTAssertGreaterThanOrEqual(occurrence.startLine, 1, "重复位置必须是 1-based 行号")
             }
         }

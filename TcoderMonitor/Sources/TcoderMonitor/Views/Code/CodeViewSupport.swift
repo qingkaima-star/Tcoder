@@ -211,7 +211,14 @@ enum CodeViewFormat {
         return directories.joined(separator: "/")
     }
 
-    /// 扫描器给的是绝对路径；万一是相对路径就按项目根补齐，保证 Finder 动作可用。
+    /// 把坐标还原成能打开的路径：**全站唯一的一个入口**（Finder 定位与「用默认应用打开」都走它）。
+    /// 树里现在同时存在两种坐标形状，两条分支各有真读者，一条都不能删：
+    /// · **相对**被扫根 —— 重复块坐标（`DuplicatedFragment.path`，RD-61 第二半之后
+    ///   在 `DuplicationScanState.fragmentOf` 那一处就定成相对），走 `appendingPathComponent` 那一支；
+    /// · **绝对** —— 巨大文件榜与复杂度热点榜（`FileSystemCodeAnalyzer` 给的是 `url.path`），
+    ///   以及**改前落盘的旧报告**里那批重复块坐标，走 `hasPrefix("/")` 那一支。
+    /// 根由调用方从 `report.project.path` 传入，与装配 `provenance.scannedRoot` 用的是同一个串，
+    /// 所以「拼回去」与「谁产的这份报告」不会分叉。
     static func resolvedURL(_ path: String, root: String) -> URL {
         if path.hasPrefix("/") { return URL(fileURLWithPath: path) }
         if !root.isEmpty { return URL(fileURLWithPath: root).appendingPathComponent(path) }
