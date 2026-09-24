@@ -151,7 +151,7 @@ final class SourceFileReachabilityTests: XCTestCase {
     ///   （`FileSystemCodeAnalyzer` 写字段那一路），不是空壳；除这一条外 1588 例全绿。
     ///   ⚠️ 上面那句"181 是推的"仍然算账：这一轮重跑同时把 181 与实扫现量对上了，
     ///   没有第二枚未登记的净增减。
-    static let censusBaseline = 182
+    static let censusBaseline = 183
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
