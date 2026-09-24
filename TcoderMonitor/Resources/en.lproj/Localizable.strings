@@ -1134,6 +1134,18 @@
 "分析完成后这里会显示贡献者排行、代码变更量与活跃时段分布。" = "Once the analysis finishes, the contributor ranking, line changes and active hour distribution appear here.";
 // Git 洞察页那条整句键（P71B 把它从消息位搬进 ⓘ 位，键与译文逐字未改，故在此复原）。
 "选择一个本地仓库目录后点击「重新分析」。\n分析完成后这里会显示提交趋势、24×7 活跃分布与最近提交记录。\n" = "Choose a local repository folder and click Re-analyse.\nThe commit trend, 24x7 activity distribution and recent commit records appear here once the analysis finishes.\n";
+
+// MARK: RD-31 扫描期间源码漂移（R29，2026-09-24）
+// 装配口只有一个：`ScanProvenance.driftReading` / `SourceTreeFingerprint.driftSummary` /
+// `ScanProvenance.recordDrift`。CLI 文本、CLI JSON 摘要、健康页横幅三处读的是同一句，
+// 所以键也只在这里登记一份 —— 谁再拼一遍中文，守卫 3（键必须在代码里真实出现）就会烂尾报错。
+// ⚠ 英文值只用 ASCII 标点（键侧的「（）」「：」照中文原样）。
+"扫描期间开工与收工两枚源码指纹一致" = "The source tree fingerprints taken at scan start and at scan end are identical.";
+"扫描期间源码是否变化未量到（%1$@）" = "Whether the source changed during the scan was not measured (%1$@).";
+"扫描期间源码有变化（%1$@），本报告不是同一源码快照的一致结果" = "The source changed during the scan (%1$@), so this report is not a consistent result of one source snapshot.";
+"条数 %1$@ → %2$@ · 字节 %3$@ → %4$@ · 路径摘要 %5$@ → %6$@" = "files %1$@ -> %2$@, bytes %3$@ -> %4$@, path digest %5$@ -> %6$@";
+"开工侧指纹没量到：%1$@" = "The scan-start fingerprint was not measured: %1$@";
+"收工侧指纹没量到：%1$@" = "The scan-end fingerprint was not measured: %1$@";
 // RD-60 第二半（R25b）：崩溃证据那几句里**不含数字**的三句 —— 一枚整句键 + 两枚整句框架键。
 // 框架键的 `%1$@` 槽装的是别处已经查过表的整串，词序由英文侧自己定；
 // 没有把「未测准：」「读取失败的原因分布：」登记成半句键（半句键拼完的整串永远查不中）。
@@ -1141,3 +1153,12 @@
 "「哪些没测准」那一句的判据输入未落盘，这里只呈现逐条原因" = "The criteria inputs behind the 'which parts were not measured accurately' sentence are not persisted, so only the per-reason breakdown is shown here.";
 "未测准：%1$@" = "Not measured accurately: %1$@";
 "读取失败的原因分布：%1$@" = "Reason breakdown for the unreadable files: %1$@";
+
+// RD-62（R33）：覆盖率「单元测试 / 集成测试」那两格的三态。句子只产自
+// `Services/Coverage/CoverageDisplayShape.swift` 的 `CoverageCategoryReadout`，
+// 屏上那两格与无头 `score` 文本共用它（「无报告」这一枚键 P0 之前就在上面第 68 行，未重复登记）。
+// 两枚框架键装的是**已经查过表的整串**，词序由英文侧自己定。
+"未标注类别" = "Category Not Labeled";
+"未产出该类报告" = "No Report Of This Category";
+"单元测试：%1$@" = "Unit Tests: %1$@";
+"集成测试：%1$@" = "Integration Tests: %1$@";

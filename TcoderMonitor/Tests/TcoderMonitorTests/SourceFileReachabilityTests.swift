@@ -151,6 +151,9 @@ final class SourceFileReachabilityTests: XCTestCase {
     ///   （`FileSystemCodeAnalyzer` 写字段那一路），不是空壳；除这一条外 1588 例全绿。
     ///   ⚠️ 上面那句"181 是推的"仍然算账：这一轮重跑同时把 181 与实扫现量对上了，
     ///   没有第二枚未登记的净增减。
+    ///   2026-09-24 **182 → 183**（RD-60 那支合流时由总工按实报拧，同一行只换数字）：
+    ///   顶上来的是 `Services/Logs/CrashEvidenceReadout.swift`（`a1d577c` 新增，
+    ///   真读者是 `FileLogAnalyzer` 那条上屏链与 CLI/GUI 两个出口，不是只被自己的单测引用）。
     static let censusBaseline = 183
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。

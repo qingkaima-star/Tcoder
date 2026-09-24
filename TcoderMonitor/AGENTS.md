@@ -601,6 +601,8 @@ WS-A/WS-B/WS-C 此刻在**主树里有未提交在途改动**。不允许直接�
 | `Models/CodeMetrics.swift` | 加 **1 个计算属性** `reportedDuplicatedBlockTotalCount`（既有成员一字未动；**取法只此一处**） | R18：评分详情那句"共 N 处重复块"吃的是 `duplicatedBlocks.count` = **榜长**（被 `maxBlocks`=20 截过的明细榜），本仓实扫榜内 20 · 榜外 96 ⇒ 少报 96 处。修法是**唯一装配口做加法**，消费方（评分解释文本 / 界面 / CLI）一律走它，谁再写一遍 `count + dropped` 就是第二把尺子。⚠️ 这一格**只许配「去重后口径」这句限定语上屏**：撞同一个 `DuplicatedBlock.id` 被削掉的块没有读数，"榜内+榜外"天然不平，不许被读成"这个仓库一共有多少处克隆" | `DuplicationTotalInScoreDetailTests`（三态各一句，第三态**断言不含「共」字**）+ `DuplicateBoardAccountingTests`（真扫对账、加法只一个家）+ `BoardLengthReadoutRatchetTests`（棘轮 1→0、全仓上限 7→6，6 = 本次实跑现量）；独立真值由测试自己走 `SourceTreeScanner → DuplicationEngine.analyze` 相加，不经装配层 |
 | `Models/LogInsights.swift` | 加 **1 枚** Optional：`crashEvidence: CrashEvidenceSnapshot?`（新类型九格**全 Optional**，既有成员一字未动） | RD-60：`CrashEvidenceLedger` 把八种原因分开算好了，但 `LogAnalysisProviding.analyze` 签名冻结只回 `LogSummary` ⇒ 台账在生产路径**算完即丢**，屏上只能读那把从趋势桶倒推的粗尺（同一事实两把尺子、分母还不同）。快照必须与 `crashCount` **同源同刻**：挂 `ProjectReport` 顶层会造出第二个「崩溃数」入口（RD-38 同族），留在 Services 的内存对象送不到视图（就是修前的样子） | `CrashEvidenceContractTests` 4 例（删整键仍解得开且读成 `nil` / 九格逐字段往返 / 缺席格不许变 0 / 编码时整键缺席不写 `null`）+ `CrashEvidenceWiringTests`（含"接回来的那一格"直接断言，不许只断言拼出的句子——R24 sabotage S2 就是这么漏的）；`CrashEvidenceReadout.readingFromFields` 任一格缺席即整枚 `nil`，一个数都不重算 |
 
+| `Views/DashboardView.swift` | 覆盖率卡片两格 `value:` 改走唯一装配口 `CoverageCategoryReadout.text(for:in:)`（该口开在 `Services/Coverage/CoverageDisplayShape.swift`，`CLIScoreText.coverageCategoryLines(_:)` 复用同一函数）；两文件**净增 0 行**，既有取义一字未动 | 「这一类到底是被标注过还是没有这一类」只有 `CoverageReportIdentity`/`kind` 那一层知道，卡片自己判就要重抄一遍分类尺子（RD-51 刚把覆盖率披露口径收成一个家，此处同形）。更狠的是原先**四处各写各的**：GUI 两格 + CLI 两句，「没标注」在屏上长成「无报告」，而那张卡只在 `coverage.hasData` 时才渲染 ⇒ 这句话在每次真实上屏里都是假的 | `CoverageCategoryAbsenceReadoutTests` 8 例：三态各一句（未标注 / 有该类报告 / 没产出该类报告）+「未标注」那句绝不出现「无报告」+ 空树仍说没有 + 真值取自测试自建 `coverage.json` 夹具 + 扫描守卫三条（只有装配口写这些句子 / 两格必须走装配口 / 注入第二份副本当场红）；R33 侧另有 4 处 sabotage 复跑；门 `1753 例 / 0 失败`、`PREMERGE-RC=0`，合流 `d467cc1` |
+
 不在这张表里的冻结区改动一律视为越界。历史批次（P7-A 退役示例数据动过
 `Models/Project.swift`、`Models/HealthScore.swift`、`App/AppState.swift`、
 `Services/ProjectStore.swift`）是同一性质的 additive/删除，**当时没有登记**，
@@ -686,6 +688,15 @@ dist/Tcoder.app/Contents/MacOS/TcoderMonitor doctor [<path>]
    （本轮第一轮复核就报了三个不存在的名字），引用前先核。
 6. 每条修复要交四件：复现夹具 + 独立真值、正例/反例/未知态/失败态、CLI 与 GUI 对表、
    新守卫 sabotage 一次证明有牙。缺件按未完成处理。
+6.1 **判据的读数不许只有 `print` 一个出口**（2026-09-24 由 RD-64 立）。
+   实测：全量跑会**安静地丢掉**一部分守卫的"现量/上限"读数（三类守卫执行并通过、日志里 grep 命中 0，
+   同一批 `print` 在 `--filter` 单跑里打得出来；机制未定位）。所以：
+   - 要引用任何现量/上限类读数，**必须来自过滤跑的原始输出**并把原文抄进账（台账 / Obsidian）；
+   - 新写这类判据时**同时落一份仓库内文件台账**（先例：`TCODER_I18N_LEDGER`、
+     `.scratch/tcoder-caliber-visible-inventory.txt`、Tests 侧 `GuardLedger` + `scripts/guard_ledger_summary.sh`），
+     并且**写完读回来断言相等**——**只 `print` 一律视为"没测到"**；
+   - 汇总类脚本**读不到账必须报错**（rc≠0）而不是打一张空表，表头也要推迟到第一行读数之前
+     （"产物为空也印 ✓ 完成"是同族，见卷三 §62）。
 
 ### 8.1 冻结区窄口径豁免（2026-09-22 07:44 由总工登记，一条链路一个负责人 ⇒ 必须放行）
 

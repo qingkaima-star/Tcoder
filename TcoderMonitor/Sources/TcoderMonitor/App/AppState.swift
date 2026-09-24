@@ -200,6 +200,9 @@ final class AppState {
         let coverageAnalyzer = self.coverageAnalyzer
 
         Task.detached(priority: .userInitiated) { [weak self] in
+            // RD-31：开工前的源码指纹（只问元数据，不读内容），与收工后那一枚比对。
+            // 采在 detached 里而不是 `scan(project:)` 头部：那会在主线程上走一遍目录树。
+            let fingerprintAtStart = SourceTreeFingerprint.probe(root: root)
             async let code = AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[0]) { try await codeAnalyzer.analyze(root: root, options: .default) }
             async let git = AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[1]) { try await gitAnalyzer.analyze(repositoryURL: root) }
             async let logs = AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[2]) { try await logAnalyzer.analyze(projectRoot: root, extraLogURLs: logURLs, withinDays: windowDays) }
@@ -226,6 +229,9 @@ final class AppState {
             await markReturned()
             let coverageResult = await coverage
             await markReturned()
+            // 收工时的那一枚：与开工那枚之间隔着的就是五路跑的时间（同样在 detached 里采，
+            // 不把目录遍历挪回主线程）。
+            let fingerprintAtEnd = SourceTreeFingerprint.probe(root: root)
 
             let inputs = HealthInputs(
                 code: codeResult.value,
@@ -260,7 +266,10 @@ final class AppState {
                 })
                 merged.failedSections = failures.sections
                 // 与 CLI 同一把尺子：同一项目同一次扫描，GUI 与 CLI 的溯源块必须能对上号。
-                merged.provenance = ScanProvenance(report: merged, scannedRoot: project.path, producedBy: "gui")
+                // RD-31 的漂移结论也在这里落：装配口只有 GUI 与 CLI 两个，两路都要写。
+                var provenance = ScanProvenance(report: merged, scannedRoot: project.path, producedBy: "gui")
+                provenance.recordDrift(startingFrom: fingerprintAtStart, endingAt: fingerprintAtEnd)
+                merged.provenance = provenance
 
                 self.store.upsertReport(merged)
                 if let score = merged.health?.verdict {
