@@ -86,6 +86,21 @@ final class ScanSourceDriftTests: XCTestCase {
         XCTAssertTrue(p.driftReading.contains("收工侧"), p.driftReading)
     }
 
+    /// 第三态的第二条来路：**开工侧**就没量到（收工侧恢复正常）。
+    /// 这一条是 sabotage 照出来的：只测「收工侧读不到」的话，开工侧那一支坏了永远没人验。
+    func testUnreadableAtStartOnlyIsStillNotMeasured() throws {
+        chmod(path: root.path, to: 0o000)
+        let start = SourceTreeFingerprint.probe(root: root)
+        chmod(path: root.path, to: 0o755)
+        guard case .notMeasured = start else { return XCTFail("chmod 000 的根必须判读不到") }
+        var p = ScanProvenance()
+        p.recordDrift(startingFrom: start, endingAt: SourceTreeFingerprint.probe(root: root))
+        XCTAssertNil(p.sourceDriftDuringScan, "开工侧没量到 ⇒ 不许拿一枚收工指纹去宣布「一致」")
+        XCTAssertTrue(p.driftNote?.contains("开工侧") == true, p.driftNote ?? "无原因")
+        XCTAssertTrue(p.driftReading.contains("未量到（开工侧"), p.driftReading)
+        XCTAssertNotNil(p.driftNotice, "没量到也要在界面上出声")
+    }
+
     /// 第三态的第二条来路：树里有目录读不动 ⇒ 指纹**不完整**，不完整性不许冒充"看完了"。
     func testIncompleteWalkIsNotMeasured() throws {
         let start = SourceTreeFingerprint.probe(root: root)
