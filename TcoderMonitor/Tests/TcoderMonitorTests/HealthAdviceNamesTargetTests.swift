@@ -27,6 +27,13 @@ final class HealthAdviceNamesTargetTests: XCTestCase {
         }.joined(separator: "\n")
     }
 
+    /// 同一族句子允许住在宿主或它拆出去的文件里（RD-84 拆分就把这段搬去了
+    /// `HealthDependencyDimension.swift`），所以按**多份文件取并集**来判——
+    /// 只认一个路径的守卫会把"整块搬家"报成"句子丢了"，那是假红；反之只查旧路径会漏。
+    static func codeOnlySources(_ names: [String]) throws -> String {
+        try names.map { try codeOnlySource($0) }.joined(separator: "\n")
+    }
+
     static func catalogText() throws -> String {
         try String(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -88,7 +95,8 @@ final class HealthAdviceNamesTargetTests: XCTestCase {
     /// 依赖那条点的名字要与 `vulnerableCount` **同源**（advisories / offlineVulnerabilities），
     /// 泛泛一句只允许作为"两处都点不出名字"的兜底存在。
     func test_dependencyAdviceNamesAPackageFromTheCountOwnSource() throws {
-        let body = try Self.codeOnlySource("HealthRuntimeDimensions.swift")
+        let body = try Self.codeOnlySources(["HealthRuntimeDimensions.swift",
+                                             "HealthDependencyDimension.swift"])
         XCTAssertTrue(body.contains("先升级这一个：%1$@（%2$@，公告 %3$@）"), "在线公告那条没点名组件")
         XCTAssertTrue(body.contains("先升级这一个：%1$@（%2$@，命中 %3$@ 个依赖）"), "离线命中那条没点名组件")
         XCTAssertTrue(body.contains("affectedPackages") && body.contains("vulnerableCount"),
