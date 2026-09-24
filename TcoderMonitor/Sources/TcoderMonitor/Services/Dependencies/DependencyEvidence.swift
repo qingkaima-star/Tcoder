@@ -78,6 +78,54 @@ struct DependencyEvidenceLedger: Sendable {
     var vulnerabilityStateCounts: [DependencyCheckState: Int] { counts(of: \.vulnerabilityState) }
 }
 
+// MARK: - 覆盖度分档（RD-68：全仓唯一一处判「能不能说没有已知漏洞」）
+
+/// 漏洞核对覆盖度的三档。**「已核对条数 == 总条数」这条算式全仓只许出现在
+/// `DependencyEvidence.vulnerabilityCoverage` 一处**（RD-68 立此为准，
+/// `DependencyGateUniquenessTests` 逐文件扫这条算式的复现）。
+///
+/// 为什么必须是一枚三档类型、而不是一个 `Bool` 闸门：改之前总览那把尺子问的是
+/// 「核对成功**过**没有」（`vulnerabilityCheckedCount > 0`），于是「6 条里查了 4 条」
+/// 与「6 条全查完」落进同一个态，而三个出口没有一个去读挂在 `.clean` 上的那两个数；
+/// 同一份数据的另一把尺子却要求严格相等 ⇒ 一道事实两道闸、其中一道说反话。
+/// 现在把"部分覆盖"立成一件**独立的事实**，出口只能按档位分派，想漏掉它就编译不过。
+///
+/// ⚠ 判据本身（全覆盖才算数）是 RD-11/13 定下的口径，**不许放宽**：
+/// 为了让某个仓库看起来干净而放宽它，等于把工具废掉。
+enum DependencyVulnerabilityCoverage: Equatable {
+    /// 每一条都已核对（且确实有依赖可核对）。只有这一档配说「未发现已知漏洞」。
+    case full(total: Int)
+    /// 核成了几条、还剩几条没核成 —— 与"干净"不同的另一件事实。
+    case partial(covered: Int, total: Int)
+    /// 一条都没核对成（含"根本没有依赖可核对"）。
+    case none(total: Int)
+
+    /// 只有全覆盖为真。**这一枚取值也只由 `vulnerabilityCoverage` 产出**，
+    /// 任何出口自己比一次 `covered == total` 就是第二把尺子。
+    var isFull: Bool {
+        if case .full = self { return true }
+        return false
+    }
+
+    /// 「核对到什么程度」这句话的**唯一装配口**：三档各一句。
+    /// 屏上结论格、安全公告空态、无头出口、报告级陈述句四处必须逐字取自这里（RD-68）。
+    var statement: String {
+        switch self {
+        case .full(let total):
+            return localizedFormat("已核对 %1$@ / %2$@ 个依赖，未发现已知漏洞",
+                                   NumberFormat.grouped(total), NumberFormat.grouped(total))
+        case .partial(let covered, let total):
+            // 整句是**一枚字面量**：拆成两段拼接会让查表只认前半截（键查不中 = 英文态整句中文）。
+            return localizedFormat("已核对 %1$@ / %2$@ 个依赖，另外 %3$@ 个没查 —— 这是「没查全」，不是「没有漏洞」",
+                                   NumberFormat.grouped(covered), NumberFormat.grouped(total),
+                                   NumberFormat.grouped(total - covered))
+        case .none(let total):
+            return localizedFormat("共 %1$@ 个依赖，一条都没核对 —— 这是「没查全」，不是「没有漏洞」",
+                                   NumberFormat.grouped(total))
+        }
+    }
+}
+
 // MARK: - 构建与读取
 
 enum DependencyEvidence {
@@ -115,6 +163,8 @@ enum DependencyEvidence {
 
     /// 「未发现已知漏洞」这句话**必须同时说明已成功核对的范围与条数**（RD-11）。
     /// 覆盖不足时不允许出现这句话，改口播未覆盖的清单。
+    /// RD-68：三档的话术一律转发给 `DependencyVulnerabilityCoverage.statement` 那一个装配口，
+    /// 本函数只补"未覆盖的那几档分别是什么"。
     static func findingsStatement(for report: DependencyReport, ledger: DependencyEvidenceLedger) -> String {
         let vulnerable = ledger.vulnerableCount
         if vulnerable > 0 {
@@ -123,14 +173,18 @@ enum DependencyEvidence {
                                    NumberFormat.grouped(vulnerable),
                                    NumberFormat.grouped(ledger.totalCount - ledger.vulnerabilityCheckedCount))
         }
-        let checked = ledger.vulnerabilityCheckedCount
-        guard checked > 0 else { return noCoverageStatement(ledger) }
-        let uncovered = ledger.totalCount - checked
-        var text = localizedFormat("已核对 %1$@ / %2$@ 个依赖，未发现已知漏洞",
-                                   NumberFormat.grouped(checked), NumberFormat.grouped(ledger.totalCount))
-        if uncovered > 0 { text += localizedFormat("；另有 %1$@ 个未覆盖：", NumberFormat.grouped(uncovered)) + tail(for: ledger) }
-        else { text += "（\(sourcesPhrase(ledger))）" }
-        return text
+        let coverage = vulnerabilityCoverage(ledger)
+        switch coverage {
+        case .none:
+            return noCoverageStatement(ledger)
+        case .full:
+            return coverage.statement + "（\(sourcesPhrase(ledger))）"
+        case .partial(let covered, let total):
+            var text = coverage.statement
+            text += localizedFormat("；另有 %1$@ 个未覆盖：", NumberFormat.grouped(total - covered))
+                + tail(for: ledger)
+            return text
+        }
     }
 
     /// 一条都没核对成时的那句 —— 这句是本页最不该被省略的。
@@ -222,10 +276,25 @@ enum DependencyEvidence {
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: localizedCopy("、"))
     }
 
+    /// 覆盖度分档的**唯一算法**（RD-68）。⚠ 全仓只许这一处比较「漏洞核对成功条数 == 依赖总条数」：
+    /// 这条算式一旦被抄到第二个地方，两处就会各自漂移 —— RD-68 的原始形状就是视图那侧
+    /// 把它抄成了 `> 0`，于是界面与无头出口对同一份账给出相反的结论。
+    /// `DependencyGateUniquenessTests` 逐文件扫复现，配元测试证明它有牙。
+    static func vulnerabilityCoverage(_ ledger: DependencyEvidenceLedger) -> DependencyVulnerabilityCoverage {
+        // 这条算式**必须逐字写成这样**：`DependencyGateUniquenessTests` 按字面特征扫复现，
+        // 缩成局部变量就会让那把守卫静默空转（它另有元测试钉住自己有牙）。
+        if ledger.vulnerabilityCheckedCount == ledger.totalCount, ledger.totalCount > 0 {
+            return .full(total: ledger.totalCount)
+        }
+        // 一条都没核成与「核成了几条但没核全」是两件事：前者连"部分覆盖"都算不上。
+        if ledger.vulnerabilityCheckedCount == 0 { return .none(total: ledger.totalCount) }
+        return .partial(covered: ledger.vulnerabilityCheckedCount, total: ledger.totalCount)
+    }
+
     /// 「能不能对外说未发现漏洞」的唯一闸门：**逐条覆盖到位**才算。
+    /// 覆盖度这一半只由 `vulnerabilityCoverage` 判，本函数只再补"零命中"这一条。
     static func mayClaimNoKnownVulnerabilities(_ ledger: DependencyEvidenceLedger) -> Bool {
-        ledger.totalCount > 0 && ledger.vulnerabilityCheckedCount == ledger.totalCount
-            && ledger.vulnerableCount == 0
+        vulnerabilityCoverage(ledger).isFull && ledger.vulnerableCount == 0
     }
 }
 

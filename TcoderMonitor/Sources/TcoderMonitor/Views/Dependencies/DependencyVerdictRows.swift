@@ -142,13 +142,23 @@ enum DependencyRowStatus: Equatable {
 /// 而它写的是 `networkLookupPerformed || !advisories.isEmpty` —— 那个字段的原话就是
 /// "**尝试过**"（`attempted > 0`），于是"发过请求"被当成"核对过"。
 /// 现在闸门读逐条落账后的**漏洞核对成功条数**：一条都没核对成，就不许出现 `.clean`。
+///
+/// RD-68 的第二半：修完 RD-11 之后闸门退化成 `vulnerabilityCheckedCount > 0`，
+/// 于是「6 条里只查了 4 条」仍然落进 `.clean`，而三个出口（`mayClaimSafe`／`role`／
+/// 安全公告空态那句「已完成核对」）只看"是不是 `.clean`"、没人读挂在身上的那两个数 ——
+/// 同一份数据的另一把尺子 `DependencyEvidence.mayClaimNoKnownVulnerabilities` 却要求严格相等。
+/// 现在覆盖度由 `DependencyEvidence.vulnerabilityCoverage` **一处**分成三档，
+/// `.clean` 只留给全覆盖，"部分覆盖"立成独立一态，三处出口一律由本枚举按档位分派。
 enum DependencySafetyVerdict: Equatable {
     /// 真的有命中。
     case findings(count: Int, risk: RiskLevel)
     /// 没联网、也没拿到任何在线公告 —— 零命中只是"未判定"。
     case unchecked(coveredCount: Int, total: Int, uncoveredEcosystems: [String])
-    /// 逐条漏洞核对确实成功过（全部覆盖时才是完整的"干净"结论）。
+    /// **每一条依赖都核对过**且零命中：只有这一态配说"安全"、配发绿（RD-68）。
     case clean(coveredCount: Int, total: Int)
+    /// 核成了几条、还剩几条没核成 —— 与"干净"是两件不同的事（RD-68）。
+    /// 绿色、`mayClaimSafe`、「已完成核对」这一句在这一态一律不成立。
+    case partiallyCovered(coveredCount: Int, total: Int)
 
     init(_ report: DependencyReport) {
         self.init(report, ledger: DependencyEvidence.ledger(for: report))
@@ -156,24 +166,31 @@ enum DependencySafetyVerdict: Equatable {
 
     /// 账本由调用方传入：评分侧、CLI 侧都用同一个 `DependencyEvidence.ledger(for:)`，
     /// 不再各自读一遍字段（那会长出第二把尺子）。
+    ///
+    /// 分档只走 `DependencyEvidence.vulnerabilityCoverage` 这一处 —— 本函数里
+    /// 出现的 `case .full/.partial/.none` 是**对档位的匹配**，不是第二次比较条数。
     init(_ report: DependencyReport, ledger: DependencyEvidenceLedger) {
-        let total = ledger.totalCount
+        let coverage = DependencyEvidence.vulnerabilityCoverage(ledger)
         if report.vulnerableCount > 0 {
             self = .findings(count: report.vulnerableCount, risk: report.riskLevel)
-        } else if ledger.vulnerabilityCheckedCount > 0 {
-            self = .clean(coveredCount: ledger.vulnerabilityCheckedCount, total: total)
-        } else {
+            return
+        }
+        switch coverage {
+        case .full(let total):
+            self = .clean(coveredCount: total, total: total)
+        case .partial(let covered, let total):
+            self = .partiallyCovered(coveredCount: covered, total: total)
+        case .none(let total):
             self = .unchecked(coveredCount: ledger.versionCheckedCount, total: total,
-                              uncoveredEcosystems: ManifestDependencyAnalyzer.ecosystemsWithoutOfflineRules(in: report))
+                              uncoveredEcosystems: ManifestDependencyAnalyzer
+                                  .ecosystemsWithoutOfflineRules(in: report))
         }
     }
 
-    /// 允许出现"绿色 = 安全"结论的唯一两种状态。
+    /// 允许出现"绿色 = 安全"结论的**唯一**一态：全部覆盖。
     var mayClaimSafe: Bool {
-        switch self {
-        case .findings, .unchecked: return false
-        case .clean: return true
-        }
+        if case .clean = self { return true }
+        return false
     }
 
     var role: Theme.SemanticRole {
@@ -182,6 +199,9 @@ enum DependencySafetyVerdict: Equatable {
         case .findings(_, let risk): return Theme.Semantic.role(for: risk)
         case .unchecked: return Theme.Semantic.neutral
         case .clean: return Theme.Semantic.success
+        // 部分覆盖既不是"安全"也不该被读成"没查"：它是**一件需要出声的缺口**，
+        // 所以走 warning 而不是 neutral —— 字在说"没查全"而色还在说"安全"就是 RD-68 的原始形状。
+        case .partiallyCovered: return Theme.Semantic.warning
         }
     }
 
@@ -190,6 +210,7 @@ enum DependencySafetyVerdict: Equatable {
         case .findings: return .riskSevere
         case .unchecked: return .unverified
         case .clean: return .clean
+        case .partiallyCovered: return .unverified
         }
     }
 
@@ -198,6 +219,7 @@ enum DependencySafetyVerdict: Equatable {
         case .findings(_, let risk): return "风险：\(risk.rawValue)"
         case .unchecked: return "未核对"
         case .clean: return "已核对"
+        case .partiallyCovered: return "部分核对"
         }
     }
 
@@ -212,10 +234,15 @@ enum DependencySafetyVerdict: Equatable {
         case .findings: return "命中详情见下方「安全公告」"
         case .unchecked: return "未联网核对，全口径见上方「风险总览」"
         case .clean: return "已联网核对，覆盖范围见上方「风险总览」"
+        // 短脚注里的状态词必须是"部分"：只写"已联网核对"就是把 4/6 说成 6/6。
+        case .partiallyCovered: return "部分核对，覆盖范围见上方「风险总览」"
         }
     }
 
-    /// 「漏洞数」磁贴的副标题：绿色 all-clear 只在真的核对过时才允许出现。
+    /// 「漏洞数」磁贴的副标题：绿色 all-clear 只在真的全量核对过时才允许出现。
+    ///
+    /// RD-68：这一格与无头出口、安全公告空态**共用一句**——全部来自
+    /// `DependencyVulnerabilityCoverage.statement`，本文件不再自己拼「N / M 项已比对」。
     var summaryCaption: String {
         switch self {
         case .findings(let count, _):
@@ -231,15 +258,37 @@ enum DependencySafetyVerdict: Equatable {
                 text += localizedFormat("· 未覆盖生态：%@", uncovered.joined(separator: localizedCopy("、")))
             }
             return text
-        case .clean(let covered, let total):
-            if covered == 0 { return "已联网核对，但无可比对版本数据的依赖" }
-            if covered >= total { return "全部 \(NumberFormat.grouped(total)) 项已比对，未发现已知漏洞" }
-            return "\(NumberFormat.grouped(covered)) / \(NumberFormat.grouped(total)) 项已比对，未发现已知漏洞"
+        case .clean(_, let total):
+            // 这里只是把 init **已经分好档**的那一档取出来交给装配口，
+            // 本文件一次都没有比较条数（RD-68：判据只有一处、话术只有一处）。
+            return DependencyVulnerabilityCoverage.full(total: total).statement
+        case .partiallyCovered(let covered, let total):
+            return DependencyVulnerabilityCoverage.partial(covered: covered, total: total).statement
+        }
+    }
+
+    /// 「安全公告」那张卡在**列表为空**时的那一句（原先写在视图里，RD-68 收回枚举自己分派：
+    /// 留在视图里就得让视图再问一次"是不是全覆盖"，那是第二把尺子）。
+    var advisoryEmptyCaption: String {
+        switch self {
+        case .unchecked:
+            return "本次未联网核对，0 条命中只是「没有查」，不是「没有病」。"
+        case .clean:
+            return "已完成核对，未发现已知漏洞。"
+        case .findings:
+            return "有命中，见上方列表。"
+        // 这句**必须**是装配口那一枚，与磁贴副标题、无头出口逐字相同（RD-68）。
+        case .partiallyCovered(let covered, let total):
+            return DependencyVulnerabilityCoverage.partial(covered: covered, total: total).statement
         }
     }
 }
 
 /// 未核对时用中性徽标并写明"未核对"，不复用 `RiskBadge(.none)` 的绿底对勾。
+///
+/// RD-68：`RiskBadge(risk: .none)` 那枚绿底对勾**只留给全覆盖**。
+/// 部分覆盖改走 `SemanticBadge`（琥珀 + `unverified` 图标），
+/// 因为"绿色 = 安全"这句话在这一档本身就是假的。
 struct SafetyVerdictBadge: View {
     let verdict: DependencySafetyVerdict
 
@@ -252,6 +301,10 @@ struct SafetyVerdictBadge: View {
         case .unchecked:
             SemanticBadge(verdict.badgeText, role: verdict.role, icon: verdict.badgeIcon)
                 .help(localizedCopy("默认不联网时漏洞判定恒为 0 条，这是「没有查」，不是「没有病」"))
+        case .partiallyCovered:
+            SemanticBadge(verdict.badgeText, role: verdict.role, icon: verdict.badgeIcon)
+                // 这句已经自带「已核对 C / T 个依赖」，不在这里再拼一遍数（一屏说两遍）。
+                .help(verdict.summaryCaption)
         }
     }
 }
