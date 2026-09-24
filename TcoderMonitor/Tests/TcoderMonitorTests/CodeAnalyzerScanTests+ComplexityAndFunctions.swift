@@ -219,10 +219,19 @@ extension CodeAnalyzerTests {
         XCTAssertTrue(jsFunctions.contains { $0.name == "priceOf" },
                       "箭头函数赋给 const 时也必须被识别，实际：\(jsFunctions.map(\.name))")
 
-        // RD-79：只差一个 `export`，两块的形状必须同权被识别。
-        // （根因是交付二进制实测出来的：同形两块体箭头，不带 `export` 计到 1、带上计到 0，
-        //   而 `export const useFoo = () => {…}` 正是 ESM/TS 模块的主流写法 —— 少认它
-        //   等于把整个模块的函数分母算小，于是前端项目"看起来比实际简单"。）
+        // 没有函数概念的语言不得凭空造函数
+        for (name, content) in [("data.json", "{\n  \"key\": 1\n}\n"), ("page.css", ".a { color: red }\n")] {
+            let scanned = try XCTUnwrap(classify(try write(content, to: name, in: root), root: root))
+            XCTAssertTrue(ComplexityEngine.functions(in: scanned).isEmpty, "\(name) 不该识别出任何函数")
+        }
+    }
+
+    /// RD-79：`export const useFoo = (…) => {…}` 是 ESM/TS 模块的主流写法，
+    /// 以前整类漏认（`jsFunction` 收了 `export function`，`jsVariableArrow` 没有 `export` 前缀位）。
+    /// 独立真值 = 只差一个 `export` 的两份同形夹具必须同权；反例 = 对象字面量与常量赋值不算函数。
+    func testExportedArrowFunctionIsRecognizedAndPlainExportsAreNot() throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
         let exportedArrow = """
         export const priceOf = (item) => {
             if (item.flag) {
@@ -239,12 +248,6 @@ extension CodeAnalyzerTests {
                              ("n.js", "export const n = 1\n")] {
             let file = try XCTUnwrap(classify(try write(text, to: name, in: root), root: root))
             XCTAssertTrue(ComplexityEngine.functions(in: file).isEmpty, "\(name) 不该识别出任何函数")
-        }
-
-        // 没有函数概念的语言不得凭空造函数
-        for (name, content) in [("data.json", "{\n  \"key\": 1\n}\n"), ("page.css", ".a { color: red }\n")] {
-            let scanned = try XCTUnwrap(classify(try write(content, to: name, in: root), root: root))
-            XCTAssertTrue(ComplexityEngine.functions(in: scanned).isEmpty, "\(name) 不该识别出任何函数")
         }
     }
 
