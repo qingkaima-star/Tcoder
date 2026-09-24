@@ -381,6 +381,16 @@ selfcheck_inwindow_load_verdict() {  # 52) 窗口内负载采样必须能定合�
     || { fail "只剩自己那一个时没排干净 ⇒ 自己的 xctrace 又会把整批判污染"; bad=1; }
   [ -z "$(filter_out_pids "" "111")" ] \
     || { fail "空名单被排出了东西"; bad=1; }
-  [ "$bad" = "0" ] && ok "窗口内负载采样能定合格：干净放行 / 中段越阈判污 / 重活单独也判 / 没采到必须出声 / 自己那一个采集进程不算外部争用"
+  # (6) **明细列必须与计数列共用同一份过滤结果**（09-24 #49）。旧写法用第二种过滤法
+  #     （`grep -vF -x` 去比 `pid=<self>`，可明细行长成 `pid=<self> name=xctrace`，整行永不相等）
+  #     ⇒ 第三列排掉了自己、第四列却把我的 xctrace 写成"在场的重活"。
+  #     这不是排版问题：我照着 run4 那行 `pid=32337 name=xctrace` 立过一张"别人在录制"的错单。
+  heavy_names_for_pids "pid=111 name=xctrace" "" >/dev/null \
+    || { fail "source 链里没有 heavy_names_for_pids ⇒ 这一维看不见东西，拒绝判定"; bad=1; }
+  [ -z "$(heavy_names_for_pids "pid=111 name=xctrace" "")" ] \
+    || { fail "只剩自己那一个采集进程时明细列还在点名 ⇒ 读的人会去找一个不存在的干扰源"; bad=1; }
+  [ "$(heavy_names_for_pids "pid=111 name=xctrace pid=222 name=swiftc" "222")" = "pid=222 name=swiftc" ] \
+    || { fail "别人那个 swiftc 没被点出来（实得「$(heavy_names_for_pids "pid=111 name=xctrace pid=222 name=swiftc" "222")」）⇒ 明细列与计数列不同源"; bad=1; }
+  [ "$bad" = "0" ] && ok "窗口内负载采样能定合格：干净放行 / 中段越阈判污 / 重活单独也判 / 没采到必须出声 / 自己那一个采集进程不算外部争用（计数与明细同一份过滤）"
 }
 
