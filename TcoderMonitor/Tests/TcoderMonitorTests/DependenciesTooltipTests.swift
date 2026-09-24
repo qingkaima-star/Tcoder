@@ -118,7 +118,10 @@ final class DependenciesTooltipTests: XCTestCase {
     /// 它不在 C 名单里，但 Z 节把它列在全站第一位，所以本片一个字没动它。
     func test_uncheckedIsNotClaimedHealthyStillOnTheScreen() throws {
         let report = DependencyReport()
-        XCTAssertFalse(report.hasVulnerabilityCoverage, "默认离线态必须判「没查」，否则下面在空转")
+        // 前提自证（RD-78：那枚合成布尔已退役，这里改问它想表达的**两件分开的**事实——
+        // 「没发起查询」与「没带回公告」不是一回事，合成一枚写着 coverage 的布尔正是 RD-11 的病根）。
+        XCTAssertFalse(report.networkLookupPerformed, "默认离线态不该已经发起过查询，否则下面在空转")
+        XCTAssertTrue(report.advisories.isEmpty, "默认离线态不该带回公告，否则下面在空转")
         let notice = DependencyAdvisoriesSection.emptyCaption(report)
         XCTAssertTrue(notice.contains("未联网"), notice)
         XCTAssertTrue(notice.contains("没有查"), notice)

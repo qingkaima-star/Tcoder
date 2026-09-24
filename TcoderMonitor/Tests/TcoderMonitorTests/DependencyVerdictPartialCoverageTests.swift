@@ -111,6 +111,36 @@ final class DependencyVerdictPartialCoverageTests: XCTestCase {
         XCTAssertFalse(verdict.tileCaption.contains("已联网核对，"), verdict.tileCaption)
     }
 
+    /// RD-77 钉：`DependencyVulnerabilityCoverage.full(total:)` 那枚句子的字面是「未发现已知漏洞」，
+    /// 而这句话只在**零命中**时才成立 —— 类型本身没编码这件事（台账卷五 §82 的 RD-77）。
+    /// 今天四个出口都靠"先判命中、再分档"的顺序躲开它；顺序一旦被人搬走，
+    /// 或者下一个调用点直接拿 `.full(total:).statement` 去画别的东西，就是这里红，
+    /// 而不是等它长成一屏没人怀疑的假话。
+    func testFullCoverageWithFindingsNeverSpeaksTheAllClearAtAnyExit() throws {
+        let report = ledger(checkedCount: 6, withFindings: true)
+        let book = DependencyEvidence.ledger(for: report)
+        // 三条前提逐条自证：覆盖度确实是 `.full`、账上确实有命中，否则整条断言在空跑。
+        XCTAssertTrue(DependencyEvidence.vulnerabilityCoverage(book).isFull,
+                      "前提不成立：这份账不是全覆盖，那下面测的就不是这一档")
+        XCTAssertGreaterThan(report.vulnerableCount, 0, "前提不成立：这份账没有命中")
+        XCTAssertEqual(book.vulnerabilityCheckedCount, 6, "前提：六条全核成")
+
+        let verdict = DependencySafetyVerdict(report)
+        guard case .findings(let count, _) = verdict else {
+            return XCTFail("有命中却没落在 .findings ⇒ 命中被覆盖度那一档吞掉了：\(verdict)")
+        }
+        XCTAssertEqual(count, report.vulnerableCount)
+
+        let allClear = "未发现已知漏洞"
+        let statement = DependencyEvidence.findingsStatement(for: report, ledger: book)
+        for (exit, text) in [("屏上结论格", verdict.summaryCaption),
+                             ("屏上安全公告空态", verdict.advisoryEmptyCaption),
+                             ("无头出口", dependencyLines(cliText(of: report))),
+                             ("报告级陈述句", statement)] {
+            XCTAssertFalse(text.contains(allClear), "\(exit) 在有命中时说「\(allClear)」：\(text)")
+        }
+    }
+
     /// 反例钉死：部分覆盖这一态在**任何出口**都不许出现「已完成核对」这一句。
     func testPartialCoverageNeverClaimsTheSweepIsFinished() throws {
         let report = ledger(checkedCount: 4)
@@ -201,7 +231,7 @@ final class DependencyVerdictPartialCoverageTests: XCTestCase {
                 XCTAssertEqual(verdict.summaryCaption, Self.expectedPartialSentence, item.name)
                 XCTAssertTrue(cli.contains(Self.expectedPartialSentence), cli)
             default:
-                XCTAssertEqual(verdict, .clean(coveredCount: 6, total: 6), item.name)
+                XCTAssertEqual(verdict, .clean(total: 6), item.name)
                 XCTAssertEqual(verdict.summaryCaption, Self.expectedCleanSentence, item.name)
                 XCTAssertTrue(item.expectAllClear)
                 XCTAssertTrue(verdict.advisoryEmptyCaption.contains("已完成核对"),

@@ -156,8 +156,14 @@ extension ComplexityEngine {
     static var jsVariableArrow: SignaturePattern {
         let name = #"([A-Za-z_$][\w$]*)"#
         let typeAnn = #"(?:[ \t]*:[ \t]*[^=;{}()]*?)?"#
+        // `export` 前缀这一档以前**没有**：`jsFunction` 收了 `export function`，
+        // 而 ESM/TS 模块里最常见的是 `export const useFoo = () => { … }` —— 少认它就是把
+        // 整个模块的函数分母算小（台账 RD-79：交付二进制实测同形两块体箭头，
+        // 不带 `export` 计到 1、带 `export` 计到 0）。
+        // ⚠ 反例由守卫钉住：`export const config = { … }`（对象字面量，没有 `(`）
+        //   与 `export const n = 1` 都**不许**被认成函数。
         return SignaturePattern(
-            #"^\#(head)(?:const|let|var)[ \t]+\#(name)[ \t]*=[ \t]*(?:async[ \t]+)?"#
+            #"^\#(head)(?:export[ \t]+)?(?:const|let|var)[ \t]+\#(name)[ \t]*=[ \t]*(?:async[ \t]+)?"#
                 + #"(?:function[ \t]*\*?[ \t]*(?:[A-Za-z_$][\w$]*)?[ \t]*)?\#(typeAnn)\("#
         )
     }

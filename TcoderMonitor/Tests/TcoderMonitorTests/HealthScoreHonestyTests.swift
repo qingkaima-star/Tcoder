@@ -36,7 +36,8 @@ final class HealthScoreHonestyTests: HealthScoreTestCase {
         var withVulnerabilities = report { _ in () }
         withVulnerabilities.advisories = advisories(count: 3)
         XCTAssertEqual(withVulnerabilities.vulnerableCount, 3, "夹具必须真造出 3 个受影响依赖")
-        XCTAssertTrue(withVulnerabilities.hasVulnerabilityCoverage, "有 advisories 即视为有覆盖")
+        // 判据读的是"有没有正向发现"这一件事实本身（上面那行 `vulnerableCount == 3` 就是它的证据）。
+        // 这里原先还复述一遍那枚合成布尔的结论，属性退役（RD-78）后不必再替旧闸门说话。
         XCTAssertEqual(VulnerabilityEvidence.classify(withVulnerabilities), .verified)
     }
 

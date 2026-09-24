@@ -114,8 +114,9 @@ final class DependencyEcosystemCoverageTests: XCTestCase {
         // ---- 独立真值：先把缺陷的机制钉住，再判卡头 ----
         XCTAssertEqual(stub.receivedOsvQueries.count, 2, "前提：两条查询确实发出去了")
         XCTAssertTrue(report.networkLookupPerformed, "前提：报告级写着「发过请求」")
-        XCTAssertTrue(report.hasVulnerabilityCoverage,
-                      "旧闸门在这份报告上判的是「有覆盖」——语义不许改（它另有读者），改的是这一格的读法")
+        // 旧闸门在这份报告上会判「有覆盖」——它的本体就是"发起过查询或带回过公告"，
+        // 而上面那行已经钉住 `networkLookupPerformed == true`。属性本身已退役（RD-78），
+        // 这里**不再复述它的结论**，只留这条对照：账本一条都没核成 ⇒ 这一格只能走 `.unchecked`。
         let ledger = DependencyEvidence.ledger(for: report)
         XCTAssertEqual(ledger.totalCount, 2, "手写：两条依赖")
         XCTAssertEqual(ledger.vulnerabilityCheckedCount, 0, "两条全失败 ⇒ 核成的条数是 0，不是 2")
