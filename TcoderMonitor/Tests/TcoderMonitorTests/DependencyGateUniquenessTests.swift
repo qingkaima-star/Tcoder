@@ -195,6 +195,38 @@ final class DependencyGateUniquenessTests: XCTestCase {
         XCTAssertTrue(Self.allClearHits(in: "// 「已完成核对」这句现在只由 .clean 分支写出").isEmpty)
     }
 
+    // MARK: - ④ 评分侧（RD-73：字面扫不到的那把第二尺子，改按行为钉）
+
+    /// 评分侧必须**改读**唯一分档入口，而不是再抄一遍"查全了没有"。
+    /// 它原先的形状是 `let checked = counts[.checked] ?? 0` 之后 `checked == ledger.totalCount` ——
+    /// 换成局部变量写法就逃过上面那把 `gatePattern`，所以这里两头都钉：
+    /// 既要求它调那一处，也要求它别再自己比条数。
+    func testScoringReadsTheSingleCoverageTier() throws {
+        let curves = Self.codeLines(try Self.source("Services/Health/ScoreCurves.swift"))
+        XCTAssertTrue(curves.contains { $0.contains("DependencyEvidence.vulnerabilityCoverage") },
+                      "评分侧不再读唯一分档入口 ⇒ 它自己又判了一次「查全了没有」")
+        let copied = Self.legacyCoverageComparisons(in: try Self.source("Services/Health/ScoreCurves.swift"))
+        XCTAssertTrue(copied.isEmpty, "评分侧又抄了一遍覆盖度算式：\(copied)")
+    }
+
+    /// 上面那把尺子的双向元测试：注入旧形状必须抓到、注释里提一句不算、否则那条断言就是永真绿。
+    func testTheScoringRulerCatchesTheLegacyExpression() throws {
+        let dirty = "    if checked == ledger.totalCount { return .verified }\n"
+        XCTAssertEqual(Self.legacyCoverageComparisons(in: dirty).count, 1,
+                       "抓不到评分侧那把旧尺子的字面形状 ⇒ 上一条断言在空跑")
+        let commented = "        // 旧实现写的是 checked == ledger.totalCount，现在不这么判\n"
+            + "        if DependencyEvidence.vulnerabilityCoverage(ledger).isFull { return .verified }\n"
+        XCTAssertTrue(Self.legacyCoverageComparisons(in: commented).isEmpty,
+                      "注释里讲这句就被判红 = 会误报的粗尺上了闸")
+    }
+
+    /// 评分侧旧尺子的形状：任何拿 `totalCount` 右操作数的相等比较（注释行已被剥掉）。
+    static func legacyCoverageComparisons(in text: String) -> [String] {
+        SurfaceScanKit.codeLines(text).filter {
+            $0.contains("== ledger.totalCount") || $0.contains("== report.totalCount")
+        }
+    }
+
     // MARK: - 小工具
 
     /// 闸门算式：按正则抓，两个方向都算，剥掉整行注释。
