@@ -30,6 +30,15 @@
 用法：
     python3 scripts/perf_trio_agreement.py <run 目录> [<run 目录> …] [--budget-ms 8.333]
 退出码：0 一致 / 1 不一致 / 2 样本不足或有缺件（不足时**不许**报"3/3 达标"）。
+
+## 第四条（09-24 需求方裁定 A）：idle 档不再比每趟极值的极差比
+
+`app-update` 的 max 是**极值统计量**：同一趟内部自助重抽（k=1→12）期望 max 就能涨 1.2~1.8 倍，
+所以"重复到一致"对它是**不会终止的协议**——多一趟只会把极差比撑得更大（实测五趟 2.1×）。
+⇒ idle 档改比**每趟自身分布**的 p90 与均值（两把都要过带宽）。
+"留一趟之后合并 p95"那一版我实现过又撤回：留一池子两两重叠，极差比会随趟数构造性地收敛到 1，
+那是比极值判据更坏的"永真绿"（理由写在 `per_run_quantiles`）。
+max 仍在报表里逐趟判达标、仍是"最长孤例单独查"那条纪律的输入，**只是不再当重复性判据**。
 """
 
 import argparse
@@ -87,6 +96,7 @@ def _run_reading(d, loaded, secs):
     return {"dir": os.path.basename(d.rstrip("/")), "seconds": secs,
             "hitch_n": len(late), "hitch_per_s": len(late) / secs,
             "render_p50_ms": percentile(rends, .5) if rends else None,
+            "update_values": upd,
             "update_max_ms": max(upd) if upd else None,
             "surfaces_p50_fps": (float(fps["fps_p50"]) if fps and fps.get("fps_p50") else None)}
 
@@ -133,6 +143,23 @@ def _roster_lines(got, missing):
     return lines
 
 
+def per_run_quantiles(runs):
+    """每一趟**只用自己的事件**算两个分位 ⇒ ([p90…], [均值…])；一趟空 ⇒ 该位给 None。
+
+    裁定 A 落地时我先写了"留一趟之后合并分布的 p95"，**那版是错的、我自己撤回**：
+    k 个留一池子两两重叠 k−2 趟的数据，极差比会随趟数天然收敛到 1，
+    等于把"重不重复"这个检验变成构造上永真 —— 比原来的极值判据更糟（那条至少是保守地难）。
+    ⇒ 现在两把尺子都用**互不重叠**的每趟自身分布：p90 看形状、均值看整体，
+    两者都必须在带宽内才算一致（一条松一条紧时不许挑好听的那条报，与"出帧那一维"同一条纪律）。
+    """
+    p90, means = [], []
+    for one in runs:
+        vals = one["update_values"]
+        p90.append(percentile(vals, .90) if vals else None)
+        means.append(sum(vals) / len(vals) if vals else None)
+    return p90, means
+
+
 def _judge_spread(got, period):
     """按档位取判据量做散布 ⇒ (告警清单, 要印的行, 判据量名, 该量的现量)。
 
@@ -140,23 +167,40 @@ def _judge_spread(got, period):
     **idle 档**，得到"0.00 ~ 0.95 ⇒ 19.0× ⇒ 不一致"——而 idle 档的 hitch 本来就该在 0 附近
     （静止窗口 ProMotion 还会降频，spec §6.2 明写那一档只记形状不判档）。
     一个真值≈0 的量做除法散布，任何噪声都是"严重不一致"。
-    ⇒ 每个档位只比**该档的判据量**：`interaction` 比 hitch/s，`idle` 比 `app-update` 的最大值
-    （T2 的既有判据），出帧那一维两档都看。
+    ⇒ 每个档位只比**该档的判据量**：`interaction` 比 hitch/s；`idle` 比每趟自身分布的 p90 与均值
+    （T2 的达标判据 max 仍逐趟判，只是不再当重复性判据，理由见 `per_run_quantiles`）。
     """
     bad, out = [], []
     if period == "idle":
-        q = [r["update_max_ms"] for r in got if r.get("update_max_ms") is not None]
-        name, bar = "app-update 最大值(ms)", 2.0
+        p90, means = per_run_quantiles(got)
+        name, bar = "每趟 p90(ms)", 2.0
+        q = [v for v in p90 if v is not None]
+        for label, vals in (("p90", p90), ("均值", means)):
+            have = [v for v in vals if v is not None]
+            if len(have) < len(got):      # 自己一趟一个事件都没有 ⇒ 它没被量，不能让别的趟替它作证
+                bad.append("有 %d 趟 update 表是空的 ⇒ %s 这条尺子没吃到它，不许报一致"
+                           % (len(got) - len(have), label))
+            if have:
+                ratio, over, text = _spread(have, "每趟 %s(ms)" % label, bar)
+                out.append("   " + text)
+                if over:
+                    bad.append("每趟 %s 极差比 %.1f× > %.1f×" % (label, ratio, bar))
+        mx = [r["update_max_ms"] for r in got if r.get("update_max_ms") is not None]
+        if mx:
+            out.append("   旁证：每趟 max %s ⇒ 极值只逐趟判达标，**不当重复性判据**"
+                       "（n≈14 时自助重抽 k=1→12 期望 max 就能涨 1.2~1.8 倍，见交接笔记 §BH）"
+                       % "/".join("%.2f" % v for v in sorted(mx)))
     else:
         q = [r["hitch_per_s"] for r in got]
         name, bar = "hitch/s", SPREAD_BAR
     if len(q) < len(got):
         bad.append("有 %d 趟没采到该档判据量（%s）⇒ 尺子没对齐，不许只凭另一半报一致"
                    % (len(got) - len(q), name))
-    if q:
+    if q and period != "idle":
         ratio, over, text = _spread(q, name, bar)
-        out.append("   " + text + ("（idle 档按 T2 判据量比，不比 hitch：那量真值≈0，除法散布无意义）"
-                                   if period == "idle" else ""))
+        out.append("   " + text)
+        if over:
+            bad.append("%s 极差比 %.1f× > %.1f×" % (name, ratio, bar))
         if over:
             bad.append("%s 极差比 %.1f× > %.1f×" % (name, ratio, bar))
     fps = [r["surfaces_p50_fps"] for r in got if r.get("surfaces_p50_fps")]
@@ -188,7 +232,7 @@ def verdict(runs, dirs):
     lines += out
     if bad:
         lines.append("   判定：**不一致** —— " + "；".join(bad))
-        lines.append("   ⇒ 这一档**不能**报「3/3 达标」。要么继续加趟直到有一组取值一致，"
+        lines.append("   ⇒ 这一档**不能**报「3/3 达标」。要么加趟/排掉被打回的那趟再看一次，"
                      "要么按 spec §1.3 明写「受控重复未满足」。")
         return lines, 1
     lines.append("   判定：一致（两把尺子都在带宽内）。中位 %s %.2f ⇒ 报数时**报中位与范围**，不报均值"

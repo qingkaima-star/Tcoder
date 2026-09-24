@@ -124,7 +124,7 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_update_table_caveat "$out"    # 34) update 表窄分布形状不许被当成主线程忙时
   item selfcheck_frame_table_budgets "$out"  # 42) 逐帧三张表各配自己的预算（寿命不判单帧，防「100% 超预算」）
   item selfcheck_pulse_window_scope "$out"   # 41) FramePulse 的总数是生命期累计：不许冒充本窗口（§M 因此降级未定）
-  item selfcheck_trio_agreement "$out"       # 39) ≥3 趟那半句「且取值一致」：五种形状各判一次，缺件/不足都不许报 3/3
+  item selfcheck_trio_agreement "$out"       # 39) ≥3 趟那半句「且取值一致」：十种形状各判一次（idle 档极值不当判据的正反一对在内）
   item selfcheck_cadence_two_budgets "$out"    # 35) p95 判据必须两把预算并排印、且真会分歧
   item selfcheck_md_tables_unbroken "$out"     # 30) markdown 表格不许有夹在行中间的裸续行
   item selfcheck_record_bounded "$out"          # 43) 录制要有墙钟兜底：被测进程一消失就当场判废，别永等
