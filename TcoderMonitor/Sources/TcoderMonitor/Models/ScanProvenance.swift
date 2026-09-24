@@ -103,14 +103,30 @@ struct ScanProvenance: Codable, Equatable, Sendable {
         toolVersion = Self.toolIdentity
         rulesVersion = Self.rulesVersionStamp
         self.producedBy = producedBy
-        self.scannedRoot = scannedRoot
+        // 被扫根**进报告之前**就归一（#60）：原来只有两个装配口自己记得归一，
+        // 而对表尺子证明这不够——09-25 复跑时 GUI 侧交进来的是 `/var/folders/…` 别名短写、
+        // CLI 侧是 `/private/var/folders/…`，同一个目录又成了两个串。
+        // 归一放在这一处，报告的这一格就不可能带别名写法，不依赖调用方是否记得。
+        let canonicalRoot = ScannedPath.canonical(scannedRoot)
+        self.scannedRoot = canonicalRoot
         guard let git = report.git else {
             dirtyProbeNote = "Git 那一路没有产出结果，提交号与工作区状态都无从谈起"
             return
         }
         sourceCommit = git.headSHA.isEmpty ? nil : git.headSHA
         sourceBranch = git.branch.isEmpty ? nil : git.branch
-        if let root = git.resolvedRepositoryRoot, root != scannedRoot { resolvedGitRoot = root }
+        // 「相等」必须按**同一把尺子的写法**判（#60）：Git 那一路给的是解析后的物理路径，
+        // 而 `scannedRoot` 是调用方递进来的字符串。两边方向不同就会凭「写法之差」造出一句
+        // 「仓库根被重定位」，而那一格是要上屏的（`HealthView` 读它）——09-25 在符号链接下的
+        // 验证树里实测到：同一份内容，GUI 侧有这一格、CLI 侧没有。
+        // 判定放在这里、而不是要求每个调用方先归一：装配口现有两个（界面 / CLI），
+        // 而测试与以后的第三个入口不会每次都记得（这一版就是被 `CoverageChainProofTests` 抓出来的）。
+        // 两格都存**同一个方向**的写法（#60）：只归一 `scannedRoot` 而让这一格带 git 原样返回的短写，
+        // 等于在同一份报告里把同一种量写成两种串——`CommitIdentity` 那格立的正是这条规矩（一个量一把缩短尺）。
+        if let root = git.resolvedRepositoryRoot {
+            let canonicalGitRoot = ScannedPath.canonical(root)
+            if canonicalGitRoot != canonicalRoot { resolvedGitRoot = canonicalGitRoot }
+        }
         workingTreeDirty = git.workingTreeDirty
         dirtyEntryCount = git.dirtyEntryCount
         if git.workingTreeDirty == nil {

@@ -138,7 +138,9 @@ final class ProjectStoreRoundTripTests: XCTestCase {
         XCTAssertEqual(registry.projects.map(\.id), [project.id], "projects.json 里的项目集合不对")
         let storedProject = try XCTUnwrap(registry.projects.first)
         XCTAssertEqual(storedProject.name, "落盘往返")
-        XCTAssertEqual(storedProject.path, "/tmp/wsv-store-subject")
+        // 注册表存的是**物理写法**（#60：同一个目录在两个面只许一个串），而上面那行传的是别名短写；
+        // 这条夹具路径并不存在，`ScannedPath` 对不存在的路径只做字面别名归一、不去 stat 改写成别的目录。
+        XCTAssertEqual(storedProject.path, "/private/tmp/wsv-store-subject")
         // 注册表是在 upsertReport 之后写的，所以它必须与报告里的 project 同步带上扫描时间。
         XCTAssertEqual(storedProject.lastScanAt, Self.fixedGeneratedAt,
                        "注册表与单份报告里的 lastScanAt 不一致，重启后总览页会退回「未扫描」")
@@ -217,6 +219,29 @@ final class ProjectStoreRoundTripTests: XCTestCase {
         XCTAssertFalse(afterRemove.projects.contains { $0.id == added.id })
         XCTAssertNil(store.report(for: added))
         XCTAssertNil(store.report(for: nil), "空选择要安全返回 nil，而不是崩溃")
+    }
+
+    // MARK: - #60 同一个目录只许一行，而且存的是物理写法
+
+    /// 注册表这一格答的是「哪个目录」，所以写物理形态（与 CLI 共用 `ScannedPath`）；
+    /// 别名短写与真实写法**不许加成两行**（两行 = 同一个仓在侧栏出现两次、报告分家）。
+    ///
+    /// ⚠ 没覆盖的那一半：`add` 里「把旧行的短写就地升级」那一支**测不到**——
+    /// 注入不进去（`projects` 是 `private(set)`，而 `load()` 只跑在 `init` 里，
+    /// 正是本文件头部那条契约缺口）。这条用例只钉住「归一 + 不加成两行」，
+    /// 升级那一支靠代码走查，等 `init(storageDirectory:)` 落地后再补断言。
+    func test_addingTheSameDirectoryByItsAliasUpgradesOneRow() throws {
+        let (store, _) = try makeIsolatedStore()
+        let dir = URL(fileURLWithPath: "/private/tmp/tcoder-store-alias-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+
+        let first = store.add(path: dir.path.replacingOccurrences(of: "/private/tmp/", with: "/tmp/"))
+        XCTAssertEqual(first.path, dir.path, "存进去的必须是物理写法，而不是用户给的那个短写")
+        XCTAssertEqual(first.name, dir.lastPathComponent, "显示名仍按给定的写法取末段：不能替用户改项目名")
+        let second = store.add(path: dir.path)
+        XCTAssertEqual(second.id, first.id, "别名与真实写法必须落到同一行")
+        XCTAssertEqual(store.projects.count, 1, "加成两行就是两个报告、两份历史")
     }
 
     // MARK: - ② 向前兼容：新增 Optional 字段不得让旧 JSON 读不回来

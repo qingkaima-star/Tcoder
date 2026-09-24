@@ -99,6 +99,43 @@ extension SourceFileClassifier {
     }
 }
 
+// MARK: - 被扫根的唯一写法（同一个目录不许在两个面印成两个串）
+
+/// 「一个目录进报告、上屏、进溯源块时只有**一个**写法」这一把尺子。
+///
+/// 为什么必须单独立一处：装配口原本有两套写法，而且方向是**反的**——
+/// `CLIScan.validatedURL` 走 `standardizedFileURL`，`ShellGitAnalyzer.canonicalPath`
+/// 走 `standardizedFileURL + resolvingSymlinksInPath`。这两个 API 在 macOS 上会把
+/// `/private/tmp`、`/private/var` 这类系统别名的**真实路径倒剥成别名短写**。
+/// 实测（2026-09-25，同一枚提交、同一条夹具、同一台机器）：
+/// GUI 落 `/private/tmp/…/ShopApp`、CLI 落 `/tmp/…/ShopApp`，
+/// 于是「同一个仓库，界面说 A、命令行说 B」，而且 `resolvedGitRoot`
+/// 会把这种**写法之差**误报成「仓库根被重定位」（那一句是要上屏的，见 `HealthView`）。
+///
+/// 方向定在**物理路径**：那是 `git` / `lsof` / `ps` 打的形状，也是唯一稳定的形状，
+/// 别名短写只是它的另一个名字。判据由 `ScannedPathTests` 钉死（含「输出必须是解析的不动点」，
+/// 所以将来换 Foundation 的脾气会先红，而不是悄悄换个写法）。
+enum ScannedPath {
+
+    /// 路径的物理写法。路径**不存在**时也给出稳定答案（按字面别名规则补 `/private`，
+    /// 不去 stat 出一个存在的路径冒充）：被扫根可能在扫描期间被删，那种时候改写它才是撒谎。
+    static func canonical(_ raw: String) -> String {
+        guard raw.isEmpty == false else { return raw }
+        let resolved = URL(fileURLWithPath: raw).resolvingSymlinksInPath().path
+        return physicalForm(of: resolved)
+    }
+
+    /// 把 `resolvingSymlinksInPath` 剥掉的 `/private` 前缀补回来：
+    /// 存在的路径问 `canonicalPathKey`（方向正确：`/tmp → /private/tmp`），
+    /// 问不到的（不存在、无权限）按同一份别名名单做字面展开。
+    private static func physicalForm(of resolvedPath: String) -> String {
+        let url = URL(fileURLWithPath: resolvedPath)
+        if let keyed = SourceFileClassifier.canonicalPath(of: url) { return keyed }
+        return SourceFileClassifier.lexicalAliasForms(ofPath: resolvedPath)
+            .first(where: { $0.hasPrefix("/private/") }) ?? resolvedPath
+    }
+}
+
 // MARK: - 重复块坐标（RD-61 第二半：落盘形状只在这一处定）
 
 extension ScannedSourceFile {

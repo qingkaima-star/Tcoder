@@ -63,12 +63,24 @@ final class ProjectStore {
 
     @discardableResult
     func add(path: String, name: String? = nil) -> MonitoredProject {
+        // 侧栏这一格存的是「哪个目录」，所以写**物理写法**（`ScannedPath`，与 CLI 同一把尺子）。
+        // 显示名仍按**给定的**那个写法取末段：用户点的是 `…/repoclink`，把它换成解析后的
+        // 目标目录名等于替他改项目名。
+        let canonical = ScannedPath.canonical(path)
         let standardizedName = name
             ?? URL(fileURLWithPath: path).lastPathComponent
-        if let existing = projects.first(where: { $0.path == path }) {
-            return existing
+        if let index = projects.firstIndex(where: { ScannedPath.canonical($0.path) == canonical }) {
+            // 修复前加进来的行可能存着别名短写（`/tmp/…`）。同一个目录不许有两行，
+            // 也不许在同一行上继续挂两种写法：就地升级那一格（`rename` 同规矩，只改内存里的
+            // 那份副本，落盘报告等下一次扫描）。
+            if projects[index].path != canonical {
+                projects[index].path = canonical
+                reports[projects[index].id]?.project = projects[index]
+                persist()
+            }
+            return projects[index]
         }
-        let project = MonitoredProject(name: standardizedName, path: path)
+        let project = MonitoredProject(name: standardizedName, path: canonical)
         projects.append(project)
         reports[project.id] = ProjectReport(project: project)
         persist()
