@@ -293,34 +293,18 @@ extension CoverageChainProofTests {
         // RD-31 的开工指纹同样要在这五路**之前**采：这份副本重演的是 GUI 装配，少采一次
         // 就会与 CLI 侧「整键在场 / 缺席」不一致，对表尺子当场判红。
         let fingerprintAtStart = SourceTreeFingerprint.probe(root: directory)
-        let code = await AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[0]) {
-            try await FileSystemCodeAnalyzer().analyze(root: directory, options: .default)
-        }
-        let git = await AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[1]) {
-            try await ShellGitAnalyzer().analyze(repositoryURL: directory)
-        }
-        let logs = await AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[2]) {
-            try await FileLogAnalyzer().analyze(projectRoot: directory, extraLogURLs: [], withinDays: 7)
-        }
-        let deps = await AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[3]) {
-            try await ManifestDependencyAnalyzer().analyze(projectRoot: directory, allowNetwork: false)
-        }
-        let coverage = await AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[4]) {
-            try await CoverageAnalyzer().analyze(projectRoot: directory, options: .default)
-        }
-        var attempts = [code.attempt, git.attempt, logs.attempt, deps.attempt, coverage.attempt]
-        attempts[0].limitsHit = code.value?.scanLimitations ?? []
-        report.code = code.value
-        report.git = git.value
-        report.logs = logs.value
-        report.dependencies = deps.value
-        report.coverage = coverage.value
+        let sections = await runGuiSideSections(root: directory)
+        report.code = sections.code
+        report.git = sections.git
+        report.logs = sections.logs
+        report.dependencies = sections.dependencies
+        report.coverage = sections.coverage
         report.health = WeightedHealthScorer().score(HealthInputs(
             code: report.code, git: report.git, logs: report.logs,
             dependencies: report.dependencies, coverage: report.coverage, previousScore: nil))
         report.attemptedAt = Date()
-        report.failedSections = attempts.compactMap { $0.failureReason == nil ? nil : $0.label }
-        report.analyzerLedger = AnalyzerLedger.records(from: attempts)
+        report.failedSections = sections.attempts.compactMap { $0.failureReason == nil ? nil : $0.label }
+        report.analyzerLedger = AnalyzerLedger.records(from: sections.attempts)
         // ⚠️ 这份**测试副本**重演了 GUI 装配而不是调用它 ⇒ AppState 每加一个字段这里就静默落后
         //    一格（实测就漏过 provenance）。抽成共用装配函数是 R10 第 0.5 条的契约缺口。
         var provenance = ScanProvenance(report: report, scannedRoot: directory.path, producedBy: "gui")
