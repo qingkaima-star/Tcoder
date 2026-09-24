@@ -18,9 +18,6 @@ import XCTest
 ///    事前拒绝已存在、事后自清，并把「盘上到底有什么」独立数一遍交给 `discrepancies` 对账。
 enum R37ReachFixture {
 
-    /// 本族夹具的产品名/署名前缀（唯一化，避免与本机真实 App 的崩溃报告撞名）。
-    static let tokenPrefix = "R37Reach"
-
     // MARK: - 沙箱
 
     /// 建一个**本次专属**的夹具根；祖先链上有 `.git` 就直接判败（不许静默造出一个假形状）。
