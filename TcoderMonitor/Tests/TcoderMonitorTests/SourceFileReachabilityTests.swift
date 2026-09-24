@@ -154,7 +154,11 @@ final class SourceFileReachabilityTests: XCTestCase {
     ///   2026-09-24 **182 → 183**（RD-60 那支合流时由总工按实报拧，同一行只换数字）：
     ///   顶上来的是 `Services/Logs/CrashEvidenceReadout.swift`（`a1d577c` 新增，
     ///   真读者是 `FileLogAnalyzer` 那条上屏链与 CLI/GUI 两个出口，不是只被自己的单测引用）。
-    static let censusBaseline = 183
+    ///   2026-09-24 **183 → 184**（RD-67 双分母那支合流时由总工按实报拧，同一行只换数字）：
+    ///   顶上来的是 `Services/Code/ProductionCodeScaleReadout.swift`（`47e251f` 新增，
+    ///   真读者是两个上屏出口 —— `CodeMetricsView` 里那格 `DataCaption` 与
+    ///   `HealthHero` 的 ⓘ，不是只被自己的单测引用；守卫实报同一趟 `unused` 为空）。
+    static let censusBaseline = 184
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames

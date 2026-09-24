@@ -297,6 +297,15 @@ struct CodeInvariantRow: View {
                 term("总计", code.totalLines)
                 Spacer(minLength: 0)
             }
+            // RD-67（台账卷四 §73）：需求方 2026-09-24 18:16 拍的是「维持现状 + 两个数并排给」——
+            // 分母一个都不动（文档 / 配置 / 备份 / 测试与生产码同分母），改为把差额显式给读者看。
+            // 所以这一句并排写在上面那条等式的 `代码` 项底下：它回答的就是「这个 M 里有多少是生产码」。
+            // 句子只由唯一装配口 `ProductionCodeScaleReadout.reading(_:)` 生产，这里不另写一份中文
+            // （与下面 `MixedLanguageRegionCaliber.note` 同一条纪律）；三种缺席态（没做分档 /
+            // 生产档没数出来 / 真的量为零）都由那一处分开，视图不补 0、也不补一句占位话。
+            if let paired = ProductionCodeScaleReadout.reading(code) {
+                DataCaption(text: paired)
+            }
             if sum != code.totalLines {
                 DataNotice(
                     text: localizedFormat("分项之和 %1$@ 与总行数相差 %2$@ 行，以扫描器输出为准。",

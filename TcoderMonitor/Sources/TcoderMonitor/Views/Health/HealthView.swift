@@ -21,7 +21,8 @@ struct HealthView: View {
                 } else {
                     HealthHero(health: health,
                                relocatedGitRoot: report?.provenance?.resolvedGitRoot,
-                               sourceDrift: report?.provenance?.driftNotice)
+                               sourceDrift: report?.provenance?.driftNotice,
+                               codeScaleNote: ProductionCodeScaleReadout.reading(report?.code))
                     HealthComponentTable(health: health, report: report)
                     HealthAdviceGrid(health: health)
                 }
@@ -114,9 +115,19 @@ struct HealthHero: View {
     /// 与上面 `relocatedGitRoot` 那条理由一字不差。
     /// 同样**故意不给默认值**：给了默认值就能被漏传，这一句又会变成一页响、一页沉默。
     let sourceDrift: ScanProvenance.DriftNotice?
+    /// 代码规模那一句「生产码 N 行 / 全量 M 行」（RD-67 · 台账卷四 §73）。
+    ///
+    /// 需求方 2026-09-24 18:16 拍的是**维持现状 + 两个数并排给**：评分与规模的分母一个都不动
+    /// （文档 / 配置 / 备份 / 测试与生产码同分母），改为让读者自己看见差额 —— 所以这一句
+    /// 挂在**综合评分这张卡的 ⓘ** 上，而综合分本身、各维权重、判档判据都没有被这一笔碰过。
+    /// 句子只由唯一装配口 `ProductionCodeScaleReadout.reading(_:)` 生产（与代码规模页那一格
+    /// 读同一句），这里不另写一份中文；本次没做角色分档（含整条代码路没跑）⇒ `nil` ⇒
+    /// 这一格 ⓘ 整个不出现，**不许**由视图补一个 0 或一句占位话。
+    /// 与前两格同一条理由：**故意不给默认值**，给了就能被漏传。
+    let codeScaleNote: String?
 
     var body: some View {
-        GlassSection("综合评分", subtitle: subtitle, icon: .health) {
+        GlassSection("综合评分", subtitle: subtitle, subtitleHelp: codeScaleNote, icon: .health) {
             HStack(alignment: .top, spacing: Theme.Spacing.lg) {
                 HealthRing(score: health.verdict,
                                 grade: health.verdictGrade,

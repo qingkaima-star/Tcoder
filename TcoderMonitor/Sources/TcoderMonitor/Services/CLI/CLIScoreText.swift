@@ -286,23 +286,26 @@ enum CLIScoreText {
         guard ledger.totalCount > 0 else { return lines }
 
         let coverage = DependencyEvidence.vulnerabilityCoverage(ledger)
-        var status = "漏洞核对状态：已核对 \(NumberFormat.grouped(ledger.vulnerabilityCheckedCount))"
-            + "/\(NumberFormat.grouped(ledger.totalCount))"
         let tail = DependencyEvidence.tailPieces(ledger)
-        if !tail.isEmpty { status += "，未覆盖：\(tail.joined(separator: localizedCopy("、")))" }
         let source = DependencyEvidence.sourcesPhrase(ledger)
-        if !source.isEmpty { status += "；数据源：\(source)" }
-        // RD-68：这里原先自己写了一遍 `vulnerabilityCheckedCount == totalCount`，
-        // 与账本那把闸门并存 —— 同一份账在界面与无头出口能长出相反的结论。
-        // 现在三档一律由 `DependencyEvidence.vulnerabilityCoverage` 分派，
+        // RD-68：三档一律由 `DependencyEvidence.vulnerabilityCoverage` 分派，
         // 「没查全」那两句逐字取自 `DependencyVulnerabilityCoverage.statement`（与屏上同源）。
+        // RD-74：`.partial` / `.none` 两档**不再在前面拼一遍条数** —— 装配口那句整句里已经带着
+        // 「已核对 C / T 个依赖」，前面再写一次就是同一对数字、两种写法（改前正是这个样子）。
+        // ⚠ `.full` 这一档故意**不**改用 `coverage.statement`：那枚句子字面写着「未发现已知漏洞」，
+        // 而"全覆盖"只说明每一条都查过、**不保证零命中**（有命中时这里必须继续只说全量覆盖）。
+        var status: String
         switch coverage {
         case .full:
+            status = "漏洞核对状态：已核对 \(NumberFormat.grouped(ledger.vulnerabilityCheckedCount))"
+                + "/\(NumberFormat.grouped(ledger.totalCount))"
             status += DependencyEvidence.mayClaimNoKnownVulnerabilities(ledger)
                 ? "（全量覆盖且零命中）" : "（全量覆盖）"
         case .partial, .none:
-            status += "。" + coverage.statement
+            status = "漏洞核对状态：" + coverage.statement
         }
+        if !tail.isEmpty { status += "，未覆盖：\(tail.joined(separator: localizedCopy("、")))" }
+        if !source.isEmpty { status += "；数据源：\(source)" }
         lines.append(status)
         lines.append("版本核对状态：已核对 \(NumberFormat.grouped(ledger.versionCheckedCount))"
             + "/\(NumberFormat.grouped(ledger.totalCount))"

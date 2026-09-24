@@ -222,7 +222,10 @@ final class SourceRoleTruthTests: XCTestCase {
         XCTAssertEqual(notes.count, 2, "未识别 + 分母未收窄，各一句：\(notes)")
         XCTAssertTrue(notes.contains { $0.contains("认不出角色") }, "\(notes)")
         XCTAssertTrue(notes.contains { $0.contains("未按角色收窄") && $0.contains("文档 1") })
-        // 弱判定那句不占 scanLimitations（那一档还没上屏），但必须在 roleLines 里备着
+        // 弱判定那句不占 scanLimitations —— 理由不是"那一档还没上屏"（RD-67 已把这一档
+        // 接到屏上：`ProductionCodeScaleReadout.weakEvidenceHint` 读落盘的 weakEvidenceFiles），
+        // 而是同一个数已经在两处出声、再挂一条边界就是把已量到的东西重复计成「没量准」。
+        // 但它仍然必须在 roleLines 里备着（那一份带样本路径，上屏那一句没有）。
         XCTAssertTrue(notes.contains { $0.contains("只有语言证据") } == false, "\(notes)")
         XCTAssertTrue(tally.roleLines.contains { $0.contains("只有语言证据")
             && $0.contains("scratchpad.swift") }, "\(tally.roleLines)")

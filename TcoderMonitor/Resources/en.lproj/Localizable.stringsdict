@@ -932,5 +932,71 @@
 			<string>%lld crash-channel files could not be read and were left out of the verdict</string>
 		</dict>
 	</dict>
+	<!-- RD-67 双分母并排（R40，2026-09-24）：「生产码 N 行 / 全量 M 行」这一句的三条量词键。
+		装配口只有一个：`Services/Code/ProductionCodeScaleReadout.swift` 的
+		`ProductionCodeScaleReadout`（代码规模页那一格读数旁 + 综合评分卡 ⓘ 读同一句）。
+		两个复数槽各选各的支（形状照既有键 `共 %lld 天 · 单日峰值 %lld 条`），
+		英文值只用 ASCII 标点；模板里**不带任何非转换符的数字**（带一枚 `0` 就会把
+		`groupedInto` 的千分位补到别人的数字上，那一族由
+		`LocalizationGuardTests+MultiSlotCopy` 逐条钉在目录上）。 -->
+	<key>生产码 %1$lld 行 / 全量 %2$lld 行</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%1$#@dualDenominatorProduction@ / %2$#@dualDenominatorTotal@</string>
+		<key>dualDenominatorProduction</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%1$lld production code line</string>
+			<key>other</key>
+			<string>%1$lld production code lines</string>
+		</dict>
+		<key>dualDenominatorTotal</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%2$lld line in total</string>
+			<key>other</key>
+			<string>%2$lld lines in total</string>
+		</dict>
+	</dict>
+	<key>生产码 -- / 全量 %lld 行 · 这一档没数出来，不是这一档没有生产码</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>production code -- / %#@dualDenominatorMissingBucket@: this bucket was not measured, it is not an empty one</string>
+		<key>dualDenominatorMissingBucket</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld line in total</string>
+			<key>other</key>
+			<string>%lld lines in total</string>
+		</dict>
+	</dict>
+	<key>生产码里 %lld 个文件只有语言证据、路径没有线索，读这一档要按它打折</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@dualDenominatorWeakFiles@</string>
+		<key>dualDenominatorWeakFiles</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld production code file rests on language evidence only with no path clue, so discount this bucket</string>
+			<key>other</key>
+			<string>%lld production code files rest on language evidence only with no path clue, so discount this bucket</string>
+		</dict>
+	</dict>
 </dict>
 </plist>
