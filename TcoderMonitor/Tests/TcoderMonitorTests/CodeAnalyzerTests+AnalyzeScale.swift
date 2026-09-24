@@ -172,7 +172,15 @@ extension CodeAnalyzerTests {
         }
         for block in metrics.duplicatedBlocks {
             for occurrence in block.occurrences {
-                XCTAssertTrue(occurrence.path.hasPrefix(repositoryRoot.path), "重复块路径不得越出仓库根：\(occurrence.path)")
+                // RD-61 第二半（WS-R26）：坐标改成相对被扫根之后，`hasPrefix(仓库根)` 这句话
+                // 就只是在描述一个不再存在的形状。要守的仍然是「不得越出仓库根」，
+                // 所以判据换成按根解析回去再量 —— 上面巨大文件榜与热点榜那两圈**没换**，
+                // 那两路至今给的是绝对 `url.path`（不在这一条链上）。
+                let coordinateURL = CodeViewFormat.resolvedURL(occurrence.path, root: repositoryRoot.path)
+                XCTAssertTrue(coordinateURL.path.hasPrefix(repositoryRoot.path + "/"),
+                              "重复块坐标越出仓库根：\(occurrence.path)")
+                XCTAssertTrue(FileManager.default.fileExists(atPath: coordinateURL.path),
+                              "坐标解析出来的文件仓库里没有：\(occurrence.path)")
             }
         }
 
