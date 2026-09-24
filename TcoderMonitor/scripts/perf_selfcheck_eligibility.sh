@@ -355,6 +355,31 @@ print("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s" % (a, b, c, d, e, f, g, h, i, j))')
   # 拿它做除法散布会把 0.00~0.95 判成"19.0× ⇒ 严重不一致"。判据量必须跟着档位走。
   # 第 10 条钉的是 09-24 需求方裁定 A：`max` 极差比 7.9× 而 p90/均值都在带宽内 ⇒ **判一致**；
   # 同一条夹具把尾巴加进 p90（第 8 条）就必须变红 —— 两条一对，才证明这条不是"怎么都放行"。
+  # 第 9 条（09-24 #50）：**被闸门当场拒收的那一趟必须不被池化**。
+  #     本文件头注一直写着"没被 REFUSED"，可代码里没有那个读者——我拿临时探针数"这趟合格吗"时
+  #     就把一个 REFUSED 的目录读成了合格（挂死的录制会留下上一次的表文件，"表在 + REFUSED 在"就是入口）。
+  local rf
+  rf=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 - "$1" <<'PYCHK'
+import json, os, sys
+from perf_trio_agreement import read_run
+root = sys.argv[1]
+xml = ('<table><schema name="hitches"/>\n'
+       '<row><start-time id="1" fmt="0.1 ms">100000</start-time>'
+       '<duration id="2" fmt="9.00 ms">9000000</duration></row>\n</table>\n')
+for name in ("clean", "refused"):
+    d = os.path.join(root, "trio-" + name)
+    os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, "hitches.xml"), "w").write(xml)
+    json.dump({"period": "idle", "hitches_seconds": 20, "input_source": "human"},
+              open(os.path.join(d, "meta.json"), "w"))
+open(os.path.join(root, "trio-refused", "REFUSED"), "w").write("REFUSED\n闸门当场拒收\n")
+got_clean = read_run(os.path.join(root, "trio-clean")) is not None
+got_refused = read_run(os.path.join(root, "trio-refused")) is None
+print("%s|%s" % (got_clean, got_refused))
+PYCHK
+)
+  [ "$rf" = "True|True" ] \
+    || { fail "REFUSED 那一维没被读到（拿到「$rf」，应为 True|True）⇒ 被拒的一趟会混进散布"; return; }
   ok "同档连测的一致性有尺子了：按档取判据量（交互比 hitch/s、idle 比每趟自身 p90 与均值），十形状各判一次（含极值不当判据的正反一对）"
 }
 
