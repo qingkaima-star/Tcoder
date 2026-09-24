@@ -12,7 +12,8 @@
 # 09-22 加第 32、33 项时就把两个数混过一回，别再留第三个腐烂的数字在这里。
 # 反例的**判据本体**按主题住在同目录的若干块文件里（`_ruler_shapes` 形状与三态话术 /
 # `_gates` 前置与闸门 / `_eligibility` 样本资格 / `_launchers` 起实例与收尾 / `_tables` 文档表 /
-# `_chain` 链的归属与同树链闸）。**块清单只有一个来源：下面那个 `for` 的那一行**，
+# `_chain` 链的归属与同树链闸 / `_trap` trap 的时效性（长 sleep 会把收尾拖过一整窗）。
+# **块清单只有一个来源：下面那个 `for` 的那一行**，
 # 这里刻意不再抄一个数字（第 12 行那句"别再留腐烂的数字"说的就是这类抄件）。
 # 由那个 for source 进来。**为什么要拆**：`SelfScanDogfoodTests` 的 ≤800 行棘轮
 # **分母含 `.sh`** 且 ceiling=0（`SourceLanguageCatalog` 认 Shell），2026-09-21 本文件
@@ -137,12 +138,14 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_chain_guard_one_per_tree "$out"  # 56) 同树只许一条链：无链要放行／同树假链要点名拒跑／跨闸要出声（列在最后：新项不与既有项抢顺序）
   item selfcheck_path_display_keeps_the_tail "$out"  # 57) 归属行两头有牙：长路径保住文件名、短路径一字不改
   item selfcheck_chain_message_names_the_compared_tree "$out"  # 58) 拒人行印的就是比对那棵树（印与比同形）+ is_ours 双向
+  item selfcheck_long_sleep_defers_the_trap "$out"  # 59) trap 的时效性：长 sleep 确实拖住（反例）／分片睡 8 秒内收尾（正例）
+  item selfcheck_trapped_scripts_have_no_long_sleep "$out"  # 60) 带 trap 的 perf_ 脚本里不许留长 sleep（要长等就走 nap）
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：那个 for 必须在 cmd_selfcheck 之前，
 # 因为编排器一跑就要点到里面的函数名。
 # shellcheck source=/dev/null
-for _part in ruler_shapes gates eligibility launchers tables chain; do
+for _part in ruler_shapes gates eligibility launchers tables chain trap; do
   source "scripts/perf_selfcheck_${_part}.sh"
 done
 unset _part

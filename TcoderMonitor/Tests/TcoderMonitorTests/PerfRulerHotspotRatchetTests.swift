@@ -80,6 +80,12 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // （排程器本体不可 source——一 source 就开始等窗口，反例点不到函数）。
         // 新建文件必须当场被量：这是这条规矩第五次被用到（前面四次都写在上面上面的注释里）。
         "perf_chain_guard.sh", "perf_selfcheck_chain.sh",
+        // 09-25 缺陷 #56 的根治：一批 T2 测量的驱动棒原来一趟一份躺在 `.scratch/`（无 trap、不在任何尺子射程内），
+        // 搬成 `scripts/perf_run_batch.sh` 之后才归第 29 项（起实例必须有 kill + trap）管得到。
+        // 搬过来必须当场被量：这是"新建文件必须点名"第六次被用到；而它自带的第 59/60 项是**行为级**的
+        // （真起子进程量"TERM 之后多久收尾"），因为第 29 项那类文本审计只看"有没有 trap 这一行"，
+        // 我 06:44 就是被它放过了一次（有 trap、但长 sleep 把收尾拖到 200 秒之后）。
+        "perf_run_batch.sh", "perf_selfcheck_trap.sh",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。
