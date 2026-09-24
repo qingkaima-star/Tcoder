@@ -160,6 +160,42 @@ def per_run_quantiles(runs):
     return p90, means
 
 
+def _one_stat_spread(vals, label, bar):
+    """一把尺子的散布 ⇒ (告警, 要印的行)。空值不参与，但**参与数不够要出声**。"""
+    bad, out = [], []
+    have = [v for v in vals if v is not None]
+    if len(have) < len(vals):
+        bad.append("有 %d 趟 update 表是空的 ⇒ %s 这条尺子没吃到它，不许报一致"
+                   % (len(vals) - len(have), label))
+    if not have:
+        return bad, out
+    ratio, over, text = _spread(have, "每趟 %s(ms)" % label, bar)
+    out.append("   " + text)
+    if over:
+        bad.append("每趟 %s 极差比 %.1f× > %.1f×" % (label, ratio, bar))
+    return bad, out
+
+
+def _idle_checks(got):
+    """idle 档的三行 + 两把尺子 ⇒ (告警, 要印的行, 主判据量的现量)。
+
+    拆出来只为一句：两把尺子并排判的循环把 `_judge_spread` 的 CC 顶到 24（门 CC<16）。
+    **拆，不抬线**（本仓第三次为同一把门让路，前两次的注释就写在尺子名单里）。
+    """
+    p90, means = per_run_quantiles(got)
+    bad, out = [], []
+    for label, vals in (("p90", p90), ("均值", means)):
+        one_bad, one_out = _one_stat_spread(vals, label, SPREAD_BAR)
+        bad += one_bad
+        out += one_out
+    mx = [r["update_max_ms"] for r in got if r.get("update_max_ms") is not None]
+    if mx:
+        out.append("   旁证：每趟 max %s ⇒ 极值只逐趟判达标，**不当重复性判据**"
+                   "（n≈14 时自助重抽 k=1→12 期望 max 就能涨 1.2~1.8 倍，见交接笔记 §BH）"
+                   % "/".join("%.2f" % v for v in sorted(mx)))
+    return bad, out, [v for v in p90 if v is not None]
+
+
 def _judge_spread(got, period):
     """按档位取判据量做散布 ⇒ (告警清单, 要印的行, 判据量名, 该量的现量)。
 
@@ -167,40 +203,21 @@ def _judge_spread(got, period):
     **idle 档**，得到"0.00 ~ 0.95 ⇒ 19.0× ⇒ 不一致"——而 idle 档的 hitch 本来就该在 0 附近
     （静止窗口 ProMotion 还会降频，spec §6.2 明写那一档只记形状不判档）。
     一个真值≈0 的量做除法散布，任何噪声都是"严重不一致"。
-    ⇒ 每个档位只比**该档的判据量**：`interaction` 比 hitch/s；`idle` 比每趟自身分布的 p90 与均值
-    （T2 的达标判据 max 仍逐趟判，只是不再当重复性判据，理由见 `per_run_quantiles`）。
+    ⇒ 每个档位只比**该档的判据量**：`interaction` 比 hitch/s；`idle` 见 `_idle_checks`
+    （每趟自身 p90 与均值两把尺，T2 的达标判据 max 逐趟判、不再当重复性判据）。
     """
     bad, out = [], []
     if period == "idle":
-        p90, means = per_run_quantiles(got)
-        name, bar = "每趟 p90(ms)", 2.0
-        q = [v for v in p90 if v is not None]
-        for label, vals in (("p90", p90), ("均值", means)):
-            have = [v for v in vals if v is not None]
-            if len(have) < len(got):      # 自己一趟一个事件都没有 ⇒ 它没被量，不能让别的趟替它作证
-                bad.append("有 %d 趟 update 表是空的 ⇒ %s 这条尺子没吃到它，不许报一致"
-                           % (len(got) - len(have), label))
-            if have:
-                ratio, over, text = _spread(have, "每趟 %s(ms)" % label, bar)
-                out.append("   " + text)
-                if over:
-                    bad.append("每趟 %s 极差比 %.1f× > %.1f×" % (label, ratio, bar))
-        mx = [r["update_max_ms"] for r in got if r.get("update_max_ms") is not None]
-        if mx:
-            out.append("   旁证：每趟 max %s ⇒ 极值只逐趟判达标，**不当重复性判据**"
-                       "（n≈14 时自助重抽 k=1→12 期望 max 就能涨 1.2~1.8 倍，见交接笔记 §BH）"
-                       % "/".join("%.2f" % v for v in sorted(mx)))
+        bad, out, q = _idle_checks(got)
+        name = "每趟 p90(ms)"
     else:
         q = [r["hitch_per_s"] for r in got]
         name, bar = "hitch/s", SPREAD_BAR
-    if len(q) < len(got):
-        bad.append("有 %d 趟没采到该档判据量（%s）⇒ 尺子没对齐，不许只凭另一半报一致"
-                   % (len(got) - len(q), name))
-    if q and period != "idle":
+        if len(q) < len(got):
+            bad.append("有 %d 趟没采到该档判据量（%s）⇒ 尺子没对齐，不许只凭另一半报一致"
+                       % (len(got) - len(q), name))
         ratio, over, text = _spread(q, name, bar)
         out.append("   " + text)
-        if over:
-            bad.append("%s 极差比 %.1f× > %.1f×" % (name, ratio, bar))
         if over:
             bad.append("%s 极差比 %.1f× > %.1f×" % (name, ratio, bar))
     fps = [r["surfaces_p50_fps"] for r in got if r.get("surfaces_p50_fps")]
