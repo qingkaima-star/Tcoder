@@ -217,7 +217,7 @@ extension LogSummary {
     func crashEvidenceFootnote(windowDays: Int, evidence: CrashEvidenceLedger? = nil) -> String {
         CrashEvidenceReadout.footnote(
             CrashEvidenceReadout.reading(from: self, evidence: evidence, windowDays: windowDays),
-            readFailureReasons: CrashEvidenceReadout.readFailureDistribution(self))>>>>>>> main
+            readFailureReasons: CrashEvidenceReadout.readFailureDistribution(self))
     }
 
     /// 崩溃那一段脚注**有没有可说的**（界面 ⓘ 与 CLI 的文本读数共用这一个判据 ——
