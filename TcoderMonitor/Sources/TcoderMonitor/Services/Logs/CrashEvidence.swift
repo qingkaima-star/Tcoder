@@ -322,7 +322,7 @@ struct CrashEvidenceLedger: Sendable, Equatable {
             let counts = Dictionary(grouping: missing, by: { $0 })
                 .sorted { $0.key < $1.key }
                 .map { "\($0.key) 缺 \($0.value.count) 份" }
-            parts.append("归属维度不完整：" + counts.joined(separator: "、"))
+            parts.append("归属维度不完整：" + counts.joined(separator: localizedListSeparator()))
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }

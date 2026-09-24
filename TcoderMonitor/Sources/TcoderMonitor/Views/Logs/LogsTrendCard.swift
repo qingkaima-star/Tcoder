@@ -22,11 +22,15 @@ struct LogsTrendCard: View {
                     NoteLine(Self.trendReading, help: footnote(buckets))
                 }
             } else if logs == nil {
-                SectionEmptyNote(text: "尚未分析，点「重新分析」后这里按天展示错误、异常与崩溃的分布。",
-                                 icon: .chartLine)
+                // **留短藏长**（盘点表 G 组）：屏上留状态那一句（下面为什么没有图），
+                // "点了之后这里会出现什么"那句预告进 ⓘ。两支的整句都是目录里原有的键，一字未改。
+                SectionEmptyNote(text: "尚未分析", icon: .chartLine,
+                                 help: "尚未分析，点「重新分析」后这里按天展示错误、异常与崩溃的分布。")
             } else {
-                SectionEmptyNote(text: "暂无趋势数据：日志行里没有可解析的时间戳时无法按天分桶，这里不画空柱。",
-                                 icon: .chartLine)
+                // 「不画空柱」是这两支共同的诚实性底线（没有分桶依据就不画），屏上的
+                // 「暂无趋势数据」已经把"这里没有数"说出口，藏掉的只是**为什么不**。
+                SectionEmptyNote(text: "暂无趋势数据", icon: .chartLine,
+                                 help: "暂无趋势数据：日志行里没有可解析的时间戳时无法按天分桶，这里不画空柱。")
             }
         }
     }
@@ -39,10 +43,18 @@ struct LogsTrendCard: View {
         return logs.trend.sorted { $0.date < $1.date }
     }
 
+    /// 卡头副标题：**两个复数槽**（天、条）。
+    ///
+    /// 为什么不能留成插值，也不能拆成两条 `localizedCount`：
+    /// 英语这一格里「天」和「条」各自要选单复数（`1 day · peak 1 entry` vs
+    /// `2 days · peak 5 entries`），而中文没有这个区分 —— 插值写法在英文态整句中文，
+    /// 单数键写法在英文态语法错。两条各查各的键更不行：` · ` 是句子的一部分，
+    /// 拆开后没有任何一本目录能决定"哪个槽在前"。
+    /// 走 `localizedCount(_:slots:)`（批次 P69c 立的那一枚）。
     private var subtitle: String? {
         guard let logs, !logs.trend.isEmpty else { return nil }
         let peak = logs.trend.map { $0.errors + $0.exceptions + $0.crashes + $0.warnings }.max() ?? 0
-        return "共 \(NumberFormat.grouped(logs.trend.count)) 天 · 单日峰值 \(NumberFormat.grouped(peak)) 条"
+        return localizedCount("共 %lld 天 · 单日峰值 %lld 条", slots: [logs.trend.count, peak])
     }
 
     private func footnote(_ buckets: [LogBucket]) -> String {
@@ -132,6 +144,6 @@ struct LogTrendChart: View {
                     .foregroundStyle(Color.secondary)
             }
         }
-        .accessibilityLabel(Text(localizedFormat("错误趋势，%@ 天", NumberFormat.grouped(buckets.count))))
+        .accessibilityLabel(Text(localizedCount("错误趋势，%lld 天", buckets.count)))
     }
 }

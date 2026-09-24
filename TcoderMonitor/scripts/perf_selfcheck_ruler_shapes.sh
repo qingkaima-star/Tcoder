@@ -358,34 +358,3 @@ PY
   fi
 }
 
-
-selfcheck_md_tables_unbroken() {  # selfcheck_md_tables_unbroken <outdir>
-  # 30) markdown 表格不许有"夹在行中间的裸续行"。
-  #     触发这次立规的是我自己：用 Edit 往 §6.1 的一格里塞多行文本，换行把一行物理行
-  #     拆成四行 ⇒ 表格当场塌掉，而 commit 一路"成功"、diff 也看不出问题。
-  #     范围只扫性能轮自己的文档（并行多流时各家只守自己名下目录）。
-  local f bad=0 n=0
-  for f in ../docs/superpowers/specs/2026-09-20-performance-120hz-design.md \
-           ../docs/superpowers/plans/2026-09-20-perf-followup-tickets.md \
-           ../docs/superpowers/plans/2026-09-21-perf-handoff-notes.md; do
-    [ -f "$f" ] || { fail "少了 $f——分母变小也是失效，不许静默跳过"; bad=1; continue; }
-    n=$((n + 1))
-    # 判据与手工核对时用的那条 python 完全同一形状（不是再写一把近似的）：
-    # 上一行以 | 开头、本行不以 | 开头且非空、下一行以 | 开头 ⇒ 表格中间混进裸续行。
-    local hits
-    hits=$(python3 - "$f" <<'PYCHK'
-import sys
-ls = open(sys.argv[1], encoding='utf-8').read().split('\n')
-bad = [str(i + 1) for i in range(1, len(ls) - 1)
-       if ls[i - 1].startswith('|') and ls[i + 1].startswith('|')
-       and not ls[i].startswith('|') and ls[i].strip()]
-print(' '.join(bad))
-PYCHK
-)
-    [ -z "$hits" ] || { fail "$f 的表格里有断行（行号 $hits）——上一版我自己就把 §6.1 压成了一行"; bad=1; }
-  done
-  # 结构钉：三把文档都要在（分母不能悄悄缩）；反向由 selfcheck 的夹具机制覆盖不了，
-  # 所以这里明确写出**已知好形状**：表头、分隔行、每行都以 | 开头。
-  [ "$n" = "3" ] || { fail "只扫到 $n 份性能文档，应为 3 份"; return; }
-  [ "$bad" = "0" ] && ok "三份性能文档的表格没有断行（分母 $n 份逐份点名存在）"
-}

@@ -32,8 +32,15 @@ xctrace 那三档（`idle` / `switch` / `report`）量的是**采样窗口内的
 """
 
 import argparse
+import json
+import os
 import re
+import subprocess
 import sys
+
+# 出帧那一半的解析**不在这里重写**：`trace_report.py` 的 `fps` / `displays` 两个子命令
+# 已经是全仓唯一吃这两张表的尺子，复制一份就是造第二把尺子（两把迟早分叉）。
+XCTRACE_RULER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trace_report.py")
 
 # 一条正则吃完整行：拆成十个独立 search 的话，「p95」这类字段名在
 # 「帧间隔p95」与「心跳p95」里各出现一次，先命中哪个取决于顺序——那是个静默错数。
@@ -84,7 +91,25 @@ def parse(text):
     return out
 
 
-def verdict(reading, interaction=False, min_frames=600, budget_ms=0.0):
+STALE_RATIO = 3.0    # 生命期帧数超过窗口应有帧数的 3 倍 ⇒ 这份读数是"整条命"，不是这一窗
+
+
+def stale_instance(reading, window_seconds):
+    """实例活得远比测量窗口久 ⇒ 摘要行里的**总数是生命期累计**，分位数来自环形缓冲。
+
+    09-23 09:50 实测才发现我一直说错的那句话：报表写"同窗 FramePulse"，
+    可 `帧数=26941`（≈224 s）对 20 s 的录制窗口——因为 `cmd_idle` 的顺序是
+    "起实例 → 录 hitches → 录 time-profile → 最后才读脉冲"，脉冲读的是**整个阶段**的累计。
+    环形缓冲的容量住在产品侧（`FramePulse.ringCapacity`），本尺不复述那个数，
+    只做一条纯算术判断：生命期帧数 ≫ 窗口应有帧数 ⇒ **不判**，别拿它当窗口内的 p95。
+    """
+    if not window_seconds or window_seconds <= 0:
+        return False
+    expect = float(reading["refresh_hz"]) * window_seconds
+    return expect > 0 and int(reading["frame_count"]) > STALE_RATIO * expect
+
+
+def verdict(reading, interaction=False, min_frames=600, budget_ms=0.0, window_seconds=0.0):
     """→ (逐行文字, 退出码)。见文件头「三条不许含糊的规矩」。"""
     if reading is None:
         return (["!! 文件里没有可解析的 FramePulse 摘要行：探针没开（要 TCODER_PERF_PROBE=1）"
@@ -106,6 +131,14 @@ def verdict(reading, interaction=False, min_frames=600, budget_ms=0.0):
     if reading["bad_ticks"]:
         head = ", ".join("tick%d(hitch=%d,maxGap=%.1fms)" % t for t in reading["bad_ticks"][:8])
         lines.append("  带 hitch 的拍：%s%s" % (head, " …" if len(reading["bad_ticks"]) > 8 else ""))
+    if stale_instance(reading, window_seconds):
+        lines.append("  判定：**不判窗口**——摘要里的帧总数是**生命期累计** %d 帧（≈%.0f s），"
+                     "远大于 %s s 窗口应有的 ~%d 帧；分位数又来自环形缓冲，"
+                     "所以这份 p95 不能当成「本窗口」的 p95。⇒ 只作形状参考，"
+                     "窗口内的结论交给 xctrace 侧（`hitches` / 呈现节奏）。"
+                     % (frames, frames / float(reading["refresh_hz"]), int(window_seconds),
+                        int(float(reading["refresh_hz"]) * window_seconds)))
+        return lines, 2
     if frames < min_frames:
         lines.append("  判定：**拒判**——只有 %d 帧（<%d），这点样本量算 p95 没有意义" % (frames, min_frames))
         return lines, 1
@@ -119,24 +152,163 @@ def verdict(reading, interaction=False, min_frames=600, budget_ms=0.0):
     return lines, 0 if ok else 1
 
 
+def read_display_pair(sample_dir):
+    """→ (设备最大 Hz, 上屏 p50/s, 上屏 p95/s, 采样秒数)；取不到的那一项是 None。
+
+    只调 `trace_report.py` 的两个子命令。缺表就是 None，**不许**把它当 0——
+    "上屏 0 帧/秒"会被下游读成"掉帧掉光了"，而真相是"这张表没导出"。
+    """
+    def _run(sub, xml):
+        path = os.path.join(sample_dir, xml)
+        if not os.path.exists(path):
+            return ""
+        try:
+            r = subprocess.run([sys.executable, XCTRACE_RULER, sub, path],
+                               capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        return r.stdout if r.returncode == 0 else ""
+    disp = _run("displays", "device-display-info.xml")
+    fps = _run("fps", "displayed-surfaces-per-second.xml")
+    hz = re.search(r"最大刷新率=(\d+)", disp)
+    sp = re.search(r"p50=([\d.]+) p95=([\d.]+)", fps)
+    n = re.search(r"采样秒数=(\d+)", fps)
+    return (float(hz.group(1)) if hz else None,
+            float(sp.group(1)) if sp else None,
+            float(sp.group(2)) if sp else None,
+            int(n.group(1)) if n else None)
+
+
+def crosscheck(reading, budget, max_hz, surf_p50, surf_p95, seconds, meta):
+    """同一窗口里两把尺子的合判（工单 §M：p95 那半句到底算不算掉帧）→ (逐行文字, 退出码)。
+
+    为什么必须有这一层：`FramePulse` 读的是 **CVDisplayLink 回调送达时刻**，不等于"上屏时刻"。
+    实测过一批三趟：p50 恰好 8.33（＝一个周期）而 p95 落在 8.98~9.26 ⇒
+    **有一大片帧比一个周期晚了约 1 ms**。这 1 ms 是在回调时序上还是在呈现上，
+    单靠脉冲这把尺子问不出来；两种解释都给"p95>8.41"这个同一个数，结论却相反。
+    退出码：0 两侧一致且都在预算内 / 1 缺件或上屏侧也缺帧 / 2 不适用或两把尺子互相矛盾。
+    """
+    lines = ["== 同窗交叉核对（CVDisplayLink 回调 vs 真实上屏）=="]
+    period = str((meta or {}).get("period") or "").strip()
+    if reading is None:
+        lines.append("  这一趟没有同窗脉冲（attach 模式下被测实例没开探针）⇒ p95 那半句**不判**。")
+        return lines, 1
+    if max_hz is None or surf_p50 is None:
+        lines.append("  xctrace 那一半缺表（`device-display-info` / `displayed-surfaces-per-second`）"
+                     "⇒ 不判：两把尺子只剩一把的时候，谁都不许单独宣布达标或未达标。")
+        return lines, 1
+    if period != "interaction":
+        lines.append("  这一趟 period=%s ⇒ **不适用**：空闲期本来就只出约 10 帧/秒"
+                     "（实测 idle 样本 `displayed-surfaces/s p50=10.00`），"
+                     "拿「上屏没跟满」去判掉帧会把正常空闲误杀成卡顿。" % period)
+        return lines, 2
+    kept = surf_p50 >= 0.9 * max_hz
+    over = reading["frame_p95_ms"] > budget
+    lines.append("  脉冲 p50 %.2f / p95 %.2f ms（期望 %.2f，预算 %.2f）→ 超出 %.2f ms；"
+                 "上屏 p50 %.1f / p95 %.1f 帧每秒，设备 %.0f Hz，采样 %s 秒"
+                 % (reading["frame_p50_ms"], reading["frame_p95_ms"],
+                    reading["expected_interval_ms"], budget,
+                    reading["frame_p95_ms"] - reading["expected_interval_ms"],
+                    surf_p50, surf_p95, max_hz, seconds))
+    if not over and kept:
+        lines.append("  合判：**两侧一致**——上屏跟到了 %.0f 帧每秒（≥0.9×%.0f），脉冲也没越预算。"
+                     % (surf_p50, max_hz))
+        return lines, 0
+    if not over and not kept:
+        lines.append("  合判：**两把尺子互相矛盾**（脉冲说没越预算，上屏却只出 %.1f 帧每秒）"
+                     "⇒ 很可能是这段窗口根本没在重绘（页面不可滚？指针没落在被测窗口上？）。不判。" % surf_p50)
+        return lines, 2
+    if kept:
+        lines.append("  合判：上屏跟满了（%.1f 帧每秒 ≈ %.0f Hz），所以那 %.2f ms 的尾巴**在回调时序上，不是掉帧**。"
+                     % (surf_p50, max_hz, reading["frame_p95_ms"] - reading["expected_interval_ms"]))
+        lines.append("  ⇒ 但**不许**据此宣布 p95 达标：要把这 %.2f ms 从读数里扣掉，得先单独量出回调送达"
+                     "与上屏之间的系统性偏移（工单 §M 要的就是这一步）。在它量出来之前，"
+                     "这句话只能写成「无一帧晚到 1.5× 周期；p95 待时序标定」。"
+                     % (reading["frame_p95_ms"] - reading["expected_interval_ms"]))
+        return lines, 2
+    lines.append("  合判：上屏侧也只有 %.1f 帧每秒（< 0.9×%.0f）⇒ **呈现真的缺帧**，未达标。"
+                 % (surf_p50, max_hz))
+    return lines, 1
+
+
+def _pulse_text(path):
+    """读脉冲文件；读不到就出声并返回 None（判据一字未动，只是从 main 里搬出来）。"""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    except OSError as exc:
+        print("!! 读不到 %s（%s）" % (path, exc), file=sys.stderr)
+        return None
+
+
+def _sample_meta(sample_dir):
+    """`--sample-dir` 那份 meta；读不到就明说「档位声明无从确认」，返回空 dict。"""
+    if not sample_dir:
+        return {}
+    try:
+        with open(os.path.join(sample_dir, "meta.json"), encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError) as exc:
+        print("  ⚠ meta.json 读不到（%s）⇒ 档位声明无从确认，交叉核对按缺件处理" % exc)
+        return {}
+
+
+def _window_seconds(args, meta):
+    """窗口秒数：显式参数 > `meta.hitches_seconds` > 0。
+
+    0 不是"窗口 0 秒"，是**判不了生命期**——那时只能在文字里说明，不许拿累计数答瞬时问题。
+    """
+    try:
+        return args.window_seconds or float(meta.get("hitches_seconds") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def main(argv=None):
-    p = argparse.ArgumentParser(description="FramePulse 落盘文件 → 帧间隔判定")
-    p.add_argument("pulse_file")
+    p = argparse.ArgumentParser(description="FramePulse 落盘文件 → 帧间隔判定（＋同窗上屏交叉核对）")
+    p.add_argument("pulse_file", nargs="?", default="",
+                   help="脉冲文件；带 --sample-dir 时可省，默认取该目录下的 pulse.txt")
+    p.add_argument("--sample-dir", default="",
+                   help="一趟样本目录：从里面同时读 pulse.txt、meta.json 与两张 xctrace 表，做交叉核对")
     p.add_argument("--interaction", action="store_true",
                    help="声明测量窗口内确实在交互（滚动/拖窗）；不声明则只算 idle 读数")
     p.add_argument("--min-frames", type=int, default=600)
     p.add_argument("--budget-ms", type=float, default=0.0)
+    p.add_argument("--window-seconds", type=float, default=0.0,
+                   help="测量窗口秒数；带 --sample-dir 时默认取 meta.json 的 hitches_seconds。"
+                        "它决定这份脉冲读数是「整个生命期」还是本窗口（见 stale_instance）")
     args = p.parse_args(argv)
-    try:
-        with open(args.pulse_file, "r", encoding="utf-8", errors="replace") as fh:
-            text = fh.read()
-    except OSError as exc:
-        print("!! 读不到 %s（%s）" % (args.pulse_file, exc), file=sys.stderr)
+    pulse = args.pulse_file or (os.path.join(args.sample_dir, "pulse.txt") if args.sample_dir else "")
+    if not pulse:
+        p.error("既没给脉冲文件也没给 --sample-dir ⇒ 不知道要读谁（故意不猜）")
+    text = _pulse_text(pulse)
+    if text is None:
         return 1
-    lines, code = verdict(parse(text), interaction=args.interaction,
-                          min_frames=args.min_frames, budget_ms=args.budget_ms)
+    reading = parse(text)
+    budget = args.budget_ms or (reading["expected_interval_ms"] * 1.01 if reading else 0.0)
+    meta = _sample_meta(args.sample_dir)
+    win = _window_seconds(args, meta)
+    lines, code = verdict(reading, interaction=args.interaction,
+                          min_frames=args.min_frames, budget_ms=args.budget_ms,
+                          window_seconds=win)
+    if args.sample_dir and reading and stale_instance(reading, win):
+        lines.append("  ⇒ 交叉核对也一并**不判**：上面那份脉冲是生命期累计，"
+                     "拿它和 20 s 的上屏表比出的差值没有窗口意义（§M 那条偏移量要重测才能用）。")
+        code = 2
+    elif args.sample_dir:
+        clines, ccode = crosscheck(reading, budget, *read_display_pair(args.sample_dir), meta=meta)
+        lines += clines
+        # 合判的码优先：脉冲自己"达标"不算数，要看另一把尺子点不点头。
+        # 但脉冲被判成**不判窗口**（rc=2 且原因是生命期）时也照样覆盖——
+        # 那种情况下更不该让合判继续拿它当"两侧都好"的证据。
+        code = ccode if frames_ok(code) else code
     print("\n".join(lines))
     return code
+
+
+def frames_ok(code):
+    """脉冲那一半只有 0/2 才有资格让合判覆盖它（1 = 坏数据/样本不足，本来就没什么可覆盖的）。"""
+    return code in (0, 2)
 
 
 if __name__ == "__main__":

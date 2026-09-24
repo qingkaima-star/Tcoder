@@ -33,7 +33,8 @@ struct DependenciesView: View {
                         // 一整句 = 一个键。原来拆成 `"…\n" + "…"` 两段拼，
                         // 运行时送进查表的是**拼接后的整串**，目录里那条半句键永远查不中
                         // （英文态照旧显示中文，而守卫 1/2/3 全绿 —— 批次 P5 新守卫抓到）。
-                        message: "扫描完成，但没有找到 package.json、Package.swift、pom.xml、go.mod 等清单文件。\n如果依赖声明在自定义脚本里，这一页为空是真实结果。"
+                        message: "扫描完成，但没有找到 package.json、Package.swift、pom.xml、go.mod 等清单文件。",
+                        help: "如果依赖声明在自定义脚本里，这一页为空是真实结果。"
                     )
                 } else {
                     GroupStack {
@@ -59,7 +60,8 @@ struct DependenciesView: View {
                 EmptyStateView(
                     icon: .package,
                     title: "尚未执行依赖分析",
-                    message: "该项目还没有依赖分析结果。点击「重新分析」开始扫描。\n需要最新版本与漏洞库在线核对时，先打开上方的联网开关。"
+                    message: "该项目还没有依赖分析结果。点击「重新分析」开始扫描。",
+                    help: "需要最新版本与漏洞库在线核对时，先打开上方的联网开关。"
                 )
             }
         }
@@ -154,10 +156,10 @@ struct DependencySummaryGrid: View {
     static func outdatedCaption(_ deps: DependencyReport) -> String {
         let total = max(1, deps.totalDependencies)
         let share = NumberFormat.percent(Double(deps.outdatedCount) / Double(total), precision: 0)
-        guard deps.totalDependencies > 0 else { return "没有可判定的依赖" }
+        guard deps.totalDependencies > 0 else { return localizedCopy("没有可判定的依赖") }
         return deps.outdatedCount > 0
-            ? "占依赖总数 \(share)"
-            : "已比对版本数据，未发现落后项"
+            ? localizedFormat("占依赖总数 %1$@", share)
+            : localizedCopy("已比对版本数据，未发现落后项")
     }
 }
 
@@ -196,7 +198,7 @@ struct DependencyOverviewSection: View {
                                  // 离线态下只是"没查"（批次 P7-B）。这一格改走同一份判定。
                                  valueColor: DependencySafetyVerdict(deps).role.textColor)
                     DataRowSeparator()
-                    DataFieldRow(label: "生态", value: deps.distinctEcosystemNames.joined(separator: "、"),
+                    DataFieldRow(label: "生态", value: deps.distinctEcosystemNames.joined(separator: localizedListSeparator()),
                                  style: .text)
                 }
 
@@ -253,8 +255,8 @@ struct DependencyEcosystemSection: View {
                     DataFieldRow(
                         label: "锁文件",
                         value: eco.lockfileName.map {
-                            "\($0)（只说明可复现，未计入依赖数）"
-                        } ?? "未发现",
+                            localizedFormat("%1$@（只说明可复现，未计入依赖数）", $0)
+                        } ?? localizedCopy("未发现"),
                         style: .text)
                     DataFieldRow(label: "依赖", value: NumberFormat.grouped(eco.dependencies.count),
                                  style: .number)
@@ -326,22 +328,23 @@ struct DependencyTable: View {
         }
     }
 
-    /// 屏上那一句：原句里"计数"那一层，逐字取前半。
+    /// 屏上那一句：原句里"计数"那一层，逐字取前半。**整句键**——写成插值字面串就等于让
+    /// 英文态那句英文中间掉进一段中文；本仓依赖清单为空，这条分支只在换个大仓时才上屏（P67 拿 Homebrew 抓到）。
     static func countLabel(total: Int, shown: Int) -> String {
         guard total > shown else {
-            return "共 \(NumberFormat.grouped(total)) 项，已全部展示。"
+            return localizedFormat("共 %1$@ 项，已全部展示。", NumberFormat.grouped(total))
         }
-        return "当前展示 \(NumberFormat.grouped(shown)) / \(NumberFormat.grouped(total)) 项。"
+        return localizedFormat("当前展示 %1$@ / %2$@ 项。",
+                               NumberFormat.grouped(shown), NumberFormat.grouped(total))
     }
 
     /// 折叠必须被计数交代：只显示 12 行而不说「共 N 项」，用户会把 12 当成全部。
     /// **整句**（含排序口径）现在是 ⓘ 里那一句，屏上的短句是它的前半 —— 两个落点不重叠。
     static func countNote(total: Int, shown: Int) -> String {
-        guard total > shown else {
-            return "共 \(NumberFormat.grouped(total)) 项，已全部展示。"
-        }
-        return "当前展示 \(NumberFormat.grouped(shown)) / \(NumberFormat.grouped(total)) 项 · "
-            + "按名称排序。"
+        // 全部展示时"完整读法"与"屏上短句"是同一句话 ⇒ 引用，不留第二份字面。
+        guard total > shown else { return countLabel(total: total, shown: shown) }
+        return localizedFormat("当前展示 %1$@ / %2$@ 项 · 按名称排序。",
+                               NumberFormat.grouped(shown), NumberFormat.grouped(total))
     }
 }
 
@@ -377,9 +380,10 @@ struct DependencyAdvisoriesSection: View {
 
     static func subtitle(items: [VulnerabilityItem], deps: DependencyReport) -> String {
         items.isEmpty
-            ? "内置快照与安全公告均未命中"
-            : "共 \(NumberFormat.grouped(items.count)) 条 · 影响 "
-                + "\(NumberFormat.grouped(deps.vulnerableCount)) 个依赖"
+            ? localizedCopy("内置快照与安全公告均未命中")
+            : localizedFormat("共 %1$@ 条 · 影响 %2$@ 个依赖",
+                              NumberFormat.grouped(items.count),
+                              NumberFormat.grouped(deps.vulnerableCount))
     }
 
     /// 空列表不等于「没有漏洞」：默认离线时 `vulnerableCount` 恒为 0，那是「没查」。

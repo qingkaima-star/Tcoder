@@ -141,7 +141,7 @@ struct HealthHero: View {
     static func relocationNotice(root: String) -> String {
         localizedFormat("仓库归属类维度（%1$@）按外层仓库 %2$@ 计算，不是所选目录本身。",
                         HealthDimension.repositoryScoped.map { localizedCopy($0.rawValue) }
-                            .joined(separator: "、"),
+                            .joined(separator: localizedListSeparator()),
                         root)
     }
 
@@ -273,7 +273,7 @@ struct HealthCodeScopeReadout: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             Theme.Readout.Field(scope.label,
-                                localizedFormat("%1$@ · %2$@ 级", String(scope.overall), scope.grade.rawValue),
+                                localizedFormat("%1$@ · %2$@ 级", String(scope.overall), localizedCopy(scope.grade.rawValue)),
                                 help: scope.note)
             Text(membershipLine)
                 .typed(Theme.Typo.narrative)

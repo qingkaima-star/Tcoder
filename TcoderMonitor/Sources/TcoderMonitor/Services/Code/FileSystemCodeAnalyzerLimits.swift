@@ -166,3 +166,22 @@ extension FileSystemCodeAnalyzer {
         }
     }
 }
+
+// MARK: - 「直传型」边界账装配（P7-C 扫描限制说明）
+//
+// 搬进本文件的理由是长度，不是主题：这一组连注释 12 行，留在
+// `FileSystemCodeAnalyzer.analyzeWithCoverage` 里就把本包 50 行闸门顶破了
+// （`CodeComplexityDebtTests`；2026-09-23 R16 的 `roleTally` 与 R17 的 `scanSurface`
+// 两批各加几行，合流后实测 52 行）。红了的正确反应是**搬**，不是抬闸门。
+// ⚠️ 一个数都不在这里重算：全部直传生产者读数（重算就是第二把尺子）。
+extension FileSystemCodeAnalyzer {
+    static func applyLedgerReadouts(coverage: CodeScanCoverage,
+                                    files: [ScannedSourceFile],
+                                    to metrics: inout CodeMetrics) {
+        // 契约接入（P7-C 3-2）：判据用 `limitationSummary` 非空而不是 `isPartial` —— 前者还含
+        // 「按规则排除了多少条目」这类**范围**事实，读者要知道数字是在什么范围内测出来的。
+        let limits = coverage.limitationSummary + coverage.surfaceNotes
+            + ComplexityEngine.JavaSignatureDeclines.notes(for: files)
+        metrics.scanLimitations = limits.isEmpty ? nil : limits
+    }
+}

@@ -48,6 +48,9 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         let duplication = await duplicationTask.value
         // R2：逐文件词法读数汇总成「这一路的测量范围」；只报一处会把其余文件藏起来。
         let lex = ComplexityEngine.LexAggregate.accumulate(functionOutcomes)
+        // RD-14：角色分档**只算一次**，下面契约字段与覆盖度台账共用同一份。
+        // 各造一份就会有两把尺子读到同一个语料的两个时刻（`scan.files` 与 `files` 是同一个数组）。
+        let roleTally = SourceRoleTally(of: files)
 
         var metrics = CodeMetrics()
         metrics.scannedAt = startedAt
@@ -56,19 +59,18 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             files: files,
             functionsPerFile: functionsPerFile,
             duplication: duplication,
+            roleTally: roleTally,
             to: &metrics
         )
-        let coverage = Self.coverage(from: scan, duplication: duplication, options: options, lex: lex)
-        // RD-42：词法台账里那枚"按分区归位为非代码的行数"**直传**进契约 ——
-        // 不在这里重算、也不在界面侧从中文句子里抠回来（那都是第二把尺子）。
-        // ⚠️ 故意**不**并进下面那条 `scanLimitations`：那是"没量准"的账，
-        // 而分区归位是已经量到了、只是分类不同（口径）。读者见 `MixedLanguageRegionCaliber`。
+        let coverage = Self.coverage(from: scan, duplication: duplication, options: options,
+                                     lex: lex, roleTally: roleTally)
+        // RD-15：范围台账同批落盘（内部读数直传，一个数都不重算）。
+        metrics.scanSurface = Self.scanSurface(from: coverage)
+        // RD-42：词法台账里那枚"按分区归位为非代码的行数"**直传**进契约。
+        // ⚠️ 这一格的**唯一写者必须是本文件**（`NonCodeRegionReadoutTests` 按文件名点名写者）：
+        //     搬去别处 = 第二把尺子的入口，所以只搬下面那条限制说明，这一行留在原地。
         metrics.nonCodeRegionLineCount = lex.integrity.nonCodeRegionLineCount
-        // 契约接入（P7-C 3-2）：判据用 `limitationSummary` 非空而不是 `isPartial` —— 前者还含
-        // 「按规则排除了多少条目」这类**范围**事实，读者要知道数字是在什么范围内测出来的。
-        let limits = coverage.limitationSummary + coverage.surfaceNotes
-            + ComplexityEngine.JavaSignatureDeclines.notes(for: files)
-        metrics.scanLimitations = limits.isEmpty ? nil : limits
+        Self.applyLedgerReadouts(coverage: coverage, files: files, to: &metrics)
         return AnalysisOutcome(metrics: metrics, coverage: coverage)
     }
 
@@ -97,6 +99,7 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         files: [ScannedSourceFile],
         functionsPerFile: [[FunctionCandidate]],
         duplication: DuplicationResult,
+        roleTally: SourceRoleTally,
         to metrics: inout CodeMetrics
     ) {
         let totals = Self.lineTotals(files)
@@ -109,6 +112,8 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         metrics.todoCount = totals.todo
         metrics.fixmeCount = totals.fixme
         metrics.languages = languageShares(files: files, codeLineTotal: totals.code)
+        // RD-14：角色分档**直传**上面那一份 tally 的读数（判据只在 `SourceFileRoleRules` 里有一份）。
+        metrics.fileRoles = Self.fileRoles(from: roleTally)
 
         let largest = files.map(\.totalLineCount).max() ?? 0
         metrics.largestFileLineCount = largest
@@ -140,7 +145,8 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
     /// 那条链路本身只有「扫 → 两路并行 → 摆字段」四步，摊在一起就成 60 行的超长函数了
     /// （本包的自扫门 `CodeComplexityDebtTests` 管这条）。
     private static func coverage(from scan: SourceScanResult, duplication: DuplicationResult,
-                                 options: ScanOptions, lex: ComplexityEngine.LexAggregate) -> CodeScanCoverage {
+                                 options: ScanOptions, lex: ComplexityEngine.LexAggregate,
+                                 roleTally: SourceRoleTally) -> CodeScanCoverage {
         return CodeScanCoverage(
             visitedEntryCount: scan.visitedFileCount,
             includedFileCount: scan.scannedFileCount,
@@ -159,11 +165,39 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             unboundedFunctionSignatureCount: lex.unboundedSignatureCount,
             vueRegionFallbackFileCount: lex.vueRegionFallbackFileCount,
             skipLedger: scan.skipLedger,
-            roleTally: SourceRoleTally(of: scan.files),
+            roleTally: roleTally,
             treeFollowing: scan.treeFollowing,
             duplicateBlockCoordinatesOutsideBoard: duplication.blocksOutsideBoard,
             duplicationBoardCaliber: duplication.blocksDroppedByCap > 0 ? duplication.boardCaliberNote : ""
         )
+    }
+
+
+    /// 扫描范围那一族读数的装配：**逐枚直传**内部台账（`scopeReadout` 与 `treeFollowing`），
+    /// 不做任何加减、不从中文句子里抠数。抽成独立函数与 `applyDuplicationBoardTruth`
+    /// 同一条理由：长度，不是判据。
+    /// ⚠️ 两格要说明：
+    /// · `linesCounted` 取 `skipLedger.linesCounted`（那是"数没数"的唯一事实来源），
+    ///   `excludedLineCount` 取三态读数里的 `measuredValue` —— 没数时它本来就是 `nil`，
+    ///   所以「`linesCounted == false` 而这一格有数」这种组合在本装配口**构造不出来**。
+    /// · `unreadableDirectoryCount` 直传扫描器那一份：**0 是有意义的读数**（每个目录都读到了），
+    ///   不许为了"干净"省略成 `nil`。
+    private static func scanSurface(from coverage: CodeScanCoverage) -> CodeScanScope {
+        let readout = coverage.scopeReadout
+        let following = coverage.treeFollowing
+        return CodeScanScope(
+            totalCount: readout.totalCount.measuredValue,
+            displayedCount: readout.displayedCount,
+            undisplayedCount: readout.undisplayedCount,
+            unmeasuredScope: readout.unmeasuredScope,
+            excludedLineCount: readout.excludedLineCount.measuredValue,
+            linesCounted: coverage.skipLedger.linesCounted,
+            nestedRepositoryCount: following.nestedRepositoryCount,
+            submoduleMarkerCount: following.submoduleMarkerCount,
+            symbolicLinkFileCount: following.symbolicLinkFileCount,
+            symbolicLinkDirectoryCount: following.symbolicLinkDirectoryCount,
+            unlistedPrunedDirectoryCount: following.unlistedPackageDirectoryCount,
+            unreadableDirectoryCount: coverage.unreadableDirectoryCount)
     }
 
 
@@ -186,6 +220,34 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         metrics.duplicateFilesHittingLineCap = duplication.filesHittingLineCap
         metrics.duplicateBlockCoordinatesOutsideBoard = duplication.blocksOutsideBoard
     }
+    /// 角色分档的装配：**八档全量列出**（含 0），逐枚**直传** `SourceRoleTally` 的读数。
+    ///
+    /// 三条纪律：
+    /// 1. 不在这里判一次角色 —— 判据只有 `SourceFileRoleRule.decide` 那一份；
+    /// 2. 不在这里加「生产码 + 测试码 == 总文件数」这类**天然不平**的等式：
+    ///    `attributedFileCount` 就是各档 `fileCount` 之和（这条恒等式由本函数按构造成立），
+    ///    它与 `totalFiles` 是否相等交给读者去对账并**说出差额**，不在这里抹平；
+    /// 3. `weakEvidenceFiles` 只挂在 `production` 那一档，其余档给 `nil`（不适用），
+    ///    给 0 会被读成「这一档没有弱判定」——那是本包明令禁止的「把没问的答成没有」。
+    private static func fileRoles(from tally: SourceRoleTally) -> CodeFileRoles {
+        let shares = SourceFileRole.allCases.map { role -> CodeFileRoleShare in
+            let value = tally.share(role)
+            return CodeFileRoleShare(
+                role: role.rawValue,
+                fileCount: value.files,
+                codeLines: value.codeLines,
+                totalLines: value.totalLines,
+                weakEvidenceFiles: role == .production ? tally.weakEvidenceFiles : nil,
+                samplePaths: value.examples
+            )
+        }
+        let criteria = tally.criterionCounts
+            .sorted { $0.key.rawValue < $1.key.rawValue }
+            .reduce(into: [String: Int]()) { acc, pair in acc[pair.key.rawValue] = pair.value }
+        return CodeFileRoles(shares: shares, criterionCounts: criteria,
+                             attributedFileCount: tally.attributedFileCount)
+    }
+
     /// 六项行计数的逐文件累加。抽出来只为了让 `apply` 只剩「摆字段」这一件事。
     private static func lineTotals(_ files: [ScannedSourceFile])
         -> (blank: Int, comment: Int, code: Int, total: Int, todo: Int, fixme: Int) {

@@ -55,6 +55,24 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // 2026-09-22：新增的"谁可能漏下孤儿实例"清单（只读、不判别家）。
         // 新尺子必须一进门就被量 —— 否则"新建文件"本身就是免检通道（同一族的教训见上面那段）。
         "perf_launcher_audit.sh",
+        // 2026-09-23：包 5（补测改动前基线）新写的 rev 树准备器。新建的尺子必须当场被量，
+        // 否则"新建文件"本身就是免检通道（同一族教训见上面 09-21/09-22 那两段）。
+        "perf_measure_rev.sh",
+        // 09-23 同一条规矩的第二次自犯：新写的"同档取值一致性"尺子差点没点进来。
+        "perf_trio_agreement.py",
+        // 09-23 中午：这条分支把自己撑过了「巨大文件 400 行」口径（preflight 448、gates 587、
+        // eligibility 500、harness 454、summary 413），按"拆文件才是修复"搬出五片。
+        // **搬出来的每一片都照样要点名进来**——拆文件如果顺手免检，那拆本身就是新的通道
+        // （这条教训在上面 09-21 那段注释里已经写过一次，今天是第二次用到它）。
+        "perf_measure_io.sh", "perf_report.sh", "perf_trace_frames.py",
+        "perf_selfcheck_launchers.sh", "perf_selfcheck_tables.sh",
+        // 09-24 第七维·预热：`preflight_context` 涨到 410 行撞 400 口径，按"拆文件才是修复"
+        // 搬出 `perf_warmup.sh`。**搬出来的那片照样要点名**——第四次用这条教训（前三次见上面注释）。
+        "perf_warmup.sh",
+        // 09-24 同一条规矩的第五次：`app-update` 三口径（28/17/16）收成一条规则，
+        // 从 `perf_trace_metrics.py` 搬出 `perf_update_caliber.py`（那文件当时 408 行撞 400 口径）。
+        // 搬出来的判据照样要点名进分母——不点名就等于给它开了免检通道。
+        "perf_update_caliber.py",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。
@@ -179,5 +197,63 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
                                     "18 处判定的合成夹具都过不了 \(Self.complexityBar) 这条线，"
                                     + "说明本门的 CC 判定空转（实得 \(measured[0].complexity)）")
         print("【WS-X5 元测试】合成坏例 x5_probe_hot CC=\(measured[0].complexity) ≥ \(Self.complexityBar) —— 门抓得住坏例")
+    }
+
+    // MARK: - 话术串里的命令替换（2026-09-23 21:44 抓到两处，两处都是我自己写的）
+
+    /// 一行里**双引号串内部**出现反引号 ⇒ bash 把它当命令替换**真的执行**。
+    /// 只看引号内部：注释里的反引号不执行、合法写法（`$( … )`）本来就该用；
+    /// 整条判据管的是「把反引号当中文引号用」这一种形状——它只有跑起来才露，
+    /// 而露出来的症状是「那行少了一个词 + stderr 多一行 command not found」，不是报错。
+    static func backtickInsideDoubleQuotes(_ line: String) -> Bool {
+        var inQuotes = false
+        var escaped = false
+        for ch in line {
+            if escaped { escaped = false; continue }
+            if ch == "\\" { escaped = inQuotes; continue }
+            if ch == "\"" { inQuotes.toggle(); continue }
+            if ch == "`" && inQuotes { return true }
+        }
+        return false
+    }
+
+    /// 只判会被执行的**输出行**（`echo` / `printf`），注释行跳过。
+    static func proseSubstitutionOffenders(in content: String) -> [Int] {
+        content.split(separator: "\n", omittingEmptySubsequences: false).enumerated()
+            .compactMap { entry in
+                let trimmed = entry.element.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.hasPrefix("#"),
+                      trimmed.contains("echo ") || trimmed.contains("printf ") else { return nil }
+                return backtickInsideDoubleQuotes(String(entry.element)) ? entry.offset + 1 : nil
+            }
+    }
+
+    func test_rulerScriptsDoNotRunSubstitutionInsideProse() throws {
+        let names = try FileManager.default.contentsOfDirectory(atPath: Self.scriptsRoot.path)
+            .filter { $0.hasSuffix(".sh") }.sorted()
+        XCTAssertGreaterThan(names.count, 10,
+                             "scripts/ 只数到 \(names.count) 个 .sh ⇒ 读盘坏了，这条绿没有含义")
+        var offenders: [String] = []
+        var scannedLines = 0
+        for name in names {
+            let text = try String(contentsOf: Self.scriptsRoot.appendingPathComponent(name), encoding: .utf8)
+            scannedLines += text.split(separator: "\n", omittingEmptySubsequences: false).count
+            offenders += Self.proseSubstitutionOffenders(in: text).map { "\(name):\($0)" }
+        }
+        XCTAssertGreaterThan(scannedLines, 3_000, "总共只读到 \(scannedLines) 行 ⇒ 判据在空转")
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些话术行会被 bash 真的执行（双引号里的反引号是命令替换）：\(offenders)")
+    }
+
+    /// 元测试双向：坏样例必须被抓且行号要对；两处合法写法（`$( … )`、注释里的反引号）不许被抓。
+    /// 只断言"抓得住"的守卫是半个空转——它可能其实在什么都抓。
+    func test_proseSubstitutionJudgeHasTeethBothWays() {
+        let bad = "  echo \"==> 采集跑完：能不能进表由 `report` 与一致性判\""
+        XCTAssertEqual(Self.proseSubstitutionOffenders(in: "x\n" + bad + "\ny"), [2],
+                       "行号没指到那一行（拿到 \(Self.proseSubstitutionOffenders(in: "x\n" + bad + "\ny"))）")
+        let okSubstitution = "  echo \"名册现量：$(printf '%s' \"$known\" | tr '\\n' ' ')\""
+        let okComment = "  # 这里写反引号不执行：`report`"
+        XCTAssertTrue(Self.proseSubstitutionOffenders(in: [okSubstitution, okComment].joined(separator: "\n")).isEmpty,
+                      "合法写法不许被抓：$() 是看得见的替换，注释不执行")
     }
 }

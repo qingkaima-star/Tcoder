@@ -65,10 +65,20 @@ extension EvidenceFreshnessTests {
         guard unreadable.isEmpty else { return unreadable }
         let listed = Set(row.paths)
         return producers.compactMap { producer in
-            guard !listed.contains(producer.file),
+            guard !listed.contains(where: { covers($0, producer.file) }),
                   references(producer.type, in: code) else { return nil }
             return "\(page) 的页内文件引用了 \(producer.type)，那一行却没列 \(producer.file)"
         }
+    }
+
+    /// 表里点名的路径**覆盖**某个生产者，当且仅当它就是这个文件，**或者它是这个文件的祖先目录**。
+    ///
+    /// 为什么必须按目录读：`git log -- <目录>` 与 `code(at:)` 两边都认目录（P45 就为此专门
+    /// 给 `code(at:)` 开了递归），只有这一条"列没列"的比对是按字面路径查集合 —— 于是
+    /// P58 把健康评分那一行从 `Services/Health/HealthBreakdown.swift` 扩成 `Services/Health`
+    /// （覆盖面**变大**了）反而被判"缺列"。尺子在惩罚自己最想鼓励的写法，就必须修尺子。
+    static func covers(_ listed: String, _ producerFile: String) -> Bool {
+        listed == producerFile || producerFile.hasPrefix(listed + "/")
     }
 
     /// 表里既有"一个文件"的写法，也有"整片目录"的写法（`Views/Performance` 这种，
@@ -139,5 +149,78 @@ extension EvidenceFreshnessTests {
         let unreadable = Self.missingProducerColumns(for: typo, producers: [producer], read: read)
         XCTAssertEqual(unreadable.count, 1, "路径读不到必须报，不许当成\"没引用\"放过：\(unreadable)")
         XCTAssertTrue(unreadable[0].contains("读不到"), "报的得说清是读不到：\(unreadable)")
+
+        // P58 的形状：列**祖先目录**算已经覆盖。反过来，只共享一段前缀的兄弟目录不算
+        // （`Views/Code` 覆盖不了 `Views/CodeGit/Producer.swift` —— 少了那道 `/` 就会自己长出牙缝）。
+        XCTAssertTrue(Self.covers("Views/CodeGit/Producer.swift", "Views/CodeGit/Producer.swift"))
+        XCTAssertTrue(Self.covers("Views/CodeGit", "Views/CodeGit/Producer.swift"))
+        XCTAssertTrue(Self.covers("Views", "Views/CodeGit/Producer.swift"))
+        XCTAssertFalse(Self.covers("Views/Code", "Views/CodeGit/Producer.swift"))
+        XCTAssertFalse(Self.covers("Views/CodeGit/Producer.swift/", "Views/CodeGit/Producer.swift"))
+        let byDirectory = Row(pages: ["健康评分"], batch: "b", head: "abc1234",
+                              paths: ["Views/Git/Page.swift", "Views/CodeGit"])
+        XCTAssertTrue(Self.missingProducerColumns(for: byDirectory, producers: [producer],
+                                                  read: { files[$0] ?? "struct Producer { var headline: String { \"\" } }" })
+                            .isEmpty,
+                      "把一行的覆盖面从单个文件扩成整片目录，判据反而报缺列 ⇒ 尺子在惩罚它最想鼓励的写法")
+    }
+
+    // MARK: - 每一个 Views 文件都必须被至少一行的依赖面罩住（P67）
+
+    /// 立它的直接起因（2026-09-23，拿 Homebrew 复验时顺手量的）：
+    /// **侧栏 `Views/Shell/ProjectSidebar.swift` 画在九页的每一页上，而它在整张表里出现 0 次**；
+    /// 同一片里 `SectionNav` / `ShellLayout` / `SidebarRows` 与两个共用设计件
+    /// （`Views/Code/CodeViewSupport.swift`、`Views/CodeGit/CodeGitDesignKit.swift`）也没人盯。
+    /// 后果不是「少了一列」而是**那句话不成立**：改了全局版框或侧栏，九页实拍仍然全部「新鲜」，
+    /// 因为没有任何一行的 `git log -- …` 里包含那个路径。
+    /// 这是本仓第三次踩「依赖面漏列」（前两次：`Design` 整目录、每页的 `Services/<域>` 生产者），
+    /// 前两次都记过「表不会自己长大，得让尺子去查表」——这一次把这句话直接变成判据。
+    static let sourcePrefix = "TcoderMonitor/Sources/TcoderMonitor/"
+
+    func test_everyViewFileIsWatchedByAtLeastOneRow() throws {
+        let url = Self.repoRoot.appendingPathComponent(Self.catalogPath)
+        let rows = Self.rows(in: try String(contentsOf: url, encoding: .utf8))
+        XCTAssertFalse(rows.isEmpty, "表读空 ⇒ 这条判据在空转")
+        let views = Self.viewFiles()
+        XCTAssertFalse(views.isEmpty, "Views 扫不到文件 ⇒ 这条判据在空转")
+        let unwatched = Self.unwatchedViews(views, rows: rows)
+        XCTAssertTrue(unwatched.isEmpty,
+                      "这些界面文件不在任何一行的依赖面里 ⇒ 改它们永远不会让实拍过期，"
+                    + "「深浅两态九页实拍复核通过」对它们根本不成立：\n  " + unwatched.joined(separator: "\n  "))
+        print("【依赖面罩住 Views】界面文件 \(views.count) 个 × 表里 \(rows.count) 行 → 没被任何一行罩住 \(unwatched.count) 个")
+    }
+
+    /// 纯函数版判据（元测试直接喂合成输入，不依赖真仓库文件树）。
+    static func unwatchedViews(_ files: [String], rows: [Row]) -> [String] {
+        let listed = rows.flatMap(\.paths)
+        return files.filter { path in !listed.contains(where: { covers($0, path) }) }
+    }
+
+    /// 元测试：目录级写法必须算罩住；**没列的文件必须被点名**（不然这条又是永真绿）。
+    func test_meta_viewCoverageRulerCatchesUnlistedFilesAndSparesDirectoryRows() {
+        let files = ["Views/Shell/ProjectSidebar.swift", "Views/Code/CodeViewSupport.swift"]
+        let byDirectory = Row(pages: ["全九页"], batch: "b", head: "abc1234", paths: ["Views/Shell"])
+        XCTAssertEqual(Self.unwatchedViews(files, rows: [byDirectory]),
+                       ["Views/Code/CodeViewSupport.swift"],
+                       "目录级行应当罩住整片目录，剩下的那一个才是漏列")
+        let unrelated = Row(pages: ["总览"], batch: "b", head: "abc1234", paths: ["Views/DashboardView.swift"])
+        XCTAssertEqual(Set(Self.unwatchedViews(files, rows: [unrelated])), Set(files),
+                       "一个都没罩住却报 0 ⇒ 这条判据在空转")
+        let both = [Row(pages: ["a"], batch: "b", head: "1", paths: ["Views/Shell"]),
+                    Row(pages: ["c"], batch: "b", head: "1", paths: ["Views/Code/CodeViewSupport.swift"])]
+        XCTAssertTrue(Self.unwatchedViews(files, rows: both).isEmpty,
+                      "两行各自罩住一半，就不该再报")
+    }
+
+    static func viewFiles() -> [String] {
+        let url = repoRoot.appendingPathComponent(sourcePrefix + "Views")
+        guard let walker = FileManager.default.enumerator(at: url, includingPropertiesForKeys: nil) else {
+            XCTFail("\(url.path) 读不到 ⇒ 这条判据没在扫任何东西，不许当成零漏列通过")
+            return []
+        }
+        return walker.compactMap { item -> String? in
+            guard let file = item as? URL, file.pathExtension == "swift" else { return nil }
+            return sourcePrefix + "Views/" + String(file.path.dropFirst(url.path.count + 1))
+        }.sorted()
     }
 }

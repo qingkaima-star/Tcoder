@@ -20,9 +20,13 @@ struct PerformanceLiveCharts: View {
     var body: some View {
         GlassSection("实时曲线", subtitle: subtitle, icon: .chartLine) {
             if points.count < Self.minPointsToPlot {
+                // **留短藏长**（盘点表 F 组）：屏上留「为什么不画」那句结论——它挡的是
+                // "这块空白是不是坏了"；「几个点才出曲线」属采样实现细节，进 ⓘ。
+                // ⓘ 里放的仍是目录里那条**整句键**，原文一字未改（只换落点）。
                 EmptyStateView(icon: IconName.chartLine.rawValue,
                                title: "正在采集首个样本",
-                               message: "至少 3 个点之后才有曲线可画。这里不预先给出估算形状。")
+                               message: "这里不预先给出估算形状。",
+                               help: "至少 3 个点之后才有曲线可画。这里不预先给出估算形状。")
             } else {
                 // 两张图是两个同级并列的叙事单元 → 组间 `group`(32)。
                 // 原来它们与脚注都挤在 `md`(16) 上，跟图例与图之间同一个数，
@@ -125,7 +129,9 @@ struct PerformanceLiveCharts: View {
                 // 可信点不够时说明为什么没有线，而不是画一条 0 线冒充平稳。
                 // **留短藏长**：屏上留「N/M 点可用」这个数（它决定这条线还有没有证据），
                 // 完整句式进 ⓘ；ⓘ 里那条仍是目录里的整句键，原文一字未改。
-                NoteLine("可信点不够画曲线（\(NumberFormat.grouped(trusted.count))/\(NumberFormat.grouped(points.count))）",
+                NoteLine(localizedFormat("可信点不够画曲线（%1$@/%2$@）",
+                                         NumberFormat.grouped(trusted.count),
+                                         NumberFormat.grouped(points.count)),
                          role: Theme.Semantic.warning, icon: .riskWarning,
                          help: localizedFormat("本窗口没有足够的可信内存读数可画曲线（%1$@/%2$@ 点可用）。",
                                                NumberFormat.grouped(trusted.count),
@@ -141,15 +147,16 @@ struct PerformanceLiveCharts: View {
     /// ⚠ 「不是 0 起点」这五个字不许进 ⓘ —— 藏掉它，陡峭的曲线就会被读成暴涨。
     private var axisNotes: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-            NoteLine("横轴 \(axisStrideReading) · 纵轴 CPU \(cpuAxis.domainText)% / 内存 \(memoryAxis.domainText)% · "
-                     + (axisIsZoomed ? "轴不是 0 起点" : "两张图均为 0 起点"),
+            NoteLine(localizedFormat("横轴 %1$@ · 纵轴 CPU %2$@%% / 内存 %3$@%% · %4$@",
+                                     axisStrideReading, cpuAxis.domainText, memoryAxis.domainText,
+                                     localizedCopy(axisIsZoomed ? "轴不是 0 起点" : "两张图均为 0 起点")),
                      role: axisIsZoomed ? Theme.Semantic.warning : Theme.Semantic.neutral,
                      icon: axisIsZoomed ? .riskWarning : .info,
                      help: Self.axisCaliber)
             let rejected = SystemReadings.rejectedMemoryPoints(points)
             if rejected > 0 {
                 // 剔除的**个数**留在屏上（它决定这条线还剩多少证据），判据进 ⓘ。
-                NoteLine("内存曲线已剔除 \(NumberFormat.grouped(rejected)) 个无证据读数",
+                NoteLine(localizedFormat("内存曲线已剔除 %1$@ 个无证据读数", NumberFormat.grouped(rejected)),
                          role: Theme.Semantic.warning, icon: .riskWarning,
                          help: Self.rejectedMemoryCaliber)
             }
@@ -161,8 +168,8 @@ struct PerformanceLiveCharts: View {
 
     /// 横轴那一格怎么读（屏上只留这一小截，理由在 ⓘ 里）。
     private var axisStrideReading: String {
-        usesRelativeAxis ? "距今秒数"
-            : "每 \(axisStrideSeconds) 秒一格"
+        usesRelativeAxis ? localizedCopy("距今秒数")
+            : localizedFormat("每 %1$@ 秒一格", String(axisStrideSeconds))
     }
 
     /// 进 ⓘ 的轴口径：**必须是完整句**（半句键在英文态语序必坏），
@@ -170,11 +177,10 @@ struct PerformanceLiveCharts: View {
     /// 本轮只换落点（屏上 → hover），不改口径也不删口径。
     /// 秒数与两个收窄触发点一律从 `ChartScale` 取，页面不写第二个真值（性能 spec §5.1）。
     static let axisCaliber =
-        "横轴：窗口不足 \(Int(ChartScale.relativeAxisLimitSeconds)) 秒（或少于 8 个点）时改标距今秒数——"
-        + "绝对时钟在这个尺度上没有区分度；否则每格步长从固定档位里选，不按点数现算，免得点数一变整个时间轴就重排。"
-        + "带下限的轴是为看清走势而收窄的，不是 0 起点：内存长期在九成是 macOS 的常态，"
-        + "0…100 的域里 93→97 的波动只够画 4pt，肉眼看是一条直线，所以峰值过 "
-        + "\(Int(ChartScale.zoomTriggerPercent))% 收到 50…100、过 \(Int(ChartScale.midZoomPercent))% 收到 75…100。"
+        localizedFormat("横轴：窗口不足 %1$@ 秒（或少于 8 个点）时改标距今秒数——绝对时钟在这个尺度上没有区分度；否则每格步长从固定档位里选，不按点数现算，免得点数一变整个时间轴就重排。带下限的轴是为看清走势而收窄的，不是 0 起点：内存长期在九成是 macOS 的常态，0…100 的域里 93→97 的波动只够画 4pt，肉眼看是一条直线，所以峰值过 %2$@%% 收到 50…100、过 %3$@%% 收到 75…100。",
+                        String(Int(ChartScale.relativeAxisLimitSeconds)),
+                        String(Int(ChartScale.zoomTriggerPercent)),
+                        String(Int(ChartScale.midZoomPercent)))
 
     /// 「无证据读数」的剔除判据：与 `SystemReadings.trustedMemoryPoints` 同一份口径。
     static let rejectedMemoryCaliber =
@@ -206,6 +212,9 @@ struct PerformanceLiveCharts: View {
     }
 
     private func memorySummary(_ count: Int, _ axis: ChartAxis) -> String {
-        "内存在用率曲线，\(NumberFormat.grouped(count)) 个可信点，当前 \(Live.percent(SystemReadings.memoryFraction(context), precision: 0))，纵轴 \(axis.domainText)"
+        localizedFormat("内存在用率曲线，%1$@ 个可信点，当前 %2$@，纵轴 %3$@",
+                          NumberFormat.grouped(count),
+                          Live.percent(SystemReadings.memoryFraction(context), precision: 0),
+                          axis.domainText)
     }
 }

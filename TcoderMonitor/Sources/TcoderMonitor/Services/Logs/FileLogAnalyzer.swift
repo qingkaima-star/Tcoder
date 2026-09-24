@@ -200,7 +200,7 @@ final class FileLogAnalyzer: LogAnalysisProviding {
 extension LogSummary {
     /// 崩溃那一格的 caption：计数 + 一句边界，替代原来只写「其中 FATAL n 条」的读数。
     var crashTileCaption: String {
-        "窗口内确认崩溃；其中 FATAL \(NumberFormat.grouped(fatalCount)) 条"
+        localizedCount("窗口内确认崩溃；其中 FATAL %lld 条", fatalCount)
     }
 
     /// 崩溃那一格 ⓘ 的完整句 —— **一行转发**，一个汉字都不在这里拼（拼话只在
@@ -217,7 +217,7 @@ extension LogSummary {
     func crashEvidenceFootnote(windowDays: Int, evidence: CrashEvidenceLedger? = nil) -> String {
         CrashEvidenceReadout.footnote(
             CrashEvidenceReadout.reading(from: self, evidence: evidence, windowDays: windowDays),
-            readFailureReasons: CrashEvidenceReadout.readFailureDistribution(self))
+            readFailureReasons: CrashEvidenceReadout.readFailureDistribution(self))>>>>>>> main
     }
 
     /// 崩溃那一段脚注**有没有可说的**（界面 ⓘ 与 CLI 的文本读数共用这一个判据 ——

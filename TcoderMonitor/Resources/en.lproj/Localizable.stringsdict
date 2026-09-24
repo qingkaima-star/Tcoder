@@ -525,5 +525,210 @@
 			<string>Collapse %lld items</string>
 		</dict>
 	</dict>
+	<!-- 批次 P69：屏上正文台账 §7 那三条"未登记话术"（B 类）。
+		键 = 中文整句（含 `%lld`），与 `FileLogAnalyzer` / `LogsErrorClusters` 里
+		`localizedCount` 传的字面量一字不差。英文值只用 ASCII 标点：
+		`。`/`，`/`（）` 落在中日韩标点段内，会被守卫 1f 和十八趟读数判成残留。 -->
+	<key>窗口内确认崩溃；其中 FATAL %lld 条</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@fatalEntries@</string>
+		<key>fatalEntries</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Crash confirmed inside the window; %lld FATAL entry among them</string>
+			<key>other</key>
+			<string>Crash confirmed inside the window; %lld FATAL entries among them</string>
+		</dict>
+	</dict>
+	<key>窗口内确认崩溃 %lld 次，只统计有真实事件证据的报告</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@confirmedCrashes@</string>
+		<key>confirmedCrashes</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Crash confirmed %lld time inside the window; only reports with real event evidence are counted</string>
+			<key>other</key>
+			<string>Crash confirmed %lld times inside the window; only reports with real event evidence are counted</string>
+		</dict>
+	</dict>
+	<key>共 %lld 类签名</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@signatureClasses@</string>
+		<key>signatureClasses</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld signature class in total</string>
+			<key>other</key>
+			<string>%lld signature classes in total</string>
+		</dict>
+	</dict>
+	<key>共 %lld 类签名 · 按出现次数排序</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@sortedSignatureClasses@</string>
+		<key>sortedSignatureClasses</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld signature class in total, sorted by occurrences</string>
+			<key>other</key>
+			<string>%lld signature classes in total, sorted by occurrences</string>
+		</dict>
+	</dict>
+	<!-- 批次 P69a：`SourceScopeCount.describe(unit:)` 的入参从半截量词（"个条目"）改成
+		整句量词键。旧形状拼出来的「1,234 个条目」不是键，英文态永远铺中文。
+		`%lld 行` 上面已经有了，这一条是它的同族。 -->
+	<key>%lld 个条目</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@scopeEntries@</string>
+		<key>scopeEntries</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld entry</string>
+			<key>other</key>
+			<string>%lld entries</string>
+		</dict>
+	</dict>
+
+  <!--
+    批次 P69c（WS-多槽复数流）：**一个键里两个复数槽**的第一族。
+    立这一族的动机见 `LocalizedCopyKit.localizedCount(_:slots:)` 的注释。
+    三条写法约定（每条都有守卫在目录上逐条钉，不靠自觉）：
+      ① `NSStringLocalizedFormatKey` 里按**出现顺序**排 `%#@a@ %#@b@`，
+         产品侧就按同一顺序喂 `[Int]` —— 实测各格组合（1/1、1/5、3/1、3/30）逐支选对。
+         交叉那一格还顺带量出一件文档没写的事：**每个复数变量只按自己绑的那个数选支**，
+         所以"要跟别的槽一致"的词（动词 has/have）必须写进**它自己那个槽**的形态里；
+      ② 每个 `one` / `other` 里**只许出现 `%lld`，不许有任何数字字面**
+         （千分位是"第 i 个槽 ↔ 第 i 段连续数字"配上去的，模板自带数字就会配错行）；
+      ③ 混槽（复数 + 任意字符串）写 `%1$#@a@ … %2$@`，产品侧收 `count:` + `note:`，
+         字符串先以一枚不含数字的占位符落地、补完千分位再换回真值。
+  -->
+	<key>共 %lld 天 · 单日峰值 %lld 条</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@trendDays@ · %#@trendPeak@</string>
+		<key>trendDays</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld day</string>
+			<key>other</key>
+			<string>%lld days</string>
+		</dict>
+		<key>trendPeak</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>single-day peak %lld entry</string>
+			<key>other</key>
+			<string>single-day peak %lld entries</string>
+		</dict>
+	</dict>
+	<key>另有 %lld 次确认崩溃的事件时间在最近 %lld 天之外，属历史报告</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@historicalCrashes@ %#@historicalWindow@, counted as a historical report</string>
+		<key>historicalCrashes</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld confirmed crash has</string>
+			<key>other</key>
+			<string>%lld confirmed crashes have</string>
+		</dict>
+		<key>historicalWindow</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>an event time outside the last %lld day</string>
+			<key>other</key>
+			<string>an event time outside the last %lld days</string>
+		</dict>
+	</dict>
+	<key>读取失败 %1$lld 份（%2$@）未参与判定</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%1$#@unreadableCrashFiles@ (%2$@) left out of the verdict</string>
+		<key>unreadableCrashFiles</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%1$lld unreadable crash file</string>
+			<key>other</key>
+			<string>%1$lld unreadable crash files</string>
+		</dict>
+	</dict>
+	<key>还有 %lld 份崩溃通道文件未产出可计数的证据（内容损坏 / 只有文件名像 / 无事件时间 / 构建版本不是当前 / 同一事件的另一份），逐条原因待 LogSummary 落盘崩溃证据字段后展示</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@unexplainedCrashFiles@</string>
+		<key>unexplainedCrashFiles</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld crash-channel file produced no countable evidence (corrupt, only the filename looks like one, no usable event time, the build version is not the current one, or it is the other copy of the same event); per-file reasons appear once LogSummary carries the crash evidence fields</string>
+			<key>other</key>
+			<string>%lld crash-channel files produced no countable evidence (corrupt, only the filename looks like one, no usable event time, the build version is not the current one, or they are other copies of the same event); per-file reasons appear once LogSummary carries the crash evidence fields</string>
+		</dict>
+	</dict>
+	<!-- 批次 P70：无障碍标签那枚被降级成 `%@` 的复数（旧英文值写死 "days"，1 天也说 days）。
+		键 = 中文整句；`.strings` 里那条旧的 `错误趋势，%@ 天` 同步删掉 —— 留着就是烂尾键。 -->
+	<key>错误趋势，%lld 天</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@trendDayCount@</string>
+		<key>trendDayCount</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Error trend, %lld day</string>
+			<key>other</key>
+			<string>Error trend, %lld days</string>
+		</dict>
+	</dict>
 </dict>
 </plist>

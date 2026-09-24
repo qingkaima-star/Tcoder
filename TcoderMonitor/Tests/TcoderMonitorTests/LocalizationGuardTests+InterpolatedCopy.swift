@@ -78,4 +78,290 @@ extension LocalizationGuardTests {
         XCTAssertTrue(Self.interpolatedHanLiterals(in: pureInterpolation).isEmpty,
                       "没有汉字的纯数字插值被误伤")
     }
+
+
+    // MARK: - 守卫 1h（P59）：**是文案就必须查表**（与上面 P26 那条同族：那条管插值，这条管裸串）
+
+    /// P26 与 1g 只抓"含插值的中文段"，抓不到这一族：
+    /// `return ["优先拆分最高复杂度函数"]` —— 没有插值、没有 `+`、也没被 `localized*` 包住，
+    /// 三条键守卫全是绿的，而 `Text(变量)` 天生不查表 ⇒ **登记了也白登记**。
+    /// 本条判的是：`Services/Health` 里**含汉字的字面量**必须是某个查表调用的第一个实参。
+    ///
+    /// 只判"字面量里有没有汉字"，所以标点字符（`"。"`、`"、"`）与英文串天然豁免；
+    /// 查表调用**与字面量分了行**也不算违例（先把 `localized*( "…" )` 整段等长涂白，
+    /// 再在原文坐标系上找剩下的汉字字面量 —— 行号仍是原文行号）。
+    static func bareChineseLiterals(in content: String) -> [(line: Int, text: String)] {
+        let literal = try? NSRegularExpression(pattern: #""(?:[^"\\\n]|\\.)*""#)
+        let han = try? NSRegularExpression(pattern: #"[\p{Han}]"#)
+        guard let literal, let han else {
+            XCTFail("正则构造失败 ⇒ 这条判据根本没在跑")
+            return []
+        }
+        let kept = content.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { raw -> String in
+                let line = String(raw)
+                return SurfaceScanKit.isCode(line) ? Self.strippingTrailingComment(line) : ""
+            }
+            .joined(separator: "\n")
+        // **按括号配对涂白整个查表调用**（含它的实参列表）。
+        // 第一版只涂 `localized*( "…"` 那种"字面量紧跟在括号后"的形状，
+        // 于是 `localizedCopy(ok ? "是" : "不是")` 的第二个分支被误判成裸文案；
+        // 再退一步改成"往前看 40 格"，窗口宽度又成了一次新的猜测。
+        // 括号配对没有可调窗口：从 `(` 到配平的 `)` 整段都算它的实参。
+        // 涂白是**等长**的（换行原样留着），所以后面所有行号仍是原文行号。
+        var characters = Array(kept)
+        for span in Self.lookedUpCallRanges(in: kept) {
+            let start = kept.distance(from: kept.startIndex, to: span.lowerBound)
+            let end = kept.distance(from: kept.startIndex, to: span.upperBound)
+            for offset in start..<min(end, characters.count) where characters[offset] != "\n" {
+                characters[offset] = " "
+            }
+        }
+        let blanked = String(characters)
+        let blankedRange = NSRange(blanked.startIndex..., in: blanked)
+        return literal.matches(in: blanked, range: blankedRange).compactMap { match in
+            guard let span = Range(match.range, in: blanked) else { return nil }
+            let text = String(blanked[span])
+            let textRange = NSRange(text.startIndex..., in: text)
+            guard han.firstMatch(in: text, range: textRange) != nil else { return nil }
+            let line = blanked[blanked.startIndex..<span.lowerBound].unicodeScalars
+                .reduce(into: 0) { total, scalar in if scalar == "\n" { total += 1 } } + 1
+            return (line, text)
+        }
+    }
+
+    /// 每个 `localized*(…)` 调用**从开括号到配平闭括号**的区间。
+    /// 字符串字面量里的括号不加深度（`"（0…100）"` 这种），转义引号也不打断字符串。
+    static func lookedUpCallRanges(in text: String) -> [Range<String.Index>] {
+        let opener = try? NSRegularExpression(pattern: #"localized(?:Copy|Count|Format)\("#)
+        guard let opener else {
+            XCTFail("正则构造失败 ⇒ 这条判据根本没在跑")
+            return []
+        }
+        let whole = NSRange(text.startIndex..., in: text)
+        var spans: [Range<String.Index>] = []
+        for match in opener.matches(in: text, range: whole) {
+            guard let head = Range(match.range, in: text) else { continue }
+            var depth = 1
+            var inString = false
+            var escaped = false
+            var cursor = head.upperBound
+            while cursor < text.endIndex {
+                let character = text[cursor]
+                if inString {
+                    if escaped { escaped = false }
+                    else if character == "\\" { escaped = true }
+                    else if character == "\"" { inString = false }
+                } else if character == "\"" {
+                    inString = true
+                } else if character == "(" {
+                    depth += 1
+                } else if character == ")" {
+                    depth -= 1
+                    if depth == 0 {
+                        spans.append(head.lowerBound..<text.index(after: cursor))
+                        break
+                    }
+                }
+                text.formIndex(after: &cursor)
+            }
+        }
+        return spans
+    }
+
+    /// **已收口名单**（形状与 1d/1g 同源：名单里的文件一个都不许有，只许往长里加）。
+    ///
+    /// ⚠ **只点 `Services/**`，不点 `Views/**`——这不是漏了，是判据不成立**：
+    /// P63 试过把性能/日志三个 Views 文件点进来，它们剩下的 15 处裸字面量
+    /// 全是 `MetricTile(label:)` / `GlassSection(title:)` 这类**组件内部替调用方查了表**的入参
+    /// （英文态实测那 15 句没有一个铺在屏上，可证）。
+    /// 同一条规则在 Services 侧成立，是因为那里的串是**数据**（经 `Text(变量)` 直接上屏、不查表）。
+    /// 要把 Views 也管起来，得先立"哪些组件自己查表"的名册——那是另一条判据，别混进来。
+    /// P59a 首批六个；`HealthBreakdown` / `HealthRuntimeDimensions` / `HealthTeamDimensions`
+    /// 三个文件还有 98 处裸字面量，收完再点进来（现量由打印出声，不伪装成通过）。
+    static let copyLookedUpFiles: [String] = [
+        "Services/Health/ScoreCurves.swift",
+        "Services/Health/ScoreCurvesCode.swift",
+        "Services/Health/ScoreCurvesTeamRuntime.swift",
+        "Services/Health/GitCadenceEvidence.swift",
+        "Services/Health/HealthCodeDimensions.swift",
+        "Services/Health/WeightedHealthScorer.swift",
+        "Services/Health/HealthTeamDimensions.swift",
+        "Services/Health/HealthBreakdown.swift",
+        "Services/Health/HealthRuntimeDimensions.swift",    ]
+
+    /// **标识符豁免**（逐条留名 + 写清它比的是什么，见《守恒线要逐条留名的豁免口》）。
+    ///
+    /// 这些中文串**不是文案，是结构化标识符**：`MissingDimensionReason.analyzerLabel` 的值要拿去
+    /// 和 `ProjectReport.failedSections`（`AppState` 写的五路路名）做**相等比较**，
+    /// 在字典里就地查表会让比较失配、缺席原因整片失效。
+    /// 它们的上屏出口是**插值那一行**，那里必须查表（本批已改成
+    /// `localizedFormat("「%1$@」完成但该分量未产出。", localizedCopy(analyzer))`），
+    /// 所以豁免只免"字典里那一份"，不免"上屏那一句"。
+    /// `overrides` 两格同理：中文 rawValue 当查表键、`重复代码率` 是规范显示名，
+    /// 紧接着就走 `localizedCopy`。
+    static let identifierLiteralsExemptedByFile: [String: [String]] = [
+        "Services/Health/HealthBreakdown.swift": ["代码扫描", "Git 分析", "错误日志", "依赖分析", "测试覆盖率",
+                                                  "重复度", "重复代码率"],
+    ]
+
+    /// 豁免表自己也要被反着钉：**列进去的标识符必须还在文件里出现**。
+    /// 否则它变成一张"以后谁把这句改坏了也不知道"的空白豁免（清单不自动长大，也不许悄悄失效）。
+    static func staleIdentifierExemptions(in scanned: [String: String]) -> [String] {
+        identifierLiteralsExemptedByFile.flatMap { path, literals in
+            guard let content = scanned[path] else { return ["豁免点名的文件不在扫描面上：\(path)"] }
+            return literals.filter { !content.contains("\"\($0)\"") }
+                .map { "\(path) 的豁免项「\($0)」在文件里已经找不到了（改名？删掉？同批清豁免）" }
+        }
+    }
+
+    static func bareChineseLiterals(in content: String, exempt: Set<String> = []) -> [(line: Int, text: String)] {
+        bareChineseLiterals(in: content).filter { !exempt.contains($0.text.trimmingCharacters(in: CharacterSet(charactersIn: "\""))) }
+    }
+
+    func test_copyInLookedUpFilesAlwaysGoesThroughTheCatalog() throws {
+        let files = try SurfaceScanKit.sourceFiles(under: "")
+        let scanned = Dictionary(uniqueKeysWithValues: files.map { ($0.path, $0.content) })
+        let absent = Self.copyLookedUpFiles.filter { scanned[$0] == nil }
+        XCTAssertTrue(absent.isEmpty,
+                      "已收口名单点名的文件不在扫描面上（改名？挪走？）：\(absent)")
+        let offenders = Self.copyLookedUpFiles.flatMap { path in
+            Self.bareChineseLiterals(in: scanned[path] ?? "",
+                                     exempt: Set(Self.identifierLiteralsExemptedByFile[path] ?? []))
+                .map { "\(path):\($0.line) \($0.text)" }
+        }
+        let staleExemptions = Self.staleIdentifierExemptions(in: scanned)
+        XCTAssertTrue(staleExemptions.isEmpty,
+                      "标识符豁免里有已经对不上号的条目（它会变成一张空白豁免，白放过以后新增的文案）：\n  "
+                    + staleExemptions.joined(separator: "\n  "))
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些中文文案字面量没走查表 ⇒ 英文态直接把中文铺上屏，而三条键守卫全绿"
+                    + "（`Text(变量)` 不查表，登记了也白登记）：\n  "
+                    + offenders.sorted().joined(separator: "\n  "))
+        // 名单外的现量**只数 `Services/**`**：`Views/**` 里 `Text("中文")` 走的是
+        // `LocalizedStringKey` 自己的查表，那是合法写法，按本条判据数进去会得到一个
+        // 谁都不该去还的假债（1,673 处里绝大多数就是这一族）。
+        let rest = files.filter { !Self.copyLookedUpFiles.contains($0.path)
+                                 && $0.path.hasPrefix("Services/") }
+            .reduce(0) { $0 + Self.bareChineseLiterals(in: $1.content).count }
+        print("【文案必查表】已收口 \(Self.copyLookedUpFiles.count) 个文件 → 名单内 0 处；"
+            + "`Services/**` 其余文件仍有 \(rest) 处（Views 不算：`Text(字面量)` 自己查表）")
+    }
+
+    /// 元测试：四种"没查表"的形状都要被抓到，三种合法写法一条不许误伤。
+    func test_meta_bareCopyRulerCatchesUnlookedLiteralsAndSparesLegalShapes() {
+        let dirty = [
+            #"return ["优先拆分最高复杂度函数"]"#,
+            #"outcome.strengths.append(String(format: "注释密度适中（%.1f%%）", x))"#,
+            #"label: "工程质量（代码口径）","#,
+            #"let pads = ["其余维度处于可接受区间。", "建议保持观察。"]"#,
+        ]
+        let found = dirty.map { Self.bareChineseLiterals(in: $0).count }
+        XCTAssertEqual(found, [1, 1, 1, 2], "漏一种形状，那一族就继续假绿：\(found)")
+        let legal = [
+            #"return [localizedCopy("优先拆分最高复杂度函数")]"#,
+            "texts.recommendations.append(localizedCopy(\n    \"当前无明显短板：综合分只由这些分量按权重算出。\"))",
+            #"if character == "。" || character == "、" { }"#,
+            #"let key = "AppleLanguages""#,
+        ]
+        for line in legal {
+            XCTAssertTrue(Self.bareChineseLiterals(in: line).isEmpty, "合法写法被误报：\(line)")
+        }
+        // 行号必须指到**原文**那一行（涂白不许让偏移漂），跨行调用也要算对。
+        let across = "let a = 1\nlet b = [localizedCopy(\n  \"整句键\")]\nlet c = [\"裸中文\"]"
+        XCTAssertEqual(Self.bareChineseLiterals(in: across).map(\.line), [4],
+                       "行号漂了 ⇒ 报错指不到地方，而跨行的查表调用还被误判：\(Self.bareChineseLiterals(in: across))")
+        // 三元里的两个分支都算"已经查表"（首版把这种写法误报成裸字面量）。
+        XCTAssertTrue(Self.bareChineseLiterals(
+            in: #"Text(localizedCopy(ok ? "两张图均为 0 起点" : "轴不是 0 起点"))"#).isEmpty,
+            "查表调用与字面量隔着一个三元 ⇒ 不许误报")
+        // 但豁免窗口只有 40 格：同一行里隔得远的裸字面量照样要抓。
+        XCTAssertEqual(Self.bareChineseLiterals(
+            in: #"let help = localizedCopy("短") + "这是一句裸文案""#).count, 1,
+            "查表调用之外的裸文案必须照抓 ⇒ 括号配对不能涂过头")
+        // 标识符豁免必须**精确到串**：只免点名的那一个，同一段里的文案照样抓。
+        let mixed = "let labels = [\"代码扫描\": 1]\nlet copy = \"这句是文案\""
+        XCTAssertEqual(Self.bareChineseLiterals(in: mixed, exempt: ["代码扫描"]).map(\.text),
+                       ["\"这句是文案\""], "豁免一放宽成整片放行 ⇒ 这个文件立刻回到三条守卫的盲区")
+    }
+
+
+    // MARK: - 守卫 1j（P62）：枚举档名直接插进模板 ⇒ 同一行半英半中
+
+    /// 实测形状（英文态 18 趟抓到）：`… overall risk 严重` ——
+    /// 模板翻成了英文，插进去的那个**档名**还是中文，因为它是 `risk.rawValue`。
+    /// 与 P57 的维度名同一条病，只是这次漏在**枚举档名**上；
+    /// 五条档名（`无/低/中/高/严重`）目录里**早就有键**，只是从来没人查。
+    ///
+    /// 判据：每个 `.rawValue` 往前看 120 格，若这一段里有 `localizedFormat(` 而**没有** `localizedCopy(`
+    /// ⇒ 这个档名没查表就被喂进了模板。窗口取 120 格（不是只看同一行），
+    /// 因为实参常常换行；判"包没包上"看的是紧邻的 `localizedCopy(`。
+    static func unwrappedEnumWords(in content: String) -> [(line: Int, text: String)] {
+        let kept = content.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { raw -> String in
+                let line = String(raw)
+                return SurfaceScanKit.isCode(line) ? Self.strippingTrailingComment(line) : ""
+            }.joined(separator: "\n")
+        let needle = ".rawValue"
+        var hits: [(line: Int, text: String)] = []
+        var search = kept.startIndex
+        while let found = kept.range(of: needle, range: search..<kept.endIndex) {
+            let windowStart = kept.index(found.lowerBound,
+                                         offsetBy: -120,
+                                         limitedBy: kept.startIndex) ?? kept.startIndex
+            let window = String(kept[windowStart..<found.lowerBound])
+            if window.contains("localizedFormat("), !window.contains("localizedCopy(") {
+                let line = kept[kept.startIndex..<found.lowerBound].reduce(into: 0) { total, c in
+                    if c == "\n" { total += 1 }
+                } + 1
+                hits.append((line, window.suffix(58).trimmingCharacters(in: .whitespaces) + needle))
+            }
+            search = found.upperBound
+        }
+        return hits
+    }
+
+    /// 已认证的文件（P62 全部改完；名单只许往长里加，理由同 1d/1g/1h）。
+    static let enumWordCertifiedFiles: [String] = [
+        "Views/Code/CodeRiskView.swift",
+        "Views/Shell/DashboardHero.swift",
+        "Views/Shell/ShellLayout.swift",
+        "Views/Health/HealthView.swift",
+        "Views/Dependencies/DependencyAdvisoryRows.swift",
+        "Views/PerfLogs/LiveReadings.swift",
+        "Views/Performance/PerformanceSystemTiles.swift",
+        "Design/ReadoutStripKit.swift",
+    ]
+
+    func test_certifiedFilesNeverFeedARawEnumWordIntoATemplate() throws {
+        let files = try SurfaceScanKit.sourceFiles(under: "")
+        let scanned = Dictionary(uniqueKeysWithValues: files.map { ($0.path, $0.content) })
+        let absent = Self.enumWordCertifiedFiles.filter { scanned[$0] == nil }
+        XCTAssertTrue(absent.isEmpty, "名单点名的文件不在扫描面上：\(absent)")
+        let offenders = Self.enumWordCertifiedFiles.flatMap { path in
+            Self.unwrappedEnumWords(in: scanned[path] ?? "").map { "\(path):\($0.line) …\($0.text)" }
+        }
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些枚举档名没查表就被插进整句模板 ⇒ 英文态一行里前半英文、后半中文：\n  "
+                    + offenders.sorted().joined(separator: "\n  "))
+        let rest = files.filter { !Self.enumWordCertifiedFiles.contains($0.path) }
+            .reduce(0) { $0 + Self.unwrappedEnumWords(in: $1.content).count }
+        print("【档名先查表】已认证 \(Self.enumWordCertifiedFiles.count) 个文件 → 名单内 0 处；"
+            + "其余文件仍有 \(rest) 处（P62 首测全仓）")
+    }
+
+    func test_meta_enumWordRulerCatchesUnwrappedAndSparesWrapped() {
+        XCTAssertEqual(Self.unwrappedEnumWords(in: #"CopyHelpBadge(localizedFormat("综合风险 %1$@", code.overallRisk.rawValue))"#).count, 1,
+                       "裸档名没抓到 ⇒ 这一族继续在英文态半中半英")
+        XCTAssertTrue(Self.unwrappedEnumWords(
+            in: #"localizedFormat("综合风险 %1$@", localizedCopy(code.overallRisk.rawValue))"#).isEmpty,
+            "查过表还报 ⇒ 下次没人信这条")
+        // 换行实参也要抓到（窗口 120 格，不是只看同一行）。
+        XCTAssertEqual(Self.unwrappedEnumWords(
+            in: "localizedFormat(\"明细 %1$@\",\n            risk.rawValue)").count, 1)
+        // 与文案无关的 `.rawValue`（比较、取 id）不许误伤。
+        XCTAssertTrue(Self.unwrappedEnumWords(
+            in: "guard state == .failed else { return nil }\nlet key = subject.rawValue").isEmpty,
+            "档名判据咬到非文案用法 ⇒ 逼人写绕路代码")
+    }
 }

@@ -101,7 +101,7 @@ enum ShellCopy {
         case .gitHistory: return localizedCopy("尚未分析Git 历史")
         case .codeSize: return localizedCopy("尚未分析代码规模")
         case .errorLogs: return localizedCopy("尚未分析错误日志")
-        default: return localizedCopy("尚未分析\(subject.rawValue)")
+        default: return localizedFormat("尚未分析%1$@", localizedCopy(subject.rawValue))
         }
     }
 
@@ -112,7 +112,7 @@ enum ShellCopy {
         case .errors: return localizedCopy("已完成扫描，未发现错误")
         case .errorLevelLogs: return localizedCopy("已完成扫描，未发现错误级别日志")
         case .strengthsAndRisks: return localizedCopy("已完成扫描，未发现优点与风险项")
-        default: return localizedCopy("已完成扫描，未发现\(subject.rawValue)")
+        default: return localizedFormat("已完成扫描，未发现%1$@", localizedCopy(subject.rawValue))
         }
     }
 
@@ -121,7 +121,7 @@ enum ShellCopy {
         switch reason {
         case .noLogFiles: return localizedCopy("无法分析：未接入任何日志文件")
         case .notAGitRepo: return localizedCopy("无法分析：该目录不是 Git 仓库，或提交记录为空")
-        default: return localizedCopy("无法分析：\(reason.rawValue)")
+        default: return localizedFormat("无法分析：%1$@", localizedCopy(reason.rawValue))
         }
     }
 }

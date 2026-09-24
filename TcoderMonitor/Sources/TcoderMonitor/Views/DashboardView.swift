@@ -312,7 +312,7 @@ struct DashboardView: View {
                 .foregroundStyle(Theme.Semantic.warning.textColor)
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 if !failed.isEmpty {
-                    Text(localizedFormat("未能完成：%1$@", failed.joined(separator: "、")))
+                    Text(localizedFormat("未能完成：%1$@", failed.joined(separator: localizedListSeparator())))
                         .font(Theme.Typo.cardTitle.font)
                         .foregroundStyle(Theme.Semantic.warning.textColor)
                     Text(message)

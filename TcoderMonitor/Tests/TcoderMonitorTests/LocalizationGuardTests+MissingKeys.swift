@@ -178,6 +178,13 @@ extension LocalizationGuardTests {
     static let compositionFreeFiles: [String] = [
         "Views/CodeGit/GitHistoryScope.swift",
         "Views/Git/GitInsightsSections.swift",
+        // P69a：复杂度风险页那五条建议/空态正文原来都是 3~6 段字面量 `+` 起来的，
+        // 收成整句键之后文件里一个 `+` 拼接都不剩，点进来把形状钉死不许长回去。
+        "Views/Code/CodeRiskAdvice.swift",
+        "Views/Code/CodeRiskView.swift",
+        // P69c（总工落）：`crashEvidenceFootnote` 那三句并成整句槽型键之后，
+        // 这个文件里已经没有一个 `+` 拼出来的中文半句（【拼了查不中】由 171 降到 169 就是它贡献的 2 处）。
+        "Services/Logs/FileLogAnalyzer.swift",
     ]
 
     func test_compositionFreeFilesStayFreeOfJoinedChineseCopy() throws {
@@ -249,6 +256,26 @@ extension LocalizationGuardTests {
         "Services/Health/ScoreCurvesCode.swift",
         "Services/Health/ScoreCurvesTeamRuntime.swift",
         "Services/Health/GitCadenceEvidence.swift",
+        // P64：这条判据原来只盯 Services，而 `Views/**` 里也有"返回字符串给 `Text(变量)`"的生产者
+        // ——`markerNote` 那句 FIXME 提示就因此长期挂在英文态残留的 A 类里（两个半句各自登记过，
+        // 运行时拼起来永远查不中）。名单只往长里加，加一个文件就要把它清干净。
+        "Views/Code/CodeMetricsSections.swift",
+        // P67：依赖页那五句只有换成别的仓库才上屏（本仓依赖清单是空的），
+        // 拿 Homebrew 复验才抓到「共 8 项，已全部展示。」既没登记、又把测得值插在自己肚子里。
+        "Views/Dependencies/DependenciesView.swift",
+        // P67：这两句是**嵌在已译长句里**的片段，英文态实拍成 "…, 快照截至 2026-09-19（4 days ago）; …"。
+        // 只有多生态的仓库才会走到这条分支（本仓依赖清单为空），所以十八趟 dogfooding 读数从没抓到过。
+        "Services/Dependencies/DependencySnapshot.swift",
+        "Services/Dependencies/ManifestDependencyAnalyzerVersionEvidence.swift",
+        // P69a：复杂度风险页。这两份是 P69 清单里「代码风险这一片」7 条的落点，
+        // 整句键化之后两份在 1d（`+` 拼接）与 1g（自己肚子里插值）两把尺子下都是 0 处 ——
+        // 点进名单的意义是**下一句新写的中文必须一开始就用整句键**，否则当场红。
+        "Views/Code/CodeRiskAdvice.swift",
+        "Views/Code/CodeRiskView.swift",
+        // P69c（WS-多槽复数流）：`crashEvidenceFootnote` 那三句从"插值 + `+` 拼半句"换成
+        // 整句槽型键（两条多槽、一条混槽、一条把三段并成一条）之后，本文件里
+        // 已经没有"把测得值插在自己肚子里"的中文字面量了。
+        "Services/Logs/FileLogAnalyzer.swift",
     ]
 
     func test_keyizedCopyFilesHoldNoInterpolatedChineseLiterals() throws {

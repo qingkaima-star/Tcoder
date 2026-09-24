@@ -362,6 +362,26 @@ Tests/TcoderMonitorTests/Health*Tests.swift
    **万一必须起，谁起的谁退出、并在交回汇报里给出前后实例数**。
    （2026-09-23 的现场：我只写了前一句，后一句漏了，
    于是 sabotage 那一趟真的留下 3 个 GUI 实例，靠子代理自己收掉才没留在机器上——那是运气不是设计。）
+   **2.2（2026-09-23 12:12 由用户定，原话：「停止做一切的点击跟滚动测试」）**
+   本仓**不再做**任何靠操作 UI 取证的活：合成输入器投递滚动事件（`INPUT=synth` /
+   `start_synth_scroller` / `SYNTH_GAP_MS` 那一套）、交互档录制
+   （`PERIOD=interaction` 的 `perf_harness.sh interact`、`perf_wait_window.sh interact`）、
+   以及任何点击/悬停驱动的取证（AX 展开点击、tooltip hover、逐页切换点击）。
+   ① 要读数走**不碰输入**的路子：静态守卫与扫描、心跳期（idle 档）录制、
+     已导出产物的二次解析、`-selectedDetailSection` / `TCODER_CAPTURE_SCROLL` 这类
+     **启动参数**（App 自己滚，不发合成事件）。
+   ② **判交互期指标（如"交互期 hitch 帧 = 0"）必须有滚动** ⇒ 没拿到一次明确授权就
+     **明写"未覆盖"**，不许拿相邻档冒充，不许因为测不到就改判据。
+   ③ 不许为了绕开这条换成"另一种模拟键鼠的写法"——**被禁的是操作 UI 这件事本身**，不是脚本名。
+   ④ 停这类链时把**自己起的**进程收干净（见 2.1），别只 kill 最外层留下孤儿输入器。
+   ⑤ **合法形状已经逐行读过的那些**（别的流不必再自己判，但也别照名字抄——判的是"有没有投递输入事件"）：
+     `paired_page_evidence.sh` / `capture_pages_isolated.sh` 切页走 `-selectedDetailSection`、
+     顶/尾走 `CAPTURE_SCROLL` 启动参数（App 自己滚）；`ax_tooltip_report.sh` / `ax_body_audit.py` /
+     `ax_truncation_sweep.sh` 只起进程 + **进程外**读 AX，选项目靠写沙箱 `projects.json`。
+     反面教材：按**脚本名**监控是否违规会假阴性——2026-09-23 看门狗第 51 轮的清单只 grep
+     `synth|perf_harness|capture_pages|hover`，`ax_*` 那一族全漏，差点把合法取证报成违规。
+   Why：这类活要独占一个"没人碰鼠标键盘"的窗口，本机同时还有别的流在编译与取证；
+   一夜下来窗口基本都在等场与互相打断，还烧掉过数小时（一次录制挂死）。
 3. **阈值不许为了刷分而动**。巨大文件行数、复杂度榜长度这类定义属冻结区；
    把阈值放宽让自己变好看，等于把工具废掉。
 4. **实现文件越过 400 行会让全仓测试变红**（`SourcesSizeAuditTests`，2026-09-21 补）。
@@ -576,6 +596,10 @@ WS-A/WS-B/WS-C 此刻在**主树里有未提交在途改动**。不允许直接�
 | `Views/DashboardView.swift` | **第二处，同上形状**：`ErrorClusterRow` 里那条崩溃标题也补 `.help(cluster.displayMessage)`（窄态 1080 实测格宽 557pt / 单行需 624pt） | 同一把尺子在窄态那一档量出来的同类缺陷：错误日志页的同类格子早就挂了 help，总览榜上这条没有 ⇒ 被裁掉的半个崩溃标题在全站任何地方都读不到 | 同上，走 `ax_truncation_sweep.sh` 窄态那趟的主门 |
 | `Models/CodeMetrics.swift` | 再加 **1 枚** Optional：`nonCodeRegionLineCount`（混合语言文件里按分区归位为非代码、未进代码统计的行数），既有成员一字未动 | RD-42「有写无读」：`ComplexitySanitizer` 从 R2 起就在算这枚数（逐行累加 + `merged` 跨区累加），全仓零读者 ⇒ "分区认出来了、N 行归位"一件没说，而"分区**没**认出来"倒另有一格在出声（`vueRegionFallbackFileCount`）。**这一格是口径不是"未量准"**，所以故意**不进** `scanLimitations`（那条在 CLI 被打成「未量准 N 条」，塞进来等于把那个数灌虚高） | `NonCodeRegionReadoutTests` 10 例：正例真值取自测试自己手写的 `.vue` 夹具（template 12 + style 8 + SFC 标签 6 ⇒ 26，先自证数对了再断言）、反例钉「这句不许进限制账」+ 对账等式、未知态（认不出分区的文件一行都不算已归位）、缺席（纯 Swift 语料整句不出声 + 旧 JSON 缺键 ⇒ `nil`）、写者恰一处与读者两出口的扫描守卫各配元测试；sabotage 一次 ⇒ 9 红 |
 | `Models/CodeMetrics.swift` | 再加 **1 枚** Optional：`duplicateBlockCoordinatesOutsideBoard`（榜外块的可点名坐标样本，直传引擎那份），既有成员一字未动 | RD-52：这些 id 原先只在 `scanLimitations` 的中文句里，而且**同一串在一份报告里印两遍**（口径句 + 扫描边界句），单条实测 2,407 字符；读 JSON 的人要定位「到底是哪几块」仍得解析散文 —— RD-48 刚消灭过的形状在坐标这格复活。⚠️ 我最初记成「全量坐标被静默截断」，复核后不对：引擎本来就只点 `outsideBoardSampleLimit` 条、未点名块数在 `droppedByCap` 里，所以修法是**散文点 3 条 + 指回字段与计数、字段给引擎那 6 条一条不减** | `OutsideBoardCoordinatesTests` 4 例（真扫本仓对账「字段在、样本数不超过引擎那把尺子、同一串只出现一次、最长限制说明 <1,200 字符」+ 装配口正例/余数反例 + 缺键 ⇒ `nil` + 抄回边界句的 sabotage ⇒ 2 红）
+| `Models/CodeMetrics.swift` | 再加**一族**：`CodeFileRoleShare` / `CodeFileRoles` 两个类型 + `var fileRoles: CodeFileRoles? = nil`（既有成员一字未动；八档**全量列出含 0**，缺档 = 没量到，`weakEvidenceFiles` 只挂 `production` 档、其余档给 `nil` 而不是 0） | RD-14/RD-20 后半第一步：角色分档此前**只是文本**（判据 `SourceFileRoleRule.decide` 与累计 `SourceRoleTally` 早就有，但没有落盘承接格）⇒ 读 JSON 的人拿不到"生产码有多少行"、评分侧也没有按角色收窄的分母。只有挂在 `CodeMetrics` 上才与 `totalLines`/`codeLines` 同属一次快照（放 `CodeScanCoverage` 就停在内存里）。写者一处：`FileSystemCodeAnalyzer` 里 `SourceRoleTally` **算一次**同喂契约字段与覆盖度台账（避免同一判据两个入口） | `CodeFileRoleContractTests` 12 例 + `CodeFileRoleRealScanTests` 1 例（共 13 例；真值取自测试自己手写的 10 文件语料逐行数出来的，含"同名 `Widget` 落进四个不同档"证明不是按 basename 猜的；两条反例 + 写者/读者扫描守卫各配元测试）；sabotage 摘掉写字段那一行 ⇒ 13 例里 8 红；旧 JSON 缺键 ⇒ `nil` |
+| `Models/CodeMetrics.swift` | 再加 **1 枚** Optional：`scanSurface: CodeScanScope?`（带一族新类型，逐格 Optional） | R17 算清的"排除了几个条目、被排除的那些有多少行、行数到底是数过还是没数"原先只活在 `scanLimitations` 的中文句里 ⇒ 读 JSON 的人要解析散文（与 RD-48 同形）。**"没数过"与"真的是 0"必须是两格**：`linesCounted == false` 时 `excludedLineCount` 必须 `nil`，填 0 等于把"没数"写成"没有"。上屏那一句的唯一装配口是 `CodeScanSurfaceReadout.accountingLine(_:)`（界面与 CLI 共用一把尺子） | `CodeScanSurfaceContractTests` + `CodeScanSurfaceProductPathTests`（本流 13:17 实跑合并树：8 例 0 失败）；旧 JSON 缺键 ⇒ `nil`；真产品路径用例钉"屏上那句与字段同源于同一次扫描" |
+| `Models/CodeMetrics.swift` | 加 **1 个计算属性** `reportedDuplicatedBlockTotalCount`（既有成员一字未动；**取法只此一处**） | R18：评分详情那句"共 N 处重复块"吃的是 `duplicatedBlocks.count` = **榜长**（被 `maxBlocks`=20 截过的明细榜），本仓实扫榜内 20 · 榜外 96 ⇒ 少报 96 处。修法是**唯一装配口做加法**，消费方（评分解释文本 / 界面 / CLI）一律走它，谁再写一遍 `count + dropped` 就是第二把尺子。⚠️ 这一格**只许配「去重后口径」这句限定语上屏**：撞同一个 `DuplicatedBlock.id` 被削掉的块没有读数，"榜内+榜外"天然不平，不许被读成"这个仓库一共有多少处克隆" | `DuplicationTotalInScoreDetailTests`（三态各一句，第三态**断言不含「共」字**）+ `DuplicateBoardAccountingTests`（真扫对账、加法只一个家）+ `BoardLengthReadoutRatchetTests`（棘轮 1→0、全仓上限 7→6，6 = 本次实跑现量）；独立真值由测试自己走 `SourceTreeScanner → DuplicationEngine.analyze` 相加，不经装配层 |
+| `Models/LogInsights.swift` | 加 **1 枚** Optional：`crashEvidence: CrashEvidenceSnapshot?`（新类型九格**全 Optional**，既有成员一字未动） | RD-60：`CrashEvidenceLedger` 把八种原因分开算好了，但 `LogAnalysisProviding.analyze` 签名冻结只回 `LogSummary` ⇒ 台账在生产路径**算完即丢**，屏上只能读那把从趋势桶倒推的粗尺（同一事实两把尺子、分母还不同）。快照必须与 `crashCount` **同源同刻**：挂 `ProjectReport` 顶层会造出第二个「崩溃数」入口（RD-38 同族），留在 Services 的内存对象送不到视图（就是修前的样子） | `CrashEvidenceContractTests` 4 例（删整键仍解得开且读成 `nil` / 九格逐字段往返 / 缺席格不许变 0 / 编码时整键缺席不写 `null`）+ `CrashEvidenceWiringTests`（含"接回来的那一格"直接断言，不许只断言拼出的句子——R24 sabotage S2 就是这么漏的）；`CrashEvidenceReadout.readingFromFields` 任一格缺席即整枚 `nil`，一个数都不重算 |
 
 不在这张表里的冻结区改动一律视为越界。历史批次（P7-A 退役示例数据动过
 `Models/Project.swift`、`Models/HealthScore.swift`、`App/AppState.swift`、

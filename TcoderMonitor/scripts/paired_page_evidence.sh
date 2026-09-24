@@ -13,6 +13,7 @@
 #
 # 用法: scripts/paired_page_evidence.sh [批次名]
 #   产物: .scratch/evidence-<rev>-<批次名>/{light,dark}-{top,tail}/ + 每趟一份 PROVENANCE
+#         （`<rev>` 与 PROVENANCE 的 `rev=` 都是**被拍二进制自己的**提交号，不是拍图时的 HEAD）
 #   EXPECT_PAGES=<n>  每趟应有张数（默认 9）
 #   VIEWPORT_PT=<pt>  取证窗口高（默认 1000；本机屏高 1080，请求再高会被 AppKit 钳住）
 #   CAPTURE_WINDOW_WIDTH=<pt>  取证窗口宽（不设 = 产品默认 1280；量窄态传 1080 = 本 App 的 minWidth）
@@ -25,7 +26,16 @@ SCRATCH="${TCODER_SCRATCH:-$REPO_ROOT/.scratch}"
 BIN="$PWD/dist/Tcoder.app/Contents/MacOS/TcoderMonitor"
 BRIGHT="$SCRATCH/page_brightness"
 BRIGHT_SRC="$PWD/scripts/page_brightness.swift"
-REV=$(git rev-parse --short HEAD)
+# 「这批图拍的是哪个提交」只认**二进制自己的记录**，不认拍图那一刻的 HEAD。
+# 直接起因（2026-09-23 18:01 实测）：主树在构建之后又落了一笔只动 docs 的提交，
+# `verify_provenance.sh` 按产物码 tree 正常放行（代码确实同源），而旧写法把
+# `git rev-parse HEAD` 盖进每趟 PROVENANCE 的 `rev=` —— 16 张图的归属于是被说成一个
+# **从没被拍过**的头（拍的是 fa954fa 的二进制，纸上写 bdf53f4）。
+# 改成认二进制的头以后，走错方向只会"显得更旧"（保守，判过期），不会"显得更新"（假新鲜）。
+source "$PWD/scripts/perf_provenance.sh"
+BINARY_COMMIT=$(provenance_manifest_value TCODER_GIT_REVISION)
+REV=$(git rev-parse --short "$BINARY_COMMIT" 2>/dev/null)
+HEAD_REV=$(git rev-parse --short HEAD)
 BATCH="${1:-$REV}"
 OUT_ROOT="$SCRATCH/evidence-$REV-$BATCH"
 EXPECT="${EXPECT_PAGES:-9}"
@@ -38,6 +48,7 @@ WIDTH="${CAPTURE_WINDOW_WIDTH:-}"
 
 fail() { echo "!! $1"; exit 1; }
 
+[ -n "$REV" ] || fail "读不到 dist/RELEASE_MANIFEST.env 里的 TCODER_GIT_REVISION —— 先跑 ./scripts/build_app.sh release"
 mkdir -p "$OUT_ROOT" || fail "建不了 $OUT_ROOT"
 
 # ── 前置：尺子先自证，再来量界面 ────────────────────────────────────────────
@@ -51,6 +62,8 @@ fi
 "$BRIGHT" selfcheck > "$SCRATCH/page_brightness-selfcheck.log" 2>&1 \
   || fail "亮度判据 selfcheck 没过（见 $SCRATCH/page_brightness-selfcheck.log）—— 尺子不可信，不出数"
 echo "== 尺子自证通过；被拍产物 $BIN；输出 $OUT_ROOT"
+echo "   归属提交 $REV（二进制自己的记录）；拍图时 HEAD=$HEAD_REV"
+[ "$REV" = "$HEAD_REV" ] || echo "   ※ 两者不同 ⇒ 本次靠「产物码 tree 相同」放行，每趟 PROVENANCE 会同时写下 head_at_capture"
 
 # ── 外观：记下原值，无论怎么结束都要还原（这是被反复要求的例外，只动这一项）──
 appearance() { osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode' 2>/dev/null; }
@@ -89,7 +102,8 @@ for pass in light-top light-tail dark-top dark-tail; do
   mkdir -p "$out"
   cat > "$out/PROVENANCE" <<EOF
 rev=$REV
-commit=$(git rev-parse HEAD)
+commit=$BINARY_COMMIT
+head_at_capture=$(git rev-parse --short HEAD)
 branch=$(git rev-parse --abbrev-ref HEAD)
 pass=$pass
 polarity=$polarity

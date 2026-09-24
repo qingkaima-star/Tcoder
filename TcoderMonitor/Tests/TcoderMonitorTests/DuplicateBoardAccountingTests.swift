@@ -97,27 +97,75 @@ final class DuplicateBoardAccountingTests: SelfScanHarnessCase {
         XCTAssertNil(back.duplicatedBlocksDroppedByCap)
     }
 
-    /// 任何地方都不许把榜内条数与榜外条数加起来当"总数"用（那个等式不平，见类注释）。
-    func testNobodySumsBoardPlusDroppedIntoATotal() throws {
+    /// RD-48 当年**故意不给总数**的理由仍然成立：`rankedBlocks` 在撞 id 时先默默削掉若干块，
+    /// 所以"榜内 + 榜外"**不等于**"引擎见过的原始命中数"。
+    /// 但它等于一个定义良好的量——**去重后的重复块总数**（先去重、再截断，见 `rankedBlocks`）。
+    /// 因此判据从"哪都不许加"改成两条更准的（R18 由总工裁，理由在台账卷三 §49）：
+    /// ① 这枚加法**只有一个家**（`CodeMetrics.reportedDuplicatedBlockTotalCount`），别处再算就是第二把尺子；
+    /// ② 任何把"共 N 处重复块"说出去的句子，**必须同时点名口径**（「去重后」或「明细已全部列出」），
+    ///    否则那个数会被读成"引擎一共见到这么多处"。
+    func testTheSumHasExactlyOneHomeAndEveryTotalNamesItsCaliber() throws {
+        let lines = try Self.sourceLines()
+        let sums = lines.filter { $0.text.contains("duplicatedBlocks.count +")
+            || $0.text.contains("duplicatedBlocksDroppedByCap +")
+            || $0.text.contains("+ duplicatedBlocksDroppedByCap") }
+        XCTAssertEqual(sums.map { URL(fileURLWithPath: $0.path).lastPathComponent }, ["CodeMetrics.swift"],
+                       "榜内 + 榜外这枚加法只许住在唯一取法里，实得：\(sums.map { "\($0.path):\($0.line)" })")
+        XCTAssertEqual(sums.count, 1, "同一个家也只许一处相加（两处就是两把尺子）：\(sums.map(\.text))")
+
+        let claims = lines.filter { $0.text.contains("处重复块") }
+        XCTAssertFalse(claims.isEmpty, "扫不到任何说『处重复块』的句子 ⇒ 这条断言在空转")
+        // 三种"口径已出口"的写法：报了限定的总数、明细已列全、或明说总数拿不出来。
+        let qualified = ["去重后", "明细已全部列出", "总处数本次未统计"]
+        let unqualified = claims.filter { line in !qualified.contains { line.text.contains($0) } }
+        XCTAssertEqual(unqualified.map { "\(URL(fileURLWithPath: $0.path).lastPathComponent):\($0.line)" }, [],
+                       "报总数却不点名口径（那个数会被读成引擎见过的原始命中数）：\n"
+                         + unqualified.map(\.text).joined(separator: "\n"))
+    }
+
+    /// 元测试：上面那条扫描判据两个方向都要红过一次（本仓规矩：扫描型守卫不配元测试迟早永真绿）。
+    func testMetaCaliberScannerCatchesBothBrokenShapes() throws {
+        let brokenTotal = "        let total = metrics.duplicatedBlocks.count + metrics.duplicatedBlocksDroppedByCap ?? 0"
+        let nakedClaim = "        return localizedFormat(\"重复代码 %1$@，共 %2$@ 处重复块\", r, n)"
+        let compliant = "        return localizedFormat(\"重复代码 %1$@，共 %2$@ 处重复块（去重后口径，榜内只列 %3$@ 处明细）\", r, n, b)"
+        XCTAssertTrue(Self.sumHits([brokenTotal]).count == 1, "该抓的第二处相加没抓到 ⇒ 尺子失效")
+        XCTAssertTrue(Self.nakedClaimHits([nakedClaim]).count == 1, "该抓的裸总数句子没抓到 ⇒ 尺子失效")
+        XCTAssertTrue(Self.nakedClaimHits([compliant]).isEmpty, "合规句子被误伤 ⇒ 判据过宽，下一个人会连合规一起删")
+        XCTAssertTrue(Self.sumHits([compliant]).isEmpty, "合规句子不该被算成第二处相加")
+        // 我第一版把判据写窄了（漏了"总处数本次未统计"那一档），当场误伤了合规句子——
+        // 这条样本就是把那次误伤钉住，下次再收判据要先过它。
+        let unmeasuredTotal = "        return localizedFormat(\"重复代码 %1$@，榜内只列 %2$@ 处重复块，总处数本次未统计\", r, b)"
+        XCTAssertTrue(Self.nakedClaimHits([unmeasuredTotal]).isEmpty,
+                      "拿不出总数、并明说了这一点，是三种合规写法之一：\(unmeasuredTotal)")
+    }
+
+    private static func sumHits(_ lines: [String]) -> [String] {
+        lines.filter { $0.contains("duplicatedBlocks.count +") || $0.contains("duplicatedBlocksDroppedByCap +")
+            || $0.contains("+ duplicatedBlocksDroppedByCap") }
+    }
+
+    private static func nakedClaimHits(_ lines: [String]) -> [String] {
+        let qualified = ["去重后", "明细已全部列出", "总处数本次未统计"]
+        return lines.filter { $0.contains("处重复块") }
+            .filter { line in !qualified.contains { line.contains($0) } }
+    }
+
+    private static func sourceLines() throws -> [(path: String, line: Int, text: String)] {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let sources = packageRoot.appendingPathComponent("Sources")
-        let files = (FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)?
+        let files = (FileManager.default.enumerator(
+            at: packageRoot.appendingPathComponent("Sources"), includingPropertiesForKeys: nil)?
             .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" } ?? [])
         XCTAssertFalse(files.isEmpty, "扫描面为空 ⇒ 这条断言不作数")
-        var offenders: [String] = []
+        var out: [(path: String, line: Int, text: String)] = []
         for url in files {
             guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
-            for line in text.split(separator: "\n") {
-                let l = line.trimmingCharacters(in: .whitespaces)
-                if l.hasPrefix("//") { continue }
-                if l.contains("duplicatedBlocks.count +") || l.contains("duplicatedBlocksDroppedByCap +")
-                    || l.contains("+ duplicatedBlocksDroppedByCap") {
-                    offenders.append("\(url.lastPathComponent): \(l)")
-                }
+            for (index, raw) in text.split(separator: "\n").enumerated() {
+                let trimmed = raw.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("//") { continue }
+                out.append((url.path, index + 1, trimmed))
             }
         }
-        XCTAssertEqual(offenders, [], "出现把榜内与榜外相加当总数的写法（等式天然不平）：\n"
-            + offenders.joined(separator: "\n"))
+        return out
     }
 }

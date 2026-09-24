@@ -16,7 +16,13 @@ struct PerformanceMatcherEditor: View {
     var canAdd: Bool { !trimmedPattern.isEmpty && !trimmedTitle.isEmpty }
 
     var body: some View {
-        GlassSection("匹配模式", subtitle: "新增分组规则（只读观测，不干预任何进程）", icon: .add) {
+        // **留短藏长**（盘点表 F 组末两条）：卡头副标题只留"这张卡做什么"，
+        // 括注里那句「只读观测，不干预任何进程」进 ⓘ —— 同一句承诺在本卡正文的
+        // `NoteLine` 里一直常驻，所以藏的是**重复的那一份**，不是唯一的出口。
+        GlassSection("匹配模式",
+                     subtitle: "新增分组规则",
+                     subtitleHelp: "新增分组规则（只读观测，不干预任何进程）",
+                     icon: .add) {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 HStack(spacing: Theme.Spacing.sm) {
                     TextField("匹配模式，例如 java", text: $pattern)

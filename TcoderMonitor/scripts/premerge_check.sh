@@ -117,6 +117,35 @@ if [ "$fail" = "0" ] && [ "$SKIP" = "0" ]; then
   fi
 fi
 
+if [ "$fail" = "0" ] && [ "$SKIP" = "0" ]; then
+  # 3) 尺子自检（`perf_harness.sh selfcheck`）：Swift 那 1600+ 例量的是**产品**，
+  #    这一档量的是**量产品的那把尺子**（项数以 selfcheck 自己的汇总行为准，别在这里抄数：
+  #    含 markdown 表格断行/列数、闸门形状、样本资格、录制兜底……）。它今天必须进门禁，
+  #    理由是同一天撞上的两件事：
+  #    　① 16:45 我自己在 spec 的一张表里写进一个裸 `|`（单元格里那条 `--filter A|B`），
+  #      把那行撑成 5 格。item 30 判得出的东西，**不在门禁里就等于没人判**——
+  #      那条断行在 main 上活了三个小时无人可见。
+  #    　② 反过来，单独执行 `scripts/perf_selfcheck.sh` 是**零输出 rc=0**（它要由宿主
+  #      source 才有的那些量）。只看退出码 = 把"没跑"读成"跑了且绿"。
+  #    所以这一档既要用能跑的方式跑，也要**正向断言**那行「N 项通过，M 项失败」。
+  SELF_LOG="/tmp/premerge-${SLUG}-selfcheck.log"
+  { bash scripts/perf_harness.sh selfcheck; echo "SELFCHECK-RC=$?"; } > "$SELF_LOG" 2>&1
+  SELF_LINE=$(grep -aE 'selfcheck：[0-9]+ 项通过' "$SELF_LOG" | tail -1)
+  if [ -z "$SELF_LINE" ]; then
+    echo "  ❌ 尺子自检没有出声（取不到「N 项通过」那行＝根本没跑），禁止合并"
+    tail -5 "$SELF_LOG"
+    fail=1
+  else
+    SELF_BAD=$(printf '%s' "$SELF_LINE" | sed -nE 's/.*项通过，([0-9]+) 项失败.*/\1/p')
+    echo "  $SELF_LINE"
+    if [ "$SELF_BAD" != "0" ]; then
+      echo "  ❌ 尺子自检 ${SELF_BAD:-?} 项失败，禁止合并（修尺子，别改读数）"
+      grep -a '^  ✗' "$SELF_LOG" | head -10
+      fail=1
+    fi
+  fi
+fi
+
 if [ -n "$CREATED" ]; then
   git worktree remove --force "$CREATED" 2>/dev/null || rm -rf "$CREATED"
 fi

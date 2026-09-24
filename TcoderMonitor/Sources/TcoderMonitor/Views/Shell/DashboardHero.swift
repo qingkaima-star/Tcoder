@@ -58,7 +58,7 @@ struct HealthRing: View {
     static func accessibilityText(score: Int?, grade: HealthGrade?, trend: Int?) -> String {
         guard let score else { return scoreText(for: nil) }
         var parts = [localizedFormat("%1$@ 分", scoreText(for: score))]
-        if let grade { parts.append(localizedFormat("%1$@ 级", grade.rawValue)) }
+        if let grade { parts.append(localizedFormat("%1$@ 级", localizedCopy(grade.rawValue))) }
         if let trend, trend != 0 { parts.append(localizedFormat("较上次 %@", NumberFormat.signed(trend))) }
         return parts.joined(separator: "，")
     }
@@ -148,10 +148,14 @@ struct HealthHeroCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
+            // **留短藏长**（盘点表 A 组 `HealthHeroCard.narrative`）：屏上留那句可做的动作，
+            // "扫哪四路、扫完这里出现什么"整句进 ⓘ。标题那一格 `ShellCopy.notAnalyzed` 一直常驻，
+            // 所以"没查过 ≠ 查了是空的"这层读法没有被搬走（它也不许搬，见 ShellTooltipTests ③）。
             EmptyStateView(
                 icon: IconName.emptyUnknown.rawValue,
                 title: ShellCopy.notAnalyzed(.thisProject),
-                message: "点击右上角「重新分析」，扫描代码规模、Git 历史、日志与依赖之后这里会出现评分与结论。"
+                message: "点击右上角「重新分析」",
+                help: "点击右上角「重新分析」，扫描代码规模、Git 历史、日志与依赖之后这里会出现评分与结论。"
             )
         }
     }
@@ -184,6 +188,10 @@ struct HealthHeroCard: View {
             Text(text)
                 .font(Theme.Typo.narrative.font)
                 .lineLimit(1)
+                // 中文态一句约 440pt，1080 那一档放得下；英文态同一句要 614pt、只给 540pt
+                // ⇒ 被裁掉的恰好是"署名按工作流计，不等同于一个人头"这半个括号（英文窄态普查抓到）。
+                // 与 `SeriesLegend.basis` 同一条修法：定宽行宁可截，但**截了必须有去处**。
+                .help(text)
         }
     }
 }

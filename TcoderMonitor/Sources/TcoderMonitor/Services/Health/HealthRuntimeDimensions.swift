@@ -47,7 +47,7 @@ extension WeightedHealthScorer {
         if thin { recommendations.append(StabilityAdvice.thinEvidenceAdvice(logs)) }
         // 「证据不足」那几句走 recommendations：detail 有 60 字硬顶（评分卡那一行），
         // 而缺什么证据恰恰是最不能因为放不下就不说的一段。
-        recommendations.append(contentsOf: stabilityEvidenceGaps(logs).map { "证据不足：\($0)" })
+            recommendations.append(contentsOf: stabilityEvidenceGaps(logs).map { localizedFormat("证据不足：%1$@", $0) })
         return DimensionOutcome(curve: curve,
                                 strengths: stabilityStrengths(logs, perKiloLogLines),
                                 issues: stabilityIssues(logs),
@@ -62,15 +62,15 @@ extension WeightedHealthScorer {
     private func stabilityEvidenceGaps(_ logs: LogSummary) -> [String] {
         var gaps: [String] = []
         // 运行时长 / 请求量：本 App 从未采集，任何"稳定性"结论都只是日志窗口内的读数。
-        gaps.append("未采集运行时长与请求量，分母只是已扫描的日志行")
+        gaps.append(localizedCopy("未采集运行时长与请求量，分母只是已扫描的日志行"))
         // 份数只从 `StabilityZeroDenominatorShape` 那一个口子取（RD-49：不留第二把尺子）。
         // ⚠ 这一格数的是**读成功却没产出事件证据**的那几份（内容损坏 / 无可用事件时间 / 只有文件名像）；
         // "读不动"的那些走 `readFailedFiles` 另一本账，由第③态单独说一句 ——
         // 原先这句把"读不动"也算进来，等于让一本账认领另一本账的数。
         let crashChannelFiles = StabilityZeroDenominatorShape.readableCrashReportCount(logs)
         if crashChannelFiles > logs.crashCount {
-            gaps.append("另有 \(crashChannelFiles - logs.crashCount) 份崩溃通道文件未产出可用事件证据"
-                + "（内容损坏 / 无可用事件时间 / 只有文件名像），未计入崩溃数")
+        gaps.append(localizedFormat("另有 %1$@ 份崩溃通道文件未产出可用事件证据（内容损坏 / 无可用事件时间 / 只有文件名像），未计入崩溃数",
+                                      HealthCurves.whole(crashChannelFiles - logs.crashCount)))
         }
         return gaps
     }
@@ -85,34 +85,36 @@ extension WeightedHealthScorer {
         // 读者会当成一份运行期健康证明（而运行时长与请求量我们根本没采）。
         guard StabilityEvidence.isThin(logs) == false else { return [] }
         guard logs.crashCount == 0, perKiloLogLines < 0.5 else { return [] }
-        return ["已扫描 \(NumberFormat.grouped(logs.totalLinesScanned)) 行日志，窗口内未见确认崩溃"
-            + "（不等于运行期无崩溃：未采运行时长与请求量）"]
+        return [localizedFormat("已扫描 %1$@ 行日志，窗口内未见确认崩溃（不等于运行期无崩溃：未采运行时长与请求量）",
+                                NumberFormat.grouped(logs.totalLinesScanned))]
     }
 
     private func stabilityIssues(_ logs: LogSummary) -> [String] {
         guard let worst = logs.topErrors.first, worst.count >= 10 else { return [] }
-        return ["\(worst.displayMessage)出现 \(worst.count) 次（最近 \(worst.lastSeenDescription)）"]
+        return [localizedFormat("%1$@出现 %2$@ 次（最近 %3$@）", worst.displayMessage,
+                                HealthCurves.whole(worst.count), worst.lastSeenDescription)]
     }
 
     private func stabilityAdvice(_ logs: LogSummary) -> [String] {
         guard let worst = logs.topErrors.first, worst.count >= 10 else { return [] }
-        return ["优先修复 Top Errors 首位，它通常掩盖了下游连锁异常"]
+        return [localizedCopy("优先修复 Top Errors 首位，它通常掩盖了下游连锁异常")]
     }
 
     private enum StabilityAdvice {
         /// 第①态（真的什么都没有）。这一句**一个字都不许改**：旧报告与三条现存用例都靠它，
         /// 而它只有在"确实一份崩溃证据都没有"的时候才是真话（RD-49 的病根就是说错了对象）。
-        static let missingLogAdvice = "没有可扫描的日志，运行稳定性不参与本次评分；"
-            + "把日志文件放进项目目录或 ~/Library/Logs，或在「错误日志」页点「附加日志」，这个维度才会出现。"
+        static let missingLogAdvice = localizedCopy(
+            "没有可扫描的日志，运行稳定性不参与本次评分；把日志文件放进项目目录或 ~/Library/Logs，或在「错误日志」页点「附加日志」，这个维度才会出现。")
 
         /// 第②态：有崩溃证据、零真日志行 ⇒ 分子有数、分母无定义。
         /// 崩溃一次都不许被抹掉（RD-49 后果 2），所以这份证据必须点名；
         /// 但**分子侧一行不许动** —— 这里只是把已经量到的数说出来，不折算成密度。
         static func crashesWithoutLogLinesAdvice(crashes: Int, reports: Int) -> String {
-            "读到 \(crashes) 次确认崩溃"
-                + (reports > 0 ? "（\(reports) 份崩溃报告）" : "（崩溃通道零份，来自日志行本身）")
-                + "，但零真日志行 ⇒ 错误密度算不出分母，本维度不参与本次评分；"
-                + "崩溃明细见「错误日志」页。"
+            localizedFormat("读到 %1$@ 次确认崩溃%2$@，但零真日志行 ⇒ 错误密度算不出分母，本维度不参与本次评分；崩溃明细见「错误日志」页。",
+                            HealthCurves.whole(crashes),
+                            reports > 0
+                                ? localizedFormat("（%1$@ 份崩溃报告）", HealthCurves.whole(reports))
+                                : localizedCopy("（崩溃通道零份，来自日志行本身）"))
         }
 
         /// 第③态：崩溃报告读不动 ⇒ 证据**不确定**。
@@ -121,24 +123,24 @@ extension WeightedHealthScorer {
         /// 逐份存在 `ScannedLogFile.readFailure` 里）；"内容损坏 / 只有文件名像"是
         /// **读成功但没产出事件证据**的那些，走 `stabilityEvidenceGaps` 另一句，两本账不许互串。
         static func unreadableCrashAdvice(reports: Int) -> String {
-            "有 \(reports) 份崩溃报告没能读出来（权限不足 / 文件已消失 / 读取失败），"
-                + "崩溃证据不确定：本维度不参与本次评分，也不得读成「没有崩溃」。"
+            localizedFormat("有 %1$@ 份崩溃报告没能读出来（权限不足 / 文件已消失 / 读取失败），崩溃证据不确定：本维度不参与本次评分，也不得读成「没有崩溃」。",
+                            HealthCurves.whole(reports))
         }
 
         /// 第②态里"另有读不动的那些"的补句 —— 与 `stabilityEvidenceGaps` 同一件事，
         /// 但那一格只在**参与计分**时才出声，这里补上缺席时的同一句。
         static func unreadableExtraAdvice(reports: Int) -> String {
-            "另有 \(reports) 份崩溃报告没能读出来，未计入上面的份数。"
+        return localizedFormat("另有 %1$@ 份崩溃报告没能读出来，未计入上面的份数。", HealthCurves.whole(reports))
         }
 
         /// RD-46：证据太薄的降档说明（与 detail 里那句同源，两个出口都得看得见）。
         /// ⚠ 这一支**不是缺席**（缺席是三态那一支的事），所以这句里不许出现"不参与计分/不按 0 计入"
         /// 那套只属于缺席的说法 —— 它说的是：分数还在、但只到普通水位，且明写"未判定"。
         static func thinEvidenceAdvice(_ logs: LogSummary) -> String {
-            "只读到 \(NumberFormat.grouped(logs.totalLinesScanned)) 行真日志，低于评这一维所需的 "
-                + "\(NumberFormat.grouped(StabilityEvidence.minimumLogLines)) 行下限 ⇒ 证据太薄，"
-                + "本维度按 \(GitCadenceEvidence.fixed(StabilityEvidence.thinEvidenceScoreCeiling)) 分封顶、"
-                + "标「证据太薄·未判定」（薄不等于稳，也不等于运行不稳）；跑够一次真实运行后重扫即可解锁。"
+        return localizedFormat("只读到 %1$@ 行真日志，低于评这一维所需的 %2$@ 行下限 ⇒ 证据太薄，本维度按 %3$@ 分封顶、标「证据太薄·未判定」（薄不等于稳，也不等于运行不稳）；跑够一次真实运行后重扫即可解锁。",
+                                NumberFormat.grouped(logs.totalLinesScanned),
+                                NumberFormat.grouped(StabilityEvidence.minimumLogLines),
+                                GitCadenceEvidence.fixed(StabilityEvidence.thinEvidenceScoreCeiling))
         }
 
         /// 零分母那一支的**唯一**出口：三态各一句，都不给分。
@@ -167,10 +169,10 @@ extension WeightedHealthScorer {
         case .degraded:
             // 原因逐条点名（旧文案写死"部分包查询失败"，可"版本没解析出来"和"生态不支持"
             // 根本不该被说成"查询失败" —— 那是另一种口径混用）。
-            let reasons = VulnerabilityEvidence.degradationReasons(deps).joined(separator: "、")
+            let reasons = VulnerabilityEvidence.degradationReasons(deps).joined(separator: localizedCopy("、"))
             return DimensionOutcome(curve: nil,
-                                    recommendations: ["漏洞核对未完成（\(reasons.isEmpty ? "存在未覆盖项" : reasons)），"
-                                        + "依赖健康本维度暂不计分；补齐锁文件或重跑联网核对后再计。"])
+                recommendations: [localizedFormat("漏洞核对未完成（%1$@），依赖健康本维度暂不计分；补齐锁文件或重跑联网核对后再计。",
+                                                   reasons.isEmpty ? localizedCopy("存在未覆盖项") : reasons)])
         case .verified:
             let curve = HealthCurves.dependencyHealth(vulnerableCount: deps.vulnerableCount,
                                                       outdatedCount: deps.outdatedCount,
@@ -185,8 +187,9 @@ extension WeightedHealthScorer {
     private func uncheckedAdvice(_ deps: DependencyReport) -> String {
         let uncovered = deps.uncoveredEcosystemNames
         return uncovered.isEmpty
-            ? "未做在线漏洞核对，依赖健康本维度暂不计分；开启「联网核对」后重扫才有结论。"
-            : "未做在线漏洞核对，依赖健康本维度暂不计分（内置规则未覆盖：\(uncovered.joined(separator: "、"))）。"
+            ? localizedCopy("未做在线漏洞核对，依赖健康本维度暂不计分；开启「联网核对」后重扫才有结论。")
+            : localizedFormat("未做在线漏洞核对，依赖健康本维度暂不计分（内置规则未覆盖：%1$@）。",
+                              uncovered.joined(separator: localizedCopy("、")))
     }
 
     private func dependencyStrengths(_ deps: DependencyReport) -> [String] {
@@ -196,17 +199,21 @@ extension WeightedHealthScorer {
         guard deps.vulnerableCount == 0 else { return [] }
         let ledger = DependencyEvidence.ledger(for: deps)
         let source = DependencyEvidence.sourcesPhrase(ledger)
-        return ["已完成漏洞核对，\(ledger.vulnerabilityCheckedCount)/\(ledger.totalCount) 个依赖零命中"
-            + (source.isEmpty ? "" : "（数据源：\(source)）")]
+        return [localizedFormat("已完成漏洞核对，%1$@/%2$@ 个依赖零命中%3$@",
+                                HealthCurves.whole(ledger.vulnerabilityCheckedCount),
+                                HealthCurves.whole(ledger.totalCount),
+                                source.isEmpty ? "" : localizedFormat("（数据源：%1$@）", source))]
     }
 
     private func dependencyIssues(_ deps: DependencyReport) -> [String] {
         guard deps.vulnerableCount > 0 else { return [] }
-        return ["\(deps.vulnerableCount) 个已知漏洞，\(deps.outdatedCount) 个版本过旧"]
+        return [localizedFormat("%1$@ 个已知漏洞，%2$@ 个版本过旧",
+                                HealthCurves.whole(deps.vulnerableCount),
+                                HealthCurves.whole(deps.outdatedCount))]
     }
 
     private func dependencyAdvice(_ deps: DependencyReport) -> [String] {
-        deps.vulnerableCount > 0 ? ["先升级带严重漏洞的依赖，再统一处理过期版本"] : []
+        deps.vulnerableCount > 0 ? [localizedCopy("先升级带严重漏洞的依赖，再统一处理过期版本")] : []
     }
 
     // MARK: - 测试覆盖
@@ -219,9 +226,9 @@ extension WeightedHealthScorer {
                                                           detail: testingDetail(coverage, line),
                                                           risk: coverage.riskLevel))
         if line >= 75 {
-            outcome.strengths.append(String(format: "测试覆盖率 %.1f%%", line))
+            outcome.strengths.append(localizedFormat("测试覆盖率 %1$@", HealthCurves.percent(line / 100)))
         } else {
-            outcome.recommendations.append(String(format: "将行覆盖率从 %.1f%% 提升到 75%% 以上", line))
+            outcome.recommendations.append(localizedFormat("将行覆盖率从 %1$@ 提升到 75%% 以上", HealthCurves.percent(line / 100)))
         }
         return outcome
     }
@@ -238,8 +245,9 @@ extension WeightedHealthScorer {
     }
 
     private func testingDetail(_ coverage: CoverageMetrics, _ line: Double) -> String {
-        String(format: "行覆盖 %.1f%%，分支覆盖 %@", line,
-               coverage.overallBranchPercent.map { String(format: "%.1f%%", $0) } ?? "无数据")
+        localizedFormat("行覆盖 %1$@，分支覆盖 %2$@", HealthCurves.percent(line / 100),
+                         coverage.overallBranchPercent.map { HealthCurves.percent($0 / 100) }
+                             ?? localizedCopy("无数据"))
     }
 }
 
@@ -293,13 +301,13 @@ enum StabilityZeroDenominatorShape: Equatable {
     static func absenceReason(logs: LogSummary) -> String {
         switch assess(logs) {
         case .nothingAtAll:
-            return "列到 \(NumberFormat.grouped(logs.scannedFiles.count)) 个日志文件，"
-                + "但一行都没读出来（空文件 / 编码不认识 / 读取失败），本维度不参与计分。"
+        return localizedFormat("列到 %1$@ 个日志文件，但一行都没读出来（空文件 / 编码不认识 / 读取失败），本维度不参与计分。",
+                                NumberFormat.grouped(logs.scannedFiles.count))
         case let .crashesWithoutLogLines(crashes, reports):
-            return "崩溃通道读到 \(reports) 份报告、确认 \(crashes) 次崩溃，但一行真日志都没有 ⇒ "
-                + "错误密度没有分母，本维度不参与计分（这也不等于「零错误」）。"
+        return localizedFormat("崩溃通道读到 %1$@ 份报告、确认 %2$@ 次崩溃，但一行真日志都没有 ⇒ 错误密度没有分母，本维度不参与计分（这也不等于「零错误」）。",
+                                HealthCurves.whole(reports), HealthCurves.whole(crashes))
         case let .unreadableCrashReports(reports):
-            return "\(reports) 份崩溃报告没能读出来，崩溃证据不确定，本维度不参与计分。"
+        return localizedFormat("%1$@ 份崩溃报告没能读出来，崩溃证据不确定，本维度不参与计分。", HealthCurves.whole(reports))
         }
     }
 }

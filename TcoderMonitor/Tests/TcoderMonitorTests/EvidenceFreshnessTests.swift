@@ -5,7 +5,10 @@ import XCTest
 ///
 /// 读 `docs/界面-乱的清单.md` 里那张「每页最近一次实拍在哪个头」的表，
 /// 对每一行把它自己写出的那条 `git log <头>..HEAD -- <依赖面>` 真的跑一遍，
-/// **非空即判红**：那一页的实拍已经过期，屏上可能有没人看过的变化。
+/// **非空即过期**：那一页的实拍已经过期，屏上可能有没人看过的变化。
+/// 过期之后**必须出声**（RD-57）：要么重拍那一页并更新表里的头，
+/// 要么进同一份文档里的「### 待重拍积压」逐条挂账（页 / 停在 / 拧过期的提交 / 挂账人 / UTC 分钟，24 小时宽限）。
+/// 判红的仍然是"屏上变了却谁也没说"这一件——只是不再拿全机唯一那格 App 窗口去卡所有人。
 ///
 /// 为什么必须有它（而不是把表写漂亮就完事）：这张表第一次写出来就写错了两行 ——
 /// 初稿把 Git 洞察 / 贡献者 / 错误日志 / 依赖分析 一起记在 `fb94e88` 那批上，
@@ -124,6 +127,36 @@ final class EvidenceFreshnessTests: XCTestCase {
         return ninePages.filter { !covered.contains($0) }
     }
 
+    /// 那一页的依赖面从实拍那个头到 `HEAD` **净变了哪些文件**。
+    ///
+    /// 为什么判过期要用净差异、而不是 `runGitLog` 的提交数（需求方 2026-09-23 13:24 授权的窄修）：
+    /// 本仓规约是"每人一树、落地前必须先并 main"，而 `git log <头>..HEAD -- 路径` 数的是**历史形状**。
+    /// 分支并 main 时那些内容会在合并里被重新落地一遍 ⇒ 提交数非空、内容却一字不差。
+    /// 实测（这棵树的十个行）：十条全被判过期，其中**六条净差异为 0**
+    /// （性能监控 / Git 洞察 / 贡献者 / 错误日志 / 依赖分析 / 全九页外壳）——
+    /// 那六条在 RD-57 之后不再是"当场红"，而会变成**逼人流假欠账**的假条目：
+    /// 挂了账不等于看过了，往账上写没发生过的变化是把这条守卫变成遮羞布。
+    /// ⇒ 净差异只用来决定"过不过期"；**挂账对不上号仍然照 `runGitLog` 的候选提交判**（见下）。
+    static func netChanged(head: String, paths: [String],
+                           root: URL = EvidenceFreshnessTests.repoRoot) throws -> [String] {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["diff", "--name-only", head, "HEAD", "--"] + paths
+        process.currentDirectoryURL = root
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        process.waitUntilExit()
+        let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        // 与 `runGitLog` 同一条保守规则：git 报错一律算"变了"，宁可误红不可漏红。
+        guard process.terminationStatus == 0 else {
+            let firstLine = text.split(separator: "\n").first.map(String.init) ?? "无输出"
+            return ["git diff 失败（exit " + String(process.terminationStatus) + "）：" + firstLine]
+        }
+        return text.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+    }
+
     // MARK: - 真判据
 
     static func runGitLog(head: String, paths: [String]) throws -> [String] {
@@ -158,18 +191,37 @@ final class EvidenceFreshnessTests: XCTestCase {
         XCTAssertTrue(missing.isEmpty,
                       "九页名册里这些页在表中没有行（新增页面忘了登记？）：\(missing)")
 
-        var expired: [String] = []
+        // RD-57：过期不再"立刻判红"，而是**必须出声**——过期页要么重拍、要么进「待重拍积压」逐条挂账。
+        // 依赖面算过期的一条没放宽，改的只是"过期之后谁都能被这张表卡住"那件事。
+        var stalePages: [(pages: [String], head: String, candidates: [String])] = []
         for row in found {
-            let touched = try Self.runGitLog(head: row.head, paths: row.paths)
-            if !touched.isEmpty {
-                expired.append("\(row.pages.joined(separator: "/")) 停在 \(row.head)，"
-                             + "此后动了 \(touched.count) 个文件：\(touched.prefix(3).joined(separator: " "))")
-            }
+            // 过期 = **内容与实拍端不同**（净差异）。`candidates` 仍取 `git log` 的提交：
+            // 「待重拍积压」第三格要指到真把那一页改了的提交，净差异只给得出文件名，给不出 sha。
+            let changed = try Self.netChanged(head: row.head, paths: row.paths)
+            guard !changed.isEmpty else { continue }
+            stalePages.append((pages: row.pages, head: row.head,
+                               candidates: try Self.runGitLog(head: row.head, paths: row.paths)))
         }
-        XCTAssertTrue(expired.isEmpty,
-                      "这些页的实拍已经过期，屏上可能有没人看过的变化 —— 重拍那一页并更新表里的头：\n"
-                    + expired.joined(separator: "\n"))
-        print("【实拍新鲜度】表里 \(found.count) 行、覆盖 \(Set(found.flatMap(\.pages)).count) 页 → 过期 \(expired.count) 行")
+        // 四桶判定与汇总出声搬进 `judgeBacklog`（同一个文件里那个测试方法越过 50 行线，
+        // 而本文件又撞上 400 行口径——按「拆开它、不抬线」处理，一条断言都没少）。
+        Self.judgeBacklog(stale: stalePages, markdown: markdown, now: Date(), rows: found)
+    }
+
+    /// 净差异口径的**真 git 夹具**，两个方向都要钉住（需求方授权的窄修，见 `netChanged` 上方注释）：
+    /// ① 历史动过、内容与实拍端一字不差 ⇒ **不判**过期（否则每条并过 main 的流都被逼去挂假欠账）；
+    /// ② 内容真的变了 ⇒ 判过期（这条窄修不许把"看过的屏"变成"不必再看"）。
+    func test_stalenessFollowsContentNotHistory() throws {
+        let fx = try FixtureRepo(name: "tcoder-evidence-fx-")
+        addTeardownBlock { fx.cleanup() }
+        let shot = try fx.buildHistoryThatLooksTouchedButIsNot()
+        XCTAssertFalse(try fx.git(["log", "--format=%h", shot + "..HEAD", "--", "a.txt"]).isEmpty,
+                       "夹具没造出「历史动过、净内容未变」的形状 ⇒ 这条元测试在空转")
+        XCTAssertTrue(try Self.netChanged(head: shot, paths: ["a.txt"], root: fx.root).isEmpty,
+                      "内容一字不差却被判成变了 ⇒ 会把每条并过 main 的流都逼成假欠账")
+        try fx.change("a.txt", "9")
+        try fx.git(["commit", "-qam", "Z 这次真的改了内容"])       // 不 commit 就进不了 `diff <头> HEAD`
+        XCTAssertEqual(try Self.netChanged(head: shot, paths: ["a.txt"], root: fx.root), ["a.txt"],
+                       "内容真的变了却不判过期 ⇒ 这条判据被放宽成了没判据")
     }
 
     /// 表里每行说的"实拍过"到底成不成立：四格图都在、且每格的 `PROVENANCE` 里
@@ -215,24 +267,37 @@ final class EvidenceFreshnessTests: XCTestCase {
         return gaps
     }
 
+    /// 只挑出"这一批产物**在本树里**"的行。
+    ///
+    /// 为什么要这一道（**RD-58，总工改**）：`.scratch/` 是 gitignore 的 ⇒ 取证产物只存在于
+    /// 拍图的那一棵树。上一版 RD-55 的口径是"本树一份 `evidence-*` 都没有才跳"，
+    /// 那是**全有或全无**：一条流按需求方要的样子**只补拍变化的那一页**，
+    /// 本树就从"整个跳过"翻成"整个都要查"，于是**表里其余每一行都变成红**，
+    /// 而红的原因与当次改动无关 —— 既不证明证据存在，也不证明它不存在。
+    /// 现在的口径是**逐行按批次判**：批次在本树 ⇒ 那一行四格齐全、rev 对得上，缺一样照旧红；
+    /// 批次不在本树 ⇒ 那行不查，但**行名要打印出来**（不许把"没查"读成"查过没事"）。
+    static func rowsWithEvidence(_ rows: [Row], batchPresent: (String) -> Bool) -> (checked: [Row], absent: [String]) {
+        let hit = rows.filter { batchPresent($0.batch) }
+        return (hit, rows.filter { !batchPresent($0.batch) }.map(\.batch))
+    }
+
     func test_everyRowActuallyHasAllFourShotsAtTheHeadItClaims() throws {
         let url = Self.repoRoot.appendingPathComponent(Self.catalogPath)
         let rows = Self.rows(in: try String(contentsOf: url, encoding: .utf8))
         XCTAssertFalse(rows.isEmpty, "表读不出行 ⇒ 下面这条会空转")
         let evidenceRoot = Self.repoRoot.appendingPathComponent(".scratch")
-        // RD-55（总工改）：`.scratch/` 是 gitignore 的 ⇒ 取证产物只存在于**拍图的那棵树**。
-        // 这一格的职责是「账里声称有证据，证据就得齐、rev 就得对」，不是「每棵树都得自己拍过一遍」；
-        // 后者让任何非拍图树（别人的工作树、CI、另一台机器）门禁必红，而红的原因与当次改动无关 ——
-        // 那既不证明证据存在，也不证明它不存在，只是把一条好守卫变成落地路障。
-        // 所以：**一棵树里一份 evidence-* 都没有 ⇒ 显式跳过并点名路径**；
-        // 目录只要在，就照原样逐格钉（少一张图、rev 不符、缺 PROVENANCE 都仍然红）。
-        let hasAnyEvidence = ((try? FileManager.default.contentsOfDirectory(atPath: evidenceRoot.path)) ?? [])
-            .contains { $0.hasPrefix("evidence-") }
-        if hasAnyEvidence == false {
-            throw XCTSkip("这棵树没有取证产物（\(evidenceRoot.path) 下无 evidence-*）"
+        let scoped = Self.rowsWithEvidence(rows) { batch in
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: evidenceRoot.appendingPathComponent(batch).path,
+                                                 isDirectory: &isDir) else { return false }
+            return isDir.boolValue
+        }
+        XCTAssertFalse(rows.allSatisfy { $0.batch.isEmpty }, "表里连批次名都没解析出来 ⇒ 这条在空转")
+        if scoped.checked.isEmpty {
+            throw XCTSkip("这棵树没有表里引用的任何一批产物（\(evidenceRoot.path)；表里 \(rows.count) 行的批次都不在）"
                 + " ⇒ 本条只钉「有产物就要齐」，产物生成在哪棵树不归它管")
         }
-        let gaps = Self.evidenceGaps(in: rows, root: evidenceRoot,
+        let gaps = Self.evidenceGaps(in: scoped.checked, root: evidenceRoot,
                                      exists: { FileManager.default.fileExists(atPath: $0.path) },
                                      provenanceRev: { file in
             guard let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
@@ -244,9 +309,10 @@ final class EvidenceFreshnessTests: XCTestCase {
         XCTAssertTrue(gaps.isEmpty,
                       "逐页账里有 \(gaps.count) 格证据不成立（口径是深浅 × 顶尾四格齐全，且 rev 对得上）：\n"
                         + gaps.map { "\($0.page) @ \($0.batch)：\($0.what)" }.joined(separator: "\n"))
-        let shots = rows.reduce(0) { $0 + Self.expectedShots(for: $1).count } * Self.evidenceModes.count
-        print("【实拍格数】表里 \(rows.count) 行 → 实际查 \(shots) 格，不成立的格 \(gaps.count) 处")
-    }
+        let shots = scoped.checked.reduce(0) { $0 + Self.expectedShots(for: $1).count } * Self.evidenceModes.count
+        print("【实拍格数】表里 \(rows.count) 行 · 本树有产物 \(scoped.checked.count) 行 → 实查 \(shots) 格，"
+            + "不成立的格 \(gaps.count) 处"
+            + (scoped.absent.isEmpty ? "" : "；不在本树的批次 \(Set(scoped.absent).count) 个：\(Set(scoped.absent).sorted().joined(separator: " "))"))    }
 
     // MARK: - 元测试：两个方向都要红过一次
 
@@ -259,6 +325,26 @@ final class EvidenceFreshnessTests: XCTestCase {
         """
 
     /// 解析器自己：行、页名拆分、以及**省略号写法整行不作数**。
+    /// RD-58 的元测试：逐行按批次判这一道**两个方向都要红过一次**。
+    /// 只喂合成输入，不碰盘上真产物 —— 这条判据要的正是"批次在不在"这一件事，与图本身无关。
+    func test_rowsWithEvidenceChecksOnlyRowsWhoseBatchIsPresent() throws {
+        let rows = Self.rows(in: Self.syntheticTable)
+        XCTAssertEqual(rows.count, 2, "夹具自检：合成表该读出两行")
+        let firstOnly = Self.rowsWithEvidence(rows) { $0 == "evidence-abc1234-x" }
+        XCTAssertEqual(firstOnly.checked.map(\.batch), ["evidence-abc1234-x"],
+                       "只有一批产物时，另那行不许被拖成红（RD-58 修的就是这个）")
+        XCTAssertEqual(firstOnly.absent, ["evidence-def5678-y"], "没查的行必须被点名，不许静默")
+
+        let nonePresent = Self.rowsWithEvidence(rows) { _ in false }
+        XCTAssertTrue(nonePresent.checked.isEmpty, "一批都不在还去查，等于把「没看见」当成「通过」")
+        XCTAssertEqual(Set(nonePresent.absent), Set(["evidence-abc1234-x", "evidence-def5678-y"]))
+
+        // 反向：两批都在 ⇒ 两行都要查（这条判据不许被"按批次跳过"变成永真绿）。
+        let allPresent = Self.rowsWithEvidence(rows) { _ in true }
+        XCTAssertEqual(allPresent.checked.count, 2, "批次齐的时候它必须逐行钉，一格都不能少查")
+        XCTAssertTrue(allPresent.absent.isEmpty)
+    }
+
     func test_tableParserReadsRowsAndRefusesAbbreviatedPaths() {
         let found = Self.rows(in: Self.syntheticTable)
         XCTAssertEqual(found.count, 2, "两行都该解析出来（第二行管两页）")

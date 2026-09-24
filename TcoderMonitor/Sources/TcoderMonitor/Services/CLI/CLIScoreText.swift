@@ -37,7 +37,7 @@ enum CLIScoreText {
 
         if !report.failedSections.isEmpty {
             lines.append("失败路 \(report.failedSections.count)/\(CLIScan.sectionLabels.count)："
-                         + report.failedSections.joined(separator: "、")
+                         + report.failedSections.joined(separator: localizedListSeparator())
                          + " —— 下面的分是在这些维度缺席时算出来的")
         }
         // 「哪些没量准」必须在**分数之前**出声，与"失败路在分数之前"同一条理由。
@@ -47,6 +47,11 @@ enum CLIScoreText {
         // 只有打开界面的人才看得到，而 JSON 里有、文本读数里没有 ——
         // 看界面的人、读 CLI 的人、拿 JSON 的 AI 于是拿到三种诚实度。
         lines.append(contentsOf: precisionCaveat(report))
+        // RD-15：范围台账那两句。位置紧跟「未量准」之后、台账之前 —— 同一条理由：
+        // 先交代这份数字是在什么范围里量出来的，再说每一路做了什么，最后才给分。
+        // ⚠️ 这两句**只读 `code.scanSurface` 那族字段**，不读 `scanLimitations` 的中文句子：
+        // 落成字段就是为了让人拿到数，而不再解析散文（RD-48 同一条纪律）。
+        lines.append(contentsOf: scanSurfaceLines(report))
         // R10b 第 1 件 · 台账上屏：位置就夹在「未量准」之后、综合分之前 ——
         // 与"失败路在分数之前""未量准在分数之前"同一条理由：先说这一路到底做了什么，再给分。
         lines.append(contentsOf: AnalyzerLedgerText.section(report))
@@ -60,6 +65,10 @@ enum CLIScoreText {
         // RD-60：崩溃证据那本细账同理。位置与覆盖率那行并排（都在分数之前），
         // 理由同「失败路在分数之前」：先说清这个崩溃数是怎么来的，再给分。
         lines.append(contentsOf: crashEvidenceLines(report, windowDays: windowDays))
+        // RD-14：文件角色分档（`code.fileRoles`）在文本读数里也得有一行 ——
+        // 否则「生产码有多少行」只有打开界面或自己解析 JSON 的人才拿得到，
+        // 而这一族读数的立案理由正是"别让读数只活在句子里"。
+        lines.append(contentsOf: fileRoleLines(report))
 
         guard let health = report.health else {
             lines.append("没有评分结果：五路都没给出可评的输入。")
@@ -119,6 +128,20 @@ enum CLIScoreText {
         return ["口径：\(note)"]
     }
 
+    /// 扫描范围那两行（RD-15）：`scan` 落的 JSON 里 `code.scanSurface` 那 12 格，
+    /// 在文本读数里也得有对应的数，否则"排除了几个目录、那些有多少行、行数数没数"
+    /// 只有打开界面或解析 JSON 的人才知道。
+    ///
+    /// **复用那一个装配口** `CodeScanSurfaceReadout.accountingLines(_:)`：CLI 不另写一份中文
+    /// （与上面 `regionCaliberLines` 复用 `MixedLanguageRegionCaliber.note` 同一条纪律）。
+    /// 三态由那个装配口负责：没有台账 ⇒ 一句缺席话；什么都没排除没剪没挡 ⇒ **一行都不打**。
+    /// `code` 整路缺席时这里也**不出声** —— 那一格的事实由上面的「失败路」那一行在说，
+    /// 在这里补一句"没有范围台账"就是把别人的失败算成自己的读数。
+    static func scanSurfaceLines(_ report: ProjectReport) -> [String] {
+        guard let code = report.code else { return [] }
+        return CodeScanSurfaceReadout.accountingLines(code)
+    }
+
     /// 覆盖率那本账（RD-50）：`scan` 落的 JSON 里那六格（`truncationTotalCount` /
     /// `displayedCount` / `undisplayedCount` / `droppedByCap` / `undisplayedReports` /
     /// `unexaminedDirectories`）在文本读数里也得有一行，否则"榜内多少 / 总多少"
@@ -152,6 +175,37 @@ enum CLIScoreText {
         return [logs.crashEvidenceFootnote(windowDays: windowDays)]
     }
 
+    /// 文件角色分档那一句（RD-14 · 申请单 §2 的第三个读者：CLI 文本）。
+    ///
+    /// **只读** `CodeMetrics.fileRoles`，不在这里重跑判据 —— 判据只有
+    /// `SourceFileRoleRule.decide` 那一份，CLI 再数一遍就是第二把尺子。
+    /// 三态各自成立：
+    /// * 整枚字段缺席（旧报告 / 这一路没跑）⇒ **一行都不打**，
+    ///   不许打成「生产源码 0 个」（那会把「没量到」画成「这个仓库没有生产码」）；
+    /// * 生产码那一档缺席 ⇒ 三个槽位打「未记录」，与 `ScanProvenance.oneLineSummary`
+    ///   的缺席口径同一族。八档本应全量列出，缺档读作**没量到**而不是 0；
+    /// * `attributedFileCount` 与 `totalFiles` 不等 ⇒ 另起一句把差额说出来，
+    ///   方向不猜（少了＝有文件没归上档，多了＝有文件被记进两档），**不许静默抹平**。
+    static func fileRoleLines(_ report: ProjectReport) -> [String] {
+        guard let code = report.code, let roles = code.fileRoles else { return [] }
+        let production = roles.share(for: .production)
+        let absent = "未记录"
+        var out = [localizedFormat(fileRoleStatement,
+                                   production.map { NumberFormat.grouped($0.fileCount) } ?? absent,
+                                   production.map { NumberFormat.grouped($0.codeLines) } ?? absent,
+                                   production?.weakEvidenceFiles.map(NumberFormat.grouped) ?? absent)]
+        if let attributed = roles.attributedFileCount, attributed != code.totalFiles {
+            let gap = code.totalFiles > attributed ? code.totalFiles - attributed : attributed - code.totalFiles
+            out.append(localizedFormat(fileRoleGapStatement, NumberFormat.grouped(attributed),
+                                       NumberFormat.grouped(code.totalFiles), NumberFormat.grouped(gap)))
+        }
+        return out
+    }
+
+    /// 整句键（拆成两段再 `+` 会让双语守卫只看到前半，键就分叉了）。
+    static let fileRoleStatement = "文件角色分档：生产源码 %1$@ 个 / %2$@ 代码行 · 弱判定 %3$@ 个 · 八档全量与判据分布见 scan 落盘的 code.fileRoles.shares。"
+    static let fileRoleGapStatement = "文件角色分档对不平：八档合计 %1$@ 个文件，而本次扫到 %2$@ 个，相差 %3$@ 个 —— 两边不是同一个总体，要么有文件没归进任何一档，要么有文件被记进了两档，这份分档要按读数打折使用。"
+
     // MARK: - 首行：总体
 
     private static func openingLine(_ report: ProjectReport) -> String {
@@ -182,7 +236,7 @@ enum CLIScoreText {
             DimensionDisplay.name($0) + " — " + MissingDimensionReason.text(for: $0, report: report)
         }
         if !failed.isEmpty {
-            parts.append(failed.map(DimensionDisplay.name).joined(separator: "、")
+            parts.append(failed.map(DimensionDisplay.name).joined(separator: localizedListSeparator())
                          + " — 所属分析路本次失败，原因见上面「失败路」那一行")
         }
         return ["缺席维度 \(missing.count) 项（不参与计分、也不按 0 计入）：" + parts.joined(separator: " · ")]
@@ -235,8 +289,8 @@ enum CLIScoreText {
             return ["工程质量（代码口径） = 无（没有代码维度参与计分）"]
         }
         return ["工程质量（代码口径） = \(scope.overall)",
-                "  计入：\(scope.includedDimensions.joined(separator: "、"))",
-                "  不含：\(scope.excludedDimensions.isEmpty ? "（无）" : scope.excludedDimensions.joined(separator: "、"))",
+                "  计入：\(scope.includedDimensions.joined(separator: localizedListSeparator()))",
+                "  不含：\(scope.excludedDimensions.isEmpty ? "（无）" : scope.excludedDimensions.joined(separator: localizedListSeparator()))",
                 "  口径：\(scope.note)"]
     }
 

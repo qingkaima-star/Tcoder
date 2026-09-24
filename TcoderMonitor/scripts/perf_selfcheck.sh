@@ -5,8 +5,12 @@
 # 宿主的 $REV / $TRACE_REPORT / $PULSE_REPORT / $QUIESCE_SRC 与 quiescence_probe /
 # quietest_seconds / human_input_in_window / die 这些同进程的量。
 #
-# 本文件现在只有 `cmd_selfcheck` + 三段 `items_*`（29 项 `item` 调用按主题分三段）；
-# 29 项反例的**判据本体**按主题住在同目录三块文件里
+# 本文件现在只有 `cmd_selfcheck` + 三段 `items_*`（32 处 `item` 调用按主题分三段）；
+# 【两个分母别混】末行印的「N 项通过」数的是 `ok` 调用次数（一项可以印两行 ✓），
+# 与「`item` 调用的处数」不是同一个数（那把尺现量：`grep -cE '^[[:space:]]+item selfcheck_' scripts/perf_selfcheck.sh`）。
+# 以前这里写死过"32 处"，加一项就烂一次 —— 手写分母要么每次跟着改，要么换成能跑的命令；
+# 09-22 加第 32、33 项时就把两个数混过一回，别再留第三个腐烂的数字在这里。
+# 32 处反例的**判据本体**按主题住在同目录三块文件里
 # （`_ruler_shapes` 形状与三态话术 / `_gates` 前置与闸门 / `_eligibility` 样本资格），
 # 由下面三行 source 进来。**为什么要拆**：`SelfScanDogfoodTests` 的 ≤800 行棘轮
 # **分母含 `.sh`** 且 ceiling=0（`SourceLanguageCatalog` 认 Shell），2026-09-21 本文件
@@ -57,7 +61,7 @@ cmd_selfcheck() {
 }
 
 # -----------------------------------------------------------------------------
-# 29 项 `item` 调用按主题分成三段。
+# 32 处 `item` 调用按主题分成三段。
 #
 # **为什么还要再拆一次**（2026-09-22）：这段以前是一串直白写在 `cmd_selfcheck` 里的
 # `item …`，加到第 30 项之后函数体 53 行，被**尺子自己的**「函数 ≤50 行 / CC<16」棘轮判红。
@@ -94,6 +98,15 @@ items_gates() {          # items_gates <outdir> —— 14..19 前置与开录闸
   item selfcheck_page_list_shape "$out"    # 18) 九页页名逐条完整（带空格的那条不许被拆）
   item selfcheck_launch_ready "$out"       # 19) 首帧要剔除运行期尾巴，不许拿求和冒充
   item selfcheck_launcher_inventory "$out"  # 31) 实例清单要分得清"真起 / 会收尾 / 只是讲"（三夹具双向）
+  item selfcheck_synth_launch_pairing "$out"  # 32) 谁起实例/谁投滚动/什么时候投，三者必须配套
+  item selfcheck_py_rulers_compile "$out"       # 36) 每支 .py 尺子都要能被 compile() 读懂（ASCII 引号第 6 次）
+  item selfcheck_section_wiring "$out"      # 40) MEASURE_SECTION 必须进到启动那一行（定义了没用＝假接线）
+  item selfcheck_measure_rev_attribution "$out"  # 38) 补测改动前基线：归属照样判，只是判另一个 rev
+  item selfcheck_load_threshold_override "$out"  # 51) LOAD_MAX 这个出口必须真的改判并回显生效阈值
+  item selfcheck_inwindow_load_verdict "$out"  # 52) 窗口内负载峰值要能定合格（四形状，含"没采到要出声"）
+  item selfcheck_switch_page_names "$out"        # 48) 冷启动档的页名：含空格的要过、名册外的要当场红
+  item selfcheck_switch_attribution_and_refusal "$out"  # 49) 归属写给被测内容；宿主 die 不在场时也要拒跑
+  item selfcheck_cleanup_opt_in_state "$out"   # 37) 收尾形状三分：无条件 kill / 躲在开关后面 / 没有（三夹具双向）
 }
 
 items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 样本资格与留痕
@@ -107,13 +120,24 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_phase_blame "$out"              # 27) 迟到帧要说清该怪主线程还是合成侧，三种形状各判一次
   item selfcheck_input_rate_qualification "$out"  # 28) meta 里的输入节奏必须有读者
   item selfcheck_launcher_hygiene "$out"       # 29) 起实例的脚本必须有 trap、不许按 bundle id 广播
+  item selfcheck_p95_crosscheck_shapes "$out"  # 33) p95 那半句由两把尺子合判，七种形状各判一次
+  item selfcheck_update_table_caveat "$out"    # 34) update 表窄分布形状不许被当成主线程忙时
+  item selfcheck_frame_table_budgets "$out"  # 42) 逐帧三张表各配自己的预算（寿命不判单帧，防「100% 超预算」）
+  item selfcheck_pulse_window_scope "$out"   # 41) FramePulse 的总数是生命期累计：不许冒充本窗口（§M 因此降级未定）
+  item selfcheck_trio_agreement "$out"       # 39) ≥3 趟那半句「且取值一致」：五种形状各判一次，缺件/不足都不许报 3/3
+  item selfcheck_cadence_two_budgets "$out"    # 35) p95 判据必须两把预算并排印、且真会分歧
   item selfcheck_md_tables_unbroken "$out"     # 30) markdown 表格不许有夹在行中间的裸续行
+  item selfcheck_record_bounded "$out"          # 43) 录制要有墙钟兜底：被测进程一消失就当场判废，别永等
+  item selfcheck_covered_evidence "$out"        # 44) 三张关键表都没行数的一趟，不许被印成「✓ 第 i 趟完成」
+  item selfcheck_warmup_dimension "$out"        # 53) 第七维·预热：etime 解析要对、未预热要拒、启动档不参与（列在最后：新维度不与既有项抢顺序）
+  item selfcheck_update_caliber_one_rule "$out"  # 54) app-update 只有一个口径：sidecar 与表同 n、少计方向要拒、回落不再截 40
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：这三行必须在 cmd_selfcheck 之前，
 # 因为编排器一跑就要点到里面的函数名。
 # shellcheck source=/dev/null
-for _part in ruler_shapes gates eligibility; do
+for _part in ruler_shapes gates eligibility launchers tables; do
   source "scripts/perf_selfcheck_${_part}.sh"
 done
 unset _part
+

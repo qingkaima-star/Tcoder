@@ -18,8 +18,11 @@ AGENTS.md 第四轮红线 5（诚实性语义与阈值不许为任何指标放�
 import os
 import statistics
 
-from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, as_int, base_app_update_line, base_hang_line, base_hitch_frame_line, base_hitches_line, base_hotspot_line, base_main_thread_line, base_render_line, dedupe_pairs, disp_values, fmt_row, fps_counts, input_rate_qualification, load_measure, over_budget, percentile, read_json, regime_note, in_display_regime, phase_blame)
+from perf_trace_metrics import (BASELINE, FRAME_BUDGET_MS_DEFAULT, as_int, base_app_update_line, base_hang_line, base_hitch_frame_line, base_hitches_line, base_hotspot_line, base_main_thread_line, base_render_line, disp_values, fmt_row, fps_counts, input_rate_qualification, load_measure, over_budget, percentile, read_json, regime_note, in_display_regime, phase_blame)
+from perf_update_caliber import dedupe_pairs, update_caliber_note  # 事件口径唯一住处（三口径的历史见该文件）
 from perf_trace_xml import cross_check_durations, find_tag
+# 逐帧三张表的判据层：判据一字未动，只是搬出去还「巨大文件 400 行」口径的债。
+from perf_trace_frames import PER_TABLE_BUDGETS, frame_table_rows
 
 
 # ----------------------------------------------------------------------------
@@ -41,6 +44,7 @@ def cmd_summary(args):
     summary_render_rows(loaded, budget, seconds)
     summary_app_update_row(loaded, budget)
     summary_hitch_rows(loaded, seconds, budget)
+    summary_frame_table_rows(loaded, budget)
     summary_phase_blame_row(loaded, budget)
     summary_hang_rows(loaded, budget)
     summary_time_profile_rows(loaded)
@@ -57,6 +61,7 @@ def cmd_summary(args):
 # 只有跨节共享的两个量（`loaded` 与 `budget`）改成显式传参。
 # 对照证据：`/tmp/x5-before.txt` 与 `/tmp/x5-after.txt` 逐字相同（驱动器见笔记）。
 SUMMARY_KEYS = ("hitches", "hitches-updates", "hitches-renders", "potential-hangs",
+                "hitches-framewait", "hitches-gpu", "hitches-frame-lifetimes",
                 "device-display-info", "displayed-surfaces-per-second", "time-profile")
 
 
@@ -79,6 +84,11 @@ def period_eligibility(meta):
     ⇒ 写进 meta 不等于被看见；判资格必须把复核读回来。
     """
     period = str(meta.get("period") or "idle")
+    # 窗口结束时整机在忙 ⇒ 两档都不作数（争用会把 hitch 间隔压到每帧一次，见交接笔记 §AB）。
+    # 与「人手污染」同一条纪律：**写进 meta 的标记必须有读者**，否则等于没记。
+    if str(meta.get("contaminated_by_foreign_load") or "") == "1":
+        return False, ("窗口结束时负载显示整机在忙（meta.load1_at_end / heavy_at_end）"
+                       "⇒ 这批量的是别人占着机器时的帧，不得作为结论提交")
     # 输入来源**与投递节奏**决定这句话能不能说"真人"、能不能答"到不到 120Hz"。
     # 25 Hz 的合成滚动器（每 40 ms 一拍）比 8.333 ms 的帧预算还慢，出帧上限是仪器锁的
     # —— 今晚实测过，那两批差点被当"交互期 hitch 读数"直接引用（现已移出充数）。
@@ -98,6 +108,18 @@ def period_eligibility(meta):
     return True, "只答心跳期；**不许**拿去交 T1，要判 T1 用 interact 档重录"
 
 
+def refusal_headline():
+    """被打回那一趟，表头该喊的那一句（**不含拒因**）。
+
+    原先这里一律写「档位声明与收尾复核**互相矛盾**」。那是个**指错方向**的话术：
+    `contaminated_by_foreign_load` 那批里，声明与复核完全一致（确实是心跳期、确实没人动），
+    被打回是因为**整机在忙**。2026-09-23 20:49 三趟 idle 就是这种形状，而那句"互相矛盾"
+    把我带去查一个根本不存在的期间谎报——话术把排查方向带走，和漏印一行一样贵。
+    ⇒ 拒因只住在 `period_eligibility` 返回的那一句里（表头上一行刚印它），这一行只说"打回"。
+    """
+    return ("本趟被收尾复核打回 ⇒ 读数只当过程记录，不得作为结论提交；具体拒因就在上一行")
+
+
 def summary_header(meta):
     # 【期间必须出现在表头上】§1 基线是**心跳期**（不去碰它）量的，T1 要的是**交互期**。
     # 两者同形状、不同含义——不在表头写清楚，过两周就有人会拿心跳期的 HTR 去交交互期的结论。
@@ -106,9 +128,14 @@ def summary_header(meta):
 
     print("== Tcoder 性能读数（对照 spec §1 基线 rev %s，release 口径）==" % BASELINE["rev"])
     print("   测量期间：%s —— %s" % (period, verdict))
+    # 报的是**哪一页**必须跟着数走：今天所有交互档都没设 `MEASURE_SECTION`，
+    # 也就是量的都是「总览」——而 §Q 的 14 处里 11 处不在这页上。
+    # 不印这一行，下一个人就会拿"总览页的 render p50"去验收"日志页的排序"。
+    print("   测量页面：%s" % (meta.get("section") or "未记录（按默认页＝总览处理）"))
     if not eligible:
-        # 自我矛盾的样本要**吵**：安静地少打一行说明，就等于让它在表里蒙混过去。
-        print("   ⚠ 本目录的档位声明与收尾复核**互相矛盾**，读数只当过程记录，不得作为结论提交。")
+        # 被打回的样本要**吵**：安静地少打一行说明，就等于让它在表里蒙混过去。
+        # 但这一行**不许指名拒因**——原因只住在 `period_eligibility` 那一句里（上一行刚印过）。
+        print("   ⚠ " + refusal_headline())
     # 【对照列的身份必须自己说清楚】§1.3 已判该样本未受控，规则原先只写在
     # `perf_trace_metrics.py` 的注释里——写在注释里的规则等于没有规则：
     # 表一打出来，"§1 基线 | 本次 | 改善" 就是一份从 X 到 Y 的结论。
@@ -191,6 +218,9 @@ def summary_render_rows(loaded, budget, seconds):
 def app_update_verdict(values, budget):
     """把"哪些迟到帧是主线程算出来的、哪些不是"分开说 —— 只报 max 会把两者混成一锅。
 
+    两种形状要分开说：**少数孤例**（<20% 行超预算）才配得上「stall N 个」；
+    **整表贴着一帧**（≥20%）那是单位问题，不是卡顿清单（09-23 改判，理由见下面那段注释）。
+
     2026-09-21 的实证：交互期那份读数 `app-update` 打的是 `超 20.2 倍`（max 168.3 ms），
     而 602 个迟到帧的 update 相位 **p95 只有 3.4 ms** —— 绝大多数迟到跟主线程没关系，
     是渲染/合成侧的事；那一次 168 ms 才是真的主线程 stall。
@@ -205,18 +235,28 @@ def app_update_verdict(values, budget):
     if not over:
         return line, "达标（没有一个 update 超预算）"
     share = 100.0 * len(over) / len(vals)
-    return line, ("主线程 stall %d 个（%.1f%%，最长 %.1f ms = %.1f 倍预算）；"
-                  "其余 %d 个迟到与 update 无关（p95 %.2f ms）"
-                  % (len(over), share, max(over), max(over) / budget,
+    if share >= 20.0:
+        # 09-23 改判：**普遍超预算不再叫「N 个 stall」**。同一趟里上屏实测 119~120 帧/秒，
+        # 而这张表 88% 的行都超过一帧预算（2090 行、p50 9.89 ms）——
+        # 两个数只有在"行数≠迟到帧、单位待核"时才互相自洽。
+        # 老话术"主线程 stall 1841 个"正是我刚在归因行撤掉的同一个 over-claim，只是住在另一支函数。
+        return line, ("%d/%d 行（%.1f%%）超一帧预算 ⇒ 整表贴着一帧，**不许按「多少个卡顿」读**"
+                      "（单位待核，见该表的 ⚠ 行）；最长孤例 %.1f ms = %.1f 倍预算，那一个才单独查"
+                      % (len(over), len(vals), share, max(over), max(over) / budget))
+    return line, ("主线程 stall %d 个（占 %d 行的 %.1f%%，最长 %.1f ms = %.1f 倍预算）；"
+                  "其余 %d 行未超预算（p95 %.2f ms）⇒ 那些迟到与主线程无关"
+                  % (len(over), len(vals), share, max(over), max(over) / budget,
                      len(vals) - len(over), percentile(vals, .95)))
 
 
 def summary_app_update_row(loaded, budget):
     # 3) app-update 相位（一次 hitch 通常拆成 Brown+Red 两行，同 duration 走 ref）
-    upd = dedupe_pairs(loaded["hitches-updates"])
+    measure = loaded["hitches-updates"]
+    upd = dedupe_pairs(measure)
     if upd:
         cur, verdict = app_update_verdict(upd, budget)
-        fmt_row("app-update 单次耗时(ms)", base_app_update_line(), cur, verdict)
+        fmt_row("app-update 单次耗时(ms)", base_app_update_line(), cur,
+                verdict + update_caliber_note(measure))
     else:
         fmt_row("app-update 单次耗时(ms)", base_app_update_line(),
                 "无 app-update = 无 hitch" if loaded["hitches-updates"]["present"] else "未覆盖", "—")
@@ -267,6 +307,17 @@ def summary_hitch_rows(loaded, seconds, budget):
         fmt_row("hitch 帧时长", base_hitch_frame_line(), "未覆盖", "—")
         fmt_row("Hitch Time Ratio (ms/s)", "%.2f（危急档）" % BASELINE.get("hitch_time_ratio_ms_per_s", 12.9),
                 "未覆盖", "—")
+
+
+
+
+def summary_frame_table_rows(loaded, budget):
+    """三张逐帧表 + 一行把 `hitches` **降级为旁证**的说明。"""
+    for label, cur, verdict in frame_table_rows(loaded, budget):
+        fmt_row(label, "—", cur, verdict)
+    fmt_row("hitch 行数（下游计数）", "—", "只作旁证，不单独定达标",
+            "判 T1 用上面三张逐帧表 + 呈现侧 p95：同一份内容三趟报过 14 / 22 / 364 行，"
+            "变的只是流水线延迟档位（§AC）")
 
 
 def summary_phase_blame_row(loaded, budget):
@@ -332,5 +383,6 @@ def summary_fps_row(loaded):
                 % (fps.get("fps_p50"), fps.get("fps_p95"), fps.get("seconds")), "参考")
     else:
         fmt_row("实测出帧/s", "参考项", "未覆盖", "参考")
+
 
 

@@ -109,7 +109,8 @@ extension HealthCurves {
     /// 当年是按"每千行**代码**"标定的，直接搬到"每千行**日志**"上属于换了量程沿用刻度。
     /// 本轮只做正确性修正（不伪分母、不为提指标动任何锚点），**独立样本重新标定归总工**，
     /// 已登记在 Obsidian `110` 的契约缺口一节。
-    /// `detail` 由 `HealthCurves.joined` 限到 60 字（评分卡那一行放不下长句），
+    /// `detail` 由 `HealthCurves.joined` 限到 120 **显示格**（评分卡那一行放不下长句；
+    /// 一段都放不下时留整段、交给 `lineLimit` + `.help` 去裁，见那上面的口径注记），
     /// 所以**"证据不足"那几句不在这里**，在 `WeightedHealthScorer` 的 recommendations 里。
     ///
     /// ⚠️ **原先那一支（`totalLinesScanned == 0 → 85 分 + 「未扫描到运行日志，本维度按默认值计」`）

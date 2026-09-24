@@ -35,7 +35,9 @@ struct DuplicationResult: Sendable {
             + "\(NumberFormat.grouped(linesOutsideReportedBlocks)) 行。"
         line += blocksOutsideBoard.isEmpty
             ? "榜外没有剩余块。"
-            : "。\(Self.coordinateDisclosure(blocksOutsideBoard))这些块参与分子、不参与明细。"
+            // RD-61：这里原来多缀了一个「。」——上面那句已经以「行。」收尾，
+            // 拼起来在屏上就是「行。。榜外坐标…」，中文排版上是一处明显的手抖。
+            : Self.coordinateDisclosure(blocksOutsideBoard) + "这些块参与分子、不参与明细。"
         return line
     }
 
@@ -150,6 +152,7 @@ enum DuplicationEngine {
                                  filesHittingLineCap: indexed.filesHittingLineCap,
                                  blocksDroppedByCap: ranked.droppedByCap,
                                  linesOutsideReportedBlocks: ranked.linesOutsideReportedBlocks,
-                                 blocksOutsideBoard: Array(ranked.outsideBoardCoordinates))
+                                 blocksOutsideBoard: DuplicationScan.relativeCoordinates(
+                                    ranked.outsideBoardCoordinates, files: files))
     }
 }

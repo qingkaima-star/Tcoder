@@ -76,12 +76,14 @@ enum VulnerabilityEvidence: String, Sendable, Equatable {
         let ledger = DependencyEvidence.ledger(for: report)
         let counts = ledger.vulnerabilityStateCounts
         var reasons: [String] = []
-        for (state, label) in [(DependencyCheckState.failed, "查询失败"),
-                               (.versionUnresolved, "版本未解析"),
-                               (.ecosystemUnsupported, "生态不支持"),
-                               (.budgetExcluded, "未进查询批次"),
-                               (.notAttempted, "未发起核对")] {
-            if let value = counts[state], value > 0 { reasons.append("\(label) \(value) 条") }
+        for (state, label) in [(DependencyCheckState.failed, localizedCopy("查询失败")),
+                               (.versionUnresolved, localizedCopy("版本未解析")),
+                               (.ecosystemUnsupported, localizedCopy("生态不支持")),
+                               (.budgetExcluded, localizedCopy("未进查询批次")),
+                               (.notAttempted, localizedCopy("未发起核对"))] {
+            if let value = counts[state], value > 0 {
+                reasons.append(localizedFormat("%1$@ %2$@ 条", label, HealthCurves.whole(value)))
+            }
         }
         return reasons
     }
@@ -231,7 +233,8 @@ enum HealthCurves {
     /// 不足 40 字补固定垫句（补满即停，绝不为凑长度把总预算顶破 80），最后再兜底截断。
     private static func padded(_ text: String) -> String {
         var result = text
-        let pads = ["其余维度处于可接受区间。", "建议保持观察，待各维度数据补齐后复核。"]
+        let pads = [localizedCopy("其余维度处于可接受区间。"),
+                    localizedCopy("建议保持观察，待各维度数据补齐后复核。")]
         var padIndex = 0
         while result.count < 40, padIndex < pads.count, result.count + pads[padIndex].count <= 80 {
             result += pads[padIndex]
@@ -279,6 +282,13 @@ enum HealthCurves {
     static var detailSeparator: String { localizedCopy("，") }
 
     /// 核心数字段在前，放不下的段直接舍弃，宁可少说也不截断数字或换行。
+    ///
+    /// ⚠ **一段都放不下时也不截**：留整段，让渲染层用 `lineLimit` + `.help` 去裁
+    /// （健康评分那一列本来就挂着 `.help`，P54 立的口径：被裁掉的那半必须有去处）。
+    /// 这里拦腰截断会把英文词切成半个 —— 实测交付头英文态打出
+    /// `…tallied only over the top 20 hotspo)`，一个"h" 在全站任何地方都读不到，
+    /// 而那正是"P58 把 60 字换成 120 格"想修掉的那族病，**换算法则不等于删掉截断**：
+    /// 旧尺子在英文上会截，新尺子还是会，只是阈值挪高了 60 个字符而已。
     static func joined(_ segments: [String]) -> String {
         var result = ""
         for segment in segments {
@@ -287,7 +297,7 @@ enum HealthCurves {
             if displayWidth(candidate) > detailWidthBudget { continue }
             result = candidate
         }
-        return result.isEmpty ? bounded(segments.first ?? "") : result
+        return result.isEmpty ? (segments.first { !$0.isEmpty } ?? "") : result
     }
 
     /// 把**口径注记**挂到一条已经翻好的 detail 后面。
@@ -333,17 +343,6 @@ enum HealthCurves {
             || (0xFFE0...0xFFE6).contains(value)      // 全角符号
             || (0x1F300...0x1FAFF).contains(value)    // 表情符号
             || (0x20000...0x2FFFD).contains(value)    // 扩展 B 及以上
-    }
-
-    private static func bounded(_ text: String) -> String {
-        var width = 0
-        var kept = ""
-        for character in text {
-            width += isFullWidth(character) ? 2 : 1
-            if width > detailWidthBudget { break }
-            kept.append(character)
-        }
-        return kept
     }
 
     /// 手写定点格式化，不走 Locale，保证任何系统语言下 detail 里的数字都一致。

@@ -9,6 +9,47 @@
 # 两个计数器（bash 动态作用域）。拆前拆后各跑一次 `./scripts/perf_harness.sh selfcheck`，
 # 31 项输出逐字 diff 过才算这刀没切坏。
 # =============================================================================
+selfcheck_py_rulers_compile() {  # selfcheck_py_rulers_compile <outdir>
+  # 36) 每一支 `.py` 尺子都必须能被**编译器**读懂。
+  #     为什么单列一条：09-22 一晚第 6 次踩同一个坑——中文文案里出现 ASCII 双引号，
+  #     Swift 侧截断过、bash 侧静默丢内容过、这次轮到 python：
+  #     `perf_cadence.py` 写完看着没错，跑起来才 `SyntaxError: invalid syntax`
+  #     （`"…不许拿"没判"当"过了""` 被切成三段）。这类错**根本不该靠人记得**，
+  #     编译器免费判，那就每次让它判。
+  #     用内建 `compile()` 而不是 `py_compile`：后者会往 scripts/ 里写 `__pycache__`
+  #     ——为跑守卫而在被扫目录里造文件，等于自己污染自己的分母（本仓为这类形状记过好几次）。
+  local res
+  res=$(python3 -c '
+import glob, sys
+bad = []
+for f in sorted(glob.glob("scripts/*.py")):
+    try:
+        compile(open(f, encoding="utf-8").read(), f, "exec")
+    except SyntaxError as e:
+        bad.append("%s:%s" % (f.split("/")[-1], e.lineno))
+print("%d|%d|%s" % (len(glob.glob("scripts/*.py")), len(bad), ",".join(bad)))')
+  local files broke
+  files=${res%%|*}; res=${res#*|}; broke=${res%%|*}
+  [ "$broke" = "0" ] || { fail ".py 尺子编不过：${res#*|}（$broke/$files 支）"; return; }
+  [ "$files" -ge 1 ] || { fail "一支 .py 尺子都没扫到——glob 或工作目录错了，这条等于没扫"; return; }
+  # 反向钉：坏形状必须被抓到，否则上面那条判据是摆设。
+  mkdir -p "$out/pyfix"
+  printf '%s\n' 'x = "中文里"夹了"ASCII 引号"' > "$out/pyfix/broken.py"
+  local caught
+  caught=$(python3 -c '
+import sys
+try:
+    compile(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1], "exec")
+    print("clean")
+except SyntaxError:
+    print("caught")' "$out/pyfix/broken.py")
+  [ "$caught" = "caught" ] \
+    || { fail "反向失败：夹了 ASCII 引号的 .py 没被抓到（拿到 ${caught:-解析失败}）⇒ 上面那条是摆设"; return; }
+  rm -rf "$out/pyfix"
+  ok "$files 支 .py 尺子全部能被 compile() 读懂（含一句故意写坏的反例，确实会炸）"
+}
+
+
 selfcheck_binary_provenance() {  # selfcheck_binary_provenance <outdir>
   # 14) 闸门第六维：**被量的二进制必须就是这份代码**。2026-09-21 实测踩过——
   #     上下文里写 `HEAD=e991c6d`，而 attach 的 `dist/Tcoder.app` 是两小时前从
@@ -141,7 +182,7 @@ selfcheck_heavy_jobs_probe() {  # selfcheck_heavy_jobs_probe <outdir>
     || fail "xctrace 活性判定不对（烧 CPU 的没算重活 / 停着的算了重活 / 编译类看了增量）"
   # 话术不许再硬编码名单：那正是"加了 xctrace 却把它说成本仓编译"的来源
   declare -f concurrent_heavy_jobs_detail >/dev/null \
-    && grep -q 'concurrent_heavy_jobs_detail' <(declare -f preflight_context) \
+    && grep -q 'concurrent_heavy_jobs_detail' <(declare -f preflight_gather; declare -f preflight_context) \
     || missing="$missing 话术未走带名字的明细版"
   [ -z "$missing" ] \
     && ok "探针覆盖 6 类重活（含编译工人 swift-frontend），话术带真名字" \
@@ -241,77 +282,114 @@ provenance_single_ruler_cases() {  # 【同一件事只许有一把手尺子】�
 }
 
 
-selfcheck_launcher_hygiene() {  # selfcheck_launcher_hygiene <outdir>
-  # 29) 会 `open` 起 App 实例的 perf_ 脚本必须同时做到两件事：
-  #     ① 有 trap 收尾 —— 脚本被中断而没收尾，就会留下一个 ppid=1 的实例，
-  #        而"实例数恰为 1"那道闸会被它一路押死（2026-09-22 实测：主树因此漏下 6 个，
-  #        所有人的帧率测量从夜里拒到上午）；
-  #     ② 收尾只针对自己起的那个 pid，**不许按 bundle id 广播退出**（AGENTS -1.3；
-  #        多实例在场时"退掉一个"根本不含"退掉我起的那个"）。
-  # 范围只扫 `scripts/perf_*`：并行多流时各家只守自己名下目录，别家的红由别家自己修
-  # （§K 已把主树那两个 offender 连同证据报出去了，那才是正确的动作）。
-  #
-  # 合法形状有**两种**，别把第二种当成漏网（也别拿第二种给第一种开脱）：
-  #   ① `open "$APP/…"` 起实例 ⇒ 必须自己 trap 收尾（本循环判的就是这一种）；
-  #   ② `xctrace record --launch -- "$PERF_BIN"` 起实例 ⇒ 那个进程是 **xctrace 收养的子进程**，
-  #      按 xctrace 的语义随录制结束而死，所以 `perf_switch.sh` 里一个 `open` 都没有，
-  #      也就不需要 trap。**这一条我只验到"形状不同"，没验到"确实不泄漏"**：
-  #      哪天发现杀 xctrace（含被 -9）之后被测进程还活着，这条就要改成 ① 并补 trap，
-  #      不许拿"它是 ②"当长期豁免的借口。
-  #      判据仍然成立：谁改用 ① 的形状，这张表当场就把他列出来（第 31 项钉着表有牙）。
-  #
-  # 【形状由 `perf_launcher_audit.sh` 现扫给出，本项**只判定**】
-  # 原来这里自己写了两条 grep（找 `open "$…APP"` 与 `application id`），于是被自己的
-  # 说明文字绊倒过一次（第 29 项夹具里的字面量命中同一条 grep，本仓记过这个族），
-  # 今天又被**第 31 项的夹具**绊倒一次：我在夹具里写了一句 `open "$APP"` 来讲那个形状，
-  # 这条守卫就把 `perf_selfcheck_gates.sh` 判成"会按 bundle id 广播退出"。
-  # ⇒ 同一个问题上不许有两把尺子：取数归表，阈值归这里（与 QUIESCE_MIN 那条分工同一个道理）。
-  local rep line name bad=0
-  rep=$(bash scripts/perf_launcher_audit.sh 2>&1) \
-    || { fail "perf_launcher_audit.sh 跑不动，或一个 App 句柄都没解析出来 ⇒ 本项没有依据可判（不许当通过）"; return; }
-  while IFS= read -r line; do
-    name=$(printf '%s' "$line" | cut -d' ' -f1)
-    # `Y` 且 trap 列不是"有" ⇒ 该收尾没收尾；广播列出现"是" ⇒ 会退掉别人的实例
-    printf '%s' "$line" | grep -qE '[[:space:]]Y[[:space:]]+无' \
-      && { fail "$name 起实例却没有 trap 收尾 ⇒ 中断就漏一个 ppid=1 的孤儿"; bad=1; }
-    printf '%s' "$line" | grep -q '是⇒' \
-      && { fail "$name 按 bundle id 广播退出 ⇒ 只许 TERM 自己起的那个 pid"; bad=1; }
-  done <<EOF
-$(printf '%s\n' "$rep" | grep -E '^perf_[a-z_]*\.sh')
-EOF
-  # 分母：表里一条 perf_* 都没有 ⇒ 说明扫描面退化了，本项等于没判（不许静默绿）
-  printf '%s\n' "$rep" | grep -qE '^perf_[a-z_]*\.sh' \
-    || { fail "实例清单里一个 perf_* 都没有：要么形状改了、要么目录错了 ⇒ 本项不作数"; return; }
-  # 表有牙由第 31 项（三夹具双向）负责，这里不再自带一份夹具——两份夹具会同源失效
-  [ "$bad" = "0" ] && ok "perf_* 名下起实例的形状都有 trap、且不按 bundle id 广播（形状取自审计表）"
+# 判"编译在闸门之前、投递在闸门之后"。违规时打印是哪一对，返回 1。
+pairing_order_violations() {  # pairing_order_violations <file>
+  local f="$1" a p s
+  a=$(grep -nE '^[[:space:]]*arm_synth_input([[:space:]]|$)' "$f" | head -1 | cut -d: -f1)
+  p=$(grep -nE '^[[:space:]]*preflight_context ' "$f" | head -1 | cut -d: -f1)
+  s=$(grep -nE '^[[:space:]]*start_synth_input([[:space:]]|$)' "$f" | head -1 | cut -d: -f1)
+  [ -n "$a" ] && [ -n "$p" ] && [ -n "$s" ] \
+    || { echo "  三个动作没找齐（arm=${a:-?} preflight=${p:-?} start=${s:-?}）—— 换了名字要一起改这条判据"; return 1; }
+  { [ "$a" -lt "$p" ] && [ "$p" -lt "$s" ]; } && return 0
+  echo "  顺序不成立：arm=$a preflight=$p start=$s（要求 arm < preflight < start）"
+  return 1
 }
 
-selfcheck_launcher_inventory() {  # selfcheck_launcher_inventory <outdir>
-  # 31) `perf_launcher_audit.sh` 这张表**必须能分辨三种形状**：
-  #     真起 App 的（要判）/ 起了但会收尾的（不判）/ 只在注释与 echo 里"讲起 App"的（不进表）。
-  #     为什么专门钉：前两版正是死在后两类上 —— v1 把讲代码的话判成 offender、
-  #     v2 把 `pgrep "$MY_BIN"` 判成起 App，而 v2 的过窄模式（`\{?` 撞上 BSD 的区间语法）
-  #     还把今天真漏 8 个孤儿的 `ax_tooltip_report.sh` **整行漏掉**。
-  #     ⇒ 一张会漏真凶、又乱点名的表比没有表更坏，所以三个夹具一次跑齐（缺一个就是废守卫）。
-  local d="$out/launch-inv" rep guilty clean prose
-  mkdir -p "$d/scripts"
-  printf '%s\n' 'BIN="$PWD/dist/Tcoder.app/Contents/MacOS/TcoderMonitor"' \
-    'x=1' '  "$BIN" -ApplePersistenceIgnoreState YES &' > "$d/scripts/guilty.sh"
-  printf '%s\n' 'BIN="$PWD/dist/Tcoder.app/Contents/MacOS/TcoderMonitor"' \
-    'trap "kill -TERM $pid" EXIT INT TERM' '  "$BIN" -ApplePersistenceIgnoreState YES &' > "$d/scripts/clean.sh"
-  printf '%s\n' '# 这里讲的是起 App 的形状："$BIN" 与 open "$APP"' \
-    'echo "别学它：$BIN 这样起会漏实例"' > "$d/scripts/prose.sh"
-  # 不 cd：`--dir` 给绝对路径，工具内部一律按它拼，省得依赖 "$OLDPWD" 这种"恰好对"的东西
-  rep=$(bash scripts/perf_launcher_audit.sh --dir="$d/scripts" 2>&1)
-  # 分母：工具在"一个句柄都没解析出来"时自己退 1 ⇒ rc 非 0 时下面三条都不作数
-  guilty=$(printf '%s' "$rep" | grep -c '^guilty.sh  *Y')
-  clean=$(printf '%s' "$rep" | grep -c '^clean.sh')
-  prose=$(printf '%s' "$rep" | grep -cE '^(prose.sh|.*一个都没认出|!! 一个")')
-  [ "$guilty" = "1" ] \
-    || { fail "坏夹具 guilty.sh 没被判成『Y 命令位起 App』（读到 $guilty）⇒ 这张表认不出真凶：$rep"; return; }
-  [ "$clean" = "1" ] || fail "有 trap 的 clean.sh 根本没进表（读到 $clean）⇒ 表漏行， offender 数不可信"
-  printf '%s' "$rep" | grep -qE '^clean.sh.*Y.*有' \
-    || fail "clean.sh 进了表但 trap 没读到『有』⇒ 宽松方向失效"
-  [ "$prose" = "0" ] || fail "讲代码的话（prose.sh）被当成会起实例的脚本 ⇒ 假黑，表会失去信誉：$rep"
-  ok "实例清单分得清『真起 / 会收尾 / 只是讲』（三夹具双向都验，含漏真凶的反例）"
+selfcheck_measure_rev_attribution() {  # selfcheck_measure_rev_attribution <outdir>
+  # 38) `MEASURE_REV`（工单包 5）只允许改"**归属比的是谁**"，不许改成"不比"。
+  #     为什么单独钉：还掉 §Q 那 14 处之后，交付要回答"从 X 降到 Y"，
+  #     而 X 只能是**重新量出来的**（spec §1.3 明令旧日志里的数不许当 X）。
+  #     一旦"补测改动前基线"这条路只能靠绕开归属闸门，那它一定会被绕——
+  #     所以这条路必须是"**照样判、只是判另一个 rev**"。
+  local pf=scripts/perf_preflight.sh bad=0 other
+  grep -qF 'TARGET_REV=$(provenance_target_rev)' "$pf" \
+    || { fail "$pf 不再从 `provenance_target_rev` 取被测 rev ⇒ 派生又长出第二份"; bad=1; }
+  grep -qF 'provenance_ok "$BUILD_REV" "${TARGET_REV:-$(provenance_target_rev)}"' "$pf" \
+    || { fail "归属又拿 raw HEAD 比 ⇒ 拿别的 rev 的读数会算到 HEAD 头上（那是假归属）"; bad=1; }
+  dn=$(grep -c '^provenance_target_rev() {' scripts/*.sh | awk -F: '{s+=$NF} END{print s+0}')
+  [ "$dn" = "1" ] || { fail "被测 rev 的派生有 $dn 处定义（应为 1）⇒ 两处迟早分叉"; bad=1; }
+  grep -qF 'provenance_product_tree "${MEASURE_REV:-HEAD}"' "$pf" \
+    || { fail "tree 那一侧没跟着换 ⇒ 两半比的是不同对象，比谁都可能假放行"; bad=1; }
+  source scripts/perf_provenance.sh
+  if provenance_ok "abc1234" "" true "t1" "t2"; then
+    fail "被测 rev 取不到（空串）却放行 ⇒ rev 写错就等于免检"; bad=1
+  fi
+  if provenance_ok "abc1234" "$(git rev-parse HEAD)" true ""; then
+    fail "产物与被测 rev 不同、又没给 tree，却放行"; bad=1
+  fi
+  other=$(git rev-parse HEAD~1 2>/dev/null)
+  if [ -n "$other" ] && provenance_ok "${other:0:7}" "$(git rev-parse HEAD)" true; then
+    fail "相邻两个提交被判成同一份代码（比 sha 那条路宽了）"; bad=1
+  fi
+  # rev 不存在 ⇒ 必须空值（调用方按 fail-closed 处理）。
+  # 【这里原来还写过一条"HEAD 与 HEAD~1 的 tree 必须不同"，那是**我判错的判据**】
+  # HEAD~1 是 `b66ea39`，只动 docs ⇒ 两棵子树逐字节相同，而"tree 相同就放行"正是包 4
+  # 立这条规则的目的（免得一行文档逼一次 46 秒重建 + 一整轮假拒）。
+  # 把设计当缺陷钉下去，红得很响，但错在我这边——留在这里防止有人再加回同一条。
+  local a
+  a=$(provenance_product_tree HEAD)
+  [ -n "$a" ] || { fail "HEAD 的产物码 tree 指纹取不到（Sources/Resources 布局改了？）"; bad=1; }
+  [ -z "$(provenance_product_tree 没有这个rev 2>/dev/null)" ] \
+    || { fail "不存在的 rev 竟然给出 tree 指纹 ⇒ 拼出来的路径会像真有一个产物"; bad=1; }
+  # `perf_measure_rev.sh` 取不到 rev 必须**非零且不印 env 行**（第一版死在子 shell 里，rc=0）
+  local out; out=$(bash scripts/perf_measure_rev.sh env 没有这个rev 2>/dev/null); rc=$?
+  { [ "$rc" != "0" ] && [ -z "$out" ]; } \
+    || { fail "perf_measure_rev.sh 取不到 rev 还是出了货（rc=$rc 输出「$out」）⇒ 空串会拼出一个看起来存在的产物路径"; bad=1; }
+  [ "$bad" = "0" ] && ok "补测改动前基线这条路照样判归属：MEASURE_REV 只改比谁、不改比不比（含空值判败与子 shell 反例）"
+}
+
+selfcheck_section_wiring() {  # selfcheck_section_wiring <outdir>
+  # 40) `MEASURE_SECTION` 必须**真的进到启动那一行**（包 11 / 任务 #25）。
+  #     为什么单列：补丁第一次 `git apply` 成功、`bash -n` 也过、selfcheck 43 项全绿，
+  #     可启动行还是 `"$bin" -ApplePersistenceIgnoreState YES &` —— 数组定义了却没被用，
+  #     于是"按页测"这句话是**假的**：跑出来的还是默认页。
+  #     ⇒ 形状类判据（"定义了变量"）不够，必须钉到**使用点**上；反例夹具证明这条判据不是摆设。
+  # 【这条判据第一次跑就抓到我自己写错文件名】`sm` 原本写成 `.sh`，
+  # 于是它报「不读 meta.section」——那句话本身是对的，只是理由错了（读的人住在 `.py` 里）。
+  # 留在这里：判据报错时先复核"我指的是哪个文件"，别急着改判据的宽严。
+  local pb=scripts/perf_probes.sh hm=scripts/perf_harness.sh sm=scripts/perf_trace_summary.py bad=0 body
+  body=$(awk '/^launch_measured_instance\(\)/,/^}/' "$pb")
+  wiring_ok() {  # 启动行引用 sec_args 的展开（不是"文件里出现过这个名字"）
+    printf '%s' "$1" | grep -Eq '"\$bin"[^&]*\$\{sec_args\[@\]'
+  }
+  wiring_ok "$body" \
+    || { fail "$pb 的启动行没用 sec_args ⇒ 传了 MEASURE_SECTION 也还是默认页"; bad=1; }
+  if printf '%s\n' '  "$bin" -ApplePersistenceIgnoreState YES >/dev/null >&1 &' \
+       | sed 's/>&1/2>\&1/' | { body=$(cat); wiring_ok "$body"; } ; then
+    fail "反向夹具（没接线的启动行）被判成合格 ⇒ 这条判据是摆设"
+    bad=1
+  fi
+  grep -qF 'section=${MEASURE_SECTION:-' "$hm" \
+    || { fail "$hm 没把页名落进 meta ⇒ 报表无从知道自己量的哪一页（§Z 的按页验收又回空）"; bad=1; }
+  grep -q 'meta.get("section")' "$sm" \
+    || { fail "$sm 不读 meta.section ⇒ 页维度有写没读（同第 28 项那条老账）"; bad=1; }
+  [ "$bad" = "0" ] && ok "MEASURE_SECTION 三处接线齐（启动行真的用它 / meta 落盘 / 报表读回），且没接线的形状会被抓"
+}
+
+selfcheck_warmup_dimension() {  # selfcheck_warmup_dimension <outdir>
+  # 第七维·预热：etime 解析 + 未预热要拒 + 启动档不参与。
+  # 样例照 `ps -o etime=` 的真排版喂（前置空格），**正反两个方向都要**：
+  # 只测拒的一面，"永远拒"这种同样坏的形状就抓不住。
+  # ⚠ 顺带钉住一条更一般的规矩：**被 source 的库不许设 shell 选项**——
+  #   这个分片自己就是靠"单独 source preflight"跑的，一旦哪层库加了 `set -u`，
+  #   整条链会在第一个未绑定变量处静默退出（实测过：拒跑分支不再落 REFUSED、rc=127）。
+  local bad=0 got
+  got=$(bash -c '
+    ps() { printf "  %s\n" "$FAKE"; }          # 覆盖外部命令：喂夹具，跑的仍是函数本体
+    source scripts/perf_preflight.sh || { echo "source preflight 失败"; exit 1; }
+    for pair in "01:23:83" "12:34:56:45296" "1-02:03:04:93784" "00:07:7"; do
+      FAKE="${pair%:*}"; want="${pair##*:}"
+      got=$(instance_uptime_seconds 12345)
+      [ "$got" = "$want" ] || { echo "解析错：$FAKE ⇒ $got（要 $want）"; exit 1; }
+    done
+    FAKE="abc"; [ "$(instance_uptime_seconds 12345)" = "取不到" ] || { echo "坏排版没判成取不到"; exit 1; }
+    uptime_secs=30; hard=0; PREFLIGHT_TIER=measure; preflight_gates_warmup >/dev/null 2>&1
+    [ "$hard" = "1" ] || { echo "低于预热线却没有拒跑"; exit 1; }
+    uptime_secs=300; hard=0; preflight_gates_warmup >/dev/null 2>&1
+    [ "$hard" = "0" ] || { echo "已预热却被拒"; exit 1; }
+    uptime_secs=5; hard=0; PREFLIGHT_TIER=launch; preflight_gates_warmup >/dev/null 2>&1
+    [ "$hard" = "0" ] || { echo "启动档被预热线拒了"; exit 1; }
+    exit 0' 2>&1) || bad=1
+  [ "$bad" = "0" ] || { fail "预热这一维不成立：$got"; return; }
+  ok "预热维成立：四种 etime 排版逐个对得上、坏排版判「取不到」（不回落成 0）、未预热判拒、已预热判放、启动档不参与"
 }

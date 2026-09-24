@@ -256,7 +256,10 @@ ensure_synth_scroller() {  # **进等待循环之前**把投事件器编好（�
 }
 
 start_synth_scroller() {  # 只管"跑起来"：编译不许出现在闸门与录制之间。<目标 pid> [秒]
-  local secs="${SYNTH_SECS:-95}"   # 覆盖一整趟（hitches 20s + time-profile 25s + 导出与换趟空档）
+  # 【第二参数原来根本没人读】写的是 `${SYNTH_SECS:-95}`，注释却承诺 `[秒]`——
+  # 09-22 排演时按 12 秒调用，实际投了 95 秒。MEASURE_LAUNCH 那条路要按
+  # "hitches + time-profile + 换档空档"来定时长，所以这个参数必须真生效。
+  local secs="${2:-${SYNTH_SECS:-95}}"   # 默认覆盖一整趟（hitches 20s + time-profile 25s + 导出与换趟空档）
   [ -x "$SYNTH_BIN" ] || { echo "!! 合成输入器没预备好（应先跑 ensure_synth_scroller）" >&2; return 1; }
   # 被测 pid：优先用本档自己起的那个；attach 模式下用唯一在场的那个
   local tp="${1:-${TARGET_PID:-}}"   # 目标 pid 由调用方给（本函数不再假设"我只有一个实例"）
@@ -266,6 +269,45 @@ start_synth_scroller() {  # 只管"跑起来"：编译不许出现在闸门与�
   SYNTH_PID=$!
   echo "    合成输入器 pid=$SYNTH_PID（投 ${secs}s，${SYNTH_PX:-14}px/${SYNTH_GAP_MS:-8}ms ≈ $((1000 / ${SYNTH_GAP_MS:-8})) Hz 事件节奏；meta 记 input_source=synth）"
   return 0
+}
+
+stop_synth_scroller() {  # 只停**自己起的那个** pid（绝不按名字 pkill：别人同形状的取证脚本会被误杀）
+  [ -n "$SYNTH_PID" ] || return 0
+  kill -TERM "$SYNTH_PID" 2>/dev/null || true
+  SYNTH_PID=""
+}
+
+measured_cleanup() {  # 收尾：只清**自己起的那两个** pid（合成输入器 + 被测实例），绝不按名字/bundle id 广播
+  stop_synth_scroller
+  [ -n "${MEASURED_PID:-}" ] && kill -TERM "$MEASURED_PID" 2>/dev/null
+  return 0
+}
+
+# -----------------------------------------------------------------------------
+# 把**自己起的**那个实例带到前台：按 pid，绝不遍历、绝不按 bundle id 广播（AGENTS -1.3）。
+# 09-22 从 perf_wait_window.sh 搬进来，因为 `MEASURE_LAUNCH=1` 那条路是 harness 自己起实例的，
+# 而实测裸 `exec` 起来的实例**不会自己抢到前台**（前台仍是别的 App）——不在前的窗口会被
+# 系统节流绘制，实测那份脉冲 2015 帧 / 25 s ≈ 80 帧每秒，与"独占且在前"的 p50=8.33 ms 不是一回事。
+# 搬而不是复制：怎么带前台只该有一把尺子（本仓为这类分叉记过不止一次）。
+# -----------------------------------------------------------------------------
+RAISE_BIN=""
+ensure_raiser() {  # 编译"把自己的实例带到前台"的小工具（一次尝试只 raise 一次，见那个文件的头注）
+  [ -n "$RAISE_BIN" ] && [ -x "$RAISE_BIN" ] && return 0
+  local want dir; want=$(shasum -a 256 "$HERE/perf_raise.swift" 2>/dev/null | cut -c1-12)
+  dir="${SCRATCH:-$PWD/.scratch}"; mkdir -p "$dir" 2>/dev/null
+  RAISE_BIN="$dir/tcoder-raise-${want:-unknown}"
+  [ -x "$RAISE_BIN" ] && return 0
+  xcrun swiftc -O -target arm64-apple-macos14.0 \
+      -module-cache-path "$dir/swiftmodulecache" "$HERE/perf_raise.swift" -o "$RAISE_BIN.tmp.$$" 2>/dev/null \
+    && mv -f "$RAISE_BIN.tmp.$$" "$RAISE_BIN" && return 0
+  rm -f "$RAISE_BIN.tmp.$$"; RAISE_BIN=""; return 1
+}
+
+raise_to_front() {  # raise_to_front <pid> ⇒ 只负责"发出请求"，成不成由调用方的前台闸判
+  local tp="${1:-}"
+  [ -n "$tp" ] || { echo "!! 没给 pid ⇒ 不猜该带谁到前台" >&2; return 1; }
+  ensure_raiser || { echo "!! raiser 编不出来（scripts/perf_raise.swift）" >&2; return 1; }
+  "$RAISE_BIN" "$tp" >/dev/null 2>&1
 }
 
 # -----------------------------------------------------------------------------
@@ -283,19 +325,61 @@ start_synth_scroller() {  # 只管"跑起来"：编译不许出现在闸门与�
 #   · 用**本树的 release 二进制**起一个实例，`TCODER_PERF_OUT` 指进样本目录、
 #     `TCODER_SUPPORT_DIR` 指进样本目录下的沙箱（不污染用户真实数据，也不会与别人互写全局态）；
 #   · 只 TERM 自己起的那一个 pid（有 trap；绝不按 bundle id 广播 —— 工单 §K 那条）。
+wait_for_seed_scanned() {  # wait_for_seed_scanned <沙箱> [最长秒] ⇒ 验"这个 App 真有内容可滚"
+  # 为什么不是固定 sleep：`bootstrapIfNeeded` 从今天起**故意不自动扫描**（批次 P7-A，
+  # 用户口径「不能有假数据」）——种一个 `projects.json` 进去，App 只会显示"未扫描"的空态，
+  # 永远不会自己扫出报告（实测等 150 s 无产物）。所以"有内容"只能来自**复制真实支持目录**，
+  # 而复制完就必须当场验：验不过就是没内容，宁可不录。
+  local sb="$1" lim="${2:-${MEASURE_SETTLE:-60}}" waited=0
+  while :; do
+    if [ -n "$(find "$sb/reports" -maxdepth 1 -name '*.json' -size +200c 2>/dev/null | head -1)" ]; then
+      echo "    沙箱里有 $(find "$sb/reports" -maxdepth 1 -name '*.json' -size +200c 2>/dev/null | wc -l | tr -d ' ') 份真报告 ⇒ 被测对象是有内容的 App"
+      return 0
+    fi
+    [ "$waited" -ge "$lim" ] && { echo "!! ${lim}s 内沙箱里没有真报告 ⇒ 不开录（空页的『交互期』不是证据）" >&2; return 1; }
+    sleep 5; waited=$((waited + 5))
+  done
+}
+
+seed_sandbox() {  # seed_sandbox <沙箱> ⇒ 按 MEASURE_SEED_DIR（一个支持目录路径）复制真实数据；不设就是不种
+  local sb="$1" src="${MEASURE_SEED_DIR:-}"
+  [ -n "$src" ] || return 0
+  [ -d "$src" ] || { echo "!! MEASURE_SEED_DIR=$src 不是目录 ⇒ 不起实例（宁可没数，也不要一份空页的『交互期』）" >&2; return 1; }
+  mkdir -p "$sb" || return 1
+  cp -R "$src/." "$sb/" || { echo "!! 复制真实支持目录失败：$src" >&2; return 1; }
+  echo "    已把真实支持目录种进沙箱：$src"
+  MEASURED_SEED="$src"
+}
+
 launch_measured_instance() {  # launch_measured_instance <样本目录> <二进制>
   local out="$1" bin="$2"
   [ -x "$bin" ] || { echo "!! 二进制不可执行：$bin（先跑 scripts/build_app.sh release）" >&2; return 1; }
   mkdir -p "$out/sandbox" || return 1
+  # 被测对象必须是**有内容的 App**：空沙箱里那个页面没有东西可滚（详见 `seed_sandbox` 那段）。
+  # 【哪一页？】默认是「总览」——而 §Q 那 14 处里有 11 处**根本不在这页上**
+  # （9 个排序在代码/依赖/Git/日志四页，2 个同步 I/O 在日志页）。
+  # 不设 `MEASURE_SECTION` 时行为与今天完全一致（一个多余参数都不传）。
+  sec_args=()
+  if [ -n "${MEASURE_SECTION:-}" ]; then sec_args=(-selectedDetailSection "$MEASURE_SECTION"); fi
+  seed_sandbox "$out/sandbox" || return 1
   MEASURED_PULSE="$out/pulse.txt"
   TCODER_PERF_PROBE=1 TCODER_PERF_OUT="$MEASURED_PULSE" TCODER_SUPPORT_DIR="$out/sandbox" \
-    "$bin" -ApplePersistenceIgnoreState YES >/dev/null 2>&1 &
+    "$bin" -ApplePersistenceIgnoreState YES "${sec_args[@]+"${sec_args[@]}"}" >/dev/null 2>&1 &
   MEASURED_PID=$!
-  # 只清自己起的那个 pid；EXIT/INT/TERM 三条都挂，中断不留孤儿（留了就压死所有人的闸门）
-  trap '[ -n "${MEASURED_PID:-}" ] && kill -TERM "$MEASURED_PID" 2>/dev/null; return' EXIT INT TERM
+  # 收尾两条：EXIT 只清；INT/TERM 清完必须真的退（原来三条共用一个写 `return` 的 handler，
+  # 两条失效都实测过：日志尾巴溅错误 + TERM 杀不掉它 ⇒ 漏一个孤儿实例压死所有人的闸）。
+  # 只清自己起的那两个 pid，绝不按 bundle id 广播（AGENTS -1.3）。
+  trap 'measured_cleanup' EXIT
+  trap 'measured_cleanup; exit 130' INT TERM
   sleep 4
   if kill -0 "$MEASURED_PID" 2>/dev/null; then
     echo "    自己起的被测实例 pid=$MEASURED_PID（脉冲写 $MEASURED_PULSE，沙箱 $out/sandbox）"
+    # 裸 exec 不抢前台（09-22 实测：前台仍是 ChatGPT）⇒ 必须按 pid 主动带一次。
+    # 带不动也**不装绿**：preflight 的前台硬闸会照原样拒，这里只负责别让它白拒一场。
+    raise_to_front "$MEASURED_PID" || echo "    ⚠ 带前台没成功（交给 preflight 的前台闸判，不绕）"
+    sleep 1
+    # 种了真实数据就要当场验"确有报告可看"，否则开录那一刻量的还是空态。
+    [ -z "${MEASURE_SEED_DIR:-}" ] || wait_for_seed_scanned "$out/sandbox" || return 1
     return 0
   fi
   echo "!! 起的实例 4 秒内就退了 ⇒ 不继续（宁可没数，也不要一份 attach 到别人实例上的假配对）" >&2

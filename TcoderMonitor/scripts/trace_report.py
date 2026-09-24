@@ -34,29 +34,63 @@ import argparse
 import collections
 import os
 import re
-import statistics
 import sys
 
-from perf_trace_metrics import (launch_ready_ms, FRAME_BUDGET_MS_DEFAULT, dist_line, over_budget, percentile,
+from perf_trace_metrics import (launch_ready_ms, FRAME_BUDGET_MS_DEFAULT, dist_line, interval_shaped, over_budget, percentile,
                                 read_json, write_json)
 from perf_trace_summary import cmd_summary
 from perf_trace_threads import cmd_threads
 from perf_trace_xml import Doc, find_tag
+from perf_update_caliber import event_durations, sidecar_payload
 
 
 # ----------------------------------------------------------------------------
 # 时长分布（hitches / hitches-updates / potential-hangs / hitches-renders）
 # ----------------------------------------------------------------------------
 
+INTERVAL_SHAPED_TABLES = ("hitches-updates",)
+
+
+def caveat_for(label, values, budget_ms):
+    """这张表的读数**能不能当成"主线程忙了多久"** —— 2026-09-22 22:16 我就是这么误读一次的。
+
+    实测形状（一趟合格的交互档样本，`d73bea4-interact-run1`）：
+    `n=1113 p50=10.22 ms`、**逐值下限 9.31 ms**、事件间隔成串是 `8.3, 8.3, 8.3`
+    ⇒ 分布不是从 0 铺开的，而是**贴着一帧的基线**；而同一趟的 time-profile 里
+    Main Thread 5765 个采样有 99.9% 栈顶是 `TcoderEntry.main()` 事件循环本体（在等，不在忙），
+    上屏又是满 120 帧/秒 —— 三者只有在"这行的单位不是占用时长"时才互相自洽。
+    所以这里只说**能说的**：这种形状下不许当占用引用；至于它到底是回调间隔还是别的什么，
+    留给仪器定义去定（不要靠猜给表贴标签——那正是我这次犯的错的反面）。
+    """
+    if label not in INTERVAL_SHAPED_TABLES or not values:
+        return None
+    if not interval_shaped(values, budget_ms):   # 分布从 0 铺开 ⇒ 就是普通的时长，不用提示
+        return None                                # 判据住在 `perf_trace_metrics.interval_shaped`，
+                                                   # 这里不再抄一份数值（09-23 同一条判据被抄进两支函数，
+                                                   # 结果 `phase_blame` 用计数比定了归因）
+    return ("⚠ 该表逐值下限 %.2f ms（≈%.1f 帧）且分布极窄 ⇒ **不许当\"主线程忙了多久\"引用**；"
+            "主线程占用请看 time-profile 的 Main Thread 忙样本（或明确标注口径待核）"
+            % (min(values), min(values) / budget_ms))
+
+
 def cmd_durations(args):
     doc = Doc(args.xml)
     spans = doc.spans()
     values = [d for _, d in spans]
+    events = event_durations(spans)
     print("[%-18s] schema=%s %s" % (args.label or os.path.basename(args.xml), doc.schema(), dist_line(values)))
+    if len(events) != len(values):
+        # 首行那个 `n` 是**行数**；不点名就会又变成"两处入口两个数"（09-24：28 vs 17 同名 app-update）
+        print("%22s 口径：首行 n 是行数 ⇒ 按 (起始,时长) 收成事件=%d 个，超预算 %d 个"
+              "（汇总表与一致性尺读的是**事件**口径）"
+              % ("", len(events), over_budget(events, args.budget_ms)[0]))
     if values:
         bad, pct = over_budget(values, args.budget_ms)
         print("%22s 累计=%.0f ms 超预算(>%.3f ms)=%d (%.2f%%)"
               % ("", sum(values), args.budget_ms, bad, pct))
+        caveat = caveat_for(args.label, values, args.budget_ms)
+        if caveat:
+            print("%22s %s" % ("", caveat))
         ordered = sorted(round(v, 2) for v in values)
         head = ordered[:20]
         print("%22s 逐值=%s%s" % ("", head, " …（共 %d 个）" % len(ordered) if len(ordered) > 20 else ""))
@@ -64,15 +98,10 @@ def cmd_durations(args):
             starts = sorted(s for s, _ in spans)
             gaps = [round(b - a, 1) for a, b in zip(starts, starts[1:])]
             print("%22s 事件间隔=%s" % ("", gaps[:16]))
+    # sidecar 的字段表住在 `perf_update_caliber.sidecar_payload`（口径判据的唯一住处），
+    # 这里不再抄一遍——09-24 之前它自己算了一套行数口径的 `n`，与汇总表的 17 同名不同值。
     if args.json:
-        write_json(args.json, {
-            "label": args.label, "n": len(values),
-            "p50": round(percentile(values, 0.5), 3), "p95": round(percentile(values, 0.95), 3),
-            "p99": round(percentile(values, 0.99), 3), "max": round(max(values), 3) if values else 0.0,
-            "median": round(statistics.median(values), 3) if values else 0.0,
-            "total": round(sum(values), 1), "over_budget": over_budget(values, args.budget_ms)[0],
-            "values": [round(v, 2) for v in sorted(values)][:40],
-        })
+        write_json(args.json, sidecar_payload(args.label, spans, values, events, args.budget_ms))
     return 0
 
 

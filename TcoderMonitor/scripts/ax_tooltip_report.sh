@@ -84,21 +84,7 @@ with open(f"{support}/projects.json", "w") as fh:
 PY
 fi
 
-wait_for_reports() {  # 等到 reports/ 的文件数与体积连续两轮不变（不是拍脑袋 sleep）
-  local pid="$1" waited=0 prev="" cur bytes sig
-  while [ "$waited" -lt "$WAIT_BUDGET" ]; do
-    cur=$(ls -1 "$SANDBOX/reports" 2>/dev/null | wc -l | tr -d ' ')
-    bytes=$(du -sk "$SANDBOX/reports" 2>/dev/null | cut -f1)
-    sig="$cur:$bytes"
-    if [ "$cur" != "0" ] && [ "$sig" = "$prev" ]; then
-      echo "   报告已落盘：$cur 份 / ${bytes} KiB（等了 ${waited}s）"; return 0
-    fi
-    prev="$sig"
-    ps -p "$pid" > /dev/null 2>&1 || { echo "   !! 实例 $pid 已退出，不等了"; return 1; }
-    sleep 5; waited=$((waited + 5))
-  done
-  echo "   ⚠ 超出 ${WAIT_BUDGET}s，按现状读（可能还在跑长段落）"; return 0
-}
+source "$(dirname "$0")/wait_for_reports.sh"  # 等分析落盘的那条判据搬进共用文件了：截断尺子当年只写了一句 sleep 20，换大仓就会在界面还空着时读树
 
 retire_own_instance() {  # 只退本脚本自己起的、且二进制路径核对一致的那一个 pid
   local pid="$1" who

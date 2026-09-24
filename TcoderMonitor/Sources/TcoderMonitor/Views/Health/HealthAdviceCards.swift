@@ -113,7 +113,8 @@ struct HealthTrendCard: View {
                     // 「不是 0 起点」与「不外推」是这张图的两条防误读声明，留在屏上；
                     // B 级参考线的具体分值与"只连已有点"的实现细节进 ⓘ（线本身已经画出来了）。
                     NoteLine("纵轴固定 0…100 分 · 不做任何外推。",
-                             help: "B 级参考线 \(Int(Self.gradeBLine)) 分；折线只连已有历史点，不外插也不预测。")
+                             help: localizedFormat("B 级参考线 %1$@ 分；折线只连已有历史点，不外插也不预测。",
+                                                   NumberFormat.grouped(Int(Self.gradeBLine))))
                     consistencyNote
                 }
             } else {
@@ -139,8 +140,18 @@ struct HealthTrendCard: View {
             Theme.Readout.Field("最高", Live.fixed(scores.max(), digits: 0))
             Theme.Readout.Field("最低", Live.fixed(scores.min(), digits: 0))
             Theme.Readout.Field("均值", Live.fixed(Self.average(scores), digits: 1))
-            Theme.Readout.Field("跨度", "\(NumberFormat.grouped(spanDays)) 天")
+            // 双语 P69b：原来这一格把天数**插在自己肚子里**（`"\(grouped(spanDays)) 天"`），
+            // 拼出来的整串从来没有键可查 ⇒ 英文态「跨度」一栏永远铺着中文。
+            // 量词键 `%lld 天` 目录里已经登记（英文 1 day / 3 days 走 stringsdict 的复数），
+            // 这里**复用**那一条，不另造单数键。
+            Theme.Readout.Field("跨度", Self.spanCaption(spanDays))
         }
+    }
+
+    /// 「跨度」那一格的读数：中文回填 `N 天`，与改前的 `"\(grouped(n)) 天"` 逐字相同
+    /// （千分位由 `localizedCount` 在填完之后补，与全站大读数同一把记法）。
+    static func spanCaption(_ days: Int) -> String {
+        localizedCount("%lld 天", days)
     }
 
     private var spanDays: Int {
@@ -158,10 +169,21 @@ struct HealthTrendCard: View {
         // `verdict` 而不是 `overall`：无证据那一份的 0 是占位，
         // 拿它去比历史末点会凭空报一条"评分不一致"的警告（批次 P7-B）。
         if let health, let score = health.verdict, let last = points.last, last.score != score {
-            NoteLine("历史末点 \(last.score) 与本次 \(score) 不一致。",
+            NoteLine(Self.scoreMismatchNote(last: last.score, current: score),
                      role: Theme.Semantic.warning, icon: .riskWarning,
                      help: "可能是旧记录，也可能是本次评分尚未落盘。")
         }
+    }
+
+    /// 「历史末点 N 与本次 M 不一致。」：整句键 + 两个位置参数（双语 P69b）。
+    ///
+    /// 原来写成 `"历史末点 \(last.score) 与本次 \(score) 不一致。"` ——
+    /// `NoteLine` 的 `text` 在渲染点查的是**拼完之后**那一串，目录里不可能有这种键。
+    /// 两个数都是**分数、不是可数名词** ⇒ 收 `String` 的 `localizedFormat` 就够，
+    /// 不占 `stringsdict` 的复数机器（记进账会让英文硬凑成单数形态）。
+    static func scoreMismatchNote(last: Int, current: Int) -> String {
+        localizedFormat("历史末点 %1$@ 与本次 %2$@ 不一致。",
+                        NumberFormat.grouped(last), NumberFormat.grouped(current))
     }
 }
 
