@@ -120,7 +120,12 @@ enum ScannedPath {
     /// 路径的物理写法。路径**不存在**时也给出稳定答案（按字面别名规则补 `/private`，
     /// 不去 stat 出一个存在的路径冒充）：被扫根可能在扫描期间被删，那种时候改写它才是撒谎。
     static func canonical(_ raw: String) -> String {
-        guard raw.isEmpty == false else { return raw }
+        // 只管绝对路径。注册表里可能住着**根本不是文件系统路径**的串——
+        // 2026-09-21 退役内置示例数据之前写进 projects.json 的那行 `demo://tcoder-sample`
+        // 今天还在老用户机器上（`load()` 不筛、不迁移），而 `URL(fileURLWithPath:)`
+        // 会把不以 `/` 开头的串按当前目录拼成一个"看着像真路径"的东西。
+        // 那种改写不是归一而是造假 ⇒ 原样交回。
+        guard raw.hasPrefix("/") else { return raw }
         let resolved = URL(fileURLWithPath: raw).resolvingSymlinksInPath().path
         return physicalForm(of: resolved)
     }
