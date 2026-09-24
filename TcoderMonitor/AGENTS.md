@@ -658,6 +658,17 @@ P7-C 收尾这一批删了两处有写无读：`ProjectStore` 的 `sortedProject
 删掉一条绿用例之前，先问它断言的不变式还有别人测吗。
 （这几处刻意写成"类型 的 成员"而不是点号形式：点号会被符号锚点棘轮当成活符号去判活。）
 
+**09-24 删了第二枚（RD-78），同一把尺子**：`Models/DependencyReport.swift` 里的
+`hasVulnerabilityCoverage`。判据不是"看着没人用"，是四条自助读数：① RD-70 之后 `Sources/**` 只剩两处
+**注释**在讲它的历史；② 它的本体是 `networkLookupPerformed || !advisories.isEmpty` —— 字面写着
+*coverage*、实际回答"发起过没有"，**这正是 RD-11 记过的病根形状**；③ 它想说的两件事各有唯一正主
+（`networkLookupPerformed` 与 `advisories`），合成一枚布尔只会再次被当覆盖度消费；
+④ 退役前把它的全部引用点逐条读过（含 `FunctionalHonestyGuardTests` 与 R41 那族守卫里的**前提自证**，
+两处都改成同时钉那两件分开的事实，判据强度不降）。**没删掉的**是 `DependencyEcosystemCoverageTests+ScanGuards`
+里那两枚字符串标记 —— 守卫扫的是名字，属性没了、"别再把它接上屏"这条约束反而更需要留着。
+顺带一条流程教训：我先用 `git grep -c … | head -5` 量引用面，被自己的截断骗过（实际还有三处），
+**判"零读者"之前不许对完整性 grep 加 `head`**。
+
 **09-24 又删了一枚，理由照同一把尺子留名**：`Models/CoverageMetrics.swift` 里逐份报告的
 `CoverageReport.branchPercent`。判据不是"看着没人用"，是**四条自助读数**：`Sources`/`Tests` 全文
 零命中、46 个本地分支 `git grep` 零命中、`git stash list` 只有两条与本件无关的账、屏上那句

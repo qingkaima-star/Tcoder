@@ -114,8 +114,11 @@ final class FunctionalHonestyGuardTests: XCTestCase {
     /// 依赖页：没有核对覆盖就不许出现"无风险"着色。
     func test_dependencyOfflineStateIsNotClaimedSafe() throws {
         let offline = DependencyReport()
-        XCTAssertFalse(offline.hasVulnerabilityCoverage,
-                       "默认离线态必须判为\"没查\"，否则下面这条守卫在空转")
+        // 前提自证：离线态必须"既没发起查询、也没带回公告"，否则下面这条守卫在空转。
+        // （RD-78：原先这里读的是那枚把两件事合成一体的 `Bool`，本体"发起过就算查过"，
+        //   正是 RD-11 的病根；属性已退役，改问两件**分开的**事实，判据强度不降。）
+        XCTAssertFalse(offline.networkLookupPerformed, "默认离线态不该已经发起过查询")
+        XCTAssertTrue(offline.advisories.isEmpty, "默认离线态不该带回任何公告")
         XCTAssertEqual(offline.riskLevel, .none,
                        "`riskLevel` 仍按数说话（评分与排序要它），这条钉住它的语义没被顺手改掉")
         XCTAssertTrue(DependencySafetyVerdict(offline) == .unchecked(coveredCount: 0, total: 0,

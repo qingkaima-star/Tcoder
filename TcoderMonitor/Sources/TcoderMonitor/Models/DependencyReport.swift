@@ -34,6 +34,18 @@ struct DependencyReport: Codable, Equatable, Sendable {
         let offline = offlineVulnerabilities.reduce(0) { $0 + $1.affectedDependencies.count }
         return offline + advisories.reduce(0) { $0 + $1.affectedPackages.count }
     }
+    /// ⚠ 这一枚**只看命中数**：默认离线态每个项目都是 `vulnerableCount == 0`，于是它给 `.none`。
+    /// 所以「零命中」绝不能被读成「安全」——任何要说「没有已知漏洞」的出口都必须先问唯一那道闸
+    /// `DependencyEvidence.vulnerabilityCoverage`（RD-68），不许自己比条数、也不许再合成一枚写着
+    /// coverage 的布尔代答「查没查过」。
+    /// 这里原来挂着那样东西，本体是「发起过查询 或 带回过公告」——**正是 RD-11 病根的同一把旧闸门**
+    /// （把"发过请求"当成"核对过"）；RD-70 关掉它最后一个上屏读者之后它在 `Sources/**` 已零读者，
+    /// 2026-09-24 按 AGENTS §3「同一把尺子也管删」退役（台账 RD-78）。
+    /// 退役而不是改名留着：它想说的那两件事各有唯一正主（「发起过」= `networkLookupPerformed`、
+    /// 「带回过公告」= `advisories`），而合成一体的布尔只会继续被人当覆盖度用。
+    /// 消费方一律走 `DependencySafetyVerdict`：`.clean` 才配绿，`.partial` 琥珀「部分核对」，
+    /// `.none` 中性「未核对」；生态卡头那一格读**本生态子账**的同一道档（`subledger(forEcosystem:)`）。
+    ///
     var riskLevel: RiskLevel {
         let vulns = vulnerableCount
         switch vulns {
@@ -44,19 +56,6 @@ struct DependencyReport: Codable, Equatable, Sendable {
         }
     }
     var distinctEcosystemNames: [String] { ecosystems.map { $0.ecosystem.displayName } }
-
-    /// Whether "zero vulnerabilities" is an actual finding rather than an absence of checking.
-    ///
-    /// `riskLevel` reads only `vulnerableCount`, so in the default offline state every project
-    /// would otherwise earn a green "无风险" badge, a per-row "正常" marker, and a
-    /// "未发现已知漏洞依赖" line in the paid health score's strengths. Those all assert
-    /// safety on evidence we never gathered.
-    ///
-    /// Consumers that would render an all-clear must branch on this and downgrade to a
-    /// neutral "未核对" state when it is `false`.
-    var hasVulnerabilityCoverage: Bool {
-        networkLookupPerformed || !advisories.isEmpty
-    }
 
     /// Offline built-in rules only cover npm / Maven / Python, so an unchecking run on any
     /// other ecosystem is not a clean bill of health — say which ones went unexamined.
