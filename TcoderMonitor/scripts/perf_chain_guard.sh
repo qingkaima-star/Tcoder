@@ -28,13 +28,24 @@ tree_of_pid() {  # tree_of_pid <pid> ⇒ 那个进程 cwd 所属仓库根；读�
   echo "${root:-unknown}"
 }
 
-clashing_chains() {  # ⇒ 每行 "<pid>\t<树>"：与本树同树、或归属不可辨的其它排程器（不含自己）
-  local p mine tree
+clashing_chains() {  # ⇒ 每行 "<pid>\t<树>\t<ps 现场>"：与本树同树、或归属不可辨的其它排程器（不含自己）
+  # 每一行都挂一段 `ps` 的原始事实（ppid + 命令行前 60 字）。**拒人的那一行必须自带证据**：
+  # 09-25 18:06 这道闸把 t14 整批误拒过一次（起跑前我数过 `pgrep` 是 0 条链），
+  # 而它当时只印了一个 pid 40815——事后没人能说出那到底是什么进程，我也只能说"大概是 fork"。
+  # ⚠ 所以下面这条 ppid 过滤是**未证实的假设**：反例（第 56 项之四）在摘掉它之后照样全绿，
+  #    也就是说它没被任何一条判据咬住过。真正闭环靠的是这一行的现场输出：
+  #    下一次再误拒，直接读那是什么进程，别再靠猜改判据。
+  local p mine tree pp cmd
   mine="${CHAIN_TREE:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
   for p in $(pgrep -f "perf_wait_window\.sh" 2>/dev/null); do
     [ "$p" = "$$" ] && continue
+    pp=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
+    [ "$pp" = "$$" ] && continue
     tree=$(tree_of_pid "$p")
-    if [ "$tree" = "unknown" ] || [ "$tree" = "$mine" ]; then printf '%s\t%s\n' "$p" "$tree"; fi
+    if [ "$tree" = "unknown" ] || [ "$tree" = "$mine" ]; then
+      cmd=$(ps -o command= -p "$p" 2>/dev/null | cut -c1-60)
+      printf '%s\t%s\tppid=%s cmd=%s\n' "$p" "$tree" "${pp:-?}" "${cmd:-已退出}"
+    fi
   done
 }
 

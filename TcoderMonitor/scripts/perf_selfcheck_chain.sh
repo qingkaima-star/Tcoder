@@ -44,7 +44,14 @@ selfcheck_chain_guard_one_per_tree() {  # selfcheck_chain_guard_one_per_tree <ou
   case "$rc" in *"ALLOW_CONCURRENT_CHAIN"*) : ;;
     *) fail "ALLOW_CONCURRENT_CHAIN=1 跨闸却一声不吭（实得「$rc」）⇒ 绕过闸门必须留下可见痕迹"; bad=1 ;;
   esac
-  [ "$bad" = "0" ] && ok "链闸双向成立：无链放行 / 同树假链被点名拒跑 / 跨闸必须出声（假链已收干净）"
+  # 之四：**从"argv 里就带着脚本名"的那个进程里点这道闸**（没有别的链 ⇒ 必须放行）。
+  # 范围要说准：这条钉的是"自我匹配类 bug 的一个形状"，
+  # ⚠ 它**抓不到** 18:06 那次真实误拒——我把 ppid 过滤摘掉后这一条照样绿（做过破坏验证才知道）。
+  #    那次误拒的成因仍未定，靠的是拒绝行里新加的 `ps` 现场去抓下一次，不是靠这条。
+  rc=$(CHAIN_TREE="$tree" bash -c 'exec -a perf_wait_window.sh bash -c "source '"$lib"'; refuse_second_chain; echo OK"' 2>/dev/null)
+  [ "$rc" = "OK" ] \
+    || { fail "以排程器自身的 argv 形状调用时被自我误判（实得「$rc」）⇒ 闸会拒掉自己这一批"; bad=1; }
+  [ "$bad" = "0" ] && ok "链闸双向成立：无链放行 / 同树假链被点名拒跑 / 跨闸必须出声 / 按真实 argv 形状调用时不误伤（拒绝行自带 ps 现场）"
 }
 
 selfcheck_path_display_keeps_the_tail() {  # selfcheck_path_display_keeps_the_tail <outdir>
