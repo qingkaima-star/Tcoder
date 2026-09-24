@@ -59,10 +59,10 @@ extension CodeAnalyzerTests {
         XCTAssertEqual(chainFunctions.first?.parameterCount, 1, "参数只认签名那一段的 (items)")
         XCTAssertEqual(chainFunctions.first?.complexity, 1, "链上没有分支构造，CC 就是基准 1")
 
-        // 三元换行：体认得对（3 行），但 CC 少算一档 —— 三元那把尺子是逐行数问号的，
-        // 要求「? 后面同一行还得有冒号」才算一次判定（ComplexityCounting.countsAsTernary）。
-        // 下面那条同一行的正例是这一组的反证：形状没变、只是换了行，CC 从 2 掉到 1。
-        // 这条限度另立 RD-80 并写进 docs/口径与已知限制.md §4.7，不许读成「三元没分支」。
+        // RD-80（已修）：三元换行以前少算一档 —— 逐行的尺子要求「`?` 后面同一行还得有冒号」
+        // （`ComplexityCounting.countsAsTernary`），于是 `? a` 换行 `: b` 读成 CC 1、
+        // 同一行写完读成 CC 2：**形状没变、只是换了行，数就变了**。
+        // 现在两行的写法与一行写完必须给同一个数（下面那组同行正例就是这一条的独立真值）。
         let ternary = "const verdict = (score) => score > 90\n"
             + "    ? 'high'\n"
             + "    : 'low'\n"
@@ -70,7 +70,8 @@ extension CodeAnalyzerTests {
         let ternaryFunctions = ComplexityEngine.functions(in: ternaryFile)
         XCTAssertEqual(ternaryFunctions.map(\.name), ["verdict"], "三元换行的体要被认出来")
         XCTAssertEqual(ternaryFunctions.first?.lineCount, 3, "体是 3 行")
-        XCTAssertEqual(ternaryFunctions.first?.complexity, 1, "RD-80：跨行三元目前不计判定（同行正例见下一条）")
+        XCTAssertEqual(ternaryFunctions.first?.complexity, 2,
+                       "RD-80：跨行三元与同行写法必须同分（配不到就不加是下一条反例的事）")
 
         let sameLineTernary = "const verdict = (score) => {\n"
             + "    const lane = score > 90 ? 'high' : 'low'\n"
@@ -170,5 +171,43 @@ extension CodeAnalyzerTests {
                       "原型声明不得产假条目，实测 \(functions.map(\.name))")
         XCTAssertEqual(functions.first?.startLine, 7, "唯一的函数 helper 从第 7 行起")
         XCTAssertEqual(functions.first?.lineCount, 3, "体是第 7~9 行")
+    }
+
+    /// RD-80 的另一半：跨行三元**配到冒号**才补那一分，配不到、也只补一次。
+    /// 独立真值 = 同一句话无论换不换行、`?` 写在行尾还是行首，读出来的 CC 都一样；
+    /// 反例是可空返回类型那种"整行末尾一枚 `?`、下一行跟冒号毫无关系"的真形状。
+    func testCrossLineTernaryCarryOnlyPaysWhenTheNextLineOpensWithColon() throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+
+        // 正例 1：两层三元铺开成五行 ⇒ 基准 1 + 两次判定，且**每枚 `?` 只配一分**。
+        let nested = "const grade = (s) => s > 90\n"
+            + "    ? 'A'\n"
+            + "    : s > 60\n"
+            + "    ? 'B'\n"
+            + "    : 'C'\n"
+        let nestedFile = try XCTUnwrap(classify(try write(nested, to: "grade.js", in: root), root: root))
+        let nestedFunctions = ComplexityEngine.functions(in: nestedFile)
+        XCTAssertEqual(nestedFunctions.first?.complexity, 3,
+                      "两枚跨行三元各补一分，实测 \(nestedFunctions.first?.complexity ?? -1)")
+
+        // 正例 2：`?` 写在上一行行尾（operator-trailing 风格）也要配到下一行的冒号。
+        let trailing = "const lane = (s) => s > 90 ? 'high'\n"
+            + "    : 'low'\n"
+        let trailingFile = try XCTUnwrap(classify(try write(trailing, to: "trail.js", in: root), root: root))
+        XCTAssertEqual(ComplexityEngine.functions(in: trailingFile).first?.complexity, 2,
+                      "换行位置换了、判定还是那一个 ⇒ 与同行写法同分（2）")
+
+        // 反例：可空返回类型在行尾就是一枚"看起来像在等冒号"的 `?`，
+        // 下一行是 `{` ⇒ 一分都不许补（这一枚 `?` 是类型，不是分支）。
+        let nullable = "func readName() -> String?\n"
+            + "{\n"
+            + "    return nil\n"
+            + "}\n"
+        let nullableFile = try XCTUnwrap(classify(try write(nullable, to: "Name.swift", in: root), root: root))
+        let nullableFunctions = ComplexityEngine.functions(in: nullableFile)
+        XCTAssertEqual(nullableFunctions.map(\.name), ["readName"], "夹具本身要被认出来，实测 \(nullableFunctions.map(\.name))")
+        XCTAssertEqual(nullableFunctions.first?.complexity, 1,
+                      "可空类型换行不得被算成三元，实测 \(nullableFunctions.first?.complexity ?? -1)")
     }
 }

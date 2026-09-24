@@ -26,6 +26,12 @@ extension ScanProvenance {
     /// 抬戳的唯一姿势：在这里加一行，别去改 `rulesVersionStamp`（它是从这里取的第一格）。
     static let rulesChangeLedger: [RulesVersion] = [
         RulesVersion(
+            stamp: "2026.09-r3",
+            landed: "RD-80 修：三元的 `?` 与 `:` 分行写时以前**不计判定**（尺子逐行数问号），"
+                + "同一句话换行前后 CC 差一档 ⇒ 现在由相邻两行配对补那一分（配不到不补、一枚 `?` 只补一次）。"
+                + "受影响读数：函数 CC、平均 CC、复杂度榜与热点榜排序（`docs/口径与已知限制.md` §4.7）"
+        ),
+        RulesVersion(
             stamp: "2026.09-r2",
             landed: "RD-79 两笔（`export const` 箭头整类漏认；无花括号的箭头体不得借下一条语句的花括号，"
                 + "函数数／平均 CC／热点榜分母同时变）＋ RD-80 立案（跨行三元不计判定，写进 `docs/口径与已知限制.md` §4.7）"
@@ -76,6 +82,17 @@ extension ScanProvenance {
             }
             previousRevision = revision
         }
+        // 最新一格点名的 RD 号要比**任何旧格**都新。为什么单独要这一条：
+        // 「戳号在抬」只证明有人动过那一行，不证明他记的是**这一版真正收进去的东西**——
+        // 抄一段旧条目同样能把戳号抬上去。有了这条，抬戳必须附带比历史更大的 RD 号。
+        // 已知限度：RD 号是**递增的案号**，所以"更大 = 更新"成立；将来若有人插编号会失真。
+        // 最新一格一枚 RD 号都没点名时**不再叠加**这一条 —— 上面那条命名判据已经出声，
+        // 一行的毛病报两条会把既有反例的期望值搅浑（`testDefectRequiresAnEntryToNameLedgerItems` 就钉着这个）。
+        let historyNewest = ledger.dropFirst().flatMap { $0.landed.rdNumbers() }.max() ?? 0
+        if let headNewest = ledger[0].landed.rdNumbers().max(), headNewest < historyNewest {
+            defects.append("最新一格「\(ledger[0].stamp)」点名的判据只到 RD-\(headNewest)，"
+                + "比它下面任何一格（RD-\(historyNewest)）都旧 ⇒ 抬了戳却没记新判据")
+        }
         return defects
     }
 
@@ -83,5 +100,19 @@ extension ScanProvenance {
     static func rulesStampRevision(_ stamp: String) -> Int? {
         guard let dash = stamp.lastIndex(of: "-"), stamp[dash...].hasPrefix("-r") else { return nil }
         return Int(stamp[stamp.index(after: dash)...].dropFirst())
+    }
+}
+
+extension String {
+    /// 本行里所有 `RD-<数字>` 的数字部分。只认 `RD-` 前缀，
+    /// 所以戳号里的 `r3`、日期里的 `09`、版本号里的 `.9` 都不会被误当成案号。
+    func rdNumbers() -> [Int] {
+        var numbers: [Int] = []
+        var search = self[...]
+        while let hit = search.range(of: "RD-") {
+            search = search[hit.upperBound...]
+            if let value = Int(search.prefix(while: { $0.isNumber })) { numbers.append(value) }
+        }
+        return numbers
     }
 }

@@ -39,7 +39,7 @@ extension ComplexityEngine {
 
     static func complexity(ofCleanedLines lines: [String], profile: LangProfile) -> Int {
         var total = 1
-        let keywords = profile.branchKeywords.isEmpty ? allBranchKeywords : profile.branchKeywords
+        var awaitingTernaryColon = false
         for rawLine in lines {
             // 预处理指令行（#if DEBUG / #include）不计入，避免平台分支被当成逻辑分支。
             // 必须跳过行首空白再判断：真实代码里的 `#if` 绝大多数带缩进
@@ -47,24 +47,36 @@ extension ComplexityEngine {
             // 只看 first 的话 `    #if A && B` 会凭空给函数加一次 if。
             guard let head = rawLine.firstIndex(where: { $0 != " " && $0 != "\t" }) else { continue }
             if rawLine[head] == "#" { continue }
-            if let re = branchKeywordExpression {
-                let text = rawLine as NSString
-                let matches = re.matches(in: rawLine, options: [], range: NSRange(location: 0, length: text.length))
-                for match in matches {
-                    var word = text.substring(with: match.range)
-                    // `else   if`（多个空白）也要落到 "else if" 这个关键字上
-                    if word.hasPrefix("else") { word = "else if" }
-                    guard keywords.contains(word) else { continue }
-                    // RD-09：关键字形状但语法位置不是判定的一律不加分（见下面两个判据）。
-                    // 反向也要守住：`ifLet(` / `.ifLet(` / `switchMap(` 这些**名字里含关键字前缀**的
-                    // 写法本来就命不中 `\b…\b`，这里不新增任何"整行不数"的口子。
-                    guard isControlFlowPosition(text, match.range) else { continue }
-                    total += 1
-                }
-            }
-            total += branchSymbols(in: rawLine, profile: profile)
+            total += keywordBranchCount(in: rawLine, profile: profile)
+            let scan = branchSymbolScan(in: rawLine, profile: profile)
+            // RD-80：上一行留下一枚"在等冒号的 `?`"，而这一行正是以 `:` 开头 ⇒ 补那一分。
+            // 空行与预处理行不撤销这个待配对状态（清洗后的 `? a` / 空行 / `: b` 是同一句话）。
+            if awaitingTernaryColon, rawLine[head] == ":" { total += 1 }
+            total += scan.count
+            awaitingTernaryColon = scan.awaitingTernaryColon
         }
         return max(1, total)
+    }
+
+    /// 关键字那一半（`if` / `else if` / `for` / `case`…）。RD-09 的两道语法位置判据原样保留。
+    static func keywordBranchCount(in rawLine: String, profile: LangProfile) -> Int {
+        guard let re = branchKeywordExpression else { return 0 }
+        let keywords = profile.branchKeywords.isEmpty ? allBranchKeywords : profile.branchKeywords
+        let text = rawLine as NSString
+        let matches = re.matches(in: rawLine, options: [],
+                                 range: NSRange(location: 0, length: text.length))
+        var hit = 0
+        for match in matches {
+            var word = text.substring(with: match.range)
+            // `else   if`（多个空白）也要落到 "else if" 这个关键字上
+            if word.hasPrefix("else") { word = "else if" }
+            guard keywords.contains(word) else { continue }
+            // 反向也要守住：`ifLet(` / `.ifLet(` / `switchMap(` 这些**名字里含关键字前缀**的
+            // 写法本来就命不中 `\b…\b`，这里不新增任何"整行不数"的口子。
+            guard isControlFlowPosition(text, match.range) else { continue }
+            hit += 1
+        }
+        return hit
     }
 
     /// 关键字命中处**是不是真的在写判定**。两条判据，各对应一种被误算成控制流的形状：
@@ -89,13 +101,18 @@ extension ComplexityEngine {
     static let spaceUnichar: unichar = 0x20
     static let tabUnichar: unichar = 0x09
 
-    // 三元 `?` 的判定是纯启发式：Swift/Kotlin/Dart 里 `Int?` 满天飞，所以额外要求
-    // 「冒号出现在该 ? 之后」，否则 `let x: Int? = 5` 会被误计一次。
-    static func branchSymbols(in rawLine: String, profile: LangProfile) -> Int {
+    /// 三元 `?` 的判定是纯启发式：Swift/Kotlin/Dart 里 `Int?` 满天飞，所以**同一行内**额外要求
+    /// 「冒号出现在该 `?` 之后」，否则 `let x: Int? = 5` 会被误计一次。
+    /// 跨行写法（RD-80）靠的是**另一条证据**：整行一个冒号都没有，且紧接的下一行以 `:` 开头
+    /// ——由 `complexity(ofCleanedLines:profile:)` 那对相邻行配对，这一行只负责出声说"我在等冒号"。
+    static func branchSymbolScan(in rawLine: String, profile: LangProfile) -> BranchSymbolScan {
         // 绝大多数代码行既没有 && / || 也没有 ?，先零成本过一遍再决定要不要转 [Character]
-        guard rawLine.contains(where: { $0 == "?" || $0 == "&" || $0 == "|" }) else { return 0 }
+        guard rawLine.contains(where: { $0 == "?" || $0 == "&" || $0 == "|" }) else {
+            return BranchSymbolScan(chars: [], profile: profile)   // 空扫描：0 分、不等冒号
+        }
         var scan = BranchSymbolScan(chars: Array(rawLine), profile: profile)
-        return scan.run()
+        _ = scan.run()
+        return scan
     }
 
     /// `branchSymbols` 的逐字符扫描。原先是一个 46 行、CC 23 的 while，
@@ -117,6 +134,8 @@ extension ComplexityEngine {
         var hasAssignment = false
         var hasParen = false
         var hasReturn = false
+        /// RD-80：这一行有一枚 `?` 除"本行没有冒号可配"之外全部满足三元形状 ⇒ 交给调用方去配下一行。
+        var awaitingTernaryColon = false
 
         init(chars: [Character], profile: LangProfile) {
             self.chars = chars
@@ -176,6 +195,7 @@ extension ComplexityEngine {
             if hasSecondCharacter(after: index), chars[index + 1] == "." { return 1 }
             if index > 0, chars[index - 1] == "?" { return 1 }
             if countsAsTernary() { count += 1 }
+            else if ternaryAwaitsNextLine() { awaitingTernaryColon = true }
             return 1
         }
 
@@ -185,6 +205,18 @@ extension ComplexityEngine {
                   chars[index + 1] == " " || chars[index + 1] == "\t" else { return false }
             guard profile.countsTernary, lastColon > index else { return false }
             return hasAssignment || hasReturn || hasParen
+        }
+
+        /// RD-80：同一行配不到冒号，不等于这句话没有判定——`? a` 换行 `: b` 是同一个三元。
+        /// 这里的证据与 `countsAsTernary` **不是同一条**：要求整行一个冒号都没有（`lastColon < 0`，
+        /// 所以 `let x: Int? = 5` 那种可空类型不会被算成"在等冒号"），且这枚 `?` 后面是空白
+        /// 或者它就在行尾。真正加那一分由调用方在下一行以 `:` 开头时做（见 `complexity(ofCleanedLines:profile:)`）。
+        /// 已知限度：只配**紧接的下一行**，`? a` 与 `: b` 之间隔了别的语句就放弃——
+        /// 要按语法真找配对得先做表达式解析，那是另一个量级的活儿。
+        func ternaryAwaitsNextLine() -> Bool {
+            guard profile.countsTernary, lastColon < 0 else { return false }
+            if index + 1 == chars.count { return true }
+            return chars[index + 1] == " " || chars[index + 1] == "\t"
         }
 
         /// 只在还没见过 return 时探测一次，避免每格都跑一遍标识符边界检查（原实现同一条短路）。

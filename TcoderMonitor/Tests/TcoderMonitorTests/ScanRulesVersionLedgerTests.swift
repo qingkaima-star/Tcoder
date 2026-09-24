@@ -25,13 +25,19 @@ final class ScanRulesVersionLedgerTests: XCTestCase {
     /// 装配口唯一：上屏的戳 = 台账最新一格，而且**已经不是 RD-30 那枚旧字面量**。
     /// 第二条断言就是 RD-81 本体：那一行手写字符串自 `9932a19` 起从没动过，
     /// 于是带 RD-79 判据的报告仍在说 `2026.09-r1`。
+    ///
+    /// 第三条原先写的是「今天这格该含 RD-79」—— 那是一句**按当期值抄的期望**：任何人正当抬一格
+    /// （`2026.09-r3`／RD-80）都会把它拧红，而红的原因不是台账坏了。
+    /// 「最新一格必须点名 RD 号、且点名的号要比历史新」这两条现在住在
+    /// `rulesLedgerDefects` 里（纯函数、能被合成输入双向测），这里只断言真台账无缺陷。
     func testStampIsDerivedFromTheLedgerHeadAndHasActuallyMoved() {
         XCTAssertEqual(ScanProvenance.rulesVersionStamp, ScanProvenance.rulesChangeLedger.first?.stamp,
                        "戳不再等于台账第一格 ⇒ 有人绕过台账改字面量了")
         XCTAssertNotEqual(ScanProvenance.rulesVersionStamp, "2026.09-r1",
                           "规则戳仍停在立块那一版 ⇒ 换过判据的报告读起来像没换（RD-81 的原始缺陷）")
-        XCTAssertTrue(ScanProvenance.rulesChangeLedger[0].landed.contains("RD-79"),
-                      "最新一格必须点名它收进了哪批判据；今天这格该是 RD-79")
+        XCTAssertEqual(ScanProvenance.rulesLedgerDefects(current: ScanProvenance.rulesVersionStamp,
+                                                        ledger: ScanProvenance.rulesChangeLedger),
+                       [], "真台账必须过自己每一条判据（含新加的『最新一格要点名 RD 号』两条）")
     }
 
     /// 反例一：改了戳没记账（或改了台账没改戳）——两个方向同一把尺子。
@@ -95,5 +101,23 @@ final class ScanRulesVersionLedgerTests: XCTestCase {
         XCTAssertEqual(ScanProvenance.rulesStampRevision("2026.09-r12"), 12)
         XCTAssertNil(ScanProvenance.rulesStampRevision("2026.09-r"), "光一个 r 没有数字要判解析不出")
         XCTAssertNil(ScanProvenance.rulesStampRevision("2026.09x1"), "没有连字符的整串不是戳")
+    }
+
+    /// 新加那条「最新一格要比历史新」的双向测（三格，缺一格就是永真绿）：
+    /// 反例 = 戳抬了但只抄旧条目；正例 = 收进了更大的号；第三格钉「同一条毛病只报一条」。
+    func testDefectRequiresTheHeadToNameNewerLedgerItemsThanHistory() {
+        let staleHead = [entry("2026.09-r3", "RD-5 与 RD-6 的旧账"), entry("2026.09-r2", "RD-40 修复")]
+        let stale = ScanProvenance.rulesLedgerDefects(current: "2026.09-r3", ledger: staleHead)
+        XCTAssertEqual(stale.count, 1, "抄旧条目抬戳必须被照出来，实测：\(stale)")
+        XCTAssertTrue(stale[0].contains("抬了戳却没记新判据"), "原因要点名是哪一格，实测：\(stale)")
+
+        let freshHead = [entry("2026.09-r3", "RD-41 新判据"), entry("2026.09-r2", "RD-40 修复")]
+        XCTAssertTrue(ScanProvenance.rulesLedgerDefects(current: "2026.09-r3", ledger: freshHead).isEmpty,
+                      "正常抬一格不该被误报（这条是双向的另一半）")
+
+        let unnamedHead = [entry("2026.09-r3", "若干修复"), entry("2026.09-r2", "RD-40 修复")]
+        let unnamed = ScanProvenance.rulesLedgerDefects(current: "2026.09-r3", ledger: unnamedHead)
+        XCTAssertEqual(unnamed.count, 1,
+                      "没点名 RD 号只该报命名那一条，不叠加 ⇒ 一行的毛病报两处会把期望值搅浑：\(unnamed)")
     }
 }
