@@ -75,17 +75,22 @@ enum CrashEvidenceReadout {
         var readFailed: Int
         var duplicates: Int
 
-        /// 「测到了什么」那一句。**逐字**沿用台账原来那句（一个数都不重新推导）。
+        /// 「测到了什么」那一句。**措辞逐字**沿用台账原来那句（一个数都不重新推导）。
+        ///
+        /// RD-60 第二半（R25b）：八条各是一枚**整句槽型键**（`%lld` 在句子里，量词跟着数走），
+        /// 不是把「确认崩溃 」+ 数字 +「 次计入」拼出去 —— 英文语序会反转
+        /// （`4 confirmed crashes counted`），而且 `次`/`份` 两支单复数只能由 `.stringsdict` 选。
+        /// 中文态逐字不变：`String(format:` 填 `%lld` 与原来的 `\(...)` 打出来一模一样。
         var statement: String {
             var parts: [String] = []
-            parts.append("确认崩溃 \(counted) 次计入")
-            if historical > 0 { parts.append("历史报告 \(historical) 次在窗口外") }
-            if staleBuild > 0 { parts.append("旧构建 \(staleBuild) 次未算当前版本") }
-            if undated > 0 { parts.append("无事件时间 \(undated) 次单列") }
-            if suspected > 0 { parts.append("疑似报告 \(suspected) 份") }
-            if parseFailed > 0 { parts.append("解析失败 \(parseFailed) 份") }
-            if readFailed > 0 { parts.append("读取失败 \(readFailed) 份") }
-            if duplicates > 0 { parts.append("同一事件去重合并 \(duplicates) 份") }
+            parts.append(localizedCount("确认崩溃 %lld 次计入", counted))
+            if historical > 0 { parts.append(localizedCount("历史报告 %lld 次在窗口外", historical)) }
+            if staleBuild > 0 { parts.append(localizedCount("旧构建 %lld 次未算当前版本", staleBuild)) }
+            if undated > 0 { parts.append(localizedCount("无事件时间 %lld 次单列", undated)) }
+            if suspected > 0 { parts.append(localizedCount("疑似报告 %lld 份", suspected)) }
+            if parseFailed > 0 { parts.append(localizedCount("解析失败 %lld 份", parseFailed)) }
+            if readFailed > 0 { parts.append(localizedCount("读取失败 %lld 份", readFailed)) }
+            if duplicates > 0 { parts.append(localizedCount("同一事件去重合并 %lld 份", duplicates)) }
             return parts.joined(separator: " · ")
         }
     }

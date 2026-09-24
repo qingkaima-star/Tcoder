@@ -730,5 +730,138 @@
 			<string>Error trend, %lld days</string>
 		</dict>
 	</dict>
+	<!-- RD-60 第二半（R25b）：崩溃证据细账「逐条原因」那八句的**唯一生产者**
+		`CrashEvidenceReadout.ReasonCounts.statement` 由裸插值接回查表。
+		八句都是整句槽型键（量词 `次`/`份` 在句子中间，英文语序会反转），
+		所以一枚键一个复数变量，不许拆成「前缀 + 数字 + 后缀」。
+		英文值只用 ASCII 标点：`。`/`，`/`（）` 落在中日韩标点段，守卫 1f 判残留。 -->
+	<key>确认崩溃 %lld 次计入</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceCounted@</string>
+		<key>crashEvidenceCounted</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld confirmed crash counted</string>
+			<key>other</key>
+			<string>%lld confirmed crashes counted</string>
+		</dict>
+	</dict>
+	<key>历史报告 %lld 次在窗口外</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceHistorical@</string>
+		<key>crashEvidenceHistorical</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld historical report outside the window</string>
+			<key>other</key>
+			<string>%lld historical reports outside the window</string>
+		</dict>
+	</dict>
+	<key>旧构建 %lld 次未算当前版本</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceStaleBuild@</string>
+		<key>crashEvidenceStaleBuild</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld stale-build occurrence not counted as the current build</string>
+			<key>other</key>
+			<string>%lld stale-build occurrences not counted as the current build</string>
+		</dict>
+	</dict>
+	<key>无事件时间 %lld 次单列</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceUndated@</string>
+		<key>crashEvidenceUndated</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld occurrence listed separately, it has no event time</string>
+			<key>other</key>
+			<string>%lld occurrences listed separately, they have no event time</string>
+		</dict>
+	</dict>
+	<key>疑似报告 %lld 份</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceSuspected@</string>
+		<key>crashEvidenceSuspected</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld suspected report</string>
+			<key>other</key>
+			<string>%lld suspected reports</string>
+		</dict>
+	</dict>
+	<key>解析失败 %lld 份</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceParseFailed@</string>
+		<key>crashEvidenceParseFailed</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld file failed to parse</string>
+			<key>other</key>
+			<string>%lld files failed to parse</string>
+		</dict>
+	</dict>
+	<key>读取失败 %lld 份</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceReadFailed@</string>
+		<key>crashEvidenceReadFailed</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld file could not be read</string>
+			<key>other</key>
+			<string>%lld files could not be read</string>
+		</dict>
+	</dict>
+	<key>同一事件去重合并 %lld 份</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@crashEvidenceDuplicates@</string>
+		<key>crashEvidenceDuplicates</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld file merged as another copy of the same event</string>
+			<key>other</key>
+			<string>%lld files merged as further copies of the same event</string>
+		</dict>
+	</dict>
 </dict>
 </plist>
