@@ -197,7 +197,13 @@ enum CrashEvidenceReadout {
         if let reasons = reading.separatedReasons {
             parts.append("最近 \(reading.windowDays) 天为窗口，逐条原因如下：" + reasons)
         } else {
-            parts.append("窗口内确认崩溃 \(reading.countedCrashCount) 次，只统计有真实事件证据的报告")
+            // 整句键，且是**目录里已有**的那一枚（批次 P69c 登记、`Localizable.stringsdict`
+            // 顶层键 `窗口内确认崩溃 %lld 次，只统计有真实事件证据的报告`，one/other 两支）。
+            // RD-60 之前这句话由 `FileLogAnalyzer` 用查表打出来，搬进本装配口时退化成了裸插值
+            // ⇒ 键还活着、没人查，`test_p69CountKeysAreLookedUpAtTheirProducers` 当场判红。
+            // 中文态一字未动：`String(format: 键, 4)` 就是「窗口内确认崩溃 4 次，…」。
+            parts.append(localizedCount("窗口内确认崩溃 %lld 次，只统计有真实事件证据的报告",
+                                         reading.countedCrashCount))
         }
 
         // 未产出可计数证据的**份数**：只在台账在场时才算得出（份数减份数）。
