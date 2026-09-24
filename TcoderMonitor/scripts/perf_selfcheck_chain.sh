@@ -78,3 +78,43 @@ selfcheck_path_display_keeps_the_tail() {  # selfcheck_path_display_keeps_the_ta
   fi
   ok "归属行两头都有牙：长路径保住结尾的文件名且不失控、短路径一字不改"
 }
+
+selfcheck_chain_message_names_the_compared_tree() {  # selfcheck_chain_message_names_the_compared_tree <outdir>
+  # 58) 拒人的那一行必须印它**实际比对**的那个值，并且 `is_ours` 要双向。
+  # 触发事件（09-25 02:09，t14 整批被拒）：消息头用的是 `${CHAIN_TREE:-$PWD}` ⇒ 印出来是子目录
+  #   `…/TcoderMonitor`，而比对用的是仓库根 `…/perf-base`。**同一件事两个数**，
+  #   我照着印出来的那个数读成"两棵树本来就不等 ⇒ 这道闸误拒"，还把这个读法写成代码注释里的结论，
+  #   活了好几个小时才被推翻（#61）。修法是印与比共用 `chain_tree`，判据钉的是"这两处必须同形"。
+  local lib tree bad=0 printed msg parent
+  lib="$(dirname "${BASH_SOURCE[0]}")/perf_chain_guard.sh"
+  [ -f "$lib" ] || { fail "没有 $lib —— 这道闸搬了家就得同步搬反例"; return; }
+  tree=$(cd "$(dirname "$0")/../.." && git rev-parse --show-toplevel)
+  printed=$(CHAIN_TREE="$tree" bash -c "source '$lib'; chain_tree" 2>/dev/null)
+  [ "$printed" = "$tree" ] \
+    || { fail "chain_tree 没原样交回显式给的树（实得「$printed」）⇒ 印与比又要分叉了"; return; }
+  ( cd "$tree" && exec bash -c 'exec -a perf_wait_window.sh sleep 5' ) >/dev/null 2>&1 &
+  local fake=$!
+  sleep 1
+  msg=$(CHAIN_TREE="$tree" bash -c "source '$lib'; refuse_second_chain" 2>&1)
+  kill -TERM "$fake" 2>/dev/null; wait "$fake" 2>/dev/null
+  case "$msg" in
+    *"与本树 $tree 同树"*) : ;;
+    *) fail "拒人行没印它比对的那棵树（首行实得「$(printf '%s' "$msg" | head -1 | cut -c1-60)」）"; bad=1 ;;
+  esac
+  # 之二：列出的那一行必须以「树=<比对值>␣␣」开头。为什么用两个空格当分隔来判：**坏的形状正好差在这里**——
+  #   `clashing_chains` 是三段制表符分隔，若消息端只用两个变量接，剩下的现场列会被粘进 `tree`，
+  #   打印出来就是「树=<路径><TAB>ppid=…」⇒ 判"路径后面紧跟制表符"比判"路径后面还有字"更准，也更难被凑。
+  case "$msg" in
+    *"树=$tree  "*) : ;;
+    *) fail "列出的那行树与比对值不同形（比对「$tree」，消息里找不到「树=<它>␣␣」那一行）⇒ 读者按消息去比永远比不中"
+       bad=1 ;;
+  esac
+  bash -c "source '$lib'; is_ours \$\$" \
+    || { fail "is_ours 不认自己 ⇒ 每条链都会把自己算成对手，这道闸就恒拒"; bad=1; }
+  parent=$(bash -c "ps -o ppid= -p \$\$ | tr -d ' '")
+  if bash -c "source '$lib'; is_ours '$parent'"; then
+    fail "is_ours 把自己的**父进程**也算成自己人 ⇒ 真链会被放过（双向的另一半）"
+    bad=1
+  fi
+  [ "$bad" = "0" ] && ok "拒人行印的就是比对的那棵树（消息与判定同形）；is_ours 双向：自己算、父进程不算"
+}
