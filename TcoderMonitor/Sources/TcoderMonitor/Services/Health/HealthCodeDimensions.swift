@@ -62,9 +62,16 @@ extension WeightedHealthScorer {
                                 HealthCurves.whole(complexityWorstCC(code)))]
     }
 
+    /// 建议要**能照着做**：这句话手里就拿着热点榜第一名（名字、文件、行号、CC 全在
+    /// `topComplexFunctions.first`），却只说「最高复杂度函数」——读的人还得自己回表里找一遍。
+    /// 榜上同一行印的就是这些字段，所以这里点名它，句子和表格说的是同一个东西。
     private func complexityAdvice(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
-        guard curve.score <= 60, !code.topComplexFunctions.isEmpty else { return [] }
-        return [localizedCopy("优先拆分最高复杂度函数，用早返回替代嵌套分支")]
+        guard curve.score <= 60, let worst = code.topComplexFunctions.first else { return [] }
+        return [localizedFormat("先拆这一个：「%1$@」（%2$@ 第 %3$@ 行 · 圈复杂度 %4$@），用早返回替代嵌套分支",
+                                worst.name,
+                                (worst.filePath as NSString).lastPathComponent,
+                                String(worst.startLine),
+                                String(worst.cyclomaticComplexity))]
     }
 
     // MARK: - 重复度
@@ -78,7 +85,7 @@ extension WeightedHealthScorer {
         return DimensionOutcome(curve: curve,
                                 strengths: duplicationStrengths(curve, code),
                                 issues: duplicationIssues(curve, code),
-                                recommendations: duplicationAdvice(curve))
+                                recommendations: duplicationAdvice(curve, code))
     }
 
     private func duplicationStrengths(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
@@ -114,9 +121,18 @@ extension WeightedHealthScorer {
         }
     }
 
-    private func duplicationAdvice(_ curve: CurveResult) -> [String] {
+    /// RD-84：调用点手里就有 `code.duplicatedBlocks`（每块带两处 `path:startLine` 与重复行数），
+    /// 所以这句要说出"先合哪一处"。**不印 `similarity`** —— 它的刻度在本仓查不到独立真值
+    /// （`DuplicationEngine` 里 grep 命中 0），没对过刻度的数不许当百分比上屏（台账卷六 §100）。
+    private func duplicationAdvice(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
         guard curve.score <= 60 else { return [] }
-        return [localizedCopy("抽取重复块为共享工具或基类，优先处理跨服务重复")]
+        guard let worst = code.duplicatedBlocks.max(by: { $0.lineCount < $1.lineCount }),
+              worst.occurrences.isEmpty == false else { return [] }
+        let places = worst.occurrences.prefix(2).map { fragment in
+            "\((fragment.path as NSString).lastPathComponent):\(fragment.startLine)"
+        }
+        return [localizedFormat("先合这一处重复：%1$@ 之间有 %2$@ 行相同，抽成共享工具或基类",
+                                places.joined(separator: " 与 "), String(worst.lineCount))]
     }
 
     // MARK: - 代码质量

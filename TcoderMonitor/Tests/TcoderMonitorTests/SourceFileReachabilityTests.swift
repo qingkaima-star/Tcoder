@@ -164,7 +164,11 @@ final class SourceFileReachabilityTests: XCTestCase {
     ///   真读者两处、不是单测：`ScanProvenance.rulesVersionStamp` 从这里取第一格（⇒ 每份报告的溯源栏、
     ///   `score` 那行都走它），以及 `CLIRouter.doctorIdentityLines()` 新加的两行
     ///   （「该版收进的判据」与「规则台账自检」）。守卫 = `ScanRulesVersionLedgerTests`（正例 + 六条反例）。
-    static let censusBaseline = 185
+    // 186（总工 R46，2026-09-25 RD-84 拆分）：新增 `Services/Health/HealthDependencyDimension.swift`。
+    // 读者：`dependenciesOutcome` 由 `WeightedHealthScorer.evaluate` 那侧点名调用（跨文件 extension 成员），
+    // 而本守卫按文件名的逐词普查认不出 extension 成员（`ScanRulesVersion.swift` 同一先例）
+    // ⇒ 这一格靠的是「该文件的成员确实被别的文件调用」这条人工核对，不是词频命中。
+    static let censusBaseline = 186
 
     /// 不再自己抄一份：仓库遍历剪枝只有 `SelfScanHarnessCase.skipDirectoryNames` 一个来源。
     static let prunedDirectories: Set<String> = SelfScanHarnessCase.skipDirectoryNames
