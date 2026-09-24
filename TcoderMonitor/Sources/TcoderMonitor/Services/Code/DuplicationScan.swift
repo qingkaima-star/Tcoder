@@ -239,31 +239,18 @@ extension DuplicationScan {
         return duplicatedCodeLines
     }
 
-    /// 披露用坐标的相对化（RD-52 的续集，2026-09-23 由需求方授权窄修）。
-    ///
-    /// 为什么必须去掉被扫根前缀：榜外坐标原先是「绝对路径|绝对路径:行数」，
-    /// 于是**同一条判据的通过与否取决于仓库被检出到哪里**——实测同一条 ≤1200 字符的门，
-    /// 在 `/Users/one/Documents/Tcoder` 树里量到 1,060 字符、在
-    /// `/Users/one/…/.worktrees/perf-base/TcoderMonitor` 树里量到 1,740 字符（12 个路径 × 前缀差 35 字符）。
-    /// 而 `premerge_check` 只在 worktree 里跑 ⇒ 这条守卫会拦下每一条并行流。
-    ///
-    /// ⚠ 只动**披露串**：`DuplicatedFragment.path` 仍然保留绝对路径，
-    /// 因为 UI 的「在 Finder 中显示」要用它（`CodeRiskRows.swift` 的 `reveal(...)`）。
-    /// 读 JSON 的人要还原成绝对路径，用同一份报告里的 `provenance.scannedRoot` 拼回去。
-    static func relativeCoordinates(_ ids: [String], files: [ScannedSourceFile]) -> [String] {
-        guard let root = files.first.flatMap({ file -> String? in
-            // `relativePath` 与 `url.path` 对不上时（根不同、或扫描器换了口径）宁可原样返回：
-            // 截错前缀会把坐标指到别的文件上，那比句子长更坏。
-            guard file.url.path.hasSuffix("/" + file.relativePath) else { return nil }
-            return String(file.url.path.dropLast(file.relativePath.count + 1))
-        }) else { return ids }
-        return ids.map { $0.replacingOccurrences(of: root + "/", with: "") }
-    }
-
     /// 明细榜单收尾：按行数降序、按 id 去重、截断到 `maxBlocks`。
     /// 冻结的 `DuplicatedBlock.id` 只由「出现文件集合 + lineCount」拼成，两个长度相同的
     /// 不同克隆会撞同一个 id（SwiftUI ForEach 会报 duplicate identifiers 并错乱 diff）。
     /// 契约缺口不能改 Models，这里按 id 去重后再截断到 20：**只削明细榜单，不动 ratio**。
+    ///
+    /// 榜外坐标（返回值的第四项）**就是 `id` 本身**，一个字都不再加工：
+    /// RD-52 那一半曾在这里补过一次「按根剥前缀」（`relativeCoordinates`），
+    /// 因为当时生产点给的是绝对路径。RD-61 第二半把坐标在唯一生产点
+    /// （`DuplicationScanState.fragmentOf`）就定成相对被扫根，那层加工于是变成
+    /// 第二次猜前缀 —— 已删除。保留的边界：它当时撑住的那条 ≤1,200 字符的门禁
+    /// 判据一字未动，改由 `OutsideBoardCoordinatesTests` 与
+    /// `DuplicateCoordinatePortabilityTests` 两把尺子共同盯（后者量两棵不同深度的根）。
     static func rankedBlocks(_ input: [DuplicatedBlock])
         -> (blocks: [DuplicatedBlock], droppedByCap: Int, linesOutsideReportedBlocks: Int,
                  outsideBoardCoordinates: [String]) {
