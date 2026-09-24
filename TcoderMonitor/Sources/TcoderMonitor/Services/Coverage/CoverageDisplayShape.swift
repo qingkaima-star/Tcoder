@@ -95,6 +95,51 @@ struct CoverageDisplayShape: Equatable, Sendable {
     }
 }
 
+// MARK: - RD-62 · 覆盖率「类别那一格」的三态（全仓唯一装配口）
+
+/// 「单元测试 / 集成测试」那一格怎么给人看：**三态各一句，取法只此一处**。
+///
+/// 立案（台账卷四 §58.5）：RD-39 结案之后 `CoverageAnalyzer.classify(url:root:)` **不再猜**类别 ——
+/// 报告在被扫根之内的相对路径里没有 `unit`/`integration`/`e2e` 那些目录段就一律算 `.combined`
+/// （钉着它的是 `CoverageContractFieldTests.testAmbientDirectoryNamesNeverLeakIntoKindOrNumbers`）。
+/// 于是「有报告、但没标注类别」是**常态**而不是例外。
+/// 而消费侧那一格原先只有两种取值：有该类报告 ⇒ 百分数；否则 ⇒ 写死「无报告」。
+/// ⇒ 一份普通的 `coverage/lcov.info` 摆在项目里、总覆盖率那格明明有数，
+/// 这两格却写「无报告」，读的人只会得出「这个项目没跑单测」——
+/// **「没标注」被渲染成「没有报告」**，与 AGENTS §4
+/// 「数据缺失时不要显示为 0 假装是真实结果」同族（也是本仓"读不到不许渲染成没有"那条红线）。
+///
+/// ⚠️ 顺手量到的一条事实（写下来，别让它再被当成"只是措辞不精确"）：
+/// 覆盖率那张卡只在 `coverage.hasData` 为真时才画（`Views/DashboardView.swift` 的 `coverageStrip`），
+/// 而 `hasData` 要求**至少有一份 `linesTotal > 0` 的报告** ⇒ 屏上那一格**永远走不到**
+/// 「一份报告都没有」那一支。也就是说改前那句「无报告」出现在屏上的**每一次都是假话**。
+///
+/// 视图与 CLI 都只准走 `text(for:in:)`；再写一句就是第二把尺子
+/// （按名字扫 `Sources/**` 的判据在 `CoverageCategoryAbsenceReadoutTests`，配元测试）。
+enum CoverageCategoryReadout {
+    /// 输入只有两件事：**这一 kind 有没有报告** × **整份报告里有没有任何覆盖率报告**。
+    ///
+    /// 中间那一态**再分一句**，因为「有别的报告」有两种成因，合成一句就必然有一句是假话：
+    /// · 报告都没标注类别（`.combined`）⇒「未标注类别」——就是 RD-62 那一格；
+    /// · 报告标注了别的类别、只是没产出这一类 ⇒「未产出该类报告」——
+    ///   这时候说「未标注类别」是把已经做了的标注报成没做（第 3 例钉的就是这一支）。
+    static func text(for kind: CoverageReport?, in coverage: CoverageMetrics) -> String {
+        if let kind { return percentOf100(kind.linePercent) }
+        guard !coverage.reports.isEmpty else { return localizedCopy("无报告") }
+        return coverage.reports.contains { $0.kind == .combined }
+            ? localizedCopy("未标注类别")
+            : localizedCopy("未产出该类报告")
+    }
+
+    /// 0...100 → 屏上百分数（**现行为逐字不变**：默认零位小数，与 `78%` 同形状）。
+    ///
+    /// 与 `DashboardView.percentOf100` 同一把尺子（都是 `NumberFormat.percent(值 / 100, precision:)`），
+    /// 两处不许分叉 —— `CoverageCategoryAbsenceReadoutTests` 拿同一次扫描的读数逐字比过这两处。
+    static func percentOf100(_ percent: Double, precision: Int = 0) -> String {
+        NumberFormat.percent(percent / 100, precision: precision)
+    }
+}
+
 /// 点名用的短坐标：相对路径原样（已经很短）；给的是绝对路径时退到**末两段**
 /// —— 一棵树里几十份都叫 `lcov.info`，只报 basename 等于没点名。
 func coverageCoordinateShort(_ path: String) -> String {
