@@ -192,6 +192,25 @@ final class SourceRoleTruthTests: XCTestCase {
         XCTAssertTrue(tally.weakEvidenceExamples == ["scratchpad.swift"], "弱判定要能点名：\(tally.weakEvidenceExamples)")
     }
 
+    /// RD-63 · **点名样本只许由相对路径决定**，与文件被递进累计器的先后无关。
+    /// 立案证据：GUI↔CLI 对表同一棵夹具树，`code.fileRoles.shares[0].samplePaths` 一个给
+    /// `Cart.swift` 一个给 `Ledger.swift`，三趟里两趟对不表、而且方向会反过来
+    /// ⇒ 旧写法是"按遇到顺序取前 N 个"，等于让并发调度的偶然决定屏上点谁的名。
+    /// 期望值由测试**自己排序**算出来（独立真值），不是拿实现输出当答案。
+    func testExamplesAreChosenByPathNotByEncounterOrder() {
+        let names = ["src/Zeta.swift", "src/alpha.swift", "src/Mid.swift", "src/Beta.swift",
+                     "src/Gamma.swift", "src/Delta.swift", "src/Epsilon.swift", "src/Theta.swift"]
+        let forward = names.map { makeFile($0, "Swift") }
+        let reversed = Array(forward.reversed())
+        let expected = Array(names.sorted().prefix(SourceRoleTally.exampleLimit))
+        XCTAssertLessThan(SourceRoleTally.exampleLimit, names.count, "样本上限必须真被撞到，否则这条在空转")
+        for (label, files) in [("正序递", forward), ("逆序递", reversed)] {
+            XCTAssertEqual(SourceRoleTally(of: files).share(.production).examples, expected,
+                           "\(label) 点出来的名不一样 ⇒ 样本吃的是遇到顺序：\(names.sorted())")
+        }
+        XCTAssertEqual(expected.first, "src/Beta.swift", "上面那组的独立真值本身要能被反驳")
+    }
+
     /// 未识别 / 弱判定 / 非生产内容仍在分母 —— 三条边界句都得进 `scanLimitations` 那条列表。
     func testTallyNotesNameTheBoundaryNotTheReading() {
         let files = [makeFile("src/App.swift", "Swift", codeLines: 5),
