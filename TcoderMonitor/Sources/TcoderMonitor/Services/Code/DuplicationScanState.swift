@@ -237,8 +237,15 @@ extension DuplicationScanState {
         return true
     }
 
+    /// 块坐标的**唯一生产点**（RD-61 第二半）。给的是 `duplicationCoordinate`
+    /// （相对被扫根），不是 `url.path`（绝对）：`DuplicatedBlock.id` 由这里的路径拼成，
+    /// 绝对形状等于把检出目录写进块身份，同一段克隆在两台机器上就变成两个块。
+    /// 屏上（`CodeDuplicationBlockRow`）、落盘（`occurrences` 与
+    /// `CodeMetrics.duplicateBlockCoordinatesOutsideBoard`）、句子（`boardCaliberNote`）
+    /// 三处读者因此拿到同一个形状，谁都不许再剥一遍前缀；要把坐标还原成绝对路径，
+    /// 只有 `CodeViewFormat.resolvedURL(_:root:)` 那一个入口。
     private func fragmentOf(_ fragment: Fragment, files: [ScannedSourceFile]) -> DuplicatedFragment {
-        DuplicatedFragment(path: files[fragment.fileIndex].url.path,
+        DuplicatedFragment(path: files[fragment.fileIndex].duplicationCoordinate,
                            startLine: numbersByFile[fragment.fileIndex][fragment.windowStart])
     }
 
