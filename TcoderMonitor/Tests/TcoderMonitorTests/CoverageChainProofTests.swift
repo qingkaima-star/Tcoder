@@ -290,6 +290,9 @@ extension CoverageChainProofTests {
         var report = ProjectReport(project: project)
         // 五路走**同一个装配助手** `AnalyzerLedger.timed`：原来这里自己写了一份 `run`，
         // 于是 `AppState` 后面加的字段（provenance、analyzerLedger）这份副本一概不知道。
+        // RD-31 的开工指纹同样要在这五路**之前**采：这份副本重演的是 GUI 装配，少采一次
+        // 就会与 CLI 侧「整键在场 / 缺席」不一致，对表尺子当场判红。
+        let fingerprintAtStart = SourceTreeFingerprint.probe(root: directory)
         let code = await AnalyzerLedger.timed(AnalyzerLedger.sectionLabels[0]) {
             try await FileSystemCodeAnalyzer().analyze(root: directory, options: .default)
         }
@@ -320,7 +323,10 @@ extension CoverageChainProofTests {
         report.analyzerLedger = AnalyzerLedger.records(from: attempts)
         // ⚠️ 这份**测试副本**重演了 GUI 装配而不是调用它 ⇒ AppState 每加一个字段这里就静默落后
         //    一格（实测就漏过 provenance）。抽成共用装配函数是 R10 第 0.5 条的契约缺口。
-        report.provenance = ScanProvenance(report: report, scannedRoot: directory.path, producedBy: "gui")
+        var provenance = ScanProvenance(report: report, scannedRoot: directory.path, producedBy: "gui")
+        provenance.recordDrift(startingFrom: fingerprintAtStart,
+                               endingAt: SourceTreeFingerprint.probe(root: directory))
+        report.provenance = provenance
         store.save(report: report)
         return try XCTUnwrap(
             FileManager.default.contentsOfDirectory(at: sandbox.appendingPathComponent("reports"),
