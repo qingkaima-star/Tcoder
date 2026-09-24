@@ -146,4 +146,29 @@ extension CodeAnalyzerTests {
         XCTAssertEqual(functions.first?.parameterCount, 2, "两个入参")
         XCTAssertEqual(functions.first?.complexity, 2, "1 基准 + 1 个 if")
     }
+
+    /// 文件作用域的原型声明后面跟着一个**不是签名**的 `{`（这里是 `struct Flags {`）时，
+    /// 旧路径会把它当自己的体 ⇒ 产出一条跨越第 1~5 行的假函数 `open`。
+    /// 独立真值 = 这份夹具里只有 `helper` 是一个函数体（第 7~9 行）。
+    /// 交付二进制实测（台账卷六 §93 补记三）：原型为主的总体量到 0 个函数时，
+    /// 评分侧把「复杂度」整维判为**缺席**（不按 0 计、也不给满分）⇒ 这一格钉的是「不产假条目」那一半。
+    func testCFileScopePrototypeDoesNotAdoptTheNextBlocksBrace() throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+        let source = "int open(const char *path);\n"
+            + "\n"
+            + "struct Flags {\n"
+            + "    int a;\n"
+            + "};\n"
+            + "\n"
+            + "static int helper(void) {\n"
+            + "    return 0\n"
+            + "}\n"
+        let file = try XCTUnwrap(classify(try write(source, to: "reader.c", in: root), root: root))
+        let functions = ComplexityEngine.functions(in: file)
+        XCTAssertEqual(functions.map(\.name), ["helper"],
+                      "原型声明不得产假条目，实测 \(functions.map(\.name))")
+        XCTAssertEqual(functions.first?.startLine, 7, "唯一的函数 helper 从第 7 行起")
+        XCTAssertEqual(functions.first?.lineCount, 3, "体是第 7~9 行")
+    }
 }
