@@ -17,15 +17,68 @@
     分叉再分三种形状，各说各的话：**互补**（各握有对方没有的条目）／**包含**（一份的名单被另一份包住）
     ／**名单一致**（纯副本）。上一版只有一种话术，于是把「包含」印成了「不重叠」——见 `compare_copies`。
 一条都不许静默：扫了几个根、命中几处、每处有没有 `*.trace`，全部打印（分母为 0 就是发现，不是通过）。
+
+`--census` 那一档答的是另一个问题：**"这几处根里各有几批、哪一批只活在一处"**。
+它把目录按**形状**分两堆（批次 = 末段 `-runN`，与 `perf_reclaim.py` 的 `RUN_RE` 同一条口径；
+非批次 = 顶着 `tcoder-perf-` 前缀但没有 `-runN` 的 selfcheck 夹具目录、report 目录），
+再按批名跨根分组。为什么要这一档：23:03 我用裸前缀 glob 数批次，把 132 个夹具目录数成了 132 批，
+连带说错两句（"夹具污染了真批次"、"14 批只在本树"）⇒ **数分母这件事以后由尺答，不由临时脚本答**。
 """
 
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 
 TABLE_HINTS = ("meta.json", "hitches.json", "hitches.xml", "summary.txt")
+# 批次的**形状**与 `perf_reclaim.py` 的 RUN_RE 同一条口径：末段必须 `-runN`。
+# 三处 `.scratch` 里还有两类共用 `tcoder-perf-` 前缀的目录（selfcheck 夹具 `…-selfcheck-<rev>`、
+# report 目录 `…-<rev>`），它们**不是批次**——23:03 我拿裸前缀 glob 数批次，把 132 个夹具目录
+# 数成了 132 批，于是连着说错两句（详见台账 §151 那格的更正）。 ⇒ "数了几批"由这把尺答。
+BATCH_RE = re.compile(r"^tcoder-perf-.+-run\d+$")
+
+
+def census_root(root):
+    """一个根里分成两堆：批次形状的目录 / 顶着同一前缀但**不是批次**的目录。读不到就返回 None。"""
+    dirs = tcoder_dirs(root)
+    if dirs is None:
+        return None
+    named = [p for p in dirs if os.path.basename(p).startswith("tcoder-perf-")]
+    return ([p for p in named if BATCH_RE.match(os.path.basename(p))],
+            sorted({os.path.basename(p) for p in named if not BATCH_RE.match(os.path.basename(p))}))
+
+
+def census_lines(roots):
+    """跨根把批次名分组：只在一处的 = **清树真正会灭失的那些**；两处以上的交给逐名模式去判形状。"""
+    where = {}
+    print("== 普查：%d 个根（算数范围：根下第一层 ＋ rescue／archive 这类容器里的第二层；"
+          "夹具树内部不算）==" % len(roots))
+    for r in roots:
+        got = census_root(os.path.normpath(r))
+        if got is None:
+            print("   %s ⇒ 读不到（不存在或不是目录）" % r)
+            continue
+        batches, others = got
+        print("   %s ⇒ 批次目录 %d 个（批名 %d 个）／顶着同一前缀但不是批次形状的 %d 类"
+              % (r, len(batches), len({os.path.basename(p) for p in batches}), len(others)))
+        for p in batches:
+            where.setdefault(os.path.basename(p), set()).add(os.path.normpath(p))
+    if not where:
+        print("   ✗ 一个批次目录都没数到 ⇒ 别把这一行读成『这些根里没有产物』，先核对根路径。")
+        return 1
+    once = sorted(n for n, rs in where.items() if len(rs) == 1)
+    many = [n for n in where if len(where[n]) > 1]
+    print("   跨根分组：只在一处 %d 个／两处以上 %d 个（批次名总数 %d）" % (len(once), len(many), len(where)))
+    print("   只在一处的清单（⇒ 删掉它所在那一处就是唯一份灭失，动之前先逐名跑一次本尺）：")
+    for n in once:
+        print("      · %s ← %s" % (n, ", ".join(sorted(where[n]))))
+    if many:
+        print("   两处以上的那 %d 个**不在这里判**：判「是不是分叉、哪份是权威」要逐名跑" % len(many))
+        print("   （`perf_artifact_locator.py <批名>`），只有那一条路看得见 inode。")
+    return 0
+
 
 
 def default_roots():
@@ -54,20 +107,33 @@ def default_roots():
     return uniq
 
 
-def scan_root(root, name):
-    """在 root 下**深度 ≤2** 找 basename == name 的目录（覆盖 rescue/这类中间层）。"""
-    hits = []
+def tcoder_dirs(root):
+    """这个根下**算数**的 `tcoder-perf-*` 目录：根下第一层，加上"搬家/归档容器"里的第二层。
+    刻意不进任何 `tcoder-perf-` 目录的内部——那里头的 `reclaim/tcoder-perf-fix-idle-run1` 这类
+    是 **selfcheck 的合成夹具**，形状与真批次一模一样（只有「住在夹具树里」这一条能分开它们）。
+    23:07 我第一次按"深度 ≤2 全走"数批次，数出 554 个，而真批次只有 222 个 ⇒ 分母被夹具灌满。
+    这一份口径逐名模式与普查档**共用**：两处各写一遍，同一棵树下就会给出两个数。返回 None = 读不到。
+    """
     if not os.path.isdir(root):
-        return hits
-    for dirpath, dirnames, _ in os.walk(root):
-        depth = os.path.relpath(dirpath, root).count(os.sep) if dirpath != root else -1
-        if depth >= 2:
-            dirnames[:] = []
+        return None
+    top, moved = [], []
+    for e in sorted(os.listdir(root)):
+        p = os.path.join(root, e)
+        if not os.path.isdir(p):
             continue
-        for d in dirnames:
-            if d == name:
-                hits.append(os.path.join(dirpath, d))
-    return hits
+        if e.startswith("tcoder-perf-"):
+            top.append(p)                       # 批次或夹具自己的树，都不再往里走
+            continue
+        for sub in sorted(os.listdir(p)):       # rescue/、archive-*/ 这类容器：第二层才算数
+            sp = os.path.join(p, sub)
+            if sub.startswith("tcoder-perf-") and os.path.isdir(sp):
+                moved.append(sp)
+    return top + moved
+
+
+def scan_root(root, name):
+    """在 root 下找 basename == name 的目录（算数范围见 `tcoder_dirs`）。"""
+    return [p for p in (tcoder_dirs(root) or []) if os.path.basename(p) == name]
 
 
 def describe(path):
@@ -210,15 +276,22 @@ def report(name, hits, roots):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="按批名定位测量产物 + 指明权威份（#89）")
-    ap.add_argument("names", nargs="+", help="批名或 run 目录名（如 tcoder-perf-cert7b-idle-run1）")
+    ap.add_argument("names", nargs="*", help="批名或 run 目录名（如 tcoder-perf-cert7b-idle-run1）")
+    ap.add_argument("--census", action="store_true",
+                    help="不逐名判，而是普查这些根里**各有几个批次**、哪些批名只活在一处"
+                         "（数分母由尺答，不由临时的 glob 答）")
     ap.add_argument("--root", action="append", dest="roots",
                     help="自定义搜索根（可重复）；不给就用本树 .scratch + 仓库根 .scratch")
     args = ap.parse_args(argv)
     roots = args.roots or default_roots()
+    if args.census:
+        return census_lines(roots)
+    if not args.names:
+        print("!! 既没给批名也没给 --census ⇒ 这支尺没被问任何问题，别把「没输出」当「通过」")
+        return 2
     rc = 0
     for n in args.names:
-        code = report(n, locate(n, roots), roots)
-        rc = max(rc, code)
+        rc = max(rc, report(n, locate(n, roots), roots))
     return rc
 
 

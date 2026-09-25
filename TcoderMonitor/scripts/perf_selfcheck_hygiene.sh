@@ -240,3 +240,31 @@ selfcheck_artifact_locator_names_the_tree_copy() {  # 69) 分叉时必须点名�
   [ "$out" = "ok" ] || { fail "本树那一份的点名不成立：$out"; return; }
   ok "分叉必点本树那一份（它是 report／一致性尺唯一认得的），且换一棵合成树站错目录时不冒这句"
 }
+
+selfcheck_locator_census_counts_only_batches() {  # 70) 「数了几批」由尺答：夹具树里的合成 -runN 不进分母（#90）
+  # 23:07 实跑抓到的：普查档第一版按"深度 ≤2 全走"数批次，把 `selfcheck-<rev>/reclaim/tcoder-perf-fix-idle-run1`
+  # 这类**合成夹具**数了进去 ⇒ 554 个"批次"而真批次只有 222 个。形状完全一样，只有
+  # 「住在夹具树里」能分开 ⇒ 这条口径必须钉住，且**逐名模式与普查档共用同一份枚举**（两处入口两个数=老账）。
+  local fx a b r1 r2 out
+  fx=$(mktemp -d 2>/dev/null || echo /tmp/locator-census-fx)
+  a="$fx/rootA"; b="$fx/rootB"
+  mkdir -p "$a/tcoder-perf-real-idle-run1" "$b/tcoder-perf-real-idle-run1" \
+           "$a/container/tcoder-perf-moved-idle-run2" \
+           "$a/tcoder-perf-selfcheck-abc/reclaim/tcoder-perf-fake-idle-run1"
+  python3 scripts/perf_artifact_locator.py --census --root "$a" --root "$b" >"$fx/census.txt" 2>&1; r1=$?
+  python3 scripts/perf_artifact_locator.py tcoder-perf-fake-idle-run1 --root "$a" >"$fx/fake.txt" 2>&1; r2=$?
+  out="ok"
+  [ "$r1" = "0" ] || out="$out 普查=$r1（要 0）"
+  [ "$r2" = "1" ] || out="$out 逐名查夹具批名=$r2（要 1：它不算批次，不能被当成'一处/分叉'）"
+  grep -qF "批次目录 2 个（批名 2 个）" "$fx/census.txt" \
+    || out="$out A 根没数成 2（真批次 1 ＋ 容器里第二层 1，夹具树里那 1 个不算）：$(grep -F "$a " "$fx/census.txt" | head -1)"
+  grep -qF "不是批次形状的 1 类" "$fx/census.txt" || out="$out 没把 selfcheck 目录单列成'非批次形状'"
+  grep -qF "只在一处 1 个／两处以上 1 个" "$fx/census.txt" || out="$out 跨根分组不对（moved 只在一处、real 在两处）"
+  grep -qF "tcoder-perf-moved-idle-run2" "$fx/census.txt" || out="$out 唯一份清单没点名容器里那一层 ⇒ rescue/archive 形状会被漏掉"
+  python3 scripts/perf_artifact_locator.py --census --root "$fx/empty-root" >"$fx/none.txt" 2>&1
+  [ "$?" = "1" ] || out="$out 空根也放行（分母为 0 必须是发现，不是通过）"
+  grep -qF "一个批次目录都没数到" "$fx/none.txt" || out="$out 空根没明说"
+  rm -rf "$fx"
+  [ "$out" = "ok" ] || { fail "普查档的分母口径不成立：$out"; return; }
+  ok "普查档三面有牙：夹具树里的合成 -runN 不进批次分母（逐名模式同样查不到它）、容器第二层算数并点名唯一份、空根要判错"
+}
