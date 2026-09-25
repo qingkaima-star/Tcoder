@@ -45,6 +45,9 @@ final class EvidenceFreshnessTests: XCTestCase {
         var batch: String
         var head: String
         var paths: [String]
+        /// 整行原文 —— 第三格那句**声明**（「无（… 空）」或「已过期 …」）只有从原文才读得出来，
+        /// 而它是一句可机检的话：对不上 git 就是这一格在说谎（§126，尺子在 `EvidenceBacklogTests`）。
+        var line: String = ""
     }
 
     /// 一行**实际要查哪些页的图**。
@@ -103,7 +106,7 @@ final class EvidenceFreshnessTests: XCTestCase {
             let batch = cells.count >= 2
                 ? cells[1].replacingOccurrences(of: "`", with: "").trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
                 : ""
-            out.append(Row(pages: pages, batch: batch, head: String(line[headRange]), paths: paths))
+            out.append(Row(pages: pages, batch: batch, head: String(line[headRange]), paths: paths, line: line))
         }
         return out
     }

@@ -321,4 +321,52 @@ extension EvidenceFreshnessTests {
         // 没过期却挂着账 ⇒ 不红（补拍完忘了删这一格是常事），但也进不了 acknowledged。
         XCTAssertTrue(Self.backlogVerdict(stale: [], entries: [entry], now: now).acknowledged.isEmpty)
     }
+
+    // MARK: - §126：第三格那句「无」是一句可机检的话，不许替 git 说谎
+
+    /// 逐页表第三格只允许两种说法：**「无」**（依赖面一字未动）或**「已过期」**（动过、并且必须挂账）。
+    /// 为什么要单独钉：`test_everyPageInTheTableStillHasFreshEvidence` 查的是"**过期了有没有说出来**"，
+    /// 而这一格写的是什么它**从不读**（正则只取反引号里那条 `git log`）。于是 2026-09-25 实测到：
+    /// 十行里 **5 行**写着「无（… 空）」，而实算分别动了 13/4/4/1/3 笔（`git log` 与净差异两个口径一起量）——
+    /// 读表的人照着一句「无」就知道"这页不必重拍"，而这页其实正躺在下面的积压表里。
+    /// **清单开头那句「表不许靠人记得去改」今天被证伪**：会被忘记的正是这一格。
+    static let noDriftMarker = "无（"
+    static let driftMarker = "已过期"
+
+    /// 纯函数：把"格内声明"与"实算是否动过"对一次账。返回 nil = 这格说的是真话。
+    static func cellClaimViolation(claimsNoDrift: Bool, claimsDrift: Bool, drifted: Bool) -> String? {
+        if claimsNoDrift && claimsDrift { return "同一格里既写「无」又写「已过期」⇒ 两个顶掉的声明" }
+        if !claimsNoDrift && !claimsDrift { return "这一格没写「无」也没写「已过期」⇒ 退回给人看的散文，机检不到" }
+        if claimsNoDrift && drifted { return "写着「无」而实算动过 ⇒ 读表的人会以为这页不必重拍" }
+        if claimsDrift && !drifted { return "写着「已过期」而内容与实拍端一字不差 ⇒ 谎报欠拍" }
+        return nil
+    }
+
+    func test_dependencyCellClaimsMatchGitReality() throws {
+        let markdown = try String(contentsOf: Self.repoRoot.appendingPathComponent(Self.catalogPath), encoding: .utf8)
+        let rows = Self.rows(in: markdown)
+        XCTAssertEqual(rows.count, 10, "逐页表读到 \(rows.count) 行 ⇒ 总体变了（九页 + 公共基座那一行），"
+                     + "这条尺子的分母要重看，不许让它悄悄对着一个不同的总体说真话")
+        var bad: [String] = []
+        for row in rows {
+            let drifted = try Self.netChanged(head: row.head, paths: row.paths).isEmpty == false
+            if let why = Self.cellClaimViolation(claimsNoDrift: row.line.contains(Self.noDriftMarker),
+                                                 claimsDrift: row.line.contains(Self.driftMarker),
+                                                 drifted: drifted) {
+                bad.append("「\(row.pages.joined(separator: "/"))」停在 \(row.head)：\(why)")
+            }
+        }
+        XCTAssertTrue(bad.isEmpty, "逐页表有 \(bad.count)/\(rows.count) 格在替 git 说谎：\n" + bad.joined(separator: "\n"))
+    }
+
+    /// 元测试：两个方向都要红（谎报"无"与谎报"欠拍"对称），且真话两种形状都不许红。
+    func test_meta_cellClaimRulerReadsBothDirections() {
+        XCTAssertNotNil(Self.cellClaimViolation(claimsNoDrift: true, claimsDrift: false, drifted: true))
+        XCTAssertNotNil(Self.cellClaimViolation(claimsNoDrift: false, claimsDrift: true, drifted: false))
+        XCTAssertNotNil(Self.cellClaimViolation(claimsNoDrift: false, claimsDrift: false, drifted: true),
+                        "没声明的格子必须被抓出来，否则新加一行就自动通过")
+        XCTAssertNotNil(Self.cellClaimViolation(claimsNoDrift: true, claimsDrift: true, drifted: false))
+        XCTAssertNil(Self.cellClaimViolation(claimsNoDrift: true, claimsDrift: false, drifted: false))
+        XCTAssertNil(Self.cellClaimViolation(claimsNoDrift: false, claimsDrift: true, drifted: true))
+    }
 }
