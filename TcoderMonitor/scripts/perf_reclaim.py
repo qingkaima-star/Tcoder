@@ -95,16 +95,27 @@ def refuse_reason(run_dir: str) -> str:
     return lines[1] if len(lines) > 1 else "（REFUSED 没写原因）"
 
 
+def open_rows(*args: str) -> int:
+    """lsof 的**表体**行数（表头不算）。退出码不能用：`lsof +D` 找到东西也返回 1。"""
+    rows = subprocess.run(["lsof", *args],
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                          text=True).stdout.splitlines()
+    return max(0, len(rows) - 1) if len(rows) > 1 else 0
+
+
 def is_open(path: str) -> bool:
-    """有进程打开着就绝不碰 —— 与 `sweep_orphan_traces` 同一个守卫、同一个理由。"""
-    return subprocess.run(["lsof", "--", path],
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    """有进程打开着就绝不碰 —— 与 `sweep_orphan_traces` 同一个守卫、同一个理由。
+
+    但**两次查**：`lsof -- <目录>` 只认"目录本身被打开"（cwd / dir fd），看不见
+    里面那些正在写的文件，而"正在录"恰好就是把文件开在里面 —— 只查一次等于没有守卫。
+    """
+    return open_rows("--", path) > 0 or (os.path.isdir(path) and open_rows("+D", path) > 0)
 
 
-def collect_bundles(root: str) -> list[dict]:
+def collect_bundles(runs: list[str]) -> list[dict]:
     """每个 `*.trace` 一条记录：属于哪一趟、哪一档、占多少盘、那趟判没判废。"""
     bundles: list[dict] = []
-    for run in find_run_dirs(root):
+    for run in runs:
         refused = os.path.exists(os.path.join(run, "REFUSED"))
         children = sorted(os.scandir(run), key=lambda e: e.name) if os.path.isdir(run) else []
         for child in children:
@@ -146,11 +157,25 @@ def pick_hits(bundles: list[dict], medians: dict[str, float]) -> list[dict]:
 
 
 def fmt_size(gib: float) -> str:
-    """不到 1 GiB 就换 MiB —— 合成夹具是 KiB/MiB 量级的，印成 `0.0 GiB` 读起来像坏了。"""
-    return f"{gib:.1f} GiB" if gib >= 1 else f"{gib * 1024:.0f} MiB"
+    """按量级换单位 —— 合成夹具是 KiB 量级的，一律印 GiB/MiB 会读成 `0`，
+    而"0 MiB 可回收"和"没东西可回收"是两句不同的话。
+    """
+    if gib >= 1:
+        return f"{gib:.1f} GiB"
+    mib = gib * 1024
+    return f"{mib:.0f} MiB" if mib >= 1 else f"{mib * 1024:.0f} KiB"
 
 
-def report(hits: list[dict], bundles: list[dict], not_judged: list[tuple[str, int]]) -> None:
+def report(hits: list[dict], bundles: list[dict], not_judged: list[tuple[str, int]],
+           runs: list[str]) -> None:
+    """一行现量 + 逐趟点名。**没有分母就不许印「0 个可回收」** ——
+    那会被读成"查过了，干净"，而实际上一趟都没认出来（样本目录改名、
+    或者这棵树压根没跑过测量）。"计数读 0 就通过"是守卫静默失效清单里的老成员。
+    """
+    if not bundles:
+        print(f"被拒趟的原始 trace：认到 {len(runs)} 个趟目录、0 个 `*.trace` ⇒ 这一维没有分母，"
+              f"别读成「没有残骸」（认法：样本根下两层内、名字像 `tcoder-perf-*-runN` 的目录）")
+        return
     refused_total = sum(1 for b in bundles if b["refused"])
     print(f"被拒趟的原始 trace：{len(hits)} 个 bundle 可回收 {fmt_size(sum(i['gib'] for i in hits))}"
           f"（线 = 同档中位 ×{OVERSIZE_FACTOR:g}；被拒 bundle 共 {refused_total} 个，"
@@ -177,10 +202,11 @@ def main(argv: list[str]) -> int:
     if not root or not os.path.isdir(root):
         print(f"回收检查：样本根不在（{root or '未给'}）⇒ 这一维没查，别读成「没有残骸」")
         return 0
-    bundles = collect_bundles(root)
+    runs = find_run_dirs(root)
+    bundles = collect_bundles(runs)
     medians, not_judged = tier_medians(bundles)
     hits = pick_hits(bundles, medians)
-    report(hits, bundles, not_judged)
+    report(hits, bundles, not_judged, runs)
     if os.environ.get("TCODER_RECLAIM") == "1" and hits:
         delete(hits)
         print("    （TCODER_RECLAIM=1：上面那些原始 bundle 已删；判定与上下文那些 KB 级文件原样留着）")
