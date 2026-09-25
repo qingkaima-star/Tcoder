@@ -109,9 +109,16 @@ selfcheck_warmup_dimension() {  # selfcheck_warmup_dimension <outdir>
     [ "$hard" = "0" ] || { echo "已预热却被拒"; exit 1; }
     uptime_secs=5; hard=0; PREFLIGHT_TIER=launch; preflight_gates_warmup >/dev/null 2>&1
     [ "$hard" = "0" ] || { echo "启动档被预热线拒了"; exit 1; }
+    # 上下文里那一句"预热"的话**也要判方向**（09-25 实测：它被写成常量后缀，
+    # 跑了 212 s 的样本照样印「低于线 ⇒ 启动首扫」——条件行说谎，可互比就是空的）。
+    note_hi=$(warmup_reading_note 212); note_lo=$(warmup_reading_note 30); note_no=$(warmup_reading_note "")
+    case "$note_hi" in *"启动首扫"*) echo "跑了 212s 仍被印成『启动首扫』：那一句是常量后缀，不是判定"; exit 1 ;; esac
+    case "$note_hi" in *"稳态心跳"*) : ;; *) echo "≥ 预热线却没判成稳态：$note_hi"; exit 1 ;; esac
+    case "$note_lo" in *"启动首扫"*) : ;; *) echo "< 预热线却没判成首扫：$note_lo"; exit 1 ;; esac
+    case "$note_no" in *"取不到"*) : ;; *) echo "读不到运行时长时没说『取不到』：$note_no"; exit 1 ;; esac
     exit 0' 2>&1) || bad=1
   [ "$bad" = "0" ] || { fail "预热这一维不成立：$got"; return; }
-  ok "预热维成立：四种 etime 排版逐个对得上、坏排版判「取不到」（不回落成 0）、未预热判拒、已预热判放、启动档不参与"
+  ok "预热维成立：四种 etime 排版逐个对得上、坏排版判「取不到」（不回落成 0）、未预热判拒、已预热判放、启动档不参与；上下文那一句按方向判（212s 说稳态、30s 说首扫、读不到说取不到）"
 }
 
 selfcheck_main_drift_reading() {  # selfcheck_main_drift_reading <outdir>

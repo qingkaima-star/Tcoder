@@ -84,12 +84,26 @@ build_product() {  # 出 release 产物；SKIP_BUILD=1 时只核对归属
   provenance_product_identity || return 1
 }
 
+owner_note_line() {  # 把"这一只实例是我这一批起的"落到盘上，别只印在终端里
+  # §145：`open` 之后 ppid 恒为 1，起它的那一批在 `ps` 上根本查不回来。
+  # 于是"是不是我的"只能按路径判（判出来的是**树**，不是**批次**），
+  # 而"那是哪一批"必须有一条落盘的记录才答得出。三列制表符：pid / 批名 / 可执行全路径。
+  # 只追加、不改写：pid 会被系统回收再发，认领时要求 pid 与路径**同时**命中（见 slot 脚本）。
+  local rr
+  rr=$(git worktree list --porcelain 2>/dev/null | sed -n '1s|^worktree ||p')
+  [ -n "$rr" ] || { echo "    ⚠ 认不出仓库根 ⇒ 这次没落归属记录（下一个读数的人查不到是谁起的）" >&2; return 0; }
+  mkdir -p "$rr/.scratch" || { echo "    ⚠ 建不出 $rr/.scratch ⇒ 归属记录没落盘" >&2; return 0; }
+  printf '%s\t%s\t%s\n' "${started_any:-?}" "${TAG:-未命名}/$(basename "$PWD")" "$MY_BIN" \
+    >> "$rr/.scratch/INSTANCE-OWNER"
+}
+
 warm_and_hold() {  # 起一个实例并预热（第七维 ≥120 s）；把 pid 交给调用方打印
   echo "    起跑前实例数=$(mine | grep -c . || true)"
   open "$START_BIN" || { echo "!! open 失败 ⇒ 没有可测实例" >&2; return 1; }
   sleep 5
   started_any=$(mine | head -1)
   echo "    我起的实例 pid=${started_any:-取不到}（按全路径认）"
+  owner_note_line
   nap "${WARMUP_SECONDS:-200}"
   echo "    预热后运行时长=$(ps -o etime= -p "${started_any:-0}" 2>/dev/null | tr -d ' ')"
 }

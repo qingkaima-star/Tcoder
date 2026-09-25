@@ -145,6 +145,22 @@ preflight_context() {  # preflight_context <outdir> <pid> [档]   档=measure(�
 
 
 
+warmup_reading_note() {  # warmup_reading_note <已跑秒数> → 预热这一维的一句人话（可单测，不碰外部命令）
+  # 旧写法把「低于线 ⇒ 量到的是启动首扫」钉在行尾**当常量后缀**印，于是跑了 212 s 的样本
+  # 也被印成"首扫"（09-25 11:48 实测：cert7b 三趟的上下文里全都带着这句假话）。
+  # 这份文件是"读数只有在这一组条件下才可互比"的凭据本身——条件行说谎，可互比就是空的。
+  # 同时修掉数字重印：`${v:+${v}s}${v:-取不到}` 在 v 非空时会把同一个数印两遍（"212s212"）。
+  local up="${1:-}" line="${WARMUP_MIN_SECONDS:-120}"
+  case "$up" in
+    ''|*[!0-9]*) printf '取不到 ⇒ 预热这一维未判（读不到运行时长，不许回落成 0 再判）'; return ;;
+  esac
+  if [ "$up" -ge "$line" ]; then
+    printf '%ss（≥ 预热线 %ss ⇒ 量的是稳态心跳）' "$up" "$line"
+  else
+    printf '%ss（低于预热线 %ss ⇒ 量到的是启动首扫，不是稳态心跳）' "$up" "$line"
+  fi
+}
+
 preflight_write_context() {  # preflight_write_context <outdir> <context 文件路径>
   # 这一份上下文是"读数可互比"的凭据：谁后面拿这批数做对比，都得先看见同一组条件。
   local f="$2"
@@ -162,7 +178,7 @@ preflight_write_context() {  # preflight_write_context <outdir> <context 文件�
     echo "产物构建rev=${BUILD_REV:-未记录}  构建时树clean=${BUILD_CLEAN:-未记录}  ← 必须与上面 HEAD= 同一份代码，否则读数归错对象"
     [ -n "${PROVENANCE_NOTE:-}" ] && echo "   ※ 归属靠产物码 tree 放行（rev 不同）：${PROVENANCE_NOTE}"
     echo "实例数=${COEXIST:-1}  前台App=$front  被测进程visible=$visible"
-    echo "被测实例已跑=${uptime_secs:+${uptime_secs}s}${uptime_secs:-取不到}  预热线=${WARMUP_MIN_SECONDS:-120}s（低于线 ⇒ 量到的是启动首扫，不是稳态心跳）"
+    echo "被测实例已跑=$(warmup_reading_note "${uptime_secs:-}")"
     echo "load1=$load1  核数=$cores  并发重活=${other_detail:-无}"
     echo "人输入静默=${quiet:-取不到}s  明细=${qline:-（探针没跑起来）}"
     echo "hitches_seconds=${SECONDS_HITCHES:-取不到}  tp_seconds=${SECONDS_TP:-取不到}"
