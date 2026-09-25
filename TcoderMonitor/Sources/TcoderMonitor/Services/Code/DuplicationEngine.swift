@@ -21,6 +21,10 @@ struct DuplicationResult: Sendable {
     /// 撞掉的那几块既不在 `blocks` 里、也不在 `blocksDroppedByCap` 里。
     /// 守恒式：`blocks.count + blocksDroppedByCap + blocksDroppedByIdCollision == 原始命中数`。
     var blocksDroppedByIdCollision: Int = 0
+    /// 上面那些**被合并掉的命中自己的坐标**（`路径:起始行`，多处用 ` + ` 连），最多取样
+    /// `DuplicationScan.outsideBoardSampleLimit` 条（RD-86：只给数不给坐标 = 读的人无法反驳，
+    /// 那条老账就是 RD-17 立过的）。点的是坐标而不是 `id`：它的 id 与留下那条一字不差。
+    var blocksMergedAwayCoordinates: [String] = []
     /// 榜外未列块的**稳定坐标**（`DuplicatedBlock.id` = 涉及路径排序后拼接 + 行数）。
     /// RD-17 工单点名要的东西：只留一个总数 = 读的人无法反驳、也无法去核对那 181 处在哪。
     /// 顺序 = 榜单自己的排序（行数降序 → id 升序），因此同一份输入永远给出同一串。
@@ -158,6 +162,7 @@ enum DuplicationEngine {
                                  blocksDroppedByCap: ranked.droppedByCap,
                                  linesOutsideReportedBlocks: ranked.linesOutsideReportedBlocks,
                                  blocksDroppedByIdCollision: ranked.droppedByIdCollision,
+                                 blocksMergedAwayCoordinates: ranked.mergedAwayCoordinates,
                                  // 榜外坐标**直传** `id`：坐标在唯一生产点（`DuplicationScanState.fragmentOf`）
                                  // 已经是相对被扫根的形状，这里不再加工（RD-61 第二半，
                                  // 原先这里挂过一次 `DuplicationScan.relativeCoordinates` 补剥前缀）。

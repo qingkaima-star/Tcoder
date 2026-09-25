@@ -100,6 +100,13 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     /// 由 `DuplicateIdCollisionConservationTests` 用两块等长克隆夹具两头钉住。
     /// `nil` = 本次没跑到重复分析（与上面几格同一种处理，**不许**当成"没有撞"）。
     var duplicatedBlocksDroppedByIdCollision: Int? = nil
+    /// **被合并掉的那几处命中自己的坐标**（每条形如 `路径:起始行 + 路径:起始行`），
+    /// 最多取样 `DuplicationScan.outsideBoardSampleLimit` 条（RD-86）。
+    /// 为什么数之外还要这一格：RD-17 立过的老账——只留一个总数，读的人既无法反驳、
+    /// 也无从去核对"到底是哪几处没上榜"。点坐标而不是点 `id`：撞 id 的那条与留下那条
+    /// 的 id **一字不差**，报名字等于没报。
+    /// `nil` = 本次没跑到重复分析；`[]` 且计数非零 = 合并发生过但一条坐标都没拿到（真缺陷）。
+    var duplicateBlockCoordinatesMergedById: [String]? = nil
     /// 因每指纹片段的展开预算而**没展开成片段**的拷贝窗口数（ratio 已含它们）。
     var duplicateFragmentsNotExpandedCount: Int? = nil
     /// 归一化行数触到窗口上限、后半段克隆不参与检测的文件数。

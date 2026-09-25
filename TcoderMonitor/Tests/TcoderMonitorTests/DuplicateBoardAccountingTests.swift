@@ -62,7 +62,13 @@ final class DuplicateBoardAccountingTests: SelfScanHarnessCase {
         let merged = try XCTUnwrap(metrics.duplicatedBlocksDroppedByIdCollision,
                                    "真扫一份仓库却不填这一格 ⇒ 引擎到契约那行直传没接上")
         XCTAssertGreaterThanOrEqual(merged, 0)
+        // RD-86 的另一半：坐标那一格也要被真实扫描填上，并且它与数**同源**（清单封顶、数不跟着缩）。
+        let spots = try XCTUnwrap(metrics.duplicateBlockCoordinatesMergedById,
+                                  "真扫描不填坐标那一格 ⇒ 数是一条无法反驳的孤账")
+        XCTAssertEqual(spots.count, min(merged, DuplicationScan.outsideBoardSampleLimit),
+                       "坐标清单与被合并掉的数不同源：数 \(merged)、清单 \(spots) 条")
         let line = "RD-85 本仓自扫：合并掉 \(merged) 处等长同组命中"
+            + "（点名 \(spots.count) 处，上限 \(DuplicationScan.outsideBoardSampleLimit)）"
         let ledger = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent()
