@@ -168,7 +168,8 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
             roleTally: roleTally,
             treeFollowing: scan.treeFollowing,
             duplicateBlockCoordinatesOutsideBoard: duplication.blocksOutsideBoard,
-            duplicationBoardCaliber: duplication.blocksDroppedByCap > 0 ? duplication.boardCaliberNote : ""
+            duplicationBoardCaliber: duplication.blocksDroppedByCap > 0 ? duplication.boardCaliberNote : "",
+            duplicationMergedByIdNote: duplication.mergedByIdLimitationNote ?? ""
         )
     }
 

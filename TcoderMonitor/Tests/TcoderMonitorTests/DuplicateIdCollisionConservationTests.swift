@@ -250,4 +250,49 @@ final class DuplicateIdCollisionConservationTests: XCTestCase {
     static func countedNames(in sentence: String, from spots: [String]) -> Int {
         spots.filter { sentence.contains($0) }.count
     }
+
+    // MARK: - §132：同一件事的**第二个出口**（CLI 的 `scanLimitations`）也必须有这一句
+
+    private func resultWithCollisions(_ count: Int, coordinates: [String]) -> DuplicationResult {
+        var result = DuplicationResult(ratio: 0.1, duplicatedCodeLines: 100, totalCodeLines: 1_000, blocks: [])
+        result.blocksDroppedByIdCollision = count
+        result.blocksMergedAwayCoordinates = coordinates
+        return result
+    }
+
+    /// 正例：有合并就出声，并且**守同一条披露预算**（散文 3 条、全量在字段里、余数点名）。
+    func testCliNoteNamesTheMergedHitsWithinTheSameDisclosureBudget() {
+        let spots = Self.sixCoordinates()
+        let note = resultWithCollisions(5_662, coordinates: spots).mergedByIdLimitationNote ?? ""
+        XCTAssertTrue(note.contains("另有 5,662 处重复命中与别处合并为一条"), "数没进句子：\(note)")
+        XCTAssertEqual(Self.countedNames(in: note, from: spots), DuplicationResult.proseCoordinateBudget,
+                       "CLI 这一句点名的条数不归预算管：\(note)")
+        XCTAssertTrue(note.contains("另有 3 条样本未写进这句"), "削了清单却没点名余数：\(note)")
+        XCTAssertTrue(note.contains("`code.duplicateBlockCoordinatesMergedById`"), "没指回落盘字段：\(note)")
+        XCTAssertFalse(note.contains(CodeBoardTruth.outsideBoardMarker),
+                       "这句顶了「榜外」那枚标记 ⇒ 会被 GUI 的按句式认领路径重复接走：\(note)")
+        XCTAssertLessThan(note.count, 1_200, "整条限制说明 \(note.count) 字符，越过披露预算那把尺")
+    }
+
+    /// 反例（零命中不出声）：没有合并就**不许**有这一句 —— 否则「没测到」会长成"有账"。
+    func testCliNoteIsSilentWhenNothingWasMerged() {
+        var none = resultWithCollisions(0, coordinates: [])
+        XCTAssertNil(none.mergedByIdLimitationNote)
+        none.blocksDroppedByIdCollision = 0
+        XCTAssertNil(none.mergedByIdLimitationNote, "0 处合并却造了一句")
+        // 数在、坐标缺席（旧产物/取样失败）：句子仍要出声，只是不点名坐标。
+        let noCoords = resultWithCollisions(7, coordinates: [])
+        let line = noCoords.mergedByIdLimitationNote ?? ""
+        XCTAssertTrue(line.contains("另有 7 处"), line)
+        XCTAssertFalse(line.contains("点样"), "没有坐标却写了点名形状：\(line)")
+    }
+
+    /// 第 21 类钉子：新增这一维时，**原来那句榜外披露一字不许变**（逐字节比，不比对形状）。
+    func test_existingOutsideBoardDisclosureIsByteForByteUnchanged() {
+        let four = ["a.swift:1 + b.swift:1", "c.swift:2", "d.swift:3", "e.swift:4"]
+        XCTAssertEqual(DuplicationResult.coordinateDisclosure(four),
+                       "榜外坐标（点样 3 条）：a.swift:1 + b.swift:1 ; c.swift:2 ; d.swift:3"
+                       + "；另有 1 条样本未写进这句（全部 4 条样本见 `code.duplicateBlockCoordinatesOutsideBoard`，"
+                       + "榜外未列的块数见 `code.duplicatedBlocksDroppedByCap`）。")
+    }
 }
