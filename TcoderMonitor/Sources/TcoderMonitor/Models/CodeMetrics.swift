@@ -81,9 +81,11 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     // 后果有两层：① 消费方要"榜外还有几块"只能去解析句子（等于造第二把尺子）；
     // ② 界面页尾那句"明细榜上限 20 块"是**数**，却来自一条按句式认领的字符串
     // （`CodeBoardTruth.outsideBoardNote`），改文案不改认领标记就会静默失去披露。
-    // ⚠️ **故意不给"重复块总数"**：`rankedBlocks` 在撞 id 时还会削掉若干块而无处计数
-    // （R6b 交回时点名），所以"榜内 + 榜外 == 总数"这个等式天然不平，
-    // 造一枚看似精确的总数就是把不平藏起来。
+    // ⚠️ **总数分两把尺，各自点名**（RD-85 改的就是这里原先那句「故意不给总数」）：
+    // 撞 id 削掉的块**以前没有读数**，所以「榜内 + 榜外 == 总数」天然不平，
+    // 造一枚看似精确的总数就是把不平藏起来。现在那一格有数了
+    // （`duplicatedBlocksDroppedByIdCollision`），等式补第三项后重新平；
+    // 「去重后口径」从一句无法反驳的免责声明变成一条可以核对的账。
     /// 明细榜的封顶长度（引擎那份 `maxBlocks` 的直传，不是界面自己抄的 20）。
     /// `nil` = 本次没跑到重复分析（旧报告与"依赖/日志缺席"同一种处理）。
     var duplicatedBlockLimit: Int? = nil
@@ -91,6 +93,13 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     var duplicatedBlocksDroppedByCap: Int? = nil
     /// 上面那些被丢掉的块覆盖的代码行数。
     var duplicatedLinesOutsideReportedBlocks: Int? = nil
+    /// 截断到明细榜上限**之前**、按 `DuplicatedBlock.id` 去重时被合并掉的原始命中数（RD-85）。
+    /// `id` 只由「出现文件集合 + 行数」拼成 ⇒ 两处**等长**的不同克隆撞同一个 id，
+    /// 被合并掉的那几块既不在榜内也不在 `duplicatedBlocksDroppedByCap` 里。
+    /// 守恒式：`duplicatedBlocks.count + 本格 + duplicatedBlocksDroppedByCap == 原始命中数`，
+    /// 由 `DuplicateIdCollisionConservationTests` 用两块等长克隆夹具两头钉住。
+    /// `nil` = 本次没跑到重复分析（与上面几格同一种处理，**不许**当成"没有撞"）。
+    var duplicatedBlocksDroppedByIdCollision: Int? = nil
     /// 因每指纹片段的展开预算而**没展开成片段**的拷贝窗口数（ratio 已含它们）。
     var duplicateFragmentsNotExpandedCount: Int? = nil
     /// 归一化行数触到窗口上限、后半段克隆不参与检测的文件数。
@@ -328,9 +337,9 @@ struct CodeScanScope: Codable, Equatable, Sendable {
 //
 // ⚠️ **口径必须自己交代**：`DuplicationScan.rankedBlocks` 先按 `DuplicatedBlock.id` 去重、
 // 再截断到上限，所以「榜内 + 榜外」是**去重之后**的重复块总数。撞同一个 id 被合并掉的
-// 原始命中没有任何读数（`docs/R6-契约字段清单.md` §7 第 2 条点名缺的那枚
-// `blocksDroppedByIdCollision`），所以这个数**只许配「去重后口径」这句限定语上屏**，
-// 不许被读成"这个仓库一共有多少处克隆"。
+// 原始命中自 RD-85 起有读数了（`duplicatedBlocksDroppedByIdCollision`，
+// 申请单见 `docs/R6-契约字段清单.md` §7 第 2 条），所以这个数**只许配「去重后口径」这句
+// 限定语上屏**，不许被读成"这个仓库一共有多少处克隆"；要那一个数，把三项相加。
 extension CodeMetrics {
     /// 去重后口径的重复块总数。**取法只此一处**：消费方（评分解释文本 / 界面 / CLI）
     /// 都走它，不许各自再写一遍加法造第二把尺子。

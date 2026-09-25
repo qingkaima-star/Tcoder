@@ -9,8 +9,9 @@ import XCTest
 /// 界面要显示"明细榜上限 20 块"只能按句式去认领那句话
 /// （`CodeBoardTruth.outsideBoardNote`；引擎改文案而标记没改，披露就静默消失）。
 ///
-/// ⚠️ 这里**故意不断言**"榜内 + 榜外 == 总块数"：`rankedBlocks` 在撞 id 时还会削掉若干块而无处计数
-/// （R6b 交回时点名的那格），等式天然不平。落四枚直传数、不造一枚看似精确的总数，是这次的选择。
+/// ⚠️ 这里**不断言**"榜内 + 榜外 == 原始命中数"：撞 id 削掉的那几块在契约里没有承接格
+/// （原始命中数根本没落盘，只有 `CodeMetrics` 这三格）。守恒式由
+/// `DuplicateIdCollisionConservationTests` 在纯函数 `rankedBlocks` 那头量（RD-85 落了第三格）。
 ///
 /// 继承 `SelfScanHarnessCase` 只为复用那台"一次扫描六个分析器"的缓存 —— 每个用例各扫一遍本仓太贵。
 final class DuplicateBoardAccountingTests: SelfScanHarnessCase {
@@ -50,6 +51,28 @@ final class DuplicateBoardAccountingTests: SelfScanHarnessCase {
     }
 
     // MARK: - 页尾那句改由字段装配
+
+    /// RD-85 的另一半：这一格必须被**真实扫描**填上，而不是只被我的夹具填上。
+    /// 立案理由（不配这条用例就是假绿）：守恒那三条量的是纯函数 `rankedBlocks`，
+    /// 把 `FileSystemCodeAnalyzer.applyDuplicationBoardTruth` 里那行直传**整行删掉**，
+    /// 三条照样全绿 —— 而屏上那一格永远读不到数。这正是「入口少一个参数 = 造出一个假无」那族。
+    /// 读数同时落一份仓库内台账并读回来比对（§6.1：判据读数不许只有 `print` 一个出口）。
+    func testRealScanFillsTheCollisionFieldAndTheLedgerAgrees() async throws {
+        let metrics = try await selfScan().code
+        let merged = try XCTUnwrap(metrics.duplicatedBlocksDroppedByIdCollision,
+                                   "真扫一份仓库却不填这一格 ⇒ 引擎到契约那行直传没接上")
+        XCTAssertGreaterThanOrEqual(merged, 0)
+        let line = "RD-85 本仓自扫：合并掉 \(merged) 处等长同组命中"
+        let ledger = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(".scratch/tcoder-idcollision.txt")
+        try FileManager.default.createDirectory(at: ledger.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try line.write(to: ledger, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try String(contentsOf: ledger, encoding: .utf8), line, "台账读回来不等于写进去的数")
+        print(line)
+    }
 
     private func metrics(dropped: Int?, lines: Int?, fragments: Int?) -> CodeMetrics {
         var metrics = CodeMetrics()
@@ -97,9 +120,10 @@ final class DuplicateBoardAccountingTests: SelfScanHarnessCase {
         XCTAssertNil(back.duplicatedBlocksDroppedByCap)
     }
 
-    /// RD-48 当年**故意不给总数**的理由仍然成立：`rankedBlocks` 在撞 id 时先默默削掉若干块，
-    /// 所以"榜内 + 榜外"**不等于**"引擎见过的原始命中数"。
-    /// 但它等于一个定义良好的量——**去重后的重复块总数**（先去重、再截断，见 `rankedBlocks`）。
+    /// RD-48 当年**故意不给总数**的理由：`rankedBlocks` 在撞 id 时先默默削掉若干块。
+    /// "默默"这一半自 RD-85 起不成立了（那一格有读数），但**结论不变**：
+    /// 「榜内 + 榜外」仍然不等于"引擎见过的原始命中数"，它等于一个定义良好的量——
+    /// **去重后的重复块总数**（先去重、再截断，见 `rankedBlocks`）。
     /// 因此判据从"哪都不许加"改成两条更准的（R18 由总工裁，理由在台账卷三 §49）：
     /// ① 这枚加法**只有一个家**（`CodeMetrics.reportedDuplicatedBlockTotalCount`），别处再算就是第二把尺子；
     /// ② 任何把"共 N 处重复块"说出去的句子，**必须同时点名口径**（「去重后」或「明细已全部列出」），

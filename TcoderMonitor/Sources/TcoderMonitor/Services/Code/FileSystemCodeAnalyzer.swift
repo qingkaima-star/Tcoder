@@ -208,13 +208,14 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
     /// 红了的正确反应是**搬**，不是抬闸门 —— 抬闸门等于把这条判据作废。
     /// RD-48 那四枚与 RD-52 那一枚同批进来：它们原先只活在 `scanLimitations` 的中文句里，
     /// 界面"上限 20 块"那格其实是在按句式认领一句散文；落成字段之后页尾改由数字装配，
-    /// 读 JSON 的人也不必再解析句子。**故意不给「总块数」**：`rankedBlocks` 撞 id 削掉的块
-    /// 无读数，「榜内 + 榜外 == 总数」天然不平。
+    /// 读 JSON 的人也不必再解析句子。RD-85 补进撞 id 那一格：在那之前「榜内 + 榜外 == 总数」
+    /// 天然不平，而且**不平多少没有读数**。
     private static func applyDuplicationBoardTruth(_ duplication: DuplicationResult,
                                                    to metrics: inout CodeMetrics) {
         metrics.duplicatedBlocks = duplication.blocks
         metrics.duplicatedBlockLimit = DuplicationEngine.maxBlocks
         metrics.duplicatedBlocksDroppedByCap = duplication.blocksDroppedByCap
+        metrics.duplicatedBlocksDroppedByIdCollision = duplication.blocksDroppedByIdCollision
         metrics.duplicatedLinesOutsideReportedBlocks = duplication.linesOutsideReportedBlocks
         metrics.duplicateFragmentsNotExpandedCount = duplication.fragmentsDroppedByBudget
         metrics.duplicateFilesHittingLineCap = duplication.filesHittingLineCap
