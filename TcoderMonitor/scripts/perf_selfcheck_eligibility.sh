@@ -269,12 +269,11 @@ print("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s" % (a, b, c, d, e, f, g, h, i, j))')
   ok "同档连测的一致性有尺子了：按档取判据量（交互比 hitch/s、idle 比每趟自身 p90 与均值），十形状各判一次（含极值不当判据的正反一对）"
 }
 
-selfcheck_refused_not_pooled() {  # selfcheck_refused_not_pooled <outdir>
-  # 55) **被闸门当场拒收的那一趟必须不被池化**。
-  #     本文件头注一直写着"没被 REFUSED"，可代码里没有那个读者——我拿临时探针数"这趟合格吗"时
-  #     就把一个 REFUSED 的目录读成了合格（挂死的录制会留下上一次的表文件，"表在 + REFUSED 在"就是入口）。
-  local rf
-  rf=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 - "$1" <<'PYCHK'
+trio_pooling_probe() {  # trio_pooling_probe <outdir> → 造四份夹具、调判定，印一行复合读数
+  # 这一半本来长在 `selfcheck_refused_not_pooled` 里：归因档那两格把函数本体顶到 **51 行**，
+  # 越过 `PerfRulerHotspotRatchetTests` 那条"尺子函数 ≤50 行"的闸门（21:12 门禁现场判红）。
+  # **拆，不抬线** —— 本仓为同一把门让路是第四次，前几次的注释就写在尺子名单里。
+  cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 - "$1" <<'PYCHK'
 import json, os, sys
 from perf_trio_agreement import read_run
 root = sys.argv[1]
@@ -288,12 +287,42 @@ for name in ("clean", "refused"):
     json.dump({"period": "idle", "hitches_seconds": 20, "input_source": "human"},
               open(os.path.join(d, "meta.json"), "w"))
 open(os.path.join(root, "trio-refused", "REFUSED"), "w").write("REFUSED\n闸门当场拒收\n")
+# 归因档两格（09-25 20:32 的现场：三趟里两趟是"按设计不参与"、一趟真被拒，
+# 旧出口把两种东西印成同一句话，下一个人会去修根本没坏的采集）：
+#   · 只有 blame 标记 ⇒ 认成 bydesign，并且整批都是它时判"不适用"（不是失败）
+#   · blame + REFUSED 同时在场 ⇒ 必须认成 refused（更该先看见的那格赢，别让"按设计"盖住真坏的）
+for name, extra in (("blame", {"blame_instrument": 1}), ("both", {"blame_instrument": 1})):
+    d = os.path.join(root, "trio-" + name)
+    os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, "hitches.xml"), "w").write(xml)
+    meta = {"period": "idle", "hitches_seconds": 20, "input_source": "human"}
+    meta.update(extra)
+    json.dump(meta, open(os.path.join(d, "meta.json"), "w"))
+open(os.path.join(root, "trio-both", "REFUSED"), "w").write("REFUSED\n闸门当场拒收\n")
+from perf_trio_agreement import _why_out, verdict
+# 只对"没参与"的那几趟问原因（clean 那趟本来就可用，不该被拿去分类）
+kinds = ",".join(_why_out(os.path.join(root, "trio-" + n))[0]
+                 for n in ("refused", "blame", "both"))
+lines, code = verdict([None, None],
+                      [os.path.join(root, "trio-blame")] * 2)
 got_clean = read_run(os.path.join(root, "trio-clean")) is not None
 got_refused = read_run(os.path.join(root, "trio-refused")) is None
-print("%s|%s" % (got_clean, got_refused))
+got_blame_out = read_run(os.path.join(root, "trio-blame")) is None
+print("%s|%s|%s|%s|%s" % (got_clean, got_refused, got_blame_out, kinds, code))
 PYCHK
-)
-  [ "$rf" = "True|True" ] \
-    || { fail "REFUSED 那一维没被读到（拿到「$rf」，应为 True|True）⇒ 被拒的一趟会混进散布"; return; }
-  ok "被当场拒收的那一趟混不进散布：同一份表 + meta，加 REFUSED 的要被排除、不加的要能读成可用"
+}
+
+selfcheck_refused_not_pooled() {  # selfcheck_refused_not_pooled <outdir>
+  # 55) **被闸门当场拒收的那一趟必须不被池化**，而且"按设计不参与"不许被印成"这一趟坏了"。
+  #     头注一直写着"没被 REFUSED"，可代码里原先没有那个读者——我拿临时探针数"这趟合格吗"时
+  #     就把一个 REFUSED 的目录读成了合格（挂死的录制会留下上一次的表文件，"表在 + REFUSED 在"就是入口）。
+  local rf rf1
+  rf=$(trio_pooling_probe "$1")
+  rf1=$(printf '%s\n' "$rf" | head -1)
+  [ "$rf1" = "True|True|True|refused,bydesign,refused|3" ] \
+    || { fail "REFUSED／归因档这两维没被分开读（拿到「$rf1」，应为 " \
+              "True|True|True|refused,bydesign,refused|3）⇒ 被拒的一趟会混进散布，" \
+              "或按设计的归因档被印成坏了"; return; }
+  ok "被当场拒收的那一趟混不进散布，且归因档与它分得开：同一份表 + meta，加 REFUSED 的被排除、" \
+     "只有 blame 标记的判「按设计不参与」（整批如此 ⇒ 不适用 rc=3）、blame+REFUSED 同场时按被拒算"
 }

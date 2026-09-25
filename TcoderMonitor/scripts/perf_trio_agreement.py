@@ -29,7 +29,9 @@
 
 用法：
     python3 scripts/perf_trio_agreement.py <run 目录> [<run 目录> …] [--budget-ms 8.333]
-退出码：0 一致 / 1 不一致 / 2 样本不足或有缺件（不足时**不许**报"3/3 达标"）。
+退出码：0 一致 / 1 不一致 / 2 样本不足或有缺件（不足时**不许**报"3/3 达标"）
+        / **3 不适用**（整批都是归因档 `blame_instrument=1`，按设计不进 §1.3 计数——
+        这既不绿也不红，把它读成"0 趟可用 ⇒ 这批坏了"就是 09-25 20:32 那次误判）。
 
 ## 第四条（09-24 需求方裁定 A）：idle 档不再比每趟极值的极差比
 
@@ -136,8 +138,39 @@ def _spread(vals, unit, bar):
         unit, lo, hi, ratio, bar)
 
 
-def _roster_lines(got, missing):
-    """把每一趟的现量逐行印出来（缺件的那几趟点名，但不进散布）。"""
+def _raw_meta(d):
+    """**不经资格判定**地读 meta.json —— 分类"为什么没参与"时必须看原始文件，
+    否则 `_meta_or_none` 会把"按设计被排除"和"文件读不出"合并成同一个 None（正是要分开的两格）。
+    """
+    try:
+        return json.load(open(os.path.join(str(d).rstrip("/"), "meta.json"), encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+
+
+def _why_out(d):
+    """一趟为什么"不参与"⇒ (种类, 一句原因)。**这些种类是两种完全不同的东西，混起来会骗人**：
+    归因档（`blame_instrument=1`）是**按设计**不进 §1.3 计数，而 REFUSED／缺件是**这一趟坏了**。
+    09-25 20:32 实测：`blame1` 三趟里两趟是归因档、一趟真被拒，旧出口把三趟一起印成
+    「缺件/读不出/被复核打回/被当场拒收」⇒ 下一个人会去修两趟根本没坏的采集。
+    顺序有意义：**真被拒的那格先认**（归因档的批次里也可能夹一趟真坏的，
+    把 REFUSED 盖在"按设计"后面，那趟坏样本就没人去看了）。
+    """
+    dd = str(d).rstrip("/")
+    if os.path.isfile(os.path.join(dd, "REFUSED")):
+        return "refused", "被闸门当场拒收（有 REFUSED）"
+    meta = _raw_meta(dd)
+    if meta is None:
+        return "unreadable", "meta.json 读不出"
+    if str(meta.get("blame_instrument") or "") in ("1", "True", "true"):
+        return "bydesign", "按设计不参与（挂了第二枚仪器，只用于定位）"
+    if not period_eligibility(meta)[0]:
+        return "periodrefused", "被收尾复核打回（期间声明没被确认）"
+    return "incomplete", "缺件（hitches 表或秒数不在）"
+
+
+def _roster_lines(got, excluded):
+    """把每一趟的现量逐行印出来（不参与的按**原因分组**点名，都不进散布）。"""
     lines = []
     for r in got:
         lines.append("   %-44s 档=%-11s %5.1fs  hitch %4d ⇒ %5.2f /s   render p50 %s  update max %s  出帧 p50 %s"
@@ -145,10 +178,20 @@ def _roster_lines(got, missing):
                         ("%.2f ms" % r["render_p50_ms"]) if r.get("render_p50_ms") else "—",
                         ("%.2f ms" % r["update_max_ms"]) if r.get("update_max_ms") else "—",
                         ("%.0f/s" % r["surfaces_p50_fps"]) if r.get("surfaces_p50_fps") else "—"))
-    if missing:
-        lines.append("   缺件/读不出/被复核打回/被当场拒收（有 REFUSED）：%s ⇒ **不参与**散布"
-                     "（缺的那趟不许当 hitch=0）" % ", ".join(missing))
+    for kind in ("refused", "bydesign", "periodrefused", "unreadable", "incomplete"):
+        names = [n for n, k in excluded if k == kind]
+        if names:
+            lines.append("   %s：%s ⇒ **不参与**散布" % (_REASONS[kind], ", ".join(names)))
     return lines
+
+
+_REASONS = {
+    "refused": "被闸门当场拒收（有 REFUSED）",
+    "bydesign": "按设计不参与（归因档 blame_instrument=1，只用于定位）",
+    "periodrefused": "被收尾复核打回（期间声明没被确认）",
+    "unreadable": "meta.json 读不出",
+    "incomplete": "缺件（hitches 表或秒数不在；缺的那趟不许当 hitch=0）",
+}
 
 
 def per_run_quantiles(runs):
@@ -243,8 +286,14 @@ def verdict(runs, dirs):
     if not runs:
         return ["!! 一个 run 目录都没给 ⇒ 这支尺子没被喂过数据，别把「没输出」当「通过」"], 2
     got = [r for r in runs if r]
-    missing = [os.path.basename(str(d).rstrip("/")) for d, r in zip(dirs, runs) if not r]
-    lines = ["== 同档连测的一致性（协议：≥3 趟 **且取值一致**）=="] + _roster_lines(got, missing)
+    excluded = [(os.path.basename(str(d).rstrip("/")), _why_out(d)[0])
+                for d, r in zip(dirs, runs) if not r]
+    lines = ["== 同档连测的一致性（协议：≥3 趟 **且取值一致**）=="] + _roster_lines(got, excluded)
+    if not got and excluded and all(k == "bydesign" for _, k in excluded):
+        # 整批都是归因档 ⇒ 这把尺子**没有对象**，这不是失败，也不许被读成"0 趟可用 = 这批坏了"。
+        lines.append("   判定：**不适用**——这一批 %d 趟全按设计不参与认证计数（定位用的归因档）。"
+                     "退出码 3 ≠ 失败：要看这一批有没有采到东西，去逐趟的 report。" % len(excluded))
+        return lines, 3
     if len(got) < 3:
         lines.append("   判定：**样本不足**（只有 %d 趟可用，协议要 ≥3）⇒ 不许报「3/3 达标」" % len(got))
         return lines, 2
