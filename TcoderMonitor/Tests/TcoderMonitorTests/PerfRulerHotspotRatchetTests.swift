@@ -127,7 +127,63 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // **第十三次**用同一条规矩：搬出来的那片当场点名——不点名就等于给它开免检通道。
         // （这次是在同一笔里点的，没有等 `ls | comm` 事后抓。）
         "perf_eligibility.py",
+        // 09-25 #75：**第十四次，也是最后一次**用这条规矩手动点名。这一次把剩下五把
+        // 从没进过名单的尺子一次补齐（`ls scripts/` 与名单求差集现量），并且在下面
+        // `testRosterCoversEveryScriptOnDisk` 里装上反向守卫——从此"新建文件"不再是免检通道，
+        // 前十三次那种"漏了→注释里认一次→再漏"的循环到此为止。
+        // 逐把说明：
+        //   · `perf_cadence.py`（p95 那半句的两把预算与相对地板判据）——它有两枚函数贴着 50 行线，
+        //     点名之前先按"拆，不抬线"把 `report` 里的脉冲交叉核对与 `against_baseline` 的
+        //     算术/判定各搬一刀，拆前拆后拿真产物跑五格、输出逐字 diff 为空（同 #39 的做法）；
+        //   · `perf_wait_window.sh`（等窗那一族的宿主，最长函数 `cond_instance_ready`）；
+        //   · `perf_who_holds_the_slot.sh`（"谁占着窗口"那份只读诊断，#81 刚给它补了一态）；
+        //   · `perf_synth_scroll.swift`（两枚函数）。⚠ 点名 **不等于**执行：合成滚动那一枚
+        //     仍然在"停止一切点击与滚动测试"的禁令里（AGENTS §2.2），这里量的是它的代码。
+        // `perf_raise.swift` 走下面的豁免表：它是 27 行**顶层脚本、零个函数**，
+        // 一进门就被"每个尺子文件都要真被认出函数"那一分母门判红（实测就是这么红的）。
+        "perf_cadence.py", "perf_wait_window.sh", "perf_who_holds_the_slot.sh",
+        "perf_synth_scroll.swift",
     ]
+
+    /// 盘上 `scripts/` 里"不进函数级名单"的文件：逐条写**为什么函数级两条尺没有可量对象**。
+    /// 目标是这张表**永远是空的**。留一行就得在评审时讲清理由——
+    /// "它超标了所以先豁免"是抬 `functionLineBar` 的另一种写法，不算理由。
+    /// ⚠ 豁免只免**函数级**：文件长度那一尺仍然量它（`testRulerFilesStayAtOrBelowEightHundredLines`
+    /// 取的是"名单 ∪ 豁免表"），否则"豁免"就会变成第二根免检通道。
+    static let rosterExemptions: [String: String] = [
+        "perf_raise.swift": "整份 27 行是顶层脚本（CommandLine + activate），零个函数"
+            + " ⇒ 圈复杂度与函数行数两条尺没有可量对象；文件行数那一尺照常量它。",
+    ]
+
+    /// 名单与盘上事实必须**双向相等**。
+    /// 为什么必须有这条：`rulerScripts` 是写死的，而扫描处是
+    /// `guard rulerScripts.contains(...) else { continue }` ⇒ **不点名的新尺子静默免检**；
+    /// 而原来那条断言只反方向管（名单有、盘上没 ⇒ 红）。同一族错我自己犯到第十三次，
+    /// 前三次都靠事后手工 `ls scripts | grep '^perf_'` 与名单求差集，
+    /// 所以这条规矩要从"我记得"搬进"这条测试替我记得"。
+    func testRosterCoversEveryScriptOnDisk() throws {
+        let entries = try FileManager.default.contentsOfDirectory(atPath: Self.scriptsRoot.path)
+        // ⚠ 全集不是"只有 perf_ 前缀"：`trace_report.py` 是最早那把尺、名字没带前缀。
+        // 只按前缀取全集会把它算成"名单有、盘上没有"的假 phantom。
+        let onDisk = entries.filter {
+            ($0.hasPrefix("perf_") || $0 == "trace_report.py")
+                && ["sh", "py", "swift"].contains(($0 as NSString).pathExtension)
+        }.sorted()
+        XCTAssertFalse(onDisk.isEmpty,
+                       "一个尺子文件都没扫到 = 路径或扩展名判据失效，这条门会永真绿")
+        let unlisted = onDisk.filter {
+            !Self.rulerScripts.contains($0) && Self.rosterExemptions[$0] == nil
+        }
+        XCTAssertTrue(unlisted.isEmpty,
+                      "盘上有 \(unlisted.count) 把尺子既没点名也没豁免：\(unlisted.sorted())")
+        let phantoms = Self.rulerScripts.filter { !onDisk.contains($0) }.sorted()
+        XCTAssertTrue(phantoms.isEmpty,
+                      "名单里 \(phantoms.count) 把不在盘上（改名或删文件没同步名单）：\(phantoms)")
+        let mute = Self.rosterExemptions.filter {
+            $0.value.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        XCTAssertTrue(mute.isEmpty, "豁免必须逐条写理由，空格子等于免检：\(mute.keys.sorted())")
+    }
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。
     static var packageRoot: URL {
@@ -193,7 +249,10 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         let fm = FileManager.default
         var over: [String] = []
         var counted = 0
-        for name in Self.rulerScripts.sorted() {
+        // 名单 **∪** 豁免表：豁免只免"函数级"那两条尺，文件长度这一尺不许被一起免掉
+        // （否则 `rosterExemptions` 就成了第二根免检通道——正是 #75 要堵的那类形状）。
+        let lengthFace = Set(Self.rulerScripts).union(Self.rosterExemptions.keys).sorted()
+        for name in lengthFace {
             let url = Self.scriptsRoot.appendingPathComponent(name)
             guard let text = try? String(contentsOf: url, encoding: .utf8) else {
                 XCTFail("读不到尺子文件 \(name)：它被改名或删除了")
@@ -204,7 +263,7 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
             print("  \(name) \(lines) 行")
             if lines > Self.fileLineBar { over.append("\(name) \(lines) 行") }
         }
-        XCTAssertEqual(counted, Self.rulerScripts.count, "点名清单里的尺子必须每把都在，少一把这条门就是空的")
+        XCTAssertEqual(counted, lengthFace.count, "清单（名单∪豁免）里的每把尺都必须都在，少一把这条门就是空的")
         XCTAssertTrue(over.isEmpty, "撞 ≤\(Self.fileLineBar) 行棘轮的尺子：\(over.sorted().joined(separator: ", "))——拆开它，别拧阈值")
     }
 

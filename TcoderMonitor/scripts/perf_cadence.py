@@ -93,28 +93,44 @@ def report(path, pulse_path=None, min_frames=1200):
                         b, "达标" if ok else "**未达标**",
                         "" if ok else "（超 %.3f ms）" % (p95 - b)))
     if pulse_path and os.path.exists(pulse_path):
-        r = parse_pulse(open(pulse_path, encoding="utf-8", errors="replace").read())
-        if r:
-            bias = r["frame_p95_ms"] - p95
-            # 「同窗」这两个字我说过一次假的：摘要里的帧总数是**生命期累计**，
-            # 而本表只覆盖录制窗口。判据不自己写，走 `perf_framepulse.stale_instance`。
-            if stale_instance(r, span / 1000.0):
-                lines.append("  同一实例 FramePulse：p50 %.2f / p95 %.2f ms，但那是**生命期累计 %d 帧**"
-                             "（本窗口只有 %.0f s ≈ %d 帧）⇒ 这个 %+.2f ms 的差值"
-                             "**不是同窗对比，§M 的偏移量按未定处理**"
-                             % (r["frame_p50_ms"], r["frame_p95_ms"], int(r["frame_count"]),
-                                span / 1000.0, int(r["refresh_hz"] * span / 1000.0), bias))
-            else:
-                lines.append("  同窗 FramePulse：p50 %.2f / p95 %.2f ms ⇒ **回调 − 上屏 = %+.2f ms**"
-                             "（这才是 §M 要的那个系统性偏移，p50 差 %+.2f ms）"
-                             % (r["frame_p50_ms"], r["frame_p95_ms"], bias,
-                                r["frame_p50_ms"] - pct(gaps, .5)))
-            if abs(bias) > 1.0 and p95 <= bud["measured"]:
-                lines.append("  ⇒ 注意：脉冲那把尺子越预算，主要来自仪器偏移而非呈现延迟；"
-                             "**但这条不能单独当结论**（两台仪器同源于显示器时钟时才可比）。")
+        plines, pcode = pulse_crosscheck(pulse_path, gaps, p95, span, bud)
+        lines += plines
+        if pcode is not None:
+            code = pcode
+    return lines, code
+
+
+def pulse_crosscheck(pulse_path, gaps, p95, span, bud):
+    """回调仪器那一侧的交叉核对 → (追加的行, 退出码或 None)。
+
+    从 `report` 里搬出来只因为 `report` 过了「函数 ≤ 50 行」那条尺（第十二次落到这张名单上）。
+    **判定、话术、顺序逐字未动**：拆前拆后拿同一批真产物跑五格、输出逐字 diff 为空。
+    返回 `None` 表示"这一路不改退出码"——原来那条 `code = 2` 只在读不出摘要行时发生。
+    """
+    lines = []
+    r = parse_pulse(open(pulse_path, encoding="utf-8", errors="replace").read())
+    code = None
+    if r:
+        bias = r["frame_p95_ms"] - p95
+        # 「同窗」这两个字我说过一次假的：摘要里的帧总数是**生命期累计**，
+        # 而本表只覆盖录制窗口。判据不自己写，走 `perf_framepulse.stale_instance`。
+        if stale_instance(r, span / 1000.0):
+            lines.append("  同一实例 FramePulse：p50 %.2f / p95 %.2f ms，但那是**生命期累计 %d 帧**"
+                         "（本窗口只有 %.0f s ≈ %d 帧）⇒ 这个 %+.2f ms 的差值"
+                         "**不是同窗对比，§M 的偏移量按未定处理**"
+                         % (r["frame_p50_ms"], r["frame_p95_ms"], int(r["frame_count"]),
+                            span / 1000.0, int(r["refresh_hz"] * span / 1000.0), bias))
         else:
-            lines.append("  ⚠ 脉冲文件读不出摘要行 ⇒ 只有一把仪器，交叉核对**没做成**")
-            code = 2
+            lines.append("  同窗 FramePulse：p50 %.2f / p95 %.2f ms ⇒ **回调 − 上屏 = %+.2f ms**"
+                         "（这才是 §M 要的那个系统性偏移，p50 差 %+.2f ms）"
+                         % (r["frame_p50_ms"], r["frame_p95_ms"], bias,
+                            r["frame_p50_ms"] - pct(gaps, .5)))
+        if abs(bias) > 1.0 and p95 <= bud["measured"]:
+            lines.append("  ⇒ 注意：脉冲那把尺子越预算，主要来自仪器偏移而非呈现延迟；"
+                         "**但这条不能单独当结论**（两台仪器同源于显示器时钟时才可比）。")
+    else:
+        lines.append("  ⚠ 脉冲文件读不出摘要行 ⇒ 只有一把仪器，交叉核对**没做成**")
+        code = 2
     return lines, code
 
 
@@ -174,23 +190,15 @@ def against_baseline(cur_xml, base_csv):
         return lines, 2
     bp95 = [b["p95"] for b in bases]
     blate = [b["gap_rate"] for b in bases]
-    m95, mlate = pct(bp95, .5), pct(blate, .5)
-    b95, blate_band = (max(bp95) - min(bp95)), (max(blate) - min(blate))
+    m95, b95, mlate, blate_band = baseline_band(bp95, blate)
     d95, dlate = cur["p95"] - m95, cur["gap_rate"] - mlate
     lines.append("  基线 %d 份：p95 中位 %.3f（散布 %.3f）  呈现缺口率中位 %.2f /s（散布 %.2f）"
                  % (len(bases), m95, b95, mlate, blate_band))
     lines.append("  交互档：p95 %.3f ⇒ %+0.3f ms   呈现缺口率 %.2f /s ⇒ %+0.2f /s"
                  % (cur["p95"], d95, cur["gap_rate"], dlate))
 
-    def one(d, band):
-        if d > 0 and d > band:
-            return "劣", 1
-        if abs(d) <= band:
-            return "分不开", 2
-        return "不劣", 0
-
-    a95, c95 = one(d95, b95)
-    alate, clate = one(dlate, blate_band)
+    a95, c95 = one_item(d95, b95)
+    alate, clate = one_item(dlate, blate_band)
     lines.append("  两项判定：p95 %s（带宽 ±%.3f ms）  呈现缺口率 %s（带宽 ±%.2f /s）"
                  % (a95, b95, alate, blate_band))
     code = 1 if 1 in (c95, clate) else (2 if 2 in (c95, clate) else 0)
@@ -200,6 +208,21 @@ def against_baseline(cur_xml, base_csv):
     lines.append("  裁定口径下的结论：%s" % verdict[code])
     lines.append("  ③ 名义 8.4 ms 那一栏在上面的绝对判据里照旧报，不随本条改口而消失。")
     return lines, code
+
+
+def baseline_band(bp95, blate):
+    """多份基线 → (p95 中位, p95 散布, 缺口率中位, 缺口率散布)。纯算术，不印东西。"""
+    return (pct(bp95, .5), max(bp95) - min(bp95),
+            pct(blate, .5), max(blate) - min(blate))
+
+
+def one_item(d, band):
+    """一项差值的三态判定 → (话术, 退出码)。带宽就是基线自身的散布（见上面的教训）。"""
+    if d > 0 and d > band:
+        return "劣", 1
+    if abs(d) <= band:
+        return "分不开", 2
+    return "不劣", 0
 
 
 def main(argv=None):
