@@ -78,8 +78,11 @@ extension PerfHitchGuardTests {
     /// 双向元测试（合成计数，不扫盘）：**新增一处正确的令牌引用不许红**，
     /// 读数塌陷必须红且指向尺子，真债涨一处仍然红。
     func testReadingGrowthIsAllowedButCollapseIsNot() {
-        let healthy = ["directFormatters": 1, "dynamicColorConstruction": 2, "fullSort": 9,
-                       "syncFileIO": 2, "tokenReference": 63]   // 62 → 63：多一处正确取色
+        // 基线数**从 knownBaseline / readings 取，不在这里抄第二份**：
+        // 我 09-25 把 `syncFileIO` 的上限从 2 拧到 1（#72 那处事件路径改记成具名豁免），
+        // 这个夹具当场红——正好证明"把数抄一份"是错的（本仓为两份副本两个数记过好几回）。
+        var healthy = Self.knownBaseline
+        healthy["tokenReference"] = (Self.readings["tokenReference"] ?? 0) + 1   // 多一处正确取色
         XCTAssertTrue(Self.ratchetProblems(counts: healthy).isEmpty,
                       "多一处正确的令牌引用就把门禁打红 ⇒ 这条尺子在惩罚它最想鼓励的写法：\(Self.ratchetProblems(counts: healthy))")
 
@@ -89,7 +92,8 @@ extension PerfHitchGuardTests {
         XCTAssertTrue(collapsed[0].contains("先复核扫描器"),
                       "话术要先指向尺子，不是指向'页面变健康了'：\(collapsed[0])")
 
-        let newDebt = healthy.merging(["dynamicColorConstruction": 3]) { _, new in new }
+        let debtRule = "dynamicColorConstruction"
+        let newDebt = healthy.merging([debtRule: (Self.knownBaseline[debtRule] ?? 0) + 1]) { _, new in new }
         XCTAssertTrue(Self.ratchetProblems(counts: newDebt).contains { $0.contains("dynamicColorConstruction") },
                       "把读数搬出去之后，真债那条必须照样管得住")
     }

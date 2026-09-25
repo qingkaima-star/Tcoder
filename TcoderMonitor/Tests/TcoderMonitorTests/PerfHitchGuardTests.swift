@@ -49,9 +49,15 @@ final class PerfHitchGuardTests: XCTestCase {
     /// 渲染路径 = Views ∪ Design。分母按**每一棵根**分别要求，
     /// 否则哪天某棵根解析失效（路径改名、目录搬走），合并后的总数看着还是"够大"，
     /// 守卫就悄悄退化成半瞎——这正是本文件第 3 条元测试要防的形状。
-    static func scanRenderSurface() throws -> PerfHitchScan.ScanResult {
-        var merged = try PerfHitchScan.scanDirectory(viewsRoot, helperHopDepth: helperHopDepth)
-        let design = try PerfHitchScan.scanDirectory(designRoot, helperHopDepth: helperHopDepth)
+    /// `waiving` 默认用名单；**守恒那条元测试会传 `[]` 再扫一遍**——
+    /// 传空就是"没有豁免时应该数到几"的那一侧，两次的和必须逐规则相等。
+    static func scanRenderSurface(
+        waiving exemptions: [PerfHitchScan.Exemption] = PerfHitchGuardTests.eventPathExemptions
+    ) throws -> PerfHitchScan.ScanResult {
+        var merged = try PerfHitchScan.scanDirectory(viewsRoot, helperHopDepth: helperHopDepth,
+                                                     exempt: exemptions)
+        let design = try PerfHitchScan.scanDirectory(designRoot, helperHopDepth: helperHopDepth,
+                                                     exempt: exemptions)
         XCTAssertGreaterThanOrEqual(design.census.swiftFiles, 10,
                                     "Design/ 只扫到 \(design.census.swiftFiles) 个文件：这棵根失效了，合并读数会假绿")
         // 两棵根的命中路径都是**相对各自根**的，直接并起来会出现两个 `ChartTokens.swift:185`
@@ -59,9 +65,20 @@ final class PerfHitchGuardTests: XCTestCase {
         for (rule, n) in design.counts {
             merged.counts[rule, default: 0] += n
             merged.hits[rule, default: []] += (design.hits[rule] ?? []).map { "Design/\($0)" }
+            // 豁免那一栏同样要带根前缀：否则"哪个文件被免了"在两棵根之间分不清，
+            // 而死条目检查恰恰是按文件路径去读源码的（#72 的口子必须由名单自己管住）。
+            merged.exempted[rule, default: []] += (design.exempted[rule] ?? []).map { "Design/\($0)" }
         }
         for rule in merged.hits.keys where merged.hits[rule] != nil {
             merged.hits[rule] = merged.hits[rule]?.map { $0.hasPrefix("Design/") ? $0 : "Views/\($0)" }
+        }
+        // 豁免栏同样补根前缀——**名单里写的 `file` 是"相对各自根"的路径**（匹配发生在扫描器内部），
+        // 而台账与死条目检查看到的是带前缀的路径。这两种写法差一层前缀，
+        // 不写出来下一次一定有人改错（#72 的口子只能由名单自己管住）。
+        for rule in merged.exempted.keys {
+            merged.exempted[rule] = merged.exempted[rule]?.map {
+                $0.hasPrefix("Design/") ? $0 : "Views/\($0)"
+            }
         }
         merged.census.swiftFiles += design.census.swiftFiles
         merged.census.inScopeSpans += design.census.inScopeSpans
@@ -97,9 +114,11 @@ final class PerfHitchGuardTests: XCTestCase {
     ///   （同一次校正里 `fullSort` 的坏样例用的就是尾随闭包写法，元测试当场把它打红——
     ///   规则过窄这件事是被 `testScannerFiresOnBadSamples` 抓出来的。）
     ///   → 归 **M1 / WS-P 与 WS-W**（body 内派生集合缓存），终点 0。
-    /// - `syncFileIO` **2** —— `Logs/LogsView.swift` 的 `fileExists(atPath:)` 与
-    ///   `attributesOfItem(atPath:)` 各 1 处（经 `attachedItems` → `fileSize(of:)` 两跳进渲染路径）。
-    ///   → 归 **M1 / WS-W**（spec §5 点名"LogsView.attachedItems 的 body 内 stat() 移出"），终点 0。
+    /// - `syncFileIO` **1 债 + 1 具名豁免** —— `Logs/LogsView.swift` 里两处：
+    ///   `attributesOfItem`（经 body 读的计算属性 `attachedItems` → `fileSize(of:)`，**每帧 stat()**）
+    ///   是真债，归 **M1 / WS-W**（spec §5 点名"attachedItems 的 body 内 stat() 移出"），终点 0；
+    ///   `fileExists`（在 `chooseLogFiles` 里、紧接着 `panel.runModal()`）是**一次点击一次**的事件路径，
+    ///   不是每帧求值 ⇒ 记成 `eventPathExemptions` 的逐点豁免，不记成债（#72）。
     static let knownBaseline: [String: Int] = [
         "directFormatters": 1,
         // 【2026-09-22 新增，不是新债】渲染路径里**现造**动态色的地方。
@@ -116,7 +135,10 @@ final class PerfHitchGuardTests: XCTestCase {
         // 留隐形余量的话，下一个人在别处新加一处排序就会显示成 10/10「没涨」，
         // 那正是"每次打现量"这条规矩要防的事（2026-09-21 20:39 台账报 `fullSort 9/10` ⇒ 拧到 9）。
         "fullSort": 9,
-        "syncFileIO": 2,
+        // 2026-09-25 #72：`LogsView.chooseLogFiles` 那一格是**一次点击一次、且当场弹模态面板**，
+        // 不是每帧求值 ⇒ 从"债"改记成"具名逐点豁免"（`eventPathExemptions`），这里只留真债那一格。
+        // ⚠ 台账必须打成 `1 债 + 1 具名豁免`，不许合并成 1 —— 否则"少报一处"与"还掉一处债"同形。
+        "syncFileIO": 1,
     ]
 
     /// 每条规则的负责人 / 里程碑，只在报错时打出来，避免"基线是遮羞布"。
@@ -137,7 +159,8 @@ final class PerfHitchGuardTests: XCTestCase {
             + "两次都是同一条『现量/上限』打印＋`.scratch` 台账抓出来的——不打印就没人知道基线在漏。"
             + "而这条棘轮当时不报现量、没人看得见那 21 处余量——现在它每次跑都打「现量/上限」。",
         "fullSort": "M1 WS-P/WS-W：body 内派生集合缓存或移到 publish 里算（终点 0）",
-        "syncFileIO": "M1 WS-W：渲染路径的文件尺寸/存在性检查移到扫描期（终点 0）",
+        "syncFileIO": "M1 WS-W：body 读的计算属性里那个文件尺寸检查移到扫描期（终点 0）；"
+            + "另一处 `chooseLogFiles` 的 `fileExists` 是一次点击一次的事件路径，已具名豁免（#72）",
     ]
 
     // MARK: - 棘轮主体
@@ -184,7 +207,10 @@ final class PerfHitchGuardTests: XCTestCase {
     static func recordRenderPathReadout(counts: [String: Int], scan: PerfHitchScan.ScanResult) {
         // 一行字符串同时喂 stdout 与台账文件：**两个地方两个数**是本仓记过的那族缺陷。
         let summary = readoutSummary(counts: counts)
-        print("【渲染路径禁则】\(summary)")
+        // 具名豁免必须跟着印出来并点名：只印"1"就把"少报一处"演成"还掉一处债"。
+        let waived = scan.exempted.values.reduce(0) { $0 + $1.count }
+        let waiverText = waived == 0 ? "" : "　具名豁免 \(waived) 处（逐点：\(scan.exempted.values.flatMap { $0 }.sorted().joined(separator: "、"))）"
+        print("【渲染路径禁则】\(summary)\(waiverText)")
         // 台账**不写在 $TMPDIR**：那个目录 2026-09-21 被清过一次，对照组的封存产物就是这么
         // 丢的；而"拧基线前要拿现量、还债人要拿明细"依赖的正是这份文件——
         // 放在会被系统随手清掉的地方，等于一份只在今天可用的台账。
@@ -195,7 +221,7 @@ final class PerfHitchGuardTests: XCTestCase {
             .appendingPathComponent(".scratch")
         try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         let ledger = scratch.appendingPathComponent("tcoder-perf-renderpath-debt.txt")
-        var detail: [String] = ["HEAD=\(Date()) \(summary)"]
+        var detail: [String] = ["HEAD=\(Date()) \(summary)\(waiverText)"]
         // 债与读数**都要留明细**：读数掉破下限时，人要能一眼看出"是引用真少了，还是模式没打中"，
         // 那需要的是同一批命中位置，而不是再来一遍扫描。
         for rule in (Array(knownBaseline.keys) + Array(readings.keys)).sorted() {
