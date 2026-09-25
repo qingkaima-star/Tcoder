@@ -144,18 +144,32 @@ selfcheck_switch_fixture() {  # selfcheck_switch_fixture <outdir>
   #     **只有存在逐页子目录时才炸**，夹具为空时它"通过"，于是坏了很久没人知道。）
   local out="$1"
   local fx="$out/switch-fixture"
-  mkdir -p "$fx/01-总览" "$fx/02-性能"
+  mkdir -p "$fx/01-总览" "$fx/02-性能" "$fx/03-尾巴" "$fx/04-真成本"
   printf '{"page":"总览","first_frame_ms":412}' > "$fx/01-总览/meta.json"
   printf '{"total_ms":1234.5,"max_period_ms":600.1,"max_period":"Process Launch"}' > "$fx/01-总览/life-cycle-period.json"
   printf '{"page":"性能"}' > "$fx/02-性能/meta.json"
+  # 03/04 是 #71 的正对照：同样一个"最长周期"，一格是活到录制结束的**跨度**、一格是真成本。
+  # 报表必须只标前者——只标一种的尺子，另一种读起来都一样像"成本"。
+  printf '{"page":"尾巴","first_frame_ms":2276}' > "$fx/03-尾巴/meta.json"
+  printf '{"total_ms":9764.4,"max_period_ms":8127.4,"max_period":"States","horizon_ms":10403.0,"max_period_is_window_tail":true}' > "$fx/03-尾巴/life-cycle-period.json"
+  printf '{"page":"真成本","first_frame_ms":840}' > "$fx/04-真成本/meta.json"
+  printf '{"total_ms":1200.0,"max_period_ms":300.0,"max_period":"Body","horizon_ms":1200.0,"max_period_is_window_tail":false}' > "$fx/04-真成本/life-cycle-period.json"
   local rows
   if python3 "$TRACE_REPORT" switches "$fx" > "$out/switch.txt" 2> "$out/switch.err"; then
     rows=$(grep -c '^| ' "$out/switch.txt" || true)
-    [ "$rows" -eq 3 ] || fail "switches 只打出 $rows 行表格（应为表头 + 2 页）：$(cat "$out/switch.txt")"
+    [ "$rows" -eq 5 ] || fail "switches 只打出 $rows 行表格（应为表头 + 4 页）：$(cat "$out/switch.txt")"
     grep -q '412 ms' "$out/switch.txt" || fail "first_frame_ms 没进表——switch 档唯一要报的就是它"
     grep -q '未观测到' "$out/switch.txt" || fail "缺 meta 的页必须显式写「未观测到」，留空会被读成 0"
     grep -q '未覆盖' "$out/switch.txt" || fail "缺 life-cycle 的页必须显式写「未覆盖」，不能用 0.0 冒充"
-    [ "$rows" -eq 3 ] && ok "switches：两页合成夹具，读数与两种缺项三态都对"
+    # 三态里最阴的一态是"缺键被当成 False"：那等于把"没判过这一维"读成"判过、是真成本"。
+    grep -q '未记该维' "$out/switch.txt" || fail "老批次（没有 max_period_is_window_tail 这个键）必须写「未记该维」，不许默认成非尾巴"
+    # 只数**表格行**里的标记：下面那段口径说明也写着「→窗口末」这四个字，
+    # 拿全文计数会把说明本身算进去（我 11:11 第一版就被自己的口径说明坑了一次，实得 2 处）。
+    marked=$(grep '^| ' "$out/switch.txt" | grep -c '窗口末' || true)
+    [ "$marked" -eq 1 ] \
+      || fail "四页里只有 03 该被标成「→窗口末(跨度)」，表格行里实得 $marked 处：$(cat "$out/switch.txt")"
+    grep -q '300.0 ms' "$out/switch.txt" || fail "真成本那一格（300 ms、非尾巴）没进表——标记逻辑把不该标的也吞了"
+    [ "$rows" -eq 5 ] && ok "switches：四页合成夹具，读数、两种缺项、尾巴三态（含「未记该维」）全对"
   else
     fail "switches 崩了（尺子坏了，读数一律不可信）：$(tail -3 "$out/switch.err" | tr '\n' ' ')"
   fi
