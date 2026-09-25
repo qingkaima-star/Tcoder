@@ -16,6 +16,11 @@ struct DuplicationResult: Sendable {
     /// 按行数降序截断到 `maxBlocks` 时被丢掉的克隆块数，以及它们覆盖的代码行数。
     var blocksDroppedByCap: Int = 0
     var linesOutsideReportedBlocks: Int = 0
+    /// 截断**之前**按 `DuplicatedBlock.id` 去重时**被合并掉**的原始命中数（RD-85）。
+    /// `id` 只由「出现文件集合 + lineCount」拼成 ⇒ 两处等长的不同克隆撞同一个 id，
+    /// 撞掉的那几块既不在 `blocks` 里、也不在 `blocksDroppedByCap` 里。
+    /// 守恒式：`blocks.count + blocksDroppedByCap + blocksDroppedByIdCollision == 原始命中数`。
+    var blocksDroppedByIdCollision: Int = 0
     /// 榜外未列块的**稳定坐标**（`DuplicatedBlock.id` = 涉及路径排序后拼接 + 行数）。
     /// RD-17 工单点名要的东西：只留一个总数 = 读的人无法反驳、也无法去核对那 181 处在哪。
     /// 顺序 = 榜单自己的排序（行数降序 → id 升序），因此同一份输入永远给出同一串。
@@ -152,6 +157,7 @@ enum DuplicationEngine {
                                  filesHittingLineCap: indexed.filesHittingLineCap,
                                  blocksDroppedByCap: ranked.droppedByCap,
                                  linesOutsideReportedBlocks: ranked.linesOutsideReportedBlocks,
+                                 blocksDroppedByIdCollision: ranked.droppedByIdCollision,
                                  // 榜外坐标**直传** `id`：坐标在唯一生产点（`DuplicationScanState.fragmentOf`）
                                  // 已经是相对被扫根的形状，这里不再加工（RD-61 第二半，
                                  // 原先这里挂过一次 `DuplicationScan.relativeCoordinates` 补剥前缀）。

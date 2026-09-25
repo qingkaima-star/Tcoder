@@ -152,13 +152,14 @@ final class DuplicationBoardCaliberTests: XCTestCase {
                        "一个都没比过，就不该有口径句子：\(outcome.coverage.surfaceNotes)")
     }
 
-    /// 失败态：`rankedBlocks` 拿到空输入时四个读数都得是"没有"，不能是 nil/负数。
-    func testRankedBlocksOnEmptyInputKeepsAllFourReadings() {
+    /// 失败态：`rankedBlocks` 拿到空输入时五个读数都得是"没有"，不能是 nil/负数。
+    func testRankedBlocksOnEmptyInputKeepsAllFiveReadings() {
         let empty = DuplicationScan.rankedBlocks([])
         XCTAssertEqual(empty.blocks.count, 0)
         XCTAssertEqual(empty.droppedByCap, 0)
         XCTAssertEqual(empty.linesOutsideReportedBlocks, 0)
         XCTAssertTrue(empty.outsideBoardCoordinates.isEmpty)
+        XCTAssertEqual(empty.droppedByIdCollision, 0, "RD-85 那一格空输入必须读 0（读不到和真的是 0 是两件事）")
     }
 
     /// 纯函数级：榜外样本上限与"总数不因取样而变小"同时成立。
