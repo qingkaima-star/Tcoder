@@ -132,6 +132,16 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
 # 非 0 时先读 failedSections 再谈结论；缺席的那一路在 JSON 里整键缺席，而不是被填成 0。
 ```
 
+**跑完 CLI 之后还有一步：跟 App 屏上对表。** 同一份 `ProjectReport` schema 走两条路
+（GUI 落盘 vs 无头 `scan --out`），「两条读数一致」这句话不能靠嘴说 —— 用
+`./scripts/report_parity.py <GUI 落盘.json> <CLI 扫描.json> <被扫总体>`
+逐项比：脚本只读两个 JSON、不写盘，退出码 0 为一致、1 会**逐条点名**不等。
+允许不同的只有两类，且必须逐条点名：以 `At` 结尾的时间戳，以及「project.id」与「project.name」
+两格身份（GUI 那趟读沙箱 `projects.json`，CLI 那趟就地造身份）。
+这把尺已经抓出两个真缺陷：F10（退出码第 3 档在真二进制里挂死）与 F11（热点榜尾部不可复现）。
+**普通使用者不必跑它** —— 它是给「改过读数的人」准备的：动过 `Services/**` 任何一路，
+跑完再谈结论（并行开发规约 §5.9 第 5 条把它写成硬要求）。
+
 打包会把 `git rev-parse HEAD`、分支、**工作树是否干净**、构建时间与
 **签名后**的二进制 SHA-256 写进 `Info.plist` 与 `dist/RELEASE_MANIFEST.env`。
 `verify_provenance.sh` 逐项比对，其中「构建时工作树干净」这一项专门用来
