@@ -105,6 +105,12 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // 同笔连带改了一处下游守卫：第 36 项原来只扫排程器里的 `open "$START_BIN"`，
         // 搬家期间它**一行都扫不到而静默变空**，所以改成两处都扫 + 给分母加断言。
         "perf_window_gates.sh",
+        // 09-25 #39 第三次到期：`perf_selfcheck_gates.sh` 到 **395/400**（这根是最紧的一弦），
+        // 把"这批量的是哪份内容、在什么条件下量的"那三项（38/40/53）整段搬进
+        // `perf_selfcheck_context.sh`——判据与 ok/fail 文案逐字未动，拆前拆后各跑一次
+        // selfcheck 并把输出归一后逐字 diff。搬出来的那片照样要点名：
+        // 这是"新建/搬出的文件必须当场被量"**第十次**落到这张表上。
+        "perf_selfcheck_context.sh",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。

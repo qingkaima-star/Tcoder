@@ -147,7 +147,7 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
 # 反例分块（每块一个文件，宿主只留编排）：那个 for 必须在 cmd_selfcheck 之前，
 # 因为编排器一跑就要点到里面的函数名。
 # shellcheck source=/dev/null
-for _part in ruler_shapes gates eligibility launchers tables chain trap windows hygiene; do
+for _part in ruler_shapes gates eligibility launchers tables chain trap windows hygiene context; do
   source "scripts/perf_selfcheck_${_part}.sh"
 done
 unset _part
