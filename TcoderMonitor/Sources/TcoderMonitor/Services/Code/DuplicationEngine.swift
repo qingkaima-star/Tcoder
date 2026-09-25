@@ -50,6 +50,13 @@ struct DuplicationResult: Sendable {
         return line
     }
 
+    /// 散文点名坐标的**条数预算**（RD-52 立的那个样子：散文只负责"让人看到长什么样"，全量在字段里）。
+    ///
+    /// 之所以要有一个名字：这条预算今天有**两个出口**（本函数的限制说明、代码页尾 RD-86 那句合并点名）。
+    /// 预算写死在默认参数里时，第二个出口只能另抄一个数 —— 我 RD-86 第一版抄的是取样上限（6），
+    /// 于是页尾那句被六条绝对路径撑长，正是下面那段注释里"6 条撑到 2,407 字符"的形状。
+    static let proseCoordinateBudget: Int = 3
+
     /// 榜外坐标的**唯一**披露形状（RD-52）：散文点前 3 条样本，**全量样本落盘**。
     ///
     /// ⚠️ 我最初把这条记成「全量坐标被静默截断」，复核后不对：引擎本来就只点
@@ -61,7 +68,7 @@ struct DuplicationResult: Sendable {
     /// 现在：散文 3 条 + 明确指回字段与计数，字段给引擎那 6 条**一条不减**。
     /// 之所以敢把散文从 6 降到 3：原先它是唯一载体，降就是藏；现在全量在字段里，
     /// 散文只负责"让人一眼看到长什么样"，没有一条样本因此消失。
-    static func coordinateDisclosure(_ all: [String], limit: Int = 3) -> String {
+    static func coordinateDisclosure(_ all: [String], limit: Int = DuplicationResult.proseCoordinateBudget) -> String {
         guard all.isEmpty == false else { return "榜外没有剩余块。" }
         let named = min(all.count, limit)
         var line = "榜外坐标（点样 \(named) 条）：\(all.prefix(named).joined(separator: " ; "))"
