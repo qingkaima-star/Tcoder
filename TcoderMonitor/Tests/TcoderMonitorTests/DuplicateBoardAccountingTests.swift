@@ -41,13 +41,34 @@ final class DuplicateBoardAccountingTests: SelfScanHarnessCase {
         let sentence = metrics.scanLimitations?.first { $0.contains(CodeBoardTruth.outsideBoardMarker) }
         if dropped > 0 || outsideLines > 0 {
             let note = try XCTUnwrap(sentence, "榜外有数却没产出台账句 ⇒ 有一边漏了")
-            XCTAssertTrue(note.contains(String(dropped)), "台账句要含榜外块数 \(dropped)：\(note)")
-            XCTAssertTrue(note.contains(String(outsideLines)), "台账句要含榜外行数 \(outsideLines)：\(note)")
+            XCTAssertTrue(Self.noteNames(note, dropped),
+                          "台账句要含榜外块数 \(dropped)（句子里是千分位的显示口径）：\(note)")
+            XCTAssertTrue(Self.noteNames(note, outsideLines),
+                          "台账句要含榜外行数 \(outsideLines)（句子里是千分位的显示口径）：\(note)")
         } else {
             XCTAssertNil(sentence, "榜外是 0 就不该渲染一句被截断（那是把没发生的事画出来）")
         }
         print("【RD-48 对账】榜内 \(metrics.duplicatedBlocks.count) · 榜外 \(dropped) 块 / \(outsideLines) 行"
             + " · 未展开拷贝 \(fragments) 处 · 触线文件 \(metrics.duplicateFilesHittingLineCap ?? -1)")
+    }
+
+    /// 句子里的数字是**显示口径**（`NumberFormat.grouped`，千分位），而字段是裸整数。
+    /// 直接拿 `String(1003)` 去 `contains` 一句「1,003」，会在**数值第一次过千那天**假红——
+    /// 本仓 09-25 就是这个形状：榜外行数涨到 1,003，RD-48 这把对账尺当场红。
+    /// ⇒ 比对必须过同一层格式化。这条坏得**朝红**（不误放），但一支"仓库一长大就叫假警"
+    /// 的尺子同样会把人训练成忽略它。
+    static func noteNames(_ note: String, _ value: Int) -> Bool {
+        note.contains(NumberFormat.grouped(value))
+    }
+
+    /// 元测试：那层格式化比对两个方向都要判得动（过千/不过千都认，错一个数就不许认）。
+    func test_meta_groupedComparisonAcceptsTheDisplayFormOnly() {
+        let big = "未列出 139 个块 / 1,003 行"
+        XCTAssertTrue(Self.noteNames(big, 1003), "过千的行数按显示口径就该被认出（旧写法在这里假红）")
+        XCTAssertFalse(Self.noteNames(big, 1004), "错一位数也被认出 ⇒ 这条断言就没有判别力了")
+        let small = "未列出 96 个块 / 474 行"
+        XCTAssertTrue(Self.noteNames(small, 474), "不过千时不许因为加了格式化而变松")
+        XCTAssertFalse(Self.noteNames(small, 4750), "不相干的数也被判成在场 ⇒ 这条断言没有判别力")
     }
 
     // MARK: - 页尾那句改由字段装配
