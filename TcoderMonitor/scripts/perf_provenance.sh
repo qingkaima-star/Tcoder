@@ -83,3 +83,34 @@ provenance_ok() {  # provenance_ok <产物 rev> <当前 HEAD> <构建时 clean> 
 "${btree:+（产物码 tree 也不同：${btree:0:7} vs ${htree:-?}）}"
   return 1
 }
+
+provenance_main_drift() {  # provenance_main_drift [rev] → 该 rev 落后 main 几笔**碰产品码的**提交；取不到打「未取到」
+  # 【为什么要有这一格】`measured_rev` 只回答"这枚二进制是谁"，不回答"它落后多少"。
+  # 于是"内部完全一致、对外已经过期"这一类判废在 harness 里**从来没有读数**——
+  # `is-ancestor` 只活在合流侧 `merge_stream.sh`，测量侧一处都没有（09-25 另一条流按名字复核时
+  # 就把它标成未闭合）。这一格把那句话变成读数，只加字段、不加闸门：
+  # **要不要因为落后而拒测，是调度约定（#62）的事，不由这把尺替需求方决定。**
+  #
+  # 【口径，写死在这里】只数改了 `TcoderMonitor/Sources` 或 `TcoderMonitor/Resources` 的提交。
+  # 08:00 在真历史标定过：从出货那一笔 `ab22870` 到 main，按产品码口径 = **3 笔**，
+  # 按"全部提交"口径 = **57 笔**，差 19 倍。用 57 那种数当警报，这一格天天响，
+  # 于是没人再看它——**报警过密的读数等于没有读数**。
+  #
+  # 【pathspec 必须带 `:/`】本文件常被从包根（`TcoderMonitor/`）source，而 pathspec 是
+  # **相对 cwd** 解析的：08:08 实测在包根跑
+  #   `git rev-list --count ab22870..main -- TcoderMonitor/Sources` → **0**（假的"没落后"）
+  #   同一句加 `:/` → **3**（真值）。
+  # 少了这两个字符，这把尺会**永远报最新**，是它能坏掉的最坏形状。
+  #
+  # 【"没查到"不许渲染成"没落后"】rev 解析不了、不在仓库里、git 报错 ⇒ 一律 `未取到`。
+  # 08:03 我就把一个 sha 打错一位，`git rev-list --count` 回的是**空串、不是 0**；
+  # 所以下面**不写 `|| echo 0`**，并且只认"纯数字"这一种输出。
+  local rev="${1:-}" out
+  [ -n "$rev" ] || rev=$(git rev-parse HEAD 2>/dev/null) || { echo "未取到"; return 0; }
+  out=$(git rev-list --count "$rev..main" \
+          -- :/TcoderMonitor/Sources :/TcoderMonitor/Resources 2>/dev/null)
+  case "$out" in
+    ''|*[!0-9]*) echo "未取到" ;;
+    *)           echo "$out" ;;
+  esac
+}

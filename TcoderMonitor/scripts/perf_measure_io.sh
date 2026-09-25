@@ -222,7 +222,15 @@ meta_write() {  # meta_write <outdir> <键=值...>
   measured=$(provenance_target_rev 2>/dev/null) \
     || measured=""
   [ -n "$measured" ] || measured="取不到（MEASURE_REV=${MEASURE_REV:-未设}）"
-  python3 - "$out/meta.json" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REV" "$DIRTY" "measured_rev=$measured" "$@" <<'PY'
+  # 【`measured_rev` 答"是谁"，`main_product_drift` 答"落后 main 几笔产品码"】
+  # 只有前一格时，"内部完全一致、对外已经过期"这类判废在**测量侧从来没有读数**
+  # （`is-ancestor` 只活在合流侧 `merge_stream.sh`）。这一格把盲区变成数字：
+  # 口径、`:/` pathspec、"取不到≠0" 三条都写在 `provenance_main_drift` 的注释里，
+  # 本处不复刻判定（同一件事不许有两把手抄尺子）。**只加字段，不加闸门。**
+  local drift
+  drift=$(provenance_main_drift)
+  python3 - "$out/meta.json" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REV" "$DIRTY" \
+    "measured_rev=$measured" "main_product_drift=$drift" "$@" <<'PY'
 import json, os, sys
 path, ts, rev, dirty = sys.argv[1:5]
 data = {"captured_at_utc": ts, "rev": rev, "git_dirty_lines": int(dirty)}
