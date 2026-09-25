@@ -166,4 +166,88 @@ final class DuplicateIdCollisionConservationTests: XCTestCase {
         XCTAssertTrue(withSpots.contains("另有 2 处重复命中与别处合并为一条"),
                       "新句挤掉了旧句：\(withSpots)")
     }
+
+    // MARK: - §116：点名条数归一把尺子管（我 RD-86 第一版把它接到了取样上限上）
+
+    /// 两个出口共用一个预算：**引擎**的限制说明与**代码页尾**那句点名同一条坐标，
+    /// 但字段里那 6 条是给读机器的人看的。这里量的不是"各自点几条"，而是"两把尺子是同一把" ——
+    /// 只要有一边退回写死的数，抬预算时就会一侧跟着、一侧不跟（那是第 21 类盲区的镜像）。
+    func testEngineDisclosureAndFooterHonourTheSameProseBudget() {
+        XCTAssertEqual(DuplicationResult.proseCoordinateBudget, 3,
+                       "散文点名预算被改动 ⇒ 这条冻结读数要连台账一起改，不许顺手抬")
+        let spots = Self.sixCoordinates()
+        let engineNamed = Self.countedNames(in: DuplicationResult.coordinateDisclosure(spots), from: spots)
+        var code = CodeMetrics()
+        code.duplicatedBlocksDroppedByCap = 0
+        code.duplicatedLinesOutsideReportedBlocks = 0
+        code.duplicatedBlocksDroppedByIdCollision = spots.count
+        code.duplicateBlockCoordinatesMergedById = spots
+        let footerNamed = Self.countedNames(in: CodeBoardTruth.outsideBoardNoteFromFields(code) ?? "", from: spots)
+        XCTAssertEqual(engineNamed, DuplicationResult.proseCoordinateBudget, "引擎那句不再受预算管")
+        XCTAssertEqual(footerNamed, DuplicationResult.proseCoordinateBudget, "页尾那句不再受预算管")
+        XCTAssertEqual(engineNamed, footerNamed, "同一份坐标在两个出口点了不同条数 ⇒ 预算分家了")
+    }
+
+    /// 六条取样 ⇒ 页尾只点三条，**剩下的必须出声**（第 20 类：朝好看方向的截断就是假绿）。
+    /// 长度那一刀**先归一化再量**（RD-61）：坐标是绝对路径，同一份内容换个 checkout 就换长度。
+    func testFooterTrimsNamedSpotsButNamesTheRemainder() {
+        let spots = Self.sixCoordinates()
+        var code = CodeMetrics()
+        code.duplicatedBlocksDroppedByCap = 0
+        code.duplicatedLinesOutsideReportedBlocks = 0
+        code.duplicatedBlocksDroppedByIdCollision = spots.count
+        code.duplicateBlockCoordinatesMergedById = spots
+        let note = CodeBoardTruth.outsideBoardNoteFromFields(code) ?? ""
+
+        XCTAssertEqual(Self.countedNames(in: note, from: spots), 3, "点名条数不在预算上：\(note)")
+        XCTAssertTrue(note.contains(spots[0]) && note.contains(spots[1]) && note.contains(spots[2]),
+                      "前 3 条没被点到 ⇒ 这句还是无法反驳：\(note)")
+        for hidden in spots.dropFirst(3) {
+            XCTAssertFalse(note.contains(hidden), "第 4 条之后又被抄进散文了：\(hidden)")
+        }
+        XCTAssertTrue(note.contains("（另有 3 处未点名）"),
+                      "削了清单却不点名被削掉的条数 ⇒ 读的人以为只有 3 处：\(note)")
+        XCTAssertTrue(note.contains("另有 6 处重复命中与别处合并为一条"),
+                      "数被清单的条数顶掉了：\(note)")
+
+        let width = OutsideBoardCoordinatesTests.normalizeRoots(note).count
+        XCTAssertLessThan(width, 1_200,
+                          "页尾那句（去掉仓库绝对前缀后）仍有 \(width) 字符 ⇒ 已越过引擎那条限制说明的量尺")
+    }
+
+    /// 元测试：这把尺子真的会红。把「join 全部取样」那版页尾喂给同一个计数器，
+    /// 它必须报出 6 条；同一串喂给长度尺子必须**越线**（我第一版就是这个形状）。
+    /// 两条都报不出来说明上面的断言在空转（永真绿）。
+    func test_meta_theNamedSpotCounterHasTeeth() {
+        let spots = Self.sixCoordinates()
+        let joinedAll = "被合并的那几处在：" + spots.joined(separator: "、") + "。"
+        XCTAssertEqual(Self.countedNames(in: joinedAll, from: spots), spots.count,
+                       "计数器认不出「六条全抄」⇒ 上面那两条断言是空的")
+        XCTAssertGreaterThan(Self.countedNames(in: joinedAll, from: spots),
+                             DuplicationResult.proseCoordinateBudget,
+                             "全抄那版本应越预算，没越就说明预算与取样上限已经同号")
+        XCTAssertGreaterThan(OutsideBoardCoordinatesTests.normalizeRoots(joinedAll).count, 1_200,
+                             "夹具的坐标串不够长 ⇒ 上面那句长度断言只是摆设")
+        XCTAssertEqual(Self.countedNames(in: "", from: spots), 0)
+    }
+
+    // MARK: - 夹具与读数器
+
+    /// 六条**真实形状**的坐标：绝对路径 + ` + ` 连接多处，与 `DuplicationScan` 落的一样。
+    /// 条数取 6 = 取样上限（`outsideBoardSampleLimit`），也就是我第一版会全部抄进散文的那个上限；
+    /// 层级故意写深，因为量的是**归一化之后**的句长（RD-61）——浅路径会让长度尺子中不了靶。
+    private static func sixCoordinates() -> [String] {
+        let root = OutsideBoardCoordinatesTests.repoRootOfCheckout.path
+        return (1...6).map { index in
+            let dir = "Sources/TcoderMonitor/Services/Code/Module\(index)/Subsystems/RiskAssessment/Family"
+            return "\(root)/\(dir)/Coordinator\(index).swift:\(index * 40)"
+                + " + \(root)/\(dir)/Helpers\(index).swift:\(index * 40 + 12)"
+        }
+    }
+
+    /// 数一句散文里点名了**几条**坐标：按"这条坐标有没有整串出现在句子里"数，
+    /// 不按分隔符数 —— 分隔符随语言（中文顿号、英文逗号），而坐标自己就含冒号与加号。
+    static func countedNames(in sentence: String, from spots: [String]) -> Int {
+        spots.filter { sentence.contains($0) }.count
+    }
 }

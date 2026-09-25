@@ -182,9 +182,16 @@ enum CodeBoardTruth {
             note += localizedFormat("另有 %1$@ 处重复命中与别处合并为一条（同一组文件、同一长度）。",
                                     NumberFormat.grouped(merged))
             // RD-86：数之外还要点名坐标，否则这句仍然只是一条无法反驳的账（RD-17 老账）。
+            // ⚠️ 但**点名条数归 `DuplicationResult.proseCoordinateBudget` 那把尺子管**，不是取样上限：
+            // 字段里那 6 条是给读机器的人看的，散文只负责让人看到长什么样（RD-52 原话）。
+            // 第一版这里 join 了整串取样 ⇒ 一句页尾被六条坐标撑长，而多出来的那几条并没有因此更可核对。
             if let spots = code.duplicateBlockCoordinatesMergedById, !spots.isEmpty {
+                let named = min(spots.count, DuplicationResult.proseCoordinateBudget)
                 note += " " + localizedFormat("被合并的那几处在：%1$@。",
-                                             spots.joined(separator: localizedListSeparator()))
+                                             spots.prefix(named).joined(separator: localizedListSeparator()))
+                if spots.count > named {
+                    note += localizedFormat("（另有 %1$@ 处未点名）", NumberFormat.grouped(spots.count - named))
+                }
             }
         }
         if let fragments = code.duplicateFragmentsNotExpandedCount, fragments > 0 {

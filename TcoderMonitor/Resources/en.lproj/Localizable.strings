@@ -747,6 +747,8 @@
 "另有 %1$@ 处拷贝因指纹预算未展开。" = "A further %1$@ clone windows were not expanded because of the fingerprint budget.";
 "另有 %1$@ 处重复命中与别处合并为一条（同一组文件、同一长度）。" = "A further %1$@ duplicate hits were merged into one entry: same file set, same length.";
 "被合并的那几处在：%1$@。" = "The merged ones sit at: %1$@.";
+// RD-86 订正（§116）：散文点名条数归 `DuplicationResult.proseCoordinateBudget` 管，被削掉的那几条要出声。
+"（另有 %1$@ 处未点名）" = "(%1$@ more not named here)";
 
 // ── RD-42（混合语言分区归位落成字段）：口径句由数装配，一条新键 ─────────────────────
 // 这句**不进** `scanLimitations`（那条在 CLI 打成「未量准 N 条」），所以它自己必须有键。
