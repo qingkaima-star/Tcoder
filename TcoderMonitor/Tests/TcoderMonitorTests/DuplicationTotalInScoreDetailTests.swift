@@ -174,6 +174,86 @@ final class DuplicationTotalInScoreDetailTests: SelfScanHarnessCase {
         XCTAssertEqual(Self.metrics(board: 20, outsideBoard: 85).reportedDuplicatedBlockTotalCount, 105)
     }
 
+    // MARK: - ③′ RD-87：那枚总数**落盘**（盘上读者拿不到计算属性）
+
+    /// 真扫描：快照 == 唯一取法，而且**不等于榜长**。
+    /// 后一半是关键：本仓榜外非零，快照若等于榜长，就说明装配读错了格子（落成了 `duplicatedBlocks.count`
+    /// 的复印件 —— 那正是 R18 在 GUI 里消灭过的那个陷阱，只是这次是在 JSON 里重演）。
+    func test_snapshotEqualsTheSingleHomeOnARealScan() async throws {
+        let code = try await selfScan().code
+        let home = try XCTUnwrap(code.reportedDuplicatedBlockTotalCount, "真扫描拿不出唯一取法 ⇒ 榜外那一格没填")
+        let snapshot = try XCTUnwrap(code.duplicatedBlockTotalCountAfterDedup,
+                                     "落盘快照没被真实扫描填上 ⇒ JSON 读者仍然只能自己加")
+        XCTAssertEqual(snapshot, home, "快照与唯一取法分叉 ⇒ 两把尺子")
+        XCTAssertGreaterThan(snapshot, code.duplicatedBlocks.count,
+                             "快照等于榜长 ⇒ 它落错了东西（应为榜内 + 榜外）")
+    }
+
+    /// 三态：没统计过榜外 ⇒ 整键缺席；量到了 ⇒ 原样读回来。
+    func test_snapshotRoundTripsAndStaysAbsentForOldReports() throws {
+        let json = try String(data: try JSONEncoder().encode(CodeMetrics()), encoding: .utf8) ?? ""
+        XCTAssertFalse(json.contains("duplicatedBlockTotalCountAfterDedup"),
+                       "没量到也要写出这一格 ⇒ 「没统计」与「榜外是零」被压成一态")
+        var measured = CodeMetrics()
+        measured.duplicatedBlockTotalCountAfterDedup = 105
+        let back = try JSONDecoder().decode(CodeMetrics.self,
+                                           from: try JSONEncoder().encode(measured))
+        XCTAssertEqual(back.duplicatedBlockTotalCountAfterDedup, 105)
+    }
+
+    /// 纪律：这一格**只服务盘上读者**，上屏一律走那枚计算属性 ⇒ 整个 `Sources` 里它只许出现两处
+    /// （声明那一行 + 装配那一行）。第三处就是有人拿复印件当了第二把尺子。
+    func test_snapshotIsNeverReadByADisplaySite() throws {
+        let hits = try Self.sourceLinesMatching("duplicatedBlockTotalCountAfterDedup")
+        XCTAssertFalse(hits.isEmpty, "扫描面一个都没命中 ⇒ 这条断言在空转")
+        XCTAssertNil(Self.snapshotDrift(files: hits.map(\.file)),
+                     "命中位置：\(hits.map { "\($0.file):\($0.line)" })")
+    }
+
+    /// 元测试：上面那把扫描尺对坏样例必须出声（本仓规矩：扫描型守卫不配元测试迟早永真绿）。
+    func test_meta_snapshotDriftMatcherRejectsAThirdSiteAndAWrongHome() {
+        XCTAssertNil(Self.snapshotDrift(files: ["CodeMetrics.swift", "FileSystemCodeAnalyzer.swift"]),
+                     "合规形状被误报 ⇒ 下一个人会连合规一起删")
+        XCTAssertNotNil(Self.snapshotDrift(
+            files: ["CodeMetrics.swift", "FileSystemCodeAnalyzer.swift", "HealthCodeDimensions.swift"]),
+                        "第三处读者没被抓出来 ⇒ 那把尺子是装饰品")
+        XCTAssertNotNil(Self.snapshotDrift(files: ["CodeMetrics.swift", "CodeMetrics.swift"]),
+                        "装配搬进了声明所在的冻结文件却没出声")
+        XCTAssertNotNil(Self.snapshotDrift(files: ["CodeMetrics.swift"]), "只剩声明（没人写）也算漂移")
+    }
+
+    /// 「快照只许住在声明 + 装配两处」这条判据的纯函数那一半（元测试与真扫描共用一把尺）。
+    private static func snapshotDrift(files: [String]) -> String? {
+        let allowed: Set<String> = ["CodeMetrics.swift", "FileSystemCodeAnalyzer.swift"]
+        guard files.count == 2, Set(files) == allowed else {
+            return "快照被第三处读走、或从装配口搬走了：\(files)"
+        }
+        return nil
+    }
+
+    /// 扫 `Sources/**` 的**非注释行**，点名每一处提到某个字段名的位置。
+    private static func sourceLinesMatching(_ name: String) throws -> [(file: String, line: Int)] {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/TcoderMonitor")
+        let urls = ((FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL } ?? []).filter { $0.pathExtension == "swift" })
+            .sorted { $0.path < $1.path }
+        XCTAssertFalse(urls.isEmpty, "扫描面为空 ⇒ 所有『没命中』都不成立")
+        var out: [(file: String, line: Int)] = []
+        for url in urls {
+            guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            for (index, raw) in text.split(separator: "\n").enumerated() {
+                let trimmed = raw.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("//") { continue }
+                if trimmed.contains(name) {
+                    out.append((url.lastPathComponent, index + 1))
+                }
+            }
+        }
+        return out
+    }
+
     // MARK: - ④ 在场语义：没出声的档位不许替它造句
 
     /// 高分档（本仓真实重复率就落在这一档）必须一句不出。
