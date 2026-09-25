@@ -157,3 +157,13 @@ for _part in ruler_shapes gates eligibility launchers tables chain trap windows 
 done
 unset _part
 
+# 单独执行本文件 = 把函数定义一遍就退出，**一项都不测**。
+# 09-25 12:00 现场：我拿 `perf_selfcheck.sh context attribution` 当命令跑，
+# 拿到「零行输出 + rc=0」，那形状与"这两块全过"一模一样——空结果伪装成通过（同族又一次）。
+# ⇒ 库就是库：被直接执行时要出声、要判错，不许留一个看起来像通过的退出码。
+if [ "${BASH_SOURCE[0]:-}" = "$0" ]; then
+  echo "!! perf_selfcheck.sh 是被 source 的库，单独跑**一项都不测**——别把'一行都没印'读成通过。" >&2
+  echo "   要跑全部 68 项：./scripts/perf_harness.sh selfcheck" >&2
+  exit 2
+fi
+
