@@ -231,4 +231,77 @@ final class CrashEvidenceReadoutGuardTests: XCTestCase {
         XCTAssertEqual(forwarders.count, 1,
                        "上屏出口应当只有一个：" + forwarders.map { $0.path }.joined(separator: "、"))
     }
+
+    // MARK: - §114 答：ⓘ 那格从「原因 × 份数」补上**是哪几份**
+
+    /// 五份读失败 ⇒ ⓘ 只点三条（与散文预算同源），**余数出声**，且旧那句「原因分布」一字不动。
+    /// 长度也量：这一格今天原本没有长度守卫，而它印的是绝对路径。
+    func test_skipHelpNamesTheUnreadableFilesWithinProseBudget() throws {
+        var summary = summaryWithChannelFiles(1)
+        let files = Self.fiveUnreadableFiles()
+        summary.readFailedFiles = files
+        let lines = LogReading.skippedReasonLines(summary)
+        let joined = lines.joined(separator: "\n")
+        XCTAssertTrue(joined.contains("已跳过 5 份读取失败，原因分布："), "旧那句被挤掉了：\(joined)")
+
+        let named = Self.linesNaming(lines, from: files)
+        XCTAssertEqual(named.count, DuplicationResult.proseCoordinateBudget,
+                       "点名条数不在散文预算上（预算 \(DuplicationResult.proseCoordinateBudget)）：\(joined)")
+        XCTAssertTrue(joined.contains("（另有 2 份未点名）"),
+                      "削了清单却不点名余数 ⇒ 读的人以为只有 3 份：\(joined)")
+        for line in lines {
+            XCTAssertLessThan(line.count, 1_200, "ⓘ 有一行 \(line.count) 字符 ⇒ 这格今天第一次有长度尺")
+        }
+    }
+
+    /// 顺序可复现（RD-54 那族）：点名清单按路径排，与扫描回来的顺序无关。
+    func test_skipHelpNamesFilesInAReproducibleOrder() throws {
+        let files = Self.fiveUnreadableFiles()
+        var forward = summaryWithChannelFiles(1)
+        forward.readFailedFiles = files
+        var backward = summaryWithChannelFiles(1)
+        backward.readFailedFiles = Array(files.reversed())
+        XCTAssertEqual(LogReading.skippedReasonLines(forward), LogReading.skippedReasonLines(backward),
+                       "同一批文件换个扫描顺序就换句子 ⇒ 榜单不可复现")
+    }
+
+    /// 没量到读失败就一句不出（不许替没发生的事造句）。
+    func test_skipHelpIsSilentWithoutReadFailures() throws {
+        var summary = summaryWithChannelFiles(1)
+        XCTAssertTrue(LogReading.skippedReasonLines(summary).isEmpty, "没这一格却造了句子")
+        summary.readFailedFiles = []
+        XCTAssertTrue(LogReading.skippedReasonLines(summary).isEmpty, "空清单也造句子")
+    }
+
+    /// 元测试：点名那把尺有牙。把「五份全抄」那版喂给同一个读数器，它必须报 5 条（> 预算 3）。
+    /// ⚠️ 那句 `line.count < 1_200` **不在这条元测试的射程里**，也不装作在：这批真实形状的路径
+    /// 五条全抄也只 610 字符，量不出牙。它是这格**有史以来第一把**长度尺（§114 答点名的缺口），
+    /// 粗、只在句子被撑到异常时长时开火，将来更长的路径（用户目录、沙箱嵌套）才会咬到它。
+    func test_meta_skipHelpRulersHaveTeeth() throws {
+        let files = Self.fiveUnreadableFiles()
+        var summary = summaryWithChannelFiles(1)
+        summary.readFailedFiles = files
+        let greedy = "读不到的这几份：" + files.map(\.path).joined(separator: "、") + "。"
+        let named = LogReading.skippedReasonLines(summary).joined(separator: "\n")
+        XCTAssertEqual(Self.linesNaming([greedy], from: files).count, files.count,
+                       "认不出「全抄」⇒ 上面那条预算断言是空的")
+        XCTAssertGreaterThan(files.count, DuplicationResult.proseCoordinateBudget,
+                             "夹具条数不超过预算 ⇒ 「削清单」这个形状根本没被造出来")
+        XCTAssertLessThan(named.count, greedy.count, "点名版不比全抄短 ⇒ 预算根本没削任何东西")
+    }
+
+    /// 五份**真实形状**的读失败：崩溃报告在 `DiagnosticReports` 下，路径长而互不相同。
+    private static func fiveUnreadableFiles() -> [ScannedLogFile] {
+        (1...5).map { index in
+            ScannedLogFile(path: "/Users/one/Library/Logs/DiagnosticReports/com.tcoder.monitor-"
+                            + "2026-09-2\(index)-0000\(index)-worker-thread-0x00000000.crash.report.ips",
+                           sizeBytes: 4_096, lineCount: 0, modifiedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                           role: .crash, readFailure: "权限不足")
+        }
+    }
+
+    /// 数 ⓘ 里点名了**几份**：按"这个路径整串出现在某一格里"数（分隔符随语言，不数分隔符）。
+    private static func linesNaming(_ lines: [String], from files: [ScannedLogFile]) -> [String] {
+        files.map(\.path).filter { path in lines.contains { $0.contains(path) } }
+    }
 }

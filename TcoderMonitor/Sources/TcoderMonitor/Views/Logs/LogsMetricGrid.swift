@@ -22,6 +22,30 @@ enum LogReading {
         return detail(logs)
     }
 
+    /// 「被跳过的读取失败」到底是**哪几份**（§114 答：原来两个出口都只给「原因 × 份数」，
+    /// 权限类问题用户自己能修，却没有一句说文件名）。
+    ///
+    /// 点名条数与散文预算同源（RD-52 立、§116 收成一个家），被削掉的一律出声（第 20 类：
+    /// 朝好看方向的截断就是假绿）。旧那句「已跳过 N 份…原因分布…」一个字没动（第 21 类）。
+    /// 顺序按路径排：清单必须可复现（RD-54 那族）。
+    static func skippedReasonLines(_ logs: LogSummary) -> [String] {
+        guard let failed = logs.readFailedFiles, failed.isEmpty == false else { return [] }
+        let grouped = Dictionary(grouping: failed.map { $0.readFailure ?? localizedCopy("未记录原因") }, by: { $0 })
+        let reasons = grouped.keys.sorted().map { "\($0) ×\(NumberFormat.grouped(grouped[$0]?.count ?? 0))" }
+        var lines = [localizedFormat("已跳过 %1$@ 份读取失败，原因分布：%2$@。",
+                                     NumberFormat.grouped(failed.count),
+                                     reasons.joined(separator: localizedCopy("、")))]
+        let paths = failed.map(\.path).sorted()
+        let named = paths.prefix(DuplicationResult.proseCoordinateBudget)
+        lines.append(localizedFormat("读不到的这几份：%1$@。",
+                                     named.joined(separator: localizedListSeparator())))
+        if paths.count > named.count {
+            lines.append(localizedFormat("（另有 %1$@ 份未点名）",
+                                         NumberFormat.grouped(paths.count - named.count)))
+        }
+        return lines
+    }
+
     /// 每千行代码错误数。分母不可信（没扫到代码行）时返回 nil，不给 0。
     static func perKiloCode(_ logs: LogSummary?, code: CodeMetrics?) -> Double? {
         guard let logs, logs.hasData, let code, code.codeLines > 0 else { return nil }
@@ -122,11 +146,9 @@ struct LogsMetricGrid: View {
         guard let logs else { return nil }
         var lines: [String] = []
         if let failed = logs.readFailedFiles, failed.isEmpty == false {
-            let grouped = Dictionary(grouping: failed.map { $0.readFailure ?? localizedCopy("未记录原因") }, by: { $0 })
-            let reasons = grouped.keys.sorted().map { "\($0) ×\(NumberFormat.grouped(grouped[$0]?.count ?? 0))" }
-            lines.append(localizedFormat("已跳过 %1$@ 份读取失败，原因分布：%2$@。",
-                                         NumberFormat.grouped(failed.count),
-                                         reasons.joined(separator: localizedCopy("、"))))
+            // 装配搬到 `LogReading.skippedReasonLines`（§114 答）：那句原先住在这里，
+            // 而这里是 `private`，屏上那句能不能核对**没有任何一把尺量得到**。
+            lines.append(contentsOf: LogReading.skippedReasonLines(logs))
         }
         if logs.hasCrashEvidenceToReport {
             // 八种原因**逐条分开**上屏：整句由 `CrashEvidenceReadout` 从落盘的九格快照按名字接回
