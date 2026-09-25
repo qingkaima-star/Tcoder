@@ -86,6 +86,12 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // （真起子进程量"TERM 之后多久收尾"），因为第 29 项那类文本审计只看"有没有 trap 这一行"，
         // 我 06:44 就是被它放过了一次（有 trap、但长 sleep 把收尾拖到 200 秒之后）。
         "perf_run_batch.sh", "perf_selfcheck_trap.sh",
+        // 09-25 #39：`perf_selfcheck_launchers.sh` 又涨回 **396/400**——`trap` 那一刀（`81213d7`）
+        // 搬走 67 行之后它重新长了回来，同一个尺寸债**第二次到期**。按"拆，不抬线"把
+        // 反例 48/49/51/52（冷启动档页名/归属 + 窗口负载判定）整段搬进 `windows.sh`
+        // （判据与 ok/fail 文案逐字未动，拆前拆后 61 项输出逐字 diff 过）。
+        // 搬出来的那片照样要点名：这是"新建/搬出的文件必须当场被量"**第七次**落到这张表上。
+        "perf_selfcheck_windows.sh",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。
