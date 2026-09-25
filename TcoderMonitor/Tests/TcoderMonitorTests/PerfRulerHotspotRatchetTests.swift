@@ -116,6 +116,12 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // （388→294 / 新块 110 行，逐字搬，拆前拆后 selfcheck 输出归一后逐字 diff）。
         // 第十一次用这条规矩：**搬出去的那片照样要点名**。
         "perf_selfcheck_attribution.sh",
+        // 09-25 #43/#73：长 update → 调用栈归因的新尺子。**第十二次**用同一条规矩——
+        // 上面那十一段注释讲的是同一件事：`rulerScripts` 是写死的名单，而扫描处是
+        // `guard rulerScripts.contains(...) else { continue }`，所以"新建文件"本身就是
+        // 一条免检通道，除非当场点名。这次仍然漏了（合入前一格），是手工
+        // `ls scripts | grep '^perf_'` 与名单求差集才发现的 ⇒ 反向守卫记在任务 #75。
+        "perf_update_stacks.py",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。

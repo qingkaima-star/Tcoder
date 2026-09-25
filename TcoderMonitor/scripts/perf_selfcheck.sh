@@ -142,6 +142,8 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_trapped_scripts_have_no_long_sleep "$out"  # 60) 带 trap 的 perf_ 脚本里不许留长 sleep（要长等就走 nap）
   item selfcheck_refused_trace_reclaim "$out"  # 61) 判废趟的 GB 级原始 trace：被拒∧超同档线才点名、默认只印、显式授权才删（#70）
   item selfcheck_hang_retry_policy "$out"  # 62) 只有录制挂死值得同窗补一次：按批封顶、挂死计数抹不掉、meta 键双向（#55）
+  item selfcheck_update_stack_attribution "$out"  # 63) 长 update → 调用栈归因：同窗才 join，四种"不许算"各判一次（#43/#73）
+  item selfcheck_blame_wiring "$out"  # 63b) 归因档的接线：附加仪器作为一个参数进 xctrace、导出改名不盖认证档
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：那个 for 必须在 cmd_selfcheck 之前，
