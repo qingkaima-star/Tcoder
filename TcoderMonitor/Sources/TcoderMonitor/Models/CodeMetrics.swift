@@ -107,6 +107,21 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     /// 的 id **一字不差**，报名字等于没报。
     /// `nil` = 本次没跑到重复分析；`[]` 且计数非零 = 合并发生过但一条坐标都没拿到（真缺陷）。
     var duplicateBlockCoordinatesMergedById: [String]? = nil
+    /// 「这一份代码里去重后共有几处重复块」的**落盘快照**（RD-87；
+    /// 申请单 `docs/R6-契约字段清单.md` §7 第 1 条）。值 = `reportedDuplicatedBlockTotalCount`
+    /// （本文件末尾那枚唯一取法），装配口在 `FileSystemCodeAnalyzer` 的
+    /// `applyDuplicationBoardTruth` —— **这里不许再写一遍加法**，写第二遍就是第二把尺子。
+    ///
+    /// 为什么要多这一格：那枚唯一取法是**代码里的计算属性，JSON 里没有**
+    /// ⇒ 盘上读者（CLI 调用方、AI、对表脚本）只拿得到 `duplicatedBlocks.count`，
+    /// 也就是**榜长**。而「榜长冒充总数」正是 R18 在我们自己界面上刚消灭掉的陷阱
+    /// （立案时的实扫读数：榜内 20、榜外 96 ⇒ 只读榜长的人会把 116 说成 20）。
+    /// 那句修正当时只给了 GUI 用户、没给 JSON 读者 —— 同一件事的两个出口只修了一个。
+    ///
+    /// ⚠️ 上屏的读者一律走那枚计算属性，这一格只服务"拿不到代码、只拿得到 JSON"的那一半；
+    /// 由 `DuplicationTotalInScoreDetailTests.test_snapshotIsNeverReadByADisplaySite` 判红（含元测试）。
+    /// `nil` = 这份报告没统计过榜外（与那枚计算属性拿不出总数的理由是同一个）⇒ 整键缺席。
+    var duplicatedBlockTotalCountAfterDedup: Int? = nil
     /// 因每指纹片段的展开预算而**没展开成片段**的拷贝窗口数（ratio 已含它们）。
     var duplicateFragmentsNotExpandedCount: Int? = nil
     /// 归一化行数触到窗口上限、后半段克隆不参与检测的文件数。

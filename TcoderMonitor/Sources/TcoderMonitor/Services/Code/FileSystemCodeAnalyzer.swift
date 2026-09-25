@@ -217,6 +217,10 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         metrics.duplicatedBlocksDroppedByCap = duplication.blocksDroppedByCap
         metrics.duplicatedBlocksDroppedByIdCollision = duplication.blocksDroppedByIdCollision
         metrics.duplicateBlockCoordinatesMergedById = duplication.blocksMergedAwayCoordinates
+        // RD-87：把「去重后总数」**落盘一格**，落的是唯一取法那一份的快照（这里不许再写一遍加法，
+        // 写第二遍就是第二把尺子）。盘上读者（CLI / AI / 对表脚本）拿不到计算属性，
+        // 只拿得到 `duplicatedBlocks.count` —— 那正是 R18 在 GUI 里消灭过的「榜长冒充总数」。
+        metrics.duplicatedBlockTotalCountAfterDedup = metrics.reportedDuplicatedBlockTotalCount
         metrics.duplicatedLinesOutsideReportedBlocks = duplication.linesOutsideReportedBlocks
         metrics.duplicateFragmentsNotExpandedCount = duplication.fragmentsDroppedByBudget
         metrics.duplicateFilesHittingLineCap = duplication.filesHittingLineCap
