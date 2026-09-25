@@ -269,12 +269,11 @@ print("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s" % (a, b, c, d, e, f, g, h, i, j))')
   ok "同档连测的一致性有尺子了：按档取判据量（交互比 hitch/s、idle 比每趟自身 p90 与均值），十形状各判一次（含极值不当判据的正反一对）"
 }
 
-selfcheck_refused_not_pooled() {  # selfcheck_refused_not_pooled <outdir>
-  # 55) **被闸门当场拒收的那一趟必须不被池化**。
-  #     本文件头注一直写着"没被 REFUSED"，可代码里没有那个读者——我拿临时探针数"这趟合格吗"时
-  #     就把一个 REFUSED 的目录读成了合格（挂死的录制会留下上一次的表文件，"表在 + REFUSED 在"就是入口）。
-  local rf
-  rf=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 - "$1" <<'PYCHK'
+trio_pooling_probe() {  # trio_pooling_probe <outdir> → 造四份夹具、调判定，印一行复合读数
+  # 这一半本来长在 `selfcheck_refused_not_pooled` 里：归因档那两格把函数本体顶到 **51 行**，
+  # 越过 `PerfRulerHotspotRatchetTests` 那条"尺子函数 ≤50 行"的闸门（21:12 门禁现场判红）。
+  # **拆，不抬线** —— 本仓为同一把门让路是第四次，前几次的注释就写在尺子名单里。
+  cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 - "$1" <<'PYCHK'
 import json, os, sys
 from perf_trio_agreement import read_run
 root = sys.argv[1]
@@ -311,7 +310,14 @@ got_refused = read_run(os.path.join(root, "trio-refused")) is None
 got_blame_out = read_run(os.path.join(root, "trio-blame")) is None
 print("%s|%s|%s|%s|%s" % (got_clean, got_refused, got_blame_out, kinds, code))
 PYCHK
-)
+}
+
+selfcheck_refused_not_pooled() {  # selfcheck_refused_not_pooled <outdir>
+  # 55) **被闸门当场拒收的那一趟必须不被池化**，而且"按设计不参与"不许被印成"这一趟坏了"。
+  #     头注一直写着"没被 REFUSED"，可代码里原先没有那个读者——我拿临时探针数"这趟合格吗"时
+  #     就把一个 REFUSED 的目录读成了合格（挂死的录制会留下上一次的表文件，"表在 + REFUSED 在"就是入口）。
+  local rf rf1
+  rf=$(trio_pooling_probe "$1")
   rf1=$(printf '%s\n' "$rf" | head -1)
   [ "$rf1" = "True|True|True|refused,bydesign,refused|3" ] \
     || { fail "REFUSED／归因档这两维没被分开读（拿到「$rf1」，应为 " \
