@@ -273,5 +273,5 @@ selfcheck_slot_owner_states() {  # selfcheck_slot_owner_states <outdir>
     *"✓ 归属各判对一次"*) : ;;
     *) fail "探针 rc=0 却没印出 ✓ 那一行 ⇒ 判定被搬走或话术改了（rc=0 不算它判过）"; return ;;
   esac
-  ok "实例归属各态各判对（含新补的「补测产物树·树还在／已删除」两态，主树 dist 不被新形状吃掉）"
+  ok "实例归属六态各判对（含「补测产物树」两态与两格反向），且探针只用合成根 ⇒ 换一棵树跑结果不变"
 }
