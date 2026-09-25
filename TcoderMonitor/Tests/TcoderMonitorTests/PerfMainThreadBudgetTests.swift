@@ -42,12 +42,30 @@ final class PerfMainThreadBudgetTests: XCTestCase {
         return nowMs() - t0
     }
 
+    /// 取证沙箱可能住在两处：**包根 `.scratch/`（现行默认）在前，`/tmp`（历史默认）兜底**。
+    /// 做成常量数组而不是就地拼一次：跳过话术也要点名同一个搜索面，否则话术与判据会各自漂移。
+    private static let captureSandboxRoots: [String] = {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return [packageRoot.appendingPathComponent(".scratch", isDirectory: true).path, "/tmp"]
+    }()
+
     /// 取证沙箱里落盘的真实报告（`capture_pages_isolated.sh` 每跑一次留一份）。
+    ///
+    /// **搜索面必须跟着生产者走**（缺陷 #67）：沙箱默认目录早就从 `/tmp/tcoder-capture-sandbox-*`
+    /// 搬到包根 `.scratch/tcoder-capture-sandbox-*`（AGENTS §1.6「样本根不许退回 `$TMPDIR`」），
+    /// 而这个消费者一直没跟着改 ⇒ 一条**明明有真夹具可量**的主线程读数长期 `XCTSkip`，
+    /// 且跳过话术还教人去跑那个"跑了也不会被找到"的脚本。07:1x 数过：仓库里有 5+ 个沙箱、
+    /// 每个 `reports/11111111-…json` 都 ≥20 KB（那就是产品自己写的真形状）。
     private func realReportURL() -> URL? {
-        let sandboxes = ((try? FileManager.default.contentsOfDirectory(atPath: "/tmp")) ?? [])
-            .filter { $0.hasPrefix("tcoder-capture-sandbox-") }
-            .map { "/tmp/\($0)/reports" }
-        for dir in sandboxes.sorted().reversed() {
+        var candidates: [(name: String, reports: String)] = []
+        for root in Self.captureSandboxRoots {
+            let entries = (try? FileManager.default.contentsOfDirectory(atPath: root)) ?? []
+            candidates += entries.filter { $0.hasPrefix("tcoder-capture-sandbox-") }
+                .map { ($0, "\(root)/\($0)/reports") }
+        }
+        // 沙箱名里带 `YYYYmmdd-HHMMSS` ⇒ 按名倒序＝按时间倒序，跨两个根也成立。
+        for (_, dir) in candidates.sorted(by: { $0.name > $1.name }) {
             guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { continue }
             for name in files where name.hasSuffix(".json") {
                 let url = URL(fileURLWithPath: "\(dir)/\(name)")
@@ -179,7 +197,8 @@ final class PerfMainThreadBudgetTests: XCTestCase {
 
     func testPersistenceMainThreadCostIsMeasuredNotGuessed() throws {
         guard let fixture = realReportURL() else {
-            throw XCTSkip("找不到 ≥20 KB 的真报告夹具（找过 /tmp/tcoder-capture-sandbox-*/reports）"
+            throw XCTSkip("找不到 ≥20 KB 的真报告夹具（找过的根：" + Self.captureSandboxRoots.joined(separator: " 与 ")
+                + " 里的 tcoder-capture-sandbox-*/reports）"
                 + "——先跑一次 scripts/capture_pages_isolated.sh 再来量；不用合成数据凑数")
         }
         let data = try Data(contentsOf: fixture)
