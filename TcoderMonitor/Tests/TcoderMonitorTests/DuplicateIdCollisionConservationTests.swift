@@ -124,4 +124,46 @@ final class DuplicateIdCollisionConservationTests: XCTestCase {
         XCTAssertNil(CodeBoardTruth.outsideBoardNoteFromFields(code),
                      "三格全零还说有账 ⇒ 这句在编造")
     }
+
+    // MARK: - RD-86：数之外还要**点名坐标**（RD-17 老账：只给总数 = 无法反驳）
+
+    /// 被合并掉的那一处必须给出**可核对的坐标**，而且这条坐标与计数同源（一次扫出来的两半）。
+    func testMergedAwayCoordinatesNameACheckablePlaceNotJustACount() {
+        let input = cloneGroup(named: "pair", startLines: [10, 40], lineCount: 12)
+        let ranked = DuplicationScan.rankedBlocks(input)
+        XCTAssertEqual(ranked.mergedAwayCoordinates.count, ranked.droppedByIdCollision,
+                       "坐标清单与计数不是同一次扫描的两半 ⇒ 会各自漂移")
+        let spot = ranked.mergedAwayCoordinates.first ?? ""
+        XCTAssertFalse(spot.isEmpty, "有合并却没点名 ⇒ 这条账仍然无法反驳")
+        // 留下的那一处与被合并的那一处只有一份坐标进清单——**不许两处都写**（那等于没删重复）。
+        let namedStartLines = [10, 40].filter { spot.contains(":\($0)") }
+        XCTAssertEqual(namedStartLines.count, 1, "要么两处都点了、要么一处都没点：\(spot)")
+        XCTAssertTrue(spot.contains("/repo/pairA.swift"), "坐标要点到文件：\(spot)")
+    }
+
+    /// 取样上限只削**清单**，不削**数**（第 20 类盲区：朝好看方向截断就是假绿）。
+    func testSamplingCapTrimsTheListButNeverTheCount() {
+        let input = cloneGroup(named: "many", startLines: Array(stride(from: 1, through: 81, by: 10)),
+                               lineCount: 25)
+        let ranked = DuplicationScan.rankedBlocks(input)
+        XCTAssertEqual(ranked.droppedByIdCollision, input.count - 1, "同组同长 ⇒ 只留一条")
+        XCTAssertEqual(ranked.mergedAwayCoordinates.count, DuplicationScan.outsideBoardSampleLimit,
+                       "清单要封顶，数不许跟着被削小")
+    }
+
+    /// 上屏那一句：有坐标就点名，没坐标时**旧那句一字不动**。
+    func testFooterNamesTheMergedPlacesWhenTheyAreThere() {
+        var code = CodeMetrics()
+        code.duplicatedBlocksDroppedByCap = 0
+        code.duplicatedLinesOutsideReportedBlocks = 0
+        code.duplicatedBlocksDroppedByIdCollision = 2
+        let withoutSpots = CodeBoardTruth.outsideBoardNoteFromFields(code) ?? ""
+        XCTAssertFalse(withoutSpots.contains("被合并的那几处在"), "没坐标却编了一句：\(withoutSpots)")
+        code.duplicateBlockCoordinatesMergedById = ["pairA.swift:40 + pairB.swift:140",
+                                                    "pairA.swift:70 + pairB.swift:170"]
+        let withSpots = CodeBoardTruth.outsideBoardNoteFromFields(code) ?? ""
+        XCTAssertTrue(withSpots.contains("pairA.swift:40"), "坐标没进页尾 ⇒ 这一格落了地没读者：\(withSpots)")
+        XCTAssertTrue(withSpots.contains("另有 2 处重复命中与别处合并为一条"),
+                      "新句挤掉了旧句：\(withSpots)")
+    }
 }
