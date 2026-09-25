@@ -97,6 +97,14 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // `eligibility` 当时 388/400 只剩 12 行）。**新建/搬出的文件当场点名**——
         // 这是这条规矩第八次落到这张表上（前七次见上面注释），不点名就等于免检。
         "perf_reclaim.py", "perf_reclaim.sh", "perf_selfcheck_hygiene.sh",
+        // 09-25 #55：等窗这一族加进"挂死同窗补一次"之后排程器到 **404/400**，
+        // 按"拆，不抬线"把 `wait_for` 与四个 `cond_*` 搬进 `perf_window_gates.sh`（逐字节原文）。
+        // `cond_instance_ready` **没跟着搬**——第 29 项要求"起实例的那份脚本必须有 trap"，
+        // 那条守卫把这次搬家逼回原形（细节写在库文件头注）。搬出来的那片照样要点名：
+        // 这是"新建/搬出的文件必须当场被量"**第九次**落到这张表上。
+        // 同笔连带改了一处下游守卫：第 36 项原来只扫排程器里的 `open "$START_BIN"`，
+        // 搬家期间它**一行都扫不到而静默变空**，所以改成两处都扫 + 给分母加断言。
+        "perf_window_gates.sh",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。

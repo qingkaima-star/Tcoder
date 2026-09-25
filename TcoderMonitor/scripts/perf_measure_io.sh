@@ -83,6 +83,58 @@ refuse_sample() {  # refuse_sample <outdir> <原因…>：一趟当场自认没�
   printf 'REFUSED\n%s\n' "$2" > "$1/REFUSED"
 }
 
+refusal_kind() {  # refusal_kind <outdir> → hang / target_gone / empty_tables / other / none
+  # 只读 `REFUSED` 的**原因行**：那是 `refuse_sample` 唯一的落点，另开一枚机读键就是
+  # 第二个入口（两份迟早分叉，而分叉的方向永远是"看起来更宽松的那一份"）。
+  # ⚠ 这是**按文案匹配**：改上面那三句判废文案会把它降级成 `other` ⇒ 少补一次重试
+  #   （方向安全：绝不会把坏样本放进来）。第 62 项反例喂给它的是**真路径产出的** REFUSED
+  #   （假 xcrun 走 `record_bounded`），所以文案与判据一分叉那一项当场红。
+  local file="$1/REFUSED" reason
+  [ -f "$file" ] || { echo none; return 0; }
+  reason=$(sed -n '2p' "$file")
+  case "$reason" in
+    *挂死*)               echo hang ;;
+    *在录制期间消失*)      echo target_gone ;;
+    *一张都没有行数*)      echo empty_tables ;;
+    *)                    echo other ;;
+  esac
+}
+
+attempt_verdict() {  # attempt_verdict <outdir> <这一趟的退出码> → retry（同窗补一次）/ slot（占掉一个计划槽位）
+  # #55 的判据：**只有录制挂死**值得在同窗原地补一次——挂死时环境往往仍然干净，
+  # 而一次挂死的真实代价不是那 140 秒，是**把一个稀缺的干净窗口整段扔掉**。
+  # 别的判废原因（人手静默不够、被测进程消失、表全空）都不补：那些恰恰说明**这个窗口不行**，
+  # 补一次只会把同一份坏条件再量一遍。
+  # 预算**按批封顶**（默认 1 次，`HANG_RETRY_BUDGET` 可调）：每条挂死都免费补一次
+  # = "攒够可用为止"那种数据相关的停止规则，那正是单向朝好看的计数那一族。
+  local out="$1" rc="$2"
+  [ "$rc" = "0" ] && { echo slot; return 0; }
+  [ "$(refusal_kind "$out")" = "hang" ] || { echo slot; return 0; }
+  if [ "${HANG_RETRIES_USED:-0}" -lt "${HANG_RETRY_BUDGET:-1}" ]; then
+    echo retry; return 0
+  fi
+  echo slot        # 挂死但预算已用完 ⇒ 照旧占槽位，而挂死计数仍要加（见 batch_hang_summary）
+}
+
+hang_recovery_meta_arg() {  # 补试那一趟要往 meta 里加的整枚参数；没挂过的趟**一个字节都不吐**
+  # 为什么是**函数**而不是在调用点直接写 `${HANG_RECOVERED:+…}`：反例（第 62 项）必须喂同一个
+  # 出口。写在调用点的话，反例只能自己抄一份表达式——那份副本和真的那处一起腐烂，没人管。
+  # 也不用"键值写 0"：那会让每一趟都带一枚 `hang_recovered`，哪些读数是补出来的反而分不出。
+  printf '%s' "${HANG_RECOVERED:+hang_recovered=$HANG_RECOVERED}"
+}
+
+batch_hang_summary() {  # batch_hang_summary <挂死趟数> <用掉的补试次数> <补试补回来的可用趟数>
+  # 挂死计数**必须照印**，哪怕补试全部成功：重试是为了"别把好窗口扔了"，
+  # **不是**为了把这一维的失败率抹成 0。
+  local hangs="$1" used="$2" recovered="$3" budget="${HANG_RETRY_BUDGET:-1}"
+  if [ "$hangs" = "0" ]; then
+    echo "    录制挂死：0 趟（这一批一趟都没挂）"
+    return 0
+  fi
+  echo "    录制挂死：$hangs 趟 ⇒ 同窗补试 $used 次（本批封顶 $budget 次），补回可用 $recovered 趟"
+  echo "      补试不换窗口、不顺延预热（同一枚实例、同一个 measured_rev）；挂死那几趟的 REFUSED 原样留在盘上，一致性尺照旧跳它们"
+}
+
 record_bounded() {  # record_bounded <outdir> <trace 路径> <模板> <时长秒>
   # 触发这条的实测（09-23 10:38→11:50）：被测实例在录制中途消失，而 `--time-limit 20s`
   # **从不触发**——它计的是采到的时间，目标没了就没有时间可计。于是 xctrace 挂在死目标上
@@ -125,7 +177,7 @@ record_bounded() {  # record_bounded <outdir> <trace 路径> <模板> <时长秒
 }
 
 require_covered_evidence() {  # require_covered_evidence <outdir>：一张表都没行数 ⇒ 这趟不算完成
-  # 为什么必须在代码里：`perf_wait_window.sh` 的 `✓ 第 i 趟完成` 只看本脚本的退出码，
+  # 为什么必须在代码里：排程器那句"这一趟完成"的 ✓ 只看本脚本的退出码，
   # 而 `set -uo pipefail`（无 -e）让失败的 xctrace 一路走到 summary 照样退 0 ⇒
   # 今天那趟五张表全空也被印成「✓ 完成」，只差没被计进 3/3。
   local out="$1" t
