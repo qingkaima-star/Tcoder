@@ -246,15 +246,37 @@ selfcheck_covered_evidence() {  # selfcheck_covered_evidence <outdir>
   [ "$bad" = "0" ] && ok "空表的一趟判不成完成：缺表判废、有表放行、演练档不误伤（三种形状）"
 }
 
-selfcheck_hang_retry_policy() {  # 62) 挂死才补、只补一次、补试不许抹掉挂死计数、meta 键双向
-  # 缺陷 #55：录制挂死 4/30 趟 ≈ 13%，一次挂死的真实代价不是那 140 秒墙钟，
-  # 而是**把一个稀缺的干净窗口整段扔掉**（今晚 6/30 可用）。补试因此只对"挂死"这一种
-  # 判废开放——其余判废（人手静默不够、被测消失、表全空）恰恰说明**这个窗口不行**。
-  # ⚠ 喂给判据的 REFUSED 一律由**真路径**产出（假 xcrun 走 record_bounded /
-  #   require_covered_evidence），不抄文案：判废文案一改，这里当场读成别的类型而变红，
-  #   而不是拿着两份各自成立的字符串继续互证。
-  local fx="$1/hangretry" bad=0 out kind summary path0="$PATH" holders=""
-  rm -rf "$fx"; mkdir -p "$fx/bin" "$fx/plain" "$fx/with" "$fx/without"
+# ===== 第 62 项：#55「录制挂死 ⇒ 同窗原地补一次」的反例（拆三个函数：本仓尺子量 CC<16 且函数 ≤50 行）
+#
+# 缺陷 #55 的现量：四批完整账 30 趟里 4 趟录制挂死 ≈ 13%，一次挂死的真实代价不是那 140 秒
+# 墙钟，而是**把一个稀缺的干净窗口整段扔掉**（同夜只有 6/30 趟可用）。补试因此只对"挂死"
+# 这一种判废开放——其余判废（被测消失、表全空）恰恰说明**这个窗口不行**，补一次只会把
+# 同一份坏条件再量一遍。
+# ⚠ 喂给判据的 REFUSED 一律由**真路径**产出（假 xcrun 走 record_bounded /
+#   require_covered_evidence），不抄判废文案：文案一改这里当场读成别的类型而红，
+#   而不是拿着两份各自成立的字符串继续互证。
+
+hang_retry_retire() {  # hang_retry_retire <pid…>：发 TERM 并**确认真的退场**（最多 3 s）
+  # 为什么要轮询而不是发完信号就算：`kill -0` 在"信号已投递、进程还没死/还没被回收"那一瞬
+  # 仍然成功——第一版在这里没有等待，把自己的收尾判成了一条红。等待有上限，
+  # 且只认自己记下的那几个 pid（不 pgrep 名字：别人的同名进程不该算到我头上）。
+  local h tick alive=""
+  for h in "$@"; do kill -TERM "$h" 2>/dev/null || true; done
+  for tick in 1 2 3 4 5 6; do
+    alive=""
+    for h in "$@"; do kill -0 "$h" 2>/dev/null && alive="$alive $h"; done
+    [ -n "$alive" ] || break
+    sleep 0.5
+  done
+  for h in $alive; do
+    fail "持有者 pid=$h 退了信号却没死 ⇒ 本项自己成了漏实例的那一个"
+    bad=1
+  done
+}
+
+hang_retry_make_refused() {  # 造三份真路径产出的判废现场。读、写调用方的 `bad`（同 `launcher_hygiene_row` 的分工）
+  local fx="$1" path0="$PATH" out h holders=""
+  mkdir -p "$fx/bin" "$fx/plain" "$fx/with" "$fx/without"
   printf '%s\n' '#!/bin/bash' \
     'case "${FAKE_XC:-ok}" in' \
     '  hang) trap "exit 0" TERM; while :; do sleep 0.2; done ;;' \
@@ -264,54 +286,62 @@ selfcheck_hang_retry_policy() {  # 62) 挂死才补、只补一次、补试不�
   chmod +x "$fx/bin/xcrun"
   PATH="$fx/bin:$PATH"; export PATH
   local RECORD_SLACK_S=2 RECORD_POLL_S=1
-
   out="$fx/hang"; mkdir -p "$out"
   sleep 300 & PID=$!; disown; holders="$holders $PID"; FAKE_XC=hang export FAKE_XC
   ( record_bounded "$out" "$out/x.trace" T 1 ) >"$out/run.txt" 2>&1
-  kind=$(refusal_kind "$out")
-  [ "$kind" = "hang" ] \
-    || { fail "真挂死路径产出的 REFUSED 被判成「$kind」⇒ 判废文案与这条判据已经分叉，补试从此不触发"; bad=1; }
-  [ "$(HANG_RETRIES_USED=0 attempt_verdict "$out" 1)" = "retry" ] \
-    || { fail "挂死、预算未用、rc=1 这三样凑齐却不补 ⇒ #55 那条同窗补试是纸面规矩"; bad=1; }
-  [ "$(HANG_RETRIES_USED=1 attempt_verdict "$out" 1)" = "slot" ] \
-    || { fail "预算用完还允许再补 ⇒ 退化成「攒够可用为止」那种数据相关的停止规则"; bad=1; }
-  [ "$(attempt_verdict "$out" 0)" = "slot" ] \
-    || { fail "成功那一趟也去补 ⇒ 同一个窗口里采两遍，读数会被当两批独立样本引用"; bad=1; }
-  kill -TERM "$PID" 2>/dev/null; wait "$PID" 2>/dev/null
-
   out="$fx/gone"; mkdir -p "$out"
   sleep 300 & PID=$!; disown; holders="$holders $PID"
-  FAKE_TARGET="$PID" FAKE_XC=die export FAKE_TARGET FAKE_XC
+  FAKE_TARGET="$PID" export FAKE_TARGET; FAKE_XC=die export FAKE_XC
   ( record_bounded "$out" "$out/x.trace" T 1 ) >"$out/run.txt" 2>&1
-  kind=$(refusal_kind "$out")
-  [ "$kind" = "target_gone" ] \
-    || { fail "被测进程消失被判成「$kind」⇒ 三种判废的类型学少了一类"; bad=1; }
-  [ "$(HANG_RETRIES_USED=0 attempt_verdict "$out" 1)" = "slot" ] \
-    || { fail "被测消失也去补试 ⇒ 补试通道扩到了「这个窗口本来就不行」那一类"; bad=1; }
-
   out="$fx/notables"; mkdir -p "$out"
   ( require_covered_evidence "$out" ) >"$out/a.txt" 2>&1
-  kind=$(refusal_kind "$out")
+  unset FAKE_XC FAKE_TARGET
+  # 自己起的持有者必须自己退（AGENTS 2.1）。**本项第一版就是没退干净**：那个 disown 掉的
+  # `sleep 300` 占着 stdout 管道，外面的 `| tail` 永远等不到 EOF，整条反例跑起来像挂死。
+  # 按 pid 精确核对，不 pgrep 名字——别人的同名进程不该算到我头上。
+  hang_retry_retire $holders
+  PATH="$path0"; export PATH
+}
+
+hang_retry_type_checks() {  # 判废类型学 + 补试判据：三个方向各判一次。读、写调用方的 `bad`
+  local fx="$1" kind
+  kind=$(refusal_kind "$fx/hang")
+  [ "$kind" = "hang" ] \
+    || { fail "真挂死路径产出的 REFUSED 被判成「$kind」⇒ 判废文案与这条判据已分叉，补试从此不触发"; bad=1; }
+  [ "$(HANG_RETRIES_USED=0 attempt_verdict "$fx/hang" 1)" = "retry" ] \
+    || { fail "挂死、预算未用、rc=1 三样凑齐却不补 ⇒ #55 那条同窗补试是纸面规矩"; bad=1; }
+  [ "$(HANG_RETRIES_USED=1 attempt_verdict "$fx/hang" 1)" = "slot" ] \
+    || { fail "预算用完还允许再补 ⇒ 退化成「攒够可用为止」那种数据相关的停止规则"; bad=1; }
+  [ "$(attempt_verdict "$fx/hang" 0)" = "slot" ] \
+    || { fail "成功那一趟也去补 ⇒ 同一个窗口采两遍，两遍会被当成两批独立样本引用"; bad=1; }
+  kind=$(refusal_kind "$fx/gone")
+  [ "$kind" = "target_gone" ] \
+    || { fail "被测进程消失被判成「$kind」⇒ 三类判废的类型学少了一类"; bad=1; }
+  [ "$(HANG_RETRIES_USED=0 attempt_verdict "$fx/gone" 1)" = "slot" ] \
+    || { fail "被测消失也去补试 ⇒ 补试通道扩到了「这个窗口本来就不行」那一类"; bad=1; }
+  kind=$(refusal_kind "$fx/notables")
   [ "$kind" = "empty_tables" ] \
     || { fail "三张表全空被判成「$kind」⇒ 该类的文案改了而这里没跟上"; bad=1; }
-  [ "$(attempt_verdict "$out" 1)" = "slot" ] \
+  [ "$(HANG_RETRIES_USED=0 attempt_verdict "$fx/notables" 1)" = "slot" ] \
     || { fail "表全空也去补试 ⇒ 同一条通道又宽了一格"; bad=1; }
   [ "$(refusal_kind "$fx/plain")" = "none" ] \
     || { fail "没有 REFUSED 的目录不判成 none ⇒ 空目录会被当成某种判废"; bad=1; }
+}
 
-  # 挂死计数**必须**在补试成功之后照样出声（#55 硬约束①）
+hang_retry_tally_checks() {  # 挂死计数与 meta 键：两个方向都要有牙。读、写调用方的 `bad`
+  local fx="$1" summary
+  # 挂死计数**必须**在补试成功之后照样出声（#55 硬约束①）：否则"重试"会把这一维的
+  # 失败率抹成 0——单向朝好看的计数。
   summary=$(batch_hang_summary 2 1 1)
   printf '%s\n' "$summary" | grep -q '挂死：2 趟' \
     || { fail "补试补回来一趟之后挂死计数就不见了（拿到「$summary」）⇒ 单向朝好看的计数"; bad=1; }
   printf '%s\n' "$summary" | grep -q '补回可用 1 趟' \
-    || { fail "挂死计数报了、却没报补回几趟 ⇒ 读的人无法判断这批还剩多少可用"; bad=1; }
+    || { fail "报了挂死却没报补回几趟 ⇒ 读的人无法判断这批还剩多少可用"; bad=1; }
   printf '%s\n' "$(batch_hang_summary 0 0 0)" | grep -q '0 趟' \
     || { fail "一趟都没挂却报了挂死 ⇒ 反向失准"; bad=1; }
-
-  # meta 那一枚键：两个方向都要有牙（走的是同一个出口 `hang_recovery_meta_arg`）
-  # ⚠ 必须 **export 之后再调用**：写成 `HANG_RECOVERED=1 meta_write … "$(hang_recovery_meta_arg)"`
-  #   是无效的前缀赋值——参数表里的命令替换**先于**赋值展开，函数看到的还是空值
-  #   （第一次就是这么写出来、当场被自己这条反例判红的）。
+  # `hang_recovered` 只在补试那一趟存在。⚠ 必须 **export 之后再调用**：写成
+  #   `HANG_RECOVERED=1 meta_write … "$(hang_recovery_meta_arg)"` 是无效的前缀赋值——
+  #   参数表里的命令替换**先于**赋值展开（第一版就这么写的，被自己这条反例当场判红）。
   ( export HANG_RECOVERED=1
     REV=x DIRTY=0 meta_write "$fx/with" "mode=idle" "$(hang_recovery_meta_arg)" )
   unset HANG_RECOVERED
@@ -320,16 +350,14 @@ selfcheck_hang_retry_policy() {  # 62) 挂死才补、只补一次、补试不�
     || { fail "补试趟没把 hang_recovered 落进 meta ⇒ 哪几份读数是补出来的，事后无从复核"; bad=1; }
   grep -q 'hang_recovered' "$fx/without/meta.json" \
     && { fail "没挂过的趟也带上了 hang_recovered ⇒ 这枚键失去区分力（写 0 冒充「没有」的形状）"; bad=1; }
+}
 
-  # 自己起的持有者必须自己退（AGENTS 2.1）。**这一项的第一版就是没退干净**：
-  # 那个 disown 掉的 `sleep 300` 还占着 stdout 管道，外面的 `| tail` 永远等不到 EOF，
-  # 整个反例跑起来像挂死。按 pid 精确核对，不 pgrep 名字——别人的同名进程不该算到我头上。
-  for h in $holders; do
-    kill -TERM "$h" 2>/dev/null || true
-    sleep 0.2
-    kill -0 "$h" 2>/dev/null && { fail "持有者 pid=$h 退了信号却没死 ⇒ 本项自己成了漏实例的那一个"; bad=1; }
-  done
-  PATH="$path0"; export PATH
-  unset FAKE_XC FAKE_TARGET HANG_RECOVERED
+selfcheck_hang_retry_policy() {  # 62) 挂死才补、按批封顶、挂死计数抹不掉、meta 键双向
+  local fx="$1/hangretry" bad=0
+  rm -rf "$fx"
+  mkdir -p "$fx"
+  hang_retry_make_refused "$fx"
+  hang_retry_type_checks "$fx"
+  hang_retry_tally_checks "$fx"
   [ "$bad" = "0" ] && ok "挂死才补、按批封顶、补试抹不掉挂死计数、meta 键两个方向都判过（真路径产出的 REFUSED）"
 }
