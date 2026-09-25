@@ -216,6 +216,7 @@ final class FileSystemCodeAnalyzer: CodeAnalysisProviding {
         metrics.duplicatedBlockLimit = DuplicationEngine.maxBlocks
         metrics.duplicatedBlocksDroppedByCap = duplication.blocksDroppedByCap
         metrics.duplicatedBlocksDroppedByIdCollision = duplication.blocksDroppedByIdCollision
+        metrics.duplicateBlockCoordinatesMergedById = duplication.blocksMergedAwayCoordinates
         metrics.duplicatedLinesOutsideReportedBlocks = duplication.linesOutsideReportedBlocks
         metrics.duplicateFragmentsNotExpandedCount = duplication.fragmentsDroppedByBudget
         metrics.duplicateFilesHittingLineCap = duplication.filesHittingLineCap

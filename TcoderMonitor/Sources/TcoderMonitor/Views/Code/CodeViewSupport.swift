@@ -181,6 +181,11 @@ enum CodeBoardTruth {
             if !note.isEmpty { note += " " }
             note += localizedFormat("另有 %1$@ 处重复命中与别处合并为一条（同一组文件、同一长度）。",
                                     NumberFormat.grouped(merged))
+            // RD-86：数之外还要点名坐标，否则这句仍然只是一条无法反驳的账（RD-17 老账）。
+            if let spots = code.duplicateBlockCoordinatesMergedById, !spots.isEmpty {
+                note += " " + localizedFormat("被合并的那几处在：%1$@。",
+                                             spots.joined(separator: localizedListSeparator()))
+            }
         }
         if let fragments = code.duplicateFragmentsNotExpandedCount, fragments > 0 {
             note += " " + localizedFormat("另有 %1$@ 处拷贝因指纹预算未展开。", NumberFormat.grouped(fragments))
