@@ -157,6 +157,14 @@ Sources/TcoderMonitor/Views/RootView.swift
 Sources/TcoderMonitor/Views/ProjectDetailView.swift
 Sources/TcoderMonitor/Views/DashboardView.swift
 ```
+> ⚠️ 2026-09-26 01:2x 逐格核过这份清单的两件事，都写在这里而不是改清单本身：
+> ① `Sources/TcoderMonitor/Services/Demo/DemoData.swift` 已随内置示例数据退役在 `8b0b2c4`（09-21 15:30）
+> **整文件删除** ⇒ 这一格今天读作「历史归属」，不是「别去改它」——留着它是为了让人知道这块以前归冻结区，
+> 谁要重新引入 `Demo/**` 仍需总工拍板。
+> ② 这份清单里的路径都是**相对 `TcoderMonitor/` 的简写**（真实布局是 `TcoderMonitor/Sources/…`），
+> 且整块在围栏代码块里、**不带反引号** ⇒ `DocReferenceRatchetTests` 那支尺子一条都不认（它只认反引号里的整段）。
+> 也就是说：冻结区清单本身是**零校验**的，路径写错、文件删掉，这里都不会变红。
+> 已另立缺陷登记（要不要给围栏块加一把尺，与路径锚点同一件事，见整改台账 §155 与其后的 #56）。
 契约不够用时：**不要改它**，在你自己的文件里加扩展（`extension CodeMetrics { ... }`）
 或用派生类型；把缺口写进你的 Obsidian 笔记 + 在最终汇报里列为「契约缺口」，由总工处理。
 
@@ -208,8 +216,8 @@ Tests/TcoderMonitorTests/Health*Tests.swift
 |---|---|---|
 | WS-D 诚实性审计 | 只读找虚报/假数据/暗示调用 AI | **仅** Obsidian `20 WS-D 诚实性审计.md`；不得改任何代码 |
 | WS-E 发布工程 | 打包、二进制==HEAD 证明、九页取证 | `scripts/build_app.sh`、`scripts/verify_pages.sh`、Obsidian `30`；**不得改 `Sources/**`** |
-| WS-F 夹具实验室 | 多清单/多格式覆盖率真值验证 | 新建 `Tests/TcoderMonitorTests/ManifestLabFixtureTests.swift`；**不得改 `Sources/**`** |
-| **WS-G 设计系统基座** | 令牌、玻璃组件库、排版与语义色 | **`App/Theme.swift`（原总工冻结区，现移交 WS-G）**、新建 `Design/**`、`Tests/.../DesignTokenTests.swift`；**不得改 `Views/**` 页面、`Services/**`、`Models/**`、`Package.swift`** |
+| WS-F 夹具实验室 | 多清单/多格式覆盖率真值验证 | 新建/追加 `Tests/TcoderMonitorTests/ManifestLab*` 一族 —— 原名 `ManifestLabFixtureTests.swift` 已在 `d774e22`（09-19 23:33）按职责拆开，今天活的是 `ManifestLabFixture.swift` ＋ `ManifestLabTree+*.swift` 等 11 枚 ⇒ **别再照原名新建**（那等于把拆好的文件再攒回一个巨型件，撞 §3 规矩 4 的 800 行闸门）；**不得改 `Sources/**`** |
+| **WS-G 设计系统基座** | 令牌、玻璃组件库、排版与语义色 | **`App/Theme.swift`（原总工冻结区，现移交 WS-G）**、新建 `Design/**`、`Tests/TcoderMonitorTests/DesignTokenTests.swift`（原先写成 `Tests/.../` 省略号，任何按路径找东西的尺都解不出来）；**不得改 `Views/**` 页面、`Services/**`、`Models/**`、`Package.swift`** |
 | WS-H 设计规范 | 栅格/字号/色板/SF Symbols/中文文案规范 | **仅** Obsidian `40 WS-H 设计语言规范.md`；不写码 |
 | WS-I 设计债审计 | 硬编码值/魔法数/不统一写法清单 | **仅** Obsidian `45 WS-I 设计债清单.md`；不写码、**不启动 App** |
 | WS-J 自食其果 | 用 Tcoder 扫 Tcoder，按自报结论修真问题 | 报告点名的 `Services/**`；**碰别人目录先停下报总工**；不得改 `Models/**`、`Package.swift`、阈值定义 |
@@ -445,9 +453,12 @@ WS-L 另背一条**功能性诚实修正**（不是美化）：界面显示"提�
 - 统一用设计系统组件：`GlassSection`（分区卡的事实标准：46 处调用 / 22 个文件）、`MetricTile`、`RiskBadge`、
   `SeverityBadge`、`MiniBarGauge`、`EmptyStateView`、`BannerRow`/`BannerStyle`、`StatLine`、`Theme.*`。
   `SectionCard` 与 `Design/TableKit.swift` 整文件已因零引用删除（2026-09-20，WS-G #28），**别再往回加**；
-  表格列头自 `d6345e5`（WS-Q #34）起**只剩 WS-L 那套 `DataTableHeader` + 列数组**（`Views/CodeGit/CodeGitTable.swift`），
+  表格列头自 `d6345e5`（WS-Q #34）起**只剩 WS-L 那套 `DataTableHeader` + 列数组**
+  （原 `Views/CodeGit/CodeGitTable.swift`；该文件已在 `6ca0578`（09-20 15:08）上提进 `Design/DataTable.swift`
+  ⇒ 旧路径今天盘上不存在，照它找会扑空），
   `TableHeaderCell` 与 `Grid`/`GridRow` 排布已删除，`TableHeaderConvergenceTests` 钉住不许回来；
-  列系统仍住在 WS-L 目录下（归属错位，上提进 `Design/` 需总工拍板）。
+  列系统自 `6ca0578` 起已在 `Design/DataTable.swift`（历史上它先住在 WS-L 目录下，属归属错位；
+  上提那笔由总工落，此格现已不再是错位，留此一句免得有人照旧文去 `Views/CodeGit/` 找）。
   需要新组件写在你自己的目录里，不要往 `Theme.swift` 里加。
 - 文案一律简体中文；数字用 `NumberFormat.grouped/compact/percent`、`ByteFormat.string/rate/bitRate`、
   `DateFormat.sinceDescription`。
