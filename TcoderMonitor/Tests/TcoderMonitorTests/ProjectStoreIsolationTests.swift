@@ -177,8 +177,14 @@ final class ProjectStoreIsolationTests: XCTestCase {
         for entry in FunctionalHonestyGuardTests.fabricationExemptions {
             let url = packageRoot.appendingPathComponent("Sources/TcoderMonitor/\(entry.path)")
             let content = try String(contentsOf: url, encoding: .utf8)
-            XCTAssertTrue(content.contains(entry.needle),
-                          "豁免点名的 \(entry.needle) 已经不在 \(entry.path) 里 ⇒ 这条豁免要跟着删")
+            // ⚠ 判"needle 还在不在"不能拿整份文件比子串：这份文件的**注释**里也写着
+            //    `demo://tcoder-sample`（07:06 实测那一段的来由），整份比子串会让一条死豁免永远"活着"。
+            //    ⇒ 复用守卫自己那把尺：`hits` 跳过 `//` 行，只有**代码行**真的引用这枚字面量，豁免才算该留。
+            let stillInCode = FunctionalHonestyGuardTests.hits(
+                FunctionalHonestyGuardTests.fabricationNeedles,
+                in: [(path: entry.path, content: content)])
+            XCTAssertFalse(stillInCode.isEmpty,
+                           "豁免点名的 \(entry.needle) 已不在 \(entry.path) 的代码行里 ⇒ 这条豁免是死条目，得删")
             XCTAssertGreaterThanOrEqual(entry.reason.count, 20,
                                         "豁免理由没写够，读的人无从判断它免的是什么：\(entry.path)")
         }
