@@ -191,9 +191,13 @@ cmd_idle() {
   fi
   require_idle_target
   arm_synth_input          # 只编译，不投递：编译不许落在闸门与录制之间（见函数注释）
+  # `hang_recovered` 这一枚**只在同窗补试那一趟才存在**（#55 硬约束①的反向半条：
+  # 没挂过的趟不许带上这个字段，否则"哪些读数是重试补出来的"就再也分不出来了）。
+  # 所以是"整枚键的有无"而不是"键值 0/1"——写空值等于每趟都带一个键。
   meta_write "$out" "mode=idle" "period=$period" "pid=$PID" "binary=$TARGET_BINARY" \
            "input_source=${INPUT_SOURCE:-human}" "scroll_target=${SYNTH_TARGET:-（没有人投）}" \
            "section=${MEASURE_SECTION:-overview（默认页＝总览）}" \
+    $(hang_recovery_meta_arg) \
     "seed=${MEASURED_SEED:-（未种：这个沙箱里没有项目）}" \
     "launched_by=${MEASURED_PID:+us(同窗脉冲)}" "pulse_file=${MEASURED_PULSE:-}" \
     "hitches_seconds=$SECONDS_HITCHES" "tp_seconds=$SECONDS_TP" "coexisting_instances=${COEXIST:-1}" \

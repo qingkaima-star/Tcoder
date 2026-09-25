@@ -141,6 +141,7 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_long_sleep_defers_the_trap "$out"  # 59) trap 的时效性：长 sleep 确实拖住（反例）／分片睡 8 秒内收尾（正例）
   item selfcheck_trapped_scripts_have_no_long_sleep "$out"  # 60) 带 trap 的 perf_ 脚本里不许留长 sleep（要长等就走 nap）
   item selfcheck_refused_trace_reclaim "$out"  # 61) 判废趟的 GB 级原始 trace：被拒∧超同档线才点名、默认只印、显式授权才删（#70）
+  item selfcheck_hang_retry_policy "$out"  # 62) 只有录制挂死值得同窗补一次：按批封顶、挂死计数抹不掉、meta 键双向（#55）
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：那个 for 必须在 cmd_selfcheck 之前，

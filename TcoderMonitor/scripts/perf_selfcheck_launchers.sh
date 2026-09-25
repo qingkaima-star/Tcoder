@@ -102,12 +102,19 @@ selfcheck_synth_launch_pairing() {  # selfcheck_synth_launch_pairing <outdir>
   #     出一份看起来完全正常的假配对（比红更难发现，因为它不报错）。
   # 所以钉三件：排程器里每处 `open "$START_BIN"` 都要在 `HARNESS_LAUNCHES` 的 else 分支里；
   # 录制档里编译（arm）在闸门之前、投递（start）在闸门之后；而且**倒过来必须被抓住**。
-  local w=scripts/perf_wait_window.sh h=scripts/perf_harness.sh bad=0 line
-  while IFS=: read -r line _; do
+  local w=scripts/perf_wait_window.sh g=scripts/perf_window_gates.sh h=scripts/perf_harness.sh bad=0 line found=0 file
+  # 2026-09-25 那次搬家把等窗那一层搬进 `perf_window_gates.sh`，`open "$START_BIN"` 一度跟着搬走
+  # ⇒ 只扫排程器的这个 while **一行都不进**，整条判据静默变空（第 29 项当场把那次搬家逼回原形，
+  #   见库文件头注）。今天这句又回到排程器里了，但**两处都扫 + 分母断言**留着：
+  #   扫到 0 处就说明落点变了，判红而不是"没有违例所以绿"——同一族失效今天在第 61 项也补了一条。
+  while IFS=: read -r file line _; do
+    found=$((found + 1))
     [ -n "$line" ] || continue
-    sed -n "$((line > 8 ? line - 8 : 1)),${line}p" "$w" | grep -q 'HARNESS_LAUNCHES' \
-      || { fail "$w:$line 起实例却没被『录制档自己起』那条分支挡住 ⇒ 两边各起一个 = 多实例拒跑"; bad=1; }
-  done < <(grep -n '^[[:space:]]*open "\$START_BIN"' "$w")
+    sed -n "$((line > 8 ? line - 8 : 1)),${line}p" "$file" | grep -q 'HARNESS_LAUNCHES' \
+      || { fail "$file:$line 起实例却没被『录制档自己起』那条分支挡住 ⇒ 两边各起一个 = 多实例拒跑"; bad=1; }
+  done < <(grep -n '^[[:space:]]*open "\$START_BIN"' "$w" "$g" | sed 's/^\([^:]*\):\([0-9]*\):.*/\1:\2:/')
+  [ "$found" -gt 0 ] \
+    || { fail "$w / $g 里一句 \`open \"\$START_BIN\"\` 都找不到 ⇒ 排程器搬家把这条守卫扫空了，先去认新落点"; bad=1; }
   pairing_order_violations "$h" \
     || { fail "$h 里 arm/start/preflight 的顺序不成立（见上面那行）"; bad=1; }
   # 反向：坏顺序（**投递排在闸门之前**）必须被同一条判据抓住，否则上面那条是永真绿。
@@ -229,7 +236,7 @@ selfcheck_covered_evidence() {  # selfcheck_covered_evidence <outdir>
   out="$fx/empty"; mkdir -p "$out"
   ( require_covered_evidence "$out" ) >"$out/a.txt" 2>&1; rc=$?
   [ "$rc" != "0" ] && [ -f "$out/REFUSED" ] \
-    || { fail "一张表都没有的目录被判成可用（rc=$rc）⇒ 「✓ 第 i 趟完成」又是空口号"; bad=1; }
+    || { fail "一张表都没有的目录被判成可用（rc=$rc）⇒ 排程器那句「完成」又是空口号"; bad=1; }
   echo "<row/>" > "$out/hitches.xml"
   ( require_covered_evidence "$out" ) >"$out/b.txt" 2>&1; rc=$?
   [ "$rc" = "0" ] || { fail "有非空 hitches.xml 的目录仍被判废 ⇒ 这条判据只认不出也判不进"; bad=1; }
@@ -237,4 +244,92 @@ selfcheck_covered_evidence() {  # selfcheck_covered_evidence <outdir>
   ( DRY_RUN=1; require_covered_evidence "$out" ) >"$out/c.txt" 2>&1; rc=$?
   [ "$rc" = "0" ] || { fail "演练档被这条判死 ⇒ selfcheck 自己会红"; bad=1; }
   [ "$bad" = "0" ] && ok "空表的一趟判不成完成：缺表判废、有表放行、演练档不误伤（三种形状）"
+}
+
+selfcheck_hang_retry_policy() {  # 62) 挂死才补、只补一次、补试不许抹掉挂死计数、meta 键双向
+  # 缺陷 #55：录制挂死 4/30 趟 ≈ 13%，一次挂死的真实代价不是那 140 秒墙钟，
+  # 而是**把一个稀缺的干净窗口整段扔掉**（今晚 6/30 可用）。补试因此只对"挂死"这一种
+  # 判废开放——其余判废（人手静默不够、被测消失、表全空）恰恰说明**这个窗口不行**。
+  # ⚠ 喂给判据的 REFUSED 一律由**真路径**产出（假 xcrun 走 record_bounded /
+  #   require_covered_evidence），不抄文案：判废文案一改，这里当场读成别的类型而变红，
+  #   而不是拿着两份各自成立的字符串继续互证。
+  local fx="$1/hangretry" bad=0 out kind summary path0="$PATH" holders=""
+  rm -rf "$fx"; mkdir -p "$fx/bin" "$fx/plain" "$fx/with" "$fx/without"
+  printf '%s\n' '#!/bin/bash' \
+    'case "${FAKE_XC:-ok}" in' \
+    '  hang) trap "exit 0" TERM; while :; do sleep 0.2; done ;;' \
+    '  die)  kill -TERM "${FAKE_TARGET:-0}" 2>/dev/null; sleep 0.3 ;;' \
+    '  *)    exit 0 ;;' \
+    'esac' > "$fx/bin/xcrun"
+  chmod +x "$fx/bin/xcrun"
+  PATH="$fx/bin:$PATH"; export PATH
+  local RECORD_SLACK_S=2 RECORD_POLL_S=1
+
+  out="$fx/hang"; mkdir -p "$out"
+  sleep 300 & PID=$!; disown; holders="$holders $PID"; FAKE_XC=hang export FAKE_XC
+  ( record_bounded "$out" "$out/x.trace" T 1 ) >"$out/run.txt" 2>&1
+  kind=$(refusal_kind "$out")
+  [ "$kind" = "hang" ] \
+    || { fail "真挂死路径产出的 REFUSED 被判成「$kind」⇒ 判废文案与这条判据已经分叉，补试从此不触发"; bad=1; }
+  [ "$(HANG_RETRIES_USED=0 attempt_verdict "$out" 1)" = "retry" ] \
+    || { fail "挂死、预算未用、rc=1 这三样凑齐却不补 ⇒ #55 那条同窗补试是纸面规矩"; bad=1; }
+  [ "$(HANG_RETRIES_USED=1 attempt_verdict "$out" 1)" = "slot" ] \
+    || { fail "预算用完还允许再补 ⇒ 退化成「攒够可用为止」那种数据相关的停止规则"; bad=1; }
+  [ "$(attempt_verdict "$out" 0)" = "slot" ] \
+    || { fail "成功那一趟也去补 ⇒ 同一个窗口里采两遍，读数会被当两批独立样本引用"; bad=1; }
+  kill -TERM "$PID" 2>/dev/null; wait "$PID" 2>/dev/null
+
+  out="$fx/gone"; mkdir -p "$out"
+  sleep 300 & PID=$!; disown; holders="$holders $PID"
+  FAKE_TARGET="$PID" FAKE_XC=die export FAKE_TARGET FAKE_XC
+  ( record_bounded "$out" "$out/x.trace" T 1 ) >"$out/run.txt" 2>&1
+  kind=$(refusal_kind "$out")
+  [ "$kind" = "target_gone" ] \
+    || { fail "被测进程消失被判成「$kind」⇒ 三种判废的类型学少了一类"; bad=1; }
+  [ "$(HANG_RETRIES_USED=0 attempt_verdict "$out" 1)" = "slot" ] \
+    || { fail "被测消失也去补试 ⇒ 补试通道扩到了「这个窗口本来就不行」那一类"; bad=1; }
+
+  out="$fx/notables"; mkdir -p "$out"
+  ( require_covered_evidence "$out" ) >"$out/a.txt" 2>&1
+  kind=$(refusal_kind "$out")
+  [ "$kind" = "empty_tables" ] \
+    || { fail "三张表全空被判成「$kind」⇒ 该类的文案改了而这里没跟上"; bad=1; }
+  [ "$(attempt_verdict "$out" 1)" = "slot" ] \
+    || { fail "表全空也去补试 ⇒ 同一条通道又宽了一格"; bad=1; }
+  [ "$(refusal_kind "$fx/plain")" = "none" ] \
+    || { fail "没有 REFUSED 的目录不判成 none ⇒ 空目录会被当成某种判废"; bad=1; }
+
+  # 挂死计数**必须**在补试成功之后照样出声（#55 硬约束①）
+  summary=$(batch_hang_summary 2 1 1)
+  printf '%s\n' "$summary" | grep -q '挂死：2 趟' \
+    || { fail "补试补回来一趟之后挂死计数就不见了（拿到「$summary」）⇒ 单向朝好看的计数"; bad=1; }
+  printf '%s\n' "$summary" | grep -q '补回可用 1 趟' \
+    || { fail "挂死计数报了、却没报补回几趟 ⇒ 读的人无法判断这批还剩多少可用"; bad=1; }
+  printf '%s\n' "$(batch_hang_summary 0 0 0)" | grep -q '0 趟' \
+    || { fail "一趟都没挂却报了挂死 ⇒ 反向失准"; bad=1; }
+
+  # meta 那一枚键：两个方向都要有牙（走的是同一个出口 `hang_recovery_meta_arg`）
+  # ⚠ 必须 **export 之后再调用**：写成 `HANG_RECOVERED=1 meta_write … "$(hang_recovery_meta_arg)"`
+  #   是无效的前缀赋值——参数表里的命令替换**先于**赋值展开，函数看到的还是空值
+  #   （第一次就是这么写出来、当场被自己这条反例判红的）。
+  ( export HANG_RECOVERED=1
+    REV=x DIRTY=0 meta_write "$fx/with" "mode=idle" "$(hang_recovery_meta_arg)" )
+  unset HANG_RECOVERED
+  REV=x DIRTY=0 meta_write "$fx/without" "mode=idle" "$(hang_recovery_meta_arg)"
+  grep -q '"hang_recovered"' "$fx/with/meta.json" \
+    || { fail "补试趟没把 hang_recovered 落进 meta ⇒ 哪几份读数是补出来的，事后无从复核"; bad=1; }
+  grep -q 'hang_recovered' "$fx/without/meta.json" \
+    && { fail "没挂过的趟也带上了 hang_recovered ⇒ 这枚键失去区分力（写 0 冒充「没有」的形状）"; bad=1; }
+
+  # 自己起的持有者必须自己退（AGENTS 2.1）。**这一项的第一版就是没退干净**：
+  # 那个 disown 掉的 `sleep 300` 还占着 stdout 管道，外面的 `| tail` 永远等不到 EOF，
+  # 整个反例跑起来像挂死。按 pid 精确核对，不 pgrep 名字——别人的同名进程不该算到我头上。
+  for h in $holders; do
+    kill -TERM "$h" 2>/dev/null || true
+    sleep 0.2
+    kill -0 "$h" 2>/dev/null && { fail "持有者 pid=$h 退了信号却没死 ⇒ 本项自己成了漏实例的那一个"; bad=1; }
+  done
+  PATH="$path0"; export PATH
+  unset FAKE_XC FAKE_TARGET HANG_RECOVERED
+  [ "$bad" = "0" ] && ok "挂死才补、按批封顶、补试抹不掉挂死计数、meta 键两个方向都判过（真路径产出的 REFUSED）"
 }
