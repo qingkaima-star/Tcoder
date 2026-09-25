@@ -92,6 +92,11 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // （判据与 ok/fail 文案逐字未动，拆前拆后 61 项输出逐字 diff 过）。
         // 搬出来的那片照样要点名：这是"新建/搬出的文件必须当场被量"**第七次**落到这张表上。
         "perf_selfcheck_windows.sh",
+        // 09-25 #70：判废趟的原始 trace 回收（判据在 `perf_reclaim.py`，收尾那一族从
+        // preflight 整族搬进 `perf_reclaim.sh`，反例 61 单开一块 `hygiene.sh`，因为
+        // `eligibility` 当时 388/400 只剩 12 行）。**新建/搬出的文件当场点名**——
+        // 这是这条规矩第八次落到这张表上（前七次见上面注释），不点名就等于免检。
+        "perf_reclaim.py", "perf_reclaim.sh", "perf_selfcheck_hygiene.sh",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。
