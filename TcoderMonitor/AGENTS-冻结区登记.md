@@ -76,7 +76,7 @@ P7-C 收尾这一批删了两处有写无读：`ProjectStore` 的 `sortedProject
 「注册表与报告里的 project 必须同步」这条不变式唯一的 exerciser。已恢复并就地写明理由。
 ⇒ 判死代码的规矩补一条：**要 grep 名字本身，不能只 grep 定义式**；
 删掉一条绿用例之前，先问它断言的不变式还有别人测吗。
-（这几处刻意写成"类型 的 成员"而不是点号形式：点号会被符号锚点棘轮当成活符号去判活。）
+（这几处刻意写成"类型 的 成员"而不是点号形式：**若**本文件哪天被登记进符号锚点棘轮的扫描面，点号就会被当成活符号判活。今天它**不在**那 14 份扫描面里，所以这个写法是预防性的，不是"现在就有尺在判"。11:08 实测：`grep -c AGENTS DocReferenceRatchetTests+ScanSurface.swift` = 0。）
 
 **09-24 删了第二枚（RD-78），同一把尺子**：`Models/DependencyReport.swift` 里的
 `hasVulnerabilityCoverage`。判据不是"看着没人用"，是四条自助读数：① RD-70 之后 `Sources/**` 只剩两处
