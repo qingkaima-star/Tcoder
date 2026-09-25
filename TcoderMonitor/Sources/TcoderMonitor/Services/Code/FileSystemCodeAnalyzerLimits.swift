@@ -66,6 +66,9 @@ extension FileSystemCodeAnalyzer {
         var duplicateBlockCoordinatesOutsideBoard: [String] = []
         /// 重复率那一格的口径自述，仅在榜内/榜外两个数真的分叉时才非空。
         var duplicationBoardCaliber: String = ""
+        /// 撞 id 被合并掉那一维的披露句（§132）。**默认空 = 这一维没出声**，
+        /// 与上面那条同一条纪律：零命中不进 `scanLimitations`，否则"没测到"会长成"没有"。
+        var duplicationMergedByIdNote: String = ""
 
         /// 有任一**上限**真的生效过 ⇒ 这份数字是部分测量，UI 不得当成全量展示。
         /// 注意不含「按规则主动排除」：跳过 vendor/二进制是范围定义，不是被截断。
@@ -112,6 +115,9 @@ extension FileSystemCodeAnalyzer {
             // 现在坐标只在 `DuplicationResult.boardCaliberNote` 里点名一次，
             // 机器可读数落在 `CodeMetrics.duplicateBlockCoordinatesOutsideBoard`（同一个来源）。
             if duplicationBoardCaliber.isEmpty == false { lines.append(duplicationBoardCaliber) }
+            // §132：撞 id 那一维以前只活在 GUI 页尾（由字段装配那一条路），
+            // CLI 的这份限制说明里一个字没有 ⇒ 同一个事实在两个出口说得不一样的话。
+            if duplicationMergedByIdNote.isEmpty == false { lines.append(duplicationMergedByIdNote) }
             return lines
         }
 

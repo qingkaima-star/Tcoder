@@ -78,6 +78,30 @@ struct DuplicationResult: Sendable {
         return line + "（全部 \(all.count) 条样本见 `code.duplicateBlockCoordinatesOutsideBoard`，"
             + "榜外未列的块数见 `code.duplicatedBlocksDroppedByCap`）。"
     }
+
+    /// 撞 id 被合并掉那一维的**披露句**（§132：这件事此前只有 GUI 页尾说得出，CLI 的
+    /// `scanLimitations` 里一个字都没有 —— 数在 `duplicatedBlocksDroppedByIdCollision` 里，
+    /// 散文侧沉默 ⇒ 两个出口对同一件事说不同的话）。
+    ///
+    /// ⚠️ 为什么不直接调用上面那把 `coordinateDisclosure`：那一句里写死了「榜外坐标」与
+    /// `duplicateBlockCoordinatesOutsideBoard`／`duplicatedBlocksDroppedByCap` 两个名字，
+    /// 而这一维**既不是榜外、字段也不同** —— 复用它的字符串就是说出假的坐标来源。
+    /// 复用它的**形状与预算**：`proseCoordinateBudget`（散文 3 条、全量在字段里、余数出声）。
+    var mergedByIdLimitationNote: String? {
+        guard blocksDroppedByIdCollision > 0 else { return nil }
+        var line = "另有 \(NumberFormat.grouped(blocksDroppedByIdCollision)) 处重复命中与别处合并为一条"
+            + "（同一组文件、同一长度）：它们在去重后各留一条，被合并掉的原始命中不参与明细。"
+        guard blocksMergedAwayCoordinates.isEmpty == false else { return line }
+        let named = min(blocksMergedAwayCoordinates.count, DuplicationResult.proseCoordinateBudget)
+        line += "被合并掉的样本（点样 \(named) 条）："
+            + blocksMergedAwayCoordinates.prefix(named).joined(separator: " ; ")
+        if blocksMergedAwayCoordinates.count > named {
+            line += "；另有 \(blocksMergedAwayCoordinates.count - named) 条样本未写进这句"
+        }
+        return line + "（全部 \(blocksMergedAwayCoordinates.count) 条样本见 "
+            + "`code.duplicateBlockCoordinatesMergedById`，合并掉的命中数见 "
+            + "`code.duplicatedBlocksDroppedByIdCollision`）。"
+    }
 }
 
 enum DuplicationEngine {
