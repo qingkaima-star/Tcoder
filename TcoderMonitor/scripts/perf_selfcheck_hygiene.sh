@@ -173,3 +173,70 @@ selfcheck_refused_trace_reclaim() {  # 61) 判废趟的 GB 级 trace：该点名
   fi
   [ "$rc" = "0" ] && ok "判废趟的原始 trace 回收四面有牙：被拒∧超线才点名（两层都认得）、默认只印、显式授权才删且只动 *.trace、空扫描明写没有分母"
 }
+
+selfcheck_artifact_locator_fork_honest() {  # 68) 同名产物分在三处时要按形状说对话，不许替人挑一份（#89）
+  # 09-25 22:27 现场：搬家把 `blame1-idle-run2` 拆成「原地有导表、rescue 有原始 trace」两份，
+  # 而 reclaim/一致性尺/report 都只按自己那棵树的 .scratch 找 ⇒ 清树可能删掉唯一的那一半。
+  # **分叉有两种，话术必须分开**，这一条是上一版本自己被实跑抓到的：
+  # `cert7b-idle-run1` 两处导表**都齐全**、只差原始 trace（一份包住另一份），
+  # 上一版却照印「两份内容不重叠」⇒ 那句会把人推向"删哪份都疼"的错结论。
+  # 于是五格：只在原地（0）、**互补**分叉（2 且说「都不能单独删」）、
+  # **包含**分叉（2 且说「名单更全」、且**不许**说「都不能单独删」）、同一根传两遍（0）、
+  # 批名不存在（1，且必须明说"一处都没找到"而不是静默）。
+  local fx a b c r1 r2 r3 r4 r5 out
+  fx=$(mktemp -d 2>/dev/null || echo /tmp/locator-fx)
+  a="$fx/rootA"; b="$fx/rootB"; c="$fx/rootC"
+  mkdir -p "$a/tcoder-perf-fake-run1" "$b/tcoder-perf-fake-run1/fake.trace" \
+           "$c/tcoder-perf-fake-run1/big.trace"
+  : > "$a/tcoder-perf-fake-run1/meta.json"      # 只有导表
+  : > "$c/tcoder-perf-fake-run1/meta.json"      # 导表 + 原始 trace ⇒ 名单包住 a
+  python3 scripts/perf_artifact_locator.py tcoder-perf-fake-run1 --root "$a" >"$fx/solo.txt" 2>&1; r1=$?
+  python3 scripts/perf_artifact_locator.py tcoder-perf-fake-run1 --root "$a" --root "$b" >"$fx/fork.txt" 2>&1; r2=$?
+  python3 scripts/perf_artifact_locator.py tcoder-perf-fake-run1 --root "$a" --root "$c" >"$fx/cover.txt" 2>&1; r5=$?
+  python3 scripts/perf_artifact_locator.py tcoder-perf-fake-run1 --root "$a" --root "$a" >"$fx/same.txt" 2>&1; r3=$?
+  python3 scripts/perf_artifact_locator.py tcoder-perf-nope-run9 --root "$a" >"$fx/none.txt" 2>&1; r4=$?
+  out="ok"
+  [ "$r1" = "0" ] || out="$out 只在原地=$r1（要 0）"
+  [ "$r2" = "2" ] || out="$out 互补分叉=$r2（要 2）"
+  [ "$r5" = "2" ] || out="$out 包含分叉=$r5（要 2：inode 不同就是分叉，不许因为一份更全就放行）"
+  [ "$r3" = "0" ] || out="$out 同一根两遍=$r3（要 0，不许误报分叉）"
+  [ "$r4" = "1" ] || out="$out 名字不存在=$r4（要 1）"
+  grep -q "都不能单独删" "$fx/fork.txt" || out="$out 互补那格没说出「各握有对方没有的东西」这件最要紧的事"
+  grep -q "名单更全" "$fx/cover.txt" || out="$out 包含那格没认出「一份的名单被另一份包住」"
+  # 反向格：写成 if 而不是 `grep … && out=…`，让「不许误报成互补」这条不依赖 set -e 的边角语义
+  if grep -q "都不能单独删" "$fx/cover.txt"; then
+    out="$out 包含那格被印成了互补（22:44 实跑 cert7b 就是这个错话）"
+  fi
+  grep -q "一处都没找到" "$fx/none.txt" || out="$out 没找到时没明说（静默零命中＝假绿）"
+  rm -rf "$fx"
+  [ "$out" = "ok" ] || { fail "产物定位尺不成立：$out"; return; }
+  ok "产物定位尺五格有牙：一处⇒定权威、互补⇒「都不能单独删」、包含⇒只说「名单更全」（且不误报成互补）、" \
+     "同一根两遍不误报、查无此名要明说"
+}
+
+selfcheck_artifact_locator_names_the_tree_copy() {  # 69) 分叉时必须点名「本树那一份是尺子唯一认得的」（#89）
+  # 这一条单独一项：它是清树现场**最容易被忽略**的那一半——`report`／一致性尺只按自己那棵树的
+  # `.scratch` 找产物，所以"别处还有更全的一份"**不构成**删本树这份的理由。
+  # 夹具**不落在真仓库树里**（那里正在跑批次，写进去既脏又会被回收器当成产物）：
+  # 改成拿 cwd 造一棵合成树——定位尺认「本树」只认 `cwd/.scratch` 与 `父目录/.scratch` 两个前缀。
+  # 反向格：两处都在本树之外（同一棵合成树的**兄弟目录**）⇒ 不许冒出这句。
+  local fx loc r1 r2 out
+  fx=$(mktemp -d 2>/dev/null || echo /tmp/locator-tree-fx)
+  loc="$PWD/scripts/perf_artifact_locator.py"
+  mkdir -p "$fx/tree/.scratch/tcoder-perf-fake-run1" "$fx/else/.scratch/tcoder-perf-fake-run1/q.trace"
+  : > "$fx/tree/.scratch/tcoder-perf-fake-run1/meta.json"
+  out="ok"
+  ( cd "$fx/tree" && python3 "$loc" tcoder-perf-fake-run1 \
+      --root "$fx/tree/.scratch" --root "$fx/else/.scratch" ) >"$fx/in.txt" 2>&1; r1=$?
+  ( cd "$fx" && python3 "$loc" tcoder-perf-fake-run1 \
+      --root "$fx/tree/.scratch" --root "$fx/else/.scratch" ) >"$fx/out.txt" 2>&1; r2=$?
+  [ "$r1" = "2" ] || out="$out 本树分叉=$r1（要 2）"
+  [ "$r2" = "2" ] || out="$out 非本树分叉=$r2（要 2：认不认得本树不该改判定）"
+  grep -q "唯一认得" "$fx/in.txt" || out="$out 分叉里没点名本树那一份（清树最容易只删它）"
+  if grep -q "唯一认得" "$fx/out.txt"; then
+    out="$out 站错了目录还硬说「唯一认得」⇒ 这句只在命中真在本树下面时才许出现"
+  fi
+  rm -rf "$fx"
+  [ "$out" = "ok" ] || { fail "本树那一份的点名不成立：$out"; return; }
+  ok "分叉必点本树那一份（它是 report／一致性尺唯一认得的），且换一棵合成树站错目录时不冒这句"
+}

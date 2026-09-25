@@ -148,6 +148,8 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_batch_product_identity "$out"  # 65) 排程器那行「被测产品码」抄的是 manifest 那枚二进制，不是 HEAD（#80）
   item selfcheck_slot_owner_states "$out"  # 66) 实例归属分类各态各判对（补上「补测产物树」这一态）＋给那个没人读过的 --probe 补读者（#81）
   item selfcheck_switch_cleanup_names_no_target "$out"  # 67) switch 收尾提示：没有 pid 就不许叫人去退（实跑六页全印了空 pid 的那格）
+  item selfcheck_artifact_locator_fork_honest "$out"  # 68) 同名产物分在三处时按形状说对话（互补／包含），不许替人挑一份（#89，清树的前置）
+  item selfcheck_artifact_locator_names_the_tree_copy "$out"  # 69) 分叉里点名本树那一份：它是 report／一致性尺唯一认得的（换树不冒这句）
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：那个 for 必须在 cmd_selfcheck 之前，
@@ -164,7 +166,7 @@ unset _part
 # ⇒ 库就是库：被直接执行时要出声、要判错，不许留一个看起来像通过的退出码。
 if [ "${BASH_SOURCE[0]:-}" = "$0" ]; then
   echo "!! perf_selfcheck.sh 是被 source 的库，单独跑**一项都不测**——别把'一行都没印'读成通过。" >&2
-  echo "   要跑全部 68 项：./scripts/perf_harness.sh selfcheck" >&2
+  echo "   要跑全部项：./scripts/perf_harness.sh selfcheck" >&2
   exit 2
 fi
 

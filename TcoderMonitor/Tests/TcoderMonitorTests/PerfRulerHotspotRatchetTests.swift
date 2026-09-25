@@ -97,6 +97,10 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // `eligibility` 当时 388/400 只剩 12 行）。**新建/搬出的文件当场点名**——
         // 这是这条规矩第八次落到这张表上（前七次见上面注释），不点名就等于免检。
         "perf_reclaim.py", "perf_reclaim.sh", "perf_selfcheck_hygiene.sh",
+        // 09-25 #89：搬家后同一批产物分在三处（原地／仓库根／perf-base-rescue），
+        // 清树之前必须先能"按批名定位 + 指明权威份"——新文件必须进名单，
+        // 否则 `testRosterCoversEveryScriptOnDisk` 的反向守卫会把"新建文件"当成免检通道（那条守卫本来就是为这个建的）。
+        "perf_artifact_locator.py",
         // 09-25 #55：等窗这一族加进"挂死同窗补一次"之后排程器到 **404/400**，
         // 按"拆，不抬线"把 `wait_for` 与四个 `cond_*` 搬进 `perf_window_gates.sh`（逐字节原文）。
         // `cond_instance_ready` **没跟着搬**——第 29 项要求"起实例的那份脚本必须有 trap"，
