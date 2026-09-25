@@ -29,6 +29,19 @@ enum PerfHitchScan {
         var counts: [String: Int]
         var hits: [String: [String]]
         var census: Census
+        /// 被**具名逐点豁免**掉的命中（规则 → `文件:行 原文`）。
+        /// 单独一栏而不是"直接不出现"：台账必须能印出"N 债 + M 具名豁免"，
+        /// 否则"少报了一处"与"还掉了一处债"在数字上长得一模一样。
+        var exempted: [String: [String]] = [:]
+    }
+
+    /// 一条逐点豁免：只有 **规则 + 文件 + 命中行里的 needle** 三者同时吻合才生效。
+    /// 不是整条规则的豁免、也不是整文件的豁免——口子的大小由名单本身管住
+    /// （名单与"死条目/理由长度/总数上限"的断言在 `PerfHitchGuardTests+Exemptions.swift`）。
+    struct Exemption: Equatable {
+        var rule: String
+        var file: String
+        var needle: String
     }
 
     // 禁用形状的词表、坏样例与"正则能不能编译"的检查，2026-09-25 整块搬进
@@ -259,7 +272,8 @@ enum PerfHitchScan {
     /// 单文件扫描，返回跨度数；命中写进 counts / hits（同一行同一规则只算一次）。
     @discardableResult
     static func scanFile(source: String, relativePath: String, helperHopDepth: Int,
-                         into counts: inout [String: Int], hits: inout [String: [String]]) -> Int {
+                         into counts: inout [String: Int], hits: inout [String: [String]],
+                         exempt: [Exemption] = [], exempted: inout [String: [String]]) -> Int {
         let units = mask(source)
         let rawLines = source.components(separatedBy: "\n")
         var covered = seedSpans(units).map { ($0.start, $0.end) }
@@ -289,9 +303,17 @@ enum PerfHitchScan {
                     let key = "\(rule.name):\(line)"
                     if found.contains(key) { return }
                     found.insert(key)
-                    counts[rule.name, default: 0] += 1
                     let snippet = line - 1 < rawLines.count && line >= 1
                         ? rawLines[line - 1].trimmingCharacters(in: .whitespaces) : ""
+                    // 豁免判定放在**计数之前**、且与写 hits 共用同一份 snippet：
+                    // 分两处判就会造成"计数少了但明细里还留着"（两把尺两个总体的老形状）。
+                    if exempt.contains(where: {
+                        $0.rule == rule.name && $0.file == relativePath && snippet.contains($0.needle)
+                    }) {
+                        exempted[rule.name, default: []].append("\(relativePath):\(line) \(snippet)")
+                        return
+                    }
+                    counts[rule.name, default: 0] += 1
                     hits[rule.name, default: []].append("\(relativePath):\(line) \(snippet)")
                 }
             }
@@ -302,17 +324,33 @@ enum PerfHitchScan {
     // MARK: 入口
 
     /// 单串扫描（元测试用）。
-    static func scan(source: String, helperHopDepth: Int = 2) -> [String: Int] {
+    static func scan(source: String, helperHopDepth: Int = 2,
+                     exempt: [Exemption] = []) -> [String: Int] {
         var counts = rules.reduce(into: [String: Int]()) { $0[$1.name] = 0 }
         var hits = [String: [String]]()
+        var exempted = [String: [String]]()
         _ = scanFile(source: source, relativePath: "<synthetic>", helperHopDepth: helperHopDepth,
-                     into: &counts, hits: &hits)
+                     into: &counts, hits: &hits, exempt: exempt, exempted: &exempted)
         return counts
     }
 
-    static func scanDirectory(_ root: URL, helperHopDepth: Int) throws -> ScanResult {
+    /// 元测试用：同一份源码，豁免名单给不给，两边各数到多少。
+    static func scanWithExemptions(source: String, relativePath: String = "<synthetic>",
+                                   exempt: [Exemption] = []) -> (counts: [String: Int],
+                                                                  exempted: [String: [String]]) {
         var counts = rules.reduce(into: [String: Int]()) { $0[$1.name] = 0 }
         var hits = [String: [String]]()
+        var exempted = [String: [String]]()
+        _ = scanFile(source: source, relativePath: relativePath, helperHopDepth: 2,
+                     into: &counts, hits: &hits, exempt: exempt, exempted: &exempted)
+        return (counts, exempted)
+    }
+
+    static func scanDirectory(_ root: URL, helperHopDepth: Int,
+                              exempt: [Exemption] = []) throws -> ScanResult {
+        var counts = rules.reduce(into: [String: Int]()) { $0[$1.name] = 0 }
+        var hits = [String: [String]]()
+        var exempted = [String: [String]]()
         var census = Census()
         guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]) else {
             throw NSError(domain: "PerfHitchGuard", code: 1,
@@ -328,9 +366,10 @@ enum PerfHitchScan {
             let relative = url.path.hasPrefix(root.path)
                 ? String(url.path.dropFirst(root.path.count + 1)) : url.lastPathComponent
             census.inScopeSpans += scanFile(source: source, relativePath: relative,
-                                            helperHopDepth: helperHopDepth, into: &counts, hits: &hits)
+                                            helperHopDepth: helperHopDepth, into: &counts, hits: &hits,
+                                            exempt: exempt, exempted: &exempted)
         }
         for key in hits.keys { hits[key]?.sort() }
-        return ScanResult(counts: counts, hits: hits, census: census)
+        return ScanResult(counts: counts, hits: hits, census: census, exempted: exempted)
     }
 }
