@@ -46,7 +46,9 @@
 #   SECONDS_TP=25        idle 档 Time Profiler 录制秒数（spec §1 主线程样本就是 25 s 档）
 #   SECONDS_LAUNCH=10    switch 档每页录制秒数
 #   PERF_BIN=<路径>      被采二进制（默认 dist/Tcoder.app/Contents/MacOS/TcoderMonitor）
-#   PAGES="总览 性能监控" switch 档只测这几页（默认取 capture_pages_isolated.sh 的九页）
+#   PAGES=$'总览\nGit 洞察'  switch 档只测这几页（默认取 capture_pages_isolated.sh 的九页）。
+#                          **按换行分隔**：页名里有含空格的（`Git 洞察`），空格分隔会把它当成一个不存在的页，
+#                          而 App 不认的页名现在当场判败（不再静默回落到默认页）。
 #   DRY_RUN=1            只打印将执行的命令，一条都不跑（用于自检命令拼得对不对）
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
@@ -94,6 +96,8 @@ SECONDS_LAUNCH="${SECONDS_LAUNCH:-10}"
 PERF_BIN="${PERF_BIN:-$PWD/dist/Tcoder.app/Contents/MacOS/TcoderMonitor}"
 TRACE_REPORT="$PWD/scripts/trace_report.py"
 PULSE_REPORT="$PWD/scripts/perf_framepulse.py"
+# 呈现侧节拍（实测周期 + 两把预算 + 与回调仪器的偏移）——§M 的那把仪器，见 perf_cadence.py 头注
+CADENCE_REPORT="$PWD/scripts/perf_cadence.py"
 PULSE_SRC="$PWD/scripts/perf_pulse.sh"   # pulse 档的实现（>400 行棘轮：拆出去，不挂账）
 # selfcheck 档的实现放在旁边那个文件里，只在跑 selfcheck 时 source 进来（同一进程、同一批全局量）。
 # 为什么搬出去：本仓 ≤800 行棘轮的分母**含 .sh**（`SourceLanguageCatalog` 认 Shell）、ceiling=0，
@@ -105,7 +109,10 @@ DOMAIN="com.tcoder.monitor"
 UUID="11111111-2222-3333-4444-555555555555"
 DRY_RUN="${DRY_RUN:-0}"
 # idle 档要导出的六张表（spec §4.1）；time-profile 来自第二份 trace，单独导。
+# 包 13（§AC）：三张**一帧一行**的表。不导出来，T1 就只剩 `hitches` 那一个下游计数，
+# 而它同一份内容能报 14 / 22 / 364 行——判据不能建在那上面。
 HITCH_TABLES=(hitches hitches-updates hitches-renders potential-hangs
+              hitches-framewait hitches-gpu hitches-frame-lifetimes
               device-display-info displayed-surfaces-per-second)
 
 die() { echo "!! $1" >&2; exit 1; }
@@ -131,6 +138,38 @@ PREFLIGHT_SRC="$PWD/scripts/perf_preflight.sh"
 . "$PREFLIGHT_SRC"
 
 # =============================================================================
+# MEASURE_LAUNCH=1 ＋ INPUT=synth 时的接线（09-22 排演之后加的，见工单包 8）
+#   为什么投递要搬进录制档：排程器那一侧先起了一个实例、又朝它投滚动，
+#   而录制档起的是**另一个**实例去 attach ⇒ "滚的是 A、量的是 B"的假配对。
+#   滚动只能落在**被 attach 的那个 pid** 上，而那个 pid 只有录制档知道。
+#   开录检查没有被取消，只是搬到这里：投不起来 ⇒ die，不录一份没人滚的"交互期"。
+# =============================================================================
+synth_wired() {  # 这一趟该不该由录制档投滚动
+  [ "${MEASURE_LAUNCH:-0}" = "1" ] && [ "${PERIOD:-idle}" = "interaction" ] \
+    && [ "${INPUT:-human}" = "synth" ]
+}
+
+arm_synth_input() {  # 闸门**之前**把输入器编好（编译落在录制窗口里就是自己污染自己）
+  synth_wired || return 0
+  ensure_synth_scroller || die "合成输入器编不出来 ⇒ 不录（宁可没数，也不要一份没人滚的『交互期』）"
+  INPUT_SOURCE="${INPUT_SOURCE:-synth@${SYNTH_GAP_MS:-8}ms}"
+  SYNTH_TARGET="$PID"     # 与 xctrace attach 的是同一个 pid —— 这条就是配对的定义
+  export INPUT_SOURCE
+}
+
+start_synth_input() {  # 闸门之后、开录之前才投；投递必须盖住**整趟**（含导表与收尾复核那一次问话）
+  synth_wired || return 0
+  # 09-22 20:44 那趟的教训：时长原来按 `hitches+tp+20` 估，以为"两次录制加起来 45 秒"就够。
+  # 实测 `xctrace record` 停表后还要 finalize，六张表导出（其中一张 815 KB）吃掉几十秒，
+  # 于是**收尾复核问"这 20 秒里有人动过吗"的那一刻，输入器已经停了 180 秒** ⇒
+  # 复核判"窗口内没人"、样本作废（判得对），而整趟 45 秒的录制白烧在稀缺窗口里。
+  # 正解不是把估算调准，而是**别用估算当终点**：给一个宽到不可能跑不完的上限，
+  # 真正的边界由 `stop_synth_scroller` 在录制结束时收（被测实例若先死，输入器自己退）。
+  start_synth_scroller "$SYNTH_TARGET" "${SYNTH_SPAN:-$((SECONDS_HITCHES + SECONDS_TP + 240))}" \
+    || die "合成输入器起不来 ⇒ 不录（这一档的『有人在动』没有别人来补）"
+}
+
+# =============================================================================
 # idle —— 不碰它，量心跳（spec §1 / §3 T2 的那一档）
 # =============================================================================
 cmd_idle() {
@@ -151,28 +190,36 @@ cmd_idle() {
     launch_measured_instance "$out" "$PERF_BIN" || die "自己起的实例没活过 4 秒 ⇒ 不录"
   fi
   require_idle_target
+  arm_synth_input          # 只编译，不投递：编译不许落在闸门与录制之间（见函数注释）
   meta_write "$out" "mode=idle" "period=$period" "pid=$PID" "binary=$TARGET_BINARY" \
-           "input_source=${INPUT_SOURCE:-human}" \
+           "input_source=${INPUT_SOURCE:-human}" "scroll_target=${SYNTH_TARGET:-（没有人投）}" \
+           "section=${MEASURE_SECTION:-overview（默认页＝总览）}" \
+    $(hang_recovery_meta_arg) \
+    "seed=${MEASURED_SEED:-（未种：这个沙箱里没有项目）}" \
     "launched_by=${MEASURED_PID:+us(同窗脉冲)}" "pulse_file=${MEASURED_PULSE:-}" \
     "hitches_seconds=$SECONDS_HITCHES" "tp_seconds=$SECONDS_TP" "coexisting_instances=${COEXIST:-1}" \
     "templates=$TEMPLATE_HITCH + $TEMPLATE_TP" "build_flavor=$TARGET_FLAVOR"
-  preflight_context "$out" "$PID"
+  # 闸门说不合格就是不合格：这里必须**自己**停，不许依赖被调函数里的 die（缺 die 时它回 1 就完了）。
+  preflight_context "$out" "$PID" || die "测量环境不合格 ⇒ 这一档不采数（REFUSED 已落在 $out）"
   # 走到这里说明闸门放行、马上就要真录：清掉**上一次尝试**留下的 REFUSED。
   # 标记描述的是"最近一次尝试"，不是目录的永久属性；不清的话同名目录复用时，
   # 一份合法读数会被过期标记挡在对照表外（report 会退 1）。
   rm -f "$out/REFUSED"
+  start_synth_input        # 闸门之后、开录之前才投：滚动必须盖住整段录制窗口
   # 四个步骤各自成函数：录哪张表、导哪张表、什么时候问人手探针，顺序就是口径，
   # 拆完仍是 1/4 → 2/4 → 3/4 → 4/4 这一条直线，一步没重排。
   idle_record_hitches "$out" "$period"
   idle_record_time_profiler "$out"
+  stop_synth_scroller
   # 自己起过实例 ⇒ 同一窗口再量一次脉冲，把两把尺子并排放（这才叫交叉核对，不是两个窗口的数对撞）
   if [ -s "${MEASURED_PULSE:-}" ]; then
     echo "==> 同窗脉冲（FramePulse 的帧间隔分位数，用来核对 p95 那半句）"
-    python3 "$PULSE_REPORT" "$MEASURED_PULSE" --interaction 2>&1 | tail -4 | sed 's/^/    /' || true
+    python3 "$PULSE_REPORT" --sample-dir "$out" --interaction 2>&1 | tail -8 | sed 's/^/    /' || true
     cp "$MEASURED_PULSE" "$out/pulse.txt" 2>/dev/null || true
   fi
   idle_parse_tables "$out"
   idle_write_summary "$out"
+  require_covered_evidence "$out"
 }
 
 idle_record_hitches() {  # idle_record_hitches <outdir> <period>
@@ -182,15 +229,32 @@ idle_record_hitches() {  # idle_record_hitches <outdir> <period>
   else
     echo "==> 1/4 录 Animation Hitches ${SECONDS_HITCHES}s（这期间不去碰鼠标键盘，否则量的就不是心跳）"
   fi
+  # 附加仪器**先在局部变量里算成空或非空**，不写成 `$( [ … ] && printf … )`：
+  # 那种形状把"取哪个仪器"藏进参数位，`bash -n` 看不见、读代码的人要看三遍。
+  local blame_tp=""
+  [ "${BLAME_INSTRUMENT:-0}" = "1" ] && blame_tp="$TEMPLATE_TP"
   run rm -rf "$out/hitches.trace"
-  run xcrun xctrace record --template "$TEMPLATE_HITCH" --attach "$PID" \
-    --time-limit "${SECONDS_HITCHES}s" --output "$out/hitches.trace" --no-prompt --quiet
+  record_bounded "$out" "$out/hitches.trace" "$TEMPLATE_HITCH" "$SECONDS_HITCHES" "$blame_tp"
   for t in "${HITCH_TABLES[@]}"; do
     [ "$DRY_RUN" = "1" ] || export_table "$out/hitches.trace" "$t" "$out"
   done
+  # 【归因档：同窗多挂一枚 Time Profiler，才答得出"这 1061 ms 主线程在跑什么"】
+  # 独立录两趟（hitches.trace / time.trace）在时间轴上是**两个窗口**，join 出来的栈属于
+  # 另一段时间——数字各自都真、结论是假的，比报错难发现。⇒ 只在一次录制里同时开两枚仪器
+  # 才允许 join，并把那棵树导成 `blame-time-profile.xml`（改名的理由见 `export_table` 注释：
+  # 不许盖掉认证档那份 time-profile.xml）。
+  # 这一档**由 `period_eligibility` 挡在 §1.3 达标计数之外**（meta.blame_instrument=1 有读者），
+  # 它只用于定位缺陷，不用于证明达标。
+  if [ "${BLAME_INSTRUMENT:-0}" = "1" ]; then
+    [ "$DRY_RUN" = "1" ] \
+      || export_table "$out/hitches.trace" "time-profile" "$out" "blame-time-profile.xml"
+    meta_write "$out" "blame_instrument=1"
+    echo "    归因档：hitches 家族与 time-profile 同窗（这一档不参与达标判定，只回答「长块在跑什么」）"
+  fi
   # 录制窗口一结束就问一次人手探针：这是"这批能不能进对比表"的判据，必须在导表之后、
   # 在下一个窗口（Time Profiler）开始之前问，否则两个窗口的静默读数会互相顶包。
   [ "$DRY_RUN" = "1" ] || post_window_quiescence "$out" "$SECONDS_HITCHES"
+  [ "$DRY_RUN" = "1" ] || post_window_load "$out"   # 收尾负载指纹（见该函数注释）
   # 每轮收尾固定动作：确认自己起的采集进程真退了 + 扫 $TMPDIR 里的 .ktrace 残骸。
   # 盘满不是"报错退出"那种失败——它会让 xctrace 写不进中间产物，
   # 样本**照样出一份看起来合理的表**，所以必须在代码里做，不能靠人记得。
@@ -201,8 +265,7 @@ idle_record_time_profiler() {  # idle_record_time_profiler <outdir>
   local out="$1"
   echo "==> 2/4 录 Time Profiler ${SECONDS_TP}s"
   run rm -rf "$out/time.trace"
-  run xcrun xctrace record --template "$TEMPLATE_TP" --attach "$PID" \
-    --time-limit "${SECONDS_TP}s" --output "$out/time.trace" --no-prompt --quiet
+  record_bounded "$out" "$out/time.trace" "$TEMPLATE_TP" "$SECONDS_TP"
   [ "$DRY_RUN" = "1" ] || export_table "$out/time.trace" "time-profile" "$out"
 }
 
@@ -214,7 +277,7 @@ idle_parse_tables() {  # idle_parse_tables <outdir>：3/4 那一节，按表名�
       --thread "Main Thread" --json "$out/time-profile.json" | tee "$out/threads.txt"
     for t in "${HITCH_TABLES[@]}"; do
       case "$t" in
-        hitches|hitches-updates|hitches-renders|potential-hangs)
+        hitches|hitches-updates|hitches-renders|potential-hangs|hitches-framewait|hitches-gpu|hitches-frame-lifetimes)
           [ -s "$out/$t.xml" ] && python3 "$TRACE_REPORT" durations "$out/$t.xml" \
             --label "$t" --with-phases --json "$out/$t.json" | sed 's/^/    /' ;;
         device-display-info)
@@ -241,17 +304,6 @@ idle_write_summary() {  # idle_write_summary <outdir>：4/4 汇总表（与 spec
 # =============================================================================
 # switch —— 逐页冷启动（spec §3 T4：到可交互 ≤1.0 s、首帧 ≤3 个显示节拍）
 # =============================================================================
-switch_page_list() {  # → 每行一个页名（**必须按行遍历**）
-  # 旧实现在这里 `tr '\n' ' '`，配合下面的 `for page in $pages` 做词分割 ——
-  # 而页名里有带空格的：`Git 洞察` 被切成 "Git" + "洞察" 两页，
-  # 九页扫描实际只覆盖 8 页，还有一页被用错名字起了一次 App。
-  # 实测抓到于 2026-09-21 14:53（日志里同时出现 `--> 4) Git` 与 `--> 5) 洞察`）。
-  if [ -n "${PAGES:-}" ]; then
-    printf '%s\n' "$PAGES"
-  else
-    sections
-  fi
-}
 
 switch_refuse_coexist() {  # 冷启动最容易被"别人的心跳"污染：默认要求机器上一个实例都没有
   local pre; pre=$(instance_pids)
@@ -283,78 +335,6 @@ switch_finish_page() {  # switch_finish_page <dir> <pid>：收尾，默认只报
 
 
 
-cmd_report() {
-  local out="${1:-$SCRATCH/tcoder-perf-$REV}"
-  [ -d "$out" ] || die "没有这个输出目录：$out"
-  # 被闸门拒掉的那趟**不许被 report 当成一趟数据重打**：
-  # 它只有 context/meta，喂给汇总表会得到"没有 hitch"形状的漂亮空表。
-  [ -f "$out/REFUSED" ] && die "这一趟当时被闸门拒了、没有采数（$out/REFUSED）——
-    它不该出现在任何对照表里；要看当时的拒因就读 $out/measurement-context.txt。"
-  echo "==> report 档：重打 $out 的汇总表（不重录）"
-  local secs
-  secs=$(python3 - "$out/meta.json" <<'PY' 2>/dev/null || echo 20
-import json, sys
-try:
-    print(json.load(open(sys.argv[1], encoding="utf-8")).get("hitches_seconds", 20))
-except Exception:
-    print(20)
-PY
-)
-  python3 "$TRACE_REPORT" summary "$out" --seconds "$secs"; local src=$?
-  [ -s "$out/time-profile.xml" ] && python3 "$TRACE_REPORT" threads "$out/time-profile.xml" --thread "Main Thread"
-  [ -d "$out/pages" ] && python3 "$TRACE_REPORT" switches "$out/pages"
-  # 显式收尾：上面两条都是 `[ 测试 ] && 命令` 的形状，没有 pages 目录时（idle 档就是没有）
-  # 最后一条测试自己返回 1，会把"重打成功"报成"档口失败"。
-  # 实测踩过：修尺子那轮 `report` 明明全打出来了，退出码仍是 1，逼得人回头去查 Traceback。
-  # 但"如实传 rc"不等于"一律传 0"：summary 判**期间自我矛盾**时给的是 3，
-  # 上面那句 `return 0` 会把它一起吞掉 ⇒ 表头翻对了话术、脚本拿到的还是绿灯。
-  case "$src" in
-    0) return 0 ;;
-    3) echo "    ⇒ 以 rc=3 退出：本目录的档位声明与收尾复核互相矛盾，不得作为结论提交。" >&2
-       return 3 ;;
-    *) return "$src" ;;
-  esac
-}
-
-# =============================================================================
-# probe —— 读 FramePulse 的落盘脉冲（交互期 hitch 的唯一入口，零采样）
-# =============================================================================
-cmd_probe() {
-  local file="${1:-}"
-  # 【为什么要有 --start】整条自动化里**没有任何地方设过 TCODER_PERF_PROBE=1**，
-  # 而 `open` 起的 App 也不继承调用方环境变量 ⇒ 这颗"进程内侧量帧脉冲"的探针
-  # 在无人值守链里**根本开不起来**，probe 档于是只能读到一个永远不会出现的 /tmp 文件。
-  # 它不牵连 T1/T2 的判决（那两个读的是 xctrace 的 hitches / updates / displays 表），
-  # 但"规范里写着的仪器"与"实际接得通的仪器"必须是同一件，所以这里补一条起法。
-  if [ "$file" = "--start" ]; then
-    local secs="${2:-8}"
-    # macOS 自带 bash 3.2 没有 BASHPID（第一次跑就在这行 unbound 死掉，还是 `set -u` 那种
-    # "不报错、直接终止"的死法），所以文件名只用 $$ + 秒，够用且不会撞名。
-    file="$SCRATCH/tcoder-framepulse-$REV-$$-$(date +%s).txt"
-    echo "==> 自己起一个带探针的实例，采 ${secs}s（输出落仓库内 $file，不写 /tmp）"
-    TCODER_PERF_PROBE=1 TCODER_PERF_OUT="$file" "$PERF_BIN" >/dev/null 2>&1 &
-    local probe_pid=$!
-    trap 'kill -TERM "$probe_pid" 2>/dev/null || true' EXIT INT TERM
-    sleep "$secs"
-    kill -TERM "$probe_pid" 2>/dev/null || true
-    trap - EXIT INT TERM
-    [ -s "$file" ] || die "探针没产出（$file 不存在或为空）⇒ 要么 env 没传进去，要么这个 build 里 FramePulse 没接上"
-    shift 2
-    set -- "$file" "$@"
-    echo "    起了 pid=$probe_pid，产物 $file（$(wc -l < "$file" | tr -d ' ') 行）"
-  fi
-  [ "$#" -gt 0 ] && file="$1"
-  [ -n "$file" ] || file=$(ls -t "$SCRATCH"/tcoder-framepulse-*.txt /tmp/tcoder-framepulse-*.txt 2>/dev/null | head -1)
-  [ -n "$file" ] || die "找不到 FramePulse 产物：用 `probe --start` 现采一趟，或自己带 TCODER_PERF_PROBE=1 起 App"
-  case "$file" in
-    /tmp/*) echo "    ⚠ 读的是 /tmp 下的旧探针文件——仓库外，可能被系统清理（今晚对照组就是这么丢的）" >&2 ;;
-  esac
-  echo "==> probe 档：读 $file"
-  echo "    交互期结论只有在测量窗口内**真的有人在滚动/拖窗**时才成立，"
-  echo "    所以判 T1 要自己带 --interaction 声明；不带就只会得到 idle 读数（退出码 2，不是达标）。"
-  python3 "$PULSE_REPORT" "$file" "${@:2}"
-}
-
 # =============================================================================
 # interact —— 交互期那一档（T1 唯一有资格的样本）：录法同 idle，区别只在"人在滚"
 # =============================================================================
@@ -377,8 +357,13 @@ main() {
       # shellcheck source=scripts/perf_switch.sh
       . "$(dirname "${BASH_SOURCE[0]}")/perf_switch.sh"
       cmd_switch "$@" ;;
-    report) cmd_report "$@" ;;
-    probe) cmd_probe "$@" ;;
+    report|probe)
+      # 懒加载：report / probe 两档搬在旁边的 `perf_report.sh`（本仓 400 行口径把 `.sh`
+      # 也算实现文件，拆文件才是修复）；只有真跑这两档才 source 进来，
+      # 同一进程 ⇒ 全局量与判据一字不变。
+      # shellcheck source=scripts/perf_report.sh
+      . "$(dirname "${BASH_SOURCE[0]}")/perf_report.sh"
+      cmd_"$cmd" "$@" ;;
     pulse)
       # 与 selfcheck 档同一个做法：**只有真跑这一档才 source**，同一进程 ⇒ 全局量与口径不变
       # shellcheck source=/dev/null
@@ -394,3 +379,4 @@ main() {
   esac
 }
 main "$@"
+

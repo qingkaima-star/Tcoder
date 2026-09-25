@@ -44,8 +44,13 @@ struct SourceRoleTally: Sendable, Equatable {
     /// 逐文件累计。`files` 是**已经进入统计**的那批（`SourceScanResult.files`）；
     /// 被剔除的条目没有角色可言，它们的去向由 `SourceSkipLedger` 与
     /// `SourceScanScopeReadout` 回答，不在这里重复记账。
+    ///
+    /// **按相对路径升序累计**，而不是按递进来的顺序：样本是"取前 N 个"，
+    /// 按遇到顺序取就等于让并发调度的偶然决定屏上点谁的名（RD-63 实测：同一棵夹具树
+    /// GUI 与 CLI 各点一枚，三趟里两趟对不表、方向还会反过来）。
+    /// 累计量本身与顺序无关（都是加法），所以这条排序只改"点哪几条名"，不改任何数。
     init(of files: [ScannedSourceFile], exampleLimit: Int = SourceRoleTally.exampleLimit) {
-        for file in files {
+        for file in files.sorted(by: { $0.relativePath < $1.relativePath }) {
             let decision = Self.decision(for: file)
             var share = shares[decision.role] ?? SourceRoleShare()
             share.files += 1
@@ -83,15 +88,18 @@ struct SourceRoleTally: Sendable, Equatable {
     /// **弱判定**那一档：只有语言证据、路径没有任何角色线索，却被归进生产源码的文件数。
     var weakEvidenceFiles: Int { count(.productionLanguageOnly) }
 
-    /// 整张分档表（每档一行）。这一份要等 `Models` 的承接字段才能上屏，
-    /// 现在只有单测与 CLI 内部读得到 —— 已列进 R6 交回汇报的「契约缺口」。
+    /// 整张分档表（每档一行）。**当前只有单测在读**：屏上那一句不走这里，走
+    /// `ProductionCodeScaleReadout`（它读的是同一份累计**落盘**之后的 `code.fileRoles`）。
+    /// 旧注释写的是「这一份要等 `Models` 的承接字段才能上屏」—— 那是一句**过期理由**：
+    /// 字段 09-23 已落地（RD-14），09-24 起界面卡与健康分 ⓘ 也各自接上了
+    /// （RD-67 · 台账卷四 §73），不许再拿「等字段」当这一份没接线的说法。
     var roleLines: [String] {
         SourceFileRole.allCases.filter { !share($0).isEmpty }.map { role in
             let value = share(role)
             var line = "\(role.displayName) · \(NumberFormat.grouped(value.files)) 个 · "
                 + "\(NumberFormat.grouped(value.codeLines)) 代码行"
             if !value.examples.isEmpty {
-                line += "；例：\(value.examples.joined(separator: "、"))"
+                line += "；例：\(value.examples.joined(separator: localizedListSeparator()))"
             }
             if role == .production, let weak = weakEvidenceNote { line += "；\(weak)" }
             return line
@@ -104,11 +112,17 @@ struct SourceRoleTally: Sendable, Equatable {
     var notes: [String] {
         var lines: [String] = []
         appendUnknownRoleNote(into: &lines)
-        // 弱判定那句**不进** `scanLimitations`：它解释的是"生产码这一档有多可信"，
-        // 而那一档要等 `Models.fileRoles` 才上屏（见 docs/R6-契约字段清单.md §2）。
-        // 现在把它塞进去 = 给一个还没露出来的读数常驻一条边界提示
-        // （会把 `CodeAnalyzerTests.testFileCapCoverageIsExposed` 那条既有断言挤掉）。
-        // 句子本身留在 `roleLines` 里，字段一落地就能用。
+        // 弱判定那句**不进** `scanLimitations`，但留在这里的理由换过（RD-67 复核）：
+        // 原先写的是「那一档要等 `Models.fileRoles` 才上屏」—— 那枚字段今天已经落地，
+        // 那一档也确实上了屏（`CLIScoreText.fileRoleStatement` 逐字点名「弱判定 N 个」），
+        // 所以旧理由已经不成立。现在只剩一条真理由：同一个数已经在两处出声，
+        // 再挂一条边界提示等于把"已量到并公开的东西"重复计成"又一条没量准"
+        // （`CodeAnalyzerPrecisionTests.testFileCapCoverageIsExposed` 那条既有断言也容不下多出来的一行）。
+        // 那一段「下一步：读 `code.fileRoles` 时一并带出」**已经做掉了**（RD-67 · WS-R40）：
+        // 「读这一档要按它打折」现在由 `ProductionCodeScaleReadout.weakEvidenceHint` 读落盘的
+        // `fileRoles.share(for: .production)?.weakEvidenceFiles`，并到上屏那一句末尾
+        // （代码规模页那一格 + 健康分 ⓘ 两处）。接的是**上屏那一路**，仍不是 `scanLimitations`
+        // 这本账 —— 上面那两条理由一条没变，别把这次接线读成「该把它挪进未量准清单」。
         appendNonProductionInsideTotalsNote(into: &lines)
         appendGeneratedEvidenceNote(into: &lines)
         return lines
@@ -125,7 +139,9 @@ struct SourceRoleTally: Sendable, Equatable {
             + "未覆盖的语言/形状：\(examplesText(value.examples))。")
     }
 
-    /// 弱判定那句：进 `roleLines`（等字段上屏），**不进** `scanLimitations`。
+    /// 弱判定那句（带**样本路径**的那一份）：进 `roleLines`，**不进** `scanLimitations`
+    /// （理由见 `notes` 里那段）。屏上那一句不读这里 —— 它读落盘的 `weakEvidenceFiles`，
+    /// 生产者只有这一处：`ProductionCodeScaleReadout.weakEvidenceHint(_:)`。
     var weakEvidenceNote: String? {
         guard weakEvidenceFiles > 0 else { return nil }
         return "生产源码判定里 \(NumberFormat.grouped(weakEvidenceFiles)) 个文件**只有语言证据**、"
@@ -143,11 +159,12 @@ struct SourceRoleTally: Sendable, Equatable {
         let detail = outsiders
             .filter { !share($0).isEmpty }
             .map { "\($0.displayName) \(NumberFormat.grouped(files($0)))" }
-            .joined(separator: "、")
+            .joined(separator: localizedListSeparator())
         lines.append("代码规模的分母本轮**未按角色收窄**：\(NumberFormat.grouped(outsiderFiles)) 个非生产源码文件"
             + "（\(NumberFormat.grouped(outsiderLines)) 代码行：\(detail)）与生产码同分母。"
-            + "要按角色分档出数或让构建产物不恶化生产码评分，需等 `Models/CodeMetrics` 的角色字段"
-            + "（清单见 docs/R6-契约字段清单.md）。")
+            + "角色分档本身已经落盘并可读（`code.fileRoles` 八档全量、CLI 那一行读的就是它），"
+            + "所以这一条**不是能力缺口**，是评分与规模的分母还没接上这枚字段；"
+            + "要不要收窄属产品裁定（台账 RD-67），不许读成工具量不到。")
     }
 
     private func appendGeneratedEvidenceNote(into lines: inout [String]) {
@@ -172,14 +189,14 @@ struct SourceRoleTally: Sendable, Equatable {
             let hits = count(criterion)
             return hits > 0 ? "\(label) \(NumberFormat.grouped(hits))" : nil
         }
-        return parts.isEmpty ? "无" : parts.joined(separator: "、")
+        return parts.isEmpty ? "无" : parts.joined(separator: localizedListSeparator())
     }
 
     /// 样本串：最多点 3 个名字，剩下的只报条数 —— 限制说明要能一眼读完，
     /// 但**必须留名**，只给一个总数的句子无从反驳。
     private func examplesText(_ examples: [String]) -> String {
         guard examples.isEmpty == false else { return "（未取样）" }
-        let shown = examples.prefix(3).joined(separator: "、")
+        let shown = examples.prefix(3).joined(separator: localizedListSeparator())
         let rest = examples.count > 3 ? "…（另 \(examples.count - 3) 条样本）" : ""
         return shown + rest
     }

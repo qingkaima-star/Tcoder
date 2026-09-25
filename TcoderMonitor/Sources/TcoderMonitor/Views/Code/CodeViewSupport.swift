@@ -33,6 +33,10 @@ enum CodeDataGate {
         let icon: IconName
         let title: String
         let message: String
+        /// 「留短藏长」的 ⓘ 那半截（`EmptyStateView` 自带的 `help:` 槽）。
+        /// 为什么随文案一起走：这一族的三种态由本文件单点产出，页面只做一次转发；
+        /// 让页面自己再决定哪句进 ⓘ 就会出现同一空态在两个页面两种详略。
+        var help: String? = nil
     }
 
     /// 两种"没有数字可看"的说法必须不同：一个是**还没测**，一个是**测了、真的是空的**。
@@ -44,7 +48,11 @@ enum CodeDataGate {
             return EmptyCopy(
                 icon: .code,
                 title: "尚无代码扫描结果",
-                message: "点击「重新分析」开始扫描该目录。\n完成后这里会显示真实的文件数、行数与\(page)。"
+                // 盘点表「留短藏长」：屏上留"该点哪里"这一句（读完就能动手）；后半
+                // 「完成后这里会显示真实的文件数…」是**预告**（等于没说，与性能页那条
+                // 判「藏」的采样预告同形），整句进 ⓘ。「还没测」这件事由上面的 title 常驻承担。
+                message: localizedCopy("点击「重新分析」开始扫描该目录。"),
+                help: localizedFormat("点击「重新分析」开始扫描该目录。\n完成后这里会显示真实的文件数、行数与%1$@。", page)
             )
         case .measuredEmpty:
             return EmptyCopy(
@@ -154,17 +162,35 @@ enum CodeBoardTruth {
     /// 引擎改了文案而这里没改标记，披露就静默消失（R7 交回时自己点明了这个耦合，并对账钉住它）。
     /// 字段落地后数字有了直传通道，页尾这句改由数装配；**旧报告没有这些格** ⇒ 返回 `nil`，
     /// 调用方退回认领句子那条路，两种来源都不许让榜外那一半看不见。
-    /// ⚠️ 不做加法：不合成"总块数"（`rankedBlocks` 撞 id 削掉的块没有读数，等式天然不平）。
+    /// ⚠️ 仍然**不做加法**：这里不合成"总块数"。撞 id 那一格（RD-85）落成读数之后，
+    /// 「榜内 + 榜外 + 合并掉 == 原始命中」这条账平了，但屏上这句只逐条点名三项，
+    /// 不把三项加成一个数再印 —— 加出来的那个数一旦被读成"这个仓库有多少处克隆"，
+    /// 就把"原始命中"和"去重后的块"两把尺子又混回一把了。
     static func outsideBoardNoteFromFields(_ code: CodeMetrics) -> String? {
+        let merged = code.duplicatedBlocksDroppedByIdCollision ?? 0
         guard let dropped = code.duplicatedBlocksDroppedByCap,
               let outsideLines = code.duplicatedLinesOutsideReportedBlocks,
-              dropped > 0 || outsideLines > 0 else { return nil }
-        var note = localizedFormat("另有 %1$@ 个块 / %2$@ 行未列入榜内。",
+              dropped > 0 || outsideLines > 0 || merged > 0 else { return nil }
+        var note = ""
+        if dropped > 0 || outsideLines > 0 {
+            note = localizedFormat("另有 %1$@ 个块 / %2$@ 行未列入榜内。",
                                    NumberFormat.grouped(dropped), NumberFormat.grouped(outsideLines))
+        }
+        if merged > 0 {
+            // 旧话术一字未动（第 21 类盲区：加新维度时旧句必须原样），这句只在有数时才出声。
+            if !note.isEmpty { note += " " }
+            note += localizedFormat("另有 %1$@ 处重复命中与别处合并为一条（同一组文件、同一长度）。",
+                                    NumberFormat.grouped(merged))
+            // RD-86：数之外还要点名坐标，否则这句仍然只是一条无法反驳的账（RD-17 老账）。
+            if let spots = code.duplicateBlockCoordinatesMergedById, !spots.isEmpty {
+                note += " " + localizedFormat("被合并的那几处在：%1$@。",
+                                             spots.joined(separator: localizedListSeparator()))
+            }
+        }
         if let fragments = code.duplicateFragmentsNotExpandedCount, fragments > 0 {
             note += " " + localizedFormat("另有 %1$@ 处拷贝因指纹预算未展开。", NumberFormat.grouped(fragments))
         }
-        return note
+        return note.isEmpty ? nil : note
     }
 }
 
@@ -203,7 +229,14 @@ enum CodeViewFormat {
         return directories.joined(separator: "/")
     }
 
-    /// 扫描器给的是绝对路径；万一是相对路径就按项目根补齐，保证 Finder 动作可用。
+    /// 把坐标还原成能打开的路径：**全站唯一的一个入口**（Finder 定位与「用默认应用打开」都走它）。
+    /// 树里现在同时存在两种坐标形状，两条分支各有真读者，一条都不能删：
+    /// · **相对**被扫根 —— 重复块坐标（`DuplicatedFragment.path`，RD-61 第二半之后
+    ///   在 `DuplicationScanState.fragmentOf` 那一处就定成相对），走 `appendingPathComponent` 那一支；
+    /// · **绝对** —— 巨大文件榜与复杂度热点榜（`FileSystemCodeAnalyzer` 给的是 `url.path`），
+    ///   以及**改前落盘的旧报告**里那批重复块坐标，走 `hasPrefix("/")` 那一支。
+    /// 根由调用方从 `report.project.path` 传入，与装配 `provenance.scannedRoot` 用的是同一个串，
+    /// 所以「拼回去」与「谁产的这份报告」不会分叉。
     static func resolvedURL(_ path: String, root: String) -> URL {
         if path.hasPrefix("/") { return URL(fileURLWithPath: path) }
         if !root.isEmpty { return URL(fileURLWithPath: root).appendingPathComponent(path) }

@@ -189,7 +189,13 @@ final class LocalizationGuardTests: XCTestCase {
     /// **2026-09-21 一天之内动了两次数字：19 → 21 → 19**，两次都是实扫现量、方向由守卫自己打印：
     /// 扩口 + S5 搬字让存量涨 2（新增债显形），补账轮把两处 `Text(变量)` 改成查表又降 2。
     /// 剩下的 19 条**全部是内插短句**，逐条台账与还法见计划文档 §6（本文件从 399 行让 1 行给这条）。
-    private static let unregisteredLiteralCeiling = 19
+    ///
+    /// **2026-09-24 P69a：19 → 11 → 4**（11 = P69 合进 main 后的实扫现量；4 = 本批清掉
+    /// 「代码风险这一片」7 条之后守卫自己打印的那一行，逐条清单同一趟落盘核对）。
+    /// 7 条全改成**整句键 + 在产出处查表**：5 条 `localizedFormat`（一句两槽以上）、
+    /// 1 条 `localizedCount` + `.stringsdict`（`%lld 个条目`）、1 条 `describe(unit:)` 量词整句化。
+    /// ✅ 上面那条"英语单复数表达不了"的缺口已由 P69c 立出口关掉（`localizedCount(_:slots:)` 与 `(_:count:note:)`）。**4 → 1** = 三条流合进 main 后守卫自报的现量，取数命令：`TCODER_I18N_LEDGER=<路径> ./scripts/locked_build.sh test --filter test_unregisteredLiteralInventoryPrintsAndShrinks`，逐条清单同一趟落盘核对。
+    private static let unregisteredLiteralCeiling = 0
 
     func test_unregisteredLiteralInventoryPrintsAndShrinks() throws {
         let registered = Set(try Self.catalog().map(\.key)).union(Self.registeredStringsDictKeys())

@@ -55,6 +55,73 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // 2026-09-22：新增的"谁可能漏下孤儿实例"清单（只读、不判别家）。
         // 新尺子必须一进门就被量 —— 否则"新建文件"本身就是免检通道（同一族的教训见上面那段）。
         "perf_launcher_audit.sh",
+        // 2026-09-23：包 5（补测改动前基线）新写的 rev 树准备器。新建的尺子必须当场被量，
+        // 否则"新建文件"本身就是免检通道（同一族教训见上面 09-21/09-22 那两段）。
+        "perf_measure_rev.sh",
+        // 09-23 同一条规矩的第二次自犯：新写的"同档取值一致性"尺子差点没点进来。
+        "perf_trio_agreement.py",
+        // 09-23 中午：这条分支把自己撑过了「巨大文件 400 行」口径（preflight 448、gates 587、
+        // eligibility 500、harness 454、summary 413），按"拆文件才是修复"搬出五片。
+        // **搬出来的每一片都照样要点名进来**——拆文件如果顺手免检，那拆本身就是新的通道
+        // （这条教训在上面 09-21 那段注释里已经写过一次，今天是第二次用到它）。
+        "perf_measure_io.sh", "perf_report.sh", "perf_trace_frames.py",
+        "perf_selfcheck_launchers.sh", "perf_selfcheck_tables.sh",
+        // 09-24 第七维·预热：`preflight_context` 涨到 410 行撞 400 口径，按"拆文件才是修复"
+        // 搬出 `perf_warmup.sh`。**搬出来的那片照样要点名**——第四次用这条教训（前三次见上面注释）。
+        "perf_warmup.sh",
+        // 09-24 同一条规矩的第五次：`app-update` 三口径（28/17/16）收成一条规则，
+        // 从 `perf_trace_metrics.py` 搬出 `perf_update_caliber.py`（那文件当时 408 行撞 400 口径）。
+        // 搬出来的判据照样要点名进分母——不点名就等于给它开了免检通道。
+        "perf_update_caliber.py",
+        // 09-24 同一天第六次：`phase_blame` 加了第三路输入后 CC 涨到 18（门 CC<16），
+        // 按"拆，不抬线"把归因判据层搬进 `perf_blame_caliber.py`（一格一个函数）。搬出来必须点名。
+        "perf_blame_caliber.py",
+        // 09-25 包 45/46：「同树只许一条测量链」这道闸与归属行的有界显示搬成库文件
+        // （排程器本体不可 source——一 source 就开始等窗口，反例点不到函数）。
+        // 新建文件必须当场被量：这是这条规矩第五次被用到（前面四次都写在上面上面的注释里）。
+        "perf_chain_guard.sh", "perf_selfcheck_chain.sh",
+        // 09-25 缺陷 #56 的根治：一批 T2 测量的驱动棒原来一趟一份躺在 `.scratch/`（无 trap、不在任何尺子射程内），
+        // 搬成 `scripts/perf_run_batch.sh` 之后才归第 29 项（起实例必须有 kill + trap）管得到。
+        // 搬过来必须当场被量：这是"新建文件必须点名"第六次被用到；而它自带的第 59/60 项是**行为级**的
+        // （真起子进程量"TERM 之后多久收尾"），因为第 29 项那类文本审计只看"有没有 trap 这一行"，
+        // 我 06:44 就是被它放过了一次（有 trap、但长 sleep 把收尾拖到 200 秒之后）。
+        "perf_run_batch.sh", "perf_selfcheck_trap.sh",
+        // 09-25 #39：`perf_selfcheck_launchers.sh` 又涨回 **396/400**——`trap` 那一刀（`81213d7`）
+        // 搬走 67 行之后它重新长了回来，同一个尺寸债**第二次到期**。按"拆，不抬线"把
+        // 反例 48/49/51/52（冷启动档页名/归属 + 窗口负载判定）整段搬进 `windows.sh`
+        // （判据与 ok/fail 文案逐字未动，拆前拆后 61 项输出逐字 diff 过）。
+        // 搬出来的那片照样要点名：这是"新建/搬出的文件必须当场被量"**第七次**落到这张表上。
+        "perf_selfcheck_windows.sh",
+        // 09-25 #70：判废趟的原始 trace 回收（判据在 `perf_reclaim.py`，收尾那一族从
+        // preflight 整族搬进 `perf_reclaim.sh`，反例 61 单开一块 `hygiene.sh`，因为
+        // `eligibility` 当时 388/400 只剩 12 行）。**新建/搬出的文件当场点名**——
+        // 这是这条规矩第八次落到这张表上（前七次见上面注释），不点名就等于免检。
+        "perf_reclaim.py", "perf_reclaim.sh", "perf_selfcheck_hygiene.sh",
+        // 09-25 #55：等窗这一族加进"挂死同窗补一次"之后排程器到 **404/400**，
+        // 按"拆，不抬线"把 `wait_for` 与四个 `cond_*` 搬进 `perf_window_gates.sh`（逐字节原文）。
+        // `cond_instance_ready` **没跟着搬**——第 29 项要求"起实例的那份脚本必须有 trap"，
+        // 那条守卫把这次搬家逼回原形（细节写在库文件头注）。搬出来的那片照样要点名：
+        // 这是"新建/搬出的文件必须当场被量"**第九次**落到这张表上。
+        // 同笔连带改了一处下游守卫：第 36 项原来只扫排程器里的 `open "$START_BIN"`，
+        // 搬家期间它**一行都扫不到而静默变空**，所以改成两处都扫 + 给分母加断言。
+        "perf_window_gates.sh",
+        // 09-25 #39 第三次到期：`perf_selfcheck_gates.sh` 到 **395/400**（这根是最紧的一弦），
+        // 把"这批量的是哪份内容、在什么条件下量的"那三项（38/40/53）整段搬进
+        // `perf_selfcheck_context.sh`——判据与 ok/fail 文案逐字未动，拆前拆后各跑一次
+        // selfcheck 并把输出归一后逐字 diff。搬出来的那片照样要点名：
+        // 这是"新建/搬出的文件必须当场被量"**第十次**落到这张表上。
+        "perf_selfcheck_context.sh",
+        // 09-25 同一条债第四次到期：`perf_selfcheck_eligibility.sh` 到 **388/400**，
+        // 把"一个读数怎么被解释成结论"那三项（26/27/41）搬进 `perf_selfcheck_attribution.sh`
+        // （388→294 / 新块 110 行，逐字搬，拆前拆后 selfcheck 输出归一后逐字 diff）。
+        // 第十一次用这条规矩：**搬出去的那片照样要点名**。
+        "perf_selfcheck_attribution.sh",
+        // 09-25 #43/#73：长 update → 调用栈归因的新尺子。**第十二次**用同一条规矩——
+        // 上面那十一段注释讲的是同一件事：`rulerScripts` 是写死的名单，而扫描处是
+        // `guard rulerScripts.contains(...) else { continue }`，所以"新建文件"本身就是
+        // 一条免检通道，除非当场点名。这次仍然漏了（合入前一格），是手工
+        // `ls scripts | grep '^perf_'` 与名单求差集才发现的 ⇒ 反向守卫记在任务 #75。
+        "perf_update_stacks.py",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。
@@ -179,5 +246,63 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
                                     "18 处判定的合成夹具都过不了 \(Self.complexityBar) 这条线，"
                                     + "说明本门的 CC 判定空转（实得 \(measured[0].complexity)）")
         print("【WS-X5 元测试】合成坏例 x5_probe_hot CC=\(measured[0].complexity) ≥ \(Self.complexityBar) —— 门抓得住坏例")
+    }
+
+    // MARK: - 话术串里的命令替换（2026-09-23 21:44 抓到两处，两处都是我自己写的）
+
+    /// 一行里**双引号串内部**出现反引号 ⇒ bash 把它当命令替换**真的执行**。
+    /// 只看引号内部：注释里的反引号不执行、合法写法（`$( … )`）本来就该用；
+    /// 整条判据管的是「把反引号当中文引号用」这一种形状——它只有跑起来才露，
+    /// 而露出来的症状是「那行少了一个词 + stderr 多一行 command not found」，不是报错。
+    static func backtickInsideDoubleQuotes(_ line: String) -> Bool {
+        var inQuotes = false
+        var escaped = false
+        for ch in line {
+            if escaped { escaped = false; continue }
+            if ch == "\\" { escaped = inQuotes; continue }
+            if ch == "\"" { inQuotes.toggle(); continue }
+            if ch == "`" && inQuotes { return true }
+        }
+        return false
+    }
+
+    /// 只判会被执行的**输出行**（`echo` / `printf`），注释行跳过。
+    static func proseSubstitutionOffenders(in content: String) -> [Int] {
+        content.split(separator: "\n", omittingEmptySubsequences: false).enumerated()
+            .compactMap { entry in
+                let trimmed = entry.element.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.hasPrefix("#"),
+                      trimmed.contains("echo ") || trimmed.contains("printf ") else { return nil }
+                return backtickInsideDoubleQuotes(String(entry.element)) ? entry.offset + 1 : nil
+            }
+    }
+
+    func test_rulerScriptsDoNotRunSubstitutionInsideProse() throws {
+        let names = try FileManager.default.contentsOfDirectory(atPath: Self.scriptsRoot.path)
+            .filter { $0.hasSuffix(".sh") }.sorted()
+        XCTAssertGreaterThan(names.count, 10,
+                             "scripts/ 只数到 \(names.count) 个 .sh ⇒ 读盘坏了，这条绿没有含义")
+        var offenders: [String] = []
+        var scannedLines = 0
+        for name in names {
+            let text = try String(contentsOf: Self.scriptsRoot.appendingPathComponent(name), encoding: .utf8)
+            scannedLines += text.split(separator: "\n", omittingEmptySubsequences: false).count
+            offenders += Self.proseSubstitutionOffenders(in: text).map { "\(name):\($0)" }
+        }
+        XCTAssertGreaterThan(scannedLines, 3_000, "总共只读到 \(scannedLines) 行 ⇒ 判据在空转")
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些话术行会被 bash 真的执行（双引号里的反引号是命令替换）：\(offenders)")
+    }
+
+    /// 元测试双向：坏样例必须被抓且行号要对；两处合法写法（`$( … )`、注释里的反引号）不许被抓。
+    /// 只断言"抓得住"的守卫是半个空转——它可能其实在什么都抓。
+    func test_proseSubstitutionJudgeHasTeethBothWays() {
+        let bad = "  echo \"==> 采集跑完：能不能进表由 `report` 与一致性判\""
+        XCTAssertEqual(Self.proseSubstitutionOffenders(in: "x\n" + bad + "\ny"), [2],
+                       "行号没指到那一行（拿到 \(Self.proseSubstitutionOffenders(in: "x\n" + bad + "\ny"))）")
+        let okSubstitution = "  echo \"名册现量：$(printf '%s' \"$known\" | tr '\\n' ' ')\""
+        let okComment = "  # 这里写反引号不执行：`report`"
+        XCTAssertTrue(Self.proseSubstitutionOffenders(in: [okSubstitution, okComment].joined(separator: "\n")).isEmpty,
+                      "合法写法不许被抓：$() 是看得见的替换，注释不执行")
     }
 }

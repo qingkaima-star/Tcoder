@@ -57,7 +57,13 @@ enum VulnerabilityEvidence: String, Sendable, Equatable {
         guard ledger.totalCount > 0 else { return .unchecked }
         let counts = ledger.vulnerabilityStateCounts
         let checked = counts[.checked] ?? 0
-        if checked == ledger.totalCount { return .verified }
+        // RD-73：「每一条都核对成了没有」只由 `DependencyEvidence.vulnerabilityCoverage` 判一次。
+        // 这里原先自己写了一遍 `checked == ledger.totalCount` —— 与那把闸门**同一件事实的第二把尺子**，
+        // 而且因为换了个局部变量的写法，`DependencyGateUniquenessTests` 按字面扫**看不见它**。
+        // ⚠ 只搬"全覆盖"这一支：`.degraded` 与 `.unchecked` 的分界是**另一根轴**
+        //   （这一路到底发没发起过），三档覆盖度里放不下它，不许为了"收成一个家"把保守方向折掉。
+        // 两把尺子今天算的是同一个数（`isCovered` 就是 `== .checked`），所以这次改动**不动任何分数**。
+        if DependencyEvidence.vulnerabilityCoverage(ledger).isFull { return .verified }
         // `.degraded` 与 `.unchecked` 的分界是"这一路发没发起过"：
         // 有失败、有被预算挡在门外的 ⇒ 发起了但没走到底 ⇒ degraded（旧文案判据正是这一支，
         // 保守方向不许松）；一条都没发起（全 notAttempted / 版本未解析 / 生态不支持）才是 unchecked。
@@ -76,12 +82,14 @@ enum VulnerabilityEvidence: String, Sendable, Equatable {
         let ledger = DependencyEvidence.ledger(for: report)
         let counts = ledger.vulnerabilityStateCounts
         var reasons: [String] = []
-        for (state, label) in [(DependencyCheckState.failed, "查询失败"),
-                               (.versionUnresolved, "版本未解析"),
-                               (.ecosystemUnsupported, "生态不支持"),
-                               (.budgetExcluded, "未进查询批次"),
-                               (.notAttempted, "未发起核对")] {
-            if let value = counts[state], value > 0 { reasons.append("\(label) \(value) 条") }
+        for (state, label) in [(DependencyCheckState.failed, localizedCopy("查询失败")),
+                               (.versionUnresolved, localizedCopy("版本未解析")),
+                               (.ecosystemUnsupported, localizedCopy("生态不支持")),
+                               (.budgetExcluded, localizedCopy("未进查询批次")),
+                               (.notAttempted, localizedCopy("未发起核对"))] {
+            if let value = counts[state], value > 0 {
+                reasons.append(localizedFormat("%1$@ %2$@ 条", label, HealthCurves.whole(value)))
+            }
         }
         return reasons
     }
@@ -231,7 +239,8 @@ enum HealthCurves {
     /// 不足 40 字补固定垫句（补满即停，绝不为凑长度把总预算顶破 80），最后再兜底截断。
     private static func padded(_ text: String) -> String {
         var result = text
-        let pads = ["其余维度处于可接受区间。", "建议保持观察，待各维度数据补齐后复核。"]
+        let pads = [localizedCopy("其余维度处于可接受区间。"),
+                    localizedCopy("建议保持观察，待各维度数据补齐后复核。")]
         var padIndex = 0
         while result.count < 40, padIndex < pads.count, result.count + pads[padIndex].count <= 80 {
             result += pads[padIndex]
@@ -268,22 +277,78 @@ enum HealthCurves {
         return .critical
     }
 
-    /// 文案预算 60 字：核心数字段在前，放不下的段直接舍弃，宁可少说也不截断数字或换行。
+    /// 文案预算按**显示宽度**算，不按字符数：中日韩全角一格折 2、拉丁与数字折 1。
+    /// 中文态 120 格 = 60 个整字，与改造前那条「60 字」线是**同一条物理线**，评分卡那一行不动；
+    /// 英文态拿到的因此是同样的**宽度**而不是同样的**字符数** —— 旧写法给英文也只数 60 格，
+    /// 一行塞得下三四个词，后面的口径段整段被舍弃（P58 的动机）。
+    static let detailWidthBudget = 120
+
+    /// 分隔符本身也必须查表。它挂在 `joined` 这一处，而不是散在每条文案里各写一遍：
+    /// 拼出来的整串永远查不中（守卫 1d），所以能查表的只有这些**片段之间**的标点。
+    static var detailSeparator: String { localizedCopy("，") }
+
+    /// 核心数字段在前，放不下的段直接舍弃，宁可少说也不截断数字或换行。
+    ///
+    /// ⚠ **一段都放不下时也不截**：留整段，让渲染层用 `lineLimit` + `.help` 去裁
+    /// （健康评分那一列本来就挂着 `.help`，P54 立的口径：被裁掉的那半必须有去处）。
+    /// 这里拦腰截断会把英文词切成半个 —— 实测交付头英文态打出
+    /// `…tallied only over the top 20 hotspo)`，一个"h" 在全站任何地方都读不到，
+    /// 而那正是"P58 把 60 字换成 120 格"想修掉的那族病，**换算法则不等于删掉截断**：
+    /// 旧尺子在英文上会截，新尺子还是会，只是阈值挪高了 60 个字符而已。
     static func joined(_ segments: [String]) -> String {
         var result = ""
         for segment in segments {
             if segment.isEmpty { continue }
-            let candidate = result.isEmpty ? segment : result + "，" + segment
-            if candidate.count > 60 { continue }
+            let candidate = result.isEmpty ? segment : result + detailSeparator + segment
+            if displayWidth(candidate) > detailWidthBudget { continue }
             result = candidate
         }
-        return result.isEmpty ? bounded(segments.first ?? "") : result
+        return result.isEmpty ? (segments.first { !$0.isEmpty } ?? "") : result
     }
 
-    private static func bounded(_ text: String) -> String {
-        let characters = Array(text)
-        guard characters.count > 60 else { return text }
-        return String(characters.prefix(60))
+    /// 把**口径注记**挂到一条已经翻好的 detail 后面。
+    ///
+    /// ⚠ 这里只能是整句键：`curve.detail + "（中文）"` 拼完的那一串查不中任何键，
+    /// 英文态会长成「前半英文 + 后半中文」—— 比整句中文更难读，而三条静态键守卫全是绿的。
+    /// 括号本身也在模板里（中文「（）」、英文「()」），所以注记一律给**不带括号**的片段。
+    static func noted(_ detail: String, _ notes: [String]) -> String {
+        let note = joined(notes)
+        guard !note.isEmpty else { return detail }
+        return localizedFormat("%1$@（%2$@）", detail, note)
+    }
+
+    /// 榜单被截断时的披露注记：**榜长与真总数并排**写出来，谁都不许单独充当对方。
+    ///
+    /// 为什么要有这个具名助手（而不是一处一行 `localizedFormat`）：
+    /// `BoardLengthReadoutRatchetTests` 数的是"把 `code.<榜>.count` 当总数用"的原始读数，
+    /// 而它认合法披露句的办法是**同一行上有标记**。P58 把注记改成整句键之后，
+    /// 参数换行会把标记与读数分到两行去 ⇒ 一句诚实的话被判成新增违例。
+    /// 名字本身就是那个标记，调用点必须写成一行。
+    static func boardOnlyNote(_ detail: String, listed: Int, total: Int) -> String {
+        noted(detail, [localizedFormat("榜内只列 %1$@ 个，实际 %2$@ 个", whole(listed), whole(total))])
+    }
+
+    /// 一个字符占几格：CJK 全角（含汉字、全角标点、假名、韩文音节）算 2，其余算 1。
+    static func displayWidth(_ text: String) -> Int {
+        text.reduce(0) { $0 + (isFullWidth($1) ? 2 : 1) }
+    }
+
+    private static func isFullWidth(_ character: Character) -> Bool {
+        guard let scalar = character.unicodeScalars.first else { return false }
+        let value = scalar.value
+        return (0x1100...0x115F).contains(value)      // 韩文字母
+            || (0x2E80...0x303E).contains(value)      // 中日韩部首、标点、假名补充
+            || (0x3041...0x33FF).contains(value)      // 平假名/片假名/中日韩符号
+            || (0x3400...0x4DBF).contains(value)      // 扩展 A
+            || (0x4E00...0x9FFF).contains(value)      // 汉字
+            || (0xA000...0xA4CF).contains(value)      // 彝文
+            || (0xAC00...0xD7A3).contains(value)      // 韩文音节
+            || (0xF900...0xFAFF).contains(value)      // 兼容汉字
+            || (0xFE30...0xFE6F).contains(value)      // 兼容标点
+            || (0xFF00...0xFF60).contains(value)      // 全角形式
+            || (0xFFE0...0xFFE6).contains(value)      // 全角符号
+            || (0x1F300...0x1FAFF).contains(value)    // 表情符号
+            || (0x20000...0x2FFFD).contains(value)    // 扩展 B 及以上
     }
 
     /// 手写定点格式化，不走 Locale，保证任何系统语言下 detail 里的数字都一致。

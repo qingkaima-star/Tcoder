@@ -177,7 +177,10 @@ idle 档判"够静默"是 `q >= 8`；我照同一把尺子做交互档"有人在
 cd TcoderMonitor
 ./scripts/build_app.sh release                                   # 必须：新闸门要求产物 rev == 树头
 ./scripts/perf_wait_window.sh $(git rev-parse --short HEAD) 3    # T2 心跳期 ×3（只等窗口、不绕闸）
-MODE=interact ./scripts/perf_wait_window.sh $(git rev-parse --short HEAD) 3   # T1 交互期：需要真人滚
+MODE=interact INPUT=synth MEASURE_LAUNCH=1 ./scripts/perf_wait_window.sh $(git rev-parse --short HEAD) 3
+# T1 交互档：真人滚 **或** 合成滚动都行（09-22 实测 CGEvent 送达有效）；
+# MEASURE_LAUNCH=1 让录制档自己起实例并朝它 attach 的那个 pid 投滚动，
+# MEASURE_SEED_DIR 指真实支持目录 ⇒ 被测的是**有内容的页面**（空沙箱量出来是空页滚动）
 ./scripts/perf_harness.sh switch /tmp/tcoder-perf-$(git rev-parse --short HEAD)-switch  # T4 逐页冷启动
 ./scripts/perf_harness.sh report <上面任一目录>                   # 表头会写明期间与产物 rev
 ```
@@ -190,7 +193,8 @@ MODE=interact ./scripts/perf_wait_window.sh $(git rev-parse --short HEAD) 3   # 
 
 ### F. 性能侧欠大家的（我在做，不用你动）
 
-1. **T1 仍未举证**：交互期 hitch=0 / p95≤8.4ms 需要真人滚动，已排好命令，等用户配合。
+1. **T1 已能无人值守**（09-22 推翻旧撤因）：真人滚或 `INPUT=synth` 共用同一道开录闸与同一道收尾复核。
+   当晚已拿到第一趟四条件齐的交互样本（见 §R）。
 2. **§1"改动前基线"这条我降级了，理由要说清**（2026-09-22 02:26 现查）：
    封存的对照组 `/tmp/tcoder-before.app`（rev `415f0f0`、sha `54005bc4…`）**已经不在了**
    ——`/tmp` 被清过一次（就是那次 103 GB 之后），所以"补测改动前"要先在 detached 树
@@ -502,103 +506,8 @@ pid=40149 已跑 02:52   主树的实例
 
 ---
 
-## §N（2026-09-22 12:44）一条尺子拆成两条 —— 附赠一份"别去做这趟假还债"的告示
+## 后半截在哪
 
-### 我要点单的那件事本来不存在
-
-并完 main 之后我把渲染路径台账按文件聚合，`dynamicNSColor 62` 里有 **8 处落在 `Design/**`**。
-AGENTS 的分工写的是「`Design/**` 取值归 UI 侧；**`Design/**` 内部缓存化归性能侧**」，
-于是我准备把这 8 处做成缓存 `static let`，把数字从 62 抬到 54 并顺手拧基线。
-
-**动手前查了一下它们到底在做什么，结论是这趟是假的**：
-
-| 环节 | 现状 | 每次访问的成本 |
-|---|---|---|
-| `Theme.Semantic.role(for:)` | `switch` 返回 `static let accent/success/…` | 无分配 |
-| `SemanticRole.textColor` | `var … { text.color }`，而 `text` 是 `let DualColor` | 一次存储属性读 |
-| `DualColor.color` | `let color`，在 **init** 里由 `makeDynamicNSColor` 算好 | 无分配 |
-
-⇒ 62 处**没有一处**在渲染路径上 new `NSColor`。做那趟"缓存化"只会让台账少 8 行、运行时一个字节都不省，
-而且我会把它报成"还掉 8 处债"。**这就是假还债**，数字变了但代码没变好。
-
-### 同一件事的另一半：该红的从来没有尺子
-
-`dynamicNSColor` 的模式是 `\.(textColor|graphicColor|badgeFill|onFillColor)\b`——**纯引用**。
-而真·现造的形状 `Color(nsColor:` 不在任何模式里（`directFormatters` 只列
-`NSColor|DateFormatter|NumberFormatter` 后跟 `(`，`Color(` 不匹配）。现扫当场抓到 2 处：
-
-```
-Views/Shell/ProjectSidebar.swift:222  isDropTargeted ? Theme.Semantic.accent.textColor : Color(nsColor: .separatorColor)
-Views/Shell/SidebarRows.swift:89      ? Color(nsColor: .quaternaryLabelColor)
-```
-
-⇒ 一条尺子同时量"现造"和"引用"，结果是**该红的漏了（0 处判据覆盖真债）、该绿的挡路**
-（顶到 62/62 零余量后，谁在 body 里新写一处**正确**的令牌取色就把闸门打红）。
-
-### 已改（性能侧名下，不碰 `Views/**`）
-
-- `PerfHitchScan.rules` 拆成 `dynamicColorConstruction`（现造，上限 **2**，终点 **0**）
-  与 `tokenReference`（引用，上限 62，**终点不是 0**，只许减不许增但不许当还债报数）。
-- 两条各配**双向**元测试：构造样例必须红、令牌引用必须不被判成构造
-  （模式一旦放宽到把 `.textColor` 也算债，它会立刻长出 62 处"新债"，那条反向断言当场红）。
-- 补一条我一直漏的洞：基线取不到计数会退化成 `-1` 而 `-1` 永远不"超"上限
-  ⇒ 改错一个键名，那条规则就**从闸门上消失且全绿**。现在钉
-  `Set(knownBaseline.keys) == Set(rules.map(.name))`（`ownerNotes` 同样钉）。
-- 台账位置 `$TMPDIR` → **`.scratch/tcoder-perf-renderpath-debt.txt`**，并改成
-  写不出去就 `XCTFail`（`try?` 会把"没有台账"伪装成成功）、写完读回来比对。
-
-验收：`./scripts/locked_build.sh test --filter PerfHitchGuardTests` →
-`Executed 15 tests, with 0 failures`，表头
-`directFormatters 1/1  dynamicColorConstruction 2/2  fullSort 9/9  syncFileIO 2/2  tokenReference 62/62`。
-
-### 派给 UI 侧的一条（很小，但是真债）
-
-把那 2 处 `Color(nsColor: .separatorColor/.quaternaryLabelColor)` 换成 `Theme.Palette` 里
-已缓存的 `static let`（`Design/ThemePalette.swift:23` 就有一个 `separator`，
-是现成的、语义相同的一份）。终点 0；棘轮今天起会拦新增。
-顺带这也是设计一致性：这两处是 `Views/**` 里**仅有**的直接取系统 `NSColor` 的写法
-（`grep -rn 'Color(nsColor:' Views/` 只出这两条；裸 `Color.gray` 那类另一条轴，归颜色面积收敛）。
-
-## §O（2026-09-22 15:35）一次性红：`CoverageAnalyzerTests` 报 0.0 ≠ 78.0 —— 报了，没动它
-
-15:14 那轮全量门禁在 `testUnitAndIntegrationKindsAreSeparated` 判红
-（`XCTAssertEqualWithAccuracy ("0.0") != ("78.0")`）。**不是我的改动**（那三笔只动尺子/文档），
-而**先怀疑自己的取数**是对的：我第一反应是"我的 `--filter` 跑污染了覆盖率产物"，
-读了 `CoverageAnalyzerTests.swift:5-30` 才发现夹具根是
-`NSTemporaryDirectory()/tcoder-cov-<UUID>/`、每个用例新建、tearDown 删除
-⇒ **跨次污染这个解释不成立**，写下来免得下一个人白查一遍。
-
-15:20 原样重跑（代码一字未改）⇒ `Executed 1050 tests, with 12 skipped and 0 failures`、
-回执按头钉死（`0bd7643`）。所以这是一次性红，最可能的原因是负载
-（同一次 wall 508 s vs cpu 262 s，机器上同时有别人的 `swift-test` 与 release 构建）。
-
-**按红线处理：不改那个文件、不拧阈值、不给自己的分支加豁免。** 但留一条**建议**给尺子主人
-（不是要求）：这条用例断言的是"分析器把 unit/integration 两类报告分开"，
-高负载下若真存在超时/并发读目录的路径，值得看一眼 `CoverageAnalyzer` 的目录扫描是否有
-时间预算——`metrics.unreadableDirectoryCount` 这个字段的存在说明它已经在容忍读不到的目录，
-那么"读不到"与"读到 0"在数值上是不是同一个形状，是可查的一问。
-
-## §P（2026-09-22 16:59）渲染路径 14 处具名存量：给一条命令，别抄我这张表
-
-`tokenReference 62` 是**读数不是债**（§N 已经说清），所以真正要还的是这 **14 处 / 10 个文件**。
-下表是 16:52 那一轮门禁现扫的快照（**它是快照，会腐烂**；重算方法就在下面那两条命令）：
-
-| 规则（现量/上限） | 处数 | 落在哪些文件 |
-|---|---|---|
-| `fullSort` 9/9 | 9 | `ContributorRows`×2、`LogsFileTables`×2、`CodeMetricsView`、`DependenciesView`、`ContributorsView`、`LogsMetricGrid`、`LogsTrendCard` |
-| `syncFileIO` 2/2 | 2 | `Views/Logs/LogsView.swift`×2（`attachedItems` → `fileSize(of:)` 两跳进 body） |
-| `dynamicColorConstruction` 2/2 | 2 | `Views/Shell/SidebarRows.swift`、`Views/Shell/ProjectSidebar.swift` |
-| `directFormatters` 1/1 | 1 | `Views/PerfLogs/ChartChrome.swift:268`（`DateFormatter()` 提 `static let`） |
-
-```bash
-./scripts/locked_build.sh test --filter PerfHitchGuardTests    # 每次跑都打「现量/上限」
-sed -n '1,200p' .scratch/tcoder-perf-renderpath-debt.txt        # 逐条带 文件:行 + 原文
-```
-
-三条使用约定：
-1. **并完 main 就重跑再看**，别拿本文里的数字派活（§H 那条"交集 = 0"就是没重算而误导了两天）。
-2. **还掉之后要有人拧基线**：`现量 < 上限` 的那一格就是"新增一处照样绿"的隐形余量，
-   而台账自己会打『可拧到 N』——**看到那句话的人就是该拧的人**，不必等总工。
-3. 这 14 处里 `DependenciesView`（n 可到上千）与 `ContributorRows`、`CodeMetricsView`
-   是**滚动/切页期**成本 ⇒ 影响 **T1**，不影响心跳期 T2；
-   别和 §H 那 16 处粗读点混成一句"清完渲染路径"——两批的验收窗口不是同一个。
+§N 起（2026-09-22 中午之后：拆尺子、14 处存量移交、交互档三趟满、
+预算基准 Hz 的反省、选装收尾的漏实例报告）搬进
+[`2026-09-22-perf-handoff-notes-round2.md`](./2026-09-22-perf-handoff-notes-round2.md)。

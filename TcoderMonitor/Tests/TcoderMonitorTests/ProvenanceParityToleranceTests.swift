@@ -58,4 +58,92 @@ final class ProvenanceParityToleranceTests: XCTestCase {
                           "容忍项 \(entry.key) 命中判定类字段 \(hit) —— 把判定容忍掉等于把对表尺子锯短")
         }
     }
+
+    /// 抠出 `IGNORED_PROJECT_KEYS = ( … )` 里逐格点名的项目身份免检键。
+    private func ignoredProjectKeys(in text: String) -> [String] {
+        guard let start = text.range(of: "IGNORED_PROJECT_KEYS = (") else { return [] }
+        let body = text[start.upperBound...]
+        guard let end = body.range(of: ")") else { return [] }
+        return body[..<end.lowerBound].components(separatedBy: ",")
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " \"\n\t")) }
+            .filter { $0.hasPrefix("project.") }
+    }
+
+    /// #64：`project.*` 整族免检 ⇒ 主角字段 `project.path` 至今没有跨面守卫。
+    /// 收窄成逐格点名之后，**两头各钉一次**：名单本身不许再长成前缀/通配，
+    /// 尺子也不许再用 `startswith` 去兜整族（那是当年那个洞的原形状，不是"另一种写法"）。
+    func testProjectExemptionIsEnumeratedAndNeverAPrefix() throws {
+        let text = try parityScriptText()
+        let keys = ignoredProjectKeys(in: text)
+        XCTAssertFalse(keys.isEmpty, "一条项目身份免检键都没扫到 ⇒ 解析坏了，这条守卫是永真绿")
+        XCTAssertFalse(keys.contains("project.path"),
+                       "「project.path」被免检 ⇒ 跨面路径拼写分叉（#60）又没人看了")
+        for key in keys {
+            XCTAssertFalse(key.hasSuffix("."), "免检键 \(key) 是个前缀，会连带免掉整个 project 家族")
+            XCTAssertFalse(key.contains("*"), "免检键 \(key) 用了通配：同上")
+        }
+        XCTAssertFalse(text.contains("startswith(IGNORE"),
+                       "对表尺子又拿前缀整族免检 ⇒ 这就是 #64 立案时的原始形状")
+        XCTAssertTrue(text.contains("path in IGNORED_PROJECT_KEYS"),
+                      "项目身份那一族没走精确匹配 ⇒ 这条守卫只是在读一份没人用的常量")
+    }
+
+    // MARK: - 缺席那两句读数必须点名对的那一侧
+
+    /// 喂两份**形状已知**的合成报告给真脚本：GUI 少一键、CLI 少一键，各自的读数要说对是谁缺。
+    ///
+    /// 为什么单独钉：RD-31 × RD-60 那次对表被这两句带偏了整轮排查 —— 真缺键的是 GUI 侧
+    /// 那份测试自带的装配副本，脚本却打印成「只有 GUI 有（CLI 缺）」，于是排查从
+    /// "CLI 没量到"起步（复现读数见 Obsidian `138`）。判败/判容忍的**分类与计数**都不受影响，
+    /// 改的只是这条读数说谁 ⇒ 这里连计数一起钉，免得下次连判定被顺手改掉还自以为是措辞。
+    func testAbsenceLabelsNameTheSideThatActuallyMisses() throws {
+        let scratch = try makeScratch()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let gui = scratch.appendingPathComponent("gui.json")
+        let cli = scratch.appendingPathComponent("cli.json")
+        try writeProvenance(to: gui, keeping: ["shared": 1, "onlyInGui": 2])
+        try writeProvenance(to: cli, keeping: ["shared": 1, "onlyInCli": 3])
+
+        let output = try runParity(gui: gui, cli: cli, target: scratch)
+        XCTAssertTrue(output.contains("onlyInGui: 只有 GUI 有（CLI 缺）"),
+                      "GUI 侧独有一键却被说成 CLI 缺 ⇒ 两句读数写反了：\n" + output)
+        XCTAssertTrue(output.contains("onlyInCli: 只有 CLI 有（GUI 缺）"),
+                      "CLI 侧独有一键却被说成 GUI 缺 ⇒ 两句读数写反了：\n" + output)
+        XCTAssertTrue(output.contains("逐项不等（判败）：2 处"),
+                      "判败计数跟着变了 ⇒ 被改的不止措辞：\n" + output)
+    }
+
+    /// 一次性产物落仓库内 `.scratch/`（AGENTS §1.6），且量完就删。
+    private func makeScratch() throws -> URL {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let dir = packageRoot.deletingLastPathComponent()
+            .appendingPathComponent(".scratch/r34-parity-label-\(UUID().uuidString)", isDirectory: true)
+        XCTAssertTrue(dir.path.contains("/.scratch/"), "夹具不在仓库内 .scratch：\(dir.path)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func writeProvenance(to url: URL, keeping slots: [String: Int]) throws {
+        try JSONSerialization.data(withJSONObject: ["provenance": slots]).write(to: url)
+    }
+
+    /// 真跑那把脚本（不是把它重抄一遍 Swift —— 那会变成第二把尺子）。
+    private func runParity(gui: URL, cli: URL, target: URL) throws -> String {
+        let script = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("scripts/report_parity.py")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: script.path), "对表脚本不在 \(script.path)")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = [script.path, gui.path, cli.path, target.path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        process.waitUntilExit()
+        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        XCTAssertEqual(process.terminationStatus, 1, "两边各缺一键，脚本必须判败（rc=1）：\n" + output)
+        return output
+    }
 }

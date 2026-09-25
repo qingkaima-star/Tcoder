@@ -57,7 +57,7 @@ selfcheck_probe_sentinel() {  # selfcheck_probe_sentinel <outdir>
 selfcheck_period_eligibility() {  # selfcheck_period_eligibility <outdir>
   # 21) 「声明了什么档」和「收尾复核是否同意」必须一起判。
   #     这两个标记此前只有写的人没有读的人 ⇒ 整窗没人动的 interaction 样本
-  #     照样打印「有资格答 T1」。四种形状各钉一次，且**两个否定必须与肯定不同**
+  #     照样打印「有资格答 T1」。八种形状各钉一次，且**两个否定必须与肯定不同**
   #     （否则这条断言会被一个恒真的实现糊过去）。
   local r
   r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
@@ -66,12 +66,21 @@ cases = [("clean-idle", {"period": "idle"}),
          ("dirty-idle", {"period": "idle", "contaminated_by_human_input": "1"}),
          ("clean-inter", {"period": "interaction"}),
          ("nobody-inter", {"period": "interaction", "no_human_input_during_window": "1"}),
-         ("no-meta", {})]
+         ("no-meta", {}),
+         # 第三种打回形状：声明与复核**一致**，但窗口里整机在忙（包 18 的窗口内自采）。
+         # 为什么必须进来：2026-09-23 20:49 三趟 idle 全被它打回，而表头当时说"互相矛盾"，
+         # 于是我去查一个根本不存在的期间谎报 —— 归类错了的拒因比没有拒因更费人。
+         ("busy-idle", {"period": "idle", "contaminated_by_foreign_load": "1"}),
+         # 同窗双仪器档（归因那一趟，#43/#73）：两档都一律不给资格。它**不是坏样本**，
+         # 而是"不是同一把尺量出来的那个量"——被测进程身上多了一枚 1 ms 采样器。
+         # 这一维必须由这里读回来（而不是只写在 meta 里）：否则归因档会去填 §1.3 的 3/3。
+         ("blame-idle", {"period": "idle", "blame_instrument": "1"}),
+         ("blame-inter", {"period": "interaction", "blame_instrument": "1"})]
 print("|".join("%s=%s" % (k, "Y" if pe(v)[0] else "N") for k, v in cases))')
   # 注意 `case` 里的 `|` 是**或**不是"与"：写成 `a=Y|b=N` 会被读成两个候选模式，
   # 于是"全串等于预期"永远匹不上——第一版就是这么红的（红得有价值：它当场把实际值打给我看）。
-  [ "$r" = "clean-idle=Y|dirty-idle=N|clean-inter=Y|nobody-inter=N|no-meta=Y" ] \
-    || { fail "四种形状的资格判定不对（拿到 ${r:-解析失败}）——自我矛盾的样本又能蒙混了"; return; }
+  [ "$r" = "clean-idle=Y|dirty-idle=N|clean-inter=Y|nobody-inter=N|no-meta=Y|busy-idle=N|blame-idle=N|blame-inter=N" ] \
+    || { fail "八种形状的资格判定不对（拿到 ${r:-解析失败}）——该打回的样本又能蒙混了"; return; }
   # 反向钉：结论话术要跟着翻转，不能只改退出码、表头还写着"有资格"
   local yes no
   yes=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c \
@@ -81,7 +90,14 @@ print("|".join("%s=%s" % (k, "Y" if pe(v)[0] else "N") for k, v in cases))')
   case "$yes" in *有资格*) ;; *) fail "干净 interaction 样本的话术里不再有「有资格」：$yes" ;; esac
   case "$no" in *"不可当交互期样本"*) ;; *) fail "没人滚的 interaction 样本话术没翻转（还是「$no」）——退出码判了、表头在骗人" ;; esac
   [ "$yes" != "$no" ] || { fail "两种样本话术一模一样，等于没判"; return; }
-  ok "期间资格：四种形状各判一次，且表头话术跟着翻转"
+  # 反向钉（话术不许替原因说话）：表头那一句**只说打回、不指原因**，原因住在 `period_eligibility`。
+  # 钉"不许出现『互相矛盾』"而不是钉"必须出现某句新话"——前者是这次的真错，后者只会逼下一个人改期望。
+  local head
+  head=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c \
+    'from perf_trace_summary import refusal_headline as rh; print(rh())')
+  case "$head" in *"互相矛盾"*) fail "表头又把每一种打回都说成「互相矛盾」（拿到「$head」）⇒ 拒因有两处出口，且这一处会指错方向" ;; esac
+  case "$head" in *"打回"*"不得作为结论"*) ;; *) fail "打回那一行不再出声（拿到「$head」）——少印一行说明就等于让它蒙混" ;; esac
+  ok "期间资格：八种形状各判一次，表头话术跟着翻转，且打回那一行不替原因说话"
 }
 
 selfcheck_probe_self_sufficient() {  # selfcheck_probe_self_sufficient <outdir>
@@ -215,70 +231,69 @@ print(h(low, 8.333))')
   ok "越档读数改口为「不判档，只记形状」；四边界与三态话术全对"
 }
 
-selfcheck_app_update_split() {  # selfcheck_app_update_split <outdir>
-  # 26) `app-update` 那行原来只报 max ⇒ "超 20.2 倍"。同一份数据里 p95 是 3.4 ms：
-  #     整体很快 + 一次 168 ms 孤例，被一个数同时说反两次。
-  #     现在拆成"主线程 stall 几个 / 其余迟到与 update 无关"，三种形状各钉一次。
+selfcheck_trio_agreement() {  # selfcheck_trio_agreement <outdir>
+  # 39) 「连测 ≥3 趟**且取值一致」**里的**后半句**必须有尺子量（spec §1.3）。
+  #     触发事件是 09-23 02:35 那一幕：`[interact] rc=0 ⇒ 可用 3/3 趟` 打得理直气壮，
+  #     而三趟的 hitch/s 是 **1.20 / 1.30 / 18.80**（同头同产物、六维上下文逐条合格）。
+  #     "可用"数的是结构（产物齐、没被 REFUSED、复核没打回），**从来没数过一致性**——
+  #     于是排程器的 3/3 被所有人读成"协议满足"。数样本 ≠ 量一致。
   local r
   r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
-from perf_trace_summary import app_update_verdict as v
-small = [0.5] * 600 + [3.0] * 40
-outl = [1.0] * 600 + [168.3]
-big = [12.0] * 30 + [30.0] * 10
-print("A|%s" % v(small, 8.333)[1][:6])
-print("B|%s" % v(outl, 8.333)[1][:14])
-print("C|%s" % v(big, 8.333)[1][:12])
-print("D|%s" % v(outl, 8.333)[0])')
-  printf '%s\n' "$r" | grep -q '^A|达标（没有' \
-    || { fail "全是小值时没判成「达标」：$(printf '%s' "$r" | tr '\n' ' ')"; return; }
-  printf '%s\n' "$r" | grep -q '^B|主线程 stall 1 个' \
-    || { fail "单个 168ms 孤例没被单独点出来（其余 600 个不该跟着背锅）"; return; }
-  printf '%s\n' "$r" | grep -q '^C|主线程 stall 40' \
-    || { fail "普遍超预算时没报出 40 个（不许反过来把它说成孤例）"; return; }
-  printf '%s\n' "$r" | grep -q 'p95 1.00' \
-    || { fail "分布里没有 p95（拿到 $(printf '%s' "$r" | grep '^D|' | cut -c3-60)）"; return; }
-  ok "app-update 判定分得清「整体快 + 一个孤例慢」与「普遍慢」"
+from perf_trio_agreement import verdict
+def R(n, fps=119.0, secs=20.0, rend=4.1, per="interaction", upd=None, vals=None):
+    return {"dir": "run", "seconds": secs, "hitch_n": int(round(n * secs)),
+            "hitch_per_s": n, "period": per, "render_p50_ms": rend, "update_values": vals or [],
+            "update_max_ms": upd, "surfaces_p50_fps": fps}
+TIGHT = [1.0 + 0.02 * i for i in range(14)]          # 一趟稳态心跳：p90 1.24 / max 1.26
+WIDE_MAX = [1.0 + 0.02 * i for i in range(13)] + [9.9]   # 同一形状，只多一枚孤例 max
+def idle(vals, upd):
+    return R(0.0, per="idle", upd=upd, vals=vals)
+a = verdict([R(1.2), R(1.3), R(1.5)], ["a", "b", "c"])[1]                 # 交互档：一致
+b = verdict([R(1.2), R(1.3), R(18.8)], ["a", "b", "c"])[1]                # 09-23 真形状：不一致
+c = verdict([R(1.2), R(1.3), None], ["a", "b", "x"])[1]                   # 缺件 ⇒ 不判
+d = verdict([R(1.2), R(1.3)], ["a", "b"])[1]                              # 不足 ⇒ 不判
+e = verdict([R(1.2), R(1.3, fps=88.0), R(1.5)], ["a", "b", "c"])[1]       # hitch 一致但出帧分歧
+f = verdict([R(1.2), R(1.3), R(1.5, per="idle")], ["a", "b", "c"])[1]     # 混档 ⇒ 不判
+g = verdict([idle(TIGHT, 1.26), idle(TIGHT, 1.30), idle(TIGHT, 1.34)], ["a", "b", "c"])[1]
+h = verdict([idle(TIGHT, 1.26), idle(TIGHT, 1.30),                      # 真形状：另一趟带 12 ms 尾巴
+             idle(TIGHT[:4] + [12.0] * 4 + TIGHT[4:], 12.0)], ["a", "b", "c"])[1]
+i = verdict([idle(TIGHT, 1.26), idle([], None), idle(TIGHT, 1.34)], ["a", "b", "c"])[1]
+j = verdict([idle(TIGHT, 1.26), idle(WIDE_MAX, 9.9), idle(TIGHT, 1.34)], ["a", "b", "c"])[1]
+print("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s" % (a, b, c, d, e, f, g, h, i, j))')
+  [ "$r" = "0|1|2|2|1|2|0|1|1|0" ] \
+    || { fail "一致性判定十种形状没各判对（拿到 $r，应为 0|1|2|2|1|2|0|1|1|0）⇒ 这条尺会把「3/3」放行"; return; }
+  # 第 7 条是**我自己第一版被自己的尺子抓到的**那条：idle 档的 hitch 真值≈0，
+  # 拿它做除法散布会把 0.00~0.95 判成"19.0× ⇒ 严重不一致"。判据量必须跟着档位走。
+  # 第 10 条钉的是 09-24 需求方裁定 A：`max` 极差比 7.9× 而 p90/均值都在带宽内 ⇒ **判一致**；
+  # 同一条夹具把尾巴加进 p90（第 8 条）就必须变红 —— 两条一对，才证明这条不是"怎么都放行"。
+  ok "同档连测的一致性有尺子了：按档取判据量（交互比 hitch/s、idle 比每趟自身 p90 与均值），十形状各判一次（含极值不当判据的正反一对）"
 }
 
-selfcheck_phase_blame() {  # selfcheck_phase_blame <outdir>
-  # 27) 42 个迟到帧里有 13 次 update 超预算 ⇒ 大多数迟到与主线程无关。
-  #     这种"该去查谁"的判断必须有一条尺子替人做，否则下一个读表的人会直接去改 update 常数。
-  local r
-  r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
-from perf_trace_metrics import phase_blame as p
-a = p([9.0] * 42, [10.0] * 42, 8.333)[1]        # 一比一 ⇒ 查主线程
-b = p([1.0] * 600 + [168.3], [10.0] * 42, 8.333)[1]   # 只占极少数 ⇒ 分开修
-c = p([1.0] * 100, [10.0] * 5, 8.333)[1]       # 一次都没超 ⇒ 全在合成侧
-d = p([1.0], [], 8.333)[1]                      # 无迟到帧 ⇒ 不给任何归因
-print("%s|%s|%s|%s" % ("先查主线程" in a, "分开修" in b, "全在渲染/合成侧" in c, d == "—"))')
-  [ "$r" = "True|True|True|True" ] \
-    || { fail "迟到帧归因四种形状没各判对（拿到 $r）"; return; }
-  ok "迟到帧归因分得清「查主线程 / 分开修 / 全在合成侧 / 无迟到」"
-}
-
-selfcheck_input_rate_qualification() {  # selfcheck_input_rate_qualification <outdir>
-  # 28) 【标记要有读者】`meta.input_source` 从今晚起带投递节奏（`synth@8ms`），
-  #     但"写了没人读"就是第二十三次要防的那个洞——我写完参数那一笔，
-  #     报表照旧对 25 Hz 批次印「有资格答 T1」。这一项就是这个读者的读者。
-  #     25 Hz 的滚动器每 40 ms 投一拍，比 8.333 ms 的帧预算还宽 ⇒ 出帧上限由仪器决定，
-  #     这种读数不许回答"到不到 120Hz"，只许回答"连续输入下有没有 hitch"。
-  local r
-  r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
-from perf_trace_summary import period_eligibility as pe
-c = [("真人","human"),("125Hz","synth@8ms"),("25Hz","synth@40ms"),
-     ("旧批次无节奏","synth"),("节奏是垃圾","synth@abc")]
-print("|".join("%s=%s" % (k, "Y" if pe({"period":"interaction","input_source":v})[0] else "N")
-               for k, v in c))')
-  [ "$r" = "真人=Y|125Hz=Y|25Hz=N|旧批次无节奏=N|节奏是垃圾=N" ] \
-    || { fail "输入节奏的资格判定不对（拿到 ${r:-解析失败}）——慢节奏样本又能冒充 T1 证据"; return; }
-  # 反向钉：不许只改退出码，表头话术必须跟着翻转（第 21 项同一套道理）
-  local slow fast
-  slow=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c \
-    'from perf_trace_summary import period_eligibility as pe; print(pe({"period":"interaction","input_source":"synth@40ms"})[1])')
-  fast=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c \
-    'from perf_trace_summary import period_eligibility as pe; print(pe({"period":"interaction","input_source":"synth@8ms"})[1])')
-  case "$slow" in *"不许交 T1"*) ;; *) fail "25 Hz 样本的表头话术没翻转（还是「$slow」）" ;; esac
-  case "$fast" in *"有资格答 T1"*) ;; *) fail "125 Hz 样本被一起挡在门外（「$fast」）——恒拒的闸门只会量产假绿" ;; esac
-  [ "$slow" != "$fast" ] || { fail "两种节奏的话术一模一样，等于没判"; return; }
-  ok "输入节奏有读者：五种形状各判一次，慢节奏与无节奏都不许冒充 T1 证据"
+selfcheck_refused_not_pooled() {  # selfcheck_refused_not_pooled <outdir>
+  # 55) **被闸门当场拒收的那一趟必须不被池化**。
+  #     本文件头注一直写着"没被 REFUSED"，可代码里没有那个读者——我拿临时探针数"这趟合格吗"时
+  #     就把一个 REFUSED 的目录读成了合格（挂死的录制会留下上一次的表文件，"表在 + REFUSED 在"就是入口）。
+  local rf
+  rf=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 - "$1" <<'PYCHK'
+import json, os, sys
+from perf_trio_agreement import read_run
+root = sys.argv[1]
+xml = ('<table><schema name="hitches"/>\n'
+       '<row><start-time id="1" fmt="0.1 ms">100000</start-time>'
+       '<duration id="2" fmt="9.00 ms">9000000</duration></row>\n</table>\n')
+for name in ("clean", "refused"):
+    d = os.path.join(root, "trio-" + name)
+    os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, "hitches.xml"), "w").write(xml)
+    json.dump({"period": "idle", "hitches_seconds": 20, "input_source": "human"},
+              open(os.path.join(d, "meta.json"), "w"))
+open(os.path.join(root, "trio-refused", "REFUSED"), "w").write("REFUSED\n闸门当场拒收\n")
+got_clean = read_run(os.path.join(root, "trio-clean")) is not None
+got_refused = read_run(os.path.join(root, "trio-refused")) is None
+print("%s|%s" % (got_clean, got_refused))
+PYCHK
+)
+  [ "$rf" = "True|True" ] \
+    || { fail "REFUSED 那一维没被读到（拿到「$rf」，应为 True|True）⇒ 被拒的一趟会混进散布"; return; }
+  ok "被当场拒收的那一趟混不进散布：同一份表 + meta，加 REFUSED 的要被排除、不加的要能读成可用"
 }

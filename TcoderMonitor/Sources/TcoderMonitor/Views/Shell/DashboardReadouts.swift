@@ -233,11 +233,15 @@ struct DashboardLiveReadout: View {
         // 不是旧写法的「0 B · 共 64 GB · 占 0%」——那把一次失败读成了「这台机器内存很空」。
         let live = SampleContext.from(state.monitor)
         let used = SystemReadings.memoryUsedBytes(live)
+        // 值槽只放数字、单位走小一号的 `unit:` 槽，分母留在脚注 —— 与性能页那一格同一个形状
+        // （`PerformanceSystemTiles.memoryTile` 的 P55/P60 定法）。总览这格原来把整个 `35.2 GB`
+        // 塞进值槽，英文窄态（1080 = 本 App 的 `minWidth`）实测"GB"掉到第二行，
+        // 四格同基线被破坏；而分母 `/ 48.0 GB` 本来就与脚注「共 48.0 GB · 73%」重复。
+        let reading = used.map { PerformanceSystemTiles.splitReading(ByteFormat.string($0, precision: 1)) }
         return MetricTile(
             label: "本机内存",
-            value: used.map { ByteFormat.string($0, precision: 1) },
-            unit: (used != nil && SystemReadings.memoryTotalBytes(live) != nil)
-                ? "/ \(Live.bytes(SystemReadings.memoryTotalBytes(live), precision: 1))" : nil,
+            value: used == nil ? nil : reading?.value,
+            unit: reading?.unit,
             caption: used == nil
                 ? SystemReadings.memoryGapReason(live)
                 : localizedFormat("共 %1$@ · %2$@",

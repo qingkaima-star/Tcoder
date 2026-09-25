@@ -117,40 +117,51 @@ def launch_ready_ms(rows):
       · 没有尾巴段（进程很快就退出）⇒ 取所有段的末端最大值，那本来就是全部启动成本。
     空表返回 None（调用方按"未观测到"处理，不许拿 0 当达标）。
     """
-    spans = [(s, d) for s, d in rows if d and d > 0]
+    spans, horizon = window_span_and_tails(rows)
     if not spans:
         return None
-    horizon = max(s + d for s, d in spans)
-    tails = [s for s, d in spans if d > horizon / 2.0]
+    tails = [s for s, d in spans if is_window_tail(d, horizon)]
     if tails:
         return min(tails)
     return horizon
 
 
-def phase_blame(updates, hitch_frames, budget_ms):
-    """把"迟到帧"按"主线程 update 是否同时超预算"分开数 —— 决定该去查谁。
+def window_span_and_tails(rows):
+    """(有效跨度段, 整表末端) —— **阈值只在这一处定义**（#71）。
 
-    只看 hitch 数会误诊：42 个迟到帧里只有 13 次 update 超预算，
-    那意味着**大多数迟到与主线程无关**（渲染/合成侧），
-    去优化 `_updateViewGraph` 的常数是白工；反之若几乎一比一，才该查视图更新。
-    两边都按"次数"报，**不假装是一次迟点对应一次 update**：
-    hitches-updates 一次迟点可能出多行（Brown/Red），602 与 42 就是这种关系。
+    为什么要单独把"跨度"抽出来：`launch_ready_ms` 早就剔掉了"活到录制结束"那段运行期
+    （2026-09-21：全表求和 10338 ms ≈ 录制时长，真实启动段 837 ms 就结束），
+    但同一份数据在 `trace_report.py cmd_switches` 里仍被当"冷构建成本"印成表格列。
+    ⇒ 一道修好的闸只闭合了一个出口，另一个出口还在放同一个坏数。
     """
-    ups = [v for v in (updates or []) if v is not None]
-    late = [v for v in (hitch_frames or []) if v is not None]
-    over = sum(1 for v in ups if v > budget_ms)
-    if not late:
-        return "本窗口无迟到帧", "—"
-    share = 100.0 * over / len(late)
-    line = "update 超预算 %d 次 vs 迟到 %d 帧（比 %.0f%%）" % (over, len(late), share)
-    if over == 0:
-        return line, "主线程一次都没超 ⇒ 迟到全在渲染/合成侧，别改视图更新常数"
-    if share >= 80:
-        return line, "几乎一比一 ⇒ 先查主线程 update（视图粗粒度失效那一族）"
-    return line, ("主线程只占 %d 次，其余 %d+ 次要去渲染/合成侧找 ⇒ 两件事分开修"
-                  % (over, max(0, len(late) - over)))
+    spans = [(s, d) for s, d in rows if d and d > 0]
+    return spans, max((s + d for s, d in spans), default=0.0)
 
 
+def is_window_tail(duration_ms, horizon_ms):
+    """这一段是不是"活到窗口结束"的运行期尾巴：时长 > 整表跨度的一半。
+
+    与 `launch_ready_ms` **共用**这一条判据，不另立口径——两处对同一段"该不该剔"
+    意见不一致时，同一份 trace 就会出两个数（#44 那一族的成因）。
+    """
+    return bool(horizon_ms) and duration_ms > horizon_ms / 2.0
+
+
+NARROW_FLOOR_RATIO = 0.8
+
+
+def interval_shaped(values, budget_ms):
+    """读数是不是「贴着一帧的基线」那种窄分布 ⇒ 它的单位不能当占用时长引用。
+
+    判据**全仓只有这一条**：`trace_report.caveat_for` 调的就是这里。
+    为什么不能有两份（2026-09-23 的现场账）：交互档样本里 `hitches-updates` 是
+    `n=2090 / p50 9.89 / 逐值下限 9.31 ms`，而同窗迟到帧只有 24 个 ⇒
+    旧的 `phase_blame` 把 1841 vs 24 算成"比 7671%"，还据此下了一句
+    "几乎一比一 ⇒ 先查主线程"。那是**用一张按事件节拍计的表去定归因**，
+    与我同一天在 §R 里自纠掉的误读是同一个错，只是换了一支函数。
+    """
+    vals = [v for v in (values or []) if v is not None]
+    return bool(vals) and min(vals) >= NARROW_FLOOR_RATIO * budget_ms
 def in_display_regime(achieved_fps, budget_ms, ratio=0.8):
     """实测出帧是否还落在 `budget_ms` 所假设的那个刷新率档内。
 
@@ -272,27 +283,6 @@ def load_measure(d, key):
     if js is not None and "_doc" in js:
         js = None
     return {"doc": doc, "json": js, "present": doc is not None or js is not None}
-
-
-def dedupe_pairs(measure):
-    """按 (起始, 时长) 去重后的时长列。
-
-    hitches-updates 里一次 app update 会出两行（Brown / Red 两个 containment-level），
-    不去重就打不赢 spec §1 那列"7 个值"的形状。
-    """
-    if measure["doc"] is not None:
-        seen, out = set(), []
-        for s, v in measure["doc"].spans():
-            key = (round(s, 1), round(v, 2))
-            if key in seen:
-                continue
-            seen.add(key)
-            out.append(v)
-        return out
-    js = measure["json"]
-    if js and "values" in js:
-        return sorted(set(float(v) for v in js["values"]))
-    return []
 
 
 def fps_counts(measure):

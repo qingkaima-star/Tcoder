@@ -33,7 +33,8 @@ struct CodeRiskView: View {
                 }
             } else if let copy = CodeDataGate.emptyCopy(for: report?.code,
                                                        page: "复杂度、重复率与改进建议") {
-                EmptyStateView(icon: copy.icon, title: copy.title, message: copy.message)
+                EmptyStateView(icon: copy.icon, title: copy.title, message: copy.message,
+                               help: copy.help)
             }
         }
     }
@@ -61,7 +62,7 @@ struct CodeRiskOverviewSection: View {
                     DataHeroReadout(value: NumberFormat.percent(code.duplicationRatio, precision: 1),
                                     note: "的代码行落在重复块内")
                     CopyHelpBadge(localizedFormat("的代码行落在重复块内 —— 综合风险 %1$@，明细见下方「重复代码率」",
-                                                  code.overallRisk.rawValue))
+                                                  localizedCopy(code.overallRisk.rawValue)))
                 }
 
                 // 盘点表 C2（DataCaption 口径，留短藏长 ●）：屏上留三个数本身（口径的**内容**
@@ -149,9 +150,12 @@ struct CodeDuplicationSection: View {
                     EmptyStateView(
                         icon: .noRisk,
                         title: "已完成扫描，未发现重复块",
-                        message: "扫描了 \(NumberFormat.grouped(code.totalFiles)) 个文件 / "
-                            + "\(NumberFormat.grouped(code.codeLines)) 行有效代码，"
-                            + "重复率为 \(NumberFormat.percent(code.duplicationRatio, precision: 1))。"
+                        // 整句键（P69a）：旧写法是三段字面量 `+` 起来再交给 `Text(变量)`，
+                        // 那一串嵌着测得值 ⇒ 不是键，英文态永远铺中文。
+                        message: localizedFormat("扫描了 %1$@ 个文件 / %2$@ 行有效代码，重复率为 %3$@。",
+                                                 NumberFormat.grouped(code.totalFiles),
+                                                 NumberFormat.grouped(code.codeLines),
+                                                 NumberFormat.percent(code.duplicationRatio, precision: 1))
                     )
                 } else {
                     let rows = visibleRows
@@ -207,9 +211,14 @@ struct CodeComplexitySection: View {
                 EmptyStateView(
                     icon: .noRisk,
                     title: "已完成扫描，没有函数上榜",
-                    message: "本次扫描没有函数达到引擎给出的复杂度上榜条件。参考数字：超长函数 "
-                        + "\(NumberFormat.grouped(code.longFunctions)) 个 · 平均函数长度 "
-                        + "\(NumberFormat.grouped(code.averageFunctionLength)) 行。"
+                    // 整句键（P69a）：与上面那句空态同一个坑 —— 三段拼完的串不是键。
+                    // 盘点表「留短藏长」：屏上留「扫过了、没函数上榜」这半句（它是这一卡的
+                    // 诚实凭据，藏了就会被读成"没扫"）；「参考数字：超长函数 N 个 · 平均函数长度
+                    // M 行」整句进 ⓘ —— 那两个数在本页「风险总览」的读数带里已各占一格。
+                    message: localizedCopy("本次扫描没有函数达到引擎给出的复杂度上榜条件。"),
+                    help: localizedFormat("本次扫描没有函数达到引擎给出的复杂度上榜条件。参考数字：超长函数 %1$@ 个 · 平均函数长度 %2$@ 行。",
+                                          NumberFormat.grouped(code.longFunctions),
+                                          NumberFormat.grouped(code.averageFunctionLength))
                 )
             } else {
                 VStack(alignment: .leading, spacing: Theme.Spacing.md) {

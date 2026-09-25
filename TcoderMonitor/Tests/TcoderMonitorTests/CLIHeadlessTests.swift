@@ -237,6 +237,20 @@ final class CLIHeadlessTests: XCTestCase {
                      "chmod 000 的目录被放行了 —— `fileExists` 为 true 不等于读得到")
     }
 
+    /// #60：CLI 的装配口不许把真实写法倒剥成别名短写。
+    /// 现证（09-25 兜底树）：同一枚提交，`/private/tmp` 那棵红两条、仓库内那棵全绿，
+    /// 红的就是这一维——`standardizedFileURL` 把 `/private/tmp/…` 剥成 `/tmp/…`，
+    /// 于是同一个目录在 CLI 与界面印成两个串。这里给**方向**加判据，不只给一致性加。
+    func test_validatedURLKeepsThePhysicalSpellingForAliasPrefixes() throws {
+        let dir = URL(fileURLWithPath: "/private/tmp/tcoder-url-alias-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        // 故意用「别名短写 + 尾随斜杠」这一个输入：两个坑一次测掉。
+        let alias = dir.path.replacingOccurrences(of: "/private/tmp/", with: "/tmp/") + "/"
+        XCTAssertEqual(CLIScan.validatedURL(for: alias)?.path, dir.path,
+                       "别名短写与尾随斜杠都该归到同一个物理串，且归向真实写法")
+    }
+
     func test_scanJSONDecodesBackIntoProjectReport() async throws {
         let outcome = await scan().outcome(path: fixtureDir, allowNetwork: false)
         XCTAssertEqual(outcome.exit, .ok, "\(outcome.report?.failedSections ?? [])")

@@ -13,6 +13,7 @@
 #
 # 用法: scripts/paired_page_evidence.sh [批次名]
 #   产物: .scratch/evidence-<rev>-<批次名>/{light,dark}-{top,tail}/ + 每趟一份 PROVENANCE
+#         （`<rev>` 与 PROVENANCE 的 `rev=` 都是**被拍二进制自己的**提交号，不是拍图时的 HEAD）
 #   EXPECT_PAGES=<n>  每趟应有张数（默认 9）
 #   VIEWPORT_PT=<pt>  取证窗口高（默认 1000；本机屏高 1080，请求再高会被 AppKit 钳住）
 #   CAPTURE_WINDOW_WIDTH=<pt>  取证窗口宽（不设 = 产品默认 1280；量窄态传 1080 = 本 App 的 minWidth）
@@ -25,7 +26,16 @@ SCRATCH="${TCODER_SCRATCH:-$REPO_ROOT/.scratch}"
 BIN="$PWD/dist/Tcoder.app/Contents/MacOS/TcoderMonitor"
 BRIGHT="$SCRATCH/page_brightness"
 BRIGHT_SRC="$PWD/scripts/page_brightness.swift"
-REV=$(git rev-parse --short HEAD)
+# 「这批图拍的是哪个提交」只认**二进制自己的记录**，不认拍图那一刻的 HEAD。
+# 直接起因（2026-09-23 18:01 实测）：主树在构建之后又落了一笔只动 docs 的提交，
+# `verify_provenance.sh` 按产物码 tree 正常放行（代码确实同源），而旧写法把
+# `git rev-parse HEAD` 盖进每趟 PROVENANCE 的 `rev=` —— 16 张图的归属于是被说成一个
+# **从没被拍过**的头（拍的是 fa954fa 的二进制，纸上写 bdf53f4）。
+# 改成认二进制的头以后，走错方向只会"显得更旧"（保守，判过期），不会"显得更新"（假新鲜）。
+source "$PWD/scripts/perf_provenance.sh"
+BINARY_COMMIT=$(provenance_manifest_value TCODER_GIT_REVISION)
+REV=$(git rev-parse --short "$BINARY_COMMIT" 2>/dev/null)
+HEAD_REV=$(git rev-parse --short HEAD)
 BATCH="${1:-$REV}"
 OUT_ROOT="$SCRATCH/evidence-$REV-$BATCH"
 EXPECT="${EXPECT_PAGES:-9}"
@@ -38,6 +48,7 @@ WIDTH="${CAPTURE_WINDOW_WIDTH:-}"
 
 fail() { echo "!! $1"; exit 1; }
 
+[ -n "$REV" ] || fail "读不到 dist/RELEASE_MANIFEST.env 里的 TCODER_GIT_REVISION —— 先跑 ./scripts/build_app.sh release"
 mkdir -p "$OUT_ROOT" || fail "建不了 $OUT_ROOT"
 
 # ── 前置：尺子先自证，再来量界面 ────────────────────────────────────────────
@@ -51,6 +62,8 @@ fi
 "$BRIGHT" selfcheck > "$SCRATCH/page_brightness-selfcheck.log" 2>&1 \
   || fail "亮度判据 selfcheck 没过（见 $SCRATCH/page_brightness-selfcheck.log）—— 尺子不可信，不出数"
 echo "== 尺子自证通过；被拍产物 $BIN；输出 $OUT_ROOT"
+echo "   归属提交 $REV（二进制自己的记录）；拍图时 HEAD=$HEAD_REV"
+[ "$REV" = "$HEAD_REV" ] || echo "   ※ 两者不同 ⇒ 本次靠「产物码 tree 相同」放行，每趟 PROVENANCE 会同时写下 head_at_capture"
 
 # ── 外观：记下原值，无论怎么结束都要还原（这是被反复要求的例外，只动这一项）──
 appearance() { osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode' 2>/dev/null; }
@@ -74,13 +87,23 @@ for pass in light-top light-tail dark-top dark-tail; do
   sleep 1
   got=$(appearance)
   [ "$got" = "$want_dark" ] || fail "外观没翻过去（要 $want_dark，读到 $got）—— 这一趟不拍"
+  # `CAPTURE_TERM` 默认开：**这条驱动自己起的实例，自己收尾**。
+  # AGENTS §2.1（需求方 2026-09-23 定的通则）：谁起的谁退，起跑前后各数一次实例数。
+  # 直接起因（2026-09-23 12:04 实测）：本驱动四趟跑完，`pgrep -x TcoderMonitor` 数到 **4 个孤儿**
+  # （ppid=1，启动时刻 11:58:53 / 11:59:10 / 11:59:28 / 11:59:45，正好一趟一个），
+  # 而 perf 那条流的 `perf_wait_window.sh` 因此已经白等了 1 小时 14 分钟 ——
+  # 全机只有一个取证窗口，留着孤儿不是"等人工 Cmd+Q"，是**占着别人的窗口**。
+  # 底层脚本仍保留 `CAPTURE_TERM=0` 那条保守路径（只通报 pid），但**只发给自己的 pid、
+  # 且先核对二进制路径**，绝不按 bundle id 广播 quit（那会全机生效，误杀别家正在拍的实例）。
   CAPTURE_WINDOW_HEIGHT="$VIEWPORT" CAPTURE_WINDOW_WIDTH="$WIDTH" CAPTURE_SCROLL="$scroll" \
+    CAPTURE_TERM="${CAPTURE_TERM:-1}" \
     ./scripts/capture_pages_isolated.sh "$out" > "$OUT_ROOT/$pass.capture.log" 2>&1
   inner=$?
   mkdir -p "$out"
   cat > "$out/PROVENANCE" <<EOF
 rev=$REV
-commit=$(git rev-parse HEAD)
+commit=$BINARY_COMMIT
+head_at_capture=$(git rev-parse --short HEAD)
 branch=$(git rev-parse --abbrev-ref HEAD)
 pass=$pass
 polarity=$polarity

@@ -243,9 +243,22 @@ extension DuplicationScan {
     /// 冻结的 `DuplicatedBlock.id` 只由「出现文件集合 + lineCount」拼成，两个长度相同的
     /// 不同克隆会撞同一个 id（SwiftUI ForEach 会报 duplicate identifiers 并错乱 diff）。
     /// 契约缺口不能改 Models，这里按 id 去重后再截断到 20：**只削明细榜单，不动 ratio**。
+    ///
+    /// RD-85：被去重削掉的那几块现在有读数了（返回值第五项 `droppedByIdCollision`）。
+    /// 在那之前「榜内 + 榜外 == 总数」在撞 id 时天然不平，而且**不平多少没人知道** ——
+    /// 于是「去重后口径」这句限定语是一句无法反驳的免责声明，不是一条账。
+    ///
+    /// 榜外坐标（返回值的第四项）**就是 `id` 本身**，一个字都不再加工：
+    /// RD-52 那一半曾在这里补过一次「按根剥前缀」（`relativeCoordinates`），
+    /// 因为当时生产点给的是绝对路径。RD-61 第二半把坐标在唯一生产点
+    /// （`DuplicationScanState.fragmentOf`）就定成相对被扫根，那层加工于是变成
+    /// 第二次猜前缀 —— 已删除。保留的边界：它当时撑住的那条 ≤1,200 字符的门禁
+    /// 判据一字未动，改由 `OutsideBoardCoordinatesTests` 与
+    /// `DuplicateCoordinatePortabilityTests` 两把尺子共同盯（后者量两棵不同深度的根）。
     static func rankedBlocks(_ input: [DuplicatedBlock])
         -> (blocks: [DuplicatedBlock], droppedByCap: Int, linesOutsideReportedBlocks: Int,
-                 outsideBoardCoordinates: [String]) {
+                 outsideBoardCoordinates: [String], droppedByIdCollision: Int,
+                 mergedAwayCoordinates: [String]) {
         var blocks = input
         if blocks.count > 1 {
             blocks.sort { lhs, rhs in
@@ -253,16 +266,32 @@ extension DuplicationScan {
                 return lhs.id < rhs.id
             }
         }
+        // 一趟扫完两件事：留下的（去重后榜单）与被合并掉的。**被合并掉的那几处必须点名**
+        // （RD-17 那条老账：只给一个总数 = 读的人既无法反驳、也无从去核对到底是哪几处）。
+        // 点的是**它自己的坐标**（path:起始行），不是它的 `id` —— 它的 id 与留下那条一字不差，
+        // 报名字等于没报；只有"哪个文件的哪一行那份没上榜"是可核对的。
         var seenIDs = Set<String>()
-        blocks = blocks.filter { seenIDs.insert($0.id).inserted }
-        guard blocks.count > DuplicationEngine.maxBlocks else { return (blocks, 0, 0, []) }
-        let dropped = blocks[DuplicationEngine.maxBlocks...]
-        return (Array(blocks.prefix(DuplicationEngine.maxBlocks)),
+        var kept: [DuplicatedBlock] = []
+        var mergedAway: [DuplicatedBlock] = []
+        for block in blocks {
+            if seenIDs.insert(block.id).inserted { kept.append(block) } else { mergedAway.append(block) }
+        }
+        let collided = mergedAway.count
+        let mergedCoordinates = mergedAway.prefix(DuplicationScan.outsideBoardSampleLimit)
+            .map { block in
+                block.occurrences.map { "\($0.path):\($0.startLine)" }.joined(separator: " + ")
+            }
+        guard kept.count > DuplicationEngine.maxBlocks else {
+            return (kept, 0, 0, [], collided, mergedCoordinates)
+        }
+        let dropped = kept[DuplicationEngine.maxBlocks...]
+        return (Array(kept.prefix(DuplicationEngine.maxBlocks)),
                 dropped.count,
                 dropped.map(\.lineCount).reduce(0, +),   // 明细外的行数（ratio 已含，只是不列明细）
                 // 榜外块的稳定坐标：`id` 由「涉及路径排序拼接 + 行数」构成，与榜单同一把排序键，
                 // 所以同一份输入永远给出同一串（RD-17：不许只留一个总数）。
-                dropped.prefix(DuplicationScan.outsideBoardSampleLimit).map(\.id))
+                dropped.prefix(DuplicationScan.outsideBoardSampleLimit).map(\.id),
+                collided, mergedCoordinates)
     }
 
     /// 榜外坐标最多点这几个名字。再多就把一行限制说明撑成一段散文；

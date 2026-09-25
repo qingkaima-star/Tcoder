@@ -184,7 +184,11 @@ final class ManifestLabLogAndGitTests: ManifestLabTestCase {
         // 且解析出的根与 0 跳都如实写进结果，UI 才能告诉用户「我分析的是哪个仓」。
         XCTAssertEqual(git.discoveryMode, .selectedDirectory,
                        "所选目录即仓库时 discoveryMode 必须是 .selectedDirectory")
-        XCTAssertEqual(git.resolvedRepositoryRoot, root.path,
+        // `resolvedRepositoryRoot` 自 #60 起是**物理写法**（`ScannedPath.canonical`），而 NSTemporaryDirectory()
+        // 给的是 `/var/folders/…` 这一种别名短写 ⇒ 直接比字符串会比出一次假不等。
+        // 断言的意思没变（「解析出的根就是夹具根」），只是两边都要用同一把尺子读；
+        // 这一格本身也正是本次缺陷的形状：同一个目录两种写法，两个面各说一种。
+        XCTAssertEqual(git.resolvedRepositoryRoot, ScannedPath.canonical(root.path),
                        "解析出的仓库根必须就是夹具根")
         XCTAssertEqual(git.discoveryHops, 0)
         XCTAssertTrue(git.nestedCandidates.isEmpty,

@@ -74,12 +74,15 @@ struct CodeMarkersSection: View {
     }
 
     /// 零标记要写成"扫过、没找到"，而不是留一片空白让人以为没扫。
+    /// 两句都是**整句键**：英文态实测残留里那句 FIXME 提示长期挂在 A 类
+    /// （两个半句各自登记过，运行时拼起来就永远查不中）。
     static func markerNote(_ code: CodeMetrics) -> String {
         if code.todoCount + code.fixmeCount == 0 {
-            return "已完成扫描：\(NumberFormat.grouped(code.totalFiles)) 个文件里没有 TODO / FIXME 标记。"
+            return localizedFormat("已完成扫描：%1$@ 个文件里没有 TODO / FIXME 标记。",
+                                   NumberFormat.grouped(code.totalFiles))
         }
-        return "FIXME \(NumberFormat.grouped(code.fixmeCount)) 处通常表示已知缺陷，"
-            + "建议优先在对应文件里核对。"
+        return localizedFormat("FIXME %1$@ 处通常表示已知缺陷，建议优先在对应文件里核对。",
+                               NumberFormat.grouped(code.fixmeCount))
     }
 }
 
@@ -149,9 +152,10 @@ struct CodeHotspotSection: View {
     static func truncationNote(_ code: CodeMetrics, shown: Int) -> String {
         let total = code.reportedHugeFileCount
         guard total > shown else {
-            return "共 \(NumberFormat.grouped(total)) 个，已全部展示。"
+            return localizedFormat("共 %1$@ 个，已全部展示。", NumberFormat.grouped(total))
         }
-        return "当前列出 \(NumberFormat.grouped(shown)) / \(NumberFormat.grouped(total)) 个。"
+        return localizedFormat("当前列出 %1$@ / %2$@ 个。",
+                               NumberFormat.grouped(shown), NumberFormat.grouped(total))
     }
 
     static func largestLineCount(_ code: CodeMetrics) -> Int {
@@ -159,7 +163,8 @@ struct CodeHotspotSection: View {
     }
 
     static func subtitle(_ code: CodeMetrics) -> String {
-        if code.hugeFiles.isEmpty { return "行数是单文件总行数（含空行与注释）" }
+        // 这里返回的是**字符串**，落到 `Text(变量)` 上永远不查表 ⇒ 空支那句必须自己查。
+        if code.hugeFiles.isEmpty { return localizedCopy("行数是单文件总行数（含空行与注释）") }
         // 「共 N 个」是**总数**口径，读真总数：榜单被 `prefix(20)` 截过，直读榜长会把 552 写成 20。
         return localizedFormat("共 %1$@ 个 · 最大 %2$@ 行 · 点击条目在 Finder 中显示",
                                 NumberFormat.grouped(code.reportedHugeFileCount),

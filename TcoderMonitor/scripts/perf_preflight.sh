@@ -22,14 +22,21 @@
 # 否则两边页名漂移会让 switch 档悄悄测到不存在的页（SwiftUI 会回落到默认页）。
 # -----------------------------------------------------------------------------
 source "$(dirname "${BASH_SOURCE[0]}")/perf_probes.sh"  # 探针族搬出去了，见那个文件的头注
+source "$(dirname "${BASH_SOURCE[0]}")/perf_measure_io.sh"  # 采集与落盘那一层，见那个文件的头注
+source "$(dirname "${BASH_SOURCE[0]}")/perf_chain_guard.sh"  # 「同树只一条链」＋归属行的有界显示（`path_for_display`）
+# 收尾磁盘卫生这一族 2026-09-25 整族搬进 `perf_reclaim.sh`（本文件当时 378/400，
+# 就地补第 ④ 条就是把尺寸债再推一笔）。第 22 项反例照旧 source 本文件就调得到。
+source "$(dirname "${BASH_SOURCE[0]}")/perf_reclaim.sh"
 # ── 磁盘卫生：第七维（2026-09-21 把这台机器吃到只剩 4.4 GiB 之后加的）────────
 # 根因不在我的样本目录，而在 **xctrace 的中间产物**：`instruments*.ktrace`
 # 默认落在 `$TMPDIR`，而采集进程被 kill、超时或崩溃时**不会自己清**。
-# 现场是 21 个孤儿共 103 GB。⇒ 三条硬规矩进代码，不靠我记得：
+# 现场是 21 个孤儿共 103 GB。⇒ 四条硬规矩进代码，不靠我记得：
 #   ① 样本根目录 = 仓库内 `.scratch/`（AGENTS §1.6 的一次性产物落点，已 gitignore；
 #      不再用全局 /tmp，也不再靠 $TMPDIR）
 #   ② 每轮收尾固定扫残留 + 确认自己起的采集进程真退了
 #   ③ 可用低于阈值就**拒跑**（与其余六维同形状、同一个 hard 标记）
+#   ④ 判废那一趟留下的 GB 级原始 trace 每轮报一次可回收体积（缺陷 #70：① 把产物
+#      搬进仓库之后，② 的扫残留就一直只扫一个不再有人写字的目录）
 SCRATCH="${SCRATCH:-$(git rev-parse --show-toplevel)/.scratch}"
 # 阈值与判定都在 `disk_headroom_bad`（环境变量 TCODER_MIN_FREE_GIB 可覆盖）
 QUIESCE_MIN="${QUIESCE_MIN:-5}"  # 静默合格线（与 perf_harness.sh 同值）。写在闸门这边，
@@ -63,15 +70,21 @@ sections() {
 # 与 `verify_provenance.sh` 共用同一把手尺子（见那个文件的头注）。
 source "$(dirname "${BASH_SOURCE[0]}")/perf_provenance.sh"
 
-preflight_context() {  # preflight_context <outdir> <pid>
-  local out="$1" pid="$2" f="" cores load1 front visible others other_detail free_gib hard=0
+preflight_gather() {  # 只取数：判据住 `preflight_gates*`，写盘住 `preflight_write_context`
+  # 【这里的赋值**一律不带 local**】值要落回调用方 `preflight_context` 的那几个 local
+  # （bash 动态作用域）。在这里 local 一下，六条闸门就各自拿到空串——
+  # 那条"探针函数不在场就恒放行"的老路是它的近亲。
   cores=$(sysctl -n hw.ncpu 2>/dev/null || echo 8)
   load1=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | awk '{print $1}')
   [ -n "$load1" ] || load1=0
-  f="$out/measurement-context.txt"
   front=$(preflight_front_app)
   visible=$(preflight_window_state "$pid")
+  # 启动档：拿一个还不存在的 pid 去问"有没有在屏窗口"，答案必然是"没有"——那是探针在说它没被问对，
+  # 不是被测进程的事实。写成一句人话，免得上下文里留下一个看着像实测的"无在屏窗口"。
+  [ "$PREFLIGHT_TIER" = "launch" ] && visible="启动档：此刻窗口尚未建立"
   others=$(concurrent_heavy_jobs)
+  # 第七维·预热：被测实例跑了多久（读不到留「取不到」，**不回落成 0**——0 会被读成"刚起来"）。
+  uptime_secs=$(instance_uptime_seconds "${pid:-}" || true)
   free_gib=$(disk_free_gib)
   mkdir -p "$SCRATCH" 2>/dev/null || true   # 样本根目录：项目内、.gitignore 已忽略
   other_detail=$(concurrent_heavy_jobs_detail)
@@ -79,16 +92,34 @@ preflight_context() {  # preflight_context <outdir> <pid>
   # 设了它再量帧率，量的就是台账自己的开销——所以这一维写进上下文，并且直接拒跑。
   i18n_ledger="${TCODER_I18N_RUNTIME_LEDGER:-}"
   # 人手静默：整机 load 与并发编译挡得住"机器在忙"，挡不住"有人在点这个窗口"。
-  local qline quiet
   qline=$(quiescence_probe)
   quiet=$(quietest_seconds "$qline")
-
   # 取二进制的出身（**不是**工作树 HEAD）：闸门第六维与上下文都要用
   BUILD_REV=$(provenance_manifest_value TCODER_GIT_REVISION)
   BUILD_CLEAN=$(provenance_manifest_value TCODER_GIT_CLEAN)
   BUILD_TREE=$(provenance_manifest_value TCODER_PRODUCT_TREE)
-  HEAD_TREE=$(provenance_product_tree HEAD)
+  # 【"被测内容"可以是别的 rev —— 但归属必须照样算清楚】包 5 的前置。
+  # 为什么需要：§Q 那 14 处还掉之后，要回答"从多少降到多少"，就必须能再量一次**改动前**那份内容；
+  # 而 `MEASURE_REV` 未设时一切照旧（比 HEAD），设了就必须比它——**这条覆盖不许变成跳过判定**。
+  TARGET_REV=$(provenance_target_rev)
+  HEAD_TREE=$(provenance_product_tree "${MEASURE_REV:-HEAD}")
+}
 
+# 第七维·预热（`instance_uptime_seconds` / `preflight_gates_warmup`）住在旁边那个文件，
+# 由**本文件**自己 source 进来（不是调用方拼）：selfcheck 里有「单独 source preflight」那条路，
+# 它必须照样看得见全部函数 —— 两个入口各拿一半函数是这条链上写死不许发生的形状。
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/perf_warmup.sh"
+
+preflight_context() {  # preflight_context <outdir> <pid> [档]   档=measure(默认) | launch(冷启动)
+  local out="$1" pid="$2" f="" cores load1 front visible others other_detail free_gib hard=0
+  local quiet qline i18n_ledger uptime_secs
+  # 动态作用域：`preflight_gather`（取数）与 `preflight_gates`（判定，含被 selfcheck 第 17 项
+  # **单独调用**那条路）读写的都是上面这几个 local，所以拆函数既没改取数顺序，也没引入新全局量；
+  # 启动档的"跳过两维"只影响从本函数进来的调用，矩阵那条不传第三参 ⇒ 行为一字不变。
+  local PREFLIGHT_TIER="${3:-measure}"
+  f="$out/measurement-context.txt"
+  preflight_gather
   preflight_write_context "$out" "$f"
   # 六条硬闸各自读上面那几个量（bash 是动态作用域：本函数的 `local` 在被调函数里照样可见，
   # 拆函数没有改变任何取数顺序，也没有引入新的全局量）。
@@ -99,7 +130,12 @@ preflight_context() {  # preflight_context <outdir> <pid>
     # （今天就真出现了三个只有 context/meta 的目录。）
     printf 'REFUSED\n这一趟没有采数：测量上下文不合格，闸门拒跑。原因见同目录 %s。\n' "$(basename "$f")" \
       > "$out/REFUSED"
-    die "测量上下文不达标（详见 $f）。IGNORE_CONTEXT_GATE=1 可强行跳过，但那批读数必须标注为『条件不合格』。"
+    echo "!! 测量上下文不达标（详见 $f）。IGNORE_CONTEXT_GATE=1 可强行跳过，但那批读数必须标注为『条件不合格』。" >&2
+    # 【只 return，不 die】`die` 住在**宿主**脚本里：单独 source 本文件（自测、排程器、手工排查）时它不在场，
+    # 2026-09-23 实测 `die: command not found` 之后这条"拒跑"分支**以 rc=0 走完**——
+    # 缺一个函数就把闸门从"拒"翻成"放"，是所有失效方向里最坏的那种。
+    # 于是判定只负责说"不合格 + 回 1"，**退不退由调用方决定**（三处调用点各自 `|| die`/`|| return 1`）。
+    return 1
   fi
   [ "$hard" = "1" ] && echo "    ⚠ IGNORE_CONTEXT_GATE=1：条件不合格，这批读数不得进任何对比表。" >&2
   echo "    上下文已落 $f"
@@ -112,18 +148,26 @@ preflight_context() {  # preflight_context <outdir> <pid>
 preflight_write_context() {  # preflight_write_context <outdir> <context 文件路径>
   # 这一份上下文是"读数可互比"的凭据：谁后面拿这批数做对比，都得先看见同一组条件。
   local f="$2"
+  # 下面五个都是**宿主脚本**的全局（`perf_harness.sh` 才定义）：本文件被单独 source 时
+  # 它们不在场，而 `set -u` 下读到未初始化量是**当场中止整个 shell**。
+  # 更糟的是这一整块原本带 `2>/dev/null` ⇒ 中止那句 "unbound variable" 被丢进黑洞，
+  # 现场只剩"什么都没印、REFUSED 没落盘"（2026-09-25 t20 那批之后我自己踩出来：
+  # 独立调用 `preflight_context` 想造一份真判废，结果它一个字没说就死了）。
+  # ⇒ 两条一起改：读法全部给 `${…:-取不到}` 的活路，**并且把块级 2>/dev/null 摘掉**
+  #    （写不出文件由后面那个 `|| die` 负责报，不该由黑洞负责）。
   { echo "# 测量上下文（读数只有在这一组条件下才可互比）"
-    echo "时间=$(date '+%F %T')  HEAD=$(git rev-parse --short HEAD 2>/dev/null)  工作树改动数=$DIRTY"
-    echo "被采pid=$pid  二进制=$TARGET_BINARY  口径=$TARGET_FLAVOR"
-    echo "   产物码 tree=${BUILD_TREE:-未记录}  当前=${HEAD_TREE:-未记录}"
+    echo "时间=$(date '+%F %T')  HEAD=$(git rev-parse --short HEAD 2>/dev/null)  工作树改动数=${DIRTY:-取不到}"
+    echo "被采pid=$pid  二进制=${TARGET_BINARY:-取不到}  口径=${TARGET_FLAVOR:-取不到}"
+    echo "   产物码 tree=${BUILD_TREE:-未记录}  被测内容(${MEASURE_REV:-HEAD})=${HEAD_TREE:-未记录}"
     echo "产物构建rev=${BUILD_REV:-未记录}  构建时树clean=${BUILD_CLEAN:-未记录}  ← 必须与上面 HEAD= 同一份代码，否则读数归错对象"
     [ -n "${PROVENANCE_NOTE:-}" ] && echo "   ※ 归属靠产物码 tree 放行（rev 不同）：${PROVENANCE_NOTE}"
     echo "实例数=${COEXIST:-1}  前台App=$front  被测进程visible=$visible"
+    echo "被测实例已跑=${uptime_secs:+${uptime_secs}s}${uptime_secs:-取不到}  预热线=${WARMUP_MIN_SECONDS:-120}s（低于线 ⇒ 量到的是启动首扫，不是稳态心跳）"
     echo "load1=$load1  核数=$cores  并发重活=${other_detail:-无}"
     echo "人输入静默=${quiet:-取不到}s  明细=${qline:-（探针没跑起来）}"
-    echo "hitches_seconds=$SECONDS_HITCHES  tp_seconds=$SECONDS_TP"
+    echo "hitches_seconds=${SECONDS_HITCHES:-取不到}  tp_seconds=${SECONDS_TP:-取不到}"
     echo "诊断开关 TCODER_I18N_RUNTIME_LEDGER=${i18n_ledger:-未设（渲染路径零成本）}"
-  } > "$f" 2>/dev/null || die "写不出 $f"
+  } > "$f" || die "写不出 $f"
   echo "    上下文：前台=$front  visible=$visible  load1=$load1/$cores  并发重活=${other_detail:-无}  静默=${quiet:-取不到}s  磁盘可用=${free_gib:-取不到}GiB"
 }
 
@@ -135,13 +179,18 @@ preflight_gates_identity() {
   # 而我 attach 的那个 `dist/Tcoder.app` 是两小时前 `build_app.sh` 从 `41add9e` 建的，
   # 中间隔了 39 个产物文件（整批 i18n + 我自己的 `PerfReadoutCells` 修复）。
   # 于是"e991c6d 的 T2 读数"这句话从头到尾是假的——量的是旧二进制，只是恰好在新树上按了回车。
-  if ! PROVENANCE_WHY=$(provenance_ok "$BUILD_REV" "$(git rev-parse HEAD 2>/dev/null)" "$BUILD_CLEAN" "${BUILD_TREE:-}" "${HEAD_TREE:-}"); then
+  # `${TARGET_REV:-…}` 的兜底不是洁癖：自测里 `preflight_gates` 是**被单独调用**的，
+  # 那时"收集上下文"那一步没跑过 ⇒ 现场再派生一次。宁可算两遍，也不拿空值当"取不到 HEAD"。
+  if ! PROVENANCE_WHY=$(provenance_ok "$BUILD_REV" "${TARGET_REV:-$(provenance_target_rev)}" "$BUILD_CLEAN" "${BUILD_TREE:-}" "${HEAD_TREE:-}"); then
     echo "!! 二进制与代码不是同一份：${PROVENANCE_WHY} —— 先跑 scripts/build_app.sh release 再量。" >&2
     hard=1
   else
     # 放行也可能带话——那就是"靠 tree 归属"的留痕，必须印进上下文，不许悄悄过。
     PROVENANCE_NOTE="$PROVENANCE_WHY"
   fi
+  # 归属是谁的就必须写出来：不设 `MEASURE_REV` 时这一行等于"HEAD"，设了则一眼能看出
+  # "这一批读数算在另一个 rev 头上"（旧形状里这句话是**隐形的**，读上下文的人只能猜）。
+  echo "    归属内容：${MEASURE_REV:-HEAD} → ${TARGET_REV:-取不到（rev 写错了？）}"
   if [ -n "${i18n_ledger:-}" ]; then
     echo "!! 设了 TCODER_I18N_RUNTIME_LEDGER（=$i18n_ledger）——渲染路径在记漏翻台账并节流写盘；
    这批读数量的是台账的开销，不是 App 的心跳。取消该变量再测。" >&2
@@ -160,11 +209,7 @@ preflight_gates_disk() {  # 【第七维：磁盘】判定只有一份（probes 
   fi
 }
 
-preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GATE 决定炸还是通报）
-  # 【bash 的坑】调用**不带括号**：写成 `preflight_gates_identity()` 会被解析成
-  # "在 preflight_gates 内部再定义一个函数"，于是这两维**一次都没执行**、也不报错——
-  # 一条静默失效的闸门。selfcheck 第 17 项（六维矩阵）抓的就是它。
-  preflight_gates_identity
+preflight_gates_contention() {  # 【并发重活】判据（认哪些名字、活性怎么算）住在 probes，这里只判"有没有"
   if [ -n "$others" ]; then
     # ${…:-} 不是洁癖：这一维在合成夹具里被单维破坏时，别的量可能是空的，
     # 而 `set -u` 下引用未声明变量会**静默中止整条闸门**（今天就是这样把 selfcheck 打断的，
@@ -173,13 +218,33 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
          "它会抢满全部核，app-update 相位会被显著抬高。等它跑完再来。" >&2
     hard=1
   fi
-  preflight_gates_disk
-  # 负载阈值：默认 1 分钟 load 不超过核数的 1.5 倍（LOAD_MAX=<数> 可覆盖，但覆盖了就要在报告里写）
-  if awk -v l="$load1" -v c="$cores" 'BEGIN{exit !(l > c*1.5)}'; then
-    echo "!! load1=$load1 已是核数($cores)的 1.5 倍以上：整机排队，任何帧节拍读数都不作数。" >&2
-    echo "   等负载降下来，或显式 LOAD_MAX=<阈值> 重跑（那必须在报告里注明是降级条件）。" >&2
+}
+
+load_bar() {  # 负载阈值的**唯一**口径：默认 核数×1.5，`LOAD_MAX=<数>` 显式覆盖
+  # 单独一个函数的理由：这条式子原本在**两处**各写了一遍（闸门里 `c*1.5`、
+  # 收尾复核里又 `c*1.5`），而注释说的 `LOAD_MAX` 出口两处都没实现。
+  # 两个入口迟早分叉，而分叉的方向永远是"闸门放行了、收尾复核却说脏"（或反过来）。
+  local c="${cores:-}"
+  [ -n "$c" ] || c=$(sysctl -n hw.ncpu 2>/dev/null || echo 8)
+  awk -v c="$c" -v o="${LOAD_MAX:-}" 'BEGIN{ if (o != "") print o+0; else print c*1.5 }'
+}
+
+preflight_gates_load() {  # 【整机负载】阈值只写一次：测量档与启动档共用（冷启动同样怕排队）
+  # 默认 1 分钟 load 不超过核数的 1.5 倍。`LOAD_MAX=<数>` 是**写在这条判据旁边的公开出口**，
+  # 但 2026-09-23 17:17 实测它是个**空头的旋钮**：注释说可覆盖，代码里阈值写死成 `c*1.5`，
+  # 我拿 `LOAD_MAX=5` 去要一个更严的窗口，它照旧按 22.5 放行（现场：load1=13.44/15 那趟量出 24.8 ms，
+  # 而同一个二进制在 load 4.6 起的那趟量出 1.59 ms ⇒ 这条闸在 1.5× 核数上太宽，心跳档根本用不了）。
+  # 判据与它印出来的数字必须同源：所以下面把真正生效的那个数回显出来，不许"印 22.5、判 5"。
+  local bar; bar=$(load_bar)
+  if awk -v l="$load1" -v b="$bar" 'BEGIN{exit !(l > b)}'; then
+    echo "!! load1=$load1 超过阈值 $bar（核数 $cores；默认 = 核数×1.5，$([ -n "${LOAD_MAX:-}" ] && echo "本次由 LOAD_MAX 显式覆盖" || echo "未设 LOAD_MAX")）" >&2
+    echo "   整机在排队 ⇒ 任何帧节拍与主线程占用读数都不作数。等负载降下来；" >&2
+    echo "   要收紧就 LOAD_MAX=<更小的数>（那批要在报告里注明条件更严），要放宽就在报告里注明是降级条件。" >&2
     hard=1
   fi
+}
+
+preflight_gates_window() {  # 【窗口形状两维：前台 + 在屏】只有"窗口已经在画"的档才判
   if ! front_is_target "$front" && [ "${ALLOW_UNFRONTMOST:-0}" != "1" ]; then
     echo "!! 被测窗口不在前台（前台是「$front」）。macOS 会节流不在前的窗口绘制，" >&2
     echo "   app-update 会**假性地好看**（实测：同二进制前台 10.8~24.8ms、后台 1.9~3.0ms）。" >&2
@@ -193,7 +258,9 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
       echo "   把窗口恢复出来（取消最小化 / 切到该 Space）再测。" >&2
       hard=1 ;;
   esac
-  # 人手静默闸：§1.3 作废的那两批基线，坏因都是"测量期间有人在动"，
+}
+
+preflight_gates_quiescence() {  # 【人手静默】§1.3 作废的那两批基线，坏因都是"测量期间有人在动"，
   # 而 load / 并发编译 / 前台这三条整机闸**看不见手**。取不到数只通报、不判败
   # （一条因为拿不到数据就永远说不合格的闸，等于没有这把尺子——前台那条就栽过这个跟头）。
   if [ -n "$quiet" ] && [ "$quiet" != "-1.00" ] \
@@ -207,33 +274,34 @@ preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GA
   fi
 }
 
-
-
-post_window_quiescence() {  # post_window_quiescence <outdir> <窗口秒数>；按 PERIOD 决定"什么样的收尾算合格"
-  # 收尾**再问一次**探针：若"距离上次人手事件"仍短于刚录的窗口，说明窗口里有人动过手。
-  # idle 档要的是"整窗没人动"；interact 档要的正好相反——没人动那批只能退回当 idle 数。
-  local out="$1" window="$2" quiet period="${PERIOD:-idle}" verdict
-  quiet=$(quietest_seconds "$(quiescence_probe)")
-  probe_usable "$quiet" || { echo "    （收尾静默探针取不到，污染判定不做）"; return 0; }
-  verdict=$(human_input_in_window "$quiet" "$window")
-  meta_write "$out" "quiescence_after_seconds=$quiet" "period=$period" "window_verdict=$verdict"
-  if [ "$period" = "interaction" ]; then
-    if [ "$verdict" = "窗口内没人" ]; then
-      meta_write "$out" "no_human_input_during_window=1"
-      echo "    ⚠ 整个 ${window}s 窗口里**没有一次人手事件**（距上次 ${quiet}s）——" >&2
-      echo "      这批量的是心跳期，不是交互期。要判 T1 必须重跑并真的持续滚动。" >&2
-    else
-      echo "    复核通过：窗口内确有真人输入（距上次 ${quiet}s < ${window}s），可当交互期样本"
-    fi
-  elif [ "$verdict" = "窗口内有人" ]; then
-    meta_write "$out" "contaminated_by_human_input=1"
-    echo "    ⚠ **这批样本被污染**：录制窗口 ${window}s 内人手在 ${quiet} 秒前还在动。" >&2
-    echo "      已写进 meta（contaminated_by_human_input=1），不得进前后对比表。" >&2
+preflight_gates() {  # 不合格就置 `hard=1`（调用方按 IGNORE_CONTEXT_GATE 决定炸还是通报）
+  # 【bash 的坑】调用**不带括号**：写成 `preflight_gates_identity()` 会被解析成
+  # "在 preflight_gates 内部再定义一个函数"，于是这两维**一次都没执行**、也不报错——
+  # 一条静默失效的闸门。selfcheck 第 17 项（六维矩阵）抓的就是它。
+  # 各维取数仍是调用方的 `local`（bash 动态作用域穿得过这层组合），
+  # 所以矩阵"单维破坏 ⇒ 拒"的形状一字未动地继续成立。
+  preflight_gates_identity
+  preflight_gates_contention
+  preflight_gates_disk
+  preflight_gates_load
+  # 【启动档（冷启动）没有"窗口形状"这两维】`PREFLIGHT_TIER=launch` 由 `preflight_context` 的第三参设。
+  # 理由不是放宽，而是**那一刻被测窗口还不存在**：App 是紧接着由 xctrace 拉起来的，
+  # 拿"前台是不是 Tcoder / 有没有在屏窗口"去判它，得到的是一条永远不可能通过的闸门
+  # （同一条教训在 `provenance_target_rev` 的注释里已经付过一次学费）。
+  # 跳过要**出声**，而且上下文文件里那两行照样写实测值（`visible` 在启动档被明写成"窗口尚未建立"，
+  # 不留一个看着像实测的"无在屏窗口"）；其余五维——身份 / 并发重活 / 盘 / load / 人手静默——照判。
+  if [ "${PREFLIGHT_TIER:-measure}" = "launch" ]; then
+    echo "    （启动档：前台与在屏两维不参与判定——写上下文时窗口还没建起来；" \
+         "身份/并发重活/盘/load1/人手静默五维照判）" >&2
   else
-    echo "    收尾复核：整窗口无人手输入（距上次事件 ${quiet}s ≥ ${window}s）"
+    preflight_gates_window
   fi
+  preflight_gates_quiescence
+  preflight_gates_warmup
 }
 
+# 归属行的显示宽度与「同树只许一条链」的判据住在一起：`perf_chain_guard.sh`。
+# 为什么不在这里重复一份：两处入口两个数是本仓记账记得最多的一类错（包 10/包 36/包 41）。
 require_idle_target() {  # 返回全局 PID；!= 1 个实例即拒跑（除非显式 ATTACH_PID=<pid>）
   local pids n
   pids=$(instance_pids)
@@ -250,7 +318,7 @@ require_idle_target() {  # 返回全局 PID；!= 1 个实例即拒跑（除非�
     echo "      spec §7.5 的「采样期间独占实例」前提**不成立**，这批读数的绝对值只能与同样"
     echo "      多实例条件下取的另一批比，不能直接和 §1 的独占基线比。meta.json 里已记 coexist=$n。"
     COEXIST="$n"
-    echo "    目标实例 pid=$PID，来源：$(pid_binary "$PID" | cut -c1-100)"
+    echo "    目标实例 pid=$PID，来源：$(path_for_display "$(pid_binary "$PID")")"
     note_target_flavor "$PID"
     return 0
   fi
@@ -273,44 +341,13 @@ require_idle_target() {  # 返回全局 PID；!= 1 个实例即拒跑（除非�
   COEXIST=1
   local exe
   exe=$(basename "$(pid_binary "$PID")")
-  echo "    目标实例 pid=$PID（${exe:-未知}），来源：$(pid_binary "$PID" | cut -c1-100)"
+  echo "    目标实例 pid=$PID（${exe:-未知}），来源：$(path_for_display "$(pid_binary "$PID")")"
   note_target_flavor "$PID"
 }
 
-export_table() {  # export_table <trace> <schema> <outdir>
-  local trace="$1" schema="$2" out="$3"
-  [ "$DRY_RUN" = "1" ] && { echo "    \$ xctrace export --input $(basename "$trace") --xpath '…@schema=\"$schema\"' --output $out/$schema.xml"; return 0; }
-  xcrun xctrace export --input "$trace" \
-    --xpath "/trace-toc/run[@number=\"1\"]/data/table[@schema=\"$schema\"]" \
-    --output "$out/$schema.xml" >/dev/null 2>&1
-  if [ -s "$out/$schema.xml" ]; then
-    echo "    导出 $schema.xml（$(wc -c < "$out/$schema.xml" | tr -d ' ') 字节）"
-  else
-    rm -f "$out/$schema.xml"
-    echo "    ⚠ 表 $schema 在该 trace 里不存在或为空 —— 汇总表会写「未覆盖」，不会编数"
-  fi
-}
-
-meta_write() {  # meta_write <outdir> <键=值...>
-  local out="$1"; shift
-  # 目录由本函数自己保证存在：cmd_switch 的 mkdir 在 per-page 循环里，
-  # DRY_RUN 下整段被跳过，于是第一次 meta_write 会写进不存在的目录（实测 traceback）。
-  mkdir -p "$out" 2>/dev/null || { echo "    ⚠ meta_write 建不了 $out，本条 meta 丢失" >&2; return 0; }
-  python3 - "$out/meta.json" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REV" "$DIRTY" "$@" <<'PY'
-import json, os, sys
-path, ts, rev, dirty = sys.argv[1:5]
-data = {"captured_at_utc": ts, "rev": rev, "git_dirty_lines": int(dirty)}
-for kv in sys.argv[5:]:
-    k, _, v = kv.partition("=")
-    data[k] = v
-if os.path.isfile(path):
-    try:
-        data = {**json.load(open(path, encoding="utf-8")), **data}
-    except ValueError:
-        pass
-json.dump(data, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-PY
-}
+# 录制的墙钟兜底与被测进程存活复核（包 14）。默认值可被夹具改小，不改判定形状。
+RECORD_SLACK_S="${RECORD_SLACK_S:-120}"
+RECORD_POLL_S="${RECORD_POLL_S:-5}"
 
 prepare_sandbox() {  # prepare_sandbox <dir> <扫描目标>：与 capture_pages_isolated.sh 同一做法
   local sandbox="$1" target="$2"
@@ -324,30 +361,4 @@ json.dump({"projects": [{"id": uuid, "name": "Tcoder（性能沙箱）", "path":
            "selectedProjectID": uuid},
           open("%s/projects.json" % support, "w"), indent=2)
 PY
-}
-
-sweep_orphan_traces() {  # 只删**没有任何进程打开着**的 .ktrace 中间产物
-  # 为什么先看 lsof：正在录的那趟也会在自己的 $TMPDIR 里留 .ktrace，
-  # 无差别删会把**正在进行的采集**打断（那是比留残骸更坏的修法）。
-  local root="${1:-${TMPDIR:-/tmp}}" f kept=0 deleted=0
-  [ -d "$root" ] || { printf '孤儿 trace：目标目录不在（%s），跳过\n' "$root"; return 0; }
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    if lsof -- "$f" >/dev/null 2>&1; then kept=$((kept + 1)); continue; fi
-    rm -rf -- "$f" && deleted=$((deleted + 1))
-  done < <(find "$root" -maxdepth 1 \( -name 'instruments*.ktrace' -o -name '*.ktrace' \) 2>/dev/null)
-  printf '孤儿 trace：删 %d 个、仍被进程打开而保留 %d 个（根 %s）\n' "$deleted" "$kept" "$root"
-}
-
-post_run_disk_hygiene() {  # 每轮收尾固定两件事：进程真退了没 + $TMPDIR 残骸
-  local left
-  # `|| true` 不是装饰：`pgrep` 在"没有 xctrace"时退出码是 1，
-  # 而 `set -e` 会让整个收尾**在那一行中止** —— 于是"机器干净"这种最好的情况
-  # 反而跳过了扫残骸。新加的第 22 项收尾检查就是把它抓出来的东西。
-  left=$(pgrep -x xctrace 2>/dev/null | tr '\n' ' ' || true)
-  [ -n "$left" ] && echo "    ⚠ 还有 xctrace 在场（pid ${left% }）——先别开下一趟" >&2
-  printf '    %s\n' "$(sweep_orphan_traces "${1:-${TMPDIR:-/tmp}}")"
-  # 阈值名收敛到 TCODER_MIN_FREE_GIB 时漏改了这行：`set -u` 下它直接**中止收尾**，
-  # 于是"录成功的一趟"被上层记成失败（今晚就是这样丢了一份合格的心跳期读数）。
-  echo "    磁盘可用 $(disk_free_gib) GiB（低于 ${TCODER_MIN_FREE_GIB:-20} 就不开新趟）"
 }

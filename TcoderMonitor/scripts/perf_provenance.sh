@@ -38,6 +38,16 @@ provenance_product_tree() {  # provenance_product_tree [rev] → 该提交"产�
   printf '%s%s' "$a" "$b" | shasum -a 256 | cut -d' ' -f1
 }
 
+provenance_target_rev() {  # → 归属比的是**谁**：默认 HEAD；`MEASURE_REV` 显式给了就比它
+  # 派生只住这一处（preflight 的两个函数都要用，抄两遍就会分叉——
+  # 2026-09-23 实测：第一版把它写在"收集上下文"那个函数里，而闸门那个函数被自测**单独调用**
+  # 时拿到空值，于是"六维全合格却被拒"，等于我自己养出一条永远不可能通过的闸门）。
+  # `--verify --quiet` + `^{commit}`：取不到就**回空**，不许把没解析动的字符串原样吐回来。
+  # （`git rev-parse 没有这个rev` 会打印入参本身并非零退出 ⇒ 闸门拿到一个"看着像 sha"的
+  #   非空值，拒是拒了，但话术成了「当前代码是 没有这个rev」——那是把取不到说成一个提交。）
+  git rev-parse --verify --quiet "${MEASURE_REV:-HEAD}^{commit}" 2>/dev/null
+}
+
 provenance_ok() {  # provenance_ok <产物 rev> <当前 HEAD> <构建时 clean> [产物 tree] [当前 tree]
   # → 0=被量的二进制就是这份代码；非 0 时把原因 echo 到 stdout（调用方拼自己的话术）。
   # 第 4/5 参是"产物码 tree 指纹"：给了就认——rev 不同但 tree 相同 ⇒ 放行，

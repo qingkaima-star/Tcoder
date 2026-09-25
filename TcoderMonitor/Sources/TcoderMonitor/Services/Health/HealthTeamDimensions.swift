@@ -33,8 +33,9 @@ extension WeightedHealthScorer {
             // ⚠ 尾巴那句不是修辞，是**去重**（台账 RD-29）：同一个 `ratePerDay` 已经被曲线
             // 折算过一次（越过 8 次/天还要掉头扣分），优点卡再说一遍"稳定"就成了
             // 同一条事实声称两次贡献。门槛两处同源，见 `ScoreCurvesTeamRuntime.activity`。
-            outcome.strengths.append(String(format: "提交节奏稳定（日均 %.1f 次；这个频率只在曲线里折算一次，本句不另加分）",
-                                            cadence.ratePerDay))
+            outcome.strengths.append(localizedFormat(
+                "提交节奏稳定（日均 %1$@ 次；这个频率只在曲线里折算一次，本句不另加分）",
+                GitCadenceEvidence.fixed(cadence.ratePerDay)))
         }
         outcome.issues = ActivityAdvice.staleIssues(daysSinceLast)
         return outcome
@@ -43,27 +44,28 @@ extension WeightedHealthScorer {
     private func activityShortHistory(_ curve: CurveResult, _ cadence: GitCadenceEvidence) -> DimensionOutcome {
         let capped = Swift.min(curve.score, GitCadenceEvidence.shortHistoryScoreCeiling)
         return DimensionOutcome(
-            curve: CurveResult(score: capped, detail: curve.detail + cadence.shortHistoryNote,
+            curve: CurveResult(score: capped, detail: HealthCurves.noted(curve.detail, [cadence.shortHistoryNote]),
                                risk: capped < curve.score ? GitCadenceEvidence.risk(afterCappingTo: capped) : curve.risk),
-            recommendations: ["提交历史仅 "
-                + "\(GitCadenceEvidence.fixed(cadence.spanDays)) 天，样本不足，"
-                + "活跃度不宣称节奏、按 \(GitCadenceEvidence.fixed(GitCadenceEvidence.shortHistoryScoreCeiling)) 分封顶；"
-                + "跑满一周后重扫即可解锁。"])
+            recommendations: [localizedFormat(
+                "提交历史仅 %1$@ 天，样本不足，活跃度不宣称节奏、按 %2$@ 分封顶；跑满一周后重扫即可解锁。",
+                GitCadenceEvidence.fixed(cadence.spanDays),
+                GitCadenceEvidence.fixed(GitCadenceEvidence.shortHistoryScoreCeiling))])
     }
 
     private func activityUnknown(_ curve: CurveResult, _ cadence: GitCadenceEvidence,
                                  _ daysSinceLast: Double?) -> DimensionOutcome {
-        DimensionOutcome(curve: CurveResult(score: curve.score, detail: curve.detail + cadence.unknownNote,
+        DimensionOutcome(curve: CurveResult(score: curve.score,
+                                            detail: HealthCurves.noted(curve.detail, [cadence.unknownNote]),
                                             risk: curve.risk),
                          issues: ActivityAdvice.staleIssues(daysSinceLast),
-                         recommendations: ["提交历史缺可用的首末时间，日均无法计算，"
-                             + "活跃度按曲线最低档计，等重新分析补齐两端再评。"])
+                         recommendations: [localizedCopy(
+                            "提交历史缺可用的首末时间，日均无法计算，活跃度按曲线最低档计，等重新分析补齐两端再评。")])
     }
 
     private enum ActivityAdvice {
         static func staleIssues(_ daysSinceLast: Double?) -> [String] {
             guard let days = daysSinceLast, days > 14 else { return [] }
-            return [String(format: "已 %.0f 天无提交", days)]
+            return [localizedFormat("已 %1$@ 天无提交", HealthCurves.whole(Int(days.rounded())))]
         }
     }
 
@@ -104,19 +106,19 @@ extension WeightedHealthScorer {
     /// 而不是"这一维为什么没算"。（与 `StabilityAdvice.missingLogAdvice` 同一形态。）
     private enum BusFactorAdvice {
         static func noAuthorBasis(_ git: GitInsights) -> String {
-            "作者表里没有可算分布的提交（非合并口径 0 笔，含合并共 \(NumberFormat.grouped(git.totalCommits)) 笔），"
-                + "协作分布不参与本次计分；这一维读的是「署名分布」，要有非合并提交才谈得上分散与否。"
+            localizedFormat("作者表里没有可算分布的提交（非合并口径 0 笔，含合并共 %1$@ 笔），协作分布不参与本次计分；这一维读的是「署名分布」，要有非合并提交才谈得上分散与否。",
+                            NumberFormat.grouped(git.totalCommits))
         }
 
         /// 理由句必须点名**三个数**：`commitBasis`、`activeAuthorCount`，
         /// 加上"占比无定义"的算术依据（一笔折合多少个百分点、攒到几笔才解锁）。
         /// 只写"样本不足"四个字等于没写（工单 R9b §4.3）。
         static func thinAuthorBasis(_ git: GitInsights) -> String {
-            "作者分布的总体只有 \(NumberFormat.grouped(git.authorBasisCommits)) 笔非合并提交、"
-                + "\(NumberFormat.grouped(git.activeAuthorCount)) 个活跃署名 —— "
-                + "一笔提交就折合 \(NumberFormat.percent(BusFactorEvidence.shareSwing(for: git), precision: 0)) 占比，"
-                + "跨一个档位只要一两笔 ⇒ 占比无定义，协作分布不参与本次计分（也不按 0 计入）；"
-                + "非合并提交攒到 \(NumberFormat.grouped(BusFactorEvidence.minimumCommitBasisForShare)) 笔以上重扫即可解锁。"
+            localizedFormat("作者分布的总体只有 %1$@ 笔非合并提交、%2$@ 个活跃署名 —— 一笔提交就折合 %3$@ 占比，跨一个档位只要一两笔 ⇒ 占比无定义，协作分布不参与本次计分（也不按 0 计入）；非合并提交攒到 %4$@ 笔以上重扫即可解锁。",
+                            NumberFormat.grouped(git.authorBasisCommits),
+                            NumberFormat.grouped(git.activeAuthorCount),
+                            NumberFormat.percent(BusFactorEvidence.shareSwing(for: git), precision: 0),
+                            NumberFormat.grouped(BusFactorEvidence.minimumCommitBasisForShare))
         }
     }
 
@@ -192,10 +194,10 @@ enum BusFactorEvidence {
 
     /// 界面与 CLI 的缺席原因（`HealthBreakdown.gitAbsence` 读这一份，不留第二把尺子）。
     static func absenceReason(_ git: GitInsights) -> String {
-        "非合并口径 \(NumberFormat.grouped(git.authorBasisCommits)) 笔、"
-            + "\(NumberFormat.grouped(git.activeAuthorCount)) 个活跃署名，低于评这一维所需的 "
-            + "\(NumberFormat.grouped(minimumCommitBasisForShare)) 笔总体 —— "
-            + "一笔提交折合 \(NumberFormat.percent(shareSwing(for: git), precision: 0)) 占比，占比无定义，"
-            + "本维度不参与计分（也不按 0 计入）。"
+        localizedFormat("非合并口径 %1$@ 笔、%2$@ 个活跃署名，低于评这一维所需的 %3$@ 笔总体 —— 一笔提交折合 %4$@ 占比，占比无定义，本维度不参与计分（也不按 0 计入）。",
+                        NumberFormat.grouped(git.authorBasisCommits),
+                        NumberFormat.grouped(git.activeAuthorCount),
+                        NumberFormat.grouped(minimumCommitBasisForShare),
+                        NumberFormat.percent(shareSwing(for: git), precision: 0))
     }
 }

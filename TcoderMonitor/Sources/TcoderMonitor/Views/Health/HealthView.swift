@@ -20,7 +20,9 @@ struct HealthView: View {
                     HealthNoInputCard(health: health)
                 } else {
                     HealthHero(health: health,
-                               relocatedGitRoot: report?.provenance?.resolvedGitRoot)
+                               relocatedGitRoot: report?.provenance?.resolvedGitRoot,
+                               sourceDrift: report?.provenance?.driftNotice,
+                               codeScaleNote: ProductionCodeScaleReadout.reading(report?.code))
                     HealthComponentTable(health: health, report: report)
                     HealthAdviceGrid(health: health)
                 }
@@ -106,9 +108,26 @@ struct HealthHero: View {
     /// （于是"给个 `= nil` 省事"直接编译不过），而不给默认值就逼每个调用点
     /// 自己交代这件事——这条告示一旦能被漏传，它就又会变成一页响、一页沉默。
     let relocatedGitRoot: String?
+    /// 扫描这段时间里源码动过没有（RD-31）的那句告示。
+    ///
+    /// **三态判定住在契约里**（`ScanProvenance.driftNotice`）：这一页只照它画，
+    /// 不在这儿再比一次 `sourceDriftDuringScan` —— 同一个事实的第二把尺子迟早分叉，
+    /// 与上面 `relocatedGitRoot` 那条理由一字不差。
+    /// 同样**故意不给默认值**：给了默认值就能被漏传，这一句又会变成一页响、一页沉默。
+    let sourceDrift: ScanProvenance.DriftNotice?
+    /// 代码规模那一句「生产码 N 行 / 全量 M 行」（RD-67 · 台账卷四 §73）。
+    ///
+    /// 需求方 2026-09-24 18:16 拍的是**维持现状 + 两个数并排给**：评分与规模的分母一个都不动
+    /// （文档 / 配置 / 备份 / 测试与生产码同分母），改为让读者自己看见差额 —— 所以这一句
+    /// 挂在**综合评分这张卡的 ⓘ** 上，而综合分本身、各维权重、判档判据都没有被这一笔碰过。
+    /// 句子只由唯一装配口 `ProductionCodeScaleReadout.reading(_:)` 生产（与代码规模页那一格
+    /// 读同一句），这里不另写一份中文；本次没做角色分档（含整条代码路没跑）⇒ `nil` ⇒
+    /// 这一格 ⓘ 整个不出现，**不许**由视图补一个 0 或一句占位话。
+    /// 与前两格同一条理由：**故意不给默认值**，给了就能被漏传。
+    let codeScaleNote: String?
 
     var body: some View {
-        GlassSection("综合评分", subtitle: subtitle, icon: .health) {
+        GlassSection("综合评分", subtitle: subtitle, subtitleHelp: codeScaleNote, icon: .health) {
             HStack(alignment: .top, spacing: Theme.Spacing.lg) {
                 HealthRing(score: health.verdict,
                                 grade: health.verdictGrade,
@@ -127,6 +146,12 @@ struct HealthHero: View {
                 // 折进了分数，却一个字没提。缺数据不许冒充没问题，缺来源同样不许。
                 BannerRow(text: Self.relocationNotice(root: root), style: .warning)
             }
+            if let drift = sourceDrift {
+                // 真变了 = 警告（这份报告不是同一快照的一致结果）；
+                // 量过而没量到 = 中性（不许沉默地被读成"没问题"，但它不是缺陷）。
+                // 两句都来自 `driftReading` 这**一个**装配口 ⇒ 与 CLI 那行逐字同话。
+                BannerRow(text: drift.reading, style: drift.isWarning ? .warning : .neutral)
+            }
         }
     }
 
@@ -141,7 +166,7 @@ struct HealthHero: View {
     static func relocationNotice(root: String) -> String {
         localizedFormat("仓库归属类维度（%1$@）按外层仓库 %2$@ 计算，不是所选目录本身。",
                         HealthDimension.repositoryScoped.map { localizedCopy($0.rawValue) }
-                            .joined(separator: "、"),
+                            .joined(separator: localizedListSeparator()),
                         root)
     }
 
@@ -273,7 +298,7 @@ struct HealthCodeScopeReadout: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             Theme.Readout.Field(scope.label,
-                                localizedFormat("%1$@ · %2$@ 级", String(scope.overall), scope.grade.rawValue),
+                                localizedFormat("%1$@ · %2$@ 级", String(scope.overall), localizedCopy(scope.grade.rawValue)),
                                 help: scope.note)
             Text(membershipLine)
                 .typed(Theme.Typo.narrative)

@@ -293,8 +293,10 @@ struct ProjectRow: View {
     private var metaLine: some View {
         HStack(spacing: Theme.Spacing.xs) {
             if let code = report?.code {
+                // 同一个"行"字在两页指两个量（这格代码行、那页头条总行数）——拿 Homebrew 并排看才发现，侧栏没宽度写口径 ⇒ 去处挂 ⓘ。
                 metricCell(localizedFormat("%1$@ 行", NumberFormat.compact(code.codeLines)),
                            width: ShellLayout.lineCountColumnWidth)
+                    .clippedHelp("这一格是代码行，不含空行与注释；总行数（含两者）在「代码规模」页的头条。")
             } else {
                 Text(ShellCopy.notAnalyzed(.codeSize))
                     .font(Theme.Typo.microLabel.font)
@@ -310,9 +312,9 @@ struct ProjectRow: View {
     }
 
     private func metricCell(_ text: String, width: CGFloat) -> some View {
+        // 字号写在每个 Text 上，而不是靠外层 `.font` 经 environment 传进来：
+        // 后者与 `.monospacedDigit()` 的先后顺序会决定等宽到底生不生效。
         Text(text)
-            // 字号写在每个 Text 上，而不是靠外层 `.font` 经 environment 传进来：
-            // 后者与 `.monospacedDigit()` 的先后顺序会决定等宽到底生不生效。
             .font(Theme.Typo.label.font.monospacedDigit())
             .frame(width: width, alignment: .trailing)
     }

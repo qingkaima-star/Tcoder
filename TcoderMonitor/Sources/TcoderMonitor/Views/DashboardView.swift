@@ -235,9 +235,9 @@ struct DashboardView: View {
                                 coverage.overallLinePercent.map { Self.percentOf100($0, precision: 1) })
                                 .display)
                     StatLine(label: "单元测试",
-                             value: coverage.unit.map { Self.percentOf100($0.linePercent) } ?? "无报告")
+                             value: CoverageCategoryReadout.text(for: coverage.unit, in: coverage))
                     StatLine(label: "集成测试",
-                             value: coverage.integration.map { Self.percentOf100($0.linePercent) } ?? "无报告")
+                             value: CoverageCategoryReadout.text(for: coverage.integration, in: coverage))
                 }
                 VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                     HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xxs) {
@@ -312,7 +312,7 @@ struct DashboardView: View {
                 .foregroundStyle(Theme.Semantic.warning.textColor)
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 if !failed.isEmpty {
-                    Text(localizedFormat("未能完成：%1$@", failed.joined(separator: "、")))
+                    Text(localizedFormat("未能完成：%1$@", failed.joined(separator: localizedListSeparator())))
                         .font(Theme.Typo.cardTitle.font)
                         .foregroundStyle(Theme.Semantic.warning.textColor)
                     Text(message)

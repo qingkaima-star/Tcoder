@@ -24,14 +24,17 @@ final class FunctionalHonestyGuardTests: XCTestCase {
     /// **行号取的是原文件行号**：这里一度改用 `SurfaceScanKit.codeLines`（先去掉注释行
     /// 再 enumerated），于是报出来的行号是"过滤后第几行"，四条命中里三条指向无关代码。
     /// 扫描器报错过行 = 把每条工单变成一次考古（本仓既有规矩：扫描器必须报原始行号）。
-    static func hits(_ needles: [String], in files: [(path: String, content: String)]) -> [String] {
+    static func hits(_ needles: [String], in files: [(path: String, content: String)],
+                     exemptPairs: Set<String> = []) -> [String] {
         files.flatMap { file in
             file.content.split(separator: "\n", omittingEmptySubsequences: false)
                 .enumerated()
                 .compactMap { index, raw in
                     let line = String(raw)
                     guard !line.trimmingCharacters(in: .whitespaces).hasPrefix("//") else { return nil }
-                    return needles.contains(where: line.contains) ? "\(file.path):\(index + 1)" : nil
+                    let matched = needles.filter { line.contains($0) }
+                        .filter { needle in exemptPairs.contains("\(file.path)\u{1}\(needle)") == false }
+                    return matched.isEmpty ? nil : "\(file.path):\(index + 1)"
                 }
         }
     }
@@ -48,6 +51,26 @@ final class FunctionalHonestyGuardTests: XCTestCase {
         "DemoData", "isDemo", "demo://", "DemoBadge", "@example.dev", "张三", "李四",
     ]
 
+    /// **退役一条假数据，就得在代码里点名它**——清理表必须带着那枚退役字面量才删得掉已落盘的行
+    /// （`ProjectStore.retiredSamplePaths`，缺陷 #66：09-21 只退了产出、没退注册表）。
+    /// 所以豁免按 **(文件, needle) 成对**给，不给文件级或 needle 级的单边口子：
+    /// 同一文件里长出别的假数据形状照旧红，别处出现 `demo://` 也照旧红。
+    /// 反向的两条 + "豁免不许变成死条目"由 `ProjectStoreIsolationTests` 那条新用例钉
+    /// （放那边的理由：它钉的正是这枚常量，理由与常量要一起被读到）。
+    static let fabricationExemptions: [(path: String, needle: String, reason: String)] = [
+        ("Services/ProjectStore.swift", "demo://",
+         "#66 清理注册表里那行已退役的示例项目，判据就是这枚字面量；正向钉住它的是 "
+         + "ProjectStoreIsolationTests.testRetiredSampleRowIsPurgedOnTheNextLaunch"),
+    ]
+
+    static func fabricationExemptionPairs() -> Set<String> {
+        Set(fabricationExemptions.map { "\($0.path)\u{1}\($0.needle)" })
+    }
+
+    static func fabricationHits(in files: [(path: String, content: String)]) -> [String] {
+        hits(fabricationNeedles, in: files, exemptPairs: fabricationExemptionPairs())
+    }
+
     /// 永不匹配的正则兜底 —— 它把"规则坏了"伪装成"这个项目真的没有"。
     static let silentRegexFallbackNeedles = ["\"(?!x)x\""]
 
@@ -63,7 +86,7 @@ final class FunctionalHonestyGuardTests: XCTestCase {
     // MARK: - G1 假数据不得回潮
 
     func test_noFabricatedProjectDataAnywhereInSources() throws {
-        let hits = Self.fabricationNeedles.isEmpty ? [] : Self.hits(Self.fabricationNeedles, in: try sources())
+        let hits = Self.fabricationNeedles.isEmpty ? [] : Self.fabricationHits(in: try sources())
         XCTAssertTrue(hits.isEmpty,
                       "内置示例数据已于批次 P7-A 退役；这些位置又把它请回来了：\(hits)。"
                       + "需要演示数据请用取证沙箱指向一个真实仓库（scripts/capture_pages_isolated.sh）。")
@@ -114,8 +137,11 @@ final class FunctionalHonestyGuardTests: XCTestCase {
     /// 依赖页：没有核对覆盖就不许出现"无风险"着色。
     func test_dependencyOfflineStateIsNotClaimedSafe() throws {
         let offline = DependencyReport()
-        XCTAssertFalse(offline.hasVulnerabilityCoverage,
-                       "默认离线态必须判为\"没查\"，否则下面这条守卫在空转")
+        // 前提自证：离线态必须"既没发起查询、也没带回公告"，否则下面这条守卫在空转。
+        // （RD-78：原先这里读的是那枚把两件事合成一体的 `Bool`，本体"发起过就算查过"，
+        //   正是 RD-11 的病根；属性已退役，改问两件**分开的**事实，判据强度不降。）
+        XCTAssertFalse(offline.networkLookupPerformed, "默认离线态不该已经发起过查询")
+        XCTAssertTrue(offline.advisories.isEmpty, "默认离线态不该带回任何公告")
         XCTAssertEqual(offline.riskLevel, .none,
                        "`riskLevel` 仍按数说话（评分与排序要它），这条钉住它的语义没被顺手改掉")
         XCTAssertTrue(DependencySafetyVerdict(offline) == .unchecked(coveredCount: 0, total: 0,

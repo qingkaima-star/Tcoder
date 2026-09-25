@@ -178,6 +178,13 @@ extension LocalizationGuardTests {
     static let compositionFreeFiles: [String] = [
         "Views/CodeGit/GitHistoryScope.swift",
         "Views/Git/GitInsightsSections.swift",
+        // P69a：复杂度风险页那五条建议/空态正文原来都是 3~6 段字面量 `+` 起来的，
+        // 收成整句键之后文件里一个 `+` 拼接都不剩，点进来把形状钉死不许长回去。
+        "Views/Code/CodeRiskAdvice.swift",
+        "Views/Code/CodeRiskView.swift",
+        // P69c（总工落）：`crashEvidenceFootnote` 那三句并成整句槽型键之后，
+        // 这个文件里已经没有一个 `+` 拼出来的中文半句（【拼了查不中】由 171 降到 169 就是它贡献的 2 处）。
+        "Services/Logs/FileLogAnalyzer.swift",
     ]
 
     func test_compositionFreeFilesStayFreeOfJoinedChineseCopy() throws {
@@ -202,6 +209,114 @@ extension LocalizationGuardTests {
             .reduce(0) { $0 + Self.composedChineseLines(in: $1.content).count }
         print("【拼了查不中】已收口 \(Self.compositionFreeFiles.count) 个文件 → 名单内 0 处；"
             + "名单外仍有 \(rest) 处（P53 首测 221 处：Services 184 / Views 37，见双语台账 §9）")
+    }
+
+    // MARK: - 守卫 1g（P58）：中文字面量**自己肚子里**做插值，两条老判据都看不见
+
+    /// `"平均圈复杂度 \(decimal(averageCC))"` 这一族：既没被 `localized*` 包住（守卫 1 放过），
+    /// 也没有 `+`（守卫 1d 放过）—— 片段与测得值在**同一个字面量里**拼完了。
+    /// 拼出来的那一串照样要上屏，照样查不中，英文态整行中文。
+    ///
+    /// 为什么单独立一条而不是并进 1d：1d 判的是"跨片段拼接"，改成数组字面量
+    /// （`joined(["甲\(x)", "乙\(y)"])`）就能绕过它，而 P58 面对的健康评分 detail **正是**这个形状。
+    static func interpolatedChineseLiterals(in content: String) -> [(line: Int, text: String)] {
+        let literal = try? NSRegularExpression(pattern: #""(?:[^"\\\n]|\\.)*""#)
+        // 「算不算汉字」用与守卫 1d **同一个** `\p{Han}`，不在这里另抄一份码表
+        // （本仓已经有三把手写的汉字区间判断，每多一把就多一处会单独腐烂的地方）。
+        let han = try? NSRegularExpression(pattern: #"[\p{Han}]"#)
+        guard let literal, let han else {
+            XCTFail("正则构造失败 ⇒ 这条判据根本没在跑")
+            return []
+        }
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var hits: [(line: Int, text: String)] = []
+        for (index, rawLine) in lines.enumerated() {
+            guard SurfaceScanKit.isCode(rawLine) else { continue }
+            let line = Self.strippingTrailingComment(rawLine)
+            let range = NSRange(line.startIndex..., in: line)
+            for match in literal.matches(in: line, range: range) {
+                guard let span = Range(match.range, in: line) else { continue }
+                let text = String(line[span])
+                let span2 = NSRange(text.startIndex..., in: text)
+                if text.contains("\\("), han.firstMatch(in: text, range: span2) != nil {
+                    hits.append((index + 1, text))
+                }
+            }
+        }
+        return hits
+    }
+
+    /// **已收口名单**：形状与 1d 同源（名单里的文件一条都不许有，名单只许往长里加）。
+    ///
+    /// P58 首测全仓 `Services/Health` 尚有 52 处（`HealthRuntimeDimensions` 19 /
+    /// `HealthBreakdown` 16 / `HealthTeamDimensions` 11 / `HealthCodeDimensions` 3 /
+    /// `WeightedHealthScorer` 2 / `ScoreCurves` 1），那一族的分母记在双语台账 §9，
+    /// 不在本条里"只减不增"——那是一条长度代理（见《守恒线要逐条留名的豁免口》）。
+    static let keyizedCopyFiles: [String] = [
+        "Services/Health/ScoreCurvesCode.swift",
+        "Services/Health/ScoreCurvesTeamRuntime.swift",
+        "Services/Health/GitCadenceEvidence.swift",
+        // P64：这条判据原来只盯 Services，而 `Views/**` 里也有"返回字符串给 `Text(变量)`"的生产者
+        // ——`markerNote` 那句 FIXME 提示就因此长期挂在英文态残留的 A 类里（两个半句各自登记过，
+        // 运行时拼起来永远查不中）。名单只往长里加，加一个文件就要把它清干净。
+        "Views/Code/CodeMetricsSections.swift",
+        // P67：依赖页那五句只有换成别的仓库才上屏（本仓依赖清单是空的），
+        // 拿 Homebrew 复验才抓到「共 8 项，已全部展示。」既没登记、又把测得值插在自己肚子里。
+        "Views/Dependencies/DependenciesView.swift",
+        // P67：这两句是**嵌在已译长句里**的片段，英文态实拍成 "…, 快照截至 2026-09-19（4 days ago）; …"。
+        // 只有多生态的仓库才会走到这条分支（本仓依赖清单为空），所以十八趟 dogfooding 读数从没抓到过。
+        "Services/Dependencies/DependencySnapshot.swift",
+        "Services/Dependencies/ManifestDependencyAnalyzerVersionEvidence.swift",
+        // P69a：复杂度风险页。这两份是 P69 清单里「代码风险这一片」7 条的落点，
+        // 整句键化之后两份在 1d（`+` 拼接）与 1g（自己肚子里插值）两把尺子下都是 0 处 ——
+        // 点进名单的意义是**下一句新写的中文必须一开始就用整句键**，否则当场红。
+        "Views/Code/CodeRiskAdvice.swift",
+        "Views/Code/CodeRiskView.swift",
+        // P69c（WS-多槽复数流）：`crashEvidenceFootnote` 那三句从"插值 + `+` 拼半句"换成
+        // 整句槽型键（两条多槽、一条混槽、一条把三段并成一条）之后，本文件里
+        // 已经没有"把测得值插在自己肚子里"的中文字面量了。
+        "Services/Logs/FileLogAnalyzer.swift",
+    ]
+
+    func test_keyizedCopyFilesHoldNoInterpolatedChineseLiterals() throws {
+        let files = try SurfaceScanKit.sourceFiles(under: "")
+        let scanned = Dictionary(uniqueKeysWithValues: files.map { ($0.path, $0.content) })
+        let absent = Self.keyizedCopyFiles.filter { scanned[$0] == nil }
+        XCTAssertTrue(absent.isEmpty,
+                      "已收口名单点名的文件不在扫描面上（改名？挪走？），判据已覆盖不到它：\(absent)")
+        let offenders = Self.keyizedCopyFiles.flatMap { path in
+            Self.interpolatedChineseLiterals(in: scanned[path] ?? "")
+                .map { "\(path):\($0.line) \($0.text)" }
+        }
+        XCTAssertTrue(offenders.isEmpty,
+                      "这些中文字面量把测得值**插在自己肚子里** ⇒ 整串永远查不中，"
+                    + "改成 localizedFormat + 位置参数：\n  " + offenders.sorted().joined(separator: "\n  "))
+        let rest = files.filter { !Self.keyizedCopyFiles.contains($0.path) }
+            .reduce(0) { $0 + Self.interpolatedChineseLiterals(in: $1.content).count }
+        print("【插值中文段】已收口 \(Self.keyizedCopyFiles.count) 个文件 → 名单内 0 处；"
+            + "名单外仍有 \(rest) 处（P58 首测全仓，见双语台账 §9）")
+    }
+
+    /// 元测试：P58 拆掉的三种形状必须每种都被抓住，整句键写法一条不许误报。
+    func test_meta_interpolatedChineseRulerCatchesWhatP58Removed() {
+        let removed = [
+            #"let detail = joined(["平均圈复杂度 \(decimal(averageCC))", "最大 \(maxCC)"]),"#,
+            #"return "距今 \(decimal(days)) 天无提交""#,
+            #"detail: raw.detail + "（榜内只列 \(code.hugeFiles.count) 个，实际 \(hugeCount) 个)","#,
+        ]
+        let found = removed.map { Self.interpolatedChineseLiterals(in: $0).count }
+        XCTAssertEqual(found, [2, 1, 1], "漏一种形状，那一族就继续假绿：\(found)")
+        let fixed = [
+            #"let detail = joined([localizedFormat("平均圈复杂度 %1$@", decimal(averageCC))])"#,
+            #"return localizedFormat("距今 %1$@ 天无提交", decimal(days))"#,
+            #"print("count = \(count)")"#,
+        ]
+        for line in fixed {
+            XCTAssertTrue(Self.interpolatedChineseLiterals(in: line).isEmpty, "整句键写法被误报：\(line)")
+        }
+        XCTAssertTrue(Self.interpolatedChineseLiterals(
+            in: #"// 旧写法 "重复率 \(percent(value))" 必须能写在注释里"#).isEmpty,
+            "注释里**必须**能写被禁的写法本身")
     }
 
     /// 双向元测试：P53 拆掉的四种写法**必须每一种都被抓住**（已知答案的正对照），

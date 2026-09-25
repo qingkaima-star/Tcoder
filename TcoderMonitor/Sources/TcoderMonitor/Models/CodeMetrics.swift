@@ -81,9 +81,11 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     // 后果有两层：① 消费方要"榜外还有几块"只能去解析句子（等于造第二把尺子）；
     // ② 界面页尾那句"明细榜上限 20 块"是**数**，却来自一条按句式认领的字符串
     // （`CodeBoardTruth.outsideBoardNote`），改文案不改认领标记就会静默失去披露。
-    // ⚠️ **故意不给"重复块总数"**：`rankedBlocks` 在撞 id 时还会削掉若干块而无处计数
-    // （R6b 交回时点名），所以"榜内 + 榜外 == 总数"这个等式天然不平，
-    // 造一枚看似精确的总数就是把不平藏起来。
+    // ⚠️ **总数分两把尺，各自点名**（RD-85 改的就是这里原先那句「故意不给总数」）：
+    // 撞 id 削掉的块**以前没有读数**，所以「榜内 + 榜外 == 总数」天然不平，
+    // 造一枚看似精确的总数就是把不平藏起来。现在那一格有数了
+    // （`duplicatedBlocksDroppedByIdCollision`），等式补第三项后重新平；
+    // 「去重后口径」从一句无法反驳的免责声明变成一条可以核对的账。
     /// 明细榜的封顶长度（引擎那份 `maxBlocks` 的直传，不是界面自己抄的 20）。
     /// `nil` = 本次没跑到重复分析（旧报告与"依赖/日志缺席"同一种处理）。
     var duplicatedBlockLimit: Int? = nil
@@ -91,6 +93,35 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     var duplicatedBlocksDroppedByCap: Int? = nil
     /// 上面那些被丢掉的块覆盖的代码行数。
     var duplicatedLinesOutsideReportedBlocks: Int? = nil
+    /// 截断到明细榜上限**之前**、按 `DuplicatedBlock.id` 去重时被合并掉的原始命中数（RD-85）。
+    /// `id` 只由「出现文件集合 + 行数」拼成 ⇒ 两处**等长**的不同克隆撞同一个 id，
+    /// 被合并掉的那几块既不在榜内也不在 `duplicatedBlocksDroppedByCap` 里。
+    /// 守恒式：`duplicatedBlocks.count + 本格 + duplicatedBlocksDroppedByCap == 原始命中数`，
+    /// 由 `DuplicateIdCollisionConservationTests` 用两块等长克隆夹具两头钉住。
+    /// `nil` = 本次没跑到重复分析（与上面几格同一种处理，**不许**当成"没有撞"）。
+    var duplicatedBlocksDroppedByIdCollision: Int? = nil
+    /// **被合并掉的那几处命中自己的坐标**（每条形如 `路径:起始行 + 路径:起始行`），
+    /// 最多取样 `DuplicationScan.outsideBoardSampleLimit` 条（RD-86）。
+    /// 为什么数之外还要这一格：RD-17 立过的老账——只留一个总数，读的人既无法反驳、
+    /// 也无从去核对"到底是哪几处没上榜"。点坐标而不是点 `id`：撞 id 的那条与留下那条
+    /// 的 id **一字不差**，报名字等于没报。
+    /// `nil` = 本次没跑到重复分析；`[]` 且计数非零 = 合并发生过但一条坐标都没拿到（真缺陷）。
+    var duplicateBlockCoordinatesMergedById: [String]? = nil
+    /// 「这一份代码里去重后共有几处重复块」的**落盘快照**（RD-87；
+    /// 申请单 `docs/R6-契约字段清单.md` §7 第 1 条）。值 = `reportedDuplicatedBlockTotalCount`
+    /// （本文件末尾那枚唯一取法），装配口在 `FileSystemCodeAnalyzer` 的
+    /// `applyDuplicationBoardTruth` —— **这里不许再写一遍加法**，写第二遍就是第二把尺子。
+    ///
+    /// 为什么要多这一格：那枚唯一取法是**代码里的计算属性，JSON 里没有**
+    /// ⇒ 盘上读者（CLI 调用方、AI、对表脚本）只拿得到 `duplicatedBlocks.count`，
+    /// 也就是**榜长**。而「榜长冒充总数」正是 R18 在我们自己界面上刚消灭掉的陷阱
+    /// （立案时的实扫读数：榜内 20、榜外 96 ⇒ 只读榜长的人会把 116 说成 20）。
+    /// 那句修正当时只给了 GUI 用户、没给 JSON 读者 —— 同一件事的两个出口只修了一个。
+    ///
+    /// ⚠️ 上屏的读者一律走那枚计算属性，这一格只服务"拿不到代码、只拿得到 JSON"的那一半；
+    /// 由 `DuplicationTotalInScoreDetailTests.test_snapshotIsNeverReadByADisplaySite` 判红（含元测试）。
+    /// `nil` = 这份报告没统计过榜外（与那枚计算属性拿不出总数的理由是同一个）⇒ 整键缺席。
+    var duplicatedBlockTotalCountAfterDedup: Int? = nil
     /// 因每指纹片段的展开预算而**没展开成片段**的拷贝窗口数（ratio 已含它们）。
     var duplicateFragmentsNotExpandedCount: Int? = nil
     /// 归一化行数触到窗口上限、后半段克隆不参与检测的文件数。
@@ -127,6 +158,34 @@ struct CodeMetrics: Codable, Equatable, Sendable {
     /// **Optional 是落盘兼容要求**：非 Optional 带默认值会让旧报告整份解码失败。
     var nonCodeRegionLineCount: Int? = nil
 
+    // MARK: 文件角色分档（RD-14 / RD-20 · 申请单 docs/R6-契约字段清单.md §2）
+    //
+    // 存在理由：「文件角色分档」这句话在此之前**只是文本**。判据（`SourceFileRoleRule.decide`）
+    // 与累计（`SourceRoleTally`）都早已实现并有独立真值用例钉着，但契约里没有承接格，
+    // 于是八档的读数只活在 `scanLimitations` 的中文句子与单测里 ——
+    // 读 JSON 的人拿不到「生产码有多少行」、评分的人也没有按角色收窄的分母。
+    // 为什么不能放在别处：角色说的是「这一份 codeLines 是在什么范围内量出来的」，
+    // 只有挂在 `CodeMetrics` 上才与 `totalLines` / `codeLines` 同属一次快照；
+    // 放 `CodeScanCoverage` 就停在内存里（那个类型不落盘，正是 `scanLimitations` 之前的老问题）。
+    //
+    /// 本次扫描的文件角色分档（八档全量，含 0）。
+    /// `nil` = **这份报告没有这个读数**（旧报告 / 这一路没跑）——
+    /// 不许被读成「一个文件都没归上档」，也不许由消费方补成空数组或全 0；
+    /// 量到了就八档都在，缺席的那一档由 `fileCount == 0` 表达。
+    /// **Optional 是落盘兼容要求**：非 Optional 带默认值会让旧报告整份解码失败。
+    var fileRoles: CodeFileRoles? = nil
+    /// 本次扫描的**范围台账**（RD-15 · 申请单 R6 §3）。`nil` = 这份报告没有范围台账
+    /// （旧报告 / 这一路没跑）—— 这时「排除了 0 个」这句话**不成立**，屏上只能报缺席。
+    ///
+    /// 存在理由：`SourceScanScopeReadout` 与 `SourceTreeFollowingLedger` 早就把
+    /// 「排除了几个条目、被排除的那些有多少行、行数到底是数过还是没数」算清楚了，
+    /// 但那几个数只活在 `scanLimitations` 的中文句子与单测里 ——
+    /// 读 JSON 的人拿不到数，只能解析散文（与 RD-48 那一批同形）。
+    /// **必须 Optional**：非 Optional 带默认值会让旧报告整份解码失败。
+    /// 上屏那一句的唯一装配口是 `CodeScanSurfaceReadout.accountingLine(_:)`
+    /// （住 `SourceScanScopeReadout.swift`，界面与 CLI 共用同一把尺子）。
+    var scanSurface: CodeScanScope? = nil
+
     var largestFileLineCount: Int = 0
 
     var overallRisk: RiskLevel = .none
@@ -148,6 +207,54 @@ struct LanguageShare: Codable, Equatable, Hashable, Identifiable, Sendable {
         self.fileCount = fileCount
         self.lineCount = lineCount
         self.share = share
+    }
+}
+
+// MARK: - 文件角色分档（RD-14 · 形状逐字照 docs/R6-契约字段清单.md §2）
+
+/// 一个文件角色的分档读数。
+///
+/// `role` 存 `SourceFileRole.rawValue`（枚举 case 名原样，如 `production`、`buildArtifact`；
+/// 稳定坐标），**不存中文档名** ——
+/// 中文只由枚举的 `displayName` 一处产出；在文案里手写第二份档名名单，
+/// 新增一档时那句话就会静默漏报（与 `HealthDimension.repositoryScoped` 同一条教训）。
+struct CodeFileRoleShare: Codable, Equatable, Sendable {
+    var role: String
+    var fileCount: Int
+    var codeLines: Int
+    var totalLines: Int
+    /// 「只有语言证据、路径没有任何角色线索」却被归进本档的文件数（弱判定）。
+    /// **只有 `production` 档会带这一格**；其余档一律 `nil` = 这一问题不适用，
+    /// 不许被读成「该档有 0 个弱判定」。
+    var weakEvidenceFiles: Int?
+    /// 可点名的相对路径样本（上限是 `SourceRoleTally.exampleLimit`，现量 6 条）。
+    /// 样本的意义是「能被反驳」：只给一个总数的分档，读的人无从核对。
+    /// `nil` = 本次没取样；空数组 = 取过样而这一档确实一个文件都没有。
+    var samplePaths: [String]?
+
+    /// 回到枚举坐标：消费方按这个比对，不要再手写 `"production"` 这类字面量。
+    /// `nil` = 这份读数的档名不在当前枚举里（工具降档/改名后的旧报告），
+    /// 那种情况下消费方只能按 `role` 原样透出，不许猜成一个已知的档。
+    var roleValue: SourceFileRole? { SourceFileRole(rawValue: role) }
+}
+
+/// 一次扫描的角色分档读数。设计是**八档全量列出（含 0）**：
+/// 缺档 = 那一档没量到，而不是「该档为 0」—— 后者由 `fileCount == 0` 表达。
+struct CodeFileRoles: Codable, Equatable, Sendable {
+    /// 八档全量（含 0），顺序即 `SourceFileRole.allCases`。
+    var shares: [CodeFileRoleShare]
+    /// 判据分布（`SourceRoleCriterion.rawValue` → 命中次数），回答「生成码是靠什么认出来的」。
+    /// `nil` = 本次没有判据账；空字典 = 跑过了而没有任何文件进入判定（空目录）。
+    var criterionCounts: [String: Int]?
+    /// 参与分档的文件数，由装配口保证等于 `shares` 各档 `fileCount` 之和。
+    /// 与 `CodeMetrics.totalFiles` **不等** ⇒ 有文件没归到任何一档（判据漏了）；
+    /// 那句差额必须被读者说出来，不许静默抹平。
+    var attributedFileCount: Int?
+
+    /// 取某一档的**唯一取法**：消费方不再各自写一份 `first { $0.role == "…" }`
+    /// （那会得到第二把按字符串认领的尺子）。
+    func share(for role: SourceFileRole) -> CodeFileRoleShare? {
+        shares.first { $0.role == role.rawValue }
     }
 }
 
@@ -183,4 +290,89 @@ struct DuplicatedBlock: Codable, Equatable, Hashable, Identifiable, Sendable {
 struct DuplicatedFragment: Codable, Equatable, Hashable, Sendable {
     var path: String
     var startLine: Int
+}
+
+// MARK: - 扫描范围（RD-15 · 申请单 R6 §3 的形状，字段名一字未改）
+
+/// 一次扫描的**范围读数**。三件事必须是三个不同的读数，所以**每一格都是 Optional**：
+/// ① 整枚 `CodeMetrics.scanSurface` 缺席 = 这份报告没有范围台账；
+/// ② 某一格缺席 = 那一项没量；③ 某一格是 `0` = 量过了、真的是 0。
+///
+/// 数值全部**直传**内部台账（`SourceScanScopeReadout` + `SourceTreeFollowingLedger`），
+/// 这里不做任何加减；唯一允许的算术是 `reportedExcludedEntryCount` 那一处取法
+/// （§5 那一族的形状：可选真总数 + 取法只留一处的计算属性，消费方不再各写一份相加）。
+///
+/// ⚠️ 上屏那一句的唯一装配口是 `CodeScanSurfaceReadout.accountingLine(_:)`
+/// （住 `Services/Code/SourceScanScopeReadout.swift`，界面与 CLI 共用同一把尺子）。
+struct CodeScanScope: Codable, Equatable, Sendable {
+    /// 遍历看到的条目数（纳入 + 剔除；目录、软链接、隐藏项这些"条目"也在内）。
+    /// `nil` = 这一份没有范围台账 —— 申请单点名的那一态：屏上只能报"没有台账"。
+    var totalCount: Int?
+    /// 逐条留了路径样本的**被排除条目**数（每个原因桶最多 `SourceSkipLedger.sampleLimit` 条）。
+    var displayedCount: Int?
+    /// 被排除但**没有**留下路径样本的条目数。
+    var undisplayedCount: Int?
+    /// 没量到的范围，一行一条（带计数）。
+    /// ⚠️ **空数组与 `nil` 是两件事**：空 = 真的没有未量到的范围（看完了）；
+    /// `nil` = 这一格没记。拿空数组冒充"看完了"是本字段的第一号反例。
+    var unmeasuredScope: [String]?
+    /// 被排除条目的**行数**。`nil` = 没读内容所以没数；`0` = 读过了、真的是 0 行。
+    /// `linesCounted == false` 时这一格**必须**为 `nil`（产品默认路径 `auditLineBudget == 0`
+    /// 就是这种组合；把 0 填进去等于把"没数"写成"没有"）。
+    var excludedLineCount: Int?
+    /// 上一格到底数没数过（审计模式才为 true）。
+    var linesCounted: Bool?
+    /// 根之下又出现的版本库标记数。口径：它们的工作树**已并入**本次统计，不按子仓库另算。
+    var nestedRepositoryCount: Int?
+    /// 其中 `.git` 是文件形状的（submodule 标记）。
+    var submoduleMarkerCount: Int?
+    /// 文件软链接数（刻意不跟随 ⇒ 不重复计数）。
+    var symbolicLinkFileCount: Int?
+    /// 目录软链接数（刻意不进入 ⇒ 其内部文件数未统计）。
+    var symbolicLinkDirectoryCount: Int?
+    /// 名单外、被系统 bundle 判定剪掉的目录数（`*.xcarchive` 这类）。修前恒为"不知道"。
+    var unlistedPrunedDirectoryCount: Int?
+    /// 本次读不动的目录数。**`0` 与 `nil` 是两个读数**：0 = 每个目录都读到了，
+    /// `nil` = 这一格没记。申请单接手那一段点名要它 —— 少了它，界面上就只有
+    /// 「这一份是没看完」那句中文、拿不到数。
+    var unreadableDirectoryCount: Int?
+
+    /// 「按规则排除了多少个条目」的**唯一取法**：点名的那半 + 没点名的那半。
+    /// 两半任缺其一就返回 `nil` —— 缺读数时补 0 就是把"没数"当成"没有"。
+    /// ⚠️ 它与 `totalCount` **不是同一个分母**（后者含被纳入的条目），两者相加不相等，
+    /// 所以任何地方都不许写死 `totalCount == displayed + undisplayed`。
+    var reportedExcludedEntryCount: Int? {
+        guard let displayed = displayedCount, let undisplayed = undisplayedCount else { return nil }
+        return displayed + undisplayed
+    }
+}
+
+// MARK: - 重复块总数的唯一取法（WS-R18 ·「榜长冒充总数」在评分解释文本里的那一处残留）
+//
+// 存在理由：健康评分「问题」那一栏的句子以前写「重复代码 X%，共 N 处重复块」，
+// 而那个 N 吃的是 `duplicatedBlocks.count` —— **榜长**，不是总数
+// （`duplicatedBlocks` 是被 `DuplicationEngine.maxBlocks` = 20 截过的明细榜）。
+// 2026-09-23 本仓实扫读数：榜内 20 · 榜外未列 96 ⇒ 那句"共 20 处重复块"少报了 96 处
+// （真总数 116；工单立案那批的读数是榜内 20 · 榜外 85，同一件事）。
+// 展示层那一半已由 R7 收口（`CodeBoardTruth.duplicationBoardCount` 与页尾三态句），
+// 这一处是它剩下的另一半。
+//
+// ⚠️ **口径必须自己交代**：`DuplicationScan.rankedBlocks` 先按 `DuplicatedBlock.id` 去重、
+// 再截断到上限，所以「榜内 + 榜外」是**去重之后**的重复块总数。撞同一个 id 被合并掉的
+// 原始命中自 RD-85 起有读数了（`duplicatedBlocksDroppedByIdCollision`，
+// 申请单见 `docs/R6-契约字段清单.md` §7 第 2 条），所以这个数**只许配「去重后口径」这句
+// 限定语上屏**，不许被读成"这个仓库一共有多少处克隆"；要那一个数，把三项相加。
+extension CodeMetrics {
+    /// 去重后口径的重复块总数。**取法只此一处**：消费方（评分解释文本 / 界面 / CLI）
+    /// 都走它，不许各自再写一遍加法造第二把尺子。
+    ///
+    /// `nil` = **这份报告没统计过榜外**（旧报告没有 `duplicatedBlocksDroppedByCap` 这一格）
+    /// ⇒ 拿不出总数。它与"统计过、榜外为零"（`duplicatedBlocksDroppedByCap == 0`）
+    /// 是两件事，所以**故意不写成** `duplicatedBlocksDroppedByCap.map { … } ?? duplicatedBlocks.count`
+    /// 那种"缺席就当没漏"的兜底 —— 那是 `reportedHugeFileCount` 的旧病（把"没统计"说成
+    /// "一份没漏"），三态被压成两态之后，句子就会对一个没量过的总体说"共 N 处"。
+    var reportedDuplicatedBlockTotalCount: Int? {
+        guard let outsideBoard = duplicatedBlocksDroppedByCap else { return nil }
+        return duplicatedBlocks.count + outsideBoard
+    }
 }

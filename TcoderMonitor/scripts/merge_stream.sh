@@ -75,6 +75,19 @@ if ! git merge-base --is-ancestor "$MAIN_BEFORE" "$TIP" 2>/dev/null; then
   fi
 fi
 
+# 0.6) **no-op 不许被报成"已合入"**（RD-53：我自己的落地脚本会把别人的提交报成我的成果）
+# 旧 `land-branch.sh` 的病：合并是 no-op 时照样打印 `LANDED <main 当时的头>`，
+# 那一行 sha 属于**另一个会话的提交**，而 `git reflog show main` 里根本没有这次合并。
+# 换成本脚本后同一个形状还在：`--no-ff` 对"分支头已是 main 祖先"的情况会造一个
+# **带入 0 个提交的空合并提交**，然后理直气壮打「✅ 已合入 main（<新 sha>）」。
+# 判据：合不动就不合，main 一个提交都不许多出来；要说的是"早已在 main 里"，不是"我合进去了"。
+if git merge-base --is-ancestor "$TIP" "$(git rev-parse main)" 2>/dev/null; then
+  echo "==> ⚠ NO-OP：$BRANCH 的头 ${TIP:0:7} 早已在 main 里（它已被合过，或被别的队列先带走了）。"
+  echo "    带入提交数 = $(git rev-list --count "$TIP"..main) 反向 = $(git rev-list --count main.."$TIP")"
+  echo "    本脚本**不动 main**（不造空合并提交）。要确认它为什么已在 main：git log --oneline --ancestry-path ${TIP}..main | tail -3"
+  exit 0
+fi
+
 # 1) 合并前 main 必须是干净的
 DIRTY=$(git status --porcelain | wc -l | tr -d ' ')
 if [ "$DIRTY" != "0" ]; then
@@ -102,4 +115,4 @@ if [ "$AFTER" != "0" ]; then
   die_clean "合并后 main 仍有 $AFTER 个未提交/unmerged 文件"
 fi
 
-echo "==> ✅ $BRANCH 已合入 main（$(git rev-parse --short HEAD)），主树干净"
+echo "==> ✅ $BRANCH 已合入 main（$(git rev-parse --short HEAD)），带入 $(git rev-list --count "$MAIN_BEFORE"..HEAD) 个提交，主树干净"

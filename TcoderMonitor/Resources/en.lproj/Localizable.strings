@@ -164,7 +164,7 @@
 "第一次 %1$@ · 最近 %2$@" = "First seen %1$@ · latest %2$@";
 "来源文件 %@" = "Source file %@";
 "缺失维度 %1$@ 项" = "%1$@ missing dimensions";
-"按 %1$@ 分桶 · 共 %2$@ 桶%3$@" = "Bucketed by %1$@ · %2$@ buckets%3$@";
+"按%1$@分桶 · 共 %2$@ 桶%3$@" = "Bucketed by %1$@ · %2$@ buckets%3$@";
 "%@ 个空桶" = "%@ empty buckets";
 
 /* ===== P5-c 第三批：性能/Git/日志侧的整句键 ===== */
@@ -188,7 +188,6 @@
 "累计变更" = "Total Changes";
 "贡献集中度结论" = "Concentration Conclusion";
 "近 30 天活跃" = "Active in Last 30 Days";
-"选择一个本地仓库目录后点击「重新分析」。\n分析完成后这里会显示贡献者排行、代码变更量与活跃时段分布。" = "Choose a local repository folder and click Re-analyse.\nOnce the analysis finishes, the contributor ranking, line changes and active hour distribution appear here.";
 "24 小时与星期的近似活跃分布矩阵" = "Approximate activity matrix by hour of day and weekday";
 "提交活跃度按星期与小时近似分布；强度为两条边际归一边际的平均值，是近似值" = "Commit activity is distributed approximately by weekday and hour; strength is the average of the two normalised marginals, so it is an approximation";
 "Git 分析没有产出按时间分桶的提交数据，因此这里无法给出峰值或均值。" = "The Git analysis produced no commit data bucketed by time, so no peak or average can be shown here.";
@@ -211,7 +210,6 @@
 "触达文件" = "Files Touched";
 "路径" = "Path";
 "远端" = "Remote";
-"选择一个本地仓库目录后点击「重新分析」。\n分析完成后这里会显示提交趋势、24×7 活跃分布与最近提交记录。\n" = "Choose a local repository folder and click Re-analyse.\nThe commit trend, 24×7 activity distribution and recent commit records appear here once the analysis finishes.\n";
 "首次提交" = "First Commit";
 "以下均为测得值，口径见上方口径条" = "All of the following are measured values; see the basis bar above";
 "作者统计基准" = "Author Statistics Basis";
@@ -243,7 +241,6 @@
 "对当前项目重新执行全部分析器" = "Re-run every analyser on the current project.";
 "尚未执行依赖分析" = "Dependencies not analysed yet";
 "开发依赖不随产物发布" = "Development dependencies are not shipped with the build output.";
-"扫描完成，但没有找到 package.json、Package.swift、pom.xml、go.mod 等清单文件。\n如果依赖声明在自定义脚本里，这一页为空是真实结果。" = "Scan finished, but no manifest files such as package.json, Package.swift, pom.xml or go.mod were found.\n If dependencies are declared in a custom script, an empty page is the true result.";
 "按清单文件统计" = "Counted by manifest file";
 "条" = "findings";
 "框架标记" = "Framework Markers";
@@ -258,7 +255,6 @@
 "联网核对会显著变慢，离线时仍会用内置快照" = "Online verification is noticeably slower; offline runs still use the built-in snapshot";
 "联网核对说明" = "Online Verification Notes";
 "该清单没有解析出可枚举的依赖项。" = "This manifest did not resolve to any enumerable dependencies.";
-"该项目还没有依赖分析结果。点击「重新分析」开始扫描。\n需要最新版本与漏洞库在线核对时，先打开上方的联网开关。" = "This project has no dependency analysis results yet. Click Re-analyse to start a scan.\n To check latest versions and the vulnerability database online, turn on the network switch above first.";
 "运行时 / 开发" = "Runtime / Dev";
 "锁文件" = "Lock File";
 "项" = "items";
@@ -337,7 +333,6 @@
 "本次提交触达 %@ 个文件" = "This commit touched %@ files";
 "该仓库含合并共 %@ 次提交" = "This repository has %@ commits including merges";
 "评分趋势，%@ 个历史点" = "Score trend, %@ history points";
-"错误趋势，%@ 天" = "Error trend, %@ days";
 "移除分组规则「%@」，只删规则，不干预任何进程" = "Remove group rule “%@” — removes the rule only; never touches a process";
 "严重度：%@" = "Severity: %@";
 "满分可得 %1$@，这一维度拖了 %2$@ 分" = "Full marks %1$@; this dimension cost %2$@ points";
@@ -494,7 +489,7 @@
 "来源" = "Source";
 "起始行" = "Start Line";
 "进程名称" = "Process";
-"出现" = "Occurrences";
+"出现" = "Times";
 "增" = "Added";
 "删" = "Removed";
 "风险" = "Risk";
@@ -514,6 +509,10 @@
 "标记事项与扫描信息" = "Markers and Scan Details";
 "仅内置快照" = "Built-in snapshot only";
 "未核对" = "Not verified";
+// RD-70（台账卷五 §81）：生态卡头那一格的状态词。它与「未核对」同一族（短标签、会换行的散文不算），
+// 之前只由 `DependencySafetyVerdict.badgeText` 上屏、一直没登记 ⇒ 英文态吐中文，这次一起补上。
+"部分核对" = "Partially verified";
+"已核对" = "Verified";
 "未配置" = "Not configured";
 "未发现" = "Not found";
 "零命中" = "No matches";
@@ -662,7 +661,7 @@
 "指一个本地仓库目录" = "point at a local repository folder";
 "首个采样点" = "first sample";
 "没有命中错误行。" = "No error lines were matched.";
-"用「附加日志文件」手动选择。" = "Use 「Attach Log Files」 to pick them by hand.";
+"用「附加日志文件」手动选择。" = "Use \"Attach Log Files\" to pick them by hand.";
 
 // 批次 ⓘ·双语补账第二轮：两处 `Text(变量)` 的渲染点改成 `Text(localizedCopy(…))` 之后，
 // 变量里那几句中文才真的查得到表（静态棘轮本来看不见它们，是 S1/S5 交回时点名的盲区）。
@@ -746,6 +745,8 @@
 // （`CodeBoardTruth.outsideBoardNote`）—— 引擎改文案而标记没改，披露会静默消失。
 "另有 %1$@ 个块 / %2$@ 行未列入榜内。" = "A further %1$@ blocks / %2$@ lines sit outside the reported board.";
 "另有 %1$@ 处拷贝因指纹预算未展开。" = "A further %1$@ clone windows were not expanded because of the fingerprint budget.";
+"另有 %1$@ 处重复命中与别处合并为一条（同一组文件、同一长度）。" = "A further %1$@ duplicate hits were merged into one entry: same file set, same length.";
+"被合并的那几处在：%1$@。" = "The merged ones sit at: %1$@.";
 
 // ── RD-42（混合语言分区归位落成字段）：口径句由数装配，一条新键 ─────────────────────
 // 这句**不进** `scanLimitations`（那条在 CLI 打成「未量准 N 条」），所以它自己必须有键。
@@ -768,6 +769,7 @@
 "当前为离线模式，版本与漏洞结论来自内置快照。" = "Offline mode: version and vulnerability conclusions come from the built-in snapshot.";
 "分用途统计" = "Breakdown by usage";
 "该项目没有产出覆盖率报告，不参与计分。" = "This project produced no coverage report, so it is not scored.";
+"看得见的部分里没有发现覆盖率报告，不参与计分。" = "No coverage report was found within the part we could read, so it is not scored.";
 "这是「在用」" = "This is in-use, not free";
 "CPU 占用率" = "CPU utilization";
 "内存在用率" = "Memory utilization";
@@ -782,14 +784,34 @@
 "开启后需要重新执行分析才会生效。" = "Re-run the analysis for this setting to take effect.";
 "尚未分析覆盖率报告，不参与计分。" = "No coverage report has been analyzed, so it is not scored.";
 
+// WS-R16（RD-14 角色分档进契约）：`CLIScoreText.fileRoleLines` 的两句整句键。
+// 占位符顺序与键一致（`test_catalogPlaceholdersMatch` 逐条比），译文不许增删 %n$@。
+"文件角色分档：生产源码 %1$@ 个 / %2$@ 代码行 · 弱判定 %3$@ 个 · 八档全量与判据分布见 scan 落盘的 code.fileRoles.shares。" = "File roles: %1$@ production files / %2$@ code lines · %3$@ attributed on language evidence alone · the full eight-bucket table and the criterion counts live in code.fileRoles.shares of the scan JSON.";
+"文件角色分档对不平：八档合计 %1$@ 个文件，而本次扫到 %2$@ 个，相差 %3$@ 个 —— 两边不是同一个总体，要么有文件没归进任何一档，要么有文件被记进了两档，这份分档要按读数打折使用。" = "File role buckets do not reconcile: the eight buckets total %1$@ files while this scan saw %2$@, a difference of %3$@ - the two sides are not the same population, so either some files were never bucketed or some landed in two buckets; discount this breakdown.";
 // P52：健康维度那四条「优点/问题」句子以前用 `String(format:)` 直接拼中文模板，
 // 模板本身从不查表 ⇒ 英文态整句是中文（屏上各 4×，是剩余 B 里最高频的一族）。
 // 改成 `localizedFormat` + 位置参数；同一个署名数在一句里出现两次，用同一个 `%1$@`。
 "重复代码率低（%1$@）" = "Low duplication rate (%1$@)";
-"重复代码 %1$@，共 %2$@ 处重复块" = "Duplicated code %1$@ across %2$@ duplicate blocks";
+// WS-R18（榜长冒充总数 · 评分解释文本那一处残留）：上面那条「共 %2$@ 处重复块」以前吃的是
+// `code.duplicatedBlocks.count` —— 那是被 `DuplicationEngine.maxBlocks` 截过的**榜长**，
+// 2026-09-23 本仓实扫榜内 20 · 榜外未列 96，句子说「共 20 处」而真总数是 116（少报 96 处）。
+// 现在按三态各一句：榜外有账 / 榜外为零 / 榜外根本没统计过（那一句不许出现「共」字）。
+// 取法只有一处：`CodeMetrics.reportedDuplicatedBlockTotalCount`（去重后口径）。
+"重复代码 %1$@，共 %2$@ 处重复块（去重后口径，榜内只列 %3$@ 处明细）" = "Duplicated code %1$@ across %2$@ duplicate blocks (deduplicated basis; the board lists only %3$@ of them)";
+"重复代码 %1$@，共 %2$@ 处重复块（明细已全部列出）" = "Duplicated code %1$@ across %2$@ duplicate blocks (every block is listed)";
+"重复代码 %1$@，榜内只列 %2$@ 处重复块，总处数本次未统计" = "Duplicated code %1$@; the board lists %2$@ duplicate blocks, and no total was counted this time";
 "贡献分布合理（%1$@ 个署名，头号署名占 %2$@；署名按工作流计，不等于 %1$@ 个人）" = "Contribution is well spread (%1$@ identities, the top one holds %2$@; identities are workflows, not %1$@ people)";
-"「%1$@」这个署名占 %2$@ 提交，单点风险高（署名按工作流计，不等同于一个人头）" = "Identity \u201c%1$@\u201d holds %2$@ of commits \u2014 single-point risk (identities are workflows, not people)";
+"「%1$@」这个署名占 %2$@ 提交，单点风险高（署名按工作流计，不等同于一个人头）" = "Identity “%1$@” holds %2$@ of commits — single-point risk (identities are workflows, not people)";
 
+// ── RD-15（WS-R17 · 扫描范围进契约）：`code.scanSurface` 那 12 格的上屏两句 ──────────
+// 之前这些数只活在 `scanLimitations` 的中文句子里，读 JSON 与看终端的人拿不到数。
+// 装配口 `CodeScanSurfaceReadout.accountingLines(_:)` 是界面与 CLI 共用的**唯一**那一个。
+// 三态各一句：没有台账 ⇒ 缺席话；量到的 0 ⇒ 一个字都不许多；有数 ⇒ 下面那两句纯数字。
+// ⚠️ 值里一律不出现 ASCII 双引号（本目录踩过：那会让整份目录解析失败而守卫全绿）。
+"扫描范围：本次没有范围台账 —— 这一路没跑过，或这份报告出自没有这一格的旧结构，所以「排除了几个」这类读数一个都不成立。" = "Scan scope: this report carries no scope ledger — that path never ran, or the report predates this field, so no reading of the excluded counts holds here.";
+"扫描范围台账：遍历看到 %1$@ 个条目 · 按规则排除 %2$@ 个（逐条点名 %3$@ · 未点名 %4$@）· 没量到的范围 %5$@ 条。" = "Scan scope ledger: %1$@ entries seen · %2$@ excluded by rule (%3$@ named one by one · %4$@ unnamed) · %5$@ ranges were not measured.";
+"排除条目的行数：%1$@ · 仓库标记 %2$@ 个 · 其中 submodule 形状 %3$@ 个 · 软链接文件 %4$@ 个 · 目录软链接 %5$@ 个 · 名单外被系统判定剪掉的目录 %6$@ 个 · 读不动的目录 %7$@ 个。" = "Lines in the excluded entries: %1$@ · repository markers %2$@ · of them submodule-shaped %3$@ · symlinked files %4$@ · symlinked directories %5$@ · directories pruned by the system bundle rule off our list %6$@ · unreadable directories %7$@.";
+"行数未统计" = "Line count not measured";
 // 批次 P53（Git 洞察口径句·先拼再上屏的那一族）：这一族的毛病不是"没键"，
 // 而是**先把带测得值的中文片段拼成串、再交给渲染层查表** —— 拼出来的整串里嵌着
 // 「279」「606」这样的测得值，目录里不可能有对应的键，于是英文态永远出中文；
@@ -812,3 +834,356 @@
 
 // 批次 P57：维度名查表之后，"名字 + ：" 这一族改整句键（英文用半角冒号）。
 "%1$@：" = "%1$@:";
+
+// 批次 P58（健康评分·分量说明行）：`Services/Health` 的 detail 原先是
+// 「中文字面量 + 测得值」插值出来的片段，再用 `joined` 拼成一整行 ——
+// 拼完那一串永远查不中任何键，英文态整行是中文；而 `curve.detail + "（口径注记）"`
+// 那一族更糟：前半已经翻好了，后半贴上去的还是中文。
+// 现在**片段**是整句键、**分隔符与括号**也是键，测得值一律走位置参数。
+// 分隔符「，」在中文态一字未动，英文态换成「, 」。
+"，" = ", ";
+"%1$@（%2$@）" = "%1$@ (%2$@)";
+
+// —— 复杂度 / 重复度 / 代码质量 / 注释与可维护性
+"未发现可计数的函数体" = "No countable function bodies";
+"平均圈复杂度 %1$@" = "Average cyclomatic complexity %1$@";
+"%1$@ 个函数 CC≥16" = "%1$@ functions at CC≥16";
+"最大 %1$@" = "Max %1$@";
+"基准 %1$@ 分扣 %2$@ 分" = "Base %1$@ minus %2$@";
+"未发现可评估的源码文件" = "No source files available to assess";
+"重复率 %1$@" = "Duplication rate %1$@";
+"样本过小，按 %1$@ 行代码估计，置信度低" = "Small sample: estimated over %1$@ code lines, low confidence";
+"按 %1$@ 行代码统计" = "Measured over %1$@ code lines";
+"巨大文件占比 %1$@" = "Huge files %1$@";
+"平均函数 %1$@ 行" = "Average function %1$@ lines";
+"共 %1$@ 个文件" = "%1$@ files in total";
+"%1$@ 个超长函数扣 %2$@ 分" = "%1$@ over-long functions cost %2$@";
+"无源码可评估" = "No source code to assess";
+"低于 2% 最佳下限" = "below the 2% floor";
+"注释过多同样扣分" = "over-commenting costs too";
+"落在 2%~15% 最佳区间" = "inside the 2%–15% best band";
+"注释占比 %1$@（%2$@）" = "Comments %1$@ (%2$@)";
+"TODO %1$@ 个" = "%1$@ TODO";
+"FIXME %1$@ 个" = "%1$@ FIXME";
+"总行 %1$@（含空行与注释）" = "%1$@ lines total (incl. blanks and comments)";
+"标记扣 %1$@ 分" = "Markers cost %1$@";
+
+// —— 提交活跃度 / 协作分布 / 运行稳定性 / 依赖健康
+"日均 %1$@ 次提交" = "%1$@ commits per day";
+"距今 %1$@ 天无提交" = "No commits for %1$@ days";
+"未提供最近提交时间" = "Last commit time not provided";
+"累计 %1$@ 次" = "%1$@ commits in total";
+"速率偏高按碎片化折算" = "A high rate is counted as fragmentation";
+"陈旧扣 %1$@ 分" = "Staleness costs %1$@";
+"作者分布总体为 0，本维度不该计分（内部守卫）" = "The author population is 0, so this dimension must not be scored (internal guard)";
+"最高作者占比 %1$@" = "Top author share %1$@";
+"%1$@ 个活跃署名" = "%1$@ active signatures";
+"%1$@ 次非合并提交" = "%1$@ non-merge commits";
+"单一署名包揽重扣 22 分" = "One signature takes nearly everything: −22";
+"单一署名封顶 8 分" = "One signature caps this at 8";
+"每千行日志 %1$@ 个错误" = "%1$@ errors per 1,000 log lines";
+"确认崩溃 %1$@ 次" = "%1$@ confirmed crashes";
+"致命 %1$@ 次" = "%1$@ fatal";
+"异常 %1$@ 次" = "%1$@ exceptions";
+"扫描 %1$@ 行" = "%1$@ lines scanned";
+"扣 %1$@ 分" = "Costs %1$@";
+"未发现依赖清单" = "No dependency manifests found";
+"依赖 %1$@ 个" = "%1$@ dependencies";
+"漏洞 %1$@ 个" = "%1$@ vulnerabilities";
+"漏洞核对零命中" = "The vulnerability check came back clean";
+"落后 %1$@ 个占 %2$@" = "%1$@ outdated (%2$@)";
+
+// —— 口径注记（挂在 detail 后面那半句，交代"这个数是从哪个总体算出来的"）
+"历史仅 %1$@ 天 < %2$@ 天门槛，样本不足不评估节奏，本维度封顶 %3$@ 分" = "History spans only %1$@ days, below the %2$@-day floor; cadence is not assessed and the dimension is capped at %3$@";
+"速率分子按含合并总数折算" = "The rate numerator uses the merge-inclusive total";
+"首末提交时间缺失或同一瞬间，日均分母无定义，速率按 0 计" = "First and last commit times are missing or identical, so the daily denominator is undefined and the rate counts as 0";
+"榜内只列 %1$@ 个，实际 %2$@ 个" = "The board lists only %1$@ of %2$@";
+"证据太薄·未判定：仅 %1$@ 行 < %2$@ 行下限，封顶 %3$@ 分" = "Thin evidence, undetermined: %1$@ lines is below the %2$@-line floor, capped at %3$@";
+"热点样本 %1$@ 个的均值" = "mean of %1$@ hotspot samples";
+"均值为全仓 %1$@ 个函数" = "Mean over all %1$@ functions in the repository";
+"均值为全仓" = "Mean over the whole repository";
+"%1$@；CC≥16 与最大 CC 只统计热点榜前 %2$@ 个" = "%1$@; the CC≥16 count and the maximum are tallied only over the top %2$@ hotspot functions";
+
+// 批次 P59a（健康评分：建议/短板/垫白一族）——`Services/Health` 里这些句子原先是裸字面量，
+// 经 `Text(变量)` 直接上屏，压根没查表：登记了也白登记（守卫 1 只看 `localized*` 的实参，看不见它们）。
+"查询失败" = "Query failed";
+"版本未解析" = "Version unresolved";
+"生态不支持" = "Ecosystem unsupported";
+"未进查询批次" = "Left out of the query batch";
+"未发起核对" = "Never attempted";
+"%1$@ %2$@ 条" = "%1$@: %2$@";
+"其余维度处于可接受区间。" = "The remaining dimensions sit inside the acceptable range.";
+"建议保持观察，待各维度数据补齐后复核。" = "Keep observing; revisit once the missing dimension data is collected.";
+"函数复杂度可控（最高 CC %1$@）" = "Complexity is contained (max CC %1$@)";
+"%1$@ 个函数圈复杂度 ≥16，最高 %2$@" = "%1$@ functions at cyclomatic complexity ≥16, max %2$@";
+"先拆这一个：「%1$@」（%2$@ 第 %3$@ 行 · 圈复杂度 %4$@），用早返回替代嵌套分支" = "Split this one first: %1$@ (%2$@ line %3$@, CC %4$@); replace nested branches with early returns";
+"文件规模健康，巨大文件占比低" = "File sizes are healthy; few oversized files";
+"%1$@ %2$@ 行，远超单文件上限" = "%1$@ has %2$@ lines, far beyond the single-file limit";
+"注释密度适中（%1$@）" = "Comment density is moderate (%1$@)";
+"为公共 API 与复杂分支补充说明性注释" = "Add explanatory comments to public APIs and complex branches";
+"当前无明显短板：在场维度都落在可接受区间，综合分只由这些分量按权重算出，没有额外加分项。" = "No obvious weak spot: every present dimension sits in the acceptable range, and the overall score is only these components weighted - nothing earns a bonus.";
+"本次所有参与计分的维度都属于代码口径，因此它与综合分同源同值。" = "Every scored dimension in this run belongs to the code basis, so it shares the overall score's source and value.";
+"代码口径只统计靠改本仓库代码就能抬起来的维度；已排除 %1$@——它们量的是提交历史的节奏与署名分布、第三方依赖与运行日志，不是这份代码本身的好坏。" = "The code basis counts only the dimensions a change in this repository can lift; excluded %1$@ - they measure commit cadence and authorship, third-party dependencies and runtime logs, not the quality of this code.";
+"先在侧栏「添加项目」选择本地仓库目录，或点右上角「重新分析」采集指标。" = "Use \"Add Project\" in the sidebar to pick a local repository, or \"Re-analyse\" in the top-right to collect metrics.";
+"尚无可用指标" = "No metrics available yet";
+"尚无可用指标，无法给出健康评分；选择项目目录后会自动完成采集。" = "No metrics are available, so no health score can be given; selecting a project directory collects them automatically.";
+"已采集到输入，但%1$@各维度都缺少可计分证据，本次不给出综合分，避免把没测到当成好结果。" = "Inputs were collected, but every dimension among %1$@ lacks scoreable evidence, so no overall score is given this run - never read \"not measured\" as a good result.";
+
+// 批次 P59b（协作分布与活跃度的建议/缺席句）：整句键，测得值一律走位置参数。
+"提交节奏稳定（日均 %1$@ 次；这个频率只在曲线里折算一次，本句不另加分）" = "Cadence is steady (%1$@ commits per day; the curve already folds this rate in once, so this line adds no credit)";
+"提交历史仅 %1$@ 天，样本不足，活跃度不宣称节奏、按 %2$@ 分封顶；跑满一周后重扫即可解锁。" = "History spans only %1$@ days, too small a sample: cadence is not claimed and activity is capped at %2$@. Rescan after a full week to unlock it.";
+"提交历史缺可用的首末时间，日均无法计算，活跃度按曲线最低档计，等重新分析补齐两端再评。" = "The history has no usable first/last commit time, so a daily average cannot be computed; activity scores at the curve's floor until a re-analysis fills both ends.";
+"已 %1$@ 天无提交" = "%1$@ days without commits";
+"作者表里没有可算分布的提交（非合并口径 0 笔，含合并共 %1$@ 笔），协作分布不参与本次计分；这一维读的是「署名分布」，要有非合并提交才谈得上分散与否。" = "The author table holds no commits to distribute (0 non-merge out of %1$@ including merges), so collaboration does not take part in this score; that dimension reads signature spread, which needs non-merge commits to mean anything.";
+"作者分布的总体只有 %1$@ 笔非合并提交、%2$@ 个活跃署名 —— 一笔提交就折合 %3$@ 占比，跨一个档位只要一两笔 ⇒ 占比无定义，协作分布不参与本次计分（也不按 0 计入）；非合并提交攒到 %4$@ 笔以上重扫即可解锁。" = "The author population is only %1$@ non-merge commits across %2$@ active signatures - one commit moves the share by %3$@ and one or two cross a band, so the share is undefined; collaboration does not take part in this score (nor is it counted as 0). Rescan once %4$@ non-merge commits have accumulated.";
+"非合并口径 %1$@ 笔、%2$@ 个活跃署名，低于评这一维所需的 %3$@ 笔总体 —— 一笔提交折合 %4$@ 占比，占比无定义，本维度不参与计分（也不按 0 计入）。" = "%1$@ non-merge commits across %2$@ active signatures, below the %3$@-commit population this dimension needs - one commit moves the share by %4$@, so the share is undefined and the dimension is not scored (nor counted as 0).";
+
+// 批次 P59c（健康评分：权重 tooltip、缺席原因、分析器名）。
+"该维度不在内置权重表里，直接采用评分器给出的权重 %1$@。" = "This dimension is not in the built-in weight table, so the scorer's own weight %1$@ is used directly.";
+"本次乘数 %1$@，与内置表原始权重 %2$@ 一致。" = "This run's multiplier %1$@ matches the table's original weight %2$@.";
+"内置权重表合计 %1$@，评分器发布前整体折算：原始 %2$@ → 本次乘数 %3$@。本次没有维度缺席。" = "The built-in weight table sums to %1$@ and was normalised before publishing: original %2$@ -> this run %3$@. No dimension was absent.";
+"%1$@ 个维度缺席，份额按在场维度等比摊入：原始 %2$@ → 本次乘数 %3$@（在场维度表权重合计 %4$@，全表合计 %5$@）。" = "%1$@ dimensions were absent and their share was spread proportionally over the present ones: original %2$@ -> this run %3$@ (present dimensions sum to %4$@ in the table, the whole table to %5$@).";
+"本次乘数 %1$@ 与内置表口径（原始 %2$@、表合计 %3$@、缺席 %4$@ 项）对不上，界面以评分器发布值为准。" = "This run's multiplier %1$@ does not reconcile with the table basis (original %2$@, table sum %3$@, %4$@ absent); the interface shows the scorer's published value.";
+"输入覆盖全部 %1$@ 个可计分维度，没有维度缺席；但内置权重表合计 %2$@，评分器发布前已整体折算，故各乘数不等于表内原始值。" = "The inputs cover all %1$@ scoreable dimensions with none absent; the built-in table sums to %2$@ and was normalised before publishing, so each multiplier differs from the table's original value.";
+"输入覆盖全部 %1$@ 个可计分维度，没有维度缺席；权重未做摊分，乘数即表内原始值。" = "The inputs cover all %1$@ scoreable dimensions with none absent; nothing was re-spread, so each multiplier is the table's original value.";
+"缺失 %1$@ 个维度不参与计分、也不按 0 计入，其份额已按在场维度等比摊入。" = "The %1$@ missing dimensions are not scored and are not counted as 0; their share was spread proportionally over the present dimensions.";
+"本次实际乘数：在场维度的乘数合计恒为 100%，故 Σ（得分 × 乘数）可复现综合分。与内置表原始值不一致的原因见各行提示。" = "Multipliers actually used: the present dimensions always sum to 100%, so the score-weighted sum reproduces the overall score. Each row's tooltip explains any difference from the table's original value.";
+"该维度不在内置口径里，本次未参与计分。" = "This dimension is not part of the built-in basis and did not take part in this score.";
+"「%1$@」完成但该分量未产出。" = "%1$@ finished but did not produce this component.";
+"上次扫描「%1$@」失败，本维度没有输入。" = "The last %1$@ scan failed, so this dimension has no input.";
+"还没有扫描结果，「%1$@」未运行。" = "There is no scan result yet; %1$@ never ran.";
+"「%1$@」没有产出代码指标。" = "%1$@ produced no code metrics.";
+"该目录不是 Git 仓库，或未取到提交历史。" = "This directory is not a Git repository, or its commit history could not be read.";
+"该仓库没有任何提交，Git 两维都没有输入。" = "The repository has no commits, so neither Git-based dimension has an input.";
+"含合并共 %1$@ 笔提交里没有一笔非合并提交，作者分布没有可算的总体，本维度不参与计分。" = "None of the %1$@ commits (merges included) is a non-merge commit, so the author distribution has no population to measure and this dimension is not scored.";
+"尚未分析日志。" = "Logs have not been analysed yet.";
+"未发现可读的日志文件。" = "No readable log files were found.";
+"未识别到依赖清单。" = "No dependency manifest was recognised.";
+"扫到 %1$@ 个覆盖率报告文件，但里面没有可用的行覆盖数字，不参与计分。" = "%1$@ coverage report files were found, but none carries usable line-coverage numbers, so this dimension is not scored.";
+"%1$@%2$@上面的结论只覆盖看得见的部分。" = "%1$@%2$@ The conclusion above covers only the part that was visible.";
+"%1$@另有 %2$@ 个目录没能读取（权限或已消失），上面的结论只覆盖读得动的部分。" = "%1$@ Another %2$@ directories could not be read (permissions, or they are gone), so the conclusion above covers only what was readable.";
+"代码扫描" = "Code analysis";
+"Git 分析" = "Git analysis";
+
+// 批次 P59d（运行稳定性 / 依赖健康 / 覆盖率那三路的建议与缺席句）。
+"证据不足：%1$@" = "Insufficient evidence: %1$@";
+"未采集运行时长与请求量，分母只是已扫描的日志行" = "Runtime duration and request volume are not collected, so the denominator is only the log lines scanned";
+"另有 %1$@ 份崩溃通道文件未产出可用事件证据（内容损坏 / 无可用事件时间 / 只有文件名像），未计入崩溃数" = "A further %1$@ crash-channel files produced no usable event evidence (corrupt, no usable event time, or only the filename looks like one); they are not counted as crashes";
+"已扫描 %1$@ 行日志，窗口内未见确认崩溃（不等于运行期无崩溃：未采运行时长与请求量）" = "Scanned %1$@ log lines with no confirmed crash in the window (this is not \"no crashes at runtime\": duration and request volume are not collected)";
+"%1$@出现 %2$@ 次（最近 %3$@）" = "%1$@ occurred %2$@ times (last seen %3$@)";
+"先修这条高频错误：「%1$@」（窗口内 %2$@ 次 · 来自 %3$@），它通常掩盖了下游连锁异常" = "Fix this frequent error first: %1$@ (%2$@ times in the window, from %3$@); it usually masks downstream cascades";
+"没有可扫描的日志，运行稳定性不参与本次评分；把日志文件放进项目目录或 ~/Library/Logs，或在「错误日志」页点「附加日志」，这个维度才会出现。" = "There are no logs to scan, so runtime stability is not scored this run. Put log files in the project directory or ~/Library/Logs, or use \\\"Attach Log Files\\\" on the Error Logs page, for this dimension to appear.";
+"读到 %1$@ 次确认崩溃%2$@，但零真日志行 ⇒ 错误密度算不出分母，本维度不参与本次评分；崩溃明细见「错误日志」页。" = "Read %1$@ confirmed crashes%2$@ but zero real log lines, so error density has no denominator and this dimension is not scored; see the Error Logs page for the details.";
+"（%1$@ 份崩溃报告）" = "(%1$@ crash reports)";
+"（崩溃通道零份，来自日志行本身）" = "(no crash-channel files; taken from the log lines themselves)";
+"有 %1$@ 份崩溃报告没能读出来（权限不足 / 文件已消失 / 读取失败），崩溃证据不确定：本维度不参与本次评分，也不得读成「没有崩溃」。" = "%1$@ crash reports could not be read (permissions, gone, or read failure), so the crash evidence is uncertain: this dimension is not scored and must not be read as \\\"no crashes\\\".";
+"另有 %1$@ 份崩溃报告没能读出来，未计入上面的份数。" = "A further %1$@ crash reports could not be read and are not included in the count above.";
+"只读到 %1$@ 行真日志，低于评这一维所需的 %2$@ 行下限 ⇒ 证据太薄，本维度按 %3$@ 分封顶、标「证据太薄·未判定」（薄不等于稳，也不等于运行不稳）；跑够一次真实运行后重扫即可解锁。" = "Only %1$@ real log lines were read, below the %2$@-line floor this dimension needs: the evidence is thin, so it is capped at %3$@ and marked \\\"thin evidence, undetermined\\\" (thin is neither stable nor unstable). Rescan after one real run to unlock it.";
+"漏洞核对未完成（%1$@），依赖健康本维度暂不计分；补齐锁文件或重跑联网核对后再计。" = "The vulnerability check is incomplete (%1$@), so dependency health is not scored yet; add the lock files or re-run the online check.";
+"存在未覆盖项" = "uncovered items exist";
+"未做在线漏洞核对，依赖健康本维度暂不计分；开启「联网核对」后重扫才有结论。" = "No online vulnerability check was made, so dependency health is not scored; enable the online check and rescan for a conclusion.";
+"未做在线漏洞核对，依赖健康本维度暂不计分（内置规则未覆盖：%1$@）。" = "No online vulnerability check was made, so dependency health is not scored (built-in rules do not cover: %1$@).";
+"已完成漏洞核对，%1$@/%2$@ 个依赖零命中%3$@" = "Vulnerability check complete: zero hits across %1$@/%2$@ dependencies%3$@";
+"（数据源：%1$@）" = "(source: %1$@)";
+"%1$@ 个已知漏洞，%2$@ 个版本过旧" = "%1$@ known vulnerabilities, %2$@ outdated versions";
+"先升级带严重漏洞的依赖，再统一处理过期版本" = "Upgrade dependencies with critical vulnerabilities first, then handle stale versions";
+"先合这一处重复：%1$@ 之间有 %2$@ 行相同，抽成共享工具或基类" = "Merge this duplicate first: %1$@ shares %2$@ identical lines; extract a shared utility or base class";
+"先升级这一个：%1$@（%2$@，公告 %3$@），再统一处理过期版本" = "Upgrade this one first: %1$@ (%2$@, advisory %3$@); then handle outdated versions together";
+"先升级这一个：%1$@（%2$@，命中 %3$@ 个依赖），再统一处理过期版本" = "Upgrade this one first: %1$@ (%2$@, affects %3$@ dependencies); then handle outdated versions together";
+"测试覆盖率 %1$@" = "Test coverage %1$@";
+"将行覆盖率从 %1$@ 提升到 75%% 以上" = "Raise line coverage from %1$@ to above 75%%";
+"行覆盖 %1$@，分支覆盖 %2$@" = "Lines %1$@, branches %2$@";
+"无数据" = "no data";
+"列到 %1$@ 个日志文件，但一行都没读出来（空文件 / 编码不认识 / 读取失败），本维度不参与计分。" = "%1$@ log files were listed but not one line could be read (empty, unknown encoding, or read failure), so this dimension is not scored.";
+"崩溃通道读到 %1$@ 份报告、确认 %2$@ 次崩溃，但一行真日志都没有 ⇒ 错误密度没有分母，本维度不参与计分（这也不等于「零错误」）。" = "The crash channel yielded %1$@ reports and %2$@ confirmed crashes, but not a single real log line, so error density has no denominator and this dimension is not scored (which is also not \\\"zero errors\\\").";
+"%1$@ 份崩溃报告没能读出来，崩溃证据不确定，本维度不参与计分。" = "%1$@ crash reports could not be read, so the crash evidence is uncertain and this dimension is not scored.";
+
+// 批次 P62（词汇层）：枚举档名进文案一律先查表，模板不再吃 `\(x.rawValue)`。
+"尚未分析%1$@" = "Not analysed yet: %1$@";
+"已完成扫描，未发现%1$@" = "The scan finished without finding any %1$@";
+"无法分析：%1$@" = "Cannot analyse: %1$@";
+
+// 批次 P63（性能页图例与轴口径、进程组空态三句话、错误日志密度脚注）。
+"可信点不够画曲线（%1$@/%2$@）" = "Not enough trusted points to plot a curve (%1$@/%2$@)";
+"横轴 %1$@ · 纵轴 CPU %2$@%% / 内存 %3$@%% · %4$@" = "X axis %1$@ · Y axis CPU %2$@%% / memory %3$@%% · %4$@";
+"轴不是 0 起点" = "the axes do not start at 0";
+"两张图均为 0 起点" = "both charts start at 0";
+"内存曲线已剔除 %1$@ 个无证据读数" = "The memory curve dropped %1$@ evidence-free readings";
+"距今秒数" = "seconds ago";
+"每 %1$@ 秒一格" = "one grid line every %1$@ s";
+"横轴：窗口不足 %1$@ 秒（或少于 8 个点）时改标距今秒数——绝对时钟在这个尺度上没有区分度；否则每格步长从固定档位里选，不按点数现算，免得点数一变整个时间轴就重排。带下限的轴是为看清走势而收窄的，不是 0 起点：内存长期在九成是 macOS 的常态，0…100 的域里 93→97 的波动只够画 4pt，肉眼看是一条直线，所以峰值过 %2$@%% 收到 50…100、过 %3$@%% 收到 75…100。" = "X axis: when the window is shorter than %1$@ seconds (or fewer than 8 points) it switches to seconds-ago labels - an absolute clock has no resolution at that scale. Otherwise the step comes from a fixed ladder rather than the point count, so a change in points cannot re-flow the whole axis. A floored axis is narrowed to show the trend, not because 0 is the origin: memory sitting near ninety percent is normal on macOS, and in a 0-100 domain a 93->97 swing draws only 4pt, i.e. a flat line to the eye - so above %2$@%% the domain narrows to 50...100, and above %3$@%% to 75...100.";
+"内存在用率曲线，%1$@ 个可信点，当前 %2$@，纵轴 %3$@" = "Memory usage curve, %1$@ trusted points, now %2$@, Y axis %3$@";
+"%1$@ 秒" = "%1$@ s";
+"首个样本到达后才按匹配模式统计，不预先给出估算值。" = "Counts by match pattern begin only after the first sample arrives; no estimate is offered beforehand.";
+"保持「继续」状态，下一帧（约 %1$@后）会立即出数。" = "Keep it on \\\"Resume\\\"; the next frame (in about %1$@) produces values immediately.";
+"暂停期间不再查找进程，这里显示的是最后一次采集的结果：全系统 %1$@ 个进程里没有命中「%2$@」。" = "While paused no process lookup runs, so this is the last collected result: none of the %1$@ system processes matched \\\"%2$@\\\".";
+"点页面右上角「继续」恢复采样，再判断服务是否真的没在跑。" = "Press \\\"Resume\\\" at the top right to resume sampling before concluding the service is not running.";
+"全系统 %1$@ 个进程里没有任何条目命中「%2$@」，因此没有 CPU / 内存 / 线程 / 打开文件数值可显示。" = "None of the %1$@ system processes matched \\\"%2$@\\\", so there is no CPU / memory / thread / open-file value to show.";
+"确认该服务已启动，或在「匹配模式」里把规则改宽一点（例如从 mysqld 改成 mysql）。" = "Confirm the service is running, or widen the match pattern slightly (for example mysqld -> mysql).";
+"占全机 %1$@" = "%1$@ of the whole machine";
+"差分帧未到，不给百分比" = "No differential frame yet, so no percentage is given";
+"单进程峰值 %1$@" = "Single-process peak %1$@";
+"无成员进程" = "No member processes";
+"%1$@/%2$@ 个进程取到" = "%1$@/%2$@ processes read";
+"按代码规模归一：每千行 %1$@ 次" = "Normalised by code size: %1$@ per 1,000 lines";
+"今日错误按代码规模归一为每千行 %1$@ 次；分母来自同一次扫描的有效代码行。" = "Today's errors normalise to %1$@ per 1,000 lines; the denominator is the effective code lines from the same scan.";
+"扫描 %1$@ 行 · %2$@ 个文件" = "Scanned %1$@ lines · %2$@ files";
+" · 已跳过 %1$@ 份读取失败" = " · %1$@ unreadable files skipped";
+"已跳过 %1$@ 份读取失败，原因分布：%2$@。" = "%1$@ unreadable files were skipped; reason breakdown: %2$@.";
+"占扫描行 %1$@" = "%1$@ of scanned lines";
+"未记录原因" = "reason not recorded";
+"已完成扫描：%1$@ 个文件里没有 TODO / FIXME 标记。" = "Scan complete: no TODO / FIXME markers across %1$@ files.";
+"FIXME %1$@ 处通常表示已知缺陷，建议优先在对应文件里核对。" = "The %1$@ FIXME markers usually flag known defects — start with the files that hold them.";
+"共 %1$@ 个，已全部展示。" = "All %1$@ are shown.";
+"行数是单文件总行数（含空行与注释）" = "Line counts are per-file totals, blank lines and comments included.";
+"这一格是代码行，不含空行与注释；总行数（含两者）在「代码规模」页的头条。" = "This figure counts code lines only, excluding blank lines and comments; the total line count (both included) is the headline on Code Size.";
+"共 %1$@ 项，已全部展示。" = "All %1$@ entries are shown.";
+"当前展示 %1$@ / %2$@ 项。" = "Showing %1$@ of %2$@ entries.";
+"当前展示 %1$@ / %2$@ 项 · 按名称排序。" = "Showing %1$@ of %2$@ entries, sorted by name.";
+"占依赖总数 %1$@" = "%1$@ of all dependencies";
+"已比对版本数据，未发现落后项" = "Version data compared — nothing outdated";
+"%1$@（只说明可复现，未计入依赖数）" = "%1$@ (reproducibility only; not counted as a dependency)";
+"共 %1$@ 条 · 影响 %2$@ 个依赖" = "%1$@ advisories · affecting %2$@ dependencies";
+"快照截至 %1$@（%2$@）" = "snapshot as of %1$@ (%2$@)";
+"版本声明形态：%1$@" = "declaration shapes: %1$@";
+"B 级参考线 %1$@ 分；折线只连已有历史点，不外插也不预测。" = "Grade B reference line at %1$@ points; the polyline joins existing history points only - no interpolation, no forecast.";
+
+// ===== 批次 P69a（WS-代码页双语流）：代码风险这一片 7 条「先拼再上屏」改成整句键 =====
+// 注释一律用 `//`：一个 `#` 会让系统解析器从那一行起整段放弃
+// （P59 真炸过一次：整本目录运行时作废，而按正则数键的守卫全绿）。
+// 值只用 ASCII 标点 + `·`：`。`/`，`/`（）`/`「」` 全在中日韩码点段内，
+// 会被「英文目录值不许留中日韩残留」那条判据（守卫 1f）判红。
+// 复杂度风险页：严重复杂度那条建议的四段拼接（P69 清单第 2~5 条）。
+"%1$@（CC %2$@ · %3$@ 行 · %4$@:%5$@）" = "%1$@ (CC %2$@ · %3$@ lines · %4$@:%5$@)";
+"%1$@ 个函数被判为严重复杂度，最高圈复杂度 %2$@：%3$@。先去掉嵌套：校验与异常分支改成提前返回，再把成组的分支换成策略表/多态；先把分支数压到 CC %4$@ 以下（那是本工具判「高」的那条线，与榜位无关）。" = "%1$@ functions are rated as critically complex, highest cyclomatic complexity %2$@: %3$@. Remove nesting first - turn validation and error branches into early returns, then replace branch groups with a policy table or polymorphism; bring the branch count below CC %4$@, the line this tool uses to call a function high, independent of board rank.";
+"同时有 %1$@ 个函数处于高复杂度档（CC %2$@~%3$@）：先给它们补单元测试，再把分支下沉成命名清晰的小函数。" = "Another %1$@ functions sit in the high complexity band (CC %2$@~%3$@): add unit tests for them first, then push the branches down into small, clearly named functions.";
+"%1$@ 个上榜函数的参数达到或超过 %2$@ 个，最多的是%3$@（%4$@ 个参数 · %5$@:%6$@）：把成组参数收进一个配置或值类型，调用点会同步变短。" = "%1$@ functions on the board take %2$@ or more parameters, the worst is %3$@ (%4$@ parameters · %5$@:%6$@): gather grouped parameters into one configuration or value type and the call sites shorten with them.";
+"注释率 %1$@（%2$@ / %3$@ 行）低于本页 %4$@ 的提示线：优先给对外接口和圈复杂度最高的那批函数写意图说明，直白代码不必加注释。" = "Comment ratio %1$@ (%2$@ of %3$@ lines) is below the %4$@ hint line on this page: write intent notes for the public interfaces and the highest-complexity functions first, obvious code needs no comment.";
+// 复杂度风险页两处空态正文（P69 清单第 6~7 条）。
+"扫描了 %1$@ 个文件 / %2$@ 行有效代码，重复率为 %3$@。" = "Scanned %1$@ files / %2$@ effective code lines; duplication ratio %3$@.";
+"本次扫描没有函数达到引擎给出的复杂度上榜条件。参考数字：超长函数 %1$@ 个 · 平均函数长度 %2$@ 行。" = "No function in this scan reached the engine condition to enter the complexity board. Reference figures: %1$@ over-long functions · average function length %2$@ lines.";
+// 扫描范围读数（P69 清单第 1 条）：`describe(unit:)` 的入参换成整句量词键之后，
+// 这三句的槽位才真的查得到（量词键本身在 `.stringsdict`，见那里的 `%lld 个条目`）。
+"扫描范围：遍历看到 %1$@、逐条留名的 %2$@ 个、未留名 %3$@ 个、未量准的范围 %4$@ 条。" = "Scan scope: %1$@ entries seen, %2$@ named one by one, %3$@ unnamed, %4$@ scope ranges not measured.";
+"被剔除条目的行数：%1$@。" = "Lines in the excluded entries: %1$@.";
+"未统计（%1$@）" = "Not counted (%1$@)";
+// `SourceScopeCount.notCounted(reason:)` 的三枚原因：它们经 `localizedCopy` 进上面那句的槽，
+// 不登记的话英文态会长成 "Not counted (本次没有范围台账)" —— 半英半中比整句中文更难读。
+"本次没有范围台账" = "this run carries no scope ledger";
+"非审计模式不读被剔除文件" = "non-audit mode does not read excluded files";
+"产品扫描不读被剔除文件的内容，审计模式才会数" = "the product scan does not read excluded file contents; only audit mode counts them";
+// ── P69b（WS-Git / 健康页双语流，2026-09-24）：Git 页 + 健康评分页的存量收口 ──────
+// 全部走「整句键 + 在产出处查表」，中文侧一字不变。
+// 前两条原本就是裸字面量上屏、只缺译文（`GlassSection` 的 `subtitle` 与
+// `SectionEmptyNote` 的 `text` 都在渲染点自己查表 ⇒ 补键即生效，调用点不许再包一层）。
+// 后三条改的是形状：插值拼出来的整串从来没有键可查（`Text(变量)` 不查表）。
+// ⚠ 注释一律 `//`：一个 `#` 会让系统解析器从那一行起整段放弃（P59 真炸过一次）。
+"当前只分析了提交数最多的那一个" = "Only the one with the most commits was analysed";
+"Git 分析没有产出按时间分桶的提交数据。" = "The Git analysis produced no commit data bucketed by time.";
+// 外壳句：`%1$@` 是仓库路径（用户数据，不翻），`%2$@` 是 `discoveryCaption` 那一格
+// —— 它只在嵌进这里这**一次**查表（另一个落点 `GlassSection(subtitle:)` 会自己查，
+// 在 `discoveryCaption` 里先查就是翻两遍，第二次查表会把英文串当成新的未登记残留记进账）。
+"分析的是另一个仓库：%1$@\n%2$@" = "Analysing a different repository: %1$@\n%2$@";
+// 定位说法的「未找到」那一态（「所选目录即仓库」早已登记；
+// 「向上 / 向下 N 层找到」两态要英语单复数，属 stringsdict，本批未收，见汇报）。
+"未找到仓库" = "No repository found";
+// 两个数都是**分数、不是可数名词** ⇒ 收 `String` 的 localizedFormat 就够，不进 stringsdict。
+"历史末点 %1$@ 与本次 %2$@ 不一致。" = "The last stored score %1$@ does not match this run's %2$@.";
+// 批次 P70：这枚空态正文原来把页名插在自己肚子里（`Text(变量)` 永不查表）⇒ 整串从来没有键。
+"点击「重新分析」开始扫描该目录。\n完成后这里会显示真实的文件数、行数与%1$@。" = "Tap Re-analyse to scan this directory.\nWhen it finishes, the real file count, line count and %1$@ appear here.";
+
+// 批次 P71A（碎文案收纳·代码页族）：以下三条是「留短藏长」**屏上那半句**的键。
+// 整句仍是一条完整的键住在 ⓘ 里（屏上半句 = 原句的逐字前缀，不是被劈开的后半），
+// 所以这四条不是半句键：运行时上屏的就是这一串本身，查得到、也翻得动。
+"主语言 %1$@" = "Main language %1$@";
+"空行占 %@" = "Blank lines %@";
+"点击「重新分析」开始扫描该目录。" = "Tap Re-analyse to scan this directory.";
+// 复杂度榜空态留短藏长：屏上那句「扫过了、没函数上榜」是诚实凭据，它自己就是整句。
+"本次扫描没有函数达到引擎给出的复杂度上榜条件。" = "No function in this scan reached the engine condition to enter the complexity board.";
+// ── P71c（WS-性能·日志·外壳片，2026-09-24）：「留短藏长」屏上那半截的短标签 ──────
+// 每条都是它所属整句的**前缀或后段子串**（不新造修辞），整句原样搬进同一个元素的 ⓘ 槽
+// （`EmptyStateView.help:` / `SectionEmptyNote.help:` / `GlassSection.subtitleHelp:`），
+// 中文侧一个字没改、也没删。英文侧每条都得独立成句 —— 屏上短句在英文态也要能单独读。
+// ⚠ 注释一律 `//`：一个 `#` 会让系统解析器从那一行起整段放弃（P59 真炸过一次）。
+"这里不预先给出估算形状。" = "No estimated shape is drawn in advance.";
+"与所选项目无关" = "Unrelated to the selected project";
+"新增分组规则" = "Add a group rule";
+"暂无趋势数据" = "No trend data yet";
+"点击右上角「重新分析」" = "Click Re-analyse in the top-right";
+
+// ── P71B（WS-P71B Git/依赖/健康族，2026-09-24）：四格空态正文「留短藏长」──────────
+// 原来这四格都是**一条键装两句话**（用 `\n` 连在一起）。收纳轮把「屏上留哪句」与
+// 「ⓘ 里挂哪句」拆成两个槽，于是每一句都必须自己是一条完整键（半句键查不中，见
+// `LocalizationGuardTests` 守卫 3 与 `DependenciesView` 那条例注）。中文侧一字未改：
+// 屏上那句就是原来 `\n` 之前的部分，ⓘ 那句是之后的部分；英文值沿用被删掉的四条合并键
+// 的原译文，只去掉行首的 `\n `。逐条判定（为什么留下的那半句够用、藏掉的那半句不丢诚实性）：
+// 1. 依赖页·无清单空态：屏上留「扫描完成，但没有找到…清单文件。」= ② 态测得事实；
+//    藏「如果依赖声明在自定义脚本里，这一页为空是真实结果。」= 对这一屏没显示出来的
+//    那种情形的补充，且空态里一个数字都没有，不会被读成「依赖数为 0」。
+// 2. 依赖页·未分析空态：屏上留「还没有依赖分析结果。点击「重新分析」开始扫描。」；
+//    藏「需要最新版本与漏洞库在线核对时，先打开上方的联网开关。」= 指路句，控件就在页顶；
+//    「没联网核对」另有两处常驻在说（本页 `deps.networkLookupNote` 那条 DataNotice，
+//    与安全公告空态那句「0 条命中只是没有查」）⇒ 不会把「没查」读成「没有病」。
+// 3. 贡献者页空态：屏上留「选择一个本地仓库目录后点击「重新分析」。」（新键，只此一处落点）；
+//    藏「分析完成后这里会显示贡献者排行、代码变更量与活跃时段分布。」= 对还不存在的东西的预告，
+//    与规范 F 组「预告，等于没说」同判。
+// 4. Git 洞察页空态：整条藏（键原样保留在下面，含末尾的 `\n`）。这条不是懒得拆，是两条判据
+//    撞在一起：屏上必须常驻的那半句产自 `Services/Git`（规范 §Y 第 2 条契约缺口），而本文件在
+//    `LocalizationGuardTests.compositionFreeFiles` 已收口名单里 ⇒ 一条消息里不许出现 `+` 拼中文
+//    ⇒ 「留半句上屏 + 另半句进 ⓘ」在这一格做不出来，只能整条搬进 ⓘ。
+//    屏上因此只剩 Services 那句「我们往哪些位置找过仓库」（② 态，本来就必须常驻）。
+// ⚠ 注释一律 `//`：一个 `#` 会让系统解析器从那一行起整段放弃（P59 真炸过一次）。
+// ⚠ 英文值只用 ASCII 标点：`24×7` 在英文里写成 `24x7`（键侧仍是中文原样 `24×7`）。
+"扫描完成，但没有找到 package.json、Package.swift、pom.xml、go.mod 等清单文件。" = "Scan finished, but no manifest files such as package.json, Package.swift, pom.xml or go.mod were found.";
+"如果依赖声明在自定义脚本里，这一页为空是真实结果。" = "If dependencies are declared in a custom script, an empty page is the true result.";
+"该项目还没有依赖分析结果。点击「重新分析」开始扫描。" = "This project has no dependency analysis results yet. Click Re-analyse to start a scan.";
+"需要最新版本与漏洞库在线核对时，先打开上方的联网开关。" = "To check latest versions and the vulnerability database online, turn on the network switch above first.";
+"选择一个本地仓库目录后点击「重新分析」。" = "Choose a local repository folder and click Re-analyse.";
+"分析完成后这里会显示贡献者排行、代码变更量与活跃时段分布。" = "Once the analysis finishes, the contributor ranking, line changes and active hour distribution appear here.";
+// Git 洞察页那条整句键（P71B 把它从消息位搬进 ⓘ 位，键与译文逐字未改，故在此复原）。
+"选择一个本地仓库目录后点击「重新分析」。\n分析完成后这里会显示提交趋势、24×7 活跃分布与最近提交记录。\n" = "Choose a local repository folder and click Re-analyse.\nThe commit trend, 24x7 activity distribution and recent commit records appear here once the analysis finishes.\n";
+
+// MARK: RD-31 扫描期间源码漂移（R29，2026-09-24）
+// 装配口只有一个：`ScanProvenance.driftReading` / `SourceTreeFingerprint.driftSummary` /
+// `ScanProvenance.recordDrift`。CLI 文本、CLI JSON 摘要、健康页横幅三处读的是同一句，
+// 所以键也只在这里登记一份 —— 谁再拼一遍中文，守卫 3（键必须在代码里真实出现）就会烂尾报错。
+// ⚠ 英文值只用 ASCII 标点（键侧的「（）」「：」照中文原样）。
+"扫描期间开工与收工两枚源码指纹一致" = "The source tree fingerprints taken at scan start and at scan end are identical.";
+"扫描期间源码是否变化未量到（%1$@）" = "Whether the source changed during the scan was not measured (%1$@).";
+"扫描期间源码有变化（%1$@），本报告不是同一源码快照的一致结果" = "The source changed during the scan (%1$@), so this report is not a consistent result of one source snapshot.";
+"条数 %1$@ → %2$@ · 字节 %3$@ → %4$@ · 路径摘要 %5$@ → %6$@" = "files %1$@ -> %2$@, bytes %3$@ -> %4$@, path digest %5$@ -> %6$@";
+"开工侧指纹没量到：%1$@" = "The scan-start fingerprint was not measured: %1$@";
+"收工侧指纹没量到：%1$@" = "The scan-end fingerprint was not measured: %1$@";
+// RD-60 第二半（R25b）：崩溃证据那几句里**不含数字**的三句 —— 一枚整句键 + 两枚整句框架键。
+// 框架键的 `%1$@` 槽装的是别处已经查过表的整串，词序由英文侧自己定；
+// 没有把「未测准：」「读取失败的原因分布：」登记成半句键（半句键拼完的整串永远查不中）。
+// 注释一律 `//`（一个 `#` 会让系统解析器从那一行起整段放弃）；英文值只用 ASCII 标点、不含裸引号。
+"「哪些没测准」那一句的判据输入未落盘，这里只呈现逐条原因" = "The criteria inputs behind the 'which parts were not measured accurately' sentence are not persisted, so only the per-reason breakdown is shown here.";
+"未测准：%1$@" = "Not measured accurately: %1$@";
+"读取失败的原因分布：%1$@" = "Reason breakdown for the unreadable files: %1$@";
+
+// RD-62（R33）：覆盖率「单元测试 / 集成测试」那两格的三态。句子只产自
+// `Services/Coverage/CoverageDisplayShape.swift` 的 `CoverageCategoryReadout`，
+// 屏上那两格与无头 `score` 文本共用它（「无报告」这一枚键 P0 之前就在上面第 68 行，未重复登记）。
+// 两枚框架键装的是**已经查过表的整串**，词序由英文侧自己定。
+"未标注类别" = "Category Not Labeled";
+"未产出该类报告" = "No Report Of This Category";
+"单元测试：%1$@" = "Unit Tests: %1$@";
+"集成测试：%1$@" = "Integration Tests: %1$@";
+
+// RD-67 双分母并排（R40，2026-09-24）：「生产码 N 行 / 全量 M 行」那一句里**不含数字**的
+// 一支 —— 生产码那一档这次真的量到 0（八档都数过、这一档一个文件都没有）。
+// 装配口只有一个：`Services/Code/ProductionCodeScaleReadout.measuredZeroNotice(_:)`；
+// 三条带量词的兄弟键在 `Localizable.stringsdict`（复数只能由 stringsdict 选支）。
+// ⚠ 这一句只说这一档的分档结果，英文值里也不许长成「这个项目没有源码」那类结论；
+// 注释一律 `//`（一个 `#` 会让系统解析器从那一行起整段放弃），英文值只用 ASCII 标点。
+"生产码这一档这次量到的是零，不是没数出来" = "This production code bucket measured zero this time; it was not left unmeasured.";
+// RD-68（R39）：「能不能说没有已知漏洞」收成一道的闸门
+// `DependencyEvidence.vulnerabilityCoverage`，三档话术只产自
+// `Services/Dependencies/DependencyEvidence.swift` 的 `DependencyVulnerabilityCoverage.statement`；
+// 屏上结论格、安全公告空态、无头出口、报告级陈述句四处逐字同源。
+// 全覆盖那枚（「已核对 %1$@ / %2$@ 个依赖，未发现已知漏洞」）P67 之前就登记过、未重复登记，
+// 这次它第一次有了上屏读者（此前只被一个零调用方的函数用着）；下面两枚是新增的部分覆盖/零覆盖档。
+"已核对 %1$@ / %2$@ 个依赖，另外 %3$@ 个没查 —— 这是「没查全」，不是「没有漏洞」" = "Checked %1$@ / %2$@ dependencies; %3$@ more went unchecked - an incomplete sweep, not a statement that there are no vulnerabilities";
+"共 %1$@ 个依赖，一条都没核对 —— 这是「没查全」，不是「没有漏洞」" = "None of the %1$@ dependencies were checked - nothing was swept, which is not a statement that there are no vulnerabilities";
+"时间窗口按文件挑、不逐行过滤：只读最近 %1$@ 天内被改动过的日志文件，文件一旦进来就整份计入 ⇒ 「每千行日志 N 个错误」与「扫描 N 行」的分母是这些文件的全部扫描行，不是最近 %1$@ 天的日志行。" = "The time window selects files, not lines: only log files modified within the last %1$@ days are read, and each such file counts in full - so the denominator of the errors-per-1000-log-lines figure and of the scanned-lines figure is every line scanned in those files, not the lines from the last %1$@ days.";

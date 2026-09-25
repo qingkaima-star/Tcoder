@@ -32,13 +32,21 @@ final class BoardLengthReadoutRatchetTests: XCTestCase {
     ///   `Views/Code`、`Views/Health`、`Services/Code/CodeRisk*`），已列进 R7 的交回汇报。
     /// 重复块那一族真正还债的是 `AdviceWordingBoardTests`：它断言的是**页尾那句话**在
     /// 截断/未截断/台账缺席三态下各说什么，比"数原始读数"更接近这件事的本体。
+    ///
+    /// 22:5x 由 **WS-R18 DupTotal**（工单：评分解释文本里的那一处残留）按同一把尺子往下拧一格：
+    /// `Services/Health/HealthCodeDimensions.swift` **1 → 0**。凭什么：
+    /// 评分「问题」那一栏的重复块数改由契约里唯一的取法 `CodeMetrics.reportedDuplicatedBlockTotalCount`
+    /// （去重后口径 = 榜内 + 榜外）说话，三态各一句 —— 榜外有账时**真总数与榜长并排**
+    /// （就是下面 `allowedShapes` 认的那句「榜内只列 N 个，实际 M 个」，不是新发明），
+    /// 榜外为零时明说"明细已全部列出"，榜外没统计过时只报榜长且**不出现"共"字**。
+    /// 现量由本文件自己打印（`榜长冒充总数：全仓现量 N / 上限 M`），拧完必须与实跑打印相等 —— 不估。
     private static let budget: [String: Int] = [
         "Views/Code/CodeRiskView.swift": 2,           // 复杂度榜的读数与展开算术（标签已写明「上榜」）
         "Views/Code/CodeMetricsSections.swift": 2,    // ⓘ 里那句「重复块 N 个 · 复杂度上榜 M 个函数」
         "Views/Code/CodeRiskRows.swift": 1,           // complexitySubtitle 的「上榜 N 个」
         "Views/Code/CodeRiskAdvice.swift":  0,        // 已还：低档那句改成「榜内 N 个重复块」
         "Views/Code/CodeViewSupport.swift": 1,        // 榜长的唯一取法 `duplicationBoardCount` 本体
-        "Services/Health/HealthCodeDimensions.swift": 1,  // 评分 detail「共 %d 处重复块」（归 WS-C）
+        "Services/Health/HealthCodeDimensions.swift": 0,  // 已还（WS-R18）：改走 reportedDuplicatedBlockTotalCount
     ]
 
     /// 两种**合法形状**，不许被算成违例（各配一条反向元测试钉着，见下）。
@@ -46,6 +54,9 @@ final class BoardLengthReadoutRatchetTests: XCTestCase {
         (">", "门槛比较：`榜.count > rowLimit` 决定要不要出展开按钮，不是把榜长当总数"),
         ("<", "同上，反方向的比较"),
         ("榜内只列", "披露句式：真总数与榜长**并排**写出来（榜内只列 N 个，实际 M 个），正解形状"),
+        // P58 补的第二种写法：整句键化之后，`榜内只列 %1$@ 个` 挪进了 `localizedFormat` 的模板里，
+        // 而**按行**认标记的这把尺子看不见"模板与实参分了行"。名字本身就是那个标记。
+        ("boardOnlyNote", "披露助手本体（`HealthCurves.boardOnlyNote`）：榜长以 `listed:` 的身份进去，助手内部把真总数并排写出来"),
     ]
 
     // MARK: - 棘轮本体
@@ -82,7 +93,16 @@ final class BoardLengthReadoutRatchetTests: XCTestCase {
         let counts = hitsByFile(try scannedFiles())
         let total = counts.values.reduce(0, +)
         let cap = Self.budget.values.reduce(0, +)
-        print("榜长冒充总数：全仓现量 \(total) / 上限 \(cap)")
+        let totalReadout = "榜长冒充总数：全仓现量 \(total) / 上限 \(cap)"
+        print(totalReadout)
+        // 第二条出口（RD-64）：`榜长冒充总数` 与 `榜长棘轮` 两条 print 在全量跑里都命中 0。
+        // 这里把同一批现量/上限（取自同一个 `counts`，不是第二把尺子）连同总数一起落一份带被测头的账，
+        // 写完读回断言相等。棘轮本体的判据（下面及 `test_boardLengthReadsNeverGrowBeyondBudget`）一字未动。
+        let ratchetLines = Self.budget.keys.sorted().map {
+            "榜长棘轮：\($0) 现量 \(counts[$0] ?? 0) / 上限 \(Self.budget[$0] ?? 0)"
+        }
+        GuardLedger.record(guard: "BoardLengthReadoutRatchetTests",
+                           readings: [totalReadout] + ratchetLines)
         XCTAssertLessThanOrEqual(total, cap)
     }
 
@@ -106,6 +126,8 @@ final class BoardLengthReadoutRatchetTests: XCTestCase {
             "if code.duplicatedBlocks.count > Self.rowLimit { expanded.toggle() }",
             "let curve = hugeCount > code.hugeFiles.count",
             "detail: raw.detail + \"（榜内只列 \\(code.hugeFiles.count) 个，实际 \\(hugeCount) 个）\",",
+            // P58 之后产品侧的写法：整句键 + 具名披露助手，标记与榜长同行。
+            "let note = HealthCurves.boardOnlyNote(raw.detail, listed: code.hugeFiles.count, total: hugeCount)",
         ].joined(separator: "\n")
         XCTAssertEqual(countHits(in: legal, path: "Synthetic.swift"), 0,
                        "合法形状被误判 —— 守卫开始咬自己人")

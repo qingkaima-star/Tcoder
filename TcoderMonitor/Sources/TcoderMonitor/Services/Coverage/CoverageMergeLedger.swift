@@ -140,13 +140,13 @@ struct CoverageMergeLedger: Equatable, Sendable {
             let grouped = Dictionary(grouping: dropped, by: { $0.reason })
                 .map { "\($0.key.note) \($0.value.count) 份" }
                 .sorted()
-            parts.append("丢弃 " + grouped.joined(separator: "、"))
+            parts.append("丢弃 " + grouped.joined(separator: localizedListSeparator()))
         }
         if !parseFailures.isEmpty {
             let grouped = Dictionary(grouping: parseFailures, by: { $0.reason })
                 .map { "\($0.key.note) \($0.value.count) 份" }
                 .sorted()
-            parts.append("读取失败 " + grouped.joined(separator: "、"))
+            parts.append("读取失败 " + grouped.joined(separator: localizedListSeparator()))
         }
         parts.append(contentsOf: displayShape.statementParts)
         if !unattributedRunPaths.isEmpty {
@@ -154,11 +154,11 @@ struct CoverageMergeLedger: Equatable, Sendable {
             let named = sorted.prefix(3).map(coverageCoordinateShort)   // 只报 basename 等于没点名
             let head = sorted.count == 1 ? "这份报告认不出属于哪次运行"
                                         : "\(sorted.count) 份报告认不出属于哪次运行"
-            parts.append(head + "：" + named.joined(separator: "、")
+            parts.append(head + "：" + named.joined(separator: localizedListSeparator())
                 + (sorted.count > named.count ? " 等" : "") + "（未知不参与去重）")
         }
         if let confident = mergeConfident, !confident, !identityGaps.isEmpty {
-            parts.append("⚠ 合并身份未互证：" + identityGaps.map { $0.note }.joined(separator: "、"))
+            parts.append("⚠ 合并身份未互证：" + identityGaps.map { $0.note }.joined(separator: localizedListSeparator()))
         }
         let details = dropped.compactMap(\.detail)
         if details.contains(where: { $0.contains(CoverageLineLedger.Blocker.budgetExceeded.rawValue) }) {

@@ -69,6 +69,8 @@ Apple Silicon 原生 macOS App（Swift + SwiftUI），对本地开发项目做�
 
 > 上面那两份是**第三轮「简约无界」**的规格，其中"去卡片面、纯墨主线"的取值
 > 已被 2026-09-21 的裁定取代。现在的权威口径是这两份：
+- **界面中英双语**：键 = 简体中文原文，缺一条译文的表现是退回中文而不是漏机器键；
+  覆盖范围、现量读数与三条诚实边界见 [`docs/使用说明.md`](docs/使用说明.md) §2.5。
 > [`docs/界面语言-对齐AiX.md`](docs/界面语言-对齐AiX.md)（灰画布 + 白卡 + azure 蓝，
 > 含 §6.2 起每批取证与修后的复拍记录），
 > 以及 [`docs/界面-乱的清单.md`](docs/界面-乱的清单.md)
@@ -161,7 +163,9 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
 
 ## 数据口径（看到数字前先读这节）
 
-- **「0 个漏洞」有三种含义**，界面会分开说：全部已比对 / 部分已比对 / 均无版本数据可比对。
+- **「0 个漏洞」有四种含义**，界面会分开说：有命中 / 全部已比对 / 部分已比对 / 一条都没核对。
+  分档只有一处（`DependencyEvidence.vulnerabilityCoverage`），原句与"该怎么读"逐档列在
+  `docs/口径与已知限制.md` §4.1。
   内置离线快照只覆盖 npm、Maven、Python 三个生态，其余生态（RubyGems、CocoaPods、Go、
   Cargo、NuGet、SwiftPM…）在未联网时是**未判定**，不是"安全"。
 - **提交总数与作者榜求和可能不相等**：作者与代码行统计一贯采用 `--no-merges` 口径，
@@ -183,10 +187,13 @@ TCODER_REAL_REPO=1 ./scripts/locked_build.sh test --filter RealRepositoryEvidenc
 
 > 使用者版含界面上**原样出现**的句子与判定字段，见 `docs/使用说明.md` 第 4 节。
 > 两处措辞在此校正（不改上面的结论，只补精确出处）：
-> ① 第三种漏洞状态在界面上写的是「未联网核对，仅内置快照（覆盖 npm / Maven / Python）· 无依赖可核对」
->   或「已联网核对，但无可比对版本数据的依赖」
->   （`DependencyVerdictRows.DependencySafetyVerdict.summaryCaption`），
+> ① 零命中那几档在界面上写的是「未联网核对，仅内置快照（覆盖 npm / Maven / Python）· 无依赖可核对」
+>   或「共 N 个依赖，一条都没核对 —— 这是「没查全」，不是「没有漏洞」」
+>   （`DependencyVerdictRows.DependencySafetyVerdict.summaryCaption`，句子本身产自
+>   `DependencyEvidence.DependencyVulnerabilityCoverage.statement`），
 >   不是「均无版本数据可比对」这句话；
+>   ⚠ 旧文案里那句「已联网核对，但无可比对版本数据的依赖」已随 RD-68（2026-09-24）**退役**——
+>   "发起过查询但没有一条核成"现在落到「一条都没核对」那一档，不再单列一句；
 > ② 界面判断「历史是否被窗口截断」用的是派生判据 `isWindowTruncated`
 >   （`GitHistoryScope.isWindowTruncated`，判据是非合并窗口是否打满），
 >   **不是**契约字段 `GitInsights.historyTruncated`——后者在 `ShellGitAnalyzer.makeInsights` 里按

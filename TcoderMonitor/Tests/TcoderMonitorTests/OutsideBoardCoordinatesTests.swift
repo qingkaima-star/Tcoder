@@ -31,6 +31,12 @@ final class OutsideBoardCoordinatesTests: SelfScanHarnessCase {
         }
         XCTAssertLessThanOrEqual(coordinates.count, DuplicationScan.outsideBoardSampleLimit,
                                  "点名的条数由引擎那一把尺子管，界面与句子都不许自己加")
+        // 坐标必须是**相对被扫根**的路径。这条不是风格问题：绝对路径会把"仓库被检到哪里"
+        // 混进本文件下面那条 ≤1200 字符的判据里（2026-09-23 实测同一条门在 main 树 1,060、
+        // 在 .worktrees/perf-base 树 1,740 ⇒ `premerge_check` 只在 worktree 里跑，
+        // 于是它会拦下每一条并行流）。判据本身一个字没动，动的是披露串的取数口径。
+        XCTAssertTrue(coordinates.allSatisfy { !$0.hasPrefix("/") },
+                      "榜外坐标里出现绝对路径 ⇒ 披露长度随检出位置变：\(coordinates.first ?? "")")
 
         guard let first = coordinates.first else { return }
         let occurrences = (metrics.scanLimitations ?? []).reduce(0) { total, line in
@@ -38,10 +44,69 @@ final class OutsideBoardCoordinatesTests: SelfScanHarnessCase {
         }
         XCTAssertEqual(occurrences, 1,
                        "同一串榜外坐标在一份报告里被抄了 \(occurrences) 遍（口径句与边界句各一遍就是这次要修的形）")
-        // 去重的可度量后果：没有任何一条上限说明再被撑成一段散文（修前实测最长 2,407 字符）。
-        let longest = (metrics.scanLimitations ?? []).map(\.count).max() ?? 0
-        XCTAssertLessThan(longest, 1_200, "单条限制说明被撑到 \(longest) 字符 ⇒ 又有整串坐标被抄进句子了")
+        // 去重的可度量后果：**句子里说点几条、实际就列几条，且不超过生产者那把尺子**。
+        // 注意为什么不能用「竖线数」或「字符数」当代理：一条榜外坐标是
+        // `DuplicatedBlock.id`（ occurrences 的路径用 `|` 连起来 + `:行数`），
+        // 一个块有三处克隆就带两个 `|` —— 我第一版拿 `|` 数当条数，实测 3 条坐标数出 5 条，
+        // 判了一条不存在的缺陷（本仓记过的那族：语义守卫不许挂长度代理）。
+        let longestLine = (metrics.scanLimitations ?? []).max(by: { $0.count < $1.count }) ?? ""
+        let disclosed = try XCTUnwrap(Self.disclosedCoordinates(in: longestLine),
+                                      "最长那条限制说明里找不到榜外坐标段 ⇒ 生产者的措辞改了，这条判据在空转")
+        XCTAssertEqual(disclosed.declared, disclosed.listed,
+                       "句子自己说点 \(disclosed.declared) 条、实际列了 \(disclosed.listed) 条 ⇒ 说的数与列的数分了家")
+        XCTAssertLessThanOrEqual(disclosed.listed, 3,
+                                 "散文里点名了 \(disclosed.listed) 条榜外坐标 ⇒ 条数不再由 `coordinateDisclosure` "
+                               + "那一把尺子管（全量在字段里，散文只负责让人看到长什么样）")
+        // 再量一次「没被撑成散文」。**必须先归一化再量**（RD-61）：坐标目前是绝对路径，
+        // 同一份内容换个 checkout 目录长度就变——2026-09-23 实测主树 1,060 字符（过）
+        // 与 `.worktrees/r21-backlog` 那棵树 1,244 字符（判红），一把随盘的路径深度变的尺子
+        // 不是判据。真正要钉的是「坐标文本占了多少句」，与仓库放在哪无关。
+        let longest = Self.normalizeRoots(longestLine).count
+        XCTAssertLessThan(longest, 1_200,
+                          "单条限制说明（去掉仓库绝对前缀后）仍有 \(longest) 字符 ⇒ 又有整串坐标被抄进句子了")
     }
+
+    /// 从一句披露文本里读出「说了几条 / 列了几条」。读不出来返回 `nil`（调用方判红，不静默通过）。
+    static func disclosedCoordinates(in line: String) -> (declared: Int, listed: Int)? {
+        let head = "榜外坐标（点样 "
+        guard let headRange = line.range(of: head),
+              let declared = Int(line[headRange.upperBound...].prefix { $0.isNumber }) else { return nil }
+        guard let colon = line.range(of: "：", range: headRange.upperBound..<line.endIndex) else { return nil }
+        var tail = line[colon.upperBound...]
+        for stopper in ["；另有", "（全部"] {
+            if let cut = tail.range(of: stopper) { tail = tail[..<cut.lowerBound] }
+        }
+        let listed = tail.split(separator: " ; ", omittingEmptySubsequences: true).count
+        return (declared, listed)
+    }
+
+    /// 元测试（双向）：生产者自己的输出必须读得通，抄多了必须数得出来。
+    /// 不配这一条，上面那个 `disclosedCoordinates` 就是一个"解析不出来就当没事"的橡皮章。
+    func test_meta_theCoordinateCounterReadsTheProducersOwnSentence() {
+        let eight = (1...8).map { "block-\($0)|pair-\($0):\($0)" }
+        let honest = DuplicationResult.coordinateDisclosure(eight, limit: 3)
+        let read = Self.disclosedCoordinates(in: "前文。" + honest + "后文。")
+        XCTAssertEqual(read?.declared, 3, "生产者说点 3 条：\(read as Any)")
+        XCTAssertEqual(read?.listed, 3, "实际也列 3 条：\(read as Any)")
+        let inflated = "榜外坐标（点样 3 条）：A|B:1 ; C|D:2 ; E|F:3 ; G|H:4（全部 8 条样本见 x）。"
+        XCTAssertEqual(Self.disclosedCoordinates(in: inflated)?.listed, 4,
+                       "句子说 3 条却列了 4 条 ⇒ 必须数得出来，否则这条判据是橡皮章")
+        XCTAssertNil(Self.disclosedCoordinates(in: "这一句根本没有榜外坐标段"))
+    }
+
+    /// 把「被扫根」那段绝对路径折成一个定长记号，使长度判据不随仓库放在哪变。
+    /// 只折**本仓自己那棵树的前缀**，别的路径原样留着 —— 否则等于把量纲抹平。
+    static func normalizeRoots(_ text: String) -> String {
+        let root = Self.repoRootOfCheckout.path + "/"
+        return text.replacingOccurrences(of: root, with: "<repo>/")
+    }
+
+    /// 这棵 checkout 的仓库根（`Tests/TcoderMonitorTests/<本文件>` 往上三层是包根、再往上是仓库根）。
+    static let repoRootOfCheckout: URL = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()   // TcoderMonitorTests
+        .deletingLastPathComponent()   // Tests
+        .deletingLastPathComponent()   // TcoderMonitor
+        .deletingLastPathComponent()   // 仓库根
 
     // MARK: - 装配口本身：点名数不缩水，且必须指回落盘字段
 

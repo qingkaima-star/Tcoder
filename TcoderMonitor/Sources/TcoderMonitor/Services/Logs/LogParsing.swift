@@ -104,8 +104,12 @@ struct LogAggregate: Sendable {
     /// 下面两本是**被排除的部分**，它们不是 0，是"没算进来"（X3 的那条老红线）。
     var undatedEventCount: Int = 0
     var outOfWindowEventCount: Int = 0
-    /// 崩溃证据台账（四态 + 去重 + 构建归属）。**不落盘**，形状登记在 Obsidian `110` 的契约缺口。
-    var crashEvidence: CrashEvidenceLedger? = nil
+    // RD-60 删掉了一格 `crashEvidence: CrashEvidenceLedger?`：它从 R4 起就**既无写者也无读者**
+    // （`LogAggregate` 不出 `FileLogAnalyzer`，台账由 `analyzeWithEvidence` 那个口子直接交回），
+    // 留着它正是 RD-34「有写无读」的胚胎。它没有被搬到别处 —— 台账本体在
+    // `CrashEvidenceLedger`，上屏装配在 `CrashEvidenceReadout`，落盘载体是报给总工的契约缺口。
+    // 删之前查过：按**裸名字** grep 全仓零引用（不只定义式）、`git stash list` 无在途实现、
+    // 无第二处同名实现、也没有任何用例断言过它。
 }
 
 // MARK: - 尾部读取

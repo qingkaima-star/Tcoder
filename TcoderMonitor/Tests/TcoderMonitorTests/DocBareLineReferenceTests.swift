@@ -30,7 +30,12 @@ final class DocBareLineReferenceTests: XCTestCase {
         .deletingLastPathComponent()      // 工作树根
 
     private static let docs: [String] = ["README.md", "docs/使用说明.md",
-                                       "docs/口径与已知限制.md", "docs/九页实拍读数.md"]
+                                       // 2026-09-25：口径文档的**续卷**（父卷写到 789 行撞上 800 行闸门，
+                                       // 尾部三节按日期追加的内容逐字搬过去）。往后新补的口径都往续卷写，
+                                       // 所以它必须一起被扫 —— 否则"以后写的行号引用"正好落在扫描面外。
+                                       // 登记当下这份续卷里 0 处裸行号引用，加进来不会带进新债。
+                                       "docs/口径与已知限制.md", "docs/口径与已知限制-续.md",
+                                       "docs/九页实拍读数.md"]
 
     /// ``` `:349` ``` / ``` `:77-105` ``` / ``` `:58,59,119` ```
     private static let barePattern = try! NSRegularExpression(

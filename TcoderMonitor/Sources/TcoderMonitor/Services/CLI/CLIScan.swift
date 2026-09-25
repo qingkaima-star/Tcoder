@@ -49,11 +49,16 @@ final class CLIScan {
             return CLIScanOutcome(report: nil, exit: .badPath,
                                   problem: "路径不可用：\(raw)（不存在、不是目录或不可读）")
         }
-        var report = ProjectReport(project: MonitoredProject(name: root.lastPathComponent, path: root.path))
+        // 名字按**给定的**写法取末段、路径按物理写法（`ScannedPath`）：与 `ProjectStore.add` 同规矩。
+        // 反过来的话，一个软链接目录在 CLI 会被改名成它的目标目录名 —— 那是替用户改项目名。
+        var report = ProjectReport(project: MonitoredProject(name: Self.givenName(for: raw), path: root.path))
 
         let codeAnalyzer = code, gitAnalyzer = git, logAnalyzer = logs
         let depAnalyzer = deps, coverageAnalyzer = coverage
         let extraLogURLs = extraLogPaths.map { URL(fileURLWithPath: $0) }
+        // RD-31：开工前先采一枚**元数据指纹**（不读任何文件内容），收工后再采一枚。
+        // 采在五路之前、比对在装配之前，两侧用的是同一个 `SourceTreeFingerprint.probe`。
+        let fingerprintAtStart = SourceTreeFingerprint.probe(root: root)
 
         async let codeResult = AnalyzerLedger.timed(Self.sectionLabels[0]) {
             try await codeAnalyzer.analyze(root: root, options: .default)
@@ -97,7 +102,11 @@ final class CLIScan {
         report.analyzerLedger = AnalyzerLedger.records(from: [codeAttempt, gi.attempt, ls.attempt, dp.attempt, cv.attempt])
         // 溯源块最后装配：它要读 Git 那一路已经拿到的提交号与工作区状态，
         // 自己不再起第二个 git 进程（两处各查一次迟早分叉）。
-        report.provenance = ScanProvenance(report: report, scannedRoot: root.path, producedBy: "cli")
+        var provenance = ScanProvenance(report: report, scannedRoot: root.path, producedBy: "cli")
+        // 五路跑完之后、装配报告之前再采一枚：这两枚之间隔着的就是"扫描这段时间"。
+        provenance.recordDrift(startingFrom: fingerprintAtStart,
+                               endingAt: SourceTreeFingerprint.probe(root: root))
+        report.provenance = provenance
 
         return CLIScanOutcome(report: report,
                               exit: CLIExit.failedSections(failures.count),
@@ -106,9 +115,18 @@ final class CLIScan {
 
     // MARK: - 路径校验（前置于任何分析，否则白扫一遍还会给出像结论的空报告）
 
+    /// 显示名：按**用户给的那个写法**取末段（`~` 仍要展开，它不是路径的一部分）。
+    /// 与 `validatedURL` 分开两个口，是因为解析之后的末段可能是**目标目录**的名字：
+    /// 界面那一路（`ProjectStore.add`）已经把这条规矩写死了，CLI 少一个入口就会给出两种名字。
+    static func givenName(for raw: String) -> String {
+        URL(fileURLWithPath: (raw as NSString).expandingTildeInPath).lastPathComponent
+    }
+
     static func validatedURL(for raw: String) -> URL? {
         let expanded = (raw as NSString).expandingTildeInPath
-        let url = URL(fileURLWithPath: expanded).standardizedFileURL
+        // 被扫根的写法由 `ScannedPath` 这一把尺子定（原来在这里走 `standardizedFileURL`，
+        // 它会把 `/private/tmp` 倒剥成 `/tmp` ⇒ 同一个目录在 CLI 与界面印成两个串，见 #60）。
+        let url = URL(fileURLWithPath: ScannedPath.canonical(expanded), isDirectory: true)
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             return nil

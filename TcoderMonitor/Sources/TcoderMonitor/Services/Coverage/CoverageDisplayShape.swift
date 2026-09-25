@@ -57,24 +57,86 @@ struct CoverageDisplayShape: Equatable, Sendable {
             undisplayedReports: overCap,
             unexaminedDirectories: unexamined,
             droppedByCap: overCap.count,
-            unmeasuredScope: scopeParts.isEmpty ? nil : scopeParts.joined(separator: "、"))
+            unmeasuredScope: scopeParts.isEmpty ? nil : scopeParts.joined(separator: localizedListSeparator()))
+    }
+
+    /// 「另有 N 份未合并」那一句的**唯一措辞**（RD-51）。
+    ///
+    /// 为什么只能有一处：历史上形状里写「…：坐标…等（逐条清单见 undisplayedReports）」、
+    /// `CoverageMetrics.capDisclosureText` 另写一套「…（逐条点名见 undisplayedReports）」——
+    /// 同一个 `droppedByCap` 在覆盖率页与健康页长成两句话，
+    /// 而后一句**声称逐条点名却一个名字都不给**，读的人按它去 JSON 里找点名，
+    /// 找到的那套其实早已被这一套替代。
+    /// 点名给**相对路径**而不是 basename：一棵树里 40 份都叫 `lcov.info`，只报文件名等于没点。
+    static func capSentence(dropped: Int, coordinates: [String]) -> String {
+        let head = "另有 \(dropped) 份未合并"
+        let named = coordinates.prefix(3).map(coverageCoordinateShort)
+        guard !named.isEmpty else {
+            // 计数在、坐标不在 ⇒ 那是两次统计拼出来的账，不许装作点过名。
+            return head + "（这一版没留下逐条坐标，点不出名）"
+        }
+        return head + "：" + named.joined(separator: localizedListSeparator())
+            + (coordinates.count > named.count ? "等（逐条清单见 undisplayedReports）" : "（已点名）")
     }
 
     /// 上屏那几句（**唯一**的披露生产者；`CoverageMergeLedger.statement` 只负责把它们拼进去）。
     var statementParts: [String] {
         var parts: [String] = []
         if droppedByCap > 0 {
-            // 判据：命中上限的每一份都要能点名（摘掉这句 ⇒ `CoverageContractFieldTests` 转红）。
-            // 点到**相对路径**而不是文件名：一棵树里 40 份都叫 `lcov.info`，只报 basename 等于没点。
-            let named = undisplayedReports.prefix(3).map(coverageCoordinateShort)
-            parts.append("另有 \(droppedByCap) 份未合并：" + named.joined(separator: "、")
-                + (undisplayedReports.count > named.count ? "等（逐条清单见 undisplayedReports）" : "（已点名）"))
+            // 摘掉这句 ⇒ `CoverageContractFieldTests` 转红（超限每一份都要能点名）。
+            parts.append(CoverageDisplayShape.capSentence(dropped: droppedByCap,
+                                                          coordinates: undisplayedReports))
         }
         if let scope = unmeasuredScope {
             parts.append("⚠ 扫描面不完整：" + scope
                 + " ⇒ 这里说的「没找到报告」不等于「该项目没有覆盖率报告」")
         }
         return parts
+    }
+}
+
+// MARK: - RD-62 · 覆盖率「类别那一格」的三态（全仓唯一装配口）
+
+/// 「单元测试 / 集成测试」那一格怎么给人看：**三态各一句，取法只此一处**。
+///
+/// 立案（台账卷四 §58.5）：RD-39 结案之后 `CoverageAnalyzer.classify(url:root:)` **不再猜**类别 ——
+/// 报告在被扫根之内的相对路径里没有 `unit`/`integration`/`e2e` 那些目录段就一律算 `.combined`
+/// （钉着它的是 `CoverageContractFieldTests.testAmbientDirectoryNamesNeverLeakIntoKindOrNumbers`）。
+/// 于是「有报告、但没标注类别」是**常态**而不是例外。
+/// 而消费侧那一格原先只有两种取值：有该类报告 ⇒ 百分数；否则 ⇒ 写死「无报告」。
+/// ⇒ 一份普通的 `coverage/lcov.info` 摆在项目里、总覆盖率那格明明有数，
+/// 这两格却写「无报告」，读的人只会得出「这个项目没跑单测」——
+/// **「没标注」被渲染成「没有报告」**，与 AGENTS §4
+/// 「数据缺失时不要显示为 0 假装是真实结果」同族（也是本仓"读不到不许渲染成没有"那条红线）。
+///
+/// ⚠️ 顺手量到的一条事实（写下来，别让它再被当成"只是措辞不精确"）：
+/// 覆盖率那张卡只在 `coverage.hasData` 为真时才画（`Views/DashboardView.swift` 的 `coverageStrip`），
+/// 而 `hasData` 要求**至少有一份 `linesTotal > 0` 的报告** ⇒ 屏上那一格**永远走不到**
+/// 「一份报告都没有」那一支。也就是说改前那句「无报告」出现在屏上的**每一次都是假话**。
+///
+/// 视图与 CLI 都只准走 `text(for:in:)`；再写一句就是第二把尺子
+/// （按名字扫 `Sources/**` 的判据在 `CoverageCategoryAbsenceReadoutTests`，配元测试）。
+enum CoverageCategoryReadout {
+    /// 输入只有两件事：**这一 kind 有没有报告** × **整份报告里有没有任何覆盖率报告**。
+    ///
+    /// 中间那一态**再分一句**，因为「有别的报告」有两种成因，合成一句就必然有一句是假话：
+    /// · 报告都没标注类别（`.combined`）⇒「未标注类别」——就是 RD-62 那一格；
+    /// · 报告标注了别的类别、只是没产出这一类 ⇒「未产出该类报告」——
+    ///   这时候说「未标注类别」是把已经做了的标注报成没做（第 3 例钉的就是这一支）。
+    static func text(for kind: CoverageReport?, in coverage: CoverageMetrics) -> String {
+        if let kind { return percentOf100(kind.linePercent) }
+        guard !coverage.reports.isEmpty else { return localizedCopy("无报告") }
+        return coverage.reports.contains { $0.kind == .combined }
+            ? localizedCopy("未标注类别")
+            : localizedCopy("未产出该类报告")
+    }
+
+    /// 0...100 → 屏上百分数（**现行为逐字不变**：默认零位小数，与 `78%` 同形状）。
+    ///
+    /// 与 `DashboardView.percentOf100` 同一把尺子（都是 `NumberFormat.percent(值 / 100, precision:)`），
+    /// 两处不许分叉 —— `CoverageCategoryAbsenceReadoutTests` 拿同一次扫描的读数逐字比过这两处。
+    static func percentOf100(_ percent: Double, precision: Int = 0) -> String {
+        NumberFormat.percent(percent / 100, precision: precision)
     }
 }
 
@@ -105,24 +167,40 @@ extension CoverageMetrics {
             missing.contains { $0.moduleKey == nil } ? "模块未知" : nil,
             missing.contains { $0.sourceFingerprint == nil } ? "未绑定提交" : nil,
         ].compactMap { $0 }
-        return slots.isEmpty ? head : head + "（" + slots.joined(separator: "、") + "），已分开呈现"
+        return slots.isEmpty ? head : head + "（" + slots.joined(separator: localizedListSeparator()) + "），已分开呈现"
     }
 
     /// 「有没有东西被上限摘掉」这句。**三态分开**，`nil` 不许渲染成"没有问题"。
+    /// `droppedByCap > 0` 那一档**逐字转发** `capSentence`（RD-51：这里以前自己写了一套说法）。
     var capDisclosureText: String {
         guard let droppedByCap else { return "未统计是否有报告被上限丢弃" }
         guard droppedByCap > 0 else { return "没有报告因命中上限被丢弃" }
-        return "另有 \(droppedByCap) 份未合并（逐条点名见 undisplayedReports）"
+        return CoverageDisplayShape.capSentence(dropped: droppedByCap,
+                                                coordinates: undisplayedReports ?? [])
     }
 
     /// §6.1 那几格合起来的那句**产品侧披露**（唯一生产者）：
     /// 健康分的"这一维为什么缺"那句就拼在它后面 —— 有了它，`unmeasuredScope` /
     /// `droppedByCap` / `undisplayedReports` 三格才算**有读者**（RD-34 钉的是"有写无读"）。
+    ///
+    /// ⚠️ 六格齐全时**不自己造话**，直接取 `statementParts`（RD-51）：
+    /// 覆盖率页尾与 CLI 读的是那一份，健康页若另拼一套，同一个数就会在两页上长成两句话——
+    /// 尤其丢掉「⇒ 这里说的『没找到报告』不等于『该项目没有覆盖率报告』」那半边（RD-26 要的退让句）。
+    /// 六格不齐（旧报告没统计过）才退到 `unmeasuredScope` + `capDisclosureText` 的既有修辞。
     var displayDisclosureText: String? {
+        if let shape = displayShapeFromFields {
+            return Self.disclosureSentence(shape.statementParts)
+        }
         var parts: [String] = []
         if let unmeasuredScope { parts.append(unmeasuredScope) }
         if let droppedByCap, droppedByCap > 0 { parts.append(capDisclosureText) }
-        return parts.isEmpty ? nil : parts.joined(separator: "；") + "。"
+        return Self.disclosureSentence(parts)
+    }
+
+    /// 披露句子串成上屏那一句的**唯一**排法（分隔符与句末标点也只有一处）。
+    /// 空清单 ⇒ `nil`：扫描面完整、也没摘掉东西时，页上不许留一个空壳句子。
+    private static func disclosureSentence(_ parts: [String]) -> String? {
+        parts.isEmpty ? nil : parts.joined(separator: "；") + "。"
     }
 
     /// "这个项目到底有没有覆盖率报告"这句话成不成立。
@@ -168,8 +246,7 @@ extension CoverageMetrics {
     ///   `CoverageDisplayShape.statementParts`（本函数只做串接，不拼一个汉字的修辞）。
     var boardAccountingNote: String? {
         guard let shape = displayShapeFromFields else { return capDisclosureText }
-        let parts = shape.statementParts
-        return parts.isEmpty ? nil : parts.joined(separator: "；") + "。"
+        return Self.disclosureSentence(shape.statementParts)
     }
 }
 

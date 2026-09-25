@@ -42,7 +42,8 @@ struct CodeMetricsView: View {
                 }
             } else if let copy = CodeDataGate.emptyCopy(for: report?.code,
                                                        page: "语言占比与重复、复杂度概览") {
-                EmptyStateView(icon: copy.icon, title: copy.title, message: copy.message)
+                EmptyStateView(icon: copy.icon, title: copy.title, message: copy.message,
+                               help: copy.help)
             }
         }
     }
@@ -104,13 +105,17 @@ struct CodeMetricsSummaryGrid: View {
         GlassSection("总量构成", icon: .code,
                      trailing: AnyView(CopyHelpBadge("代码 / 注释 / 空行共同构成总行数"))) {
             ReadoutStrip {
+                // 盘点表口径「留短藏长」：屏上留「主语言」这一头（它说明这一格读数的总体是谁），
+                // 「扫描于 X」整句进 ⓘ —— 扫描时间/距今在同页「标记事项与扫描信息」卡里
+                // 已各占一格（`DataFieldRow`），这一格再念一遍就是主诉⑧点的「同一句念两遍」。
                 MetricTile(
                     label: "代码文件",
                     value: NumberFormat.grouped(code.totalFiles),
                     unit: "个",
-                    caption: localizedFormat("主语言 %1$@ · 扫描于 %2$@",
-                                             code.primaryLanguage,
-                                             DateFormat.sinceDescription(code.scannedAt))
+                    caption: localizedFormat("主语言 %1$@", code.primaryLanguage),
+                    captionHelp: localizedFormat("主语言 %1$@ · 扫描于 %2$@",
+                                                 code.primaryLanguage,
+                                                 DateFormat.sinceDescription(code.scannedAt))
                 )
                 DataBandSeparator()
                 MetricTile(
@@ -135,8 +140,13 @@ struct CodeMetricsSummaryGrid: View {
                     label: "空行数",
                     value: NumberFormat.grouped(code.blankLines),
                     unit: "行",
-                    caption: localizedFormat("空行占 %@ · 与注释、代码共同构成总行数",
-                                             Self.shareOf(code.blankLines, code))
+                    // 后半「与注释、代码共同构成总行数」在本卡**同一屏已有两处常驻落点**：
+                    // 卡名右侧的 ⓘ（`代码 / 注释 / 空行共同构成总行数`）与下面的
+                    // `CodeInvariantRow` 等式（画在屏上的 空行+注释+代码=总计）。
+                    // 第三遍不删（B 守恒线不许删），整句收进这一格自己的 ⓘ，屏上留占比。
+                    caption: localizedFormat("空行占 %@", Self.shareOf(code.blankLines, code)),
+                    captionHelp: localizedFormat("空行占 %@ · 与注释、代码共同构成总行数",
+                                                Self.shareOf(code.blankLines, code))
                 )
             }
         }
@@ -164,9 +174,13 @@ struct CodeScaleSection: View {
             // 这张卡实际说的是"总行数 + 它由哪三项相加"，所以卡名就叫总行数。
             GlassSection(
                 "总行数",
-                subtitle: localizedFormat("主语言 %1$@ · 共 %2$@ 个文件",
-                                          code.primaryLanguage,
-                                          NumberFormat.grouped(code.totalFiles)),
+                // 盘点表「留短藏长」：屏上留「主语言」——它是这一屏主角读数的总体抬头；
+                // 「共 N 个文件」与同卡组里「代码文件 N 个」那一格是**同一个数的第二遍**
+                // （值都是 `code.totalFiles`），所以整句进 ⓘ，不删（B 守恒线）。
+                subtitle: localizedFormat("主语言 %1$@", code.primaryLanguage),
+                subtitleHelp: localizedFormat("主语言 %1$@ · 共 %2$@ 个文件",
+                                              code.primaryLanguage,
+                                              NumberFormat.grouped(code.totalFiles)),
                 icon: .code
             ) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.md) {
@@ -282,6 +296,15 @@ struct CodeInvariantRow: View {
                 sign("=")
                 term("总计", code.totalLines)
                 Spacer(minLength: 0)
+            }
+            // RD-67（台账卷四 §73）：需求方 2026-09-24 18:16 拍的是「维持现状 + 两个数并排给」——
+            // 分母一个都不动（文档 / 配置 / 备份 / 测试与生产码同分母），改为把差额显式给读者看。
+            // 所以这一句并排写在上面那条等式的 `代码` 项底下：它回答的就是「这个 M 里有多少是生产码」。
+            // 句子只由唯一装配口 `ProductionCodeScaleReadout.reading(_:)` 生产，这里不另写一份中文
+            // （与下面 `MixedLanguageRegionCaliber.note` 同一条纪律）；三种缺席态（没做分档 /
+            // 生产档没数出来 / 真的量为零）都由那一处分开，视图不补 0、也不补一句占位话。
+            if let paired = ProductionCodeScaleReadout.reading(code) {
+                DataCaption(text: paired)
             }
             if sum != code.totalLines {
                 DataNotice(

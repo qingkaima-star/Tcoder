@@ -123,7 +123,7 @@ enum HealthBreakdown {
         let published = NumberFormat.percent(row.effectiveWeight, precision: 1)
         // 「表里没有这一档」在两个分支里是同一句话（无 `baseWeight` / 有 `baseWeight`
         // 但判据归因到 scorerOnly），写两遍就有两份改漏的机会。
-        let notInTable = "该维度不在内置权重表里，直接采用评分器给出的权重 \(published)。"
+        let notInTable = localizedFormat("该维度不在内置权重表里，直接采用评分器给出的权重 %1$@。", published)
         guard let base = row.baseWeight else { return notInTable }
         let raw = NumberFormat.percent(base, precision: 1)
         let tableSumText = NumberFormat.percent(Self.tableWeightSum, precision: 0)
@@ -131,15 +131,18 @@ enum HealthBreakdown {
         case .scorerOnly:
             return notInTable
         case .asIntended:
-            return "本次乘数 \(published)，与内置表原始权重 \(raw) 一致。"
+            return localizedFormat("本次乘数 %1$@，与内置表原始权重 %2$@ 一致。", published, raw)
         case .tableNormalization:
-            return "内置权重表合计 \(tableSumText)，评分器发布前整体折算：原始 \(raw) → 本次乘数 \(published)。本次没有维度缺席。"
+            return localizedFormat("内置权重表合计 %1$@，评分器发布前整体折算：原始 %2$@ → 本次乘数 %3$@。本次没有维度缺席。",
+                                   tableSumText, raw, published)
         case .missingDimensions:
             // 两个合计数一起给：在场合计里已经含着「表本身不到 100%」这一层，不再为它单开一个分支。
-            return "\(missingCount) 个维度缺席，份额按在场维度等比摊入：原始 \(raw) → 本次乘数 \(published)"
-                + "（在场维度表权重合计 \(NumberFormat.percent(Self.presentTableSum(rows), precision: 0))，全表合计 \(tableSumText)）。"
+            return localizedFormat("%1$@ 个维度缺席，份额按在场维度等比摊入：原始 %2$@ → 本次乘数 %3$@（在场维度表权重合计 %4$@，全表合计 %5$@）。",
+                                   HealthCurves.whole(missingCount), raw, published,
+                                   NumberFormat.percent(Self.presentTableSum(rows), precision: 0), tableSumText)
         case .unexplained:
-            return "本次乘数 \(published) 与内置表口径（原始 \(raw)、表合计 \(tableSumText)、缺席 \(missingCount) 项）对不上，界面以评分器发布值为准。"
+            return localizedFormat("本次乘数 %1$@ 与内置表口径（原始 %2$@、表合计 %3$@、缺席 %4$@ 项）对不上，界面以评分器发布值为准。",
+                                   published, raw, tableSumText, HealthCurves.whole(missingCount))
         }
     }
 
@@ -149,14 +152,18 @@ enum HealthBreakdown {
         let tableSum = Self.tableWeightSum
         let notes = shiftNotes(rows, missingCount: missingCount)
         if missingCount == 0 {
-            let head = "输入覆盖全部 \(rows.count) 个可计分维度，没有维度缺席"
             if abs(tableSum - 1) > shareTolerance {
-                return head + "；但内置权重表合计 \(NumberFormat.percent(tableSum, precision: 0))，评分器发布前已整体折算，故各乘数不等于表内原始值。"
+                return localizedFormat("输入覆盖全部 %1$@ 个可计分维度，没有维度缺席；但内置权重表合计 %2$@，评分器发布前已整体折算，故各乘数不等于表内原始值。",
+                                       HealthCurves.whole(rows.count),
+                                       NumberFormat.percent(tableSum, precision: 0))
             }
-            return head + "；权重未做摊分，乘数即表内原始值。"
+            return localizedFormat("输入覆盖全部 %1$@ 个可计分维度，没有维度缺席；权重未做摊分，乘数即表内原始值。",
+                                   HealthCurves.whole(rows.count))
         }
-        return "缺失 \(missingCount) 个维度不参与计分、也不按 0 计入，其份额已按在场维度等比摊入。"
-            + (notes.isEmpty ? "" : "（\(notes.joined(separator: " · "))）")
+        let base = localizedFormat("缺失 %1$@ 个维度不参与计分、也不按 0 计入，其份额已按在场维度等比摊入。",
+                                   HealthCurves.whole(missingCount))
+        guard !notes.isEmpty else { return base }
+        return HealthCurves.noted(base, [notes.joined(separator: " · ")])
     }
 
     /// 折算说明列表：只列乘数确实偏离表内原始值的维度。
@@ -176,7 +183,7 @@ enum HealthBreakdown {
     /// 上一轮这里写死了「缺失维度的权重已摊到在场维度」——列头是整列静态文案，
     /// 而偏移原因逐行不同（九维全在场时真实原因是表合计 110% 的整体折算，与缺席无关），
     /// 所以那种写法必然在某些场景下说谎。原因交给每行自己的 `weightTooltip`。
-    static let weightColumnHelp = "本次实际乘数：在场维度的乘数合计恒为 100%，故 Σ（得分 × 乘数）可复现综合分。与内置表原始值不一致的原因见各行提示。"
+    static let weightColumnHelp = localizedCopy("本次实际乘数：在场维度的乘数合计恒为 100%，故 Σ（得分 × 乘数）可复现综合分。与内置表原始值不一致的原因见各行提示。")
 }
 
 /// `weightTooltip` 的分支依据。每种原因一句不同的话，避免「无条件宣称」。
@@ -228,19 +235,21 @@ enum MissingDimensionReason {
     /// 混在一个函数里读，谁也看不出界面为什么是这句话。
     static func text(for dimension: HealthDimension, report: ProjectReport?) -> String {
         guard let analyzer = analyzerLabel[dimension] else {
-            return "该维度不在内置口径里，本次未参与计分。"
+            return localizedCopy("该维度不在内置口径里，本次未参与计分。")
         }
         if let absent = scanAbsenceReason(analyzer: analyzer, report: report) { return absent }
         return dimensionAbsenceReason(dimension, analyzer: analyzer, report: report)
-            ?? "「\(analyzer)」完成但该分量未产出。"
+            ?? localizedFormat("「%1$@」完成但该分量未产出。", localizedCopy(analyzer))
     }
 
     /// 整体缺席：整次扫描没跑、或这一维所属的分析器报过失败。
     private static func scanAbsenceReason(analyzer: String, report: ProjectReport?) -> String? {
         if let report, report.failedSections.contains(analyzer) {
-            return "上次扫描「\(analyzer)」失败，本维度没有输入。"
+            return localizedFormat("上次扫描「%1$@」失败，本维度没有输入。", localizedCopy(analyzer))
         }
-        if report == nil { return "还没有扫描结果，「\(analyzer)」未运行。" }
+        if report == nil {
+            return localizedFormat("还没有扫描结果，「%1$@」未运行。", localizedCopy(analyzer))
+        }
         return nil
     }
 
@@ -266,7 +275,7 @@ enum MissingDimensionReason {
     }
 
     private static func codeAbsence(analyzer: String, code: CodeMetrics?) -> String? {
-        code == nil ? "「\(analyzer)」没有产出代码指标。" : nil
+        code == nil ? localizedFormat("「%1$@」没有产出代码指标。", localizedCopy(analyzer)) : nil
     }
 
     /// Git 那一路的缺席要分**四档**，合成一句就把输入状态弄丢了：
@@ -278,11 +287,11 @@ enum MissingDimensionReason {
     /// ⚠ 这两句只对「协作分布」成立：活跃度那一维的缺席条件是 `totalCommits == 0`，
     /// 走到第③④档时它已经在计分、不会来问原因（`WeightedHealthScorer.busFactorOutcome`）。
     private static func gitAbsence(git: GitInsights?) -> String? {
-        guard let git else { return "该目录不是 Git 仓库，或未取到提交历史。" }
-        guard git.totalCommits > 0 else { return "该仓库没有任何提交，Git 两维都没有输入。" }
+        guard let git else { return localizedCopy("该目录不是 Git 仓库，或未取到提交历史。") }
+        guard git.totalCommits > 0 else { return localizedCopy("该仓库没有任何提交，Git 两维都没有输入。") }
         guard git.authorBasisCommits > 0 else {
-            return "含合并共 \(NumberFormat.grouped(git.totalCommits)) 笔提交里没有一笔非合并提交，"
-                + "作者分布没有可算的总体，本维度不参与计分。"
+            return localizedFormat("含合并共 %1$@ 笔提交里没有一笔非合并提交，作者分布没有可算的总体，本维度不参与计分。",
+                                   NumberFormat.grouped(git.totalCommits))
         }
         guard BusFactorEvidence.isShareUndefined(git) == false else {
             return BusFactorEvidence.absenceReason(git)
@@ -301,8 +310,8 @@ enum MissingDimensionReason {
     /// `StabilityZeroDenominatorShape`，这里只是它的一个读者 ——
     /// 缺席原因在界面与 CLI 共用，评分器那边的建议句也共用，不留第二把尺子。
     private static func stabilityAbsence(logs: LogSummary?) -> String? {
-        guard let logs else { return "尚未分析日志。" }
-        guard logs.hasData else { return "未发现可读的日志文件。" }
+        guard let logs else { return localizedCopy("尚未分析日志。") }
+        guard logs.hasData else { return localizedCopy("未发现可读的日志文件。") }
         guard logs.totalLinesScanned > 0 else {
             return StabilityZeroDenominatorShape.absenceReason(logs: logs)
         }
@@ -310,7 +319,7 @@ enum MissingDimensionReason {
     }
 
     private static func dependencyAbsence(dependencies: DependencyReport?) -> String? {
-        dependencies == nil ? "未识别到依赖清单。" : nil
+        dependencies == nil ? localizedCopy("未识别到依赖清单。") : nil
     }
 
     /// 覆盖率这一维要分**三档**，合成一句就把输入状态弄丢了：
@@ -324,10 +333,15 @@ enum MissingDimensionReason {
         if coverage.hasData { return nil }
         let base: String
         if coverage.scannedFileCount > 0 {
-            base = "扫到 \(NumberFormat.grouped(coverage.scannedFileCount)) 个覆盖率报告文件，"
-                + "但里面没有可用的行覆盖数字，不参与计分。"
-        } else {
+            base = localizedFormat("扫到 %1$@ 个覆盖率报告文件，但里面没有可用的行覆盖数字，不参与计分。",
+                                   NumberFormat.grouped(coverage.scannedFileCount))
+        } else if coverage.absenceClaimIsSound {
             base = localizedCopy("该项目没有产出覆盖率报告，不参与计分。")
+        } else {
+            // RD-55：这一档以前无条件印上面那句，而同一个对象里的 `absenceClaimIsSound`
+            // 刚刚判它**不成立**（有目录没下潜 / 有报告被上限摘掉）⇒ 两本账在同一句话里打脸，
+            // 而读的人只看前半句。不成立时前半句必须自己收窄范围。
+            base = localizedCopy("看得见的部分里没有发现覆盖率报告，不参与计分。")
         }
         // 「没找到」与「没看到」是两件事：有目录读不动时，"没有产出报告"这句站不住，
         // 必须把扫描面不完整这件事一起说出来（`unreadableDirectoryCount == 0` 才是一句真话，
@@ -336,11 +350,11 @@ enum MissingDimensionReason {
         // `CoverageDisplayShape` 一处生产，这里只负责接在结论后面。
         // 旧报告没有那几格（`nil` = 没统计过，**不许**替它下结论）⇒ 退回 `unreadableDirectoryCount` 那句。
         if let disclosure = coverage.displayDisclosureText {
-            return base + disclosure + "上面的结论只覆盖看得见的部分。"
+            return localizedFormat("%1$@%2$@上面的结论只覆盖看得见的部分。", base, disclosure)
         }
         guard let unreadable = coverage.unreadableDirectoryCount, unreadable > 0 else { return base }
-        return base + "另有 \(NumberFormat.grouped(unreadable)) 个目录没能读取（权限或已消失），"
-            + "上面的结论只覆盖读得动的部分。"
+        return localizedFormat("%1$@另有 %2$@ 个目录没能读取（权限或已消失），上面的结论只覆盖读得动的部分。",
+                               base, NumberFormat.grouped(unreadable))
     }
 
 }

@@ -642,7 +642,7 @@ pgrep -f 'swift-frontend|swift-build' | wc -l  # 必须是 0
 ls -d /tmp/tcoder-capture.lock 2>/dev/null     # 取证锁必须空闲
 ```
 
-四条都满足才跑 `./scripts/perf_harness.sh idle <目录>`（或 `interact`，需要真人持续滚动）。
+四条都满足才跑 `./scripts/perf_harness.sh idle <目录>`（或 `interact`：真人滚 **或** `INPUT=synth` 合成滚动，09-22 实测送达有效）。
 不满足时脚本自己的 `preflight_context` 会**直接拒跑**并写明缺哪一条——那不是脚本坏，
 是它在拦第三次"未受控基线"（spec §1.3 已经作废过两批这样的数）。
 一次完整前后对比约 **5 分钟**（`idle`×3 + `interact`×3，各含导出与解析）。
@@ -717,5 +717,27 @@ ls -d /tmp/tcoder-capture.lock 2>/dev/null     # 取证锁必须空闲
 
 ## 给 UI 总工的性能侧交接（原 12:40 一节）
 
-→ 搬进独立文件继续更新：[`2026-09-21-perf-handoff-notes.md`](./2026-09-21-perf-handoff-notes.md)。
+→ 搬进独立文件继续更新：[`2026-09-21-perf-handoff-notes.md`](./2026-09-21-perf-handoff-notes.md)；
+　§N 起（09-22 中午之后）又在 09-23 撞了同一条 ≤800 棘轮，那半截在 [`2026-09-22-perf-handoff-notes-round2.md`](./2026-09-22-perf-handoff-notes-round2.md)。
+　同一把闸门 09-23 晚上逼了第三次搬家：**§AK 起在 [`2026-09-23-perf-handoff-notes-round3.md`](./2026-09-23-perf-handoff-notes-round3.md)**；
+　本文件下面点到的 §AG / §AI 仍在卷二，编号一字未重排。
 　（A 迁移欠账 / B 禁则基线 / C 守卫留档 / D 采样纪律 / E 证据标记要有读者 / E′ 存量复扫 / F 性能侧欠大家 / G 你们每并一批之后请自己重跑）
+
+## 0.7 渲染路径债那 14 处：**不复制清单**，只补一条验收改判（2026-09-23 14:54）
+
+清单与按页路由在交接笔记 **§Z** 那张表里（五页 × 处数 × 具体符号），
+上限现量在 **§AG**（`directFormatters 1 / dynamicColorConstruction 2 / fullSort 9 / syncFileIO 2 / tokenReference 62`，
+五把尺子**全部贴着上限** ⇒ 目标里"零动态色 / 零排序 / 零同步 I/O"这条一分未还）。
+本文件不抄第二份——两处清单必然分叉，而分叉的方向永远是旧那份被当成依据。
+
+改判只有一条：**验收从一条腿变两条腿**，理由与三条规矩见 **§AI**。执行者回执要长这样：
+
+    静态已验收：现量 N → M（守卫名点出来），该处不再被渲染路径可达性扫到
+    帧率未覆盖：这一页滚动期读数没取（需求方停着点击/滚动测试），所以本页不声明变快
+
+⚠ 两个不许：不许用 `idle` 档的数冒充某一页（那是 T2 心跳），不许用总览页的数判别的页（§Y）。
+还掉之后**由我把那一格上限逐格拧下去**——上限停在现量就是给回涨留门。
+
+> §0.8 / §0.8.1 / §0.9 三节（14 处的施工顺序、我上一版把两处以为一处、以及那条死路）
+> 已搬到 [`2026-09-24-perf-paydown-order.md`](./2026-09-24-perf-paydown-order.md)——
+> 搬的原因只是这份文档 795 行贴上 ≤800 棘轮；编号一字未重排，也没有任何一处指针指向它们。

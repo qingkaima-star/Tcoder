@@ -38,7 +38,11 @@ enum DependencySnapshot {
     /// 措辞里刻意不出现「失败」二字：`VulnerabilityEvidence.classify` 拿
     /// `networkLookupNote.contains("失败")` 当降级判据，这句话会被拼进那个 note。
     static var asOfText: String {
-        "快照截至 \(snapshotDayText)（\(DateFormat.sinceDescription(snapshotDate))）"
+        // **整句键**：这句会被插进一条已经翻译的长句里，写成插值字面串就等于
+        // 英文态在那句英文中间掉进一段中文（2026-09-23 拿 Homebrew 复验实拍抓到：
+        // "…built-in snapshot (npm / Maven / Python), 快照截至 2026-09-19（4 days ago）; …"）。
+        localizedFormat("快照截至 %1$@（%2$@）",
+                        snapshotDayText, DateFormat.sinceDescription(snapshotDate))
     }
 
     /// 全仓共用的日期格式化器只有 `DateFormat.full`（`yyyy-MM-dd HH:mm`），
@@ -180,6 +184,29 @@ enum DependencySnapshot {
         }
         return index
     }()
+}
+
+// MARK: - 生态可跟踪性（版本核对这一路的"支持"判据）
+//
+// 自 `DependencyEvidence.swift` **逐字搬入**（RD-70 那一轮，理由就一条：那个文件撞到
+// `SourcesSizeAuditTests` 与产品同口径的 400 行线，而本判据是"查表逻辑"、
+// 与本文件头写的职责（离线快照表与查表逻辑）同族，四条依据也全部来自这批表。
+// 取义一字未改。
+
+enum DependencyLockSupport {
+    /// 这个生态**有没有办法量到"装的到底是哪个版本"**：
+    /// ① 有锁文件候选、② 有已解析产物候选（effective-POM / 依赖树 / SBOM，RD-13b）、
+    /// ③ 内置快照收录过它、④ OSV/registry 覆盖它。四条从同一批表里**推导**，
+    /// 不另抄清单（抄一份就会在增删后腐烂）。
+    /// 判据落空的后果很具体：`versionState` 会说"结构性测不到"，而那句话会变成
+    /// 事实上的"请你去补个文件" —— 本轮不背这个债。
+    static func isEcosystemTrackable(_ ecosystem: DependencyEcosystem) -> Bool {
+        if !ManifestParsers.lockfileCandidates[ecosystem, default: []].isEmpty { return true }
+        if !ManifestParsers.resolvedArtifactCandidates[ecosystem, default: []].isEmpty { return true }
+        if OsvPackageQuery.osvEcosystem(for: ecosystem) != nil { return true }
+        let scopes = DependencySnapshot.lookupScopes(for: ecosystem)
+        return scopes.contains { scope in DependencySnapshot.table.keys.contains { $0.hasPrefix(scope + "|") } }
+    }
 }
 
 // MARK: - Bundled advisories

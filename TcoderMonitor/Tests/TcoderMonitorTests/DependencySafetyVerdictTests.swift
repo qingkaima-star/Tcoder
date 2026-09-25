@@ -52,7 +52,7 @@ final class DependencySafetyVerdictTests: XCTestCase {
                                                      vulnerabilityStates: [.checked]))
 
         XCTAssertEqual(offline, .unchecked(coveredCount: 1, total: 1, uncoveredEcosystems: []))
-        XCTAssertEqual(online, .clean(coveredCount: 1, total: 1))
+        XCTAssertEqual(online, .clean(total: 1))
         XCTAssertFalse(offline.mayClaimSafe, "没联网就不许声称安全")
         XCTAssertTrue(online.mayClaimSafe)
         XCTAssertNotEqual(offline.badgeText, online.badgeText)

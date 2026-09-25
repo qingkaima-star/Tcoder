@@ -58,6 +58,21 @@ git diff > .inflight/<流名>.patch                # 同时留一份可读档
 
 **每做完一小步就 commit**——攒着的在途改动就是最容易整份丢掉的东西。
 
+**提交正文写完先跑一支尺子（09-24 立，`scripts/commit_msg_quote_check.py`）**：
+`git log -1 --format=%B | python3 TcoderMonitor/scripts/commit_msg_quote_check.py -`
+⚠️ **自检与提交之间只许 `&&`，不许 `;`**（09-24 21:49 我自己踩的：尺子当场报出 1 处违例，
+可我用的是分号，退出码被丢掉、提交照旧发生，于是那笔违例进了历史 —— `1402126`）。
+**"跑了检查"不等于"检查有后果"**：一支可以被 `;` 绕过的尺子仍然只是装饰品。
+它查的是本仓那条老规约——**中文句子里一个 ASCII 双引号都不许有，引用走「」**。
+为什么不用 git 钩子：本仓禁止 `core.hooksPath` 与 `--no-verify`（那是绕过门禁，不是修工具），
+所以只能提交前自己跑；一支**会被跳过**的尺子仍然比没有强，前提是把用法写进纪律（就是这段）。
+现量（09-24 18:53，最近 30 笔正文）：**至少 3 笔有违规**，包括我自己两笔（`550bad5`、`29e067a`）
+与另一条会话的一笔（3 处）。两条已知限度也写在脚本头里：
+① 命令片段**紧挨中文又没进反引号**会误报（修法是把那段用反引号包住，判据不改）；
+② 只查双引号，不查撇号与半角逗号/括号。
+⚠️ 顺手记一条 shell 坑：`PIPESTATUS` 是 bash 的，zsh 里要用 `pipestatus`——
+我在验证这支尺子时用前者，拿到一次"rc 为空"的假读数，差点把"没测到退出码"当成"码是 0"。
+
 **补充（20:34 实测教训）：`Tests/TcoderMonitorTests/**` 是同一个编译单元。**
 你写的测试文件哪怕生产代码全对，只要它编译不过，
 **全仓所有工作流就都跑不了 `test`**——别人会以为是自己的代码坏了。
@@ -269,6 +284,15 @@ Tests/TcoderMonitorTests/Health*Tests.swift
 7. **`SourceFileReachabilityTests.censusBaseline`（现 110）与本文件的新章节，只由总工改**；
    每加一个 `Sources/**` 文件必须在该常量注释里写清"谁加的、凭什么被引用"。
    注意该守卫**剥注释与字符串**、且**只认 `Sources/**` 里的调用点**——单测引用不算证据。
+7.1 **新增 `Sources/**` 文件的标准动作**（2026-09-23 11:36 由总工补，起因：看门狗照到
+   一条流正在写新生产文件而 **ahead=0**，同时另一条流自己伸手改了分母——两笔都可能白干）：
+   ① **新文件单独一笔先落盘**，别攒着三个文件一起交（未跟踪文件崩一次就没了，reflog 救不到）；
+   ② 分母红**不要自己抬**——照常提交、让它红，把红的那条**测试名 + 它自报的现量数字**
+      写进 commit message 或日志交回总工，总工在集成那一笔里改成"你自报的现量"。
+      理由：写死的分母不止一处（目录计数已有三份副本），两双手改同一个常量必然撞；
+   ③ 每个新 public 东西必须有**真读者**（GUI/CLI 的上屏出口或一条已存在的判据），
+      **只被自己的单测引用不算数**——那是第 7 条要拦的"有写无读"老 RD 家族；
+   ④ 停笔前数一次实例数（基线见当轮看门狗播报），双绿再交。
 8. `FramePulse` 必须接线进产品代码后才允许合入（零调用的实现文件会被第 7 条拦下），
    且**默认关闭**：只有 `TCODER_PERF_PROBE=1` 时才允许创建 `displayLink`，关闭时开销必须为零。
 ### 双总工协作裁定（2026-09-20 16:57，由用户裁定）
@@ -353,8 +377,36 @@ Tests/TcoderMonitorTests/Health*Tests.swift
    **万一必须起，谁起的谁退出、并在交回汇报里给出前后实例数**。
    （2026-09-23 的现场：我只写了前一句，后一句漏了，
    于是 sabotage 那一趟真的留下 3 个 GUI 实例，靠子代理自己收掉才没留在机器上——那是运气不是设计。）
+   **2.2（2026-09-23 12:12 由用户定，原话：「停止做一切的点击跟滚动测试」）**
+   本仓**不再做**任何靠操作 UI 取证的活：合成输入器投递滚动事件（`INPUT=synth` /
+   `start_synth_scroller` / `SYNTH_GAP_MS` 那一套）、交互档录制
+   （`PERIOD=interaction` 的 `perf_harness.sh interact`、`perf_wait_window.sh interact`）、
+   以及任何点击/悬停驱动的取证（AX 展开点击、tooltip hover、逐页切换点击）。
+   ① 要读数走**不碰输入**的路子：静态守卫与扫描、心跳期（idle 档）录制、
+     已导出产物的二次解析、`-selectedDetailSection` / `TCODER_CAPTURE_SCROLL` 这类
+     **启动参数**（App 自己滚，不发合成事件）。
+   ② **判交互期指标（如"交互期 hitch 帧 = 0"）必须有滚动** ⇒ 没拿到一次明确授权就
+     **明写"未覆盖"**，不许拿相邻档冒充，不许因为测不到就改判据。
+   ③ 不许为了绕开这条换成"另一种模拟键鼠的写法"——**被禁的是操作 UI 这件事本身**，不是脚本名。
+   ④ 停这类链时把**自己起的**进程收干净（见 2.1），别只 kill 最外层留下孤儿输入器。
+   ⑤ **合法形状已经逐行读过的那些**（别的流不必再自己判，但也别照名字抄——判的是"有没有投递输入事件"）：
+     `paired_page_evidence.sh` / `capture_pages_isolated.sh` 切页走 `-selectedDetailSection`、
+     顶/尾走 `CAPTURE_SCROLL` 启动参数（App 自己滚）；`ax_tooltip_report.sh` / `ax_body_audit.py` /
+     `ax_truncation_sweep.sh` 只起进程 + **进程外**读 AX，选项目靠写沙箱 `projects.json`。
+     反面教材：按**脚本名**监控是否违规会假阴性——2026-09-23 看门狗第 51 轮的清单只 grep
+     `synth|perf_harness|capture_pages|hover`，`ax_*` 那一族全漏，差点把合法取证报成违规。
+   Why：这类活要独占一个"没人碰鼠标键盘"的窗口，本机同时还有别的流在编译与取证；
+   一夜下来窗口基本都在等场与互相打断，还烧掉过数小时（一次录制挂死）。
 3. **阈值不许为了刷分而动**。巨大文件行数、复杂度榜长度这类定义属冻结区；
    把阈值放宽让自己变好看，等于把工具废掉。
+   **3.1（2026-09-25 由 #68 定）改性质必须连容器一起改**。一条判据改变"它是什么"
+   （债 ↔ 读数、上限 ↔ 下限、跳过 ↔ 判红、免检 ↔ 受检）时，只改注释、名字与话术**不算改完**：
+   必须 ① 把它搬到承载新性质的那个容器（哪张字典、哪个分支、哪个扫描面），
+   ② 补一条"性质 ↔ 容器"的等式断言（例：`债键 ∪ 读数键 == 全部规则名` 且两栏不相交）。
+   现场：2026-09-22 把 `dynamicNSColor` 改名成 `tokenReference` 并写明"这是读数、终点不是 0、不该挡路"，
+   但它仍留在 `knownBaseline` 里吃 `现量 > 上限 ⇒ 红`——三天后台账还是 `62/62` 零余量，
+   **写更多正确的令牌取色会被门禁拦住**。文档说它不该挡路、代码说它在挡路，**两边各自都绿**。
+   推论：**"注释也改了"永远不能当完成证据**——要问"哪张表还在按旧性质遍历它"。
 4. **实现文件越过 400 行会让全仓测试变红**（`SourcesSizeAuditTests`，2026-09-21 补）。
    这条口径（`FileSystemCodeAnalyzer.mediumFileLines`）本来只出现在自扫报告里、没有断言守着，
    于是收官轮打到 0 之后又悄悄长回 4 个超限文件。红了的正确反应是**按类型整块搬去新文件**
@@ -441,6 +493,24 @@ WS-L 另背一条**功能性诚实修正**（不是美化）：界面显示"提�
 （它是 `[锚点: 为什么死]` 的形状，是为了万一真要留豁免时，原因必须和条目一起写下来；
 `#29` 第一次交回时曾把 33 条**活锚点**当"已知失效"塞进基线，于是校验器对它们永远不红——
 这段历史就是"不许拿基线当遮羞布"的理由。）
+
+**4.6.1 裸用例名也算锚（RD-66，2026-09-24 由 `DocReferenceRatchetTests+BareTestAnchors.swift` 落）**：
+上面那条 token 正则要求**至少一个点**，所以文档里反引号包住的裸用例名（不带点号）
+在过去**压根不成锚**——判活索引里其实早有 `Tests/**` 的声明名，缺的只是提取规则。
+现场：`cd4f3a3` 引了一枚只在未合并分支上存在的用例名，main 上挂了约 52 分钟，
+期间那趟全量 `1745 例 / 0 失败` 全绿。⇒ 从今天起，形如
+`` `testXxx` `` / `` `test_xxx` ``（`test` 紧跟大写字母或下划线、整名 ≥ 9 字符、整段在反引号里）
+**必须在 `Tests/**` 或 `Sources/**` 的声明位找得到**，找不到判红，零豁免额度
+（新类另立守恒 `出现处 == 判活 + 判死`，死名上限 0；**不许**往 `knownDeadAnchors` 里塞）。
+⇒ 写文档时注意两件事：
+① **要举例说明"某枚裸名字判红/判活"时，一律用「」包住，不要用反引号**——
+   用反引号就是把自己举的例子送进被扫对象（`test_bareProseWordsAndUnquotedNamesAreNotAnchors`
+   量的是散文词，不是你举的那个真形状）；
+② 门槛 9 由本仓最短真实用例名自证（`test_bareGateIsBoundedByTheShortestRealTestName`），
+   以后谁加了**短于 9 字符**的真用例名会先红在那条自证上，
+   正确反应是**往下调门槛并在此处写理由**，不是给用例改名。
+这一类只回答"这个名字在不在声明位"，**不回答它指的是用例还是字段**；
+索引也只认声明位形状（不剥字符串字面量、分不清局部绑定），限度写在守卫文件头。
 
 
 ## 5. 工作日志（Obsidian，边做边写）
@@ -539,52 +609,17 @@ WS-A/WS-B/WS-C 此刻在**主树里有未提交在途改动**。不允许直接�
 过渡办法（总工执行）：先让三人各自在主树把当前成果 commit（双绿为前提），
 总工随后从该 main 切出各自 worktree，**下一轮起所有人只能在 worktree 里干活**。
 
-### 冻结区 additive 变更登记（第三轮 · P6-Q / P7-D，总工本人）
+### 冻结区 additive／变更登记（规矩在这里，账在别处）
 
-22:40 单人接管后，「冻结区缺口由总工处理」这句的执行者就是本流自己。为避免它变成
-"总工想改就改"，这里逐条登记本轮动过的冻结文件，并给自己立两条判据：**只加不改**
-（不改动任何既有取义与既有成员）、**新增的东西必须自带守卫**（否则下一轮长回去没人知道）。
+**规矩（四条，判据不搬家）**：
+1. 只加不改：不改动任何既有取义与既有成员；新增的东西必须**自带守卫**，否则下一轮长回去没人知道。
+2. 每一笔都要**登记成一行**：冻结文件 / 加了什么 / 为什么不能在别的文件里 / 自带守卫 ——
+   完整历史表在 `TcoderMonitor/AGENTS-冻结区登记.md`（2026-09-25 因 `AGENTS.md` 逼近 800 行上限整块搬出，
+   内容一字未改）。**不在这张表里的冻结区改动一律视为越界。**
+3. **同一把尺子也管"删"**：从冻结文件删成员要留名 + 说清为什么它不是被搬走了；
+   判死代码要 grep 名字本身（不只定义式），删一条绿用例之前先问它断言的不变式还有别人测吗。
+4. 登记表里刻意写"类型 的 成员"而不是点号形式的地方，是因为点号会被符号锚点棘轮当成活符号判活。
 
-| 冻结文件 | 加了什么 | 为什么不能在别的文件里 | 自带守卫 |
-|---|---|---|---|
-| `Utilities/SharedUtilities.swift` | `DateFormat.day`（日期档格式化器，`full` 一字未动） | `PerfHitchGuardTests` 的 `directFormatters` 现量 1 / 上限 1，把 `DateFormatter()` 挪进 `Views/**` 当场红；格式化器必须住在扫描面之外的共用层 | `DesignAbsenceStateTests` 钉「读数格走 day 且正好 10 字符」 |
-| `Models/CodeMetrics.swift` | `scanLimitations: [String]?`（一个字段，其余一字未动） | WS-A 在 `FileSystemCodeAnalyzer` 里把"哪些上限真的生效过"算好了却无处安放，注释点名"交给总工决定接入点"——这就是那个接入点的另一半。**必须是 Optional**：非 Optional 带默认值会让旧报告整份解码失败 | `FunctionalHonestyGuardTests` G9（写/读两头都在）+ `CodeAnalyzerPrecisionTests` 行为两向（截断→非空、未截断→nil）|
-| `Models/CoverageMetrics.swift` | `unreadableDirectoryCount: Int?`（其余一字未动） | 目录枚举失败被 `try?` 吞掉时，"没看到"会在界面上长成"该项目没有产出覆盖率报告"。这一格要把"扫描面不完整"随报告一起落盘，只能住在契约里 | `CoverageAnalyzerTests` 两向（挡住一个目录→计数 ≥1 且结论补一句"没看完"；一个都没挡住→必须写 0，不许留 nil） |
-| `Design/SharedComponents.swift` | `MetricTile` 的自定义 `init` 补一个 `captionHelp: String? = nil` 形参（插在 `caption:` 之后，带默认值） | 属性与渲染 main 早就开好了，**只有 init 不收这个参数 ⇒ 调用点传不进去**；「留短藏长」的格子没有别的挂载点，而 42 处现有调用点靠默认值一字不改 | `TooltipMigrationGuardTests+HelpSlots`（新标签必须进 A/B 两本账）+ S7 的 `ShellReadoutTooltipTests`（三格 captionHelp 只指既有真值生产者，不许重抄中文） |
-| `Models/ScanProvenance.swift`（**新文件**） | 报告溯源块：`schemaVersion` / `toolVersion` / `rulesVersion` / `producedBy` / `scannedRoot` / `resolvedGitRoot` / `sourceCommit` / `sourceBranch` / `workingTreeDirty` / `dirtyEntryCount` / `dirtyProbeNote`，**11 个字段全 Optional** | "这份报告是哪个提交、哪一版工具、哪一版判据产的"必须随报告一起落盘；放别处就没有第二份产物能带着它走 | `ScanProvenanceTests` 17 例（含 4 条反例：没量到不得渲染成干净、缺席值打「未记录」、仓库根相等时不许造假提示、非零退出要带原因）+ 真子进程三情形对独立真值 + sabotage 3 红 |
-| `Models/Project.swift` | `ProjectReport` 加 `var provenance: ScanProvenance? = nil`（其余一字未动） | 溯源块必须挂在唯一那份 schema 上（§5.9 第 2 条：不存在第二个 DTO）；**必须 Optional**，否则旧 JSON 整份解码失败 | `testReportWithoutProvenanceKeyStillDecodes`（把键删掉再解）+ `testProvenanceRoundTripKeepsEveryField` |
-| `Models/GitInsights.swift` | 加 `workingTreeDirty: Bool?` / `dirtyEntryCount: Int?` / `dirtyProbeNote: String`（既有成员一字未动） | 工作区状态只有 Git 那一路量得到：`ShellGitAnalyzer` 已经在同一次分析里起进程，**再开第二个 git 进程就是第二把尺子**（一处看仓库根、一处看用户选的子目录，今天真踩过） | `ShellGitAnalyzer.workingTree(from:)` 三态 + `testStatusProbeDistinguishesCleanDirtyAndUnmeasured` 四分支 |
-| `App/AppState.swift` | 扫描收尾处加 **1 行**：`merged.provenance = ScanProvenance(…producedBy: "gui")` | 装配点只有两个（GUI 与 CLI），少一个就产出一半"无溯源"的报告，而 `producedBy` 正是 CLI↔GUI 对表要用的那格 | `testProvenanceHasBothWritersAndReaders`（**两个写者点名相等**，且必须有读者） |
-| `Services/CLI/CLIOutput.swift` | `buildConfiguration` / `bundleIdentity` 改成**转发**到 `ScanProvenance`，输出逐字未变 | 同一件事不许有两把尺子：`--version` 与报告溯源必须给同一个串 | `testCLIIdentityAndProvenanceShareOneRuler` |
-| `Models/HealthScore.swift` | `HealthDimension` 加 **1 个静态成员** `repositoryScoped`（既有成员一字未动） | "哪几维的输入是按仓库/项目身份定位的"这件事，两个生产者（`ShellGitAnalyzer` 向上找 `.git`、`LogProjectIdentity.resolve` 取锚点）各算各的，只有契约里放得下这份汇总；放文案里就是手写第二份名单，加第四个成员时句子会静默漏报 | `test_repositoryScopedMatchesTheInputsThatFeedIt`（钉**生产者**：单独喂 Git/日志/代码/依赖四路，落进与落不出必须各自成立；已在真源码上破坏验证——把 `dependencies` 塞进名单判两条红）+ `test_relocationNoticeNamesExactlyRepositoryScopedDimensions` |
-| `Models/ScanProvenance.swift` | 加 `CommitIdentity`（缩短宽度 12 + `abbreviated`），既有成员一字未动 | 提交号原先有**两把尺子**：Git 那一路 `rev-parse --short=7` 存 7 位、覆盖率那一路自己 `prefix(12)`，同一份报告三格说两样话。缩短只能发生在唯一装配口 `ShellGitPureHelpers.makeInsights` | `CommitIdentityRulerTests`（尺子 2 例 + 「只有两个调用点」+ `--short` 不许回来）+ 对表用例 `testCoverageFingerprintAndProvenanceCommitShareOneRuler`；sabotage 摘掉装配口缩短 ⇒ 5 红 |
-| `Models/AnalyzerLedger.swift`（**新文件**） | 四态台账 `AnalyzerRunState` / `AnalyzerRunRecord` / `AnalyzerAttempt` + 唯一装配助手 `timed` / `records` + 五路路名唯一一份 `sectionLabels` | 用户 §十一：每路的状态·耗时·上限·失败原因要问得出来；`notRun` / `failed` / `partial` / `ok` 是四件不同的事，原先报告里只有「挂掉的路名」一种表达 | `AnalyzerLedgerTests` 8 例（含真跑一次无头装配填满五代、四态各不混淆）+ 两处写者点名各 1 次；sabotage（partial 判成 ok + 摘掉 GUI 写者）⇒ 8 例里 4 红 |
-| `Models/Project.swift` | `ProjectReport` 加 `var analyzerLedger: [AnalyzerRunRecord]? = nil`（其余一字未动） | 台账必须挂在唯一那份 schema 上；**必须 Optional**，否则旧报告整份解码失败，而空数组会被读成「五路都没跑」 | `testReportWithoutLedgerKeyStillDecodesAsNil`（断言键真的缺席）+ `testLedgerRoundTripKeepsEveryField` |
-| `App/AppState.swift` | 五路改走 `AnalyzerLedger.timed`、收尾加 1 行台账；**删掉**自己那份 `attempt<T>` 助手（有删，理由写在这里） | 那份助手与 `CLIScan.attempt` 是「同一件事两个入口」（RD-38 同族），且它手打的路名与 `sectionFailures` 那五行不一致——同一次失败在界面叫「日志分析」、在报告里叫「错误日志」 | `SectionLabelGuardTests` 两条（AppState 一个路名字面量都不许有 + 命名位不许传字面量）各配元测试；`AnalyzerLedgerTests.testBothAssemblyPointsWriteTheLedger` |
-| `Models/CodeMetrics.swift` | 加 5 枚 Optional：`duplicatedBlockLimit` / `duplicatedBlocksDroppedByCap` / `duplicatedLinesOutsideReportedBlocks` / `duplicateFragmentsNotExpandedCount` / `duplicateFilesHittingLineCap`（既有成员一字未动；**故意不给「总块数」**） | 引擎早就算好这四个数，但契约里没有承接格 ⇒ 它们只活在 `scanLimitations` 那句中文里，界面按句式认领句子、读 JSON 的人只能解析散文。不给总数是因为 `rankedBlocks` 撞 id 削掉的块无读数，「榜内 + 榜外 == 总数」天然不平 | `DuplicateBoardAccountingTests` 6 例（真扫本仓对账「字段 == 台账句里的数」：榜内 20 · 榜外 85 块 / 584 行 · 未展开 225 处；含「不许把两者相加当总数」的结构守卫）；sabotage 摘两枚字段 ⇒ 2 红 |
-| `Models/LogInsights.swift` | 加 2 枚 Optional：`crashReportCount`（读到几份崩溃报告）/ `crashReportLineCount`（被移出密度分母的正文行数），既有成员一字未动 | RD-46b 把崩溃正文从 `totalLinesScanned` 摘出去之后，那些行只活在内部类型 `LogAggregate` 里；不落成字段，"移出分母"就和"消失"在盘上无法区分，而 RD-49 的输入（有崩溃证据、零真日志行）在报告里也就数不出来。**故意没开**两格：`crashReportDirectoryReadable`（要把"目录读不动"与"目录里没有"分开，得先给 `LogDiscovery` 加枚举失败读数 = 新能力，同形边界已写在 `LogDenominatorStatesTests` 文件头）、`unattributedCrashReportCount`（数的是**别人项目**的报告，属整机面不是项目面；"自己的报告没产出可用事件"那件事由 `stabilityEvidenceGaps` 已经在说） | `LogDenominatorAccountingTests` 5 例（真值取自盘上 `0x0A` 计数、含对账等式 `分母 + 崩溃正文 == 盘上读到的总行数`、旧 JSON 缺键 ⇒ `nil`、写者集合恰好是 `FileLogAnalyzer.swift` 一条 + 其元测试）；R11 侧另有 `LogDenominatorTests` 9 例与 sabotage（摘掉 role 分流 ⇒ 6 红） |
-| `Views/DashboardView.swift` | hero 那条最近提交标题 `Text(commit.subject)` 补 **1 个修饰符** `.help(commit.subject)`（既有布局、字号、取义一字未动） | 被裁的是**这一格自己的**文本，去处必须挂在同一个元素上 —— `ax_frames` 第 9 列量的就是"这一格挂没挂 help"，挂到邻居身上等于给尺子造假信号。Git 页提交榜（`Views/Git/**`，非冻结）同批补上，画法与侧栏项目名一致 | `scripts/ax_truncation_sweep.sh` 的主门（装不下**且无 help** 才 exit 1）+ 夹具那一格的**分档自证**（它必须落在"有 help"档，落进主门即第 9 列没读到 ⇒ 当场判不成立） |
-| `Views/DashboardView.swift` | **第二处，同上形状**：`ErrorClusterRow` 里那条崩溃标题也补 `.help(cluster.displayMessage)`（窄态 1080 实测格宽 557pt / 单行需 624pt） | 同一把尺子在窄态那一档量出来的同类缺陷：错误日志页的同类格子早就挂了 help，总览榜上这条没有 ⇒ 被裁掉的半个崩溃标题在全站任何地方都读不到 | 同上，走 `ax_truncation_sweep.sh` 窄态那趟的主门 |
-| `Models/CodeMetrics.swift` | 再加 **1 枚** Optional：`nonCodeRegionLineCount`（混合语言文件里按分区归位为非代码、未进代码统计的行数），既有成员一字未动 | RD-42「有写无读」：`ComplexitySanitizer` 从 R2 起就在算这枚数（逐行累加 + `merged` 跨区累加），全仓零读者 ⇒ "分区认出来了、N 行归位"一件没说，而"分区**没**认出来"倒另有一格在出声（`vueRegionFallbackFileCount`）。**这一格是口径不是"未量准"**，所以故意**不进** `scanLimitations`（那条在 CLI 被打成「未量准 N 条」，塞进来等于把那个数灌虚高） | `NonCodeRegionReadoutTests` 10 例：正例真值取自测试自己手写的 `.vue` 夹具（template 12 + style 8 + SFC 标签 6 ⇒ 26，先自证数对了再断言）、反例钉「这句不许进限制账」+ 对账等式、未知态（认不出分区的文件一行都不算已归位）、缺席（纯 Swift 语料整句不出声 + 旧 JSON 缺键 ⇒ `nil`）、写者恰一处与读者两出口的扫描守卫各配元测试；sabotage 一次 ⇒ 9 红 |
-| `Models/CodeMetrics.swift` | 再加 **1 枚** Optional：`duplicateBlockCoordinatesOutsideBoard`（榜外块的可点名坐标样本，直传引擎那份），既有成员一字未动 | RD-52：这些 id 原先只在 `scanLimitations` 的中文句里，而且**同一串在一份报告里印两遍**（口径句 + 扫描边界句），单条实测 2,407 字符；读 JSON 的人要定位「到底是哪几块」仍得解析散文 —— RD-48 刚消灭过的形状在坐标这格复活。⚠️ 我最初记成「全量坐标被静默截断」，复核后不对：引擎本来就只点 `outsideBoardSampleLimit` 条、未点名块数在 `droppedByCap` 里，所以修法是**散文点 3 条 + 指回字段与计数、字段给引擎那 6 条一条不减** | `OutsideBoardCoordinatesTests` 4 例（真扫本仓对账「字段在、样本数不超过引擎那把尺子、同一串只出现一次、最长限制说明 <1,200 字符」+ 装配口正例/余数反例 + 缺键 ⇒ `nil` + 抄回边界句的 sabotage ⇒ 2 红）
-
-不在这张表里的冻结区改动一律视为越界。历史批次（P7-A 退役示例数据动过
-`Models/Project.swift`、`Models/HealthScore.swift`、`App/AppState.swift`、
-`Services/ProjectStore.swift`）是同一性质的 additive/删除，**当时没有登记**，
-补记在此只是为了让下一轮看得见，不是为了追认流程无瑕疵。
-
-**同一把尺子也管"删"**：从冻结文件删成员，同样要留名 + 说清为什么它不是被搬走了。
-P7-C 收尾这一批删了两处有写无读：`ProjectStore` 的 `sortedProjects`（侧栏按插入序读，
-接上去会让行在光标底下跳——**不接是判断**）、`AppState` 的 `hasProjects`
-（与 `store.projects.isEmpty` 重复且零调用），外加一个空的 `Views/Shared/` 目录。
-删之前查过 `git stash list` 为空、全仓无第二处同名实现，随 `sortedProjects`
-一起删的是它的契约测试（判据对象已不存在）。
-**还有一处删错了又恢复**：`ProjectStore` 的 `rename` —— 我按定义式 grep
-（`func rename`）判它零调用，漏掉了测试里的**调用点**，而它恰恰是
-「注册表与报告里的 project 必须同步」这条不变式唯一的 exerciser。已恢复并就地写明理由。
-⇒ 判死代码的规矩补一条：**要 grep 名字本身，不能只 grep 定义式**；
-删掉一条绿用例之前，先问它断言的不变式还有别人测吗。
-（这几处刻意写成"类型 的 成员"而不是点号形式：点号会被符号锚点棘轮当成活符号去判活。）
 
 ## 5.9 无头 CLI 入口（2026-09-22 落地，WS-CL）：所有流都要知道的五条
 
@@ -653,6 +688,15 @@ dist/Tcoder.app/Contents/MacOS/TcoderMonitor doctor [<path>]
    （本轮第一轮复核就报了三个不存在的名字），引用前先核。
 6. 每条修复要交四件：复现夹具 + 独立真值、正例/反例/未知态/失败态、CLI 与 GUI 对表、
    新守卫 sabotage 一次证明有牙。缺件按未完成处理。
+6.1 **判据的读数不许只有 `print` 一个出口**（2026-09-24 由 RD-64 立）。
+   实测：全量跑会**安静地丢掉**一部分守卫的"现量/上限"读数（三类守卫执行并通过、日志里 grep 命中 0，
+   同一批 `print` 在 `--filter` 单跑里打得出来；机制未定位）。所以：
+   - 要引用任何现量/上限类读数，**必须来自过滤跑的原始输出**并把原文抄进账（台账 / Obsidian）；
+   - 新写这类判据时**同时落一份仓库内文件台账**（先例：`TCODER_I18N_LEDGER`、
+     `.scratch/tcoder-caliber-visible-inventory.txt`、Tests 侧 `GuardLedger` + `scripts/guard_ledger_summary.sh`），
+     并且**写完读回来断言相等**——**只 `print` 一律视为"没测到"**；
+   - 汇总类脚本**读不到账必须报错**（rc≠0）而不是打一张空表，表头也要推迟到第一行读数之前
+     （"产物为空也印 ✓ 完成"是同族，见卷三 §62）。
 
 ### 8.1 冻结区窄口径豁免（2026-09-22 07:44 由总工登记，一条链路一个负责人 ⇒ 必须放行）
 

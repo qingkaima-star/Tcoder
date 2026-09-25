@@ -363,11 +363,15 @@ struct SeriesLegend: View {
             }
             if let basis {
                 // 口径里带的是测得值（已用字节 / 总量），不得用 `.tertiary`。
+                // ⚠ `lineLimit(1)` + 中段截断 ⇒ 被裁掉的那半**必须有去处**，否则"已用 X GB"
+                // 这一段在全站任何地方都读不到（P54 立的口径）。`ax_truncation_sweep.sh`
+                // 在 1280 那一档实测抓到这一格：单行需 205pt、只给 189pt、当时**没有 help**。
                 Text(basis)
                     .font(Theme.Typo.microLabel.font)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .help(basis)
             }
         }
     }

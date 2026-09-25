@@ -50,18 +50,28 @@ extension WeightedHealthScorer {
 
     private func complexityStrengths(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
         guard curve.score >= 85, !code.topComplexFunctions.isEmpty else { return [] }
-        return ["函数复杂度可控（最高 CC \(complexityWorstCC(code))）"]
+        return [localizedFormat("函数复杂度可控（最高 CC %1$@）",
+                                HealthCurves.whole(complexityWorstCC(code)))]
     }
 
     private func complexityIssues(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
         guard curve.score <= 60, !code.topComplexFunctions.isEmpty else { return [] }
         let highRisk = code.topComplexFunctions.filter { $0.cyclomaticComplexity >= 16 }.count
-        return ["\(highRisk) 个函数圈复杂度 ≥16，最高 \(complexityWorstCC(code))"]
+        return [localizedFormat("%1$@ 个函数圈复杂度 ≥16，最高 %2$@",
+                                HealthCurves.whole(highRisk),
+                                HealthCurves.whole(complexityWorstCC(code)))]
     }
 
+    /// 建议要**能照着做**：这句话手里就拿着热点榜第一名（名字、文件、行号、CC 全在
+    /// `topComplexFunctions.first`），却只说「最高复杂度函数」——读的人还得自己回表里找一遍。
+    /// 榜上同一行印的就是这些字段，所以这里点名它，句子和表格说的是同一个东西。
     private func complexityAdvice(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
-        guard curve.score <= 60, !code.topComplexFunctions.isEmpty else { return [] }
-        return ["优先拆分最高复杂度函数，用早返回替代嵌套分支"]
+        guard curve.score <= 60, let worst = code.topComplexFunctions.first else { return [] }
+        return [localizedFormat("先拆这一个：「%1$@」（%2$@ 第 %3$@ 行 · 圈复杂度 %4$@），用早返回替代嵌套分支",
+                                worst.name,
+                                (worst.filePath as NSString).lastPathComponent,
+                                String(worst.startLine),
+                                String(worst.cyclomaticComplexity))]
     }
 
     // MARK: - 重复度
@@ -75,7 +85,7 @@ extension WeightedHealthScorer {
         return DimensionOutcome(curve: curve,
                                 strengths: duplicationStrengths(curve, code),
                                 issues: duplicationIssues(curve, code),
-                                recommendations: duplicationAdvice(curve))
+                                recommendations: duplicationAdvice(curve, code))
     }
 
     private func duplicationStrengths(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
@@ -85,16 +95,44 @@ extension WeightedHealthScorer {
                                     NumberFormat.percent(code.duplicationRatio, precision: 1))]
     }
 
+    /// 「问题」那一栏里重复块数的那一句，按**三态**说话。
+    ///
+    /// 病根（2026-09-23 本仓实扫：榜内 20 · 榜外未列 96）：这一句以前直接把**榜长**当总数念，
+    /// 于是评分详情对用户说"共 20 处重复块"，真相是 116 处（少报 96 处；
+    /// 工单立案那批的读数是榜内 20 · 榜外 85，同一件事）。
+    /// 需求方 §五 点名的形状（"实际 552 显示 20"）在展示层已由 R7 收口，这一处是它在
+    /// **评分解释文本**里的那一处残留。
+    ///
+    /// 三态的判据是「榜外那一半统计过没有」，不是「榜外是不是零」——
+    /// 两态会把"没统计"说成"没漏"，所以 `nil` 那一句**不许出现"共"字**。
+    /// 写法上的硬约束：`BoardLengthReadoutRatchetTests` 认的披露句式是
+    /// 「榜内只列 N 个，实际 M 个」（真总数与榜长**并排**），而它的判据按**行**认标记，
+    /// 所以整句键与它点名的两个数必须同行；换行会把这行退化成"只报了个榜长"。
     private func duplicationIssues(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
         guard curve.score <= 60 else { return [] }
-        return [localizedFormat("重复代码 %1$@，共 %2$@ 处重复块",
-                                    NumberFormat.percent(code.duplicationRatio, precision: 1),
-                                    NumberFormat.grouped(code.duplicatedBlocks.count))]
+        let ratio = NumberFormat.percent(code.duplicationRatio, precision: 1)
+        switch code.reportedDuplicatedBlockTotalCount {
+        case let total? where total > code.duplicatedBlocks.count:
+            return [localizedFormat("重复代码 %1$@，共 %2$@ 处重复块（去重后口径，榜内只列 %3$@ 处明细）", ratio, NumberFormat.grouped(total), NumberFormat.grouped(code.duplicatedBlocks.count))]
+        case let total?:
+            return [localizedFormat("重复代码 %1$@，共 %2$@ 处重复块（明细已全部列出）", ratio, NumberFormat.grouped(total))]
+        case nil:
+            return [localizedFormat("重复代码 %1$@，榜内只列 %2$@ 处重复块，总处数本次未统计", ratio, NumberFormat.grouped(code.duplicatedBlocks.count))]
+        }
     }
 
-    private func duplicationAdvice(_ curve: CurveResult) -> [String] {
+    /// RD-84：调用点手里就有 `code.duplicatedBlocks`（每块带两处 `path:startLine` 与重复行数），
+    /// 所以这句要说出"先合哪一处"。**不印 `similarity`** —— 它的刻度在本仓查不到独立真值
+    /// （`DuplicationEngine` 里 grep 命中 0），没对过刻度的数不许当百分比上屏（台账卷六 §100）。
+    private func duplicationAdvice(_ curve: CurveResult, _ code: CodeMetrics) -> [String] {
         guard curve.score <= 60 else { return [] }
-        return ["抽取重复块为共享工具或基类，优先处理跨服务重复"]
+        guard let worst = code.duplicatedBlocks.max(by: { $0.lineCount < $1.lineCount }),
+              worst.occurrences.isEmpty == false else { return [] }
+        let places = worst.occurrences.prefix(2).map { fragment in
+            "\((fragment.path as NSString).lastPathComponent):\(fragment.startLine)"
+        }
+        return [localizedFormat("先合这一处重复：%1$@ 之间有 %2$@ 行相同，抽成共享工具或基类",
+                                places.joined(separator: " 与 "), String(worst.lineCount))]
     }
 
     // MARK: - 代码质量
@@ -109,10 +147,11 @@ extension WeightedHealthScorer {
                                            averageFunctionLength: code.averageFunctionLength,
                                            longFunctions: code.longFunctions,
                                            totalFiles: code.totalFiles)
+        // 注记**提到外面算**：披露助手那一行必须同时装着标记与榜长
+        // （`BoardLengthReadoutRatchetTests` 按行认合法披露句，拆两行就把一句诚实的话判成违例）。
+        let boardNote = HealthCurves.boardOnlyNote(raw.detail, listed: code.hugeFiles.count, total: hugeCount)
         let curve = hugeCount > code.hugeFiles.count
-            ? CurveResult(score: raw.score,
-                          detail: raw.detail + "（榜内只列 \(code.hugeFiles.count) 个，实际 \(hugeCount) 个）",
-                          risk: raw.risk)
+            ? CurveResult(score: raw.score, detail: boardNote, risk: raw.risk)
             : raw
         guard let worst = code.hugeFiles.max(by: { $0.lineCount < $1.lineCount }) else {
             return DimensionOutcome(curve: curve, strengths: codeQualityStrengths(curve))
@@ -124,13 +163,13 @@ extension WeightedHealthScorer {
     }
 
     private func codeQualityStrengths(_ curve: CurveResult) -> [String] {
-        curve.score >= 85 ? ["文件规模健康，巨大文件占比低"] : []
+        curve.score >= 85 ? [localizedCopy("文件规模健康，巨大文件占比低")] : []
     }
 
     private func codeQualityIssues(_ worst: FileHotspot) -> [String] {
         guard worst.lineCount >= 1500 else { return [] }
-        let name = worst.path.split(separator: "/").last ?? "?"
-        return ["\(name) \(NumberFormat.grouped(worst.lineCount)) 行，远超单文件上限"]
+        let name = String(worst.path.split(separator: "/").last ?? "?")
+        return [localizedFormat("%1$@ %2$@ 行，远超单文件上限", name, NumberFormat.grouped(worst.lineCount))]
     }
 
     private func codeQualityAdvice(_ worst: FileHotspot) -> [String] {
@@ -148,9 +187,13 @@ extension WeightedHealthScorer {
                                                totalLines: code.totalLines)
         var outcome = DimensionOutcome(curve: curve)
         if curve.score >= 95 {
-            outcome.strengths.append(String(format: "注释密度适中（%.1f%%）", code.commentRatio * 100))
+            // 同一个占比在 detail 里也是 `HealthCurves.percent` 打的，这里不再另用 `%.1f%%`
+            // 自己格式化一遍（两套记法在同一页里并存过：见批次 P5 的千分位同款病）。
+            outcome.strengths.append(localizedFormat("注释密度适中（%1$@）", HealthCurves.percent(code.commentRatio)))
         }
-        if curve.score < 70 { outcome.recommendations.append("为公共 API 与复杂分支补充说明性注释") }
+        if curve.score < 70 {
+            outcome.recommendations.append(localizedCopy("为公共 API 与复杂分支补充说明性注释"))
+        }
         return outcome
     }
 }

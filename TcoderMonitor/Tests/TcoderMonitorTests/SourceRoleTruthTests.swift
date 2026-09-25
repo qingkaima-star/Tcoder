@@ -192,6 +192,25 @@ final class SourceRoleTruthTests: XCTestCase {
         XCTAssertTrue(tally.weakEvidenceExamples == ["scratchpad.swift"], "弱判定要能点名：\(tally.weakEvidenceExamples)")
     }
 
+    /// RD-63 · **点名样本只许由相对路径决定**，与文件被递进累计器的先后无关。
+    /// 立案证据：GUI↔CLI 对表同一棵夹具树，`code.fileRoles.shares[0].samplePaths` 一个给
+    /// `Cart.swift` 一个给 `Ledger.swift`，三趟里两趟对不表、而且方向会反过来
+    /// ⇒ 旧写法是"按遇到顺序取前 N 个"，等于让并发调度的偶然决定屏上点谁的名。
+    /// 期望值由测试**自己排序**算出来（独立真值），不是拿实现输出当答案。
+    func testExamplesAreChosenByPathNotByEncounterOrder() {
+        let names = ["src/Zeta.swift", "src/alpha.swift", "src/Mid.swift", "src/Beta.swift",
+                     "src/Gamma.swift", "src/Delta.swift", "src/Epsilon.swift", "src/Theta.swift"]
+        let forward = names.map { makeFile($0, "Swift") }
+        let reversed = Array(forward.reversed())
+        let expected = Array(names.sorted().prefix(SourceRoleTally.exampleLimit))
+        XCTAssertLessThan(SourceRoleTally.exampleLimit, names.count, "样本上限必须真被撞到，否则这条在空转")
+        for (label, files) in [("正序递", forward), ("逆序递", reversed)] {
+            XCTAssertEqual(SourceRoleTally(of: files).share(.production).examples, expected,
+                           "\(label) 点出来的名不一样 ⇒ 样本吃的是遇到顺序：\(names.sorted())")
+        }
+        XCTAssertEqual(expected.first, "src/Beta.swift", "上面那组的独立真值本身要能被反驳")
+    }
+
     /// 未识别 / 弱判定 / 非生产内容仍在分母 —— 三条边界句都得进 `scanLimitations` 那条列表。
     func testTallyNotesNameTheBoundaryNotTheReading() {
         let files = [makeFile("src/App.swift", "Swift", codeLines: 5),
@@ -203,13 +222,25 @@ final class SourceRoleTruthTests: XCTestCase {
         XCTAssertEqual(notes.count, 2, "未识别 + 分母未收窄，各一句：\(notes)")
         XCTAssertTrue(notes.contains { $0.contains("认不出角色") }, "\(notes)")
         XCTAssertTrue(notes.contains { $0.contains("未按角色收窄") && $0.contains("文档 1") })
-        // 弱判定那句不占 scanLimitations（那一档还没上屏），但必须在 roleLines 里备着
+        // 弱判定那句不占 scanLimitations —— 理由不是"那一档还没上屏"（RD-67 已把这一档
+        // 接到屏上：`ProductionCodeScaleReadout.weakEvidenceHint` 读落盘的 weakEvidenceFiles），
+        // 而是同一个数已经在两处出声、再挂一条边界就是把已量到的东西重复计成「没量准」。
+        // 但它仍然必须在 roleLines 里备着（那一份带样本路径，上屏那一句没有）。
         XCTAssertTrue(notes.contains { $0.contains("只有语言证据") } == false, "\(notes)")
         XCTAssertTrue(tally.roleLines.contains { $0.contains("只有语言证据")
             && $0.contains("scratchpad.swift") }, "\(tally.roleLines)")
-        XCTAssertTrue(notes.allSatisfy { $0.contains("字段清单") } == false
-                      || notes.contains { $0.contains("docs/R6-契约字段清单.md") },
-                      "要按角色出数的那句必须指出去哪儿看字段：\(notes)")
+        // RD-67：这枚字段**已经落地**（`code.fileRoles` 八档全量、CLI 那一行读它），
+        // 所以那句边界不许再说"要等字段"—— 把已有的东西说成没有，与把没有的说成已有，
+        // 是同一条不诚实的两个方向（本仓踩过：把口径说成没量到，是反向不诚实）。
+        let narrowed = notes.filter { $0.contains("未按角色收窄") }
+        XCTAssertEqual(narrowed.count, 1, "分母未收窄那句只许有一条：\(notes)")
+        let boundary = narrowed[0]
+        XCTAssertTrue(boundary.contains("code.fileRoles"),
+                      "既然字段已落盘，那句就必须点名可读数在哪：\(boundary)")
+        for forbidden in ["需等", "清单见", "尚缺", "字段还没有"] {
+            XCTAssertFalse(boundary.contains(forbidden),
+                           "把已落地的读数说成没有 ⇒ 反向不诚实：\(forbidden) / \(boundary)")
+        }
     }
 
     /// 一个生产码都不缺、也不缺任何线索时，**不许**出声（零命中不出声）。

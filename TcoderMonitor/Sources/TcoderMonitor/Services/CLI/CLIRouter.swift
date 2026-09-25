@@ -127,7 +127,9 @@ enum CLIRouter {
             return outcome.exit.rawValue
         }
         guard req.mode == .scan else {
-            CLIOutput.line(CLIScoreText.render(report, exit: outcome.exit))
+            // `windowDays` 必须一路传到崩溃那句脚注：本次扫描用的是 `--window-days`，
+            // 读数里那句「最近 N 天为窗口」要是写死一个默认值就自相矛盾（RD-60 的 CLI 出口）。
+            CLIOutput.line(CLIScoreText.render(report, exit: outcome.exit, windowDays: req.windowDays))
             return outcome.exit.rawValue
         }
         let json = (try? CLIScan.json(report, compact: req.compact)) ?? "{}"
@@ -140,12 +142,28 @@ enum CLIRouter {
     /// 这一族文字存在的意义就是：**相信任何读数之前，先知道自己用的是哪一版尺子。**
     /// 立 R10 第 0 条的现场：`ScanProvenance.rulesVersionStamp` 已经落进报告与 `score` 输出，
     /// 但 `doctor` 只打构建口径与 bundle，"我在用哪一版判据"这一格在它最该出现的地方缺席。
+    ///
+    /// RD-81 又补两行：**光有戳号回答不了"这一版收进了什么"**。原来那一行手写字面量自
+    /// `9932a19` 起没动过，所以"看戳知道判据"这条路整个是断的 —— 现在把台账最新一格
+    /// 与它的自检结论一起打出来，用 `doctor` 的人不必去读源码才知道自己拿的是哪把尺子。
     static func doctorIdentityLines() -> [String] {
         ["  二进制 = \(CLIConfig.binaryPath)",
          "  构建口径 = \(CLIConfig.buildConfiguration)",
          "  bundle = \(CLIConfig.bundleIdentity)",
          "  检测规则戳 = \(ScanProvenance.rulesVersionStamp)",
+         "  该版收进的判据 = \(ScanProvenance.rulesChangeLedger.first?.landed ?? "未记录")",
+         "  规则台账自检 = \(doctorLedgerVerdict())",
          "  报告结构版本 = v\(ScanProvenance.currentSchemaVersion)"]
+    }
+
+    /// 台账自检结论要**说得出内容**：有缺陷时逐条点名，不许只印「正常/异常」。
+    /// 只报计数等于没报（第二天没人能找到是哪一格坏了），而印一个不带原因的"正常"
+    /// 又是一句"分母没读到的真话"。
+    static func doctorLedgerVerdict() -> String {
+        let defects = ScanProvenance.rulesLedgerDefects(current: ScanProvenance.rulesVersionStamp,
+                                                        ledger: ScanProvenance.rulesChangeLedger)
+        guard defects.isEmpty else { return "不自洽 " + defects.joined(separator: "；") }
+        return "自洽（\(ScanProvenance.rulesChangeLedger.count) 格，最新一格 \(ScanProvenance.rulesVersionStamp)）"
     }
 
     private static func runDoctor(_ req: CLIRequest) -> Int32 {

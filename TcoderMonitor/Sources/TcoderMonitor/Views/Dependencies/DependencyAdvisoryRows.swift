@@ -80,7 +80,7 @@ struct VulnerabilityRow: View {
                 .fill(role.graphicColor)
                 .frame(width: Theme.Stroke.emphasis)
                 .frame(maxHeight: .infinity)
-                .accessibilityLabel(Text(localizedFormat("严重度：%@", item.severity.rawValue)))
+                .accessibilityLabel(Text(localizedFormat("严重度：%@", localizedCopy(item.severity.rawValue))))
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
                     SemanticBadge(item.severity.rawValue, role: role, icon: severityIcon)
@@ -135,5 +135,69 @@ struct VulnerabilityRow: View {
         let list = item.targets.prefix(4).joined(separator: ", ")
         let more = item.targets.count > 4 ? " 等 \(NumberFormat.grouped(item.targets.count)) 项" : ""
         return "\(prefix)\(list)\(more)"
+    }
+}
+
+// MARK: 生态卡头那一格（RD-70：那份账的第四个出口）
+//
+// 本文件是「画」的那一片（原话见文件头：配图不是判据），RD-70 这一格也归这一类：
+// 一枚徽标 + 一次档位匹配。它住进 `DependencyVerdictRows.swift` 会让那个文件 354 + 56
+// 撞上 `SourcesSizeAuditTests` 的 400 行线（超限名额为 0），所以按类型整块落在这里。
+// **分档判据本体在 `Services/Dependencies/DependencyEvidence.swift`，这里一个数都不算。**
+
+/// 生态卡头风险槽位的**分派结果**。写成枚举而不是一层 View，是为了让「哪一档配哪枚徽标」
+/// 这件事能被 in-process 断言钉住 —— 本仓不许为了测一格界面去开 App（AGENTS §3 横切约束 2.1/2.2）。
+/// 也不用布尔：`DependencyVulnerabilityCoverage` 是三档，"是不是没查全"一根开关会把
+/// 「核成几条还剩几条」与「一条都没核成」说成同一句话（RD-68 反对的正是那种折叠）。
+enum DependencyEcosystemRiskSlot: Equatable {
+    /// 走 `RiskBadge(riskLevel)`。两种来源共用这一支：
+    /// ① 离线也算得出的真风险（`.low`/`.medium` 来自锁文件里的过期比例、`.high` 来自命中）
+    ///    —— 坏消息永远不许被"覆盖度"那一格吞掉；
+    /// ② `riskLevel == .none` **且**漏洞核对覆盖度 `.full` —— 这才是"真核对过的干净"，
+    ///    也是本页唯一还允许 `RiskBadge(.none)`（对勾 +「风险：无」）出现的地方。
+    case riskBadge
+    /// 覆盖度 `.partial` ⇒ 琥珀 +「部分核对」。缺口要出声，不许缩成中性灰（与总览同一套色）。
+    case partiallyChecked
+    /// 覆盖度 `.none` ⇒ 中性 +「未核对」。
+    case unchecked
+}
+
+/// 单个生态卡头。**all-clear 那枚对勾只留给「这个生态逐条全核成过」**。
+///
+/// 修前这一格的开关是 `DependencyReport.hasVulnerabilityCoverage`
+/// （本体 `networkLookupPerformed || !advisories.isEmpty`），那正是 RD-11 记过的旧闸门 ——
+/// **「发过请求」被当成「核对过」**。于是「两条查询全失败」的那份报告里，页面上方写着
+/// 「共 2 个依赖，一条都没核对」，下方每个生态卡头却发着 all-clear。
+///
+/// 颜色与图标一律复用 `SafetyVerdictBadge`（`DependencyVerdictRows.swift`）那一套
+/// （`Theme.Semantic.warning` / `.neutral` + `IconName.unverified`），本页不另调一套色；
+/// 那句进度话术也只有一枚出处（`DependencyVulnerabilityCoverage.statement`，RD-68）。
+struct DependencyEcosystemBadge: View {
+    let eco: EcosystemReport
+    let coverage: DependencyVulnerabilityCoverage
+
+    /// 档位 → 槽位。**这里只匹配档位，一次都没比条数**（RD-68：那条算式全仓只许
+    /// `DependencyEvidence.vulnerabilityCoverage` 一处，`DependencyGateUniquenessTests` 扫第二把）。
+    static func slot(riskLevel: RiskLevel,
+                     coverage: DependencyVulnerabilityCoverage) -> DependencyEcosystemRiskSlot {
+        guard riskLevel == .none else { return .riskBadge }
+        switch coverage {
+        case .full: return .riskBadge
+        case .partial: return .partiallyChecked
+        case .none: return .unchecked
+        }
+    }
+
+    var body: some View {
+        switch Self.slot(riskLevel: eco.riskLevel, coverage: coverage) {
+        case .riskBadge:
+            RiskBadge(risk: eco.riskLevel)
+        case .partiallyChecked:
+            SemanticBadge("部分核对", role: Theme.Semantic.warning, icon: .unverified)
+                .help(coverage.statement)
+        case .unchecked:
+            SemanticBadge("未核对", role: Theme.Semantic.neutral, icon: .unverified)
+                .help(coverage.statement)
+        }
     }
 }

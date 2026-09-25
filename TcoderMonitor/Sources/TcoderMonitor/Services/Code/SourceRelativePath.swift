@@ -99,6 +99,81 @@ extension SourceFileClassifier {
     }
 }
 
+// MARK: - 被扫根的唯一写法（同一个目录不许在两个面印成两个串）
+
+/// 「一个目录进报告、上屏、进溯源块时只有**一个**写法」这一把尺子。
+///
+/// 为什么必须单独立一处：装配口原本有两套写法，而且方向是**反的**——
+/// `CLIScan.validatedURL` 走 `standardizedFileURL`，`ShellGitAnalyzer.canonicalPath`
+/// 走 `standardizedFileURL + resolvingSymlinksInPath`。这两个 API 在 macOS 上会把
+/// `/private/tmp`、`/private/var` 这类系统别名的**真实路径倒剥成别名短写**。
+/// 实测（2026-09-25，同一枚提交、同一条夹具、同一台机器）：
+/// GUI 落 `/private/tmp/…/ShopApp`、CLI 落 `/tmp/…/ShopApp`，
+/// 于是「同一个仓库，界面说 A、命令行说 B」，而且 `resolvedGitRoot`
+/// 会把这种**写法之差**误报成「仓库根被重定位」（那一句是要上屏的，见 `HealthView`）。
+///
+/// 方向定在**物理路径**：那是 `git` / `lsof` / `ps` 打的形状，也是唯一稳定的形状，
+/// 别名短写只是它的另一个名字。判据由 `ScannedPathTests` 钉死（含「输出必须是解析的不动点」，
+/// 所以将来换 Foundation 的脾气会先红，而不是悄悄换个写法）。
+enum ScannedPath {
+
+    /// 路径的物理写法。路径**不存在**时也给出稳定答案（按字面别名规则补 `/private`，
+    /// 不去 stat 出一个存在的路径冒充）：被扫根可能在扫描期间被删，那种时候改写它才是撒谎。
+    static func canonical(_ raw: String) -> String {
+        // 只管绝对路径。注册表里可能住着**根本不是文件系统路径**的串——
+        // 2026-09-21 退役内置示例数据之前写进 projects.json 的那行 `demo://tcoder-sample`
+        // 今天还在老用户机器上（`load()` 不筛、不迁移），而 `URL(fileURLWithPath:)`
+        // 会把不以 `/` 开头的串按当前目录拼成一个"看着像真路径"的东西。
+        // 那种改写不是归一而是造假 ⇒ 原样交回。
+        guard raw.hasPrefix("/") else { return raw }
+        let resolved = URL(fileURLWithPath: raw).resolvingSymlinksInPath().path
+        return physicalForm(of: resolved)
+    }
+
+    /// 把 `resolvingSymlinksInPath` 剥掉的 `/private` 前缀补回来：
+    /// 存在的路径问 `canonicalPathKey`（方向正确：`/tmp → /private/tmp`），
+    /// 问不到的（不存在、无权限）按同一份别名名单做字面展开。
+    private static func physicalForm(of resolvedPath: String) -> String {
+        let url = URL(fileURLWithPath: resolvedPath)
+        if let keyed = SourceFileClassifier.canonicalPath(of: url) { return keyed }
+        return SourceFileClassifier.lexicalAliasForms(ofPath: resolvedPath)
+            .first(where: { $0.hasPrefix("/private/") }) ?? resolvedPath
+    }
+}
+
+// MARK: - 重复块坐标（RD-61 第二半：落盘形状只在这一处定）
+
+extension ScannedSourceFile {
+
+    /// 写进 `DuplicatedFragment.path` 的那一格坐标：**相对被扫根**，不是绝对路径。
+    ///
+    /// 为什么必须相对（三条后果，一条比一条坏）：
+    /// 1. `DuplicatedBlock.id` 由 `occurrences` 的路径排序拼成 ⇒ 绝对路径把检出目录嵌进了
+    ///    **块身份**里：同一段克隆在两台机器、两个 worktree 下有两个 id，RD-52 承诺的
+    ///    「可点名、可 diff」不成立，两次扫描的结论集求交永远是空集。
+    /// 2. 榜外坐标那 6 条样本会进 `scanLimitations` 与落盘字段，一句上限说明的长度
+    ///    随仓库放在哪变（2026-09-23 实测同一条 ≤1,200 字符的门：主树 1,060、
+    ///    `.worktrees/r21-backlog` 1,244 ⇒ 每条并行流的门禁必红）。
+    /// 3. 屏上、JSON、句子三处读者本来就读的是同一个 `occurrences`，绝对形状等于让
+    ///    每一处各自再猜一遍「该剥掉多长的前缀」。
+    ///
+    /// 守卫方向（不静默降级）：只有当 `relativePath` 确实是 `url.path` 的一次**真后缀剥离**
+    /// 时才给相对形状；不是就退回绝对路径 —— 宁可这一条坐标随检出位置变，
+    /// 也不要它拼回根之后指到别的文件上（`SourceFileClassifier.relativePath(for:root:)`
+    /// 的第三条不变式说明 url 落在 root 之外时它会退化成裸文件名，那种形状有歧义）。
+    /// 产品路径上 url 全部出自 `enumerator(at: scanRoot)`，所以这一支只由合成输入走到；
+    /// 那条不变式由 `DuplicateCoordinatePortabilityTests` 在**真源码扫描**上逐文件复量。
+    ///
+    /// 还原成绝对路径**只有一个入口**：`CodeViewFormat.resolvedURL(_:root:)`
+    /// （Finder 定位与「用默认应用打开」两处消费点都走它）；旧报告里那批绝对坐标
+    /// 不必改写，它走的是同一函数 `hasPrefix("/")` 那一支。
+    var duplicationCoordinate: String {
+        let relative = relativePath
+        guard relative.isEmpty == false, url.path.hasSuffix("/" + relative) else { return url.path }
+        return relative
+    }
+}
+
 // MARK: - 跳过目录计划
 
 /// 跳过目录判定 + 已剔除目录的绝对路径集合（符号链接与 skipDirectories 的兜底防线）。

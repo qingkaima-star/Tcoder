@@ -110,7 +110,7 @@ enum CodeRiskAnalysis {
         let names = Array(block.occurrences.prefix(2))
             .map { "\(CodeViewFormat.fileName($0.path)):\(NumberFormat.grouped($0.startLine))" }
         let rest = block.occurrences.count - names.count
-        let joined = names.joined(separator: "、")
+        let joined = names.joined(separator: localizedListSeparator())
         return rest > 0 ? "\(joined) 等文件" : joined
     }
 
@@ -205,6 +205,10 @@ struct CodeDuplicationBlockRow: View {
         }
     }
 
+    /// 在 Finder 中显示。坐标是**相对被扫根**的（RD-61 第二半），root 由页面从
+    /// `report.project.path` 传进来，与装配 `provenance.scannedRoot` 同一个串；
+    /// 拼回去这件事只发生在 `CodeViewFormat.resolvedURL` 那一个入口（行尾那个
+    /// 「用默认应用打开」按钮走的是同一个函数），这里不另写一份拼接。
     private func reveal(_ path: String?) {
         guard let path else { return }
         NSWorkspace.shared.activateFileViewerSelecting([CodeViewFormat.resolvedURL(path, root: root)])
@@ -217,7 +221,7 @@ struct CodeDuplicationBlockRow: View {
 
     struct OccurrenceLine {
         let text: String
-        /// 中间截断后的回读出口：完整路径。
+        /// 中间截断后的回读出口：整条坐标（相对被扫根，RD-61 第二半之后不再带机器前缀）。
         let help: String?
     }
 

@@ -66,6 +66,9 @@ extension ComplexityEngine {
         /// `/`.*\$\{(/` 里的反引号与 `${` 都是正则内容，不是模板串开头。
         /// 判定保守 —— 本行内配不上对就退回普通字符，绝不吞行。
         var regexLiterals = false
+        /// 只有 JS/TS/Vue 的箭头函数可以**不带花括号**（`const f = (x) => x + 1`，RD-79）。
+        /// 这一档决定：签名命中而本条语句里没有 `{` 时，是去接它的表达式体，还是照旧判"边界推不出来"。
+        var arrowExpressionBody = false
     }
 
     /// 正则编译缓存。签名 pattern 是热点：每个文件都要走一遍 profile → 每条 pattern 建一个
@@ -138,6 +141,9 @@ extension ComplexityEngine {
         // 正则字面量这一档只给有它的那三家（R2 / RD-06 夹具 4）。
         // 不给 Go/Rust/C：它们的 `/` 后面跟的多半是除法或路径，白担一份误吞风险。
         profile.regexLiterals = canonical == "TypeScript" || canonical == "JavaScript" || canonical == "Vue"
+        // 无花括号的箭头体同样只给这三家（RD-79）。Swift/Rust/Kotlin 的闭包体一律带 `{`，
+        // 给它们开这一档等于凭空多一条「语句收尾」判据要去复核。
+        profile.arrowExpressionBody = canonical == "TypeScript" || canonical == "JavaScript" || canonical == "Vue"
         profile.branchKeywords = branchKeywords(for: canonical)
         profile.countsLogicalSymbols = canonical != "Python" && canonical != "HTML"
         profile.countsTernary = canonical != "Python" && canonical != "Go"

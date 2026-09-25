@@ -43,6 +43,21 @@ struct LogSummary: Codable, Equatable, Sendable {
     /// 由 `LogDenominatorAccountingTests` 钉住。
     var crashReportLineCount: Int? = nil
 
+    /// RD-60（第二批·日志事件窗口）：崩溃证据那本**细账**的落盘快照。
+    ///
+    /// 存在理由：`CrashEvidenceLedger` 把八种原因分开算好了（确认计入 / 窗口外 / 旧构建 /
+    /// 无事件时间 / 疑似 / 解析失败 / 读取失败 / 同一事件去重合并），但
+    /// `LogAnalysisProviding.analyze` 的签名只回 `LogSummary`（协议冻结）⇒ 台账在生产路径
+    /// **算完即丢**，屏上只能读另一把从趋势桶倒推的粗尺（RD-60 立案的就是这件事）。
+    /// 快照必须与 `crashCount` 同源同刻：挂到 `ProjectReport` 顶层会造出第二个「崩溃数」入口
+    /// （RD-38 同族），留在 Services 的内存对象里则送不到视图（就是今天的样子）。
+    ///
+    /// **九格全 Optional**：`nil` = 这一格没统计（旧报告 / 这一路没跑），
+    /// `0` = 查过了、真的是 0。两者不许互相冒充——把「没数」写成「没有」是本轮反复在修的那件事。
+    /// 整枚快照也必须是 Optional 且**不带非可选默认值**：否则旧报告整份解码失败。
+    /// 装配口只有一个：`CrashEvidenceReadout`（逐字取台账读数，一个数都不重算）。
+    var crashEvidence: CrashEvidenceSnapshot? = nil
+
     var topErrors: [ErrorCluster] = []
     var trend: [LogBucket] = []
     var affectedFiles: [String: Int] = [:]
@@ -185,4 +200,30 @@ enum LogRecency {
     static func split(_ date: Date?) -> (value: String, unit: String?) {
         split(describe(date))
     }
+}
+
+/// RD-60：崩溃证据细账的落盘形状（`LogSummary.crashEvidence` 那一格）。
+///
+/// 九格全是**台账自己算好的读数**，这里不做任何加减：
+/// 一旦在契约里重算，就有了第二把尺子（RD-43/51/60 那一族）。
+/// 逐格 `nil` 与 `0` 的分别见 `LogSummary.crashEvidence` 那段注释。
+struct CrashEvidenceSnapshot: Codable, Equatable, Sendable {
+    /// 窗口内、有真实事件时间、确认属于当前构建的崩溃**次数**（与 `crashCount` 同源）。
+    var countedCrashCount: Int?
+    /// 确认过、但事件时间落在窗口**之外**的次数（粗尺以前把这一格倒推进趋势桶，量纲还不一样）。
+    var historicalConfirmedCount: Int?
+    /// 确认过、但报告自报的构建版本不是当前版本 ⇒ 不算当前版本的次数。
+    var staleBuildConfirmedCount: Int?
+    /// 确认过、但**没有可用事件时间** ⇒ 单列，不按新鲜数据声称。
+    var undatedConfirmedCount: Int?
+    /// 只有文件名像崩溃报告、内容对不上的份数。
+    var suspectedCount: Int?
+    /// 读了但解析失败的份数。
+    var parseFailedCount: Int?
+    /// 连读都没读动的份数（原因分布由 `CrashEvidenceReadout` 装配）。
+    var readFailedCount: Int?
+    /// 同一事件的另一份报告被并掉的份数（去重合并）。
+    var duplicateCount: Int?
+    /// 产出了可用证据的**份数**（与上面那些「次数」量纲不同，故意不混进同一格）。
+    var filesWithCountedEvidence: Int?
 }

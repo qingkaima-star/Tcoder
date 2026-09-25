@@ -14,15 +14,22 @@
 
 两边喂的是**同一个被扫总体**。允许不同的只有两类，且必须**逐条点名**、不许静默：
   · 时间戳：字段名以 `At` 结尾（generatedAt / attemptedAt / computedAt / analyzedAt …）
-  · 项目身份：`project.*` —— GUI 那趟读的是沙箱里预置的 projects.json（固定 UUID、
-    名字「Tcoder（自扫打分）」），CLI 那趟就地造一个 MonitoredProject。两边都不是判定。
+  · 项目身份：**只有 `project.id` 与 `project.name` 两格** —— GUI 那趟读的是沙箱里预置的
+    projects.json（固定 UUID、名字「Tcoder（自扫打分）」），CLI 那趟就地造一个 MonitoredProject。
+    ⚠️ **`project.path` 不在免检里**（2026-09-25 收窄，缺陷 #64）：原来这里写的是整族前缀
+    `project.`，等于把**两格真不同**与**所有还没被看的格**一起免掉，而 #60 那枚"同一份代码在
+    两棵树里给出两种路径拼写"的缺陷主角正是 `project.path` —— 它当时被这条前缀**静默容忍**掉了。
+    现量凭证（收窄前先核过）：main 全量日志里 `project.*` 只出现过 id 与 name 两格，
+    `project.path` **一次都没进过不等清单** ⇒ 收窄是"把盲区变成判据"，不是给自己找红。
 除这两类之外，任何一处不等都算**两条路读数不一致**，逐条打印并判败。
 """
 import json
 import subprocess
 import sys
 
-IGNORE_PREFIXES = ("project.",)
+# 逐格点名的项目身份免检键（**精确匹配**，不许再用前缀——前缀就是"整族免检"的那个洞本身）。
+IGNORED_PROJECT_KEYS = ("project.id", "project.name")
+
 # 逐条点名的"每次运行必然不同"字段。**每条必须写清为什么天然不同** ——
 # 不加理由的容忍项等于把对表尺子锯短（`ProvenanceParityToleranceTests` 机器拦这条）。
 # 键 = 叶子字段名，值 = 理由（理由里点出"谁来正向钉住它"）。
@@ -43,7 +50,7 @@ TOLERATED_NAMES = {
 
 def is_tolerated(path):
     leaf = path.rsplit(".", 1)[-1].split("[", 1)[0]
-    return leaf.endswith("At") or leaf in TOLERATED_NAMES or path.startswith(IGNORE_PREFIXES)
+    return leaf.endswith("At") or leaf in TOLERATED_NAMES or path in IGNORED_PROJECT_KEYS
 
 
 def walk(a, b, path=""):
@@ -52,11 +59,16 @@ def walk(a, b, path=""):
     if isinstance(a, dict) and isinstance(b, dict):
         for k in sorted(set(a) | set(b)):
             p = f"{path}.{k}" if path else k
+            # ⚠️ 缺席那一侧要点名对：`k not in a`（a=GUI）说的是 **GUI 没有、只有 CLI 有**。
+            # 这两句原先写反了（2026-09-24 RD-31×RD-60 那次对表就是被它带偏方向的：
+            # 真缺键的是 GUI 侧那份测试装配副本，打印出来却像 CLI 侧没量到。
+            # 判败/判容忍的分类与计数都不受影响，改的只是这条读数说谁）——
+            # 方向由 `ProvenanceParityToleranceTests.test_absenceLabelsNameTheSideThatActuallyMisses` 钉住。
             if k not in a:
-                (soft if is_tolerated(p) else hard).append(f"{p}: 只有 GUI 有（CLI 缺）")
+                (soft if is_tolerated(p) else hard).append(f"{p}: 只有 CLI 有（GUI 缺）")
                 continue
             if k not in b:
-                (soft if is_tolerated(p) else hard).append(f"{p}: 只有 CLI 有（GUI 缺）")
+                (soft if is_tolerated(p) else hard).append(f"{p}: 只有 GUI 有（CLI 缺）")
                 continue
             h, s = walk(a[k], b[k], p)
             hard += h

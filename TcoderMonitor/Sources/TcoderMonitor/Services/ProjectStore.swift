@@ -45,6 +45,21 @@ final class ProjectStore {
         return URL(fileURLWithPath: override, isDirectory: true)
     }
 
+    /// 已退役的内置示例项目**注册表行**。2026-09-21 那次退役（`8b0b2c4`）只退了产出
+    /// （`DemoData` / `MonitoredProject.isDemo` / 侧栏入口整条删掉），没退已经写进
+    /// `projects.json` 的那一行 ⇒ 老用户机器上至今侧栏还挂着"Tcoder 示例项目"，
+    /// 而点开它是空态——**这正是验收主诉第⑦条"不能有假数据"的形态**。
+    /// 本机实测于 2026-09-25 07:06：`~/Library/Application Support/TcoderMonitor/projects.json`
+    /// 里那一行 `demo://tcoder-sample` 原样躺着。
+    ///
+    /// 判据只认这一枚**退役常量**，不泛化成"路径不在盘上就删"：
+    /// 泛化会把用户暂时卸载的移动盘项目一并抹掉，那是拿别人的数据换自己的整洁。
+    static let retiredSamplePaths: Set<String> = ["demo://tcoder-sample"]
+
+    static func rowsAfterRetiringSamples(_ projects: [MonitoredProject]) -> [MonitoredProject] {
+        projects.filter { retiredSamplePaths.contains($0.path) == false }
+    }
+
     init() {
         let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
@@ -63,12 +78,24 @@ final class ProjectStore {
 
     @discardableResult
     func add(path: String, name: String? = nil) -> MonitoredProject {
+        // 侧栏这一格存的是「哪个目录」，所以写**物理写法**（`ScannedPath`，与 CLI 同一把尺子）。
+        // 显示名仍按**给定的**那个写法取末段：用户点的是 `…/repoclink`，把它换成解析后的
+        // 目标目录名等于替他改项目名。
+        let canonical = ScannedPath.canonical(path)
         let standardizedName = name
             ?? URL(fileURLWithPath: path).lastPathComponent
-        if let existing = projects.first(where: { $0.path == path }) {
-            return existing
+        if let index = projects.firstIndex(where: { ScannedPath.canonical($0.path) == canonical }) {
+            // 修复前加进来的行可能存着别名短写（`/tmp/…`）。同一个目录不许有两行，
+            // 也不许在同一行上继续挂两种写法：就地升级那一格（`rename` 同规矩，只改内存里的
+            // 那份副本，落盘报告等下一次扫描）。
+            if projects[index].path != canonical {
+                projects[index].path = canonical
+                reports[projects[index].id]?.project = projects[index]
+                persist()
+            }
+            return projects[index]
         }
-        let project = MonitoredProject(name: standardizedName, path: path)
+        let project = MonitoredProject(name: standardizedName, path: canonical)
         projects.append(project)
         reports[project.id] = ProjectReport(project: project)
         persist()
@@ -149,8 +176,21 @@ final class ProjectStore {
 
         if let data = try? Data(contentsOf: registryURL),
            let decoded = try? decoder.decode(PersistedState.self, from: data) {
-            projects = decoded.projects
-            selectedProjectID = decoded.selectedProjectID
+            let kept = ProjectStore.rowsAfterRetiringSamples(decoded.projects)
+            projects = kept
+            // 选中项正好是被退役那一行时不许留悬空 UUID：下面 reports 循环按 projects 建，
+            // 而 `report(for:)` 认的是 id，留着会让侧栏指向一行已经不存在的东西。
+            selectedProjectID = decoded.selectedProjectID.flatMap { selected in
+                kept.contains(where: { $0.id == selected }) ? selected : nil
+            }
+            if kept.count != decoded.projects.count {
+                // 只滤不写回＝每次启动再滤一遍，那行假数据永远住在文件里（也可能被别处读走）。
+                // 反过来，没滤掉任何东西时**一次字节都不写**，别拿用户的注册表练手。
+                // 留在这里没删的：那一行的 `reports/<uuid>.json` 与 `score-history.json` 里那格。
+                // 它们已经无从被读到——所有读者都要先有一个还在册的 project id（`reportsDirectory`
+                // 只按 id 取文件，从不列目录），而在启动那一刻去删用户盘上的文件是更大的口子。
+                persist()
+            }
         }
         if let data = try? Data(contentsOf: historyURL),
            let decoded = try? decoder.decode([UUID: [ScoreHistoryPoint]].self, from: data) {

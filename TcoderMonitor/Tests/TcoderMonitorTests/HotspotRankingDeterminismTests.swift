@@ -9,8 +9,9 @@ import XCTest
 /// ① 同一台机器上扫同一个仓库两次，榜必须逐项相等；
 /// ② 榜必须**全序**（相邻两项比较，五把键里至少有一把严格往下走），
 ///    否则"谁在第 20 名"仍然由输入顺序决定；
-/// ③ 分母：本次扫描必须**真的存在并列**（复杂度与行数都相同的两项），
-///    不然 ② 是一条永真断言 —— 本仓在"分不清没有和没查"上栽过太多次。
+/// ③ 分母：判据必须**真的见过并列**（复杂度与行数都相同的两项），不然 ② 是一条永真断言。
+///    这一档不绑本仓（榜随代码变，可能今天一对并列都没有），由
+///    `test_tieBreakBitesOnAFixtureThatMustHaveTies` 用逐字相同的夹具承担 —— 本仓在"分不清没有和没查"上栽过太多次。
 final class HotspotRankingDeterminismTests: XCTestCase {
 
     /// 被扫总体 = 本仓库根（dogfooding 是长期要求）。
@@ -49,7 +50,8 @@ final class HotspotRankingDeterminismTests: XCTestCase {
              path: h.filePath, start: h.startLine, name: h.name)
     }
 
-    /// ①+②+③ 一次跑齐：两次独立扫描的榜逐项相等，且榜内全序、并且确有并列。
+    /// ①+② 跑在本仓这棵真实的树上：两次独立扫描的榜逐项相等，且榜内全序。
+    /// ③（并列分母）在同文件的夹具用例里，见上面的口径说明。
     func test_hotspotLeaderboardIsReproducibleAndTotallyOrdered() async throws {
         let analyzer = FileSystemCodeAnalyzer()
         let first = try await analyzer.analyze(root: repoRoot, options: .default)
@@ -79,8 +81,38 @@ final class HotspotRankingDeterminismTests: XCTestCase {
         }
         XCTAssertGreaterThan(ties, 0,
                              "整份榜没有一个并列项 ⇒ 全序判据是空的，换一个有并列的总体再测")
-        print("【热点榜可复现】两次扫描逐项相等（\(a.count) 项），"
-              + "其中 \(ties) 对由 路径→起始行→函数名 定序")
+        // ③ 的分母**不再绑在本仓身上**：这张榜随代码每天在变，今天可以一对并列都没有，
+        // 那时 `ties > 0` 会把一条好判据变成一次随机红（RD-79 第二批落地当天就是被这样抓出来的：
+        // 识别器认得更准之后，本仓榜上原有的那对并列消失了）。
+        // 并列这一档改由 `test_tieBreakBitesOnAFixtureThatMustHaveTies` 用自建夹具承担 —— 强度不降，
+        // 因为夹具是**逐字相同**的三份函数，并列是构造出来的、不靠运气。
+        print("【热点榜可复现】两次扫描逐项相等（\(a.count) 项），本次总体里 \(ties) 对主键并列")
+    }
+
+    /// ③ 的正式落点：并列必须**存在**，且并列项由 路径→起始行→函数名 定序。
+    /// 独立真值 = 夹具是自己逐字写出来的（三份同体函数），不是从产品读数反推的。
+    func test_tieBreakBitesOnAFixtureThatMustHaveTies() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tcoder-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let body = "func duplicate(a: Int) -> Int {\n    if a > 1 {\n        return a\n    }\n    return 0\n}\n"
+        for name in ["Alpha.swift", "Bravo.swift", "Charlie.swift"] {
+            try body.write(to: root.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        let board = try await FileSystemCodeAnalyzer().analyze(root: root, options: .default).topComplexFunctions
+        XCTAssertEqual(board.count, 3, "夹具三份都要进榜，实测 \(board.map(\.id))")
+        let pairs = Array(zip(board, board.dropFirst()))
+        let ties = pairs.filter {
+            $0.cyclomaticComplexity == $1.cyclomaticComplexity && $0.lineCount == $1.lineCount
+        }.count
+        XCTAssertGreaterThan(ties, 0, "夹具自己都没造出并列 ⇒ 这条判据的输入坏了")
+        for (left, right) in pairs {
+            XCTAssertTrue(Self.precedes(Self.rank(left), Self.rank(right)),
+                          "并列项没按 路径→起始行→函数名 往下排：\(left.id) / \(right.id)")
+        }
+        XCTAssertEqual(board.map(\.name), ["duplicate", "duplicate", "duplicate"])
+        XCTAssertEqual(board.map(\.filePath).sorted(), board.map(\.filePath), "同分之下按路径定序，不许听枚举顺序")
     }
 
     /// 反向自证：判据抓得住"主键并列就听输入顺序"的坏榜。

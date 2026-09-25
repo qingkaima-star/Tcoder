@@ -114,6 +114,53 @@ extension CodeGitRestyleTests {
         XCTAssertTrue(note.contains("重复代码率 0.0%"), note)
     }
 
+    /// 批次 P69a 的**中文侧一字不变**证据：那四条建议原先是 3~6 段字面量 `+` 起来的，
+    /// 收成整句键之后屏上那句话必须**逐字**还是原来那一句（多一个空格、少一个顿号、
+    /// 词序换掉都会红 —— 而这类改动不会让任何一条既有守卫变红）。
+    /// 期望串里的每个数字都是**夹具手数列出来的**，不是从实现输出里读回来的；
+    /// 第二组数字不同的夹具钉的是"这些数确实由槽位填进去的"，不是句子被写死了。
+    func test_p69aAdviceSentencesKeepTheirChineseWordForWord() {
+        func spot(_ name: String, _ file: String, line: Int, body: Int, cc: Int,
+                  params: Int, risk: RiskLevel) -> FunctionHotspot {
+            FunctionHotspot(name: name, filePath: "/p/\(file)", startLine: line,
+                            lineCount: body, cyclomaticComplexity: cc, parameterCount: params, risk: risk)
+        }
+        // 手算真值：3 个 critical（CC 33 / 24 / 18，最高 33）、3 个 high（CC 16 / 20 / 24 ⇒ 区间 16~24）、
+        // 参数 ≥6 的是 3 个（9 / 7 / 6，最坏 handleOrder 9 个）；注释 200 / 总 8,000 行 = 2.5%。
+        let spots = [spot("handleOrder", "OrderFlow.swift", line: 42, body: 120, cc: 33, params: 9, risk: .critical),
+                     spot("renderLegend", "Legend.swift", line: 7, body: 61, cc: 24, params: 7, risk: .critical),
+                     spot("parse", "Parser.swift", line: 300, body: 55, cc: 18, params: 6, risk: .critical),
+                     spot("a", "A.swift", line: 1, body: 30, cc: 16, params: 2, risk: .high),
+                     spot("b", "B.swift", line: 2, body: 30, cc: 20, params: 1, risk: .high),
+                     spot("c", "C.swift", line: 3, body: 30, cc: 24, params: 0, risk: .high)]
+        let code = CodeMetrics(totalFiles: 5, totalLines: 8_000, commentLines: 200,
+                               codeLines: 6_000, topComplexFunctions: spots)
+        let advice = Dictionary(uniqueKeysWithValues: CodeRiskAnalysis.suggestions(for: code)
+            .map { ($0.id, $0.text) })
+
+        XCTAssertEqual(advice["complexity-critical"],
+                       "3 个函数被判为严重复杂度，最高圈复杂度 33：handleOrder（CC 33 · 120 行 · OrderFlow.swift:42）、renderLegend（CC 24 · 61 行 · Legend.swift:7）、parse（CC 18 · 55 行 · Parser.swift:300）。先去掉嵌套：校验与异常分支改成提前返回，再把成组的分支换成策略表/多态；先把分支数压到 CC 21 以下（那是本工具判「高」的那条线，与榜位无关）。")
+        XCTAssertEqual(advice["complexity-high-cluster"],
+                       "同时有 3 个函数处于高复杂度档（CC 16~24）：先给它们补单元测试，再把分支下沉成命名清晰的小函数。")
+        XCTAssertEqual(advice["parameters"],
+                       "3 个上榜函数的参数达到或超过 6 个，最多的是handleOrder（9 个参数 · OrderFlow.swift:42）：把成组参数收进一个配置或值类型，调用点会同步变短。")
+        XCTAssertEqual(advice["comments"],
+                       "注释率 2.5%（200 / 8,000 行）低于本页 5% 的提示线：优先给对外接口和圈复杂度最高的那批函数写意图说明，直白代码不必加注释。")
+
+        // 反向不误伤：换个数字，句子必须跟着变（钉住"数是从槽位填进去的"）。
+        let single = CodeMetrics(totalFiles: 1, totalLines: 1_000, commentLines: 10, codeLines: 900,
+                                 topComplexFunctions: [spot("only", "One.swift", line: 9, body: 70,
+                                                            cc: 40, params: 8, risk: .critical)])
+        let again = Dictionary(uniqueKeysWithValues: CodeRiskAnalysis.suggestions(for: single)
+            .map { ($0.id, $0.text) })
+        XCTAssertTrue(again["complexity-critical"]?
+            .hasPrefix("1 个函数被判为严重复杂度，最高圈复杂度 40：only（CC 40 · 70 行 · One.swift:9）。") == true,
+                      "换个数字句子不跟着变 ⇒ 上面那四条断言比的是写死的句子：\(again["complexity-critical"] ?? "nil")")
+        XCTAssertNil(again["complexity-high-cluster"], "只有一个函数时高档聚集那句不许出声")
+        XCTAssertEqual(again["parameters"],
+                       "1 个上榜函数的参数达到或超过 6 个，最多的是only（8 个参数 · One.swift:9）：把成组参数收进一个配置或值类型，调用点会同步变短。")
+    }
+
     func testComplexityDivergenceNeedsFiveHotspots() {
         func hotspots(_ count: Int, cc: Int) -> [FunctionHotspot] {
             (1...count).map {

@@ -13,7 +13,7 @@ extension HealthCurves {
 
     static func activity(commitsPerDay: Double, daysSinceLastCommit: Double?, totalCommits: Int) -> CurveResult {
         if totalCommits == 0 {
-            return CurveResult(score: 15, detail: "无提交记录", risk: graded(15, 85, 65, 45, 25))
+            return CurveResult(score: 15, detail: localizedCopy("无提交记录"), risk: graded(15, 85, 65, 45, 25))
         }
         // 速率超过 4 次/天后掉头：高频小提交是碎片化，不该比稳定节奏拿更高分。
         let rate = Swift.max(0.0, commitsPerDay)
@@ -24,7 +24,7 @@ extension HealthCurves {
         var stalePenalty = 0.0
         var recency = ""
         if let days = daysSinceLastCommit, days.isFinite {
-            recency = "距今 \(decimal(Swift.max(0, days))) 天无提交"
+            recency = localizedFormat("距今 %1$@ 天无提交", decimal(Swift.max(0, days)))
             if days > 7 {
                 // 7 天起线性扣、60 天封顶 -45。
                 stalePenalty = Swift.min(45.0, Swift.max(0.0, (days - 7) / 53 * 45))
@@ -32,14 +32,15 @@ extension HealthCurves {
         }
         let score = ScoreCurve.clamped(base - stalePenalty)
         let detail = joined([
-            "日均 \(decimal(rate)) 次提交",
-            recency.isEmpty ? "未提供最近提交时间" : recency,
-            "累计 \(whole(totalCommits)) 次",
+            localizedFormat("日均 %1$@ 次提交", decimal(rate)),
+            recency.isEmpty ? localizedCopy("未提供最近提交时间") : recency,
+            localizedFormat("累计 %1$@ 次", whole(totalCommits)),
             // ⚠ 门槛**不许在这里再抄一个数字**：优点句「提交节奏稳定」与这句「速率偏高按碎片化折算」
             // 说的是同一个数，两处各写一遍就会出现"一处当优点、一处当扣分理由"（台账 RD-29）。
             // 两处现在同源于 `GitCadenceEvidence.steadyCadenceCommitsPerDay`（值仍是 8，没动过）。
-            rate >= GitCadenceEvidence.steadyCadenceCommitsPerDay ? "速率偏高按碎片化折算" : "",
-            stalePenalty > 0 ? "陈旧扣 \(decimal(stalePenalty)) 分" : ""
+            rate >= GitCadenceEvidence.steadyCadenceCommitsPerDay
+                ? localizedCopy("速率偏高按碎片化折算") : "",
+            stalePenalty > 0 ? localizedFormat("陈旧扣 %1$@ 分", decimal(stalePenalty)) : ""
         ])
         return CurveResult(score: score, detail: detail, risk: graded(score, 85, 65, 45, 25))
     }
@@ -65,7 +66,7 @@ extension HealthCurves {
     /// 在测试进程里 trap 等于把别人那条用例改成崩溃。
     static func busFactor(risk: RiskLevel, topAuthorShare: Double, activeAuthors: Int, commitBasis: Int) -> CurveResult {
         if commitBasis <= 0 {
-            return CurveResult(score: 0, detail: "作者分布总体为 0，本维度不该计分（内部守卫）",
+            return CurveResult(score: 0, detail: localizedCopy("作者分布总体为 0，本维度不该计分（内部守卫）"),
                                risk: .critical)
         }
         let base = ScoreCurve.piecewise(Double(risk.rank), through: [
@@ -82,13 +83,13 @@ extension HealthCurves {
         if singlePoint { score = Swift.min(score, 8) }
         let shareText = String(format: "%.0f%%", share * 100)
         let detail = joined([
-            "最高作者占比 \(shareText)",
+            localizedFormat("最高作者占比 %1$@", shareText),
             // 「署名」不是「人数」（台账 RD-28）：`activeAuthors` 数的是 git 作者身份，
             // 本仓按流署名 ⇒ 一个署名可能是一条工作流，也可能是同一个人在两台机器上。
-            "\(whole(activeAuthors)) 个活跃署名",
-            "\(whole(commitBasis)) 次非合并提交",
-            share >= 0.7 ? "单一署名包揽重扣 22 分" : "",
-            singlePoint ? "单一署名封顶 8 分" : ""
+            localizedFormat("%1$@ 个活跃署名", whole(activeAuthors)),
+            localizedFormat("%1$@ 次非合并提交", whole(commitBasis)),
+            share >= 0.7 ? localizedCopy("单一署名包揽重扣 22 分") : "",
+            singlePoint ? localizedCopy("单一署名封顶 8 分") : ""
         ])
         return CurveResult(score: score, detail: detail, risk: risk)
     }
@@ -108,7 +109,8 @@ extension HealthCurves {
     /// 当年是按"每千行**代码**"标定的，直接搬到"每千行**日志**"上属于换了量程沿用刻度。
     /// 本轮只做正确性修正（不伪分母、不为提指标动任何锚点），**独立样本重新标定归总工**，
     /// 已登记在 Obsidian `110` 的契约缺口一节。
-    /// `detail` 由 `HealthCurves.joined` 限到 60 字（评分卡那一行放不下长句），
+    /// `detail` 由 `HealthCurves.joined` 限到 120 **显示格**（评分卡那一行放不下长句；
+    /// 一段都放不下时留整段、交给 `lineLimit` + `.help` 去裁，见那上面的口径注记），
     /// 所以**"证据不足"那几句不在这里**，在 `WeightedHealthScorer` 的 recommendations 里。
     ///
     /// ⚠️ **原先那一支（`totalLinesScanned == 0 → 85 分 + 「未扫描到运行日志，本维度按默认值计」`）
@@ -138,12 +140,12 @@ extension HealthCurves {
         let deducted = crashPenalty + fatalPenalty + exceptionPenalty
         let score = ScoreCurve.clamped(base - deducted)
         let detail = joined([
-            "每千行日志 \(decimal(Swift.max(0, errorsPerKiloLogLines))) 个错误",
-            "确认崩溃 \(whole(crashCount)) 次",
-            "致命 \(whole(fatalCount)) 次",
-            "异常 \(whole(exceptionCount)) 次",
-            "扫描 \(whole(totalLinesScanned)) 行",
-            deducted > 0 ? "扣 \(decimal(deducted)) 分" : ""
+            localizedFormat("每千行日志 %1$@ 个错误", decimal(Swift.max(0, errorsPerKiloLogLines))),
+            localizedFormat("确认崩溃 %1$@ 次", whole(crashCount)),
+            localizedFormat("致命 %1$@ 次", whole(fatalCount)),
+            localizedFormat("异常 %1$@ 次", whole(exceptionCount)),
+            localizedFormat("扫描 %1$@ 行", whole(totalLinesScanned)),
+            deducted > 0 ? localizedFormat("扣 %1$@ 分", decimal(deducted)) : ""
         ])
         return CurveResult(score: score, detail: detail, risk: graded(score, 85, 65, 45, 20))
     }
@@ -156,7 +158,7 @@ extension HealthCurves {
     static func dependencyHealth(vulnerableCount: Int, outdatedCount: Int,
                                  totalDependencies: Int) -> CurveResult {
         if totalDependencies == 0 {
-            return CurveResult(score: 100, detail: "未发现依赖清单", risk: .none)
+            return CurveResult(score: 100, detail: localizedCopy("未发现依赖清单"), risk: .none)
         }
         let vulnerable = Swift.max(0, vulnerableCount)
         let vulnerablePenalty = Swift.min(70.0, Double(vulnerable) * 14)
@@ -173,10 +175,11 @@ extension HealthCurves {
         else if vulnerable <= 9 { risk = .high }
         else { risk = .critical }
         let detail = joined([
-            "依赖 \(whole(totalDependencies)) 个",
-            vulnerable > 0 ? "漏洞 \(whole(vulnerable)) 个" : "漏洞核对零命中",
-            "落后 \(whole(outdatedCount)) 个占 \(percent(outdatedRatio))",
-            deducted > 0 ? "扣 \(decimal(deducted)) 分" : "",
+            localizedFormat("依赖 %1$@ 个", whole(totalDependencies)),
+            vulnerable > 0 ? localizedFormat("漏洞 %1$@ 个", whole(vulnerable))
+                           : localizedCopy("漏洞核对零命中"),
+            localizedFormat("落后 %1$@ 个占 %2$@", whole(outdatedCount), percent(outdatedRatio)),
+            deducted > 0 ? localizedFormat("扣 %1$@ 分", decimal(deducted)) : "",
         ])
         return CurveResult(score: score, detail: detail, risk: risk)
     }

@@ -226,6 +226,31 @@ extension CodeAnalyzerTests {
         }
     }
 
+    /// RD-79：`export const useFoo = (…) => {…}` 是 ESM/TS 模块的主流写法，
+    /// 以前整类漏认（`jsFunction` 收了 `export function`，`jsVariableArrow` 没有 `export` 前缀位）。
+    /// 独立真值 = 只差一个 `export` 的两份同形夹具必须同权；反例 = 对象字面量与常量赋值不算函数。
+    func testExportedArrowFunctionIsRecognizedAndPlainExportsAreNot() throws {
+        let root = try makeFixtureRoot()
+        defer { try? fm.removeItem(at: root) }
+        let exportedArrow = """
+        export const priceOf = (item) => {
+            if (item.flag) {
+                return item.count
+            }
+            return 0
+        }
+        """
+        let exportedFile = try XCTUnwrap(classify(try write(exportedArrow + "\n", to: "price2.js", in: root), root: root))
+        XCTAssertEqual(ComplexityEngine.functions(in: exportedFile).map(\.name), ["priceOf"],
+                       "带 export 的 const 箭头函数必须与不带时同权被识别")
+        // 反例：`export` 后面跟对象字面量或常量**不是**函数，不许被上面那一档顺手吃进来。
+        for (name, text) in [("config.js", "export const config = {\n  retries: 2\n}\n"),
+                             ("n.js", "export const n = 1\n")] {
+            let file = try XCTUnwrap(classify(try write(text, to: name, in: root), root: root))
+            XCTAssertTrue(ComplexityEngine.functions(in: file).isEmpty, "\(name) 不该识别出任何函数")
+        }
+    }
+
     func testFunctionIdentificationDegradesSafelyOnHostileCode() throws {
         let root = try makeFixtureRoot()
         defer { try? fm.removeItem(at: root) }

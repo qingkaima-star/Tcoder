@@ -118,14 +118,22 @@ struct GitCadenceEvidence: Equatable, Sendable {
     }
 
     /// 写进分量 detail 的口径注记：先说结论（样本不足）、再说跨度、最后说封顶值。
+    ///
+    /// ⚠ **不带括号、也不与 detail 相加**：括号由 `HealthCurves.noted` 那一族整句键给出。
+    /// 这里要是写成 `detail + "（中文）"`，拼完的整串查不中任何键，
+    /// 英文态会长成半英半中（P58 收的就是这一族）。
     var shortHistoryNote: String {
-        "（历史仅 \(Self.fixed(spanDays)) 天 < \(Self.fixed(Self.minimumSpanDays)) 天门槛，"
-            + "样本不足不评估节奏，本维度封顶 \(Self.fixed(Self.shortHistoryScoreCeiling)) 分"
-            + (numeratorSharesSpanWindow ? "" : "，速率分子按含合并总数折算")
-            + "）"
+        HealthCurves.joined([
+            localizedFormat("历史仅 %1$@ 天 < %2$@ 天门槛，样本不足不评估节奏，本维度封顶 %3$@ 分",
+                            Self.fixed(spanDays), Self.fixed(Self.minimumSpanDays),
+                            Self.fixed(Self.shortHistoryScoreCeiling)),
+            numeratorSharesSpanWindow ? "" : localizedCopy("速率分子按含合并总数折算")
+        ])
     }
 
-    var unknownNote: String { "（首末提交时间缺失或同一瞬间，日均分母无定义，速率按 0 计）" }
+    var unknownNote: String {
+        localizedCopy("首末提交时间缺失或同一瞬间，日均分母无定义，速率按 0 计")
+    }
 
     /// 定点格式化（一位小数，尾随 0 省掉）：跟随 `ScoreCurves.decimal` 的立场不依赖 Locale，
     /// 免得系统语言换成逗号小数点后 detail 里的数读不出。
