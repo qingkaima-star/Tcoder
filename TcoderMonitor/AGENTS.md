@@ -556,6 +556,9 @@ WS-L 另背一条**功能性诚实修正**（不是美化）：界面显示"提�
 3. 合入前自检：`./scripts/locked_build.sh build && ./scripts/locked_build.sh test` 双绿。
 4. **合入主线由总工执行**（别人不要自己 merge/push main），完成后
    `git worktree remove` 清掉自己的工作树与分支。
+   ⚠ **树里有过测量样本 ⇒ 清树之前必须先跑 `python3 scripts/perf_artifact_locator.py --census`，再逐名定位**（#89/#90）：
+   `.scratch` 被 gitignore，删了不惊动任何守卫；而搬家后的批次**散在三处、inode 各不相同**，
+   普查里「只在一处」的那些就是唯一份（2026-09-25 实测有 5 批的导表只活在一棵树里）。
 
 ### 署名口径（2026-09-21 由用户裁定「按流署名」）
 
