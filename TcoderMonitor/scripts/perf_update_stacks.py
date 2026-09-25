@@ -77,10 +77,14 @@ def main_thread_samples(xml_path: str, pid: str = "") -> tuple[list, int, int]:
 
 
 def read_run(run_dir: str):
-    """→ (事件区间, 行数, 被测 pid, 是否同窗双仪器档)。
+    """→ (事件区间, 行数, 被测 pid, 是否同窗双仪器档, 归属那一行怎么说)。
 
-    行→事件走 `unique_event_spans`（Brown / Red 两行算一个事件）——**不归因侧自造**：
+    行→事件走 `unique_event_spans`（一条 update 在表里带多枚 `event-concept`，
+    Brown ＋ Red 各占一行 —— 09-25 拿真表量过，不是录制重复）——**不归因侧自造**：
     #44 那次的病根就是同一份 trace 两处入口给出两个数。
+
+    `same_window` 只认字面量 `"1"`：写成 `bool(非空)` 的话 `blame_instrument=0`
+    （将来有人拿它显式关掉这一档）会被读成"是同窗档"而放行 join——**方向上就错了**。
     """
     meta_path = os.path.join(run_dir, "meta.json")
     meta = {}
@@ -94,7 +98,18 @@ def read_run(run_dir: str):
     if os.path.isfile(upd):
         rows = [tuple(p) for p in (json.load(open(upd, encoding="utf-8")).get("pairs") or [])]
     instrument = str(meta.get("blame_instrument") or "").strip()
-    return unique_event_spans(rows), len(rows), str(meta.get("pid") or ""), bool(instrument)
+    binary = str(meta.get("binary") or "").strip()
+    mrev = str(meta.get("measured_rev") or "").strip()
+    # 【归属不许沉默】手动 `--attach` 出来的探针档只有 pid，没有 binary / measured_rev，
+    # 那份栈此刻正指着"某台机器上某个二进制"，而读者无从知道是哪个 ⇒ 大声说不知道，
+    # 而不是少印一行让它看起来像正式读数（09-25 就被这种形状骗过一次：
+    # 同批相邻 pid 指向 `.scratch/rev-trees/<旧 rev>`，那串热点根本不属于当前 main）。
+    if binary or mrev:
+        prov = "    归属：measured_rev=%s binary=%s" % (mrev or "未记", binary or "未记")
+    else:
+        prov = ("    ⚠ meta 里没有 binary / measured_rev ⇒ 这份栈说不出属于哪份内容（探针档的形状），"
+                "只能当线索，不许写进缺陷单")
+    return unique_event_spans(rows), len(rows), str(meta.get("pid") or ""), instrument == "1", prov
 
 
 def blame(windows: list, samples: list, min_ms: float) -> list:
@@ -151,7 +166,7 @@ def main(argv: list) -> int:
         print("用法: perf_update_stacks.py <一趟的产物目录> [--min-ms 100]（目录里要有 "
               "hitches-updates.json + blame-time-profile.xml + meta.json）")
         return 2
-    windows, n_raw_rows, pid, same_window = read_run(run_dir)
+    windows, n_raw_rows, pid, same_window, prov = read_run(run_dir)
     xml = os.path.join(run_dir, "blame-time-profile.xml")
     if not same_window:
         # 两个窗口的时间轴并起来 = 把"另一段时间的栈"归给这一刻。数字都真，结论是假的。
@@ -170,6 +185,7 @@ def main(argv: list) -> int:
         print("!! 一个主线程样本都没解出来：确认导出的是 time-profile 表而不是空表（表内 %d 行）"
               % total_rows)
         return 1
+    print(prov)
     report(blame(windows, samples, min_ms), windows, samples, n_raw_rows,
            total_rows, skipped, pid, min_ms)
     return 0

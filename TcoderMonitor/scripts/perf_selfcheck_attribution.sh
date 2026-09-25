@@ -119,7 +119,7 @@ print("%s|%s|%s|%s|%s" % (a, b, c, code, "生命期" in txt))')
 #   跨窗口 join、把区间外的栈算进来、把别家进程的 Main Thread 顶包、把"没采到"说成"没有"。
 # 夹具全部由下面这段 python **造真文件**、再让**真 CLI** 去读（不在 bash 里复刻算法）：
 # 判据与实现一旦分叉，红的是这一项，而不是两周后台账里那句话。
-blame_attribution_probe() {  # blame_attribution_probe <outdir> → 八格 True/False 向量（空串 = 夹具自己崩了）
+blame_attribution_probe() {  # blame_attribution_probe <outdir> → 十格 True/False 向量（空串 = 夹具自己崩了）
   cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 - "$1" <<'PYBLAME'
 from perf_trace_xml import RUNLOOP_PLUMBING
 import itertools, json, os, subprocess, sys
@@ -153,7 +153,10 @@ D = {n: write_run(n, s, m) for n, s, m in (
     ("hit", [(2500.0, HIT, PID)], META), ("outside", [(9000.0, HIT, PID)], META),
     ("foreign", [(9000.0, HIT, PID), (2500.0, FOREIGN, "9999")], META),
     ("nostack", [(2500.0, "", PID)], META), ("plumbing", [(2500.0, PLUMB, PID)], META),
-    ("crosswindow", [(2500.0, HIT, PID)], CLEAN), ("notable", [(2500.0, HIT, PID)], META))}
+    ("crosswindow", [(2500.0, HIT, PID)], CLEAN), ("notable", [(2500.0, HIT, PID)], META),
+    # 显式写 0 也必须拒：把同窗判据写成 bool(非空) 的话，这一格会被放行（方向上就错了）。
+    ("off", [(2500.0, HIT, PID)], dict(META, blame_instrument="0")),
+    ("withprov", [(2500.0, HIT, PID)], dict(META, binary="b1", measured_rev="r1")))}
 os.remove(os.path.join(D["notable"], "blame-time-profile.xml"))   # 有标记没表 = 采集坏了
 R = {n: probe(d) for n, d in D.items()}
 print("|".join(str(x) for x in [
@@ -164,20 +167,23 @@ print("|".join(str(x) for x in [
     "无栈 1" in R["nostack"][1],
     "管道帧 1" in R["plumbing"][1] and PLUMB not in R["plumbing"][1],
     R["crosswindow"][0] != 0 and "拒绝归因" in R["crosswindow"][1],
-    R["notable"][0] != 0 and "采集坏了" in R["notable"][1]]))
+    R["notable"][0] != 0 and "采集坏了" in R["notable"][1],
+    R["off"][0] != 0 and "拒绝归因" in R["off"][1],
+    "归属：measured_rev=r1 binary=b1" in R["withprov"][1] and "说不出属于哪份内容" in R["hit"][1]]))
 PYBLAME
 }
 
 selfcheck_update_stack_attribution() {  # selfcheck_update_stack_attribution <outdir>
-  # 63) 长 update 归因的八个形状：同窗才 join、双行收成事件、区间外与别家进程不许点名、
-  #     没采到栈写「取不到」、管道帧剔掉但照印、跨窗口拒、有标记没表也拒。
+  # 63) 长 update 归因的十个形状：同窗才 join（缺标记与显式写 0 都要拒）、双行收成事件、
+  #     区间外与别家进程不许点名、没采到栈写「取不到」、管道帧剔掉但照印、
+  #     有标记没表也拒、归属那一行不许沉默（有就给出、没有就吵）。
   local r
   r=$(blame_attribution_probe "$1")
   [ -n "$r" ] \
     || { fail "归因夹具的 python 崩了（拿到空串）⇒ 这不是判据不符，是这一项根本没跑"; return; }
-  [ "$r" = "True|True|True|True|True|True|True|True" ] \
-    || { fail "长 update 归因八个形状没各判对（拿到 $r）⇒ 归因表会把别的窗口的栈归给这一刻"; return; }
-  ok "长 update 归因认得「同窗才 join、双行收成事件、区间外/别家进程不许点名、没栈写取不到、跨窗口与缺表一律拒跑」"
+  [ "$r" = "True|True|True|True|True|True|True|True|True|True" ] \
+    || { fail "长 update 归因十个形状没各判对（拿到 $r）⇒ 归因表会把别的窗口/别份内容的栈归给这一刻"; return; }
+  ok "长 update 归因认得「同窗才 join（写 0 也拒）、双行收成事件、区间外/别家进程不许点名、没栈写取不到、缺表拒跑、归属缺失要吵」"
 }
 
 # 63 的第二条腿：归因档的**接线**（不只是尺子会算）。
