@@ -108,26 +108,13 @@ final class PerfHitchGuardTests: XCTestCase {
         // 于是 `Color(nsColor: …)` 这种写法一条都不抓（现扫才看见 2 处，全在 `Views/Shell/`）。
         // 上限 = 2026-09-22 现扫真值，**零余量**；终点 0，归 UI 流（改的是 `Views/**`）。
         "dynamicColorConstruction": 2,
-        "tokenReference": 62,   // 旧名 `dynamicNSColor`。56→**64 是扩面，不是新增债**：判据写的是"body/Mark 内"，
-        // 而 `Design/**`（`GlassComponents`/`ChartTokens`/`HealthAdviceCards` 等）本身就是视图构造器，
-        // 旧扫描面只看 `Views/`。多看见的 8 处全部落在 Design/（台账现在带 `Design/` 前缀可逐条复核）。
-        // 历史上这条是 107→86→59→58→56（三次还债）→64（一次扩面）→62（并 main 后复拧）。
-        //
-        // 【终点**不是 0**，2026-09-22 写死】这句以前一直写着"终点 0"，是错的：
-        // 令牌缓存（M0-d′）落地后这条量的已经不是分配次数，而 62 处引用**全部命中 init 里
-        // 算好的 `let color`**（`Theme.Semantic.role(for:)` 返回 `static let` 角色，
-        // `.textColor` → `DualColor.color` 是存储属性）。打到 0 等于要求页面**不给任何东西着色**，
-        // 而那 8 处 `Design/**` 更是一个陷阱：我据此差点去做一趟"缓存化改造"，
-        // 会把数字从 62 抬到 54 而**运行时一个字节都没省**——假还债。
-        // 所以这条保留为**读数**（引用越密＝每 tick 重算面越大），棘轮方向仍只许减，
-        // 但"再新增一处正确的令牌取色"该由 `dynamicColorConstruction` 那条真判据管，
-        // 不该被这条挡路。
-        // 为什么还留着"只许减不许增"：台账"现量/上限"一上线就自己报出 `58/59（可拧到 58）`——
-        // 留 1 处余量等于"新增 1 处照样绿"。**只减不增要成立，降下来必须有人拧**。
-        // 没点名是哪一笔还掉的：这条不需要知道，扫描器每次跑都会重算。
-        // 2026-09-21 20:39 台账报 `fullSort 9/10（可拧到 9）` ⇒ 拧到 9。
-        // 方向只有这一个：棘轮**只许变紧**。留 1 处隐形余量，下一个人在别处新加一处
-        // 排序就会显示成 10/10「没涨」——那正是"每次打现量"这条规矩要防的事。
+        // ⚠ `tokenReference` **不在这张表里**（2026-09-25 #68）。它待在下面的循环里
+        // 就等于被套上零余量上限，于是"新写一处正确的令牌取色"会红——而 #19 那两笔要做的
+        // 正是那个方向。它现在住 `PerfHitchGuardTests+Readings.swift`：读数只有**下限**。
+        // 为什么这条线要**零余量**：台账"现量/上限"一上线就自己报出过 `58/59（可拧到 58）`——
+        // 留 1 处余量等于"新增 1 处照样绿"。方向只有这一个：棘轮**只许变紧**。
+        // 留隐形余量的话，下一个人在别处新加一处排序就会显示成 10/10「没涨」，
+        // 那正是"每次打现量"这条规矩要防的事（2026-09-21 20:39 台账报 `fullSort 9/10` ⇒ 拧到 9）。
         "fullSort": 9,
         "syncFileIO": 2,
     ]
@@ -167,29 +154,19 @@ final class PerfHitchGuardTests: XCTestCase {
                              "读到的源码行数异常少（\(census.totalLines)）——文件没真被读进来")
 
         var problems: [String] = []
-        // 【基线键必须与规则名一一对应】下面那行 `counts[rule] ?? -1` 有个静默失效形状：
-        // 基线里写了一个**不存在**的规则名（改名时最容易发生），取不到计数就退化成 -1，
+        // 【债表 ∪ 读数表 必须等于规则名】`counts[rule] ?? -1` 有个静默失效形状：
+        // 表里写了一个**不存在**的规则名（改名时最容易发生），取不到计数就退化成 -1，
         // 而 -1 永远不"超过"上限 ⇒ 那条规则**从闸门上消失**，日志里一个字都不会多。
-        // 今天正好把 `dynamicNSColor` 改名成 `tokenReference`，所以这条等式断言现在补上。
-        XCTAssertEqual(Set(Self.knownBaseline.keys), Set(PerfHitchScan.rules.map(\.name)),
-                       "基线键与规则名不再一一对应：多出来的键会被当成 -1 处而恒绿，"
+        // 2026-09-22 改名那次就补了这条等式；2026-09-25 #68 把它从"基线键"改成"两键并集"，
+        // 因为 `tokenReference` 已经从债表搬进读数表——只查一张表就会漏掉另一张。
+        XCTAssertEqual(Self.ruleNamesCovered, Set(PerfHitchScan.rules.map(\.name)),
+                       "债表加读数表与规则名不再一一对应：多出来的键会被当成 -1 处而恒绿，"
                        + "少掉的名字则完全没人管")
         XCTAssertEqual(Set(Self.ownerNotes.keys), Set(PerfHitchScan.rules.map(\.name)),
                        "有规则没写负责人，或负责人讲了一条不存在的规则")
-        for rule in PerfHitchScan.rules where counts[rule.name] == nil {
-            problems.append("规则「\(rule.name)」没有计数结果，扫描器漏了一条")
-        }
-        for (rule, baseline) in Self.knownBaseline {
-            let now = counts[rule] ?? -1
-            if now > baseline {
-                let hits = scan.hits[rule, default: []].prefix(12).joined(separator: "\n    ")
-                problems.append("""
-                「\(rule)」从基线 \(baseline) 涨到 \(now)（新增 \(now - baseline) 处）
-                    负责人/终点：\(Self.ownerNotes[rule] ?? "未写")
-                    \(hits)
-                """)
-            }
-        }
+        // 判定**只此一处入口**（`ratchetProblems`）：元测试和被跑的那条走同一段代码，
+        // 否则会出现"测试绿着而闸门是另一套逻辑"——本仓为"同一判据两处入口"记过账。
+        problems += Self.ratchetProblems(counts: counts, hits: scan.hits)
         // 防"假零"的第二道：基线本身不许被偷偷清零。
         XCTAssertTrue(Self.knownBaseline.values.reduce(0, +) > 0, "基线全 0 等于没有守卫")
         Self.recordRenderPathReadout(counts: counts, scan: scan)
@@ -205,12 +182,9 @@ final class PerfHitchGuardTests: XCTestCase {
     /// 台账里要**点得到名字**：只有 `fullSort 10/10` 一行的话，还债的人还得自己
     /// 把守卫触发成红才知道现场在哪，所以明细逐条带"文件:行 + 原文"。
     static func recordRenderPathReadout(counts: [String: Int], scan: PerfHitchScan.ScanResult) {
-        let debt = knownBaseline.keys.sorted().map { rule -> String in
-            let baseline = knownBaseline[rule] ?? 0
-            let now = counts[rule] ?? -1
-            return now < baseline ? "\(rule) \(now)/\(baseline)（可拧到 \(now)）" : "\(rule) \(now)/\(baseline)"
-        }.joined(separator: "  ")
-        print("【渲染路径禁则】现量/上限 —— \(debt)")
+        // 一行字符串同时喂 stdout 与台账文件：**两个地方两个数**是本仓记过的那族缺陷。
+        let summary = readoutSummary(counts: counts)
+        print("【渲染路径禁则】\(summary)")
         // 台账**不写在 $TMPDIR**：那个目录 2026-09-21 被清过一次，对照组的封存产物就是这么
         // 丢的；而"拧基线前要拿现量、还债人要拿明细"依赖的正是这份文件——
         // 放在会被系统随手清掉的地方，等于一份只在今天可用的台账。
@@ -221,8 +195,10 @@ final class PerfHitchGuardTests: XCTestCase {
             .appendingPathComponent(".scratch")
         try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         let ledger = scratch.appendingPathComponent("tcoder-perf-renderpath-debt.txt")
-        var detail: [String] = ["HEAD=\(Date()) \(debt)"]
-        for rule in knownBaseline.keys.sorted() {
+        var detail: [String] = ["HEAD=\(Date()) \(summary)"]
+        // 债与读数**都要留明细**：读数掉破下限时，人要能一眼看出"是引用真少了，还是模式没打中"，
+        // 那需要的是同一批命中位置，而不是再来一遍扫描。
+        for rule in (Array(knownBaseline.keys) + Array(readings.keys)).sorted() {
             let hits = scan.hits[rule, default: []]
             detail.append("—— \(rule)：\(hits.count) 处")
             detail.append(contentsOf: hits.sorted().map { "   \($0)" })

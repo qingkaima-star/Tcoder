@@ -46,6 +46,9 @@ Views/Shell/SidebarRows.swift:89      ? Color(nsColor: .quaternaryLabelColor)
 
 - `PerfHitchScan.rules` 拆成 `dynamicColorConstruction`（现造，上限 **2**，终点 **0**）
   与 `tokenReference`（引用，上限 62，**终点不是 0**，只许减不许增但不许当还债报数）。
+  ⚠ **本行后半句作废（2026-09-25 #68）**：那次只改了名字与注释，**机制里那条读数仍留在债表里吃零余量上限**，
+  于是"新写一处正确的令牌取色"会把门禁打红——正是这条拆分的初衷的反面。现在它住在
+  `PerfHitchGuardTests+Readings.swift`，**只有下限 40**（防模式退化），往上涨不再被拦。
 - 两条各配**双向**元测试：构造样例必须红、令牌引用必须不被判成构造
   （模式一旦放宽到把 `.textColor` 也算债，它会立刻长出 62 处"新债"，那条反向断言当场红）。
 - 补一条我一直漏的洞：基线取不到计数会退化成 `-1` 而 `-1` 永远不"超"上限
