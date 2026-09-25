@@ -122,6 +122,11 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // 一条免检通道，除非当场点名。这次仍然漏了（合入前一格），是手工
         // `ls scripts | grep '^perf_'` 与名单求差集才发现的 ⇒ 反向守卫记在任务 #75。
         "perf_update_stacks.py",
+        // 09-25 #76 的连带一步：`perf_trace_summary.py` 涨到 417 行撞「巨大文件 400」口径，
+        // 按"拆文件才是修复"把样本资格与基线新鲜度那一层搬进 `perf_eligibility.py`（三枚函数一字未动）。
+        // **第十三次**用同一条规矩：搬出来的那片当场点名——不点名就等于给它开免检通道。
+        // （这次是在同一笔里点的，没有等 `ls | comm` 事后抓。）
+        "perf_eligibility.py",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。

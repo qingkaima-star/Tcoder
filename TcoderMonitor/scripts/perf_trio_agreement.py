@@ -48,7 +48,8 @@ import sys
 
 from perf_trace_metrics import disp_values, fps_counts, percentile
 from perf_update_caliber import dedupe_pairs
-from perf_trace_summary import period_eligibility, summary_load
+from perf_eligibility import period_eligibility      # 资格判据的**真家**（09-25 从 summary 层拆出）
+from perf_trace_summary import summary_load
 
 SPREAD_BAR = 2.0          # hitch/s 极差比上限（保守）
 FPS_SPREAD_BAR = 10.0     # 出帧 p50 极差上限（帧/s）

@@ -434,6 +434,38 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
    **不做合成输入**（本机 System Events 权限被拒，`CGEvent.post` 会被静默丢弃，
    那只会造出"交互期 0 hitch"的假绿），拿不到脉冲文件就**明写"未覆盖"**，不许拿 idle 档的数冒充。
 
+## 4.2 归因档（`BLAME_INSTRUMENT=1`）：只回答「这段卡在跑什么」，不参与 §1.3 的达标判定
+
+**为什么单独一档**：长 `update` 的调用栈归因要求 hitches 家族与 Time Profiler 落在**同一次录制**里，
+否则两条时间轴是两个窗口，join 出来的栈属于另一段时间——数字各自都真、结论是假的，
+这比报错难发现（它看着就是一张正常的归因表）。开法：
+
+```bash
+MODE=idle BLAME_INSTRUMENT=1 scripts/perf_run_batch.sh blame1 3 1800
+python3 scripts/perf_update_stacks.py <那一趟的产物目录> --min-ms 100
+```
+
+**这一档被结构上挡在达标之外**，不靠自觉：`period_eligibility`（住在 `perf_eligibility.py`）
+读到 `meta` 里的 `blame_instrument=1` 就判「不给资格」，报表表头与一致性尺 `_meta_or_none`
+共用同一个出口 ⇒ 一个问题上只有一把判据。理由不是洁癖：这一档在被测进程身上多挂了一枚 1 ms 采样器，
+拿它去认证「没被采样器改过的条件」就是自欺。
+
+**尺子的三条口径**（写在 `perf_update_stacks.py` 头注，判定处只此一家）：
+同窗是硬前提（`meta` 里没有 `blame_instrument` 就**拒绝出数**，显式写 `0` 也拒）；
+窗口里 0 个样本只能说「取不到」，不能说「没有栈」（1 ms 采样有空隙）；
+叶子帧剔掉 RunLoop 管道帧，但剔掉多少照印。
+行→事件与达标口径共用 `unique_event_spans`——一条 update 在表里带多枚 `event-concept`
+（Brown 与 Red 各占一行），所以是「6 行 → 3 个事件」，不是重复录制。
+
+**归属必须出声**：手动 `--attach` 出来的探针档没有 `binary=` / `measured_rev=`，
+尺子会先打一行「⚠ 这份栈说不出属于哪份内容……只能当线索，不许写进缺陷单」。
+这不是假想——2026-09-25 就被这种形状骗过一次：那批 `_platform_memcmp` 热点其实来自
+`.scratch/rev-trees/<旧 rev>` 的产物，不是当时的 main。
+
+**守卫**：selfcheck 第 63 项十格（同窗、双行收成事件、区间外不许点名、别家进程不许顶包、
+没采到栈写「取不到」、管道帧剔掉但照印、缺表拒跑、归属三态）＋第 63b 项（附加仪器确实作为
+**一个**参数进 `xctrace`、导出落 `blame-time-profile.xml` 而不盖掉认证档那份 `time-profile.xml`）。
+
 ## 5. 分工（零文件重叠，按"谁消费谁负责"）
 
 ### M0 总工串行（不占三家名额，`ws/perf-base` 一棵树，我 merge）
