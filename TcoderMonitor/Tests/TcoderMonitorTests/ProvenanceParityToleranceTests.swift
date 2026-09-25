@@ -59,6 +59,35 @@ final class ProvenanceParityToleranceTests: XCTestCase {
         }
     }
 
+    /// 抠出 `IGNORED_PROJECT_KEYS = ( … )` 里逐格点名的项目身份免检键。
+    private func ignoredProjectKeys(in text: String) -> [String] {
+        guard let start = text.range(of: "IGNORED_PROJECT_KEYS = (") else { return [] }
+        let body = text[start.upperBound...]
+        guard let end = body.range(of: ")") else { return [] }
+        return body[..<end.lowerBound].components(separatedBy: ",")
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " \"\n\t")) }
+            .filter { $0.hasPrefix("project.") }
+    }
+
+    /// #64：`project.*` 整族免检 ⇒ 主角字段 `project.path` 至今没有跨面守卫。
+    /// 收窄成逐格点名之后，**两头各钉一次**：名单本身不许再长成前缀/通配，
+    /// 尺子也不许再用 `startswith` 去兜整族（那是当年那个洞的原形状，不是"另一种写法"）。
+    func testProjectExemptionIsEnumeratedAndNeverAPrefix() throws {
+        let text = try parityScriptText()
+        let keys = ignoredProjectKeys(in: text)
+        XCTAssertFalse(keys.isEmpty, "一条项目身份免检键都没扫到 ⇒ 解析坏了，这条守卫是永真绿")
+        XCTAssertFalse(keys.contains("project.path"),
+                       "「project.path」被免检 ⇒ 跨面路径拼写分叉（#60）又没人看了")
+        for key in keys {
+            XCTAssertFalse(key.hasSuffix("."), "免检键 \(key) 是个前缀，会连带免掉整个 project 家族")
+            XCTAssertFalse(key.contains("*"), "免检键 \(key) 用了通配：同上")
+        }
+        XCTAssertFalse(text.contains("startswith(IGNORE"),
+                       "对表尺子又拿前缀整族免检 ⇒ 这就是 #64 立案时的原始形状")
+        XCTAssertTrue(text.contains("path in IGNORED_PROJECT_KEYS"),
+                      "项目身份那一族没走精确匹配 ⇒ 这条守卫只是在读一份没人用的常量")
+    }
+
     // MARK: - 缺席那两句读数必须点名对的那一侧
 
     /// 喂两份**形状已知**的合成报告给真脚本：GUI 少一键、CLI 少一键，各自的读数要说对是谁缺。
