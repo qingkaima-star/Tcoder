@@ -326,7 +326,7 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
     | `dynamicColorConstruction` | 2/2 | **0** | 真违规：渲染路径里现造动态色（2026-09-22 起才有尺子；归 UI 流） |
     | `fullSort` | 9/9 | **0** | 真违规：body 内全量排序（缓存或挪到 publish） |
     | `syncFileIO` | 2/2 | **0** | 真违规：body 内 `exists`/`attributesOfItem` |
-    | `tokenReference` | 62/62 | **不是 0** | 旧名 `dynamicNSColor`。取色本身没错，错的是"每次访问现造"。达标判据换成两件事：① `Design/**` 里不许再出现 `var color: Color {` 这类计算属性（已有守卫）；② 引用点不许嵌在 O(n) 循环 / Mark 闭包里重复求值（只减不增 + 人工核）。 |
+    | `tokenReference` | 62/**下限 40** | **不是 0，也不是债**（#68 起它是**读数**，住 `PerfHitchGuardTests+Readings.swift`）。取色本身没错，错的是"每次访问现造"。⚠ 2026-09-22~09-25 期间它曾以 `62/62` 零余量**上限**的形式留在债表里，于是"body 里新写一处正确的令牌取色"会被门禁打红——那正是这条拆分的初衷的反面，机制与注释互相矛盾了三天。达标判据仍是两件事：① `Design/**` 里不许再出现 `var color: Color {` 这类计算属性（已有守卫）；② 引用点不许嵌在 O(n) 循环 / Mark 闭包里重复求值（**这条靠人工核，不靠上限**——上限只会拦错方向）。 |
     **不许为了凑"零动态色"去删令牌引用**——那会同时砸掉观感一致性与 T8（颜色承载语义），
     属于"为了指标改语义"，是本规范第一条禁止的事。
 - **T6 合成层预算**：内容层 0 填充、投影只给 `.floating`、每屏材质/backdrop 层 ≤ 2。
