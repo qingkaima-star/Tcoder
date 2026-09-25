@@ -57,7 +57,7 @@ selfcheck_probe_sentinel() {  # selfcheck_probe_sentinel <outdir>
 selfcheck_period_eligibility() {  # selfcheck_period_eligibility <outdir>
   # 21) 「声明了什么档」和「收尾复核是否同意」必须一起判。
   #     这两个标记此前只有写的人没有读的人 ⇒ 整窗没人动的 interaction 样本
-  #     照样打印「有资格答 T1」。四种形状各钉一次，且**两个否定必须与肯定不同**
+  #     照样打印「有资格答 T1」。八种形状各钉一次，且**两个否定必须与肯定不同**
   #     （否则这条断言会被一个恒真的实现糊过去）。
   local r
   r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
@@ -70,12 +70,17 @@ cases = [("clean-idle", {"period": "idle"}),
          # 第三种打回形状：声明与复核**一致**，但窗口里整机在忙（包 18 的窗口内自采）。
          # 为什么必须进来：2026-09-23 20:49 三趟 idle 全被它打回，而表头当时说"互相矛盾"，
          # 于是我去查一个根本不存在的期间谎报 —— 归类错了的拒因比没有拒因更费人。
-         ("busy-idle", {"period": "idle", "contaminated_by_foreign_load": "1"})]
+         ("busy-idle", {"period": "idle", "contaminated_by_foreign_load": "1"}),
+         # 同窗双仪器档（归因那一趟，#43/#73）：两档都一律不给资格。它**不是坏样本**，
+         # 而是"不是同一把尺量出来的那个量"——被测进程身上多了一枚 1 ms 采样器。
+         # 这一维必须由这里读回来（而不是只写在 meta 里）：否则归因档会去填 §1.3 的 3/3。
+         ("blame-idle", {"period": "idle", "blame_instrument": "1"}),
+         ("blame-inter", {"period": "interaction", "blame_instrument": "1"})]
 print("|".join("%s=%s" % (k, "Y" if pe(v)[0] else "N") for k, v in cases))')
   # 注意 `case` 里的 `|` 是**或**不是"与"：写成 `a=Y|b=N` 会被读成两个候选模式，
   # 于是"全串等于预期"永远匹不上——第一版就是这么红的（红得有价值：它当场把实际值打给我看）。
-  [ "$r" = "clean-idle=Y|dirty-idle=N|clean-inter=Y|nobody-inter=N|no-meta=Y|busy-idle=N" ] \
-    || { fail "五种形状的资格判定不对（拿到 ${r:-解析失败}）——该打回的样本又能蒙混了"; return; }
+  [ "$r" = "clean-idle=Y|dirty-idle=N|clean-inter=Y|nobody-inter=N|no-meta=Y|busy-idle=N|blame-idle=N|blame-inter=N" ] \
+    || { fail "八种形状的资格判定不对（拿到 ${r:-解析失败}）——该打回的样本又能蒙混了"; return; }
   # 反向钉：结论话术要跟着翻转，不能只改退出码、表头还写着"有资格"
   local yes no
   yes=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c \
@@ -92,7 +97,7 @@ print("|".join("%s=%s" % (k, "Y" if pe(v)[0] else "N") for k, v in cases))')
     'from perf_trace_summary import refusal_headline as rh; print(rh())')
   case "$head" in *"互相矛盾"*) fail "表头又把每一种打回都说成「互相矛盾」（拿到「$head」）⇒ 拒因有两处出口，且这一处会指错方向" ;; esac
   case "$head" in *"打回"*"不得作为结论"*) ;; *) fail "打回那一行不再出声（拿到「$head」）——少印一行说明就等于让它蒙混" ;; esac
-  ok "期间资格：五种形状各判一次，表头话术跟着翻转，且打回那一行不替原因说话"
+  ok "期间资格：八种形状各判一次，表头话术跟着翻转，且打回那一行不替原因说话"
 }
 
 selfcheck_probe_self_sufficient() {  # selfcheck_probe_self_sufficient <outdir>

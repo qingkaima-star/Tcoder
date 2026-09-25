@@ -62,16 +62,21 @@ post_window_quiescence() {  # post_window_quiescence <outdir> <窗口秒数>；�
   fi
 }
 
-export_table() {  # export_table <trace> <schema> <outdir>
-  local trace="$1" schema="$2" out="$3"
-  [ "$DRY_RUN" = "1" ] && { echo "    \$ xctrace export --input $(basename "$trace") --xpath '…@schema=\"$schema\"' --output $out/$schema.xml"; return 0; }
+export_table() {  # export_table <trace> <schema> <outdir> [落盘文件名覆写]
+  # 第 4 个参数**只给归因档用**：同一次双仪器录制里的 time-profile 表，schema 名与
+  # 独立那一趟完全相同，若按 schema 落盘会**盖掉认证档的 time-profile.xml**
+  # ——两份不同窗口的读数共用一个文件名，是"两个入口一个数"那条老病的文件版。
+  # 所以这里必须能改名落盘（`blame-time-profile.xml`），让两把尺各读各的。
+  local trace="$1" schema="$2" out="$3" name="${4:-}"
+  [ -n "$name" ] || name="$schema.xml"
+  [ "$DRY_RUN" = "1" ] && { echo "    \$ xctrace export --input $(basename "$trace") --xpath '…@schema=\"$schema\"' --output $out/$name"; return 0; }
   xcrun xctrace export --input "$trace" \
     --xpath "/trace-toc/run[@number=\"1\"]/data/table[@schema=\"$schema\"]" \
-    --output "$out/$schema.xml" >/dev/null 2>&1
-  if [ -s "$out/$schema.xml" ]; then
-    echo "    导出 $schema.xml（$(wc -c < "$out/$schema.xml" | tr -d ' ') 字节）"
+    --output "$out/$name" >/dev/null 2>&1
+  if [ -s "$out/$name" ]; then
+    echo "    导出 $name（$(wc -c < "$out/$name" | tr -d ' ') 字节）"
   else
-    rm -f "$out/$schema.xml"
+    rm -f "$out/$name"
     echo "    ⚠ 表 $schema 在该 trace 里不存在或为空 —— 汇总表会写「未覆盖」，不会编数"
   fi
 }
@@ -139,7 +144,7 @@ batch_hang_summary() {  # batch_hang_summary <挂死趟数> <用掉的补试次�
   echo "      补试不换窗口、不顺延预热（同一枚实例、同一个 measured_rev）；挂死那几趟的 REFUSED 原样留在盘上，一致性尺照旧跳它们"
 }
 
-record_bounded() {  # record_bounded <outdir> <trace 路径> <模板> <时长秒>
+record_bounded() {  # record_bounded <outdir> <trace 路径> <模板> <时长秒> [附加仪器]
   # 触发这条的实测（09-23 10:38→11:50）：被测实例在录制中途消失，而 `--time-limit 20s`
   # **从不触发**——它计的是采到的时间，目标没了就没有时间可计。于是 xctrace 挂在死目标上
   # 一整小时（trace 停在 52 KB），整条 M2 收尾链白烧一个稀缺窗口。
@@ -147,12 +152,21 @@ record_bounded() {  # record_bounded <outdir> <trace 路径> <模板> <时长秒
   # 也没有"被测进程活到窗口末尾没有"这一步复核。
   # 本机没有 coreutils 的 `timeout`（那个叫 gtimeout），所以用"后台起 + 轮询 +
   # 只收自己 spawn 的那个 pid"（横切约束 2.1：绝不按名字广播 kill）。
-  local out="$1" trace="$2" template="$3" secs="$4" pid rc=0 waited=0
+  #
+  # 第 5 个参数是**归因档专用**的附加仪器（`BLAME_INSTRUMENT=1` 时传 `Time Profiler`）：
+  # 一次录制同时挂两枚仪器，两条时间轴才天然同窗，才允许把长 update 归到栈上（#43）。
+  # 它**必须**由资格闸把这一档挡在达标计数之外（`period_eligibility` 读
+  # `blame_instrument`），否则就是拿"被采样器改过的条件"去认证"没被改过"。
+  local out="$1" trace="$2" template="$3" secs="$4" extra="${5:-}" pid rc=0 waited=0
   local limit=$((secs + RECORD_SLACK_S))
-  echo "    \$ xcrun xctrace record --template $template --attach $PID --time-limit ${secs}s --output $(basename "$trace")（墙钟上限 ${limit}s）"
+  echo "    \$ xcrun xctrace record --template $template --attach $PID --time-limit ${secs}s${extra:+ --instrument $extra} --output $(basename "$trace")（墙钟上限 ${limit}s）"
   [ "$DRY_RUN" = "1" ] && return 0
-  xcrun xctrace record --template "$template" --attach "$PID" \
-    --time-limit "${secs}s" --output "$trace" --no-prompt --quiet &
+  # 参数向量用 `set --` 造，**不用数组**：本机 /bin/bash 是 3.2，`set -u` 下展开空数组
+  # 直接 `unbound variable`（实测 rc=127）—— 那会让**每一趟常规录制**死在这一步，
+  # 而不是只在归因档出错。前面五位已经取进局部变量，改 `$@` 不丢参数。
+  set -- --template "$template" --attach "$PID" --time-limit "${secs}s"
+  [ -n "$extra" ] && set -- "$@" --instrument "$extra"
+  xcrun xctrace record "$@" --output "$trace" --no-prompt --quiet &
   pid=$!
   while [ "$waited" -lt "$limit" ]; do
     kill -0 "$pid" 2>/dev/null || break     # kill -0 只探活，不发信号

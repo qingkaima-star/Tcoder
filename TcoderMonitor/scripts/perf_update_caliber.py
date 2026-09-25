@@ -28,15 +28,25 @@ import statistics
 from perf_trace_metrics import over_budget, percentile
 
 
-def event_durations(pairs):
-    """(起始, 时长) 行 → 事件时长列。同一起始同一时长才算重复（Brown / Red 两行）。"""
+def unique_event_spans(pairs):
+    """(起始, 时长) 行 → 事件区间列 `[(起始, 时长)]`：同一起始同一时长才算重复（Brown / Red 两行）。
+
+    去重这件事**只有这一把尺**（#44 那次"同一份 trace 两处入口两个数"的根治）。
+    归因侧需要留下起始时刻去对 time-profile 的时间轴，所以这里另开一个"保起始"的出口，
+    而 `event_durations` 就是它的一列投影——两条规则不可能各长一份。
+    """
     seen, out = set(), []
     for start, duration in pairs:
         key = (round(start, 1), round(duration, 2))
         if key not in seen:
             seen.add(key)
-            out.append(duration)
+            out.append((start, duration))
     return out
+
+
+def event_durations(pairs):
+    """(起始, 时长) 行 → 事件时长列。口径同上，只是把起始丢掉。"""
+    return [duration for _, duration in unique_event_spans(pairs)]
 
 
 def dedupe_pairs(measure):

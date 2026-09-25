@@ -85,6 +85,14 @@ def period_eligibility(meta):
     ⇒ 写进 meta 不等于被看见；判资格必须把复核读回来。
     """
     period = str(meta.get("period") or "idle")
+    # 【同窗双仪器档不参与达标判定】归因那一趟为了拿栈，在同一次录制里多挂了一枚
+    # Time Profiler ⇒ 被测进程身上真的多了一个采样器。它的读数**不是假的**，
+    # 但**不是同一把尺量出来的那个量**：拿它去填 §1.3 的 3/3，等于用被仪器改过的条件
+    # 认证"没被仪器改过"。这一维与「人手污染」同一条纪律：**写进 meta 的标记必须有读者**，
+    # 而这里就是那个读者（`perf_trio_agreement._meta_or_none` 走同一个出口 ⇒ 两把读者一把判据）。
+    if str(meta.get("blame_instrument") or "").strip() == "1":
+        return False, ("这一趟挂了第二枚仪器（meta.blame_instrument=1，为了把长 update 归到调用栈）"
+                       "⇒ 采集条件与认证档不同，只用于定位，**不得**进 §1.3 的达标计数")
     # 窗口结束时整机在忙 ⇒ 两档都不作数（争用会把 hitch 间隔压到每帧一次，见交接笔记 §AB）。
     # 与「人手污染」同一条纪律：**写进 meta 的标记必须有读者**，否则等于没记。
     if str(meta.get("contaminated_by_foreign_load") or "") == "1":

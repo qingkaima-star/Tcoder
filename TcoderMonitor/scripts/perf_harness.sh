@@ -229,11 +229,28 @@ idle_record_hitches() {  # idle_record_hitches <outdir> <period>
   else
     echo "==> 1/4 录 Animation Hitches ${SECONDS_HITCHES}s（这期间不去碰鼠标键盘，否则量的就不是心跳）"
   fi
+  # 附加仪器**先在局部变量里算成空或非空**，不写成 `$( [ … ] && printf … )`：
+  # 那种形状把"取哪个仪器"藏进参数位，`bash -n` 看不见、读代码的人要看三遍。
+  local blame_tp=""
+  [ "${BLAME_INSTRUMENT:-0}" = "1" ] && blame_tp="$TEMPLATE_TP"
   run rm -rf "$out/hitches.trace"
-  record_bounded "$out" "$out/hitches.trace" "$TEMPLATE_HITCH" "$SECONDS_HITCHES"
+  record_bounded "$out" "$out/hitches.trace" "$TEMPLATE_HITCH" "$SECONDS_HITCHES" "$blame_tp"
   for t in "${HITCH_TABLES[@]}"; do
     [ "$DRY_RUN" = "1" ] || export_table "$out/hitches.trace" "$t" "$out"
   done
+  # 【归因档：同窗多挂一枚 Time Profiler，才答得出"这 1061 ms 主线程在跑什么"】
+  # 独立录两趟（hitches.trace / time.trace）在时间轴上是**两个窗口**，join 出来的栈属于
+  # 另一段时间——数字各自都真、结论是假的，比报错难发现。⇒ 只在一次录制里同时开两枚仪器
+  # 才允许 join，并把那棵树导成 `blame-time-profile.xml`（改名的理由见 `export_table` 注释：
+  # 不许盖掉认证档那份 time-profile.xml）。
+  # 这一档**由 `period_eligibility` 挡在 §1.3 达标计数之外**（meta.blame_instrument=1 有读者），
+  # 它只用于定位缺陷，不用于证明达标。
+  if [ "${BLAME_INSTRUMENT:-0}" = "1" ]; then
+    [ "$DRY_RUN" = "1" ] \
+      || export_table "$out/hitches.trace" "time-profile" "$out" "blame-time-profile.xml"
+    meta_write "$out" "blame_instrument=1"
+    echo "    归因档：hitches 家族与 time-profile 同窗（这一档不参与达标判定，只回答「长块在跑什么」）"
+  fi
   # 录制窗口一结束就问一次人手探针：这是"这批能不能进对比表"的判据，必须在导表之后、
   # 在下一个窗口（Time Profiler）开始之前问，否则两个窗口的静默读数会互相顶包。
   [ "$DRY_RUN" = "1" ] || post_window_quiescence "$out" "$SECONDS_HITCHES"
