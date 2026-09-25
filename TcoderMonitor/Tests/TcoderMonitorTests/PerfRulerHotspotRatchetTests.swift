@@ -111,6 +111,11 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // selfcheck 并把输出归一后逐字 diff。搬出来的那片照样要点名：
         // 这是"新建/搬出的文件必须当场被量"**第十次**落到这张表上。
         "perf_selfcheck_context.sh",
+        // 09-25 同一条债第四次到期：`perf_selfcheck_eligibility.sh` 到 **388/400**，
+        // 把"一个读数怎么被解释成结论"那三项（26/27/41）搬进 `perf_selfcheck_attribution.sh`
+        // （388→294 / 新块 110 行，逐字搬，拆前拆后 selfcheck 输出归一后逐字 diff）。
+        // 第十一次用这条规矩：**搬出去的那片照样要点名**。
+        "perf_selfcheck_attribution.sh",
     ]
 
     /// 包根（`TcoderMonitor/`）：本文件 → TcoderMonitorTests → Tests → TcoderMonitor。
