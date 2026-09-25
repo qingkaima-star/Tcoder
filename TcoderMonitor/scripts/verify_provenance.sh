@@ -92,7 +92,17 @@ echo "  built at : ${MF_TIMESTAMP:-?}"
 echo "  delivered: ${ACTUAL_SHA}"
 echo "---"
 if [ "$fail" = "0" ]; then
-  echo "全部通过：产物可机械证明来自 ${HEAD_SHA}"
+  # 收尾那句必须分两态——**这两种"通过"不是一件事，而只有第二种容易说谎**：
+  #   · rev 相同 ⇒ 产物确实是从这个提交建的，"来自 HEAD" 说得出口；
+  #   · rev 不同、只按产物码 tree 放行 ⇒ 能证明的只是"与 HEAD 同一份**产品码**"，
+  #     那枚二进制自己是从 `${MF_REVISION}` 建的。把这一态也写成"来自 HEAD"，
+  #     就是在给 #62 那句「认证 = 交付头」递一张它买不到的收据（报数的人会照着抄）。
+  if [ "$PROV_BY_TREE" = "1" ]; then
+    echo "全部通过：产物与 ${HEAD_SHA} **同一份产物码**（该二进制自身记的是 ${MF_REVISION}）"
+    echo "  ⇒ 只能报「与交付头同一份产品码」，**不许**报「认证/取证 = 交付头 ${HEAD_SHA}」；差的虽只是 docs/scripts，措辞不能替它合并。"
+  else
+    echo "全部通过：产物可机械证明来自 ${HEAD_SHA}"
+  fi
 else
   echo "存在失败项 —— 不要交付这个产物"
 fi
