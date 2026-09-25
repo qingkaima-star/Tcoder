@@ -361,7 +361,7 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
    | 交互期 **hitch 帧 = 0** | xctrace `hitches` 表（`interact` 档） | 它只列**超预算**的那些帧 |
    | **p95 帧间隔 ≤ 8.4 ms** | **只有 `FramePulse`**（`pulse` 档 / `probe` 档） | 这是**全部帧**的分位数；hitches 表没有这一列，`displayed-surfaces-per-second` 也只有"每秒几张"——09-22 之前这条**没有任何仪器在量** |
    | 1.5 s 心跳主线程占用 ≤ 4.0 ms | xctrace `hitches-updates`（`idle` 档） | 逐次 update 时长；只用 max 判会同时说反两件事（见 §1.6） |
-   | body/Mark 零动态色/零排序/零同步 I/O | 静态守卫 `PerfHitchGuardTests` + 台账 | 每条打"现量/上限"并逐条可点名 |
+   | body/Mark 零动态色/零排序/零同步 I/O | 静态守卫 `PerfHitchGuardTests` + 台账 | 每条打"现量/上限"并逐条可点名。**这句的真实射程（#65，09-25 写死）**：跨度只认 `var body: some View` 与 `Chart { … }`；helper 跳展开**只在同一份文件内**；词表认的是那几类形状（09-25 起含 `resolvingSymlinksInPath()` 与 `Process(`/`NSTask(`）。⇒ 它答的是"**渲染跨度内**没有这些写法"，**不答**"主线程在任何地方都没打过盘"——后者由 §D-持久化 那条量级尺与 T2/T4 的实测管 |
 
    ⇒ 交叉核对的义务：`pulse` 读的是 **CVDisplayLink 回调送达时刻**，不等于"上屏时刻"。
    同一次 `interact` 采样里的 `displayed-surfaces-per-second` 是独立第二把尺子
