@@ -140,12 +140,13 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_chain_message_names_the_compared_tree "$out"  # 58) 拒人行印的就是比对那棵树（印与比同形）+ is_ours 双向
   item selfcheck_long_sleep_defers_the_trap "$out"  # 59) trap 的时效性：长 sleep 确实拖住（反例）／分片睡 8 秒内收尾（正例）
   item selfcheck_trapped_scripts_have_no_long_sleep "$out"  # 60) 带 trap 的 perf_ 脚本里不许留长 sleep（要长等就走 nap）
+  item selfcheck_refused_trace_reclaim "$out"  # 61) 判废趟的 GB 级原始 trace：被拒∧超同档线才点名、默认只印、显式授权才删（#70）
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：那个 for 必须在 cmd_selfcheck 之前，
 # 因为编排器一跑就要点到里面的函数名。
 # shellcheck source=/dev/null
-for _part in ruler_shapes gates eligibility launchers tables chain trap windows; do
+for _part in ruler_shapes gates eligibility launchers tables chain trap windows hygiene; do
   source "scripts/perf_selfcheck_${_part}.sh"
 done
 unset _part

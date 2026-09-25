@@ -24,14 +24,19 @@
 source "$(dirname "${BASH_SOURCE[0]}")/perf_probes.sh"  # 探针族搬出去了，见那个文件的头注
 source "$(dirname "${BASH_SOURCE[0]}")/perf_measure_io.sh"  # 采集与落盘那一层，见那个文件的头注
 source "$(dirname "${BASH_SOURCE[0]}")/perf_chain_guard.sh"  # 「同树只一条链」＋归属行的有界显示（`path_for_display`）
+# 收尾磁盘卫生这一族 2026-09-25 整族搬进 `perf_reclaim.sh`（本文件当时 378/400，
+# 就地补第 ④ 条就是把尺寸债再推一笔）。第 22 项反例照旧 source 本文件就调得到。
+source "$(dirname "${BASH_SOURCE[0]}")/perf_reclaim.sh"
 # ── 磁盘卫生：第七维（2026-09-21 把这台机器吃到只剩 4.4 GiB 之后加的）────────
 # 根因不在我的样本目录，而在 **xctrace 的中间产物**：`instruments*.ktrace`
 # 默认落在 `$TMPDIR`，而采集进程被 kill、超时或崩溃时**不会自己清**。
-# 现场是 21 个孤儿共 103 GB。⇒ 三条硬规矩进代码，不靠我记得：
+# 现场是 21 个孤儿共 103 GB。⇒ 四条硬规矩进代码，不靠我记得：
 #   ① 样本根目录 = 仓库内 `.scratch/`（AGENTS §1.6 的一次性产物落点，已 gitignore；
 #      不再用全局 /tmp，也不再靠 $TMPDIR）
 #   ② 每轮收尾固定扫残留 + 确认自己起的采集进程真退了
 #   ③ 可用低于阈值就**拒跑**（与其余六维同形状、同一个 hard 标记）
+#   ④ 判废那一趟留下的 GB 级原始 trace 每轮报一次可回收体积（缺陷 #70：① 把产物
+#      搬进仓库之后，② 的扫残留就一直只扫一个不再有人写字的目录）
 SCRATCH="${SCRATCH:-$(git rev-parse --show-toplevel)/.scratch}"
 # 阈值与判定都在 `disk_headroom_bad`（环境变量 TCODER_MIN_FREE_GIB 可覆盖）
 QUIESCE_MIN="${QUIESCE_MIN:-5}"  # 静默合格线（与 perf_harness.sh 同值）。写在闸门这边，
@@ -349,30 +354,4 @@ json.dump({"projects": [{"id": uuid, "name": "Tcoder（性能沙箱）", "path":
            "selectedProjectID": uuid},
           open("%s/projects.json" % support, "w"), indent=2)
 PY
-}
-
-sweep_orphan_traces() {  # 只删**没有任何进程打开着**的 .ktrace 中间产物
-  # 为什么先看 lsof：正在录的那趟也会在自己的 $TMPDIR 里留 .ktrace，
-  # 无差别删会把**正在进行的采集**打断（那是比留残骸更坏的修法）。
-  local root="${1:-${TMPDIR:-/tmp}}" f kept=0 deleted=0
-  [ -d "$root" ] || { printf '孤儿 trace：目标目录不在（%s），跳过\n' "$root"; return 0; }
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    if lsof -- "$f" >/dev/null 2>&1; then kept=$((kept + 1)); continue; fi
-    rm -rf -- "$f" && deleted=$((deleted + 1))
-  done < <(find "$root" -maxdepth 1 \( -name 'instruments*.ktrace' -o -name '*.ktrace' \) 2>/dev/null)
-  printf '孤儿 trace：删 %d 个、仍被进程打开而保留 %d 个（根 %s）\n' "$deleted" "$kept" "$root"
-}
-
-post_run_disk_hygiene() {  # 每轮收尾固定两件事：进程真退了没 + $TMPDIR 残骸
-  local left
-  # `|| true` 不是装饰：`pgrep` 在"没有 xctrace"时退出码是 1，
-  # 而 `set -e` 会让整个收尾**在那一行中止** —— 于是"机器干净"这种最好的情况
-  # 反而跳过了扫残骸。新加的第 22 项收尾检查就是把它抓出来的东西。
-  left=$(pgrep -x xctrace 2>/dev/null | tr '\n' ' ' || true)
-  [ -n "$left" ] && echo "    ⚠ 还有 xctrace 在场（pid ${left% }）——先别开下一趟" >&2
-  printf '    %s\n' "$(sweep_orphan_traces "${1:-${TMPDIR:-/tmp}}")"
-  # 阈值名收敛到 TCODER_MIN_FREE_GIB 时漏改了这行：`set -u` 下它直接**中止收尾**，
-  # 于是"录成功的一趟"被上层记成失败（今晚就是这样丢了一份合格的心跳期读数）。
-  echo "    磁盘可用 $(disk_free_gib) GiB（低于 ${TCODER_MIN_FREE_GIB:-20} 就不开新趟）"
 }
