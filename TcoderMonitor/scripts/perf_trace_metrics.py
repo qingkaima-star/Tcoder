@@ -117,14 +117,34 @@ def launch_ready_ms(rows):
       · 没有尾巴段（进程很快就退出）⇒ 取所有段的末端最大值，那本来就是全部启动成本。
     空表返回 None（调用方按"未观测到"处理，不许拿 0 当达标）。
     """
-    spans = [(s, d) for s, d in rows if d and d > 0]
+    spans, horizon = window_span_and_tails(rows)
     if not spans:
         return None
-    horizon = max(s + d for s, d in spans)
-    tails = [s for s, d in spans if d > horizon / 2.0]
+    tails = [s for s, d in spans if is_window_tail(d, horizon)]
     if tails:
         return min(tails)
     return horizon
+
+
+def window_span_and_tails(rows):
+    """(有效跨度段, 整表末端) —— **阈值只在这一处定义**（#71）。
+
+    为什么要单独把"跨度"抽出来：`launch_ready_ms` 早就剔掉了"活到录制结束"那段运行期
+    （2026-09-21：全表求和 10338 ms ≈ 录制时长，真实启动段 837 ms 就结束），
+    但同一份数据在 `trace_report.py cmd_switches` 里仍被当"冷构建成本"印成表格列。
+    ⇒ 一道修好的闸只闭合了一个出口，另一个出口还在放同一个坏数。
+    """
+    spans = [(s, d) for s, d in rows if d and d > 0]
+    return spans, max((s + d for s, d in spans), default=0.0)
+
+
+def is_window_tail(duration_ms, horizon_ms):
+    """这一段是不是"活到窗口结束"的运行期尾巴：时长 > 整表跨度的一半。
+
+    与 `launch_ready_ms` **共用**这一条判据，不另立口径——两处对同一段"该不该剔"
+    意见不一致时，同一份 trace 就会出两个数（#44 那一族的成因）。
+    """
+    return bool(horizon_ms) and duration_ms > horizon_ms / 2.0
 
 
 NARROW_FLOOR_RATIO = 0.8

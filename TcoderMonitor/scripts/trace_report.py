@@ -36,8 +36,8 @@ import os
 import re
 import sys
 
-from perf_trace_metrics import (launch_ready_ms, FRAME_BUDGET_MS_DEFAULT, dist_line, interval_shaped, over_budget, percentile,
-                                read_json, write_json)
+from perf_trace_metrics import (launch_ready_ms, FRAME_BUDGET_MS_DEFAULT, dist_line, interval_shaped, is_window_tail,
+                                over_budget, percentile, read_json, window_span_and_tails, write_json)
 from perf_trace_summary import cmd_summary
 from perf_trace_threads import cmd_threads
 from perf_trace_xml import Doc, find_tag
@@ -204,10 +204,18 @@ def cmd_lifecycle(args):
     # 合计里含"活到窗口结束"的运行期，**不能当首帧**；就绪点看下一行。
     print("  启动到就绪 %.1f ms（尾巴段已剔除；合计只作跨度参考）" % ready if ready is not None
           else "  启动到就绪：未解出（表里没有带时长的周期，按未覆盖处理）")
+    # 最长周期是"启动成本"还是"活到录制结束的那一段"？用**与 launch_ready_ms 同一条**阈值判（#71）。
+    _, horizon = window_span_and_tails(spans)
+    tail = is_window_tail(longest[0], horizon)
+    if tail:
+        print("  ⚠ 最长周期 %s %.1f ms 超过整表跨度 %.1f ms 的一半 ⇒ 它是**跨度**（活到录制结束），"
+              "不是成本；拿去算\"冷构建花了多久\"会得到≈窗口长度"
+              % (longest[1], longest[0], horizon))
     if args.json:
         write_json(args.json, {"periods": len(rows), "total_ms": round(total, 2),
                                "ready_ms": None if ready is None else round(ready, 2),
-                               "max_period_ms": round(longest[0], 2), "max_period": longest[1]})
+                               "max_period_ms": round(longest[0], 2), "max_period": longest[1],
+                               "horizon_ms": round(horizon, 2), "max_period_is_window_tail": tail})
     return 0
 
 
@@ -216,7 +224,8 @@ def cmd_switches(args):
     root = args.directory
     dirs = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))) if os.path.isdir(root) else []
     print("== switch 档：逐页冷启动 ==")
-    print("| %-14s | %-14s | %-16s | %s |" % ("页", "首帧 ms", "冷构建周期合计 ms", "最长周期"))
+    print("| %-14s | %-14s | %-16s | %s |"
+          % ("页", "首帧 ms(页间可比)", "合计 ms(跨度参考)", "最长周期(跨度参考)"))
     n = 0
     for name in dirs:
         meta = read_json(os.path.join(root, name, "meta.json")) or {}
@@ -225,12 +234,23 @@ def cmd_switches(args):
         first = meta.get("first_frame_ms", "未观测到")
         first_txt = "未观测到" if first == "未观测到" else "%s ms" % first
         total = "%.1f" % life["total_ms"] if life else "未覆盖"
-        longest = "%s %.1f ms" % (str(life.get("max_period", ""))[:14], life.get("max_period_ms", 0.0)) if life else "—"
+        if not life:
+            longest = "—"
+        else:
+            # 三态：缺键＝这批测量根本没记这一维（老批次），**不许退化成 False**
+            # （那等于把"没判过"读成"判过、不是尾巴"，也就是读成成本可用）。
+            tail = life.get("max_period_is_window_tail")
+            mark = " →窗口末(跨度，非成本)" if tail is True else ("" if tail is False else " (未记该维)")
+            longest = "%s %.1f ms%s" % (str(life.get("max_period", ""))[:14],
+                                        life.get("max_period_ms", 0.0), mark)
         print("| %-14s | %-14s | %-18s | %s |" % (page[:14], first_txt[:14], total, longest))
         n += 1
     if n == 0:
         print("!! %s 下没有逐页子目录：switch 档没跑过或跑了 DRY_RUN" % root)
-    print("（首帧口径 = 带采样器、窗口出现即算；比裸启动慢，只用于页间横向比较。）")
+    print("（口径：**只有「首帧」是页间可比的量**——它 = 带采样器、窗口出现即算，比裸启动慢。\n"
+          "  「合计」与「最长周期」是 life-cycle-period 的**跨度**：App 起来后一直活到录制结束，\n"
+          "   标了「→窗口末」的那一格约等于窗口长度减去首帧，**不可当成本**（#71：这条告诫原先\n"
+          "   错挂在首帧那一列上，等于把两列不能用的数包装成可用）。）")
     return 0
 
 
