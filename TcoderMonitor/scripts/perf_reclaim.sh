@@ -26,6 +26,19 @@ report_refused_traces() {  # report_refused_traces [<样本根>]：印"被拒趟
   python3 "$ruler" "$root" || printf 'trace 回收：这一维没跑成（rc≠0），下次开录前手动跑一次它\n'
 }
 
+trace_path_in_use() {  # trace_path_in_use <路径>；返回 0 = 有进程正在用（含"里面某个文件被打开"）
+  # 只看退出码不够：`lsof +D` 找到东西也返回 1 ⇒ 只能数表体行数。
+  # 更要紧的是 `lsof -- <目录>` **看不见开在里面的文件**，而"正在录"就是把 trace
+  # 文件开在目录里 —— 2026-09-25 实测：开一个 `sleep < dir/data.bin`，前者 0 行、
+  # 后者 1 行。原来那一行守卫挡不住它声称要挡的那件事。
+  local path="$1" rows
+  rows=$(lsof -- "$path" 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')
+  [ "$rows" != "0" ] && return 0
+  [ -d "$path" ] || return 1
+  rows=$(lsof +D "$path" 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')
+  [ "$rows" != "0" ]
+}
+
 sweep_orphan_traces() {  # 只删**没有任何进程打开着**的 .ktrace 中间产物
   # 为什么先看 lsof：正在录的那趟也会在自己的 $TMPDIR 里留 .ktrace，
   # 无差别删会把**正在进行的采集**打断（那是比留残骸更坏的修法）。
@@ -33,7 +46,7 @@ sweep_orphan_traces() {  # 只删**没有任何进程打开着**的 .ktrace 中�
   [ -d "$root" ] || { printf '孤儿 trace：目标目录不在（%s），跳过\n' "$root"; return 0; }
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    if lsof -- "$f" >/dev/null 2>&1; then kept=$((kept + 1)); continue; fi
+    if trace_path_in_use "$f"; then kept=$((kept + 1)); continue; fi
     rm -rf -- "$f" && deleted=$((deleted + 1))
   done < <(find "$root" -maxdepth 1 \( -name 'instruments*.ktrace' -o -name '*.ktrace' \) 2>/dev/null)
   printf '孤儿 trace：删 %d 个、仍被进程打开而保留 %d 个（根 %s）\n' "$deleted" "$kept" "$root"

@@ -13,8 +13,11 @@
 #                唯一能解释「这档正常多大」的样本，下一轮的中位数就没有底座）；
 #   反例侧 2 —— 被拒但尺寸正常的趟 ⇒ **不许**被点名（那份 trace 还能回收重导）；
 #   反例侧 3 —— 样本不足的档 ⇒ 明写不判，且**不许**在该档里点名；
+#   反例侧 4 —— 一趟都没认出来的空样本根 ⇒ 必须明写"没有分母"，且**不许**印可回收计数
+#                （新克隆的树、或者目录命名口径改了的树，读起来都该是"没查成"而不是"干净"）；
 #   正例     —— 被拒 ∧ 超同档线 ⇒ 必须点名，默认只印不删，`TCODER_RECLAIM=1` 才删，
-#                删的时候只动 `*.trace`，判定与上下文（REFUSED / meta.json）原样留着。
+#                删的时候只动 `*.trace`，判定与上下文（REFUSED / meta.json）原样留着；
+#                第一层与 `archive-*/` 第二层各放一处，两层都要认得到。
 # 造尺寸用真写出来的字节：回收器量的是实际占盘块数，`truncate` 糊的稀疏文件
 # 量不出大小 —— 那把尺子故意不认「看起来大但盘上不存在」的身材。
 # =============================================================================
@@ -46,6 +49,9 @@ reclaim_fixture() {  # reclaim_fixture <dir>：四个形状各占一处
   mk_reclaim_run "$d" tcoder-perf-fix-interact-run4 240 0
   # switch 档只有 1 个样本 ⇒ 分母太小，整档不判（哪怕那个 trace 又大又被拒）
   mk_reclaim_run "$d" tcoder-perf-fix-switch-run1 240 1
+  # 第二层：判废之后被整批挪进 `archive-*/` 的那些趟也要在射程内
+  # （真实树上就有这么一批，只扫一层等于把"先攒着、以后再说"排除在回收之外）
+  mk_reclaim_run "$d/archive-fake" tcoder-perf-fix-idle-run6 240 1
 }
 
 selfcheck_refused_trace_reclaim() {  # 61) 判废趟的 GB 级 trace：该点名的点名、不该动的一个字不动
@@ -74,8 +80,12 @@ selfcheck_refused_trace_reclaim() {  # 61) 判废趟的 GB 级 trace：该点名
     fail "被拒且超同档线的那趟没被点名 ⇒ 回收这一维等于没上线（现读 $(tr '\n' '|' < "$txt")）"
     rc=1
   fi
-  if ! grep -qF '1 个 bundle 可回收' "$txt"; then
-    fail "点名的个数不是 1（该点的只有一处）⇒ 尺寸线或档位分母算错了"
+  if ! grep -qF 'tcoder-perf-fix-idle-run6/hitches.trace' "$txt"; then
+    fail "挪进 `archive-*/` 第二层的那趟没被认出来 ⇒ 回收器的射程还是只扫一层（真实树上就有一批判废趟在第二层）"
+    rc=1
+  fi
+  if ! grep -qF '2 个 bundle 可回收' "$txt"; then
+    fail "点名的个数不是 2（该点的是第一层与第二层各一处）⇒ 尺寸线或档位分母算错了"
     rc=1
   fi
   if ! grep -qF '合成夹具' "$txt"; then
@@ -114,13 +124,38 @@ selfcheck_refused_trace_reclaim() {  # 61) 判废趟的 GB 级 trace：该点名
       fail "回收这一维在裸 set -u 消费者下有未初始化量 ⇒ 收尾会中止、读数会丢：$hygiene"
       rc=1 ;;
   esac
-  if ! printf '%s\n' "$hygiene" | grep -qF '1 个 bundle 可回收'; then
+  if ! printf '%s\n' "$hygiene" | grep -qF '2 个 bundle 可回收'; then
     fail "收尾出口没把回收这一维印出来 ⇒ 尺子住在 scripts 里却没人每轮读它"
     rc=1
   fi
-  # ---- 显式授权才删，而且只删 *.trace
+  # ---- 空扫描不许冒充"查过、干净"：一趟都没认出来时必须明写没有分母
+  mkdir -p "$out/reclaim-empty"
+  python3 scripts/perf_reclaim.py "$out/reclaim-empty" > "$out/reclaim-empty.txt" 2>&1 \
+    || { fail "空样本根就非零退出 ⇒ 新克隆的树会把收尾打断"; rc=1; }
+  if ! grep -qF '没有分母' "$out/reclaim-empty.txt"; then
+    fail "样本根里一个 trace 都没认出来，却没说「没有分母」 ⇒ 现读 $(tr '\n' '|' < "$out/reclaim-empty.txt")"
+    rc=1
+  fi
+  if grep -qF '可回收' "$out/reclaim-empty.txt"; then
+    fail "没有分母却仍然印了可回收计数 ⇒ 空扫描会被读成「查过了，干净」（计数读 0 就通过那一族）"
+    rc=1
+  fi
+  # ---- 显式授权才删，而且只删 *.trace。删之前先把一个句柄**开在 bundle 里面**
+  #      （用宿主自己的 fd 9，不另起进程 ⇒ 不会有漏下来的实例要退），
+  #      那就是"录到一半"的形状：回收器必须看得见开在目录里面的文件，
+  #      只看 `lsof -- <目录>` 的话它是 0 行 —— 那等于没有守卫。
+  exec 9< "$d/archive-fake/tcoder-perf-fix-idle-run6/hitches.trace/data.bin"
   if ! TCODER_RECLAIM=1 python3 scripts/perf_reclaim.py "$d" > "$out/reclaim-delete.txt" 2>&1; then
     fail "TCODER_RECLAIM=1 那一趟非零退出"
+    rc=1
+  fi
+  exec 9<&-
+  if ! grep -qF '跳过（仍被进程打开）' "$out/reclaim-delete.txt"; then
+    fail "开着句柄的那一趟没有被认成「在用」⇒ 打印的跳过行没出现（现读 $(tr '\n' '|' < "$out/reclaim-delete.txt")）"
+    rc=1
+  fi
+  if [ ! -d "$d/archive-fake/tcoder-perf-fix-idle-run6/hitches.trace" ]; then
+    fail "有一个句柄开在 bundle 里面却被连目录删了 ⇒ 守卫只认「目录本身被打开」，那正是录制中的形状"
     rc=1
   fi
   if [ -d "$d/tcoder-perf-fix-idle-run5/hitches.trace" ]; then
@@ -136,5 +171,5 @@ selfcheck_refused_trace_reclaim() {  # 61) 判废趟的 GB 级 trace：该点名
     fail "不该点名的那两趟被删了 ⇒ 回收动作超出了判定点名的范围"
     rc=1
   fi
-  [ "$rc" = "0" ] && ok "判废趟的原始 trace 回收双向有牙：被拒∧超线才点名、默认只印、显式授权才删且只动 *.trace"
+  [ "$rc" = "0" ] && ok "判废趟的原始 trace 回收四面有牙：被拒∧超线才点名（两层都认得）、默认只印、显式授权才删且只动 *.trace、空扫描明写没有分母"
 }
