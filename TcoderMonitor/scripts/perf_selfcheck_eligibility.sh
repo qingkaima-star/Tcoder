@@ -288,12 +288,35 @@ for name in ("clean", "refused"):
     json.dump({"period": "idle", "hitches_seconds": 20, "input_source": "human"},
               open(os.path.join(d, "meta.json"), "w"))
 open(os.path.join(root, "trio-refused", "REFUSED"), "w").write("REFUSED\n闸门当场拒收\n")
+# 归因档两格（09-25 20:32 的现场：三趟里两趟是"按设计不参与"、一趟真被拒，
+# 旧出口把两种东西印成同一句话，下一个人会去修根本没坏的采集）：
+#   · 只有 blame 标记 ⇒ 认成 bydesign，并且整批都是它时判"不适用"（不是失败）
+#   · blame + REFUSED 同时在场 ⇒ 必须认成 refused（更该先看见的那格赢，别让"按设计"盖住真坏的）
+for name, extra in (("blame", {"blame_instrument": 1}), ("both", {"blame_instrument": 1})):
+    d = os.path.join(root, "trio-" + name)
+    os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, "hitches.xml"), "w").write(xml)
+    meta = {"period": "idle", "hitches_seconds": 20, "input_source": "human"}
+    meta.update(extra)
+    json.dump(meta, open(os.path.join(d, "meta.json"), "w"))
+open(os.path.join(root, "trio-both", "REFUSED"), "w").write("REFUSED\n闸门当场拒收\n")
+from perf_trio_agreement import _why_out, verdict
+# 只对"没参与"的那几趟问原因（clean 那趟本来就可用，不该被拿去分类）
+kinds = ",".join(_why_out(os.path.join(root, "trio-" + n))[0]
+                 for n in ("refused", "blame", "both"))
+lines, code = verdict([None, None],
+                      [os.path.join(root, "trio-blame")] * 2)
 got_clean = read_run(os.path.join(root, "trio-clean")) is not None
 got_refused = read_run(os.path.join(root, "trio-refused")) is None
-print("%s|%s" % (got_clean, got_refused))
+got_blame_out = read_run(os.path.join(root, "trio-blame")) is None
+print("%s|%s|%s|%s|%s" % (got_clean, got_refused, got_blame_out, kinds, code))
 PYCHK
 )
-  [ "$rf" = "True|True" ] \
-    || { fail "REFUSED 那一维没被读到（拿到「$rf」，应为 True|True）⇒ 被拒的一趟会混进散布"; return; }
-  ok "被当场拒收的那一趟混不进散布：同一份表 + meta，加 REFUSED 的要被排除、不加的要能读成可用"
+  rf1=$(printf '%s\n' "$rf" | head -1)
+  [ "$rf1" = "True|True|True|refused,bydesign,refused|3" ] \
+    || { fail "REFUSED／归因档这两维没被分开读（拿到「$rf1」，应为 " \
+              "True|True|True|refused,bydesign,refused|3）⇒ 被拒的一趟会混进散布，" \
+              "或按设计的归因档被印成坏了"; return; }
+  ok "被当场拒收的那一趟混不进散布，且归因档与它分得开：同一份表 + meta，加 REFUSED 的被排除、" \
+     "只有 blame 标记的判「按设计不参与」（整批如此 ⇒ 不适用 rc=3）、blame+REFUSED 同场时按被拒算"
 }
