@@ -23,6 +23,12 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."        # → TcoderMonitor/
 
+# 归属判定不在本文件里——它是 `perf_provenance.sh` 那一家（manifest 取值 + 落后几笔产品码）。
+# 在这里 source，是因为下面 build_product 要把"被测的是哪份内容"印成人看的一行，
+# 而自己再解析一遍 manifest 就是造第二把尺子（同一个问题上多一把尺，两把量错时没人怀疑新那把）。
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/perf_provenance.sh"
+
 TAG="${1:-}"; RUNS="${2:-${RUNS:-6}}"; DEADLINE="${3:-${DEADLINE:-1800}}"
 [ -n "$TAG" ] || { echo "!! 用法: $0 <批次标签> [趟数] [等窗上限]" >&2; exit 2; }
 MODE="${MODE:-idle}"
@@ -73,7 +79,9 @@ build_product() {  # 出 release 产物；SKIP_BUILD=1 时只核对归属
   fi
   grep -E 'TCODER_GIT_REVISION|TCODER_GIT_CLEAN|TCODER_BINARY_SHA256=' dist/RELEASE_MANIFEST.env || {
     echo "!! 没有 dist/RELEASE_MANIFEST.env ⇒ 归属无从核对，这一批不测" >&2; return 1; }
-  echo "    被测产品码 Sources tree=$(git rev-parse --short=12 HEAD:TcoderMonitor/Sources)"
+  # 这一行印的是「**被量的那枚二进制**是谁」，不是「我这棵树现在是谁」——判据住在
+  # `perf_provenance.sh`，第 65 项拿临时仓库逐格钉它（话术与缺陷现场写在那把尺的头注里）。
+  provenance_product_identity || return 1
 }
 
 warm_and_hold() {  # 起一个实例并预热（第七维 ≥120 s）；把 pid 交给调用方打印
