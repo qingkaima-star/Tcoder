@@ -119,16 +119,17 @@ print("%s|%s|%s|%s|%s" % (a, b, c, code, "生命期" in txt))')
 #   跨窗口 join、把区间外的栈算进来、把别家进程的 Main Thread 顶包、把"没采到"说成"没有"。
 # 夹具全部由下面这段 python **造真文件**、再让**真 CLI** 去读（不在 bash 里复刻算法）：
 # 判据与实现一旦分叉，红的是这一项，而不是两周后台账里那句话。
+# 夹具里三枚 meta 形状的分工（写在函数外面，免得把本项自己顶过 50 行的尺子）：
+#   CLEAN   = 少一枚 `blame_instrument` ⇒ 跨窗口档，必须拒绝 join；
+#   off     = 显式写 `blame_instrument=0` ⇒ 也要拒。判据若写成 `bool(非空)`，这一格会被放行，
+#             而错的方向正是「把该拒的放进来」（本项第十格之外，这一格就是钉它的）。
 blame_attribution_probe() {  # blame_attribution_probe <outdir> → 十格 True/False 向量（空串 = 夹具自己崩了）
   cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 - "$1" <<'PYBLAME'
-from perf_trace_xml import RUNLOOP_PLUMBING
-import itertools, json, os, subprocess, sys
-fx = os.path.join(sys.argv[1], "blame-fx")
-NID = itertools.count(1)
+from perf_trace_xml import RUNLOOP_PLUMBING; import itertools, json, os, subprocess, sys
+fx = os.path.join(sys.argv[1], "blame-fx"); NID = itertools.count(1)
 WIN = [[2000.0, 1100.0], [2000.0, 1100.0], [7000.0, 50.0]]   # 3 行 = 2 个事件（同一 update 的双行）
 HIT, FOREIGN, PLUMB, PID = "LongStringCompare", "ForeignThing", RUNLOOP_PLUMBING[0], "4242"
-META = {"pid": PID, "period": "idle", "blame_instrument": "1"}
-CLEAN = {"pid": PID, "period": "idle"}                        # 少一枚 blame_instrument ⇒ 跨窗口档
+META = {"pid": PID, "period": "idle", "blame_instrument": "1"}; CLEAN = {"pid": PID, "period": "idle"}
 def row(t_ms, func, pid):
     """一个主线程样本行。func 为空串 = 这一刻**没采到栈**（≠ 没在干活，见尺子头注第 2 条）。"""
     a, b, c, d, e, g = [next(NID) for _ in range(6)]
@@ -154,11 +155,10 @@ D = {n: write_run(n, s, m) for n, s, m in (
     ("foreign", [(9000.0, HIT, PID), (2500.0, FOREIGN, "9999")], META),
     ("nostack", [(2500.0, "", PID)], META), ("plumbing", [(2500.0, PLUMB, PID)], META),
     ("crosswindow", [(2500.0, HIT, PID)], CLEAN), ("notable", [(2500.0, HIT, PID)], META),
-    # 显式写 0 也必须拒：把同窗判据写成 bool(非空) 的话，这一格会被放行（方向上就错了）。
     ("off", [(2500.0, HIT, PID)], dict(META, blame_instrument="0")),
     ("withprov", [(2500.0, HIT, PID)], dict(META, binary="b1", measured_rev="r1")))}
 os.remove(os.path.join(D["notable"], "blame-time-profile.xml"))   # 有标记没表 = 采集坏了
-R = {n: probe(d) for n, d in D.items()}
+R = {n: probe(d) for n, d in D.items()}                           # 每档只跑一次真 CLI
 print("|".join(str(x) for x in [
     R["hit"][0] == 0 and HIT in R["hit"][1],
     "表 3 行 → 去重成 2 个事件" in R["hit"][1] and R["hit"][1].count("1100.0 ms") == 1,
