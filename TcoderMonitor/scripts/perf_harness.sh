@@ -315,24 +315,9 @@ switch_refuse_coexist() {  # 冷启动最容易被"别人的心跳"污染：默�
   [ -n "$pre" ] && echo "    ⚠ SWITCH_ALLOW_COEXIST=1：共存态读数不得用于与独占基线对比。" >&2
 }
 
-switch_finish_page() {  # switch_finish_page <dir> <pid>：收尾，默认只报告该退哪个 pid
-  local dir="$1" pid="$2"
-  # 收尾：绝不用 `tell application id "<bundle id>" to quit` —— 它按 bundle id **全机生效**，
-  # 会把用户自己开着的实例一起退掉（实测踩过：留下 7 个残留，且随时可能误伤）。
-  # 默认只报告该退哪个 pid，由人 Cmd+Q；确实要自动收，必须显式授权 SWITCH_TERM=1，
-  # 且只对本脚本自己起的那个 pid 发 SIGTERM —— 这是对 AGENTS.md -1.3「不发信号」的**有意偏离**，
-  # 授权与后果都要写进 meta，不留成"看起来是脚本自己会清理"的假象。
-  if [ "${SWITCH_TERM:-0}" = "1" ]; then
-    kill -TERM "$pid" 2>/dev/null \
-      && echo "    已按授权 SIGTERM 自己起的实例 pid=$pid" \
-      || echo "    ⚠ SIGTERM 失败：pid=$pid 需人工 Cmd+Q"
-    meta_write "$dir" "cleanup=SIGTERM(授权 SWITCH_TERM=1)"
-  else
-    echo "    提示：采完请人工 Cmd+Q 这个实例 pid=$pid（脚本按 bundle id 退出会误伤其它实例，故不自作主张）"
-    meta_write "$dir" "cleanup=人工(脚本未退出实例)"
-  fi
-}
-
+# `switch_finish_page` 住在 `scripts/perf_switch.sh`（switch 档的实现都在那儿）：
+# 它原先长在本文件里，而本文件 382/400 已经吃紧、函数本体又只是一条收尾提示——
+# 搬过去 + 补上"没有 pid 就不许叫人去退"那一格（09-25 21:53 实跑 6 页全印了空 pid 的提示）。
 
 
 # =============================================================================

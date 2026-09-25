@@ -147,6 +147,7 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_main_drift_reading "$out"  # 64) 基线新鲜度：落后 main 几笔**产品码**（只数产品码、乱 rev 报未取到、换 cwd 仍是 1）（#76）
   item selfcheck_batch_product_identity "$out"  # 65) 排程器那行「被测产品码」抄的是 manifest 那枚二进制，不是 HEAD（#80）
   item selfcheck_slot_owner_states "$out"  # 66) 实例归属分类各态各判对（补上「补测产物树」这一态）＋给那个没人读过的 --probe 补读者（#81）
+  item selfcheck_switch_cleanup_names_no_target "$out"  # 67) switch 收尾提示：没有 pid 就不许叫人去退（实跑六页全印了空 pid 的那格）
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：那个 for 必须在 cmd_selfcheck 之前，
