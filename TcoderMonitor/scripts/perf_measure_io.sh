@@ -83,12 +83,15 @@ refuse_sample() {  # refuse_sample <outdir> <原因…>：一趟当场自认没�
   printf 'REFUSED\n%s\n' "$2" > "$1/REFUSED"
 }
 
-refusal_kind() {  # refusal_kind <outdir> → hang / target_gone / empty_tables / other / none
+refusal_kind() {  # refusal_kind <outdir> → hang / target_gone / empty_tables / context_gate / other / none
   # 只读 `REFUSED` 的**原因行**：那是 `refuse_sample` 唯一的落点，另开一枚机读键就是
   # 第二个入口（两份迟早分叉，而分叉的方向永远是"看起来更宽松的那一份"）。
   # ⚠ 这是**按文案匹配**：改上面那三句判废文案会把它降级成 `other` ⇒ 少补一次重试
   #   （方向安全：绝不会把坏样本放进来）。第 62 项反例喂给它的是**真路径产出的** REFUSED
-  #   （假 xcrun 走 `record_bounded`），所以文案与判据一分叉那一项当场红。
+  #   （假 xcrun 走 `record_bounded`、真闸门走 `preflight_context`），
+  #   所以文案与判据一分叉那一项当场红。
+  # `context_gate` 是 2026-09-25 t20 批补上的第四类：那一趟**根本没开录**就被闸门拒了
+  #   （当晚两次都掉进 `other`，小结只能说"不是挂死"、说不出"为什么不用补"）。
   local file="$1/REFUSED" reason
   [ -f "$file" ] || { echo none; return 0; }
   reason=$(sed -n '2p' "$file")
@@ -96,6 +99,7 @@ refusal_kind() {  # refusal_kind <outdir> → hang / target_gone / empty_tables 
     *挂死*)               echo hang ;;
     *在录制期间消失*)      echo target_gone ;;
     *一张都没有行数*)      echo empty_tables ;;
+    *测量上下文不合格*)     echo context_gate ;;
     *)                    echo other ;;
   esac
 }

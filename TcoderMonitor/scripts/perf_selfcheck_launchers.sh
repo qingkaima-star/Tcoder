@@ -295,6 +295,11 @@ hang_retry_make_refused() {  # 造三份真路径产出的判废现场。读、�
   ( record_bounded "$out" "$out/x.trace" T 1 ) >"$out/run.txt" 2>&1
   out="$fx/notables"; mkdir -p "$out"
   ( require_covered_evidence "$out" ) >"$out/a.txt" 2>&1
+  # 第四类：闸门在**开录之前**就把这一趟拒了 ⇒ 让真闸门自己写那句 REFUSED。
+  # `LOAD_MAX=-1` 是判据自己的公开出口（`load_bar` 认它），比"没有负载"严格得多 ⇒ 必然不合格。
+  # 抄那句文案就等于再造一份第二入口：阈值一改，反例还拿着旧句子自证。
+  out="$fx/gate"; mkdir -p "$out"
+  ( LOAD_MAX=-1 preflight_context "$out" "$$" ) >"$out/a.txt" 2>&1 || true
   unset FAKE_XC FAKE_TARGET
   # 自己起的持有者必须自己退（AGENTS 2.1）。**本项第一版就是没退干净**：那个 disown 掉的
   # `sleep 300` 占着 stdout 管道，外面的 `| tail` 永远等不到 EOF，整条反例跑起来像挂死。
@@ -324,6 +329,12 @@ hang_retry_type_checks() {  # 判废类型学 + 补试判据：三个方向各�
     || { fail "三张表全空被判成「$kind」⇒ 该类的文案改了而这里没跟上"; bad=1; }
   [ "$(HANG_RETRIES_USED=0 attempt_verdict "$fx/notables" 1)" = "slot" ] \
     || { fail "表全空也去补试 ⇒ 同一条通道又宽了一格"; bad=1; }
+  kind=$(refusal_kind "$fx/gate")
+  [ "$kind" = "context_gate" ] \
+    || { fail "闸门开录前就拒跑那一类被判成「$kind」⇒ 小结只能说『不是挂死』，说不出『所以不用补』"\
+              "（2026-09-25 t20 那批两次都掉进 other）"; bad=1; }
+  [ "$(HANG_RETRIES_USED=0 attempt_verdict "$fx/gate" 1)" = "slot" ] \
+    || { fail "根本没开录的一趟也去补试 ⇒ 补试通道又宽了一格（那类拒因与挂死无关）"; bad=1; }
   [ "$(refusal_kind "$fx/plain")" = "none" ] \
     || { fail "没有 REFUSED 的目录不判成 none ⇒ 空目录会被当成某种判废"; bad=1; }
 }
