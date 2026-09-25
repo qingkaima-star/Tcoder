@@ -11,6 +11,35 @@
 # （合法页名要过、名册外的页名要当场红）。住在 harness 里就只能整档 source，
 # 而那是会真去跑一次测量的脚本 ⇒ 判据只能挂在"能被裸 source 的文件"里（与第 22 项同一条规矩）。
 
+switch_finish_page() {  # switch_finish_page <dir> <pid>：收尾，默认只报告该退哪个 pid
+  local dir="$1" pid="$2"
+  # 【没有 pid 就没有对象】09-25 21:53 实跑 `switch` 六页，六页全印了同一句
+  # 「请人工 Cmd+Q 这个实例 pid=」而等号后面是空的：`xctrace record --launch` 起的进程
+  # 随录制结束就退了，`pgrep -n -x TcoderMonitor` 探不到（跑完核对场上实例数确为 0）。
+  # 一句"要人动手却没有对象"的提示只会让人去找一个不存在的进程，而它写进 meta 的
+  # `cleanup=人工(脚本未退出实例)` 更像是脚本把活推给人——把"无事"写成"有活"也是说谎的一种。
+  # 这一格此前**没有任何读者**（selfcheck 与测试都不碰本函数），所以它错了 6/6 页也没人吵。
+  if [ -z "$pid" ]; then
+    echo "    未探到实例（xctrace 起的进程随录制结束已退）⇒ 没有需要人工退的对象"
+    meta_write "$dir" "cleanup=未探到实例(无需人工退)"
+    return 0
+  fi
+  # 收尾：绝不用 `tell application id "<bundle id>" to quit` —— 它按 bundle id **全机生效**，
+  # 会把用户自己开着的实例一起退掉（实测踩过：留下 7 个残留，且随时可能误伤）。
+  # 默认只报告该退哪个 pid，由人 Cmd+Q；确实要自动收，必须显式授权 SWITCH_TERM=1，
+  # 且只对本脚本自己起的那个 pid 发 SIGTERM —— 这是对 AGENTS.md -1.3「不发信号」的**有意偏离**，
+  # 授权与后果都要写进 meta，不留成"看起来是脚本自己会清理"的假象。
+  if [ "${SWITCH_TERM:-0}" = "1" ]; then
+    kill -TERM "$pid" 2>/dev/null \
+      && echo "    已按授权 SIGTERM 自己起的实例 pid=$pid" \
+      || echo "    ⚠ SIGTERM 失败：pid=$pid 需人工 Cmd+Q"
+    meta_write "$dir" "cleanup=SIGTERM(授权 SWITCH_TERM=1)"
+  else
+    echo "    提示：采完请人工 Cmd+Q 这个实例 pid=$pid（脚本按 bundle id 退出会误伤其它实例，故不自作主张）"
+    meta_write "$dir" "cleanup=人工(脚本未退出实例)"
+  fi
+}
+
 switch_record_page() {  # switch_record_page <page> <dir> <sandbox>：一页的全流程（录制 + 导表 + 落 meta）
   local page="$1" dir="$2" sandbox="$3"
   # 正确做法照抄 capture_pages_isolated.sh：TCODER_SUPPORT_DIR 指到自己的沙箱，

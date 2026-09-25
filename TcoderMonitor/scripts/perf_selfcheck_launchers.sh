@@ -372,3 +372,28 @@ selfcheck_hang_retry_policy() {  # 62) 挂死才补、按批封顶、挂死计�
   hang_retry_tally_checks "$fx"
   [ "$bad" = "0" ] && ok "挂死才补、按批封顶、补试抹不掉挂死计数、meta 键两个方向都判过（真路径产出的 REFUSED）"
 }
+
+selfcheck_switch_cleanup_names_no_target() {  # selfcheck_switch_cleanup_names_no_target <outdir>
+  # 67) switch 档收尾那句提示：**没有 pid 就不许叫人去退**。
+  #     09-25 21:53 实跑 `switch` 六页，六页全印「请人工 Cmd+Q 这个实例 pid=」而等号后是空的
+  #     （xctrace --launch 起的进程随录制结束已退，`pgrep -n` 探不到，跑完场上 0 个实例）。
+  #     一句没有对象的行动指令只会让人去找一个不存在的进程；而它落进 meta 的
+  #     `cleanup=人工(脚本未退出实例)` 更像把活推给人。这一格此前没有任何读者 ⇒ 错了 6/6 页也没人吵。
+  local res
+  res=$(bash -c '
+    set -u
+    d=$(mktemp -d); mkdir -p "$d/empty" "$d/held"
+    source scripts/perf_switch.sh || { echo "source 失败"; exit 1; }
+    meta_write() { printf "%s\n" "$*" >> "$1/meta.json"; }
+    e=$(switch_finish_page "$d/empty" "" 2>&1)
+    h=$(switch_finish_page "$d/held" 12345 2>&1)
+    ok1=0; case "$e" in *"未探到实例"*) ok1=1 ;; esac
+    case "$e" in *"请人工 Cmd+Q"*) ok1=0 ;; esac
+    grep -q "cleanup=未探到实例" "$d/empty/meta.json" || ok1=0
+    ok2=0; case "$h" in *"pid=12345"*) ok2=1 ;; esac
+    rm -rf "$d"
+    echo "${ok1}${ok2}"' 2>&1) || res="跑挂了：$(printf '%s' "$res" | tail -1)"
+  [ "$res" = "11" ] \
+    || { fail "switch 收尾提示两个方向没都判对（拿到「$res」，要 11＝空 pid 只说未探到、有 pid 才点名）"; return; }
+  ok "switch 收尾提示两头有牙：没有 pid 就只说「未探到实例」并这样记进 meta，有 pid 才点名让人 Cmd+Q"
+}
