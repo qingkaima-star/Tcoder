@@ -90,31 +90,45 @@ owner_of() {  # owner_of <可执行路径> —— 只把 `kind_of` 的判定翻�
 # 自测：这条分类**判错过一次**（把"读不到路径"报成"工作树已删除"= 诬告树被删，
 # 而下一个人会照着这句话去 kill），所以每种形状各钉一次，含反向。
 # ⚠ 这个 `--probe` 以前**没有读者**（只有人会去跑它），第 66 项就是给它补的那个读者。
+# ⚠ 探针必须**与跑它的那棵树无关**：所有格子只用合成根。
+#    第一版里有三格写死了真实绝对路径（`/Users/one/Documents/Tcoder/…`），
+#    于是"主树的实例""孤儿""在途工作树"三格在**主树里跑**会全部判成「我自己」
+#    ——因为 `kind_of` 的第一条命中就是 `"$MY_ROOT"/*`，而在主树里 MY_ROOT 正是那个前缀。
+#    09-25 10:02 现场抓到（`--probe` rc=1，四格红）。补了读者之后，这种"随 checkout 变色"
+#    不再只是探针自己红，而是**别人家的门禁红**——所以这一版把根换成合成的。
 if [ "${1:-}" = "--probe" ]; then
   bad=0
   check() {  # check <期望含> <实际> <形状名>
     case "$2" in *"$1"*) : ;; *) echo "  ✗ $3 分类不对：拿到「$2」"; bad=$((bad + 1)) ;; esac
   }
-  check "读不到路径" "$(owner_of '?')" "读不到（必须说'不知道'，不许猜成已删除）"
-  check "我自己" "$(owner_of "$MY_ROOT/x/y")" "本树"
-  check "主树的实例" "$(owner_of "/Users/one/Documents/Tcoder/TcoderMonitor/dist/a")" "主树"
-  check "已删除" "$(owner_of "/Users/one/Documents/Tcoder/.worktrees/no-such-tree-xyz/dist/a")" "孤儿"
-  check "别人的工作树" "$(owner_of "$REPO_ROOT/.worktrees/chief/dist/a")" "在途工作树（树还在）"
-  # 补测产物树这一态有**两格**，而且"树在不在"必须是现造的目录，不能拿真历史里的路径当夹具
-  # （那会随 checkout 变色：今天 5a5d55c 还在，明天回收器一跑就没了，于是这条断言今天对明天错）。
   fx=$(mktemp -d 2>/dev/null || echo /tmp/slot-fx)
-  mkdir -p "$fx/.scratch/rev-trees/deadbeef" "$fx/.scratch/rev-trees/gonecafe" 2>/dev/null
-  rmdir "$fx/.scratch/rev-trees/gonecafe" 2>/dev/null
-  check "不是这一批起的" "$(owner_of "$fx/.scratch/rev-trees/deadbeef/TcoderMonitor/dist/a")" \
+  mkdir -p "$fx/treeA" "$fx/repo/.worktrees/chief" \
+           "$fx/repo/.scratch/rev-trees/deadbeef" 2>/dev/null
+  # 换根：后面所有格子只在 `$fx` 下面构造路径，真实仓库路径一概不用。
+  MY_ROOT="$fx/treeA"
+  REPO_ROOT="$fx/repo"
+  check "读不到路径" "$(owner_of '?')" "读不到（必须说「不知道」，不许猜成已删除）"
+  check "我自己" "$(owner_of "$MY_ROOT/x/y")" "本树"
+  check "主树的实例" "$(owner_of "$REPO_ROOT/TcoderMonitor/dist/a")" "主树"
+  check "别人的工作树" "$(owner_of "$REPO_ROOT/.worktrees/chief/dist/a")" "在途工作树（树还在）"
+  check "已删除" "$(owner_of "$REPO_ROOT/.worktrees/no-such-tree-xyz/dist/a")" "工作树孤儿"
+  # 补测产物树两格：目录**必须现造**，"树在不在"才是被真的判过一次，
+  # 而不是拿真历史里的某枚 rev 目录赌它还活着（那会随回收器一变而今天对、明天错）。
+  check "不是这一批起的" "$(owner_of "$REPO_ROOT/.scratch/rev-trees/deadbeef/TcoderMonitor/dist/a")" \
     "补测产物树·树还在（要给判后动作：不代收、不代 kill）"
-  check "已删除（进程还活着）" "$(owner_of "$fx/.scratch/rev-trees/gonecafe/TcoderMonitor/dist/a")" \
+  check "已删除（进程还活着）" "$(owner_of "$REPO_ROOT/.scratch/rev-trees/gonecafe/TcoderMonitor/dist/a")" \
     "补测产物树·树已删（不许被读成「可以动」，也不许冒充普通工作树的孤儿）"
+  # 反向之一（两枚根**还分开**的时候）：新形状不许吃掉普通工作树的判定。
+  [ "$(kind_of "$REPO_ROOT/.worktrees/chief/dist/a")" = "worktree" ] \
+    || { echo "  ✗ 反向失守：在途工作树被改判成 $(kind_of "$REPO_ROOT/.worktrees/chief/dist/a")"; bad=$((bad + 1)); }
+  # 反向之二：主树自己跑的时候（MY_ROOT == REPO_ROOT）本树的产物**必须**判成"我自己"，
+  # 不能被"主树的实例"那一格抢走——这正是第一版在主树里把三格读成"我自己"的**同一处优先级**，
+  # 只不过那一版把它用在了错误的方向上。（顺序有意义：这一格必须在换根之后。）
+  MY_ROOT="$REPO_ROOT"
+  check "我自己" "$(owner_of "$REPO_ROOT/TcoderMonitor/dist/a")" "主树里跑：本树产物仍算我自己"
   rm -rf "$fx" 2>/dev/null
-  # 反向那一格不许被新形状吃掉：主树自己的 dist 仍然必须判成"主树的实例"。
-  [ "$(kind_of "$REPO_ROOT/TcoderMonitor/dist/a")" = "main" ] \
-    || { echo "  ✗ 反向失守：主树 dist 被新判据改判成 $(kind_of "$REPO_ROOT/TcoderMonitor/dist/a")"; bad=$((bad + 1)); }
   [ "$bad" = "0" ] \
-    && echo "  ✓ 归属各判对一次（含补测产物树的「树还在／已删除」两态，与「读不到」「已删除」不许互相冒充、主树 dist 不被新形状吃掉）" \
+    && echo "  ✓ 归属各判对一次（六态＋两格反向，全部只用合成根 ⇒ 换一棵树跑结果不变）" \
     || exit 1
   exit 0
 fi
