@@ -228,3 +228,50 @@ selfcheck_blame_wiring() {  # selfcheck_blame_wiring <outdir>
     || { fail "归因档接线四格没各判对（拿到 $r，应为 1|1|0|1）⇒ 要么仪器被词法分裂，要么归因档盖了认证档的表"; return; }
   ok "归因档接线：--instrument 作为一个参数进 xctrace、导出落 blame-time-profile.xml、常规档一字不带"
 }
+
+selfcheck_batch_product_identity() {  # selfcheck_batch_product_identity <outdir>
+  # 65) 排程器那行「被测产品码」必须抄**被量的那枚二进制**，不许抄 HEAD（缺陷 #80）。
+  #     四格：① 印的是 manifest rev 的 Sources tree；② 不含 HEAD 那一枚（反向）；
+  #     ③ 落后几笔一并报对；④ manifest 里 rev 是空的 ⇒ 明说"说不出"，**不许静默回落成 HEAD**。
+  #     夹具为什么现起一座 git 仓库而不是拿本仓：判据要在"manifest 与 HEAD 故意不一致"上跑，
+  #     本仓永远造不出这一格（而且会随 checkout 变色）。
+  local fx="$1/identityfx" pp c base head t1 t2 out rc empty
+  rm -rf "$fx"; mkdir -p "$fx/TcoderMonitor/Sources"
+  pp=$(cd scripts && pwd)/perf_provenance.sh
+  c="git -C $fx -c user.name=selfcheck -c user.email=selfcheck@local"
+  git -C "$fx" init -q -b main . >/dev/null 2>&1 \
+    || { fail "夹具仓库起不来 ⇒ 本项一条都没判（不是判据不符）"; return; }
+  echo a > "$fx/TcoderMonitor/Sources/a.swift"; $c add -A; $c commit -q -m built-this
+  base=$(git -C "$fx" rev-parse HEAD)
+  t1=$(git -C "$fx" rev-parse --short=12 "$base:TcoderMonitor/Sources")
+  echo b > "$fx/TcoderMonitor/Sources/a.swift"; $c add -A; $c commit -q -m moved-on
+  head=$(git -C "$fx" rev-parse HEAD)
+  t2=$(git -C "$fx" rev-parse --short=12 "$head:TcoderMonitor/Sources")
+  printf 'TCODER_GIT_REVISION="%s"\n' "$base" > "$fx/RELEASE_MANIFEST.env"
+  out=$(cd "$fx" && source "$pp"; provenance_product_identity RELEASE_MANIFEST.env) || true
+  case "$out" in *"$t1"*) : ;; *) fail "没印出被测 rev 的 Sources tree（$t1），拿到「$out」⇒ 又去抄 HEAD 了"; return ;; esac
+  case "$out" in *"$t2"*) fail "印的其实是 HEAD 的 tree（$t2）——这一格就是钉这个反向"; return ;; esac
+  case "$out" in *"落后 main 1 笔产品码"*) : ;; *) fail "落后读数不对，拿到「$out」"; return ;; esac
+  printf 'TCODER_GIT_REVISION=""\n' > "$fx/EMPTY.env"
+  empty=$(cd "$fx" && source "$pp"; provenance_product_identity EMPTY.env; printf 'rc=%s' "$?") || true
+  case "$empty" in *"说不出被测产品码"*rc=1*) : ;; *) fail "空 rev 没走「明说取不到」那条出口，拿到「$empty」"; return ;; esac
+  ok "被测产品码那行抄的是 manifest 里那枚二进制（不是 HEAD）、落后几笔一并报、rev 空值明说取不到"
+}
+
+selfcheck_slot_owner_states() {  # selfcheck_slot_owner_states <outdir>
+  # 66) 实例归属分类（缺陷 #81）：`.scratch/rev-trees/<rev>` 是包 5 造的形状，
+  #     旧版四态里没有它 ⇒ 它长在仓库根下面，会被 `"$MY_ROOT"/*` 先吃成「我自己」并打上「← 我的」，
+  #     于是"场上只有一个人的补测产物实例"被读成**窗口干净**、催下一个人直接开录去 attach 别人的构建。
+  #     ⚠ 这条同时是那个 `--probe` 的**读者**：探针以前只能靠人手动跑（写了却没读者＝第 3 类失效）。
+  local probe out rc
+  probe=$(cd scripts && pwd)/perf_who_holds_the_slot.sh
+  [ -f "$probe" ] || { fail "找不到 $probe ⇒ 归属分类这条门是空转的"; return; }
+  out=$(bash "$probe" --probe 2>&1); rc=$?
+  [ "$rc" = "0" ] \
+    || { fail "归属分类探针红（rc=$rc）：$(printf '%s' "$out" | head -3 | tr '\n' ' ')"; return; }
+  case "$out" in
+    *"✓ 归属各判对一次"*) : ;;
+    *) fail "探针 rc=0 却没印出 ✓ 那一行 ⇒ 判定被搬走或话术改了（rc=0 不算它判过）"; return ;;
+  esac
+  ok "实例归属各态各判对（含新补的「补测产物树·树还在／已删除」两态，主树 dist 不被新形状吃掉）"
+}

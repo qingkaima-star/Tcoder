@@ -114,3 +114,22 @@ provenance_main_drift() {  # provenance_main_drift [rev] → 该 rev 落后 main
     *)           echo "$out" ;;
   esac
 }
+
+provenance_product_identity() {  # provenance_product_identity [manifest 路径]
+  # → 一行**人看**的话：被测的那枚二进制到底是哪份内容、它落后 main 几笔产品码。
+  # 【为什么搬进库文件】排程器本体不可 source（一 source 就开始等窗、起 GUI），
+  # 反例点不到它里面的函数——同一族形状已经搬过两次（`perf_chain_guard.sh`、`perf_blame_caliber.py`）。
+  # 搬进来之后第 65 项才能拿一棵临时仓库去逐格判它。
+  # 【口径】rev 只从 manifest 取（`provenance_manifest_value`），落后几笔只从
+  # `provenance_main_drift` 取：本文件外面不许再解析一遍 manifest、再数一遍提交。
+  local manifest="${1:-dist/RELEASE_MANIFEST.env}" rev tree drift
+  rev=$(provenance_manifest_value TCODER_GIT_REVISION "$manifest")
+  if [ -z "$rev" ] || [ "$rev" = "unknown" ]; then
+    # 取不到就明说取不到。回落成 HEAD 会把「不知道被测的是谁」印成「被测的就是最新」，方向正好相反。
+    echo "⚠ manifest 里没有可用的 TCODER_GIT_REVISION ⇒ 说不出被测产品码，这一批只能当线索"
+    return 1
+  fi
+  tree=$(git rev-parse --short=12 "${rev}:TcoderMonitor/Sources" 2>/dev/null) || tree=""
+  drift=$(provenance_main_drift "$rev")
+  echo "被测产品码 Sources tree=${tree:-取不到}（rev=${rev:0:7}，落后 main ${drift} 笔产品码）"
+}

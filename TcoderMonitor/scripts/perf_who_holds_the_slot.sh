@@ -41,22 +41,55 @@ instance_rows() {
 # 主树路径只能问 `git worktree list` 的第一条：在 linked worktree 里
 # `--git-common-dir` 给的是主树的 .git 目录，再拿它去 --show-toplevel 会算错（实测错过一次）。
 REPO_ROOT=$(git worktree list --porcelain 2>/dev/null | sed -n '1s|^worktree ||p')
-owner_of() {
-  case "$1" in
-    '?') printf '读不到路径 ⇒ 不知道是谁的（**不许当成"已删除"，也不许当成"可以动"**）' ;;
-    "$MY_ROOT"/*) printf '我自己（本树 %s）' "$MY_ROOT" ;;
+
+# 【唯一一处按路径判归属】下面两件事都从这里取，不许各写一遍 `case`：
+#   · `owner_of` 印的那句话；
+#   · 结尾那列「← 我的」标记。
+# 第一版这两处是**两条独立的前缀匹配**，于是"印的是 A、比的是 B"——本仓为这类错记过
+# "印与比共用同一个变量是判据的一部分"。
+kind_of() {  # kind_of <可执行路径> → unknown | revtree | mine | worktree | orphan | main | outside
+  local p="$1" t
+  case "$p" in
+    '?') printf 'unknown' ;;
+    # 【形状缺口，09-25 09:25 现场抓到】补测产物树（包 5 `perf_measure_rev.sh` 造的
+    # `.scratch/rev-trees/<rev>/…`）长在仓库根**下面**，所以它会被 `"$MY_ROOT"/*` 先吃进去，
+    # 印成「我自己（本树 …）」并打上「← 我的」——而收尾的 trap 按**全路径** `pgrep -fx` 认，
+    # 根本不收它。这一句必须排在"本树/主树"之前，否则每一批补测产物都会被读成"我这一批起的"。
+    */.scratch/rev-trees/*) printf 'revtree' ;;
+    "$MY_ROOT"/*) printf 'mine' ;;
     # 顺序有意：工作树的路径也长在仓库根下面，`*/.worktrees/*` 必须排在主树那条之前，
     # 否则每棵工作树都会被读成"主树的实例"（第一版就是这么错的）。
-    */.worktrees/*) local t; t=$(printf '%s' "$1" | sed -n 's|\(.*\.worktrees/[^/]*\)/.*|\1|p')
-                    if [ -n "$t" ] && [ -d "$t" ]; then printf '别人的工作树 %s' "$t"
-                    else printf '孤儿：工作树 %s 已删除（进程还活着）' "${t:-?}"; fi ;;
-    "$REPO_ROOT"/*) printf '主树的实例 %s —— 有人在主树上开工' "$REPO_ROOT" ;;
-    *) printf '仓库外（%s）' "$1" ;;
+    */.worktrees/*) t=$(printf '%s' "$p" | sed -n 's|\(.*\.worktrees/[^/]*\)/.*|\1|p')
+                    if [ -n "$t" ] && [ -d "$t" ]; then printf 'worktree'
+                    else printf 'orphan'; fi ;;
+    "$REPO_ROOT"/*) printf 'main' ;;
+    *) printf 'outside' ;;
+  esac
+}
+
+owner_of() {  # owner_of <可执行路径> —— 只把 `kind_of` 的判定翻成一句人话，自己不再判
+  local p="$1" t
+  case "$(kind_of "$p")" in
+    unknown)  printf '读不到路径 ⇒ 不知道是谁的（**不许当成"已删除"，也不许当成"可以动"**）' ;;
+    revtree)  t=$(printf '%s' "$p" | sed -n 's|\(.*\.scratch/rev-trees/[^/]*\)/.*|\1|p')
+              if [ -n "$t" ] && [ -d "$t" ]; then
+                printf '补测产物树 %s —— 不是这一批起的：不代收、不代 kill，找起它的那一批或需求方' "$t"
+              else
+                printf '补测产物树 %s 已删除（进程还活着）⇒ 由需求方或那一批的主人关它' "${t:-?}"
+              fi ;;
+    mine)     printf '我自己（本树 %s）' "$MY_ROOT" ;;
+    worktree) printf '别人的工作树 %s' \
+                "$(printf '%s' "$p" | sed -n 's|\(.*\.worktrees/[^/]*\)/.*|\1|p')" ;;
+    orphan)   t=$(printf '%s' "$p" | sed -n 's|\(.*\.worktrees/[^/]*\)/.*|\1|p')
+              printf '孤儿：工作树 %s 已删除（进程还活着）' "${t:-?}" ;;
+    main)     printf '主树的实例 %s —— 有人在主树上开工' "$REPO_ROOT" ;;
+    *)        printf '仓库外（%s）' "$p" ;;
   esac
 }
 
 # 自测：这条分类**判错过一次**（把"读不到路径"报成"工作树已删除"= 诬告树被删，
-# 而下一个人会照着这句话去 kill），所以四种形状各钉一次，含两个反向。
+# 而下一个人会照着这句话去 kill），所以每种形状各钉一次，含反向。
+# ⚠ 这个 `--probe` 以前**没有读者**（只有人会去跑它），第 66 项就是给它补的那个读者。
 if [ "${1:-}" = "--probe" ]; then
   bad=0
   check() {  # check <期望含> <实际> <形状名>
@@ -67,7 +100,22 @@ if [ "${1:-}" = "--probe" ]; then
   check "主树的实例" "$(owner_of "/Users/one/Documents/Tcoder/TcoderMonitor/dist/a")" "主树"
   check "已删除" "$(owner_of "/Users/one/Documents/Tcoder/.worktrees/no-such-tree-xyz/dist/a")" "孤儿"
   check "别人的工作树" "$(owner_of "$REPO_ROOT/.worktrees/chief/dist/a")" "在途工作树（树还在）"
-  [ "$bad" = "0" ] && echo "  ✓ 五种归属各判对一次（含「读不到」与「已删除」不许互相冒充）" || exit 1
+  # 补测产物树这一态有**两格**，而且"树在不在"必须是现造的目录，不能拿真历史里的路径当夹具
+  # （那会随 checkout 变色：今天 5a5d55c 还在，明天回收器一跑就没了，于是这条断言今天对明天错）。
+  fx=$(mktemp -d 2>/dev/null || echo /tmp/slot-fx)
+  mkdir -p "$fx/.scratch/rev-trees/deadbeef" "$fx/.scratch/rev-trees/gonecafe" 2>/dev/null
+  rmdir "$fx/.scratch/rev-trees/gonecafe" 2>/dev/null
+  check "不是这一批起的" "$(owner_of "$fx/.scratch/rev-trees/deadbeef/TcoderMonitor/dist/a")" \
+    "补测产物树·树还在（要给判后动作：不代收、不代 kill）"
+  check "已删除（进程还活着）" "$(owner_of "$fx/.scratch/rev-trees/gonecafe/TcoderMonitor/dist/a")" \
+    "补测产物树·树已删（不许被读成「可以动」，也不许冒充普通工作树的孤儿）"
+  rm -rf "$fx" 2>/dev/null
+  # 反向那一格不许被新形状吃掉：主树自己的 dist 仍然必须判成"主树的实例"。
+  [ "$(kind_of "$REPO_ROOT/TcoderMonitor/dist/a")" = "main" ] \
+    || { echo "  ✗ 反向失守：主树 dist 被新判据改判成 $(kind_of "$REPO_ROOT/TcoderMonitor/dist/a")"; bad=$((bad + 1)); }
+  [ "$bad" = "0" ] \
+    && echo "  ✓ 归属各判对一次（含补测产物树的「树还在／已删除」两态，与「读不到」「已删除」不许互相冒充、主树 dist 不被新形状吃掉）" \
+    || exit 1
   exit 0
 fi
 
@@ -94,7 +142,12 @@ mine=0
 while IFS=$'\t' read -r pid up path; do
   [ -n "$pid" ] || continue
   own=$(owner_of "$path")
-  case "$path" in "$MY_ROOT"/*) mine=$((mine + 1)); tag='← 我的' ;; *) tag='' ;; esac
+  kind=$(kind_of "$path")
+  # 「← 我的」这一列与下面那句"窗口干净"的计数**都从同一把判定里取**（以前这里另写了一遍
+  # `"$MY_ROOT"/*` 前缀匹配，于是补测产物树既被印成「我自己」、又被计进 `$mine`——
+  # 结果是"场上只有一个人的补测产物实例"会被判成**窗口干净**并催我直接开录，
+  # 而 attach 的那枚二进制根本不是本树建的）。
+  if [ "$kind" = "mine" ]; then tag='← 我的'; mine=$((mine + 1)); else tag=''; fi
   printf '    pid=%-7s 已跑 %-10s %s %s\n' "$pid" "$up" "$own" "$tag"
 done <<< "$rows"
 
