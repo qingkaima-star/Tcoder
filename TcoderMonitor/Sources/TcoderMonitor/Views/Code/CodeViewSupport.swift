@@ -162,17 +162,30 @@ enum CodeBoardTruth {
     /// 引擎改了文案而这里没改标记，披露就静默消失（R7 交回时自己点明了这个耦合，并对账钉住它）。
     /// 字段落地后数字有了直传通道，页尾这句改由数装配；**旧报告没有这些格** ⇒ 返回 `nil`，
     /// 调用方退回认领句子那条路，两种来源都不许让榜外那一半看不见。
-    /// ⚠️ 不做加法：不合成"总块数"（`rankedBlocks` 撞 id 削掉的块没有读数，等式天然不平）。
+    /// ⚠️ 仍然**不做加法**：这里不合成"总块数"。撞 id 那一格（RD-85）落成读数之后，
+    /// 「榜内 + 榜外 + 合并掉 == 原始命中」这条账平了，但屏上这句只逐条点名三项，
+    /// 不把三项加成一个数再印 —— 加出来的那个数一旦被读成"这个仓库有多少处克隆"，
+    /// 就把"原始命中"和"去重后的块"两把尺子又混回一把了。
     static func outsideBoardNoteFromFields(_ code: CodeMetrics) -> String? {
+        let merged = code.duplicatedBlocksDroppedByIdCollision ?? 0
         guard let dropped = code.duplicatedBlocksDroppedByCap,
               let outsideLines = code.duplicatedLinesOutsideReportedBlocks,
-              dropped > 0 || outsideLines > 0 else { return nil }
-        var note = localizedFormat("另有 %1$@ 个块 / %2$@ 行未列入榜内。",
+              dropped > 0 || outsideLines > 0 || merged > 0 else { return nil }
+        var note = ""
+        if dropped > 0 || outsideLines > 0 {
+            note = localizedFormat("另有 %1$@ 个块 / %2$@ 行未列入榜内。",
                                    NumberFormat.grouped(dropped), NumberFormat.grouped(outsideLines))
+        }
+        if merged > 0 {
+            // 旧话术一字未动（第 21 类盲区：加新维度时旧句必须原样），这句只在有数时才出声。
+            if !note.isEmpty { note += " " }
+            note += localizedFormat("另有 %1$@ 处重复命中与别处合并为一条（同一组文件、同一长度）。",
+                                    NumberFormat.grouped(merged))
+        }
         if let fragments = code.duplicateFragmentsNotExpandedCount, fragments > 0 {
             note += " " + localizedFormat("另有 %1$@ 处拷贝因指纹预算未展开。", NumberFormat.grouped(fragments))
         }
-        return note
+        return note.isEmpty ? nil : note
     }
 }
 

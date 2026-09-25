@@ -244,6 +244,10 @@ extension DuplicationScan {
     /// 不同克隆会撞同一个 id（SwiftUI ForEach 会报 duplicate identifiers 并错乱 diff）。
     /// 契约缺口不能改 Models，这里按 id 去重后再截断到 20：**只削明细榜单，不动 ratio**。
     ///
+    /// RD-85：被去重削掉的那几块现在有读数了（返回值第五项 `droppedByIdCollision`）。
+    /// 在那之前「榜内 + 榜外 == 总数」在撞 id 时天然不平，而且**不平多少没人知道** ——
+    /// 于是「去重后口径」这句限定语是一句无法反驳的免责声明，不是一条账。
+    ///
     /// 榜外坐标（返回值的第四项）**就是 `id` 本身**，一个字都不再加工：
     /// RD-52 那一半曾在这里补过一次「按根剥前缀」（`relativeCoordinates`），
     /// 因为当时生产点给的是绝对路径。RD-61 第二半把坐标在唯一生产点
@@ -253,7 +257,7 @@ extension DuplicationScan {
     /// `DuplicateCoordinatePortabilityTests` 两把尺子共同盯（后者量两棵不同深度的根）。
     static func rankedBlocks(_ input: [DuplicatedBlock])
         -> (blocks: [DuplicatedBlock], droppedByCap: Int, linesOutsideReportedBlocks: Int,
-                 outsideBoardCoordinates: [String]) {
+                 outsideBoardCoordinates: [String], droppedByIdCollision: Int) {
         var blocks = input
         if blocks.count > 1 {
             blocks.sort { lhs, rhs in
@@ -262,15 +266,21 @@ extension DuplicationScan {
             }
         }
         var seenIDs = Set<String>()
-        blocks = blocks.filter { seenIDs.insert($0.id).inserted }
-        guard blocks.count > DuplicationEngine.maxBlocks else { return (blocks, 0, 0, []) }
-        let dropped = blocks[DuplicationEngine.maxBlocks...]
-        return (Array(blocks.prefix(DuplicationEngine.maxBlocks)),
+        let deduped = blocks.filter { seenIDs.insert($0.id).inserted }
+        // 撞 id 被合并掉的原始命中数。它既不在榜内、也不在 `droppedByCap` 里，
+        // 所以这一格不归零，「榜内 + 榜外 + 撞 id == 原始命中」这条账就永远差一截。
+        let collided = input.count - deduped.count
+        guard deduped.count > DuplicationEngine.maxBlocks else {
+            return (deduped, 0, 0, [], collided)
+        }
+        let dropped = deduped[DuplicationEngine.maxBlocks...]
+        return (Array(deduped.prefix(DuplicationEngine.maxBlocks)),
                 dropped.count,
                 dropped.map(\.lineCount).reduce(0, +),   // 明细外的行数（ratio 已含，只是不列明细）
                 // 榜外块的稳定坐标：`id` 由「涉及路径排序拼接 + 行数」构成，与榜单同一把排序键，
                 // 所以同一份输入永远给出同一串（RD-17：不许只留一个总数）。
-                dropped.prefix(DuplicationScan.outsideBoardSampleLimit).map(\.id))
+                dropped.prefix(DuplicationScan.outsideBoardSampleLimit).map(\.id),
+                collided)
     }
 
     /// 榜外坐标最多点这几个名字。再多就把一行限制说明撑成一段散文；
