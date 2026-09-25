@@ -113,3 +113,36 @@ selfcheck_warmup_dimension() {  # selfcheck_warmup_dimension <outdir>
   [ "$bad" = "0" ] || { fail "预热这一维不成立：$got"; return; }
   ok "预热维成立：四种 etime 排版逐个对得上、坏排版判「取不到」（不回落成 0）、未预热判拒、已预热判放、启动档不参与"
 }
+
+selfcheck_main_drift_reading() {  # selfcheck_main_drift_reading <outdir>
+  # 64) 「落后 main 几笔产品码」这一格（第 25 类盲区的测量侧出口）。
+  #     五个形状各钉一次。为什么必须有真 git 夹具：这把尺的两种坏法都是**静默**的——
+  #     pathspec 少了 `:/` 会永远报 0（"总是最新"），rev 打错会回空串（"不知道"），
+  #     两者看起来都像正常输出。
+  local fx="$1/driftfx" c base got same sub bogus pp
+  rm -rf "$fx"; mkdir -p "$fx/TcoderMonitor/Sources" "$fx/docs"
+  # 绝对路径：四格都要在**别的 cwd** 里 source 同一个库，否则"换目录仍是 1"那一格是假的。
+  pp=$(cd scripts && pwd)/perf_provenance.sh
+  c="git -C $fx -c user.name=selfcheck -c user.email=selfcheck@local"
+  git -C "$fx" init -q -b main . >/dev/null 2>&1 \
+    || { fail "夹具仓库起不来 ⇒ 本项一条都没判（不是判据不符）"; return; }
+  $c commit -q --allow-empty -m base
+  echo a > "$fx/TcoderMonitor/Sources/a.swift"; $c add -A; $c commit -q -m product-earlier
+  base=$(git -C "$fx" rev-parse HEAD)
+  echo d > "$fx/docs/d.md"; $c add -A; $c commit -q -m docs-only           # 纯 docs：不该计入
+  echo b > "$fx/TcoderMonitor/Sources/a.swift"; $c add -A; $c commit -q -m product-later
+  got=$(cd "$fx" && source "$pp"; provenance_main_drift "$base")
+  same=$(cd "$fx" && source "$pp"; provenance_main_drift main)
+  bogus=$(cd "$fx" && source "$pp"; provenance_main_drift nosuchrev999)
+  sub=$(cd "$fx/TcoderMonitor" && source "$pp"; provenance_main_drift "$base")
+  [ "$got" = "1" ] && [ "$same" = "0" ] && [ "$bogus" = "未取到" ] && [ "$sub" = "1" ] \
+    || { fail "读数四形状不对（落后=$got 期望1｜同码=$same 期望0｜乱rev=$bogus 期望未取到｜子目录=$sub 期望1）" \
+             "⇒ 少 `:/` 会永远报 0，那种坏法是静默的"; return; }
+  local note
+  note=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_trace_summary import freshness_note as f
+print("%s|%s|%s" % ("不知道" in f(""), "同码" in f("0"), "3 笔" in f("3") and "不绑" in f("3")))')
+  [ "$note" = "True|True|True" ] \
+    || { fail "表头那句三态不对（拿到 ${note:-解析失败}）⇒ 「没查到」会被印成「没落后」"; return; }
+  ok "基线新鲜度：只数产品码（1 不是 2）、同码报 0、乱 rev 报未取到、换 cwd 仍是 1，表头三态各说各的"
+}

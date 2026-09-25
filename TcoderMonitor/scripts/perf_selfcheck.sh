@@ -144,6 +144,7 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_hang_retry_policy "$out"  # 62) 只有录制挂死值得同窗补一次：按批封顶、挂死计数抹不掉、meta 键双向（#55）
   item selfcheck_update_stack_attribution "$out"  # 63) 长 update → 调用栈归因：同窗才 join，四种"不许算"各判一次（#43/#73）
   item selfcheck_blame_wiring "$out"  # 63b) 归因档的接线：附加仪器作为一个参数进 xctrace、导出改名不盖认证档
+  item selfcheck_main_drift_reading "$out"  # 64) 基线新鲜度：落后 main 几笔**产品码**（只数产品码、乱 rev 报未取到、换 cwd 仍是 1）（#76）
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：那个 for 必须在 cmd_selfcheck 之前，
