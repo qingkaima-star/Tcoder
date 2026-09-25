@@ -148,9 +148,16 @@ preflight_context() {  # preflight_context <outdir> <pid> [档]   档=measure(�
 preflight_write_context() {  # preflight_write_context <outdir> <context 文件路径>
   # 这一份上下文是"读数可互比"的凭据：谁后面拿这批数做对比，都得先看见同一组条件。
   local f="$2"
+  # 下面五个都是**宿主脚本**的全局（`perf_harness.sh` 才定义）：本文件被单独 source 时
+  # 它们不在场，而 `set -u` 下读到未初始化量是**当场中止整个 shell**。
+  # 更糟的是这一整块原本带 `2>/dev/null` ⇒ 中止那句 "unbound variable" 被丢进黑洞，
+  # 现场只剩"什么都没印、REFUSED 没落盘"（2026-09-25 t20 那批之后我自己踩出来：
+  # 独立调用 `preflight_context` 想造一份真判废，结果它一个字没说就死了）。
+  # ⇒ 两条一起改：读法全部给 `${…:-取不到}` 的活路，**并且把块级 2>/dev/null 摘掉**
+  #    （写不出文件由后面那个 `|| die` 负责报，不该由黑洞负责）。
   { echo "# 测量上下文（读数只有在这一组条件下才可互比）"
-    echo "时间=$(date '+%F %T')  HEAD=$(git rev-parse --short HEAD 2>/dev/null)  工作树改动数=$DIRTY"
-    echo "被采pid=$pid  二进制=$TARGET_BINARY  口径=$TARGET_FLAVOR"
+    echo "时间=$(date '+%F %T')  HEAD=$(git rev-parse --short HEAD 2>/dev/null)  工作树改动数=${DIRTY:-取不到}"
+    echo "被采pid=$pid  二进制=${TARGET_BINARY:-取不到}  口径=${TARGET_FLAVOR:-取不到}"
     echo "   产物码 tree=${BUILD_TREE:-未记录}  被测内容(${MEASURE_REV:-HEAD})=${HEAD_TREE:-未记录}"
     echo "产物构建rev=${BUILD_REV:-未记录}  构建时树clean=${BUILD_CLEAN:-未记录}  ← 必须与上面 HEAD= 同一份代码，否则读数归错对象"
     [ -n "${PROVENANCE_NOTE:-}" ] && echo "   ※ 归属靠产物码 tree 放行（rev 不同）：${PROVENANCE_NOTE}"
@@ -158,9 +165,9 @@ preflight_write_context() {  # preflight_write_context <outdir> <context 文件�
     echo "被测实例已跑=${uptime_secs:+${uptime_secs}s}${uptime_secs:-取不到}  预热线=${WARMUP_MIN_SECONDS:-120}s（低于线 ⇒ 量到的是启动首扫，不是稳态心跳）"
     echo "load1=$load1  核数=$cores  并发重活=${other_detail:-无}"
     echo "人输入静默=${quiet:-取不到}s  明细=${qline:-（探针没跑起来）}"
-    echo "hitches_seconds=$SECONDS_HITCHES  tp_seconds=$SECONDS_TP"
+    echo "hitches_seconds=${SECONDS_HITCHES:-取不到}  tp_seconds=${SECONDS_TP:-取不到}"
     echo "诊断开关 TCODER_I18N_RUNTIME_LEDGER=${i18n_ledger:-未设（渲染路径零成本）}"
-  } > "$f" 2>/dev/null || die "写不出 $f"
+  } > "$f" || die "写不出 $f"
   echo "    上下文：前台=$front  visible=$visible  load1=$load1/$cores  并发重活=${other_detail:-无}  静默=${quiet:-取不到}s  磁盘可用=${free_gib:-取不到}GiB"
 }
 
