@@ -73,6 +73,9 @@ selfcheck_binary_provenance() {  # selfcheck_binary_provenance <outdir>
   # 【同一件事只许有一把手尺子】这三条结构钉拆到 `provenance_single_ruler_cases`：
   # 本仓 50 行线（`PerfRulerHotspotRatchetTests`）——拆函数才是修复，抬数字不是。
   provenance_single_ruler_cases
+  # 14b) 同一项里再问一句"manifest 说的是不是**眼前这个文件**"（#107 的假绿通道）；
+  #      不另开一项：项数 79 是常量，多印一句 ✓ 会让汇总凭空加一项。
+  provenance_content_matches_both_ways "$1"
   # tree 放行这一支必须单独钉：它是"假拒"的唯一解药，也是最容易被写歪的一支
   #（写歪的方向是"永远认为相同"或"永远认为不同"，两边都不报错）。
   local T1=1111111111111111111111111111111111111111111111111111111111111111
@@ -92,7 +95,47 @@ selfcheck_binary_provenance() {  # selfcheck_binary_provenance <outdir>
   if provenance_ok "$B" "$H" true "" "$T1"; then
     fail "缺 tree 信息还走 tree 放行（老 manifest 必须退回严格比 sha）"; bad=1
   fi
-  [ "$bad" = "0" ] && ok "二进制出身判定双向都对（sha 相同 / tree 相同可放行且留痕 / 逐维破坏各判拒）"
+  [ "$bad" = "0" ] && ok "二进制出身判定双向都对（sha 相同 / tree 相同可放行且留痕 / 逐维破坏各判拒 ＋ 内容对账：配对放行、错配点名两个 sha 判拒）"
+}
+
+provenance_content_matches_both_ways() {  # provenance_content_matches_both_ways <outdir>
+  # 14b) 第 14 项只管"rev/tree 对不对"，**没管 manifest 说的是不是眼前这个文件**：
+  #      manifest 每棵树只有一份，而 `PERF_BIN` 能指任何 bundle ⇒ 装着 A 的 manifest 量 B 会一路绿灯
+  #      （2026-09-27 §191 做双产物 A/B 时撞见，工单 #107）。这里把新那把尺**双向**钉：
+  #      配对必须放行、错配必须拒且**两个 sha 都要印出来**（不然人查不到现场）。
+  # ⚠ **故意不 `local bad`**：`fail()` 走的是动态作用域，本函数的判红要汇进调用方
+  #   （第 14 项）那个 `bad`——上一版我把它 local 了，结果 4 条 ✗ 与 1 条 ✓ 同时印出来，
+  #   读日志的人以为这一项过了。**一项红着就不许再印"双向都对"。**
+  local dir="$1/content" bin mf want got why
+  mkdir -p "$dir" || { fail "建不了夹具目录 $dir"; return; }
+  bin="$dir/TcoderMonitor"; mf="$dir/RELEASE_MANIFEST.env"
+  printf 'macho-A\n' > "$bin"
+  want=$(shasum -a 256 "$bin" | cut -d' ' -f1)
+  printf 'TCODER_BINARY_SHA256="%s"\n' "$want" > "$mf"
+  # 用**调用方的形状**验（话术必须走 stdout，赋值出不了子 shell 那条老账）
+  if why=$(provenance_binary_matches "$bin" "$mf"); then :; else
+    fail "配对的二进制被判拒 ⇒ 这条闸门会恒拒，谁都会被它挡在测量外面：${why:-未给原因}"; bad=1
+  fi
+  printf 'macho-B-different-bytes\n' > "$bin"
+  got=$(shasum -a 256 "$bin" | cut -d' ' -f1)
+  if why=$(provenance_binary_matches "$bin" "$mf"); then
+    fail "manifest 说的是 A 而量的是 B，却放行了 —— #107 那条假绿通道又开了"; bad=1
+  else
+    case "$why" in
+      *"${want:0:12}"*"${got:0:12}"*) ;;                        # 两个短号都在 ⇒ 查得到现场
+      *) fail "错配拒了但没点名两个 sha，人拿这话找不到现场：$why"; bad=1 ;;
+    esac
+  fi
+  : > "$dir/empty.env"
+  provenance_binary_matches "$bin" "$dir/empty.env" \
+    && { fail "manifest 里根本没有那格哈希却放行（读不到不等于通过）"; bad=1; }
+  provenance_binary_matches "" "$mf" \
+    && { fail "连被量的二进制都不知道是谁却放行"; bad=1; }
+  provenance_binary_matches "$dir/不在场" "$mf" \
+    && { fail "被量的二进制不在场却放行"; bad=1; }
+  # ⚠ 这里**不再 `ok` 一次**：项数是常量（79），多印一句 ✓ 会把汇总数凭空加一项，
+  #    而"项数应当是常量、出声次数才是变量"这条规矩就白立了。判定由第 14 项那句 ok 一并出声。
+  return "$bad"
 }
 
 selfcheck_baseline_text_is_derived() {  # selfcheck_baseline_text_is_derived <outdir>
