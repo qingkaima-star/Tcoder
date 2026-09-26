@@ -295,13 +295,14 @@ XML
 # 把"变异—反证"这一段单独成函数：宿主 `selfcheck_migration` 加了它就从 44 行涨到 52 行，
 # 越过 `PerfRulerHotspotRatchetTests` 那把「尺子函数 ≤50 行」的门（2026-09-27 门禁实测撞红）。
 # 本仓对这把门只有一句口径：**拆，不抬线**。
-migration_rejects_a_renamed_ruler() {  # <夹具树> <变异前的完整输出>
+migration_rejects_a_renamed_ruler() {  # <夹具树> <变异前的完整输出> [sed 表达式，默认真变异]
   local fake="$1" mig_before="$2"
+  local sed_expr="${3:-s/static let coarsePattern/static let coarsePatternRenamed/}"
   local guard="$fake/Tests/TcoderMonitorTests/PerfInvalidationRatchetTests.swift"
   local snap mig_after rc
   snap=$(mktemp)
   cp "$guard" "$snap"
-  sed -i '' 's/static let coarsePattern/static let coarsePatternRenamed/' "$guard"
+  sed -i '' "$sed_expr" "$guard"
   if cmp -s "$snap" "$guard"; then
     fail "变异没改进文件（sed 静默落空）——这一格从「有牙」退化成「什么都没做」，" \
          "而它的退出码照样能骗过只看 rc 的判据"
@@ -326,18 +327,7 @@ selfcheck_migration() {  # selfcheck_migration <outdir>
   #    （工单 §0.1 那张手写表会腐烂——行号会漂；命令化之后各家能自己反复跑）
   local out="$1"
   local fake="$out/fake-tree"
-  mkdir -p "$fake/Tests/TcoderMonitorTests" "$fake/Sources/TcoderMonitor/Views"
-  cat > "$fake/Tests/TcoderMonitorTests/PerfInvalidationRatchetTests.swift" <<'SWIFT'
-    static let coarsePattern = #"monitor\s*\.\s*(latestSnapshot|history)\b"#
-    static let finePattern = #"monitor\s*\.\s*(cpu|pulse)\s*\.\s*value\b"#
-    static let coarseCallSiteCeiling = 7
-    private static let consumerDirectories = ["Sources/TcoderMonitor/Views"]
-SWIFT
-  cat > "$fake/Sources/TcoderMonitor/Views/Fake.swift" <<'SWIFT'
-  // 文档注释里提到 monitor.latestSnapshot 不算调用点（与守卫同一条豁免）
-  Text(monitor.cpu.value.title)
-  Chart(monitor.history)
-SWIFT
+  migration_fixture_build "$fake"   # 夹具与第 78 项共用同一份（见 perf_selfcheck_mutation.sh）
   local mig
   if mig=$(python3 "$TRACE_REPORT" migration --module-root "$fake" 2>&1) \
      && printf '%s' "$mig" | grep -q "粗粒度读点 1 处 / 登记上限 7 处" \
