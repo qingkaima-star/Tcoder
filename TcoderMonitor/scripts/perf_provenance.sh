@@ -24,6 +24,41 @@ provenance_manifest_value() {  # provenance_manifest_value <KEY> [manifest 路�
   printf '%s' "${line#*=}" | tr -d '"'
 }
 
+provenance_binary_matches() {  # provenance_binary_matches <被量的二进制> [manifest 路径]
+  # → 0＝眼前这个二进制**就是** manifest 记的那一份；非 0 时把原因 echo 到 stdout
+  #   （调用方一律写成 `WHY=$(…)`，所以话术必须走 stdout，不走 stderr——同 `provenance_ok` 那条老账）。
+  #
+  # 为什么要它（2026-09-27 工单 #107，实测撞出来的）：闸门原先只比 **manifest 的 rev** 与 HEAD，
+  # 而 manifest 每棵树只有一份（`dist/RELEASE_MANIFEST.env`），`PERF_BIN` 却可以指向任何 bundle
+  # ⇒ "装着 A 的 manifest 去量 B"一路绿灯，读数被归到**不是它的那份代码**头上。
+  # manifest 里 `TCODER_BINARY_SHA256` 早就有，只是一直没有读者（第 23 类：只有写点、零读者）。
+  #
+  # 按设计不参与的一格由**调用方**决定：debug 产物的哈希不在 release manifest 里
+  # （那格是 codesign 之后对 `dist/…` 那个文件算的），所以调用方对 debug 要**明着跳过并说出来**，
+  # 不许静默放行——这里只回答"内容对不对得上"，不替调用方判"该不该问这个问题"。
+  local bin="$1" path="${2:-dist/RELEASE_MANIFEST.env}" want got
+  if [ -z "$bin" ]; then
+    echo "取不到被量的二进制路径（TARGET_BINARY 为空）⇒ 这一格没法对账"
+    return 1
+  fi
+  [ -f "$bin" ] || { echo "被量的二进制不在场：$bin"; return 1; }
+  want=$(provenance_manifest_value TCODER_BINARY_SHA256 "$path")
+  if [ -z "$want" ]; then
+    echo "manifest 里没有 TCODER_BINARY_SHA256（看 $path）⇒ 无从对账，别当通过"
+    return 1
+  fi
+  got=$(shasum -a 256 "$bin" 2>/dev/null | cut -d' ' -f1)
+  if [ -z "$got" ]; then
+    echo "算不出被量二进制的 sha256：$bin"
+    return 1
+  fi
+  if [ "$want" != "$got" ]; then
+    echo "manifest 记的产物是 ${want:0:12}…，而真正要量的这个算出 ${got:0:12}…（$bin）⇒ 这批读数不归给这份代码"
+    return 1
+  fi
+  return 0
+}
+
 provenance_product_tree() {  # provenance_product_tree [rev] → 该提交"产物码"的 tree 指纹
   # 为什么比 tree 而不是 commit sha：落地/merge 加的**容器提交**会换 sha，
   # 而 `Sources/` + `Resources/` 两棵子树逐字节没变。只比 sha 就会把

@@ -204,6 +204,18 @@ preflight_gates_identity() {
     # 放行也可能带话——那就是"靠 tree 归属"的留痕，必须印进上下文，不许悄悄过。
     PROVENANCE_NOTE="$PROVENANCE_WHY"
   fi
+  # 归属内容：比完 rev/tree，还要比**内容**——manifest 每棵树只有一份，而 `PERF_BIN` 能指任何
+  # bundle ⇒ 只看 rev 会放行"装着 A 的 manifest 去量 B"（#107，实测撞出来的假绿通道）。
+  # 对账对象取"真正会被跑起来的那个文件"：attach 档已经有 `TARGET_BINARY`（从 pid 反查），
+  # 而 `switch`／`MEASURE_LAUNCH` 那一档是先录后起、pid 还没有 ⇒ 只能拿 `PERF_BIN` 当被量对象。
+  # 两个都取不到就是**判红**，不放行（"看不见"从来不等于"没问题"）。
+  case "${TARGET_FLAVOR:-}" in
+    debug*) echo "    （debug 产物不比 release manifest 的内容哈希——那格按设计不参与，不是漏判）" >&2 ;;
+    *) if ! BINARY_WHY=$(provenance_binary_matches "${TARGET_BINARY:-${PERF_BIN:-}}"); then
+         echo "!! 量的不是 manifest 说的那份产物：${BINARY_WHY}" >&2
+         hard=1
+       fi ;;
+  esac
   # 归属是谁的就必须写出来：不设 `MEASURE_REV` 时这一行等于"HEAD"，设了则一眼能看出
   # "这一批读数算在另一个 rev 头上"（旧形状里这句话是**隐形的**，读上下文的人只能猜）。
   echo "    归属内容：${MEASURE_REV:-HEAD} → ${TARGET_REV:-取不到（rev 写错了？）}"
