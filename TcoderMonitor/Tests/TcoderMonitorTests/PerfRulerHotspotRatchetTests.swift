@@ -147,6 +147,15 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // 一进门就被"每个尺子文件都要真被认出函数"那一分母门判红（实测就是这么红的）。
         "perf_cadence.py", "perf_wait_window.sh", "perf_who_holds_the_slot.sh",
         "perf_synth_scroll.swift",
+        // 09-26 包 51：selfcheck 第十二块 `perf_selfcheck_ledger.sh`（台账**装订层**的反例，
+        // 尺子是 `scripts/ledger_binding_check.py`）。这块**不测帧率**，测的是"每节有没有指路行、
+        // 节号唯不唯一"——它进这张表的原因和前面十一块同一条：名单是写死的，带 `perf_` 前缀的
+        // 新文件不点名就静默免检。**这次不需要"第 N 次漏了"那句 confession**：
+        // 装闸之后我自己先故意不注册跑了一次，`testRosterCoversEveryScriptOnDisk` 当场红
+        // 「盘上有 1 把尺子既没点名也没豁免：["perf_selfcheck_ledger.sh"]」⇒ 这条门有牙是被测出来的，
+        // 不是被我引用的。尺子本体不带前缀，所以不被 `onDisk` 全集收成（它不是测量链的尺），
+        // 它的读者就是这里的 72/73 两项。
+        "perf_selfcheck_ledger.sh",
     ]
 
     /// 盘上 `scripts/` 里"不进函数级名单"的文件：逐条写**为什么函数级两条尺没有可量对象**。
