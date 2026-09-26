@@ -47,8 +47,8 @@ final class SceneTypeNameStabilityTests: XCTestCase {
     func testRulerFiresOnAFilePrivateType() {
         let display = String(reflecting: UnstableByDesign.self)
         XCTAssertNotNil(Self.instability(in: display),
-                        "文件私有类型的显示名里已经没有那段地址（实测拿到「\(display）」）⇒ 判据作废，连同正向那条一起撤")
-        print("【#108 反例实测】\(display)")
+                        "文件私有类型的显示名里已经没有那段地址 ⇒ 判据作废，连同正向那条一起撤；实测拿到：" + display)
+        print("【#108 反例实测】" + display)
     }
 }
 
