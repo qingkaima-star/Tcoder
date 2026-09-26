@@ -241,11 +241,29 @@ selfcheck_artifact_locator_names_the_tree_copy() {  # 69) 分叉时必须点名�
   ok "分叉必点本树那一份（它是 report／一致性尺唯一认得的），且换一棵合成树站错目录时不冒这句"
 }
 
+locator_census_suspect_checks() {  # 内部工具（不是 item，故不叫 selfcheck_*）：#95 那几格的断言
+  # 为什么要单独一个函数：留在第 70 项里，那一项的 CC 从 15 涨到 **16**，
+  # 2026-09-27 00:54 被 `PerfRulerHotspotRatchetTests.testRulerFunctionsStayBelowTheComplexityBar`
+  # 当场判红（1942 例 / 1 failure）⇒ **拆函数才是修复，抬那条线不是**（同 #39/#54 那一族）。
+  local fx="$1" a="$2" r3 out=""
+  grep -qF "家族外但形状像批次的 1 类" "$fx/census.txt" \
+    || out="$out 家族外但形状就是一批产物的目录没出声（静默不存在＝清树会灭失而没人报）"
+  grep -qF "switch-fake-cert1" "$fx/census.txt" || out="$out 家族外那一格没点名是哪个目录"
+  python3 scripts/perf_artifact_locator.py switch-fake-cert1 --root "$a" >"$fx/susp.txt" 2>&1; r3=$?
+  [ "$r3" = "3" ] || out="$out 逐名查家族外真批次=$r3（要 3：目录在、但本尺不判）"
+  # 反向格：把"活着"印成"可能没了"是本轮最贵的一条（上一版就是这么对 switch-cert11 说的）
+  if grep -qF "一处都没找到" "$fx/susp.txt"; then
+    out="$out 对明明活着的目录印了「一处都没找到」（否定读数会被写成原件灭失）"
+  fi
+  grep -qF "本尺对它**没有判定**" "$fx/susp.txt" || out="$out 没印出「不判」这句结论"
+  printf '%s' "$out"
+}
+
 selfcheck_locator_census_counts_only_batches() {  # 70) 「数了几批」由尺答：夹具不进分母（#90）＋家族外像批次的要出声（#95）
   # 23:07 实跑抓到的：普查档第一版按"深度 ≤2 全走"数批次，把 `selfcheck-<rev>/reclaim/tcoder-perf-fix-idle-run1`
   # 这类**合成夹具**数了进去 ⇒ 554 个"批次"而真批次只有 222 个。形状完全一样，只有
   # 「住在夹具树里」能分开 ⇒ 这条口径必须钉住，且**逐名模式与普查档共用同一份枚举**（两处入口两个数=老账）。
-  local fx a b r1 r2 r3 out
+  local fx a b r1 r2 out
   fx=$(mktemp -d 2>/dev/null || echo /tmp/locator-census-fx)
   a="$fx/rootA"; b="$fx/rootB"
   mkdir -p "$a/tcoder-perf-real-idle-run1" "$b/tcoder-perf-real-idle-run1" \
@@ -264,17 +282,9 @@ selfcheck_locator_census_counts_only_batches() {  # 70) 「数了几批」由尺
   grep -qF "批次目录 2 个（批名 2 个）" "$fx/census.txt" \
     || out="$out A 根没数成 2（真批次 1 ＋ 容器里第二层 1，夹具树里那 1 个不算）：$(grep -F "$a " "$fx/census.txt" | head -1)"
   grep -qF "不是批次形状的 1 类" "$fx/census.txt" || out="$out 没把 selfcheck 目录单列成'非批次形状'"
-  # ↓ 三格都是 #95 那一条的牙：出声、点名、且**不许抬高批次分母**（上面那句"批次目录 2 个"就是这条）
-  grep -qF "家族外但形状像批次的 1 类" "$fx/census.txt" \
-    || out="$out 家族外但形状就是一批产物的目录没出声（静默不存在＝清树会灭失而没人报）"
-  grep -qF "switch-fake-cert1" "$fx/census.txt" || out="$out 家族外那一格没点名是哪个目录"
-  python3 scripts/perf_artifact_locator.py switch-fake-cert1 --root "$a" >"$fx/susp.txt" 2>&1; r3=$?
-  [ "$r3" = "3" ] || out="$out 逐名查家族外真批次=$r3（要 3：目录在、但本尺不判）"
-  # 反向格：把"活着"印成"可能没了"是本轮最贵的一条（上一版就是这么对 switch-cert11 说的）
-  if grep -qF "一处都没找到" "$fx/susp.txt"; then
-    out="$out 对明明活着的目录印了「一处都没找到」（否定读数会被写成原件灭失）"
-  fi
-  grep -qF "本尺对它**没有判定**" "$fx/susp.txt" || out="$out 没印出「不判」这句结论"
+  # ↓ #95 那几格的断言拆进 helper：留在本项里会把这一项的 CC 顶到 16（00:54 被复杂度棘轮判红过）
+  local extra; extra=$(locator_census_suspect_checks "$fx" "$a")
+  [ -z "$extra" ] || out="$out$extra"
   grep -qF "只在一处 1 个／两处以上 1 个" "$fx/census.txt" || out="$out 跨根分组不对（moved 只在一处、real 在两处）"
   grep -qF "tcoder-perf-moved-idle-run2" "$fx/census.txt" || out="$out 唯一份清单没点名容器里那一层 ⇒ rescue/archive 形状会被漏掉"
   python3 scripts/perf_artifact_locator.py --census --root "$fx/empty-root" >"$fx/none.txt" 2>&1
