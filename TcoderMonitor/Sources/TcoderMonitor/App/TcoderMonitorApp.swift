@@ -97,9 +97,17 @@ enum CaptureWindow {
 /// `TCODER_CAPTURE_WINDOW_HEIGHT=1000` 之后图仍然是 1640px（= 820pt），
 /// 长页折叠线以下照样没进证据。`-ApplePersistenceIgnoreState YES` 管的是
 /// restorable state，管不到这条帧自动保存。
-///
 /// 只在设了环境变量时动作，且**只执行一次**：之后用户手动拖窗口不该被 App 拽回去。
-private struct CaptureWindowSizer: NSViewRepresentable {
+///
+/// ⚠ **这个类型不许声明成 `private`**（2026-09-27 实测，台账卷十二 §191／工单 #108）：
+/// Swift 给**文件私有作用域里的类型**生成的运行时名字带一段 `(unknown context at $<地址>)`，
+/// 而那个地址随每次构建的二进制布局变。这个类型挂在 `WindowGroup` 的内容链上，
+/// 而 AppKit/SwiftUI 的窗口与分栏自动保存键**就用内容链的类型名**——
+/// 于是每构建换一次键：这台机器上实测攒出 `NSWindow Frame*` 1574 条 ＋
+/// `NSSplitView Subview Frames*` 2030 条（整个域 1.53 MB，真正属于用户状态的只有 5 条），
+/// 而启动时要把这整域读进来、再拿一条 320 字符的长键去查。
+/// 由 `SceneTypeNameStabilityTests` 钉住（判据＝显示名里不许出现那段地址）。
+struct CaptureWindowSizer: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async { apply(to: view.window) }
