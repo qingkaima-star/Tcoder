@@ -155,4 +155,26 @@ extension DocReferenceRatchetTests {
         }
     }
 
+    /// 守恒等式自己的元测试：三个桶必须同为**出现次数**口径。
+    /// 反例形状不是我编的，是 2026-09-27 那次真实塌陷 —— 探针把 11 卷整改台账接进扫描面之后，
+    /// 等式左边的 915 是出现次数、右边的判死栏取自 `[名: 原因]` 那张表（唯一名），
+    /// 11 名死锚在文档里被提了 16 次 ⇒ 凭空差 5 枚，尺子把"同一条死锚提了两次"
+    /// 喊成了"有锚点被静默吞掉"。两个方向一起钉：重复出现要各算一次（否则口径又漂回唯一名），
+    /// 而四桶不闭合才是真的吞掉。
+    func testSymbolTallyBucketsClosePerOccurrence() {
+        var scan = Scan()
+        let deadResolution = Resolution(reason: "找不到 Member", usedFileScope: false, droppedSegment: nil)
+        let plainLive = Resolution(reason: nil, usedFileScope: false, droppedSegment: nil)
+        let scopedLive = Resolution(reason: nil, usedFileScope: true, droppedSegment: "CodeMetrics")
+        Self.tally(.symbol(segments: ["CodeMetrics", "totalLines"]), scopedLive, into: &scan)
+        Self.tally(.symbol(segments: ["AppState", "lastScan"]), plainLive, into: &scan)
+        Self.tally(.symbol(segments: ["NotAReal", "Member"]), deadResolution, into: &scan)
+        Self.tally(.symbol(segments: ["NotAReal", "Member"]), deadResolution, into: &scan)
+        XCTAssertEqual(scan.deadSymbolHits, 2,
+                       "同一条死锚提两次只算一次 = 又回到唯一名口径，等式会凭空欠账")
+        XCTAssertEqual(scan.symbolCount,
+                       scan.symbolFileScopedLive + scan.symbolPlainLive + scan.deadSymbolHits,
+                       "四桶不闭合：有锚点既没算活也没算死，这一格才是「静默吞掉」")
+    }
+
 }

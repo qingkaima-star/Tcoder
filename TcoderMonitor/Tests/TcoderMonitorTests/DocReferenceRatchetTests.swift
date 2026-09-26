@@ -235,8 +235,40 @@ final class DocReferenceRatchetTests: XCTestCase {
         var excludedExtensions = Set<String>()
         var symbolFileScopedLive = 0
         var symbolPlainLive = 0
+        // 判死桶按**出现次数**计，不按唯一名：`dead` 那张表是 `[名: 原因]`，
+        // 同一条死锚在文档里提两次只留一行。守恒等式左边是出现次数，
+        // 右边若用唯一名，差额会被读成"有锚点被静默吞掉"（第 24 类）——
+        // 2026-09-27 探针实测：死锚 11 名 16 次 ⇒ 等式凭空差 5 枚。
+        var deadSymbolHits = 0
         var droppedSegments = Set<String>()
         var dead: [String: String] = [:]
+    }
+
+    /// 一条锚点入哪个桶（守恒等式的唯一来源）。判活/判死都按出现次数计。
+    static func tally(_ anchor: Anchor, _ resolution: Resolution, into scan: inout Scan) {
+        switch anchor {
+        case let .example(ext):
+            scan.exampleCount += 1
+            scan.excludedExtensions.insert(ext)
+        case .symbol:
+            scan.symbolCount += 1
+            if resolution.reason == nil {
+                if resolution.usedFileScope {
+                    scan.symbolFileScopedLive += 1
+                    scan.droppedSegments.insert(resolution.droppedSegment ?? "?")
+                } else {
+                    scan.symbolPlainLive += 1
+                }
+            } else {
+                scan.deadSymbolHits += 1
+            }
+        case .file(_, let line):
+            scan.fileCount += 1
+            // #48 真正要盯的是**带行号**的那一类：`foo.swift` 这种纯文件名提及
+            // 是正常写作（`build_app.sh`、`Info.plist`…），拿它当债务计数会
+            // 惩罚普通改文档——第一版就误伤过一次（写 `verify_provenance.sh` 就 +1）。
+            if line != nil { scan.fileWithLineCount += 1 }
+        }
     }
 
     func scanDocs(with index: CodeIndex) -> Scan {
@@ -252,27 +284,7 @@ final class DocReferenceRatchetTests: XCTestCase {
             for token in tokens(in: text) {
                 let anchor = classify(token)
                 let resolution = resolve(anchor, in: index)
-                switch anchor {
-                case let .example(ext):
-                    scan.exampleCount += 1
-                    scan.excludedExtensions.insert(ext)
-                case .symbol:
-                    scan.symbolCount += 1
-                    if resolution.reason == nil {
-                        if resolution.usedFileScope {
-                            scan.symbolFileScopedLive += 1
-                            scan.droppedSegments.insert(resolution.droppedSegment ?? "?")
-                        } else {
-                            scan.symbolPlainLive += 1
-                        }
-                    }
-                case .file(_, let line):
-                    scan.fileCount += 1
-                    // #48 真正要盯的是**带行号**的那一类：`foo.swift` 这种纯文件名提及
-                    // 是正常写作（`build_app.sh`、`Info.plist`…），拿它当债务计数会
-                    // 惩罚普通改文档——第一版就误伤过一次（写 `verify_provenance.sh` 就 +1）。
-                    if line != nil { scan.fileWithLineCount += 1 }
-                }
+                Self.tally(anchor, resolution, into: &scan)
                 if let reason = resolution.reason { scan.dead[token] = reason }
             }
         }
@@ -294,11 +306,11 @@ final class DocReferenceRatchetTests: XCTestCase {
                              "在锚范围内的引用不到 100 条，不像这份文档的真实规模")
 
         // 守恒：每条符号锚点都必须落在三个桶之一，谁也不许凭空消失。
-        let deadSymbols = scan.dead.filter { classify($0.key).isSymbol }.count
-        XCTAssertEqual(scan.symbolCount, scan.symbolFileScopedLive + scan.symbolPlainLive + deadSymbols,
+        // 三个桶同为**出现次数**（见 `Scan.deadSymbolHits` 上方那段），等式才不欠账。
+        XCTAssertEqual(scan.symbolCount, scan.symbolFileScopedLive + scan.symbolPlainLive + scan.deadSymbolHits,
                        """
                        符号锚点不守恒（总 \(scan.symbolCount) ≠ 作用域判活 \(scan.symbolFileScopedLive)
-                       + 纯符号判活 \(scan.symbolPlainLive) + 判死 \(deadSymbols)），
+                       + 纯符号判活 \(scan.symbolPlainLive) + 判死 \(scan.deadSymbolHits)），
                        说明有锚点被静默吞掉——正是「91 条里跳过 85 条」那一族失效。
                        """)
         XCTAssertGreaterThan(scan.symbolFileScopedLive, 0,
@@ -316,9 +328,13 @@ final class DocReferenceRatchetTests: XCTestCase {
                                + "新增一律写成 `文件名` 的 `类型.成员`，不要写行号。"
                                + "确实清掉了若干条，就把基线改成新的实测值（只许往下调）。")
 
+        // 死锚这一栏**两个数一起印**：唯一名数（= 基线要逐条相等的条数）与出现次数
+        // （= 守恒等式里的那个桶）。只印一个，下一个人就得自己重做一遍减法。
+        let deadSymbolNames = scan.dead.filter { classify($0.key).isSymbol }.count
         print("【#29 分母】在锚引用 \(scan.symbolCount + scan.fileCount) 条"
             + "（符号 \(scan.symbolCount)：按文件名作用域判活 \(scan.symbolFileScopedLive)"
-            + " / 纯符号判活 \(scan.symbolPlainLive)）、文件名提及 \(scan.fileCount) 条（其中带行号 \(scan.fileWithLineCount) 条）；"
+            + " / 纯符号判活 \(scan.symbolPlainLive) / 判死 \(deadSymbolNames) 名 \(scan.deadSymbolHits) 次）、"
+            + "文件名提及 \(scan.fileCount) 条（其中带行号 \(scan.fileWithLineCount) 条）；"
             + "示例清单名排除 \(scan.exampleCount) 条；文档读到 \(scan.docsRead)/\(Self.docs.count) 份，skip 0；"
             + "豁免掉的文件名首段 \(scan.droppedSegments.count) 个："
             + "\(scan.droppedSegments.sorted().joined(separator: ", "))")
