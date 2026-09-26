@@ -320,7 +320,8 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
     §177 那批 time-profile 也独立给出同一句真话——首帧后 1.12 s 里的 prefs 读栈根全是 `start`，
     是 AppKit 首用同步初始化，**不是**我们写的）。
     ⚠ **没盖住的那一半**：`@AppStorage` 是属性声明（`Views/**` 真声明 2 处，字面 3 处里有一条是注释里的引用），字面不在跨度内，
-    读发生在你每次访问那个 wrapper 时 ⇒ 这条判据对它是**设计性失明**，不许读成「prefs 已全覆盖」。
+    读发生在你每次访问那个 wrapper 时 ⇒ 这条判据对它是**设计性失明**，不许读成「prefs 已全覆盖」——**另一半已于同日补上**：`PerfHitchGuardTests+PrefsOutside.swift`
+    在**整文件声明层**数它（现量 2/上限 2、逐点点名；牙＝合成声明要数到、注释里谈这个键不许算）。
   - **T5 的"零"到底指什么（2026-09-20 23:35 明写，防止被读成"把令牌引用删光"）**。
     C 包落地后 `ColorToken`/`ThemeTokens` 的 `color`/`font` 已是**存储常量**，
     守卫里 `dynamicNSColor` 那条正则量的东西随之变了：**不再是"每 tick new 多少个 `NSColor`"，
