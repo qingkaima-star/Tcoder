@@ -313,8 +313,10 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 - **T4 冷启动**：到可交互 ≤ 1.0 s（`App Launch` 模板），首帧 ≤ 3 个显示节拍。
 - **T5 主线程禁则**（静态守卫钉死，见 §4）：`body` 与图表 Mark 闭包内 **0 次** new
   `NSColor` / `DateFormatter` / `NumberFormatter` / `Font`；**0 次**全量 `sorted`/`filter`/`reduce`；
-  **0 次**同步文件 I/O（`stat`/`Data(contentsOf:)`/JSON 解码/`.write(to:)` 写盘——
-  读写一样贵，`.atomic` 那一路还多一次 `rename`；2026-09-27 §184 才把写盘补进词表）。
+  **0 次**同步文件 I/O（读、写、改名／删除、`FileHandle` 都在内。**词表的权威清单就是守卫里那条
+  `syncFileIO`，spec 不逐字抄**——抄一次就腐烂一次；这里只留一句方向：读写一样贵，`.atomic` 那一路还多一次
+  `rename`。2026-09-27 §184 把写盘补进词表、§190 补齐「往盘上写／改」剩下的形状，并给词表立了一条
+  「每一格备选自己有没有牙」的探针名单）。
   - **2026-09-27（#97）：上面那句「同步文件 I/O」从此含 prefs 家族，但仍管不到 `@AppStorage`。**
     守卫加了独立规则 `syncPrefs`：跨度内出现 `UserDefaults`／`CFPreferences` 打头那一族 C API／
     `PropertyListSerialization` 即红（上限 = 现量 **0**，2026-09-27 现读 `Sources/**` 三族各 0 处；
