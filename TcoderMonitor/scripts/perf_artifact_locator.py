@@ -40,19 +40,82 @@ TABLE_HINTS = ("meta.json", "hitches.json", "hitches.xml", "summary.txt")
 BATCH_RE = re.compile(r"^tcoder-perf-.+-run\d+$")
 
 
+def looks_like_batch(path):
+    """**家族外**但形状就是一批产物：有 `switch-summary.txt`，或 `pages/` ＋ `meta.json` 同时在场。
+
+    为什么非要有这一格（#95，2026-09-27 现量）：`BATCH_RE` 只认 `tcoder-perf-*-runN`，
+    而冷启动档的批名是**调用方给的**——`cmd_switch` 的默认 outdir 明明在家族内
+    （`$SCRATCH/tcoder-perf-$REV`），是我自己传了 `switch-cert11`/`switch-cert12` 出去。
+    后果不是"少个数"这么简单：这两批在普查里**静默不存在**（清树会灭失 7.4 GiB 而没人报警），
+    而逐名问它们，上一版回的是「✗ 一处都没找到 ⇒ 要么原件已经没了」——
+    **一把尺把活着的东西印成可能没了**，那句话会被下一轮当成"原件丢失"的证据。
+    判据只看产物形状、不看名字，所以 `selfcheck-<rev>` 那种既无 summary 也无 pages 的目录不会被拉进来。
+    """
+    if not os.path.isdir(path):
+        return False
+    if os.path.exists(os.path.join(path, "switch-summary.txt")):
+        return True
+    return (os.path.isdir(os.path.join(path, "pages"))
+            and os.path.exists(os.path.join(path, "meta.json")))
+
+
+def suspect_dirs(root):
+    """与 `tcoder_dirs` **同一套范围**（根下第一层 ＋ 容器第二层），只换成"不在家族里"那一侧。
+
+    范围必须共用：逐名模式与普查档各写一遍范围，同一棵树下就会给出两个数（本仓记过最多的一类）。
+    """
+    if not os.path.isdir(root):
+        return []
+    out = []
+    for entry in sorted(os.listdir(root)):
+        p = os.path.join(root, entry)
+        if not os.path.isdir(p) or entry.startswith("tcoder-perf-"):
+            continue
+        if looks_like_batch(p):
+            out.append(p)
+            continue                      # 自己就是一批 ⇒ 不再往里走（容器只算第二层）
+        for sub in sorted(os.listdir(p)):
+            sp = os.path.join(p, sub)
+            if not sub.startswith("tcoder-perf-") and looks_like_batch(sp):
+                out.append(sp)
+    return out
+
+
 def census_root(root):
-    """一个根里分成两堆：批次形状的目录 / 顶着同一前缀但**不是批次**的目录。读不到就返回 None。"""
+    """一个根里分成三堆：批次形状的目录 / 顶着同一前缀但**不是批次**的目录 /
+    **家族外但形状像批次**的目录（#95）。读不到就返回 None。
+    """
     dirs = tcoder_dirs(root)
     if dirs is None:
         return None
     named = [p for p in dirs if os.path.basename(p).startswith("tcoder-perf-")]
     return ([p for p in named if BATCH_RE.match(os.path.basename(p))],
-            sorted({os.path.basename(p) for p in named if not BATCH_RE.match(os.path.basename(p))}))
+            sorted({os.path.basename(p) for p in named if not BATCH_RE.match(os.path.basename(p))}),
+            sorted({os.path.basename(p) for p in suspect_dirs(root)}))
+
+
+def print_suspects(suspects):
+    """第三堆单独成函数有两个理由：`census_lines` 已经贴到尺子名单的函数长度棘轮，
+    以及这一格本身就是 #95 的全部内容——它值得一个名字，而不是普查里的一段内联 if。
+    """
+    if not suspects:
+        return
+    # 第 12 类（集体看不见）的正面材料：这些目录**不进任何分母**，于是"清树会灭失什么"少算它们；
+    # 而逐名问它们，上一版还会回"要么原件已经没了"。所以这里必须出声，且不许放宽排斥式正则
+    # （它存在的理由是"别把 132 个夹具数成批次"，见 §151）。
+    print("   ⚠ **家族外但形状像批次的目录 %d 类**（名字不匹配 `%s` ⇒ 没进上面的批次分母）："
+          % (len(suspects), BATCH_RE.pattern))
+    for name in sorted(suspects):
+        print("      · %s ← %s" % (name, ", ".join(sorted(set(suspects[name])))))
+    print("     它们同样是「清树就灭失」的东西。两条路：把批名改成家族内的形状"
+          "（`cmd_switch` 的**默认** outdir 本来就在家族内，是自己传名字传出去的），"
+          "或者在清树前逐名跑一次本尺、读到 rc=3 那句结论。")
 
 
 def census_lines(roots):
     """跨根把批次名分组：只在一处的 = **清树真正会灭失的那些**；两处以上的交给逐名模式去判形状。"""
     where = {}
+    suspects = {}
     print("== 普查：%d 个根（算数范围：根下第一层 ＋ rescue／archive 这类容器里的第二层；"
           "夹具树内部不算）==" % len(roots))
     for r in roots:
@@ -60,11 +123,16 @@ def census_lines(roots):
         if got is None:
             print("   %s ⇒ 读不到（不存在或不是目录）" % r)
             continue
-        batches, others = got
+        batches, others, suspect = got
         print("   %s ⇒ 批次目录 %d 个（批名 %d 个）／顶着同一前缀但不是批次形状的 %d 类"
-              % (r, len(batches), len({os.path.basename(p) for p in batches}), len(others)))
+              "／家族外但形状像批次的 %d 类"
+              % (r, len(batches), len({os.path.basename(p) for p in batches}),
+                 len(others), len(suspect)))
+        for name in suspect:
+            suspects.setdefault(name, []).append(os.path.normpath(r))
         for p in batches:
             where.setdefault(os.path.basename(p), set()).add(os.path.normpath(p))
+    print_suspects(suspects)
     if not where:
         print("   ✗ 一个批次目录都没数到 ⇒ 别把这一行读成『这些根里没有产物』，先核对根路径。")
         return 1
@@ -250,6 +318,17 @@ def tree_side_line(hits):
 def report(name, hits, roots):
     print("== 产物定位：%s（扫了 %d 个根：%s）==" % (name, len(roots), ", ".join(roots)))
     if not hits:
+        # 先分清"真找不到"与"找得到但尺子不判"：上一版只有一条话术，于是拿着
+        # `switch-cert11` 这种家族外批名去问，会在它**就在 owning 树里**的时候印出
+        # "要么原件已经没了"（#95）。否定读数比肯定读数更贵——它会被写成"原件灭失"。
+        near = sorted({p for r in roots for p in suspect_dirs(os.path.normpath(r))
+                       if os.path.basename(p) == name})
+        if near:
+            print("   ⚠ 目录**在**：%s" % ", ".join(near))
+            print("      但它不在批次家族里（名字不匹配 `%s`）⇒ 本尺对它**没有判定**："
+                  "既不许读成「原件还在、可以删别处」，也不许读成「已经没了」。" % BATCH_RE.pattern)
+            print("      rc=3 的出口只有两个：改批名走家族内，或人工 `du -sh`/`ls` 确认后把结论写下来。")
+            return 3
         print("   ✗ 一处都没找到 ⇒ 要么批名不对，要么原件已经没了。"
               "**别把这一行读成『这批没有产物』以外的任何结论**，先去核对批名。")
         return 1
