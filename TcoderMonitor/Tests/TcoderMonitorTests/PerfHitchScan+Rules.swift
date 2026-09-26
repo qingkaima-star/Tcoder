@@ -41,7 +41,7 @@ extension PerfHitchScan {
         //    对面 `Process`/`NSTask` 是**类型名**，才需要挡 `.` 前面那种 `Foo.Process(` 误伤。
         // ⚠ 词表再宽也管不到"跨度外"的主线程 I/O（跨度只认 `var body:` 与 `Chart {`，
         //    且跳展开只在**同一份文件内**）——那句话的真实射程写在 spec §D 的 T5 行里，不靠这段注释撑。
-        ("syncFileIO", #"(?<![\w.])(?:l?stat)\s*\(|(?:Data|String)\(contentsOf:|contents\(ofDirectory|contents\(ofPath:|attributesOfItem\(|fileExists\(|FileManager|resolvingSymlinksInPath\s*\(|(?<![\w.])(?:Process|NSTask)\s*\("#),
+        ("syncFileIO", #"(?<![\w.])(?:l?stat)\s*\(|(?:Data|String)\(contentsOf:|contents\(ofDirectory|contents\(ofPath:|attributesOfItem\(|fileExists\(|FileManager|resolvingSymlinksInPath\s*\(|(?<![\w.])(?:Process|NSTask)\s*\(|\.write\(to(?:URL)?:"#),
         // 缺陷 #97：prefs 这一族此前**两重不可见**——词表不认（`syncFileIO` 只列文件 API），
         // 而且 §177 用 time-profile 按区间切片量出来"主线程栈里 40% 是 `CFPreferences`/`NSUserDefaults`"
         // 之后，守卫连"我们自己有没有这么写"都答不出来。补一条**独立规则**而不是往 `syncFileIO` 里塞词：
@@ -89,6 +89,10 @@ extension PerfHitchScan {
                         "let raw = try Data(contentsOf: url)",
                         "let text = try String(contentsOf: url, encoding: .utf8)",
                         "var st = stat(); stat(path, &st)",
+                        // 2026-09-27（§184）：写盘这一族以前根本不在词表里（只有读的形状）。
+                        // 两种真形状各配一行：`Data.write(to:options:)` 与 `String.write(to:atomically:encoding:)`。
+                        "try data.write(to: fileURL, options: .atomic)",
+                        "try text.write(to: url, atomically: true, encoding: .utf8)",
                         "let physical = url.resolvingSymlinksInPath().path",
                         "let task = Process(); task.launchPath = \"/bin/sh\""]),
         // prefs 这一族的样例用的是**本仓从没写过、但一写就是主线程打盘**的三种真形状
