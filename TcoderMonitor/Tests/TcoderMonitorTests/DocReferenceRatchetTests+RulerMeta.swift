@@ -177,4 +177,27 @@ extension DocReferenceRatchetTests {
                        "四桶不闭合：有锚点既没算活也没算死，这一格才是「静默吞掉」")
     }
 
+    /// 示例清单名这张豁免表**改成存在性判据**（#104）：只有"本仓没有这个文件"才免检。
+    /// 两个方向一起钉着，缺一边等于没修：
+    /// ① 本仓真有的 python 长尺必须进文件锚点分母（写越界行号要判死、界内要判活）；
+    /// ② 用户项目的 `package.json` 必须仍旧豁免（否则扫别人仓库的清单名会全体判红）；
+    /// ③ 问不到索引时（合成小世界、纯分类自证）退回旧的按扩展名豁免，不然那些夹具会凭空地变红。
+    func testExampleManifestExemptionIsAnExistenceTestNotAnExtensionTax() {
+        var index = CodeIndex()
+        index.files["trace_report.py"] = 500
+        guard case .file = classify("trace_report.py:9999", in: index) else {
+            return XCTFail("本仓真有的 .py 仍被按扩展名免检 ⇒ 自家尺子的引用永远不进分母")
+        }
+        XCTAssertNotNil(resolve(classify("trace_report.py:9999", in: index), in: index).reason,
+                        "越界行号没判死：`.py` 被收进分母只是形式，判据没接上")
+        XCTAssertNil(resolve(classify("scripts/trace_report.py:120", in: index), in: index).reason,
+                     "界内行号判死了（带路径的写法要按文件名去查行数，否则是新的假红）")
+        guard case .example(ext: "json") = classify("package.json", in: index) else {
+            return XCTFail("package.json 本仓没有，必须仍按示例清单名豁免")
+        }
+        guard case .example(ext: "py") = classify("report.py:12", in: nil) else {
+            return XCTFail("拿不到索引时要退回旧行为，否则合成夹具会凭空地变红")
+        }
+    }
+
 }

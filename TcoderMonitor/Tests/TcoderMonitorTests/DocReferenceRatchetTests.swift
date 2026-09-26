@@ -56,6 +56,10 @@ final class DocReferenceRatchetTests: XCTestCase {
     /// 文档里作为**用户项目示例**出现的清单 / 报告文件名（package.json、pom.xml…）。
     /// 它们指的是别人仓库里的文件，按扩展名排除；排除条数会被打印，
     /// 且断言「被排除的扩展名必须都在这张表里」，不许悄悄扩大豁免面。
+    ///
+    /// ⚠ 这张表自 #104 起**只在"本仓没有这个文件"时才生效**（见 `classify(_:in:)`）：
+    /// 按扩展名一刀切曾把我们自家的三把 python 长尺（`trace_report.py`／`report_parity.py`／
+    /// `ax_tooltip_coverage.py`）整族免检——它们在扫描面里被点名 8 次，一次都不进分母。
     static let exampleManifestExtensions: Set<String> = [
         "json", "xml", "toml", "yaml", "yml", "gradle", "kts", "mod", "lock",
         "py", "js", "ts", "resolved",
@@ -109,13 +113,22 @@ final class DocReferenceRatchetTests: XCTestCase {
 
     // MARK: - 解析规则（纯函数，元测试直接喂合成输入）
 
-    func classify(_ token: String) -> Anchor {
+    func classify(_ token: String, in index: CodeIndex? = nil) -> Anchor {
         let halves = token.components(separatedBy: ":")
         let stem = halves[0]
         let line = halves.count > 1 ? Int(halves[1]) : nil
         let parts = stem.components(separatedBy: ".").filter { !$0.isEmpty }
         let ext = (parts.last ?? "").lowercased()
-        if Self.exampleManifestExtensions.contains(ext) { return .example(ext: ext) }
+        if Self.exampleManifestExtensions.contains(ext) {
+            let base = (stem as NSString).lastPathComponent
+            // 这张表的来意是免掉**用户项目**里的 package.json／pom.xml 那一类，可它按扩展名一刀切，
+            // 于是把本仓自己的 python 长尺一起免了：扫描面 14 份里 `report_parity.py` 4 次、
+            // `ax_tooltip_coverage.py` 3 次、`trace_report.py` 1 次，全都不进文件锚点分母（#104）。
+            // 改成"仓里真有这么个文件就不算示例" ⇒ 按文件锚点判存在（将来写行号也判界内）。
+            // 问不到索引时（合成小世界、纯分类自证）退回旧行为：只按扩展名。
+            if index?.files[base] == nil { return .example(ext: ext) }
+            return .file(name: base, line: line)
+        }
         if Self.repoFileExtensions.contains(ext) { return .file(name: stem, line: line) }
         return .symbol(segments: parts)
     }
@@ -282,7 +295,7 @@ final class DocReferenceRatchetTests: XCTestCase {
             XCTAssertGreaterThan(text.count, 1_000, "\(doc) 读到了却只有 \(text.count) 字符，不像真文档")
             scan.docsRead += 1
             for token in tokens(in: text) {
-                let anchor = classify(token)
+                let anchor = classify(token, in: index)
                 let resolution = resolve(anchor, in: index)
                 Self.tally(anchor, resolution, into: &scan)
                 if let reason = resolution.reason { scan.dead[token] = reason }
@@ -295,7 +308,8 @@ final class DocReferenceRatchetTests: XCTestCase {
 
     /// 分母守卫：先证明尺子在量东西，再证明它没把量到的东西静默吞掉。
     func testScannerActuallyReadsDocsAndFindsAnchors() throws {
-        let scan = scanDocs(with: try buildIndex())
+        let index = try buildIndex()
+        let scan = scanDocs(with: index)
         XCTAssertEqual(scan.unreadable, [], "有文档读不到却被当成「引用都有效」：\(scan.unreadable)")
         XCTAssertEqual(scan.docsRead, Self.docs.count, "不是每份文档都被扫了")
         XCTAssertGreaterThan(scan.symbolCount, 0, "一个符号锚点都没扫到 = 正则或文档路径失效，棘轮在空转")
@@ -330,7 +344,7 @@ final class DocReferenceRatchetTests: XCTestCase {
 
         // 死锚这一栏**两个数一起印**：唯一名数（= 基线要逐条相等的条数）与出现次数
         // （= 守恒等式里的那个桶）。只印一个，下一个人就得自己重做一遍减法。
-        let deadSymbolNames = scan.dead.filter { classify($0.key).isSymbol }.count
+        let deadSymbolNames = scan.dead.filter { classify($0.key, in: index).isSymbol }.count
         print("【#29 分母】在锚引用 \(scan.symbolCount + scan.fileCount) 条"
             + "（符号 \(scan.symbolCount)：按文件名作用域判活 \(scan.symbolFileScopedLive)"
             + " / 纯符号判活 \(scan.symbolPlainLive) / 判死 \(deadSymbolNames) 名 \(scan.deadSymbolHits) 次）、"
