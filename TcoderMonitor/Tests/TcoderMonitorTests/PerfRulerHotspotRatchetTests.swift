@@ -66,6 +66,9 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // （这条教训在上面 09-21 那段注释里已经写过一次，今天是第二次用到它）。
         "perf_measure_io.sh", "perf_report.sh", "perf_trace_frames.py",
         "perf_selfcheck_launchers.sh", "perf_selfcheck_tables.sh",
+        // 2026-09-27（卷十二 §186）：把"变异臂自己的反证"从 /tmp 搬进门禁，新增的一块。
+        // 新文件必须当场进名单——否则"新建文件"本身就成了免检通道（上面 09-21／09-22 那两段记的同一族教训）。
+        "perf_selfcheck_mutation.sh",
         // 09-24 第七维·预热：`preflight_context` 涨到 410 行撞 400 口径，按"拆文件才是修复"
         // 搬出 `perf_warmup.sh`。**搬出来的那片照样要点名**——第四次用这条教训（前三次见上面注释）。
         "perf_warmup.sh",
