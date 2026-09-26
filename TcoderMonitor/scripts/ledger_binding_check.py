@@ -63,8 +63,12 @@ def scan(path):
             for line in lines[:body_start] for h in [ROW_RE.match(line)] if h}
     has_block = any(BLOCK_RE.match(l) for l in lines[:body_start])
     forbidden = [i + 1 for i, l in enumerate(lines) if MOVED_RE.match(l)]
+    # 节号是全局的 ⇒ 同一卷里出现两枚同号标题也是断链（`§173 的未覆盖` 那种"子标题以 § 号开头"
+    # 就是它的常见来源）。`sections` 是按号去重的字典，所以这件事**必须单独数一遍 `order`**，
+    # 否则普查会在"绿着"的状态下看不见重复（2026-09-26 §174 我自己连着犯两次之后补的这条）。
+    repeated = sorted(n for n, c in collections.Counter(order).items() if c > 1)
     return {"path": path, "sections": sections, "rows": rows, "has_block": has_block,
-            "forbidden_move_headings": forbidden}
+            "forbidden_move_headings": forbidden, "repeated": repeated}
 
 
 def findings(found):
@@ -76,6 +80,12 @@ def findings(found):
         out.append((name, "搬家标题以节号开头",
                     "第 %s 行 `## §NN 起搬家到…` ⇒ 会被扫节号的普查当成真节（改成 `## 搬家记录：§NN 起在…`）"
                     % found["forbidden_move_headings"]))
+    if found.get("repeated"):
+        out.append((name, "同卷重复节号",
+                    "§%s 在本卷出现不止一次 ⇒ 按号去重的普查会把它读成一枚，"
+                    "而别处引 `§那个数` 时到底指哪一节没有答案"
+                    "（多半是子标题写成了 `## §NN …` 开头，改成 `## …（§NN）`）"
+                    % "/".join(str(n) for n in found["repeated"])))
     if not found["has_block"]:
         return out                                  # 没有块 ⇒ 整卷未覆盖，不逐节报缺行
     for number in sorted(sections):
@@ -153,11 +163,20 @@ def main(argv=None):
     for number, places in sorted(collide.items()):
         print("   ❌ 跨卷重复节号 §%d：%s" % (number, places))
     if problems or collide:
-        print("判定：**不成立** —— 缺行 %d、多行/文本不符 %d、重复节号 %d"
-              % (len([p for p in problems if p[1] == "缺指路行"]),
-                 len([p for p in problems if p[1] != "缺指路行"]), len(collide)))
+        def n_of(kind):
+            return len([p for p in problems if p[1] == kind])
+        miss = n_of("缺指路行")
+        wrong = n_of("指路行与标题不一致")
+        extra = n_of("指路行指向不存在的节")
+        dup_in = n_of("同卷重复节号")
+        move = n_of("搬家标题以节号开头")
+        other = len(problems) - (miss + wrong + extra + dup_in + move)
+        print("判定：**不成立** —— 缺行 %d、行与标题不符 %d、行指向不存在的节 %d、"
+              "同卷重复节号 %d、搬家标题 %d、跨卷重复节号 %d%s"
+              % (miss, wrong, extra, dup_in, move, len(collide),
+                 "" if other == 0 else "、未归类 %d" % other))
         return 1
-    print("判定：成立 ✓ —— 有块的卷册指路行齐且与标题一致、无重复节号、无禁止形状的搬家标题")
+    print("判定：成立 ✓ —— 有块的卷册指路行齐且与标题一致、无同卷或跨卷重复节号、无禁止形状的搬家标题")
     return 0
 
 

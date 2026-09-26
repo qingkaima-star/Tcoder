@@ -153,7 +153,7 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_locator_census_counts_only_batches "$out"  # 70) 「数了几批」由尺答：夹具树里的合成 -runN 不进批次分母、容器第二层算数、空根要判错（#90）
   item selfcheck_presence_reading_is_honest "$out"  # 71) 整窗在场只是读数：无 pid／探针没热答未知、桩探针两态、缺列明写没采到（#53 裁 C）
   item selfcheck_ledger_binding_reads_the_real_ledger "$out"  # 72) 台账装订层在真文档上全绿，且"数到几本"由尺自己出声（分母<10 判错）
-  item selfcheck_ledger_binding_names_each_blemish "$out"  # 73) 四种坏形状各红一次并点名：缺指路行、双前缀、假节号造成跨卷重复、集体看不见（卷十 §165）
+  item selfcheck_ledger_binding_names_each_blemish "$out"  # 73) 五种坏形状各红一次并点名：缺指路行、双前缀、假节号造成跨卷重复、同卷重复节号、集体看不见（卷十 §165；同卷重复那一臂是 §174 补的）
   item selfcheck_trio_false_reject_counts_are_exact "$out"  # 74) 打回率尺：三分类要数得准（2/2/0 与 1/0/3）、喂不够趟数不出数、caveat 不许掉（#53 裁定材料）
 }
 
