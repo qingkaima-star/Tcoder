@@ -292,6 +292,35 @@ XML
     && ok "summary：测量期间进表头，两种期间各说各的资格"
 }
 
+# 把"变异—反证"这一段单独成函数：宿主 `selfcheck_migration` 加了它就从 44 行涨到 52 行，
+# 越过 `PerfRulerHotspotRatchetTests` 那把「尺子函数 ≤50 行」的门（2026-09-27 门禁实测撞红）。
+# 本仓对这把门只有一句口径：**拆，不抬线**。
+migration_rejects_a_renamed_ruler() {  # <夹具树> <变异前的完整输出>
+  local fake="$1" mig_before="$2"
+  local guard="$fake/Tests/TcoderMonitorTests/PerfInvalidationRatchetTests.swift"
+  local snap mig_after rc
+  snap=$(mktemp)
+  cp "$guard" "$snap"
+  sed -i '' 's/static let coarsePattern/static let coarsePatternRenamed/' "$guard"
+  if cmp -s "$snap" "$guard"; then
+    fail "变异没改进文件（sed 静默落空）——这一格从「有牙」退化成「什么都没做」，" \
+         "而它的退出码照样能骗过只看 rc 的判据"
+    rm -f "$snap"; return
+  fi
+  mig_after=$(python3 "$TRACE_REPORT" migration --module-root "$fake" 2>&1); rc=$?
+  rm -f "$snap"
+  if [ "$mig_before" = "$mig_after" ]; then
+    fail "变异之后输出与变异前逐字相同 ⇒ 那句「读不到守卫常量」根本没发生，" \
+         "这一格的红来自别的原因（不是这条判据），不许算作牙"
+    return
+  fi
+  if [ "$rc" = "0" ]; then
+    fail "守卫常量被改名时 migration 仍退 0 —— 它会静默用旧口径报数，正是「第二把尺子」的来路"
+  else
+    ok "migration：读不到守卫常量就炸（拒绝退回手抄正则）；且变异自己过「文件变了＋输出变了」两道验"
+  fi
+}
+
 selfcheck_migration() {  # selfcheck_migration <outdir>
   # 8) `migration` 报告：口径必须**从守卫源码里读**，读不到要炸，不许退回 0/0
   #    （工单 §0.1 那张手写表会腐烂——行号会漂；命令化之后各家能自己反复跑）
@@ -317,32 +346,7 @@ SWIFT
   else
     fail "migration 报告数不对（口径漂移或扫描失效）：$(printf '%s' "$mig" | head -3)"
   fi
-  # 【变异自己也要被验】以前这一格只看"改完之后 migration 退非 0"，
-  # 那是单向的：`sed -i ''` 在 macOS 上**模式打不中就是静默落空**（不改文件、也不报错），
-  # 于是"什么都没做"也能满足"它红了"——红可能来自别的原因（夹具本身坏了也算过一次）。
-  # ⇒ 两层各判一次：① 文件确实被改动（`cmp`）；② 输出确实与改动前不同（逐字比）。
-  #   只有"改动进了被读的那一行、且报表跟着变了"之后，才有资格去判它红不红。
-  local mig_after snap
-  snap="$out/守卫快照.swift"
-  cp "$fake/Tests/TcoderMonitorTests/PerfInvalidationRatchetTests.swift" "$snap"
-  sed -i '' 's/static let coarsePattern/static let coarsePatternRenamed/' \
-    "$fake/Tests/TcoderMonitorTests/PerfInvalidationRatchetTests.swift"
-  if cmp -s "$snap" "$fake/Tests/TcoderMonitorTests/PerfInvalidationRatchetTests.swift"; then
-    fail "变异没改进文件（sed 静默落空）——这一格从「有牙」退化成「什么都没做」，" \
-         "而它的退出码照样能骗过只看 rc 的判据"
-    return
-  fi
-  mig_after=$(python3 "$TRACE_REPORT" migration --module-root "$fake" 2>&1); local rc=$?
-  if [ "$mig" = "$mig_after" ]; then
-    fail "变异之后输出与变异前逐字相同 ⇒ 那句「读不到守卫常量」根本没发生，" \
-         "这一格的红来自别的原因（不是这条判据），不许算作牙"
-    return
-  fi
-  if [ "$rc" = "0" ]; then
-    fail "守卫常量被改名时 migration 仍退 0 —— 它会静默用旧口径报数，正是「第二把尺子」的来路"
-  else
-    ok "migration：读不到守卫常量就炸（拒绝退回手抄正则）；且变异自己过「文件变了＋输出变了」两道验"
-  fi
+  migration_rejects_a_renamed_ruler "$fake" "$mig"
 }
 
 selfcheck_quiescence() {  # selfcheck_quiescence <outdir>
