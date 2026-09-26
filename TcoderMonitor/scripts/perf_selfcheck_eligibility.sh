@@ -252,7 +252,7 @@ a = verdict([R(1.2), R(1.3), R(1.5)], ["a", "b", "c"])[1]                 # 交�
 b = verdict([R(1.2), R(1.3), R(18.8)], ["a", "b", "c"])[1]                # 09-23 真形状：不一致
 c = verdict([R(1.2), R(1.3), None], ["a", "b", "x"])[1]                   # 缺件 ⇒ 不判
 d = verdict([R(1.2), R(1.3)], ["a", "b"])[1]                              # 不足 ⇒ 不判
-e = verdict([R(1.2), R(1.3, fps=88.0), R(1.5)], ["a", "b", "c"])[1]       # hitch 一致但出帧分歧
+e = verdict([R(1.2), R(1.3, fps=88.0), R(1.5)], ["a", "b", "c"])[1]       # 出帧分歧：裁定 A 起**只印不判**
 f = verdict([R(1.2), R(1.3), R(1.5, per="idle")], ["a", "b", "c"])[1]     # 混档 ⇒ 不判
 g = verdict([idle(TIGHT, 1.26), idle(TIGHT, 1.30), idle(TIGHT, 1.34)], ["a", "b", "c"])[1]
 h = verdict([idle(TIGHT, 1.26), idle(TIGHT, 1.30),                      # 真形状：另一趟带 12 ms 尾巴
@@ -260,8 +260,18 @@ h = verdict([idle(TIGHT, 1.26), idle(TIGHT, 1.30),                      # 真形
 i = verdict([idle(TIGHT, 1.26), idle([], None), idle(TIGHT, 1.34)], ["a", "b", "c"])[1]
 j = verdict([idle(TIGHT, 1.26), idle(WIDE_MAX, 9.9), idle(TIGHT, 1.34)], ["a", "b", "c"])[1]
 print("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s" % (a, b, c, d, e, f, g, h, i, j))')
-  [ "$r" = "0|1|2|2|1|2|0|1|1|0" ] \
-    || { fail "一致性判定十种形状没各判对（拿到 $r，应为 0|1|2|2|1|2|0|1|1|0）⇒ 这条尺会把「3/3」放行"; return; }
+  # 第 5 条在 2026-09-26 裁定 A 之前是 1（出帧分歧判不一致），现在是 **0**：
+  # 这一格就是那纸裁定的守卫 —— 有人把出帧那一维偷偷改回判据、或反过来把它整维删掉不印，
+  # 都会在这里红（改回判据 ⇒ 第 5 条变 1；删掉不印 ⇒ 下面那句 ok 之外另有 grep 钉着参考行）。
+  [ "$r" = "0|1|2|2|0|2|0|1|1|0" ] \
+    || { fail "一致性判定十种形状没各判对（拿到 $r，应为 0|1|2|2|0|2|0|1|1|0）⇒ " \
+              "第 5 条不是 0 就是出帧那一维又被当成判据（或干脆不印了），其余任一条不对都是这条尺会把「3/3」放行"; return; }
+  (cd "$(dirname "$TRACE_REPORT")" && python3 -c '
+from perf_trio_agreement import _judge_spread
+def R(u, f): return {"update_values": [1.0]*14, "update_max_ms": u, "surfaces_p50_fps": f}
+_bad, out, _n, _q = _judge_spread([R(1.2, 119.0), R(1.3, 88.0), R(1.5, 119.0)], "idle")
+print("|".join(x.strip()[:12] for x in out if "参考项" in x))') | grep -q '参考项' \
+    || { fail "出帧那一维不再当判据之后，连那行**参考项**都不印了 ⇒ 读数被藏起来，比当判据更坏"; return; }
   # 第 7 条是**我自己第一版被自己的尺子抓到的**那条：idle 档的 hitch 真值≈0，
   # 拿它做除法散布会把 0.00~0.95 判成"19.0× ⇒ 严重不一致"。判据量必须跟着档位走。
   # 第 10 条钉的是 09-24 需求方裁定 A：`max` 极差比 7.9× 而 p90/均值都在带宽内 ⇒ **判一致**；
@@ -345,7 +355,7 @@ def one(fps, vals):
 
 flat = [1.0] * 20
 if sys.argv[1] == "same-fps-spread":
-    # 出帧 100/104/108/112（极差 12 > 10）而两把主尺完全相同 ⇒ 四组三元里 2 过、2 只被出帧拦
+    # 出帧 100/104/108/112（极差 12 > 参考线）而两把主尺完全相同 ⇒ 裁定 A 起四组三元**全过**
     runs = [one(100, flat), one(104, flat), one(108, flat), one(112, flat)]
 else:
     # 出帧全都一样（这一维不拦），但其中一趟的 update 分布是别人的 4 倍 ⇒ 1 过、3 别处也拦
@@ -359,9 +369,9 @@ selfcheck_trio_false_reject_counts_are_exact() {  # 74) 打回率尺：三分类
   local bad=0 d="$out/trio-fpr" got
   mkdir -p "$d"
   got=$(trio_fpr_counts_probe same-fps-spread 2>"$d/a.err")
-  [ "$got" = "2 2 0" ] \
-    || { fail "出帧极差 12、两把主尺完全相同的一批合成读数，四组三元应数成 2 过／2 只被出帧拦／0 别处（实得「$got」，" \
-              "明细 $d/a.err）⇒ 分类把别处的红算给了出帧，或反过来"; bad=1; }
+  [ "$got" = "4 0 0" ] \
+    || { fail "出帧极差 12、两把主尺完全相同的一批合成读数，四组三元应数成 4 过／0 只被出帧拦／0 别处（实得「$got」，" \
+              "明细 $d/a.err）⇒ 出帧那一维又回到判据里了（2026-09-26 裁定 A 被推翻就是这一格先红）"; bad=1; }
   got=$(trio_fpr_counts_probe one-slow-run 2>"$d/b.err")
   [ "$got" = "1 0 3" ] \
     || { fail "出帧一致而有一趟 update 慢 4 倍的一批，应数成 1 过／0 只被出帧拦／3 别处也拦（实得「$got」，" \
@@ -376,5 +386,5 @@ selfcheck_trio_false_reject_counts_are_exact() {  # 74) 打回率尺：三分类
   # 口径那一句不许被删：它挡的是「把组内抽样读成全产品抖动率」这种过头读法
   grep -qF '不是全产品抖动率' scripts/perf_trio_false_reject.py \
     || { fail "尺子里那句口径 caveat 不见了 ⇒ 这两个比例会被读成产品抖动率"; bad=1; }
-  [ "$bad" = "0" ] && ok "打回率尺三分类数得准（2/2/0 与 1/0/3）、喂不够趟数不出数、口径 caveat 在位（74）"
+  [ "$bad" = "0" ] && ok "打回率尺三分类数得准（裁定 A 后：出帧分歧那批 4/0/0 就是「出帧不许再当判据」的哨兵；update 慢 4 倍那批 1/0/3 证明它不是怎么都放行）、喂不够趟数不出数、caveat 在位（74）"
 }
