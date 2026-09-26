@@ -266,17 +266,25 @@ print("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s" % (a, b, c, d, e, f, g, h, i, j))')
   [ "$r" = "0|1|2|2|0|2|0|1|1|0" ] \
     || { fail "一致性判定十种形状没各判对（拿到 $r，应为 0|1|2|2|0|2|0|1|1|0）⇒ " \
               "第 5 条不是 0 就是出帧那一维又被当成判据（或干脆不印了），其余任一条不对都是这条尺会把「3/3」放行"; return; }
-  (cd "$(dirname "$TRACE_REPORT")" && python3 -c '
-from perf_trio_agreement import _judge_spread
-def R(u, f): return {"update_values": [1.0]*14, "update_max_ms": u, "surfaces_p50_fps": f}
-_bad, out, _n, _q = _judge_spread([R(1.2, 119.0), R(1.3, 88.0), R(1.5, 119.0)], "idle")
-print("|".join(x.strip()[:12] for x in out if "参考项" in x))') | grep -q '参考项' \
-    || { fail "出帧那一维不再当判据之后，连那行**参考项**都不印了 ⇒ 读数被藏起来，比当判据更坏"; return; }
+  trio_collapse_probe | grep -q '参考项:有 小n:塌 大n:不塌' \
+    || { fail "三格缺一：参考项不印＝把出帧那维的读数藏起来；小n 不报「塌陷」＝n≤10 时「每趟 p90 就是该趟 max」这一格没人出声（§173）；大n 乱报＝把不是极值的也说成极值"; return; }
   # 第 7 条是**我自己第一版被自己的尺子抓到的**那条：idle 档的 hitch 真值≈0，
   # 拿它做除法散布会把 0.00~0.95 判成"19.0× ⇒ 严重不一致"。判据量必须跟着档位走。
   # 第 10 条钉的是 09-24 需求方裁定 A：`max` 极差比 7.9× 而 p90/均值都在带宽内 ⇒ **判一致**；
   # 同一条夹具把尾巴加进 p90（第 8 条）就必须变红 —— 两条一对，才证明这条不是"怎么都放行"。
   ok "同档连测的一致性有尺子了：按档取判据量（交互比 hitch/s、idle 比每趟自身 p90 与均值），十形状各判一次（含极值不当判据的正反一对）"
+}
+
+trio_collapse_probe() {  # → 印三格：参考项印没印、小 n 批认不认「p90 就是 max」、大 n 批别乱认
+  # 从 `selfcheck_trio_agreement` 拆出来的：那一格加上第 10 条之后本体 51 行，
+  # 撞 `PerfRulerHotspotRatchetTests` 的「尺子函数 ≤50 行」。**拆，不抬线**（同下面的 `trio_pooling_probe`）。
+  (cd "$(dirname "$TRACE_REPORT")" && python3 -c '
+from perf_trio_agreement import _judge_spread
+def R(n, f=120.0): return {"update_values": [1.0]*n, "update_max_ms": 1.3, "surfaces_p50_fps": f}
+def has(runs, w): return w in " ".join(_judge_spread(runs, "idle")[1])
+print("参考项:" + ("有" if has([R(14, 119.0), R(14, 88.0)], "参考项") else "无"),
+      "小n:" + ("塌" if has([R(6), R(8)], "本批全部如此") else "无"),
+      "大n:" + ("不塌" if has([R(14), R(16)], "不是极值") else "无"))')
 }
 
 trio_pooling_probe() {  # trio_pooling_probe <outdir> → 造四份夹具、调判定，印一行复合读数
