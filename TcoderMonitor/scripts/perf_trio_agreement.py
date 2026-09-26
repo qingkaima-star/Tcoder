@@ -126,6 +126,9 @@ def read_run(d):
         return None
     reading = _run_reading(d, loaded, secs)
     reading["period"] = str(meta.get("period") or "?")
+    # 「整窗在场」是**读数**（#53 裁 C：只加读数、不动阈值）。旧批次 meta 里没这格 ⇒
+    # 明写"这一维没采到"，不许让下游把"没有这一格"读成"整窗都在屏"。
+    reading["presence"] = str(meta.get("presence_summary") or "这一维没采到")
     return reading
 
 
@@ -173,11 +176,13 @@ def _roster_lines(got, excluded):
     """把每一趟的现量逐行印出来（不参与的按**原因分组**点名，都不进散布）。"""
     lines = []
     for r in got:
-        lines.append("   %-44s 档=%-11s %5.1fs  hitch %4d ⇒ %5.2f /s   render p50 %s  update max %s  出帧 p50 %s"
+        lines.append("   %-44s 档=%-11s %5.1fs  hitch %4d ⇒ %5.2f /s   render p50 %s  update max %s  出帧 p50 %s\n"
+                     "      整窗在场读数（不判定）：%s"
                      % (r["dir"], r["period"], r["seconds"], r["hitch_n"], r["hitch_per_s"],
                         ("%.2f ms" % r["render_p50_ms"]) if r.get("render_p50_ms") else "—",
                         ("%.2f ms" % r["update_max_ms"]) if r.get("update_max_ms") else "—",
-                        ("%.0f/s" % r["surfaces_p50_fps"]) if r.get("surfaces_p50_fps") else "—"))
+                        ("%.0f/s" % r["surfaces_p50_fps"]) if r.get("surfaces_p50_fps") else "—",
+                        r.get("presence", "这一维没采到")))
     for kind in ("refused", "bydesign", "periodrefused", "unreadable", "incomplete"):
         names = [n for n, k in excluded if k == kind]
         if names:

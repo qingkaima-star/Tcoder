@@ -173,7 +173,7 @@ record_bounded() {  # record_bounded <outdir> <trace 路径> <模板> <时长秒
     sleep "$RECORD_POLL_S"; waited=$((waited + RECORD_POLL_S))
     # 这个循环本来就每 5 s 在窗口内醒一次 ⇒ 顺手采一发整机负载。
     # 没有这一发，闸门就只看得到"起窗前"和"收窗时"两个点，中段起的那趟编译看不见（§AP）。
-    load_sample_once "$out" "$pid"
+    load_sample_once "$out" "$pid" "$PID"
   done
   local stuck=0
   if kill -0 "$pid" 2>/dev/null; then
@@ -273,11 +273,11 @@ heavy_names_for_pids() {  # heavy_names_for_pids <明细串> <保留的 pid 串>
   printf '%s\n' "${out% }"
 }
 
-load_sample_once() {  # load_sample_once <outdir> [自己 spawn 的采集 pid] —— 追加一行「时刻 / load1 / 重活个数」
+load_sample_once() {  # load_sample_once <outdir> [自己 spawn 的采集 pid] [被测 pid] —— 追加一行「时刻/load1/重活数/明细/在场/前台」
   # 为什么挂在 `record_bounded` 的轮询里而不是自己起后台子壳：那个 poll 循环本来就在窗口内每 5 s 醒一次，
   # 借它顺手采样**不新增进程**，也就不会有"录制链半路 die 掉、留下一个还在写 tsv 的孤儿"这种形状
   # （`record_bounded` 自己就得对付挂死与被测消失两条路，别再给它加一条）。
-  local out="$1" self="${2:-}" l j pids
+  local out="$1" self="${2:-}" tpid="${3:-}" l j pids
   # 分两行声明：同一条 `local` 里引用自己前半段的名字，$out 还是空的
   # （今天在第 49 项的夹具里刚踩过同一条，两处一起改）。⇒ 路径必须单独一步拼。
   local f="$out/load-in-window.tsv"
@@ -295,7 +295,30 @@ load_sample_once() {  # load_sample_once <outdir> [自己 spawn 的采集 pid] �
   j=$(printf '%s' "$pids" | wc -w | tr -d ' ')
   # 第四列**必须复用第三列那一份已过滤的 pid 集**，不许有第二种过滤法（理由见 `heavy_names_for_pids`）。
   local names; names=$(heavy_names_for_pids "$detail" "$pids")
-  printf '%s\t%s\t%s\t%s\n' "$(date +%s)" "${l:-0}" "${j:-0}" "${names:-无}" >> "$f"
+  # 第 5、6 列是**读数**（#53 裁定 C：只加读数、不动任何阈值）：
+  # 「整窗里这个 App 到底在不在屏上」今天没有任何一维记录，而 cert7c-idle-run3 那趟
+  # 出帧 p50 从 112 掉到 4，meta 里除时刻与负载外无一维可解释 ⇒ 一趟"几乎不在屏上画"的样本
+  # 会同时给出 hitch=0 与 update max 很小（**没在跑所以不卡**）。先让它可被看见，再谈要不要设线。
+  local pres; pres=$(sample_presence "$tpid")
+  printf '%s\t%s\t%s\t%s\t%s\n' "$(date +%s)" "${l:-0}" "${j:-0}" "${names:-无}" "$pres" >> "$f"
+}
+
+sample_presence() {  # sample_presence <被测 pid> → `在屏|前台名` / `不在屏|前台名` / `未知|前台名`
+  # **绝不在测量窗口里现编 swiftc**（`winlist_ensure_bin` 的注释记着撞过的挂死）：
+  # 只认 `preflight` 在计时窗外编好的那份稳定产物（`winlist_resolve`）；拿不到就记「未知」。
+  local tpid="$1" seen on front
+  [ -n "$WINLIST_BIN" ] || winlist_resolve || true
+  front=$(preflight_front_app)
+  if [ -z "$tpid" ] || [ -z "$WINLIST_BIN" ]; then
+    printf '未知|%s\n' "$front"; return 0
+  fi
+  seen=$(winlist_probe "$tpid" | head -1)
+  on="不在屏"
+  [ -n "$seen" ] && on="在屏"
+  # ⚠ 已知歧义：探针**失败**时也返回空 ⇒ 这一格会把"探不到"记成"不在屏"。
+  # 正因如此，本维**只作读数、不作判定**（#53 裁 C 就是这么定的）；
+  # 哪天要拿它设线，先把这个歧义消掉（区分"探针说了没有"与"探针没说话"）。
+  printf '%s|%s\n' "$on" "$front"
 }
 
 load_window_verdict() {  # 把**窗口内峰值**判一次并落 meta：两端干净 ≠ 整窗干净（§AP 今天八趟的现证）
@@ -310,6 +333,21 @@ load_window_verdict() {  # 把**窗口内峰值**判一次并落 meta：两端�
   n=$(wc -l < "$f" | tr -d ' '); bar=$(load_bar)
   meta_write "$out" "load1_max_in_window=${maxl:-0}" "heavy_max_in_window=${jobs:-0}" \
                    "heavy_names_at_peak=${who:-无}" "load_samples=$n" "load_bar_used=$bar"
+  # 「整窗在场」这一维**只落读数、不参与判定**（#53 裁 C）。旧批次没有第 5 列 ⇒ 明写"没采到"，
+  # 不许让"没有这一格"被下游读成"整窗都在屏"。
+  local pon poff puk pnone sum
+  pon=$(cut -f5 "$f" 2>/dev/null | cut -d'|' -f1 | grep -c '^在屏$' || true)
+  poff=$(cut -f5 "$f" 2>/dev/null | cut -d'|' -f1 | grep -c '^不在屏$' || true)
+  puk=$(cut -f5 "$f" 2>/dev/null | cut -d'|' -f1 | grep -c '^未知$' || true)
+  pnone=$((n - pon - poff - puk))
+  if [ "$pnone" -gt 0 ]; then
+    sum="这一维没采到（旧批次没有第 5 列，$pnone/$n 发缺项）"
+  else
+    sum="在屏 $pon／不在屏 $poff／未知 $puk（共 $n 发）"
+  fi
+  meta_write "$out" "presence_on=$pon" "presence_off=$poff" "presence_unknown=$puk" \
+                   "presence_summary=$sum"
+  echo "    窗口内在场读数（**只读数、不判定**）：$sum"
   if awk -v l="${maxl:-0}" -v j="${jobs:-0}" -v b="$bar" 'BEGIN{exit !(l > b || j > 0)}'; then
     meta_write "$out" "contaminated_by_foreign_load=1"
     echo "    ⚠ 窗口内出现过高负载或重活（峰值 load1=$maxl、重活个数峰值 $jobs、采样 $n 次、阈值 $bar）" >&2

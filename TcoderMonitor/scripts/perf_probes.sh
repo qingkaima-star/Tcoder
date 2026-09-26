@@ -26,30 +26,16 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # 一次性产物的落点：AGENTS §1.6 的仓库内 `.scratch/`（探针二进制也在这儿，不再 litter /tmp）。
 SCRATCH="${SCRATCH:-${TCODER_SCRATCH:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.scratch}}"
 WINLIST="${WINLIST:-$HERE/winlist.swift}"
-WINLIST_BIN="${WINLIST_BIN:-}"   # 编译产物落 $SCRATCH，见 winlist_probe
+WINLIST_BIN="${WINLIST_BIN:-}"   # 只是"本进程已知的路径"；跨进程靠稳定路径，见 perf_winlist_probe.sh
 QUIESCE_SRC="${QUIESCE_SRC:-$HERE/input_quiescence.swift}"
 QUIESCE_BIN="${QUIESCE_BIN:-}"
 
-# 窗口存在性探测。**为什么先编译一次**：`xcrun swift winlist.swift` 是 JIT，实测每次 0.3 s；
-# 原来 `switch` 档把它放在"首帧轮询"里（最多 60 次），既慢又把探测开销混进了计时。
-# 编译成二进制后稳态实测 39~45 ms，且首次 ~508 ms 的 dyld 冷启动由下面这次预热挡在计时窗外。
-winlist_probe() {  # winlist_probe <pid> → 有在屏窗口时打印 `窗口号|标题|宽`，否则空
-  local pid="$1"
-  if [ -z "$WINLIST_BIN" ]; then
-    if xcrun swiftc -O -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
-         -target arm64-apple-macos14.0 "$WINLIST" -o "/tmp/tcoder-winlist-$$" 2>/dev/null; then
-      WINLIST_BIN="/tmp/tcoder-winlist-$$"
-      "$WINLIST_BIN" "$pid" >/dev/null 2>&1 || true
-    else
-      echo "    ⚠ winlist 编译失败 → 退回 JIT（单次 ~300 ms，只影响存在性探测，不影响时长口径）" >&2
-    fi
-  fi
-  if [ -n "$WINLIST_BIN" ]; then
-    "$WINLIST_BIN" "$pid" 2>/dev/null | head -1
-  else
-    xcrun swift "$WINLIST" "$pid" 2>/dev/null | head -1
-  fi
-}
+# 「在屏窗口探针」那一族（稳定路径 / 缓存 / 只认已存在产物 / 解析）搬进
+# `perf_winlist_probe.sh` —— 09-26 加『整窗在场』那一列读数时本文件涨到 406 行，
+# 越过 `SourcesSizeAuditTests` 的 400 行口径（它**覆盖 `scripts/**`**，与产品自扫「巨大文件」同一条线）
+# ⇒ 按同一口径**拆文件才是修复**：改线、塞挂账清单、挪出扫描面都不算。
+# shellcheck source=/dev/null
+source "$HERE/perf_winlist_probe.sh"
 
 TARGET_BINARY=""   # 由 require_idle_target 填：实际被采的那个二进制的绝对路径
 TARGET_FLAVOR=""   # release / debug —— spec §7.3 要求两档的绝对值永不混比
