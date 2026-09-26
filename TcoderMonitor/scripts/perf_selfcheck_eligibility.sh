@@ -326,3 +326,55 @@ selfcheck_refused_not_pooled() {  # selfcheck_refused_not_pooled <outdir>
   ok "被当场拒收的那一趟混不进散布，且归因档与它分得开：同一份表 + meta，加 REFUSED 的被排除、" \
      "只有 blame 标记的判「按设计不参与」（整批如此 ⇒ 不适用 rc=3）、blame+REFUSED 同场时按被拒算"
 }
+
+# 合成读数的组内打回率计数（#53 裁定尺）。**判据不在这里重算** ——
+# 这个 helper 只造读数，分类全部走交付里那两把尺（`_judge_spread` 与 `sweep`）。
+trio_fpr_counts_probe() {  # trio_fpr_counts_probe <形态：same-fps-spread / one-slow-run>
+  python3 - "$1" <<'PY'
+import os
+import sys
+sys.path.insert(0, os.path.join("scripts"))
+import perf_trio_false_reject as fpr
+
+
+def one(fps, vals):
+    return {"dir": "probe", "seconds": 20.0, "update_values": vals,
+            "surfaces_p50_fps": fps, "update_max_ms": max(vals),
+            "hitch_per_s": 0.0, "hitch_n": 0}
+
+
+flat = [1.0] * 20
+if sys.argv[1] == "same-fps-spread":
+    # 出帧 100/104/108/112（极差 12 > 10）而两把主尺完全相同 ⇒ 四组三元里 2 过、2 只被出帧拦
+    runs = [one(100, flat), one(104, flat), one(108, flat), one(112, flat)]
+else:
+    # 出帧全都一样（这一维不拦），但其中一趟的 update 分布是别人的 4 倍 ⇒ 1 过、3 别处也拦
+    runs = [one(105, flat), one(105, flat), one(105, flat), one(105, [4.0] * 20)]
+counts, _examples = fpr.sweep(runs, 3)
+print("%d %d %d" % (counts[fpr.PASS], counts[fpr.FPS_ONLY], counts[fpr.ELSEWHERE]))
+PY
+}
+
+selfcheck_trio_false_reject_counts_are_exact() {  # 74) 打回率尺：三分类要数得准、分母不成立要判错、口径句不许掉
+  local bad=0 d="$out/trio-fpr" got
+  mkdir -p "$d"
+  got=$(trio_fpr_counts_probe same-fps-spread 2>"$d/a.err")
+  [ "$got" = "2 2 0" ] \
+    || { fail "出帧极差 12、两把主尺完全相同的一批合成读数，四组三元应数成 2 过／2 只被出帧拦／0 别处（实得「$got」，" \
+              "明细 $d/a.err）⇒ 分类把别处的红算给了出帧，或反过来"; bad=1; }
+  got=$(trio_fpr_counts_probe one-slow-run 2>"$d/b.err")
+  [ "$got" = "1 0 3" ] \
+    || { fail "出帧一致而有一趟 update 慢 4 倍的一批，应数成 1 过／0 只被出帧拦／3 别处也拦（实得「$got」，" \
+              "明细 $d/b.err）⇒ 那一维会被误算成『没拦过任何东西』"; bad=1; }
+  # 反向：喂不够趟数必须**不出数**（假 0 比不报更贵）
+  if python3 scripts/perf_trio_false_reject.py "$d/没有这趟1" "$d/没有这趟2" > "$d/c.txt" 2>&1; then
+    fail "只给两个目录却 rc=0 ⇒ 一支没被喂够数据的尺给了结论"
+    bad=1
+  fi
+  grep -qF '本次不作数' "$d/c.txt" \
+    || { fail "拒了但没说是分母不成立 ⇒ 报出来像脚本坏了而不是数据不够"; bad=1; }
+  # 口径那一句不许被删：它挡的是「把组内抽样读成全产品抖动率」这种过头读法
+  grep -qF '不是全产品抖动率' scripts/perf_trio_false_reject.py \
+    || { fail "尺子里那句口径 caveat 不见了 ⇒ 这两个比例会被读成产品抖动率"; bad=1; }
+  [ "$bad" = "0" ] && ok "打回率尺三分类数得准（2/2/0 与 1/0/3）、喂不够趟数不出数、口径 caveat 在位（74）"
+}
