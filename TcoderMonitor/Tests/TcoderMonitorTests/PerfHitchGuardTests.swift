@@ -290,6 +290,9 @@ final class PerfHitchGuardTests: XCTestCase {
                 XCTAssertFalse(hits.isEmpty, "规则「\(rule)」命中不了坏样例，它已经废了：\(sample)")
             }
         }
+        // 整条正则命中 ≠ 每一格备选都有人验（§190：我第一版新增的两格被 `FileManager` 盖住了）。
+        XCTAssertEqual(PerfHitchScan.soleResponsibilityProblems(), [],
+                       "某格备选删掉后样例仍然命中 ⇒ 它是零覆盖的字，加它等于给自己一个假防线")
     }
 
     /// 把坏样例**包成真实 body 形状**喂给整条流水线（跨度提取 → 命中），
