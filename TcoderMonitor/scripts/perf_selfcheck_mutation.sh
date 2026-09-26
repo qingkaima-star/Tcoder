@@ -50,3 +50,39 @@ selfcheck_mutation_teeth_are_proved() {  # 78) 反例自己也要被反证：变
 
   [ "$bad" = "0" ] && ok "变异臂的反证三格齐：正控制走绿、sed 落空要喊、改了报告不读的那一行也要喊（78）"
 }
+
+selfcheck_arms_are_all_wired() {  # 79) 每把臂都必须真的被调用：盘上块 ↔ `_part` 名单 ↔ `item` 调用，三张表两头对齐（§188）
+  # 为什么这条比"文件 ≤400 行"那把门更值钱：拆文件的动机就是"再加一臂会撞红"，而**拆的过程本身
+  # 最容易掉臂**——函数搬走了、`item` 那行没跟过去，或 `_part` 名单漏了新块。这两种都**不会报错**：
+  # 前者是"定义了没人调"（臂静默消失），后者是"名单里有个不存在的块"（source 少一块，项数悄悄少）。
+  # 本仓为"空结果伪装成通过"记过第 46 类；这条就是它在这块的专职读者。
+  local out="$1" listed defined called orphan ghost block stem bad=0
+  listed=$(sed -n 's/^for _part in \(.*\); do$/\1/p' scripts/perf_selfcheck.sh)
+  [ -n "$listed" ] \
+    || { fail "79 取不到 _part 名单（宿主那一行的形状变了）⇒ 这条普查自己失效，先修它"; return; }
+
+  # ① 盘上的块 ↔ 名单（两个方向）
+  for block in scripts/perf_selfcheck_*.sh; do
+    stem=${block#scripts/perf_selfcheck_}; stem=${stem%.sh}
+    case " $listed " in *" $stem "*) ;; *) orphan="$orphan$stem " ;; esac
+  done
+  for stem in $listed; do
+    [ -f "scripts/perf_selfcheck_${stem}.sh" ] || ghost="$ghost$stem "
+  done
+
+  # ② 定义了的臂 ↔ 真的被调用了（`item x` 与被别的臂直接调都算数；只认 `item` 会误报三个假孤儿——
+  #    `selfcheck_weight_ruler` 那三个帮手就是被它自己调的，第一版我就被这条骗过一次）
+  defined=$(grep -h '^selfcheck_[a-z_0-9]*()' scripts/perf_selfcheck*.sh \
+            | sed -E 's/^(selfcheck_[a-z_0-9]+\(\).*)$/\1/' | cut -d'(' -f1 | sort -u)
+  called=$(grep -hE '^[[:space:]]+(item[[:space:]]+)?selfcheck_[a-z_0-9]+[[:space:]]' scripts/perf_selfcheck*.sh \
+           | sed -E 's/^[[:space:]]+(item[[:space:]]+)?(selfcheck_[a-z_0-9]+)[[:space:]].*/\2/' | sort -u)
+
+  [ -z "$orphan" ] || { bad=$((bad + 1)); fail "79 盘上有这块、_part 名单里没有 ⇒ 它里面的臂**永远不会被跑**：$orphan"; }
+  [ -z "$ghost" ] || { bad=$((bad + 1)); fail "79 名单里有这个名字、盘上没有这块 ⇒ source 少一块而项数悄悄少：$ghost"; }
+  local unwired
+  unwired=$(comm -23 <(printf '%s\n' "$defined") <(printf '%s\n' "$called") | tr '\n' ' ')
+  [ -z "${unwired// /}" ] || { bad=$((bad + 1)); fail "79 这些臂定义了却没有任何调用点 ⇒ 它是死代码，不是判据：$unwired"; }
+
+  [ "$bad" = "0" ] && ok "selfcheck 三张表对齐：盘上 $(printf '%s\n' "$listed" | wc -w | tr -d ' ') 块全在名单里、" \
+     "「_part」名单没有幽灵块、定义到的 $(printf '%s\n' "$defined" | wc -l | tr -d ' ') 把臂全有调用点（79）"
+}
