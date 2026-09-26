@@ -42,6 +42,18 @@ extension PerfHitchScan {
         // ⚠ 词表再宽也管不到"跨度外"的主线程 I/O（跨度只认 `var body:` 与 `Chart {`，
         //    且跳展开只在**同一份文件内**）——那句话的真实射程写在 spec §D 的 T5 行里，不靠这段注释撑。
         ("syncFileIO", #"(?<![\w.])(?:l?stat)\s*\(|(?:Data|String)\(contentsOf:|contents\(ofDirectory|contents\(ofPath:|attributesOfItem\(|fileExists\(|FileManager|resolvingSymlinksInPath\s*\(|(?<![\w.])(?:Process|NSTask)\s*\("#),
+        // 缺陷 #97：prefs 这一族此前**两重不可见**——词表不认（`syncFileIO` 只列文件 API），
+        // 而且 §177 用 time-profile 按区间切片量出来"主线程栈里 40% 是 `CFPreferences`/`NSUserDefaults`"
+        // 之后，守卫连"我们自己有没有这么写"都答不出来。补一条**独立规则**而不是往 `syncFileIO` 里塞词：
+        // 两件事的终点虽然同向（都往 0），但命中形状、豁免表与台账那一格都是分开的，
+        // 混进一条就会重演 2026-09-22 那次"一条尺子量两种反向东西"的事故。
+        // 上限 = 现量 0（`UserDefaults` 与 `CFPreferences` 在 `Sources/**` 各 0 处，2026-09-27 18:38 现读）
+        // ⇒ 零余量、终点 0，新增一处即红；`@AppStorage` 那一族**不在这条里**（它字面不在跨度内，
+        // 见 `#97` 后半那条未闭格），别把这条当成"prefs 已全覆盖"。
+        // ⚠ 这条**故意不在结尾留 `\b`**：真写法是 `CFPreferencesCopyAppValue(…)` 这一族 C API，
+        //    结尾 `\b` 会把它们全部挡在门外（第一版我就这么写废了，是元测试
+        //    `testScannerFiresOnBadSamples` 拿样例打回来的）。防误伤由前面的 `(?<![\w.])` 负责。
+        ("syncPrefs", #"(?<![\w.])(?:UserDefaults|CFPreferences|PropertyListSerialization)"#),
     ]
 
     /// 正则必须能编译（`matches` 对编不过的模式只返回空并报警，那条规则就静默失效了，
@@ -79,5 +91,10 @@ extension PerfHitchScan {
                         "var st = stat(); stat(path, &st)",
                         "let physical = url.resolvingSymlinksInPath().path",
                         "let task = Process(); task.launchPath = \"/bin/sh\""]),
+        // prefs 这一族的样例用的是**本仓从没写过、但一写就是主线程打盘**的三种真形状
+        // （§177 那批 time-profile 里，`CFPreferences` 一族占了首帧后主线程栈的 40%）。
+        ("syncPrefs", ["let v = UserDefaults.standard.object(forKey: key)",
+                       "let v = CFPreferencesCopyAppValue(key as CFString, app as CFString)",
+                       "let o = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)"]),
     ]
 }

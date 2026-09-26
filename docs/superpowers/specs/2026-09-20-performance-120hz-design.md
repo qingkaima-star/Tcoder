@@ -314,6 +314,13 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
 - **T5 主线程禁则**（静态守卫钉死，见 §4）：`body` 与图表 Mark 闭包内 **0 次** new
   `NSColor` / `DateFormatter` / `NumberFormatter` / `Font`；**0 次**全量 `sorted`/`filter`/`reduce`；
   **0 次**同步文件 I/O（`stat`/`Data(contentsOf:)`/JSON 解码）。
+  - **2026-09-27（#97）：上面那句「同步文件 I/O」从此含 prefs 家族，但仍管不到 `@AppStorage`。**
+    守卫加了独立规则 `syncPrefs`：跨度内出现 `UserDefaults`／`CFPreferences` 打头那一族 C API／
+    `PropertyListSerialization` 即红（上限 = 现量 **0**，2026-09-27 现读 `Sources/**` 三族各 0 处；
+    §177 那批 time-profile 也独立给出同一句真话——首帧后 1.12 s 里的 prefs 读栈根全是 `start`，
+    是 AppKit 首用同步初始化，**不是**我们写的）。
+    ⚠ **没盖住的那一半**：`@AppStorage` 是属性声明（`Views/**` 真声明 2 处，字面 3 处里有一条是注释里的引用），字面不在跨度内，
+    读发生在你每次访问那个 wrapper 时 ⇒ 这条判据对它是**设计性失明**，不许读成「prefs 已全覆盖」。
   - **T5 的"零"到底指什么（2026-09-20 23:35 明写，防止被读成"把令牌引用删光"）**。
     C 包落地后 `ColorToken`/`ThemeTokens` 的 `color`/`font` 已是**存储常量**，
     守卫里 `dynamicNSColor` 那条正则量的东西随之变了：**不再是"每 tick new 多少个 `NSColor`"，

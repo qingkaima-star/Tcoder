@@ -142,29 +142,18 @@ final class PerfHitchGuardTests: XCTestCase {
         // 不是每帧求值 ⇒ 从"债"改记成"具名逐点豁免"（`eventPathExemptions`），这里只留真债那一格。
         // ⚠ 台账必须打成 `1 债 + 1 具名豁免`，不许合并成 1 —— 否则"少报一处"与"还掉一处债"同形。
         "syncFileIO": 1,
+        // 2026-09-27（#97）：prefs 家族（`UserDefaults`／`CFPreferences`／`PropertyListSerialization`）
+        // 从此进词表。上限 = 现量 **0**——三族在 `Sources/**` 各 0 处（18:38 现读），
+        // 而 §177 那批 time-profile 也独立给出同一句真话：首帧后 1.12 s 里的 prefs 读
+        // 栈根全是 `start`（AppKit 首用同步初始化），**不是**我们自己写的。
+        // ⇒ 这条不是"还掉的债"，是"以前看不见"；新增一处即红，零余量。
+        "syncPrefs": 0,
     ]
 
-    /// 每条规则的负责人 / 里程碑，只在报错时打出来，避免"基线是遮羞布"。
-    static let ownerNotes: [String: String] = [
-        "directFormatters": "M1 WS-W：DateFormatter/NumberFormatter 提 static let（终点 0）",
-        "dynamicColorConstruction": "UI 流（Views/Shell）：把 `Color(nsColor: .separatorColor)` / "
-            + "`Color(nsColor: .quaternaryLabelColor)` 换成 `Theme.Palette` 里已缓存的 `static let` 角色"
-            + "（终点 0）。**2026-09-22 才有的尺子**：这条以前完全没人量——"
-            + "`directFormatters` 的模式不认 `Color(`，于是渲染路径里现造动态色可以一路绿灯。"
-            + "性能侧不接手：改的是 `Views/**`，归 UI 总工派发。",
-        "tokenReference": "旧名 `dynamicNSColor`（2026-09-22 改名，因为名字在撒谎：它量的不是 NSColor）。"
-            + "令牌由「每次访问现造」改成缓存之后，本条量的不再是分配次数，"
-            + "而是**渲染路径里引用令牌成员的次数**——它是重算面的**读数**，"
-            + "**终点不是 0**（打到 0＝页面不再着色）。它仍只许减不许增，但谁也不许把它当「还掉多少债」报。"
-            + "落地前 88（只认 .textColor），放宽到四成员后实测 107（+19 处 .graphicColor，全在图表 Mark/循环里）。"
-            + "**2026-09-20 拧到 86**：`165faa7`（M1-集成，图表取色上提进 Design/）还掉了 21 处 Views 侧引用，"
-            + "**2026-09-21 再拧到 59**：`c60abbd`（观感·批次 ABC 颜色面积收敛）又还掉 27 处。"
-            + "两次都是同一条『现量/上限』打印＋`.scratch` 台账抓出来的——不打印就没人知道基线在漏。"
-            + "而这条棘轮当时不报现量、没人看得见那 21 处余量——现在它每次跑都打「现量/上限」。",
-        "fullSort": "M1 WS-P/WS-W：body 内派生集合缓存或移到 publish 里算（终点 0）",
-        "syncFileIO": "M1 WS-W：body 读的计算属性里那个文件尺寸检查移到扫描期（终点 0）；"
-            + "另一处 `chooseLogFiles` 的 `fileExists` 是一次点击一次的事件路径，已具名豁免（#72）",
-    ]
+
+    // 负责人名单（`ownerNotes`）2026-09-27 整块搬进 `PerfHitchGuardTests+Owners.swift`。
+    // 为什么搬：#97 那条 prefs 规则的说明一写进来，宿主就过 400 行门（实测 401）。
+    // 本仓对这把门只有一句口径：**拆，不抬线**（`FileSystemCodeAnalyzer.mediumFileLines` 是产品侧同一把尺）。
 
     // MARK: - 棘轮主体
 
@@ -314,6 +303,8 @@ final class PerfHitchGuardTests: XCTestCase {
                 let number = NumberFormatter()
                 let names = allNames.sorted()
                 let attrs = try? FileManager.default.attributesOfItem(atPath: "/tmp/x")
+                let flag = UserDefaults.standard.bool(forKey: "showSplash")
+                let prefs = CFPreferencesCopyAppValue("key" as CFString, app as CFString)
                 return VStack {
                     Text("\\(names.count)").foregroundStyle(Theme.Semantic.warning.textColor)
                     Chart { ForEach(rows) { row in BarMark(x: .value("a", row.a)) } }
