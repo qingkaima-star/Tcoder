@@ -156,6 +156,10 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // 不是被我引用的。尺子本体不带前缀，所以不被 `onDisk` 全集收成（它不是测量链的尺），
         // 它的读者就是这里的 72/73 两项。
         "perf_selfcheck_ledger.sh",
+        // 09-26 #53 的裁定材料：`perf_trio_false_reject.py` 把一批读数枚举成所有 k 元子集，
+        // 喂给**那把真一致性尺**（`perf_trio_agreement._judge_spread`），数出"只被出帧那一维打回"的比例。
+        // 它自己也是一把尺（量的是判据的假拒率），所以同批点进来；第 74 项反例用合成读数咬它的分类。
+        "perf_trio_false_reject.py",
     ]
 
     /// 盘上 `scripts/` 里"不进函数级名单"的文件：逐条写**为什么函数级两条尺没有可量对象**。
