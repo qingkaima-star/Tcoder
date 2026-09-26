@@ -390,7 +390,7 @@ python3 scripts/trace_report.py migration --strict   # 迁干净前它会非零�
 
 ### 第 3 步：M2 收尾
 
-- 九页 × 深浅取证：`SWITCH_MODE=argv` + 自己的 `CAPTURE_SANDBOX` + 目录名带短 HEAD，
+- 九页 × 深浅取证：`SWITCH_MODE=argv` + 自己的 `CAPTURE_SANDBOX` + 目录名带**被拍二进制自己的 rev**（用 `paired_page_evidence.sh`，它从 manifest 取名；手填 HEAD 会造出错归属批次，见台账 §171），
   **按 `CAPTURE_LOCK` 排队别绕锁**；深色用 `osascript … set dark mode`（`defaults write` 无效），
   翻完立刻翻回；每趟逐张量平均亮度（浅 0.95–0.98 / 深 0.15–0.16），被污染的页重拍。
   收尾退出现在只处理自己那个 pid（`CAPTURE_TERM=1`），**不会再按 bundle id 全机杀实例**。
