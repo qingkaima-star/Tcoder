@@ -15,6 +15,8 @@ extension DocReferenceRatchetTests {
     /// 接入前先按本文件的口径预检过：`NSView.toolTip` 这类**外部 API** 不合规约
     /// （锚点是给我们自己的代码用的），已改写成 `NSView` 的 `toolTip`；
     /// `*.py` 走 `exampleManifestExtensions` 豁免、`*.txt` 不是文件锚点，也一并改了措辞。
+    /// ⚠ 上面这句里"`*.py` 走豁免"那一半自 #104 起要补一个前提：**本仓没有同名文件**才豁免；
+    /// 当年那批预检改写的都是不指本仓文件的写法，所以结论不变（`*.txt` 那一半也不变）。
     static let docs: [String] = ["README.md", "docs/使用说明.md",
                                        "docs/口径与已知限制.md", "docs/九页实拍读数.md",
                                        "docs/界面-乱的清单.md", "docs/界面语言-对齐AiX.md",
