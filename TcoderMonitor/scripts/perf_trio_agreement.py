@@ -251,10 +251,20 @@ def _idle_checks(got):
         one_bad, one_out = _one_stat_spread(vals, label, SPREAD_BAR)
         bad += one_bad
         out += one_out
+    ns = [len(r["update_values"]) for r in got if r.get("update_values")]
+    if ns:
+        # 2026-09-26 §173：`percentile` 用 `int(n·p)` 下标（换算法＝换门禁，所以取法不动），
+        # 但那个取法在 **n≤10 时取到的就是该趟 max**（int(10×0.9)=9＝末位）。
+        # 不印这一行的话，报表上"每趟 p90"与"每趟 max"会是同一件事的两个名字。
+        line = ("   每趟事件数 n=%d~%d：本尺取分位用 int(n·p) 下标 ⇒ n≤10 时「每趟 p90」**就是该趟 max**"
+                % (min(ns), max(ns)))
+        line += ("（本批全部如此 ⇒ 这一维实际是按逐趟极值算的散布）"
+                 if max(ns) <= 10 else "（本批有趟 n>10 ⇒ 那些趟的 p90 不是极值）")
+        out.append(line)
     mx = [r["update_max_ms"] for r in got if r.get("update_max_ms") is not None]
     if mx:
         out.append("   旁证：每趟 max %s ⇒ 极值只逐趟判达标，**不当重复性判据**"
-                   "（n≈14 时自助重抽 k=1→12 期望 max 就能涨 1.2~1.8 倍，见交接笔记 §BH）"
+                   "（§BH 那组实验的 n≈14：自助重抽 k=1→12 期望 max 就能涨 1.2~1.8 倍）"
                    % "/".join("%.2f" % v for v in sorted(mx)))
     return bad, out, [v for v in p90 if v is not None]
 
