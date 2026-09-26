@@ -29,13 +29,15 @@ final class DocBareLineReferenceTests: XCTestCase {
         .deletingLastPathComponent()      // TcoderMonitor
         .deletingLastPathComponent()      // 工作树根
 
-    private static let docs: [String] = ["README.md", "docs/使用说明.md",
-                                       // 2026-09-25：口径文档的**续卷**（父卷写到 789 行撞上 800 行闸门，
-                                       // 尾部三节按日期追加的内容逐字搬过去）。往后新补的口径都往续卷写，
-                                       // 所以它必须一起被扫 —— 否则"以后写的行号引用"正好落在扫描面外。
-                                       // 登记当下这份续卷里 0 处裸行号引用，加进来不会带进新债。
-                                       "docs/口径与已知限制.md", "docs/口径与已知限制-续.md",
-                                       "docs/九页实拍读数.md"]
+    /// 名册**只有一个来源**：主守卫那张 `docs`（`DocReferenceRatchetTests+ScanSurface.swift`）。
+    ///
+    /// 这里原来自己抄了一份 5 行的名单，而主守卫那张已经长到 14 份 ⇒ 两张表漂了 9 份，
+    /// 那 9 份里的裸行号回指**一直没人判**（正是本文件立起来要防的那一族：`:349` 指向一个
+    /// 只有 197 行的文件，却绿着）。同族的另两把尺（§指针、裸用例名）本来就是
+    /// `复用主守卫那份文档清单，避免两处各写一遍路径（写两遍就会有一天不一致）` —— 补第三处。
+    /// 归一当下主名册里多出来的 9 份**裸行号 token 实测 0 条**（逐份数过），
+    /// 所以这一笔是纯加面、不带进新债；往后写进那 9 份的行号引用从此会被判。
+    private static var docs: [String] { DocReferenceRatchetTests.docs }
 
     /// ``` `:349` ``` / ``` `:77-105` ``` / ``` `:58,59,119` ```
     private static let barePattern = try! NSRegularExpression(
@@ -203,10 +205,11 @@ final class DocBareLineReferenceTests: XCTestCase {
 
     func testBareLineReferencesInDocsAllResolveAndInRange() throws {
         let (all, perDoc) = try scannedAll()
-        print("【#41 裸行号】扫到 \(all.total) 条：判活 \(all.live)、判死 \(all.dead.count)"
+        print("【#41 裸行号】名册 \(Self.docs.count) 份（与主守卫同一张表）；"
+              + "扫到 \(all.total) 条：判活 \(all.live)、判死 \(all.dead.count)"
               + "（" + perDoc.map { "\($0.0) \($0.1.total)" }.joined(separator: "，") + "）")
         XCTAssertGreaterThan(all.total, 0,
-                                    "只扫到 \(all.total) 条裸行号引用，不像这两份文档的真实规模 ⇒ 判据在空转")
+                                    "名册 \(Self.docs.count) 份里只扫到 \(all.total) 条裸行号引用 ⇒ 判据在空转")
         XCTAssertTrue(all.dead.isEmpty, """
         有 \(all.dead.count) 条裸行号引用不可验证：
         \(DictPreview(all.dead))
