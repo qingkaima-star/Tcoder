@@ -35,7 +35,9 @@ MODE="${MODE:-idle}"
 START_BIN="$PWD/dist/Tcoder.app"
 MY_BIN="$START_BIN/Contents/MacOS/TcoderMonitor"
 SCRATCH="$PWD/../.scratch"
+CLOSING_FILE="$SCRATCH/tcoder-perf-${TAG}-closing.tsv"   # 收尾读数的落点（stdout 断了也留得住）
 started_any=""
+FINALIZED=""
 
 mine() { pgrep -fx "$MY_BIN" 2>/dev/null || true; }        # 只认这一条全路径，不按 bundle id 广播
 
@@ -56,7 +58,30 @@ retire_mine() {  # 收尾：只退我自己按全路径认出的那些；一个�
   [ "$n" -gt 0 ] && echo "    退掉自己起的实例 $n 个（全路径匹配，不广播）" >&2
   return 0
 }
-trap 'retire_mine; exit 143' INT TERM       # 被中断也先把实例收干净（第 29 项判的就是这一条）
+finalize() {  # finalize <这一批是怎么结束的> —— **任何**退出路径都要留下一行收尾读数，落盘而不只是印
+  local how="${1:-未标注}"
+  # 为什么要有这一格（台账卷十 §169）：t1human 那批（交互档、没人滚）到最后**两行收尾话术都没印**
+  # ——日志停在「还没等到有人正在滚动」，而实例又确实归零了。也就是说"没留残骸"这件事
+  # 当时**没有任何一条读数能解释它是怎么发生的**（实例是 `open` 起的、不在这个进程组里，
+  # 所以"整组被杀顺带带走 GUI"这个省事的解释根本不成立）。巧合不能当机制 ⇒
+  # 收尾那一行改成既印也写进 `.scratch/tcoder-perf-<批名>-closing.tsv`， stdout 断了也留得住。
+  [ -n "${FINALIZED:-}" ] && return 0
+  FINALIZED=1
+  retire_mine
+  sleep 3
+  local line
+  # 一行一个字段：这里**不许**折行（TSV 里塞进换行会把一条读数拆成两条记录）。
+  line="收尾后实例数=$(mine | grep -c . || true) 计划趟数=$RUNS 等窗退出码=${SCHED_RC:-未走到} 一致性判定退出码=${VERDICT_RC:-未走到} 结束方式=$how"
+  echo "    $line"
+  echo "DONE-BATCH"
+  mkdir -p "$SCRATCH" 2>/dev/null && printf '%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TAG" "$line" \
+    >> "$CLOSING_FILE" 2>/dev/null || echo "    ⚠ 收尾那行没能落盘（$CLOSING_FILE 写不进去）" >&2
+}
+
+# EXIT 兜住所有出口（含 build/warm 提前 exit 1），INT/TERM 自己给个可辨认的结束方式。
+# 幂等靠 FINALIZED 那一格：不然正常结束会被 EXIT trap 再收一次。
+trap 'finalize "被 INT/TERM 中断"; exit 143' INT TERM
+trap 'finalize "EXIT（含提前退出，若已收尾则不重复）"' EXIT
 
 wait_for_lock() {  # 别人的全量在跑就别抢机器（两档互踩：窗内重活那一维会把自己那批打回）
   local waited=0
@@ -125,11 +150,8 @@ echo "==> 起实例并预热"
 warm_and_hold || exit 1
 echo "==> 量 $RUNS 趟 $MODE（tag=$TAG，等窗上限 ${DEADLINE}s）"
 MODE="$MODE" LAUNCH_APP=0 bash scripts/perf_wait_window.sh "$TAG" "$RUNS" "$DEADLINE"
-sched_rc=$?
-echo "SCHED-RC=$sched_rc"
+SCHED_RC=$?
+echo "SCHED-RC=$SCHED_RC"
 report_batch
-verdict_rc=$?
-retire_mine
-sleep 3
-echo "    收尾后实例数=$(mine | grep -c . || true)   计划趟数=$RUNS / 等窗退出码=$sched_rc / 一致性判定退出码=$verdict_rc"
-echo "DONE-BATCH"
+VERDICT_RC=$?
+finalize "正常收尾"
