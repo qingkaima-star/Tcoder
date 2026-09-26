@@ -26,48 +26,16 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # 一次性产物的落点：AGENTS §1.6 的仓库内 `.scratch/`（探针二进制也在这儿，不再 litter /tmp）。
 SCRATCH="${SCRATCH:-${TCODER_SCRATCH:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.scratch}}"
 WINLIST="${WINLIST:-$HERE/winlist.swift}"
-WINLIST_BIN="${WINLIST_BIN:-}"   # 编译产物落 $SCRATCH，见 winlist_probe
+WINLIST_BIN="${WINLIST_BIN:-}"   # 只是"本进程已知的路径"；跨进程靠稳定路径，见 perf_winlist_probe.sh
 QUIESCE_SRC="${QUIESCE_SRC:-$HERE/input_quiescence.swift}"
 QUIESCE_BIN="${QUIESCE_BIN:-}"
 
-# 窗口存在性探测。**为什么先编译一次**：`xcrun swift winlist.swift` 是 JIT，实测每次 0.3 s；
-# 原来 `switch` 档把它放在"首帧轮询"里（最多 60 次），既慢又把探测开销混进了计时。
-# 编译成二进制后稳态实测 39~45 ms，且首次 ~508 ms 的 dyld 冷启动由下面这次预热挡在计时窗外。
-winlist_bin_path() {  # 探针二进制的**稳定路径**（同 uid 共享一份，可被 TCODER_WINLIST_BIN 指走）
-  # 为什么必须是稳定路径而不是 `…-$$`：`$$` 在子 shell 里还是父进程号，但**父 shell 拿不到子 shell 的赋值**，
-  # 而 `preflight_window_state` 恰恰是被 `$(…)` 调的 ⇒ 编好的东西没人认得（2026-09-26 现抓：热身后 WINLIST_BIN 仍为空）。
-  printf '%s\n' "${TCODER_WINLIST_BIN:-${TMPDIR:-/tmp}/tcoder-winlist-probe-$(id -u)}"
-}
-winlist_resolve() {  # 只**认已存在的**产物，绝不在此处编译 ⇒ 给"窗口内采样"这类调用方用
-  local b; b=$(winlist_bin_path)
-  [ -x "$b" ] && { WINLIST_BIN="$b"; return 0; }
-  return 1
-}
-winlist_ensure_bin() {  # → 打印编译好的在屏探针二进制路径（编不出来就打印空、非零退出）
-  # 只允许在**计时窗外**调它（首次编译 ~500 ms～数秒）。
-  # 反面教训（09-26 06:0x 现抓）：把它挂进 `record_bounded` 会撞上 selfcheck 第 43 项那个
-  # 故意"挂死不动"的假 `xcrun` ⇒ 整条 selfcheck 挂了 10 分钟。**测量路径里不许出现编译。**
-  local bin; bin=$(winlist_bin_path)
-  [ -x "$bin" ] && { printf '%s\n' "$bin"; return 0; }
-  local tmp="$bin.tmp.$$"
-  xcrun swiftc -O -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
-      -target arm64-apple-macos14.0 "$WINLIST" -o "$tmp" 2>/dev/null || return 1
-  mv -f "$tmp" "$bin" 2>/dev/null || { rm -f "$tmp"; return 1; }
-  printf '%s\n' "$bin"
-}
-winlist_probe() {  # winlist_probe <pid> → 有在屏窗口时打印 `窗口号|标题|宽`，否则空
-  local pid="$1" bin
-  if [ -z "$WINLIST_BIN" ]; then
-    bin=$(winlist_ensure_bin || true)          # 计时窗外的首次调用才会真编译（见上面的稳定路径注释）
-    [ -n "$bin" ] || echo "    ⚠ winlist 编译失败 → 退回 JIT（单次 ~300 ms，只影响存在性探测，不影响时长口径）" >&2
-    WINLIST_BIN="$bin"
-  fi
-  if [ -n "$WINLIST_BIN" ]; then
-    "$WINLIST_BIN" "$pid" 2>/dev/null | head -1
-  else
-    xcrun swift "$WINLIST" "$pid" 2>/dev/null | head -1
-  fi
-}
+# 「在屏窗口探针」那一族（稳定路径 / 缓存 / 只认已存在产物 / 解析）搬进
+# `perf_winlist_probe.sh` —— 09-26 加『整窗在场』那一列读数时本文件涨到 406 行，
+# 越过 `SourcesSizeAuditTests` 的 400 行口径（它**覆盖 `scripts/**`**，与产品自扫「巨大文件」同一条线）
+# ⇒ 按同一口径**拆文件才是修复**：改线、塞挂账清单、挪出扫描面都不算。
+# shellcheck source=/dev/null
+source "$HERE/perf_winlist_probe.sh"
 
 TARGET_BINARY=""   # 由 require_idle_target 填：实际被采的那个二进制的绝对路径
 TARGET_FLAVOR=""   # release / debug —— spec §7.3 要求两档的绝对值永不混比

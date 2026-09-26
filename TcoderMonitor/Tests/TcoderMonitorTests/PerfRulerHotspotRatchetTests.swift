@@ -45,7 +45,7 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         "perf_harness.sh", "perf_selfcheck.sh", "perf_preflight.sh", "trace_report.py",
         "perf_trace_xml.py", "perf_trace_metrics.py", "perf_trace_threads.py",
         "perf_trace_summary.py", "perf_framepulse.py",
-        "perf_provenance.sh", "perf_probes.sh", "perf_switch.sh",
+        "perf_provenance.sh", "perf_probes.sh", "perf_winlist_probe.sh", "perf_switch.sh",
         "perf_pulse.sh",
         // 2026-09-21：`perf_selfcheck.sh` 涨到 835 行撞 ≤800 棘轮，按"拆开它、不拧阈值"
         // 把 27 项反例按主题搬进下面三块。**搬走的名额必须继续被量**——不然"拆"就成了
