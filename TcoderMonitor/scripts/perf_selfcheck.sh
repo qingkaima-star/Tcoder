@@ -150,7 +150,7 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_switch_cleanup_names_no_target "$out"  # 67) switch 收尾提示：没有 pid 就不许叫人去退（实跑六页全印了空 pid 的那格）
   item selfcheck_artifact_locator_fork_honest "$out"  # 68) 同名产物分在三处时按形状说对话（互补／包含），不许替人挑一份（#89，清树的前置）
   item selfcheck_artifact_locator_names_the_tree_copy "$out"  # 69) 分叉里点名本树那一份：它是 report／一致性尺唯一认得的（换树不冒这句）
-  item selfcheck_locator_census_counts_only_batches "$out"  # 70) 「数了几批」由尺答：夹具树里的合成 -runN 不进批次分母、容器第二层算数、空根要判错（#90）
+  item selfcheck_locator_census_counts_only_batches "$out"  # 70) 「数了几批」由尺答：夹具树里的合成 -runN 不进批次分母、容器第二层算数、空根要判错（#90）、家族外但形状像批次的要出声（#95）
   item selfcheck_presence_reading_is_honest "$out"  # 71) 整窗在场只是读数：无 pid／探针没热答未知、桩探针两态、缺列明写没采到（#53 裁 C）
   item selfcheck_ledger_binding_reads_the_real_ledger "$out"  # 72) 台账装订层在真文档上全绿，且"数到几本"由尺自己出声（分母<10 判错）
   item selfcheck_ledger_binding_names_each_blemish "$out"  # 73) 五种坏形状各红一次并点名：缺指路行、双前缀、假节号造成跨卷重复、同卷重复节号、集体看不见（卷十 §165；同卷重复那一臂是 §174 补的）
