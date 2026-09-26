@@ -20,7 +20,14 @@ extension DocReferenceRatchetTests {
         var found: Set<String> = []
         let code = SurfaceScanKit.codeLines(text).joined(separator: "\n")
         let patterns = [#"func\s+([A-Za-z_][A-Za-z0-9_]*)"#,
-                        #"(?:class|struct|enum|actor|protocol|extension)\s+([A-Za-z0-9_]+)"#]
+                        #"(?:class|struct|enum|actor|protocol|extension)\s+([A-Za-z0-9_]+)"#,
+                        // 2026-09-27（§189）：**类型作用域的存储属性**也要收。
+                        // 来路是卷十一 §179 的丙类误报：`PerfRulerHotspotRatchetTests.rulerScripts`
+                        // 那张名单真实存在（同文件第 44 行的 `static let`），却因为采集器只收
+                        // "类型名＋方法名"而被判死——文档写 `类型.那张名单` 是正常写法，判它死＝尺子钝。
+                        // 作用面用"正好四空格缩进"当判据（本仓风格：类型成员缩进 4、函数内的局部量 ≥8）；
+                        // 这是**启发式不是解析器**，写在这里就是为了下一个人在这里加豁免前先看见它。
+                        #"(?:^|\n)[ ]{4}(?:[@#]\w+\S*\s+)*(?:(?:private|fileprivate|internal|public|open)\s+)*(?:static\s+|final\s+|class\s+)*(?:let|var)\s+([A-Za-z_][A-Za-z0-9_]*)"#]
         let range = NSRange(location: 0, length: code.utf16.count)
         for pattern in patterns {
             guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
@@ -97,12 +104,14 @@ extension DocReferenceRatchetTests {
         let index = try buildIndex()
         let canary = """
         合成行：真实文件名作用域 `ContributorRows.ContributorRow.body`、真实纯符号 `LogsView.header`、
+        真实存储属性 `PerfRulerHotspotRatchetTests.rulerScripts`（§179 丙类那格误报，现在必须判活）、
         假符号 `WsvCanaryDeadType.someMember`、假文件 `WsvCanaryFile.swift:999`、
         行号越界 `Package.swift:99999`。
         """
         let hits = tokens(in: canary)
         XCTAssertEqual(Set(hits), [
-            "ContributorRows.ContributorRow.body", "LogsView.header", "WsvCanaryDeadType.someMember",
+            "ContributorRows.ContributorRow.body", "LogsView.header",
+            "PerfRulerHotspotRatchetTests.rulerScripts", "WsvCanaryDeadType.someMember",
             "WsvCanaryFile.swift:999", "Package.swift:99999",
         ], "合成文本里的锚点没被全部扫到，正则或口径漂了")
 
@@ -140,15 +149,24 @@ extension DocReferenceRatchetTests {
         struct Shape {}
         final class SurfaceGuardTests: XCTestCase { func test_borderless() {} }
         extension SurfaceGuardTests { func helper() {} }
+        final class RosterTests: XCTestCase {
+            static let rosterNames: Set<String> = []
+            private var cachedFormatter: DateFormatter?
+            func run() {
+                let localThing = 1
+            }
+        }
         let canary = "WsvCanaryDeadType.someMember 只是字符串，不是声明"
         // struct CommentOnly {} —— 整行注释不是声明，剥注释由 SurfaceScanKit.codeLines 负责
         """
         let found = Self.declaredNames(in: text)
         for name in ["ScanKit", "codeLines", "Ledger", "trim", "Ruler", "Shape",
-                     "SurfaceGuardTests", "test_borderless", "helper"] {
+                     "SurfaceGuardTests", "test_borderless", "helper",
+                     "rosterNames", "cachedFormatter"] {
             XCTAssertTrue(found.contains(name), "声明名 \(name) 没被收到 —— 文档引用它会判死")
         }
-        for notADeclaration in ["WsvCanaryDeadType", "someMember", "CommentOnly"] {
+        for notADeclaration in ["WsvCanaryDeadType", "someMember", "CommentOnly",
+                                "localThing"] {
             XCTAssertFalse(found.contains(notADeclaration),
                            "\(notADeclaration) 不是声明却被收了：判活集合一旦包含「哪里提到过」，"
                          + "它就再也测不出判据失效（金丝雀当年就是这样不红的）")
