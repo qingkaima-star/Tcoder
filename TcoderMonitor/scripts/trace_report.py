@@ -19,6 +19,7 @@
 
     trace_report.py durations <xml> [--label 名] [--budget-ms 8.333]  # 时长分布 n/p50/p95/p99/max
     trace_report.py threads <xml> [--thread "Main Thread"] [--top 20] [--leaf 12] [--pairs 12]
+                            [--window 428-1551]        # 只数这段时间轴上的样本（毫秒；#96）
     trace_report.py displays <xml>                                   # device-display-info：分辨率与最大 Hz
     trace_report.py fps <xml> [--display 名]                          # displayed-surfaces-per-second：出帧
     trace_report.py summary <输出目录> [--seconds N]                    # 出 spec §1 的同形状对照表
@@ -481,6 +482,11 @@ def add_xml_subcommands(sub):
     t.add_argument("--top", type=int, default=20)
     t.add_argument("--leaf", type=int, default=12)
     t.add_argument("--pairs", type=int, default=12)
+    # 窗口=「只数这段」。为什么要它：App Launch 那份 time-profile 里有 6.55 s 的
+    # "活到窗口结束"运行期尾巴（#71 同一课），拿全窗聚合去答"那 1.12 s 空档是谁占的"
+    # 一定答错——它会把尾巴算进分母。落点见 `perf_trace_threads.parse_window`。
+    t.add_argument("--window", default=None,
+                   help="只数这个时间区间（毫秒，形如 428-1551）；不给就是全窗")
     t.add_argument("--json", default=None)
     t.set_defaults(func=cmd_threads)
 

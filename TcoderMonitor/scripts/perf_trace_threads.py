@@ -23,28 +23,59 @@ from perf_trace_xml import PLUMBING_SHARE_PCT, build_stack_index, is_runloop_plu
 # threads：Time Profiler 的按线程样本数与热点栈
 # ----------------------------------------------------------------------------
 
+def parse_window(spec):
+    """`428-1551` -> (428e6, 1551e6) 纳秒；不合法直接报错，不许静默变成"恒零窗口"。"""
+    if not spec:
+        return None
+    try:
+        lo_s, hi_s = spec.split("-", 1)
+        lo, hi = float(lo_s), float(hi_s)
+    except ValueError:
+        raise SystemExit("!! --window 要 `起-止`（毫秒），收到 %r" % spec)
+    if not (0 <= lo < hi):
+        raise SystemExit("!! --window %r 里 起 >= 止 ⇒ 那是一段恒空窗口，比假绿更坏" % spec)
+    return (lo * 1e6, hi * 1e6)
+
+
+def window_label(win):
+    return "全窗" if not win else "%.1f~%.1f ms" % (win[0] / 1e6, win[1] / 1e6)
+
+
 def cmd_threads(args):
     with open(args.xml, "r", encoding="utf-8", errors="replace") as fh:
         text = fh.read()
-    per, leaf, anyf, pairs = threads_tally(text)
+    win = parse_window(getattr(args, "window", None))
+    per, leaf, anyf, pairs, shape = threads_tally(text, win)
     if not per:
-        print("!! 一个样本都没解出来：确认导出的是 time-profile 表（而不是空的 time-profile）")
+        if win:
+            print("!! 窗口 %s 内一个样本都没有：整表 %d 行、带 sample-time 的 %d 行"
+                  " ⇒ 是**窗口选错**，不是这张表是空的。" % (window_label(win), shape[0], shape[1]))
+        else:
+            print("!! 一个样本都没解出来：确认导出的是 time-profile 表（而不是空的 time-profile）")
         return 1
-    target, total, total_all = threads_print(args, per, leaf, anyf, pairs)
-    threads_write_json(args, anyf, target, total, total_all)
+    target, total, total_all = threads_print(args, per, leaf, anyf, pairs, win)
+    threads_write_json(args, anyf, target, total, total_all, win)
     return 0
 
 
 # 【拆分的形状】原先 82 行 / CC 41 挤在一个函数里，按「数样本 → 打印 → 落 JSON」
 # 三段切开；四个 Counter 与选线程、排序、截断的表达式**逐字未动**。
-def threads_tally(text):
-    """逐行数样本：每线程计数 + 叶子帧 / 栈中出现 / 调用对三张榜（都带线程名）。"""
+def threads_tally(text, win=None):
+    """逐行数样本：每线程计数 + 叶子帧 / 栈中出现 / 调用对三张榜（都带线程名）。
+    返回末尾多一项 (整表行数, 带时间行数) —— 窗口内为空时要靠它区分"窗口选错"与"表是空的"。"""
     _, _, tbs, threads = build_stack_index(text)
     per = collections.Counter()
     leaf = collections.Counter()
     anyf = collections.Counter()
     pairs = collections.Counter()
-    for row in re.findall(r"<row>(.*?)</row>", text, re.S):
+    rows = re.findall(r"<row>(.*?)</row>", text, re.S)
+    timed = 0
+    for row in rows:
+        sm = re.search(r'<sample-time (?:id="\d+"[^>]*>)?(\d+)', row)
+        if sm:
+            timed += 1
+            if win and not (win[0] <= int(sm.group(1)) <= win[1]):
+                continue
         tm = re.search(r'<thread (?:id="(\d+)"[^>]*|ref="(\d+)")', row)
         if not tm:
             continue
@@ -61,17 +92,24 @@ def threads_tally(text):
             anyf[(tname, f)] += 1
         if len(stack) > 1:
             pairs[(tname, stack[0], stack[1])] += 1
-    return per, leaf, anyf, pairs
+    return per, leaf, anyf, pairs, (len(rows), timed)
 
 
-def threads_print(args, per, leaf, anyf, pairs):
+def threads_print(args, per, leaf, anyf, pairs, win=None):
     """选定目标线程（名字前缀匹配，匹配不上退回样本最多的那条）并打三张榜。"""
-    print("== 线程样本数 ==")
+    print("== 线程样本数（窗口：%s；口径＝样本数，不是毫秒）==" % window_label(win))
     for tname, cnt in per.most_common(8):
         print("  %6d  %s" % (cnt, tname[:70]))
 
     cand = [t for t in per if t.startswith(args.thread)]
-    target = max(cand, key=lambda t: per[t]) if cand else max(per, key=lambda t: per[t])
+    if cand:
+        target = max(cand, key=lambda t: per[t])
+    else:
+        target = max(per, key=lambda t: per[t])
+        # 要的是 A 线程、给的是 B 线程的数——这必须出声（#98：这把尺此前没有行为级臂，
+        # 于是"认不到人就悄悄换人"这个形状一直没人拦）。
+        print("!! ⚠ 没有线程名以 %r 开头 ⇒ 回退到样本最多的那条（%s）；"
+              "下面这些数**不是**你要的那个执行体的。" % (args.thread, target[:60]))
     total_all = sum(per.values())
     total = per[target]
     print("\n== %s  %d 样本（占全进程 %.1f%%）==" % (target[:60], total, 100.0 * total / max(1, total_all)))
@@ -109,7 +147,7 @@ def threads_print_leaf_and_pairs(args, leaf, pairs, target):
             shown += 1
 
 
-def threads_write_json(args, anyf, target, total, total_all):
+def threads_write_json(args, anyf, target, total, total_all, win=None):
     if not args.json:
         return
     ranked = [(f, cnt) for (tname, f), cnt in anyf.most_common(4000) if tname == target]
@@ -120,6 +158,9 @@ def threads_write_json(args, anyf, target, total, total_all):
     hotspot = [(f, pct) for f, pct in ranked
                if not is_runloop_plumbing(f) and pct < PLUMBING_SHARE_PCT]
     write_json(args.json, {
+        # 窗口必须随数一起落盘：不带这一格，一份"只数了 428~1551 ms"的 JSON
+        # 和一份全窗的长得一模一样，下游 summary 会把它当全窗读数（#96/#98）。
+        "window": window_label(win),
         "thread": target,
         "samples": total,
         "process_samples": total_all,

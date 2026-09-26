@@ -155,6 +155,7 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_ledger_binding_reads_the_real_ledger "$out"  # 72) 台账装订层在真文档上全绿，且"数到几本"由尺自己出声（分母<10 判错）
   item selfcheck_ledger_binding_names_each_blemish "$out"  # 73) 五种坏形状各红一次并点名：缺指路行、双前缀、假节号造成跨卷重复、同卷重复节号、集体看不见（卷十 §165；同卷重复那一臂是 §174 补的）
   item selfcheck_trio_false_reject_counts_are_exact "$out"  # 74) 打回率尺：三分类要数得准（2/2/0 与 1/0/3）、喂不够趟数不出数、caveat 不许掉（#53 裁定材料）
+  item selfcheck_threads_window_grill "$out"  # 75) threads 尺的窗口切片：全窗自称全窗、筛得对、零命中说「窗口选错」、反向区间拒、认不到执行体要出声（#96／#98，它此前只有形状守卫点名、没有行为级臂）
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：那个 for 必须在 cmd_selfcheck 之前，
