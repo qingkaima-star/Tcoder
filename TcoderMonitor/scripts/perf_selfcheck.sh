@@ -151,6 +151,7 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_artifact_locator_fork_honest "$out"  # 68) 同名产物分在三处时按形状说对话（互补／包含），不许替人挑一份（#89，清树的前置）
   item selfcheck_artifact_locator_names_the_tree_copy "$out"  # 69) 分叉里点名本树那一份：它是 report／一致性尺唯一认得的（换树不冒这句）
   item selfcheck_locator_census_counts_only_batches "$out"  # 70) 「数了几批」由尺答：夹具树里的合成 -runN 不进批次分母、容器第二层算数、空根要判错（#90）
+  item selfcheck_presence_reading_is_honest "$out"  # 71) 整窗在场只是读数：无 pid／探针没热答未知、桩探针两态、缺列明写没采到（#53 裁 C）
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：那个 for 必须在 cmd_selfcheck 之前，

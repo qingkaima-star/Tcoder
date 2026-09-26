@@ -165,3 +165,42 @@ selfcheck_inwindow_load_verdict() {  # 52) 窗口内负载采样必须能定合�
     || { fail "别人那个 swiftc 没被点出来（实得「$(heavy_names_for_pids "pid=111 name=xctrace pid=222 name=swiftc" "222")」）⇒ 明细列与计数列不同源"; bad=1; }
   [ "$bad" = "0" ] && ok "窗口内负载采样能定合格：干净放行 / 中段越阈判污 / 重活单独也判 / 没采到必须出声 / 自己那一个采集进程不算外部争用（计数与明细同一份过滤）"
 }
+
+selfcheck_presence_reading_is_honest() {  # 71) 「整窗在场」只加读数不加判定（#53 裁 C），三种形状各钉一次
+  # 为什么必须有这一项：这一维的**全部价值**是把"程序几乎不在屏上画"那种趟暴露出来
+  # （cert7c-idle-run3：出帧 p50 112→4，同一棵树、同一个 pid、meta 里无一维可解释）。
+  # 而它一旦写错就会**反过来骗人**：探针没热身时也报"在屏"、或者旧批次缺列被算成"都在屏"，
+  # 那比没有这一维更糟——下一个人会拿它当"窗口确实在场"的证据。
+  local fx bad=0 v1 v2 v3 sum1 sum3
+  fx=$(mktemp -d 2>/dev/null || echo /tmp/pres-fx)
+  # 三支桩：报窗口的、不报窗口的（退出码 0）、以及"根本不存在"的路径。
+  # 为什么必须自带桩：这一维读的是**机器上有没有编好的探针**，不钉住它，
+  # 同一条断言在别人机器上（跑过一次真测量 ⇒ 稳定路径上有了产物）就会漂成另一种答案。
+  printf '#!/bin/sh\nprintf "12|标题|1200\\n"\n' > "$fx/on"; chmod +x "$fx/on"
+  printf '#!/bin/sh\nexit 0\n' > "$fx/off"; chmod +x "$fx/off"
+  # 1) 没有 pid ⇒ 未知（不许猜成在屏/不在屏）——即便探针是热的
+  v1=$(TCODER_WINLIST_BIN="$fx/on" sample_presence "")
+  # 2) 探针产物不在（且 WINLIST_BIN 空）⇒ 未知，且**绝不在窗口里现编**（挂死过一次的位置）
+  v2=$(WINLIST_BIN= TCODER_WINLIST_BIN="$fx/does-not-exist" sample_presence 4242)
+  # 3) 桩探针：有窗口／没窗口两种回答各判一次（"没窗口"落保守侧）
+  v3=$(WINLIST_BIN= TCODER_WINLIST_BIN="$fx/on" sample_presence 4242)
+  local v4; v4=$(WINLIST_BIN= TCODER_WINLIST_BIN="$fx/off" sample_presence 4242)
+  case "$v1" in 未知\|*) : ;; *) fail "没 pid 时没答未知（实得「$v1」）"; bad=1 ;; esac
+  case "$v2" in 未知\|*) : ;; *) fail "探针产物不在时没答未知（实得「$v2」⇒ 它可能在窗口里偷偷编译，或在猜）"; bad=1 ;; esac
+  case "$v3" in 在屏\|*) : ;; *) fail "桩探针说有窗口却判成「$v3」（稳定路径没被认？winlist_resolve 断了）"; bad=1 ;; esac
+  case "$v4" in 不在屏\|*) : ;; *) fail "桩探针说没窗口时没落到不在屏（实得「$v4」）"; bad=1 ;; esac
+  # 4) 收尾复核的三种形状：旧批次缺第 5 列／全在屏／混合
+  mkdir -p "$fx/old" "$fx/on2" "$fx/mix"
+  printf '1\t1.0\t0\t无\n2\t1.1\t0\t无\n' > "$fx/old/load-in-window.tsv"
+  printf '1\t1.0\t0\t无\t在屏|X\n2\t1.1\t0\t无\t在屏|X\n' > "$fx/on2/load-in-window.tsv"
+  printf '1\t1.0\t0\t无\t在屏|X\n2\t1.1\t0\t无\t不在屏|Y\n3\t1.2\t0\t无\t未知|Z\n' > "$fx/mix/load-in-window.tsv"
+  sum1=$(load_window_verdict "$fx/old" 2>&1 | grep -a "整窗在场\|在场读数" | head -1)
+  local s_on s_mix
+  s_on=$(load_window_verdict "$fx/on2" 2>&1 | grep -a "在场读数" | head -1)
+  s_mix=$(load_window_verdict "$fx/mix" 2>&1 | grep -a "在场读数" | head -1)
+  case "$sum1" in *没采到*) : ;; *) fail "旧批次缺列被当成有读数（实得「$sum1」）⇒ 必须明写「这一维没采到」"; bad=1 ;; esac
+  case "$s_on" in *"在屏 2／不在屏 0／未知 0"*) : ;; *) fail "全在屏的形状数错（实得「$s_on」）"; bad=1 ;; esac
+  case "$s_mix" in *"在屏 1／不在屏 1／未知 1"*) : ;; *) fail "混合形状数错（实得「$s_mix」）"; bad=1 ;; esac
+  rm -rf "$fx"
+  [ "$bad" = "0" ] && ok "在场读数五面有牙：无 pid／探针没热都答未知（不在窗口里编译）、桩探针两态各判对（失败落保守侧）、旧批次缺列明写没采到、混合形状逐态计数"
+}
