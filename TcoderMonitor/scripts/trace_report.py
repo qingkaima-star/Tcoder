@@ -204,7 +204,8 @@ def cmd_lifecycle(args):
           % (total, len(rows), longest[0], longest[1]))
     # 合计里含"活到窗口结束"的运行期，**不能当首帧**；就绪点看下一行。
     print("  启动到就绪 %.1f ms（尾巴段已剔除；合计只作跨度参考）" % ready if ready is not None
-          else "  启动到就绪：未解出（表里没有带时长的周期，按未覆盖处理）")
+          else "  启动到就绪：未解出（表里没有带时长的周期，**或整段从录制起点就开始 ⇒ 启动过程根本没进表**；"
+               "两种都按未覆盖处理，不许当 0 ms 达标——#114）")
     # 最长周期是"启动成本"还是"活到录制结束的那一段"？用**与 launch_ready_ms 同一条**阈值判（#71）。
     _, horizon = window_span_and_tails(spans)
     tail = is_window_tail(longest[0], horizon)
