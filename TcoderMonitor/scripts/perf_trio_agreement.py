@@ -53,7 +53,8 @@ import json
 import os
 import sys
 
-from perf_trace_metrics import disp_values, fps_counts, percentile
+from perf_trace_metrics import (FRAME_BUDGET_MS_DEFAULT, HEARTBEAT_BUDGET_MS,
+                                disp_values, fps_counts, percentile)
 from perf_update_caliber import dedupe_pairs
 from perf_eligibility import period_eligibility      # 资格判据的**真家**（09-25 从 summary 层拆出）
 from perf_trace_summary import summary_load
@@ -303,11 +304,46 @@ def _judge_spread(got, period):
     return bad, out, name, q
 
 
+def _heartbeat_verdict(got, period):
+    """→ (追加行, 退出码或 None)：判据② 那条 4.0 ms 线**第一次有机器读者**（#124）。
+
+    为什么放这把尺而不是报表那行：报表的「达标」按**一帧预算**判（`FRAME_BUDGET_MS_DEFAULT`），
+    是既成口径、也有别的读者；
+    而一致性尺本来就是"这批能不能算认证"的那个出口——把 ② 挂在它身上，
+    「一致」与「达标」才不会各说各话（**一致 ≠ 达标**：三趟都 6 ms 时两把带宽尺全过，② 却已经不成立）。
+    缺读数按「未采到」给码 2，绝不给过（缺证据不得给满分）。
+    ⚠ 只在 idle（心跳期）这一档判：交互档的 update 是被滚动催出来的，拿 4.0 ms 去判它
+    是问错对象；但**跳过要出声**，不许静默少一维（第 21 类那条「新维度沉默＝什么都判不成立」的反面）。
+    """
+    if period != "idle":
+        return (["   判据②：这一档不参与——心跳期那条 4.0 ms 线只对 idle 档有意义（本批档位：%s）"
+                 % period], None)
+    over = [(r["dir"], r["update_max_ms"]) for r in got
+            if r.get("update_max_ms") is not None and r["update_max_ms"] > HEARTBEAT_BUDGET_MS]
+    if over:
+        return (["   判据②：**不成立** —— %s 的 app-update max 越过 T2 的 %.1f ms 线（%s）"
+                 % ("、".join(n for n, _ in over),
+                    HEARTBEAT_BUDGET_MS,
+                    "／".join("%.2f ms" % v for _, v in over)),
+                 "   ⇒ 逐趟报表那句「没有一个 update 超预算」按的是**一帧 %.3f ms**，不是 ②（#124）"
+                 % FRAME_BUDGET_MS_DEFAULT], 1)
+    missing = [r["dir"] for r in got if r.get("update_max_ms") is None]
+    if missing:
+        # 现实中 `read_run` 的 max 由值集算出，所以"有值却没 max"进不来；
+        # **update 表整空的批次在上游就被散布尺打回**（实测 code=1，话术点名「不许报一致」），
+        # 这一格只兜"读数形状变了"的那种漂移，不给它留静默放行。
+        return (["   判据②：**未采到** —— %s 没有 app-update 读数 ⇒ 这一维不许按「没数据」算通过"
+                 % "、".join(missing)], 2)
+    return (["   判据②：每趟 max 都在 T2 的 %.1f ms 线内（报表那句「达标」按一帧 %.3f ms，两条线这里都对过）"
+             % (HEARTBEAT_BUDGET_MS, FRAME_BUDGET_MS_DEFAULT)], None)
+
+
 def verdict(runs, dirs):
     """→ (逐行文字, 退出码)。缺件与不足都**不许**伪装成"一致"。
 
     判据量的选择与散布怎么算都在 `_judge_spread` 里（连同一句"为什么 idle 档不比 hitch"），
-    这里只管三件事：够不够 3 趟、档位齐不齐、结论落在哪个退出码。混档一律不判。
+    这里管四件事：够不够 3 趟、档位齐不齐、结论落在哪个退出码、**判据② 那条 4.0 ms 线**（#124）。
+    混档一律不判。
     """
     if not runs:
         return ["!! 一个 run 目录都没给 ⇒ 这支尺子没被喂过数据，别把「没输出」当「通过」"], 2
@@ -328,15 +364,21 @@ def verdict(runs, dirs):
         lines.append("   判定：**不判**——这些趟的档位不同（%s），混档比散布没有意义"
                      % " / ".join(sorted(periods)))
         return lines, 2
-    bad, out, name, q = _judge_spread(got, periods.pop())
+    periods_only = periods.pop()
+    bad, out, name, q = _judge_spread(got, periods_only)
     lines += out
     if bad:
         lines.append("   判定：**不一致** —— " + "；".join(bad))
         lines.append("   ⇒ 这一档**不能**报「3/3 达标」。要么加趟/排掉被打回的那趟再看一次，"
                      "要么按 spec §1.3 明写「受控重复未满足」。")
         return lines, 1
-    lines.append("   判定：一致（两把尺子都在带宽内）。中位 %s %.2f ⇒ 报数时**报中位与范围**，不报均值"
-                 % (name, sorted(q)[len(q) // 2]))
+    hb_lines, hb_code = _heartbeat_verdict(got, periods_only)
+    lines += hb_lines
+    if hb_code is not None:      # ② 越线或未采到 ⇒ 散布再齐也不算认证（#124）
+        return lines, hb_code
+    lines.append("   判定：一致（两把散布尺都在带宽内%s）。中位 %s %.2f ⇒ 报数时**报中位与范围**，不报均值"
+                 % ("，且每趟 max 都过 T2 的 4.0 ms 线" if periods_only == "idle"
+                    else "；判据② 按档位不参与，见上一行", name, sorted(q)[len(q) // 2]))
     return lines, 0
 
 
