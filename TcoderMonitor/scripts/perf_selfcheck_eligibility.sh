@@ -315,3 +315,53 @@ print(pe({"period": "interaction", "quiescence_recheck": "unavailable"})[1])')
     || { fail "写侧到读侧那条链没走通（拿到 $got）⇒ 要么 unavailable 那一格又没落盘，要么落了盘却没被资格尺读回来"; return; }
   ok "收尾复核未判/做成两态都落盘且被同一把资格尺读回；① ② 各不放过，缺字段不追溯"
 }
+
+selfcheck_load_window_uncollected_has_reader() {  # selfcheck_load_window_uncollected_has_reader <outdir>
+  # 72) 【#128】`load_in_window=未采到` 这一格必须有**读者**。
+  #     写侧其实早就落了（比 #127 那条诚实），但资格判据读的是 `contaminated_by_foreign_load`
+  #     与收窗那两个点 ⇒ 零采样那一趟被「缺席」补成「整窗干净」。而 §AP 立这一维的原因正是
+  #     「两端看不件中段的编译」：八趟里唯一落在 4.0 ms 红线内的那趟，收窗负载 19.73。
+  #     形状＝**标记落地而判据住空集合**（第 38 类）：记了没人读等于没记。为什么单独成一项：
+  #     第 52 项（`selfcheck_inwindow_load_verdict`）已经 45 行，再往里加格就撞「函数 ≤50 行」
+  #     ⇒ 本仓口径是**新臂另开一格**，不是抬线（卷十三 §212 同族）。
+  local r
+  r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_eligibility import period_eligibility as pe
+g = lambda m: "1" if pe(m)[0] else "0"
+print("|".join([
+    g({"period": "interaction", "load_in_window": "未采到"}),
+    g({"period": "idle", "load_in_window": "未采到"}),
+    g({"period": "idle", "load_samples": "4", "load1_max_in_window": "2.0"}),
+    g({"period": "idle"}),
+]))')
+  [ "$r" = "0|0|1|1" ] \
+    || { fail "整窗零采样四格没各判对（拿到 $r，应为 0|0|1|1）⇒ 第 1、2 条不是 0 就是「没采到」又被补成「干净」，" \
+              "第 3 条不是 1 就是这条尺把采到了样本的趟也一并拒（恒拒），第 4 条不是 1 就是有人拿它追溯老批次"; return; }
+  local words
+  words=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_eligibility import period_eligibility as pe
+print(pe({"period": "idle", "load_in_window": "未采到"})[1])')
+  printf '%s\n' "$words" | grep -q '未采到' \
+    || { fail "拒因里没出现「未采到」这个标记值 ⇒ 读的人分不清是尺子没在场还是机器真的空"; return; }
+  # 端到端那一腿：真跑写侧（`load_window_verdict` 于一个没有 tsv 的目录），再让读侧判那份落盘。
+  local fx got
+  fx="$(cd "$1" && pwd)/load-window-uncollected"
+  rm -rf "$fx"; mkdir -p "$fx"
+  got=$(bash -c '
+    set -uo pipefail
+    dir="$1"
+    source scripts/perf_preflight.sh >/dev/null 2>&1 || { echo "source-fail"; exit 0; }
+    REV=selfcheck; DIRTY=0; PERIOD=idle; cores=15
+    load_window_verdict "$dir" >/dev/null 2>&1
+    cd scripts && python3 - "$dir" <<PY
+import json, sys
+m = json.load(open(sys.argv[1] + "/meta.json", encoding="utf-8"))
+from perf_eligibility import period_eligibility as pe
+ok, _ = pe(m)
+print("%s|%s" % (m.get("load_in_window", "(缺)"), "Y" if ok else "N"))
+PY
+    ' _ "$fx")
+  [ "$got" = "未采到|N" ] \
+    || { fail "写侧到读侧没走通（拿到 $got，应为 未采到|N）⇒ 要么那一格又没落盘，要么落了盘还是没人读"; return; }
+  ok "整窗零采样落成显式一格并被资格尺读回：两档都拒、有样本放行、缺格不追溯"
+}

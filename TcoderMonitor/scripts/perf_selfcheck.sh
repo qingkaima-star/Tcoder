@@ -176,6 +176,7 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_artifact_locator_names_the_tree_copy "$out"  # 69) 分叉里点名本树那一份：它是 report／一致性尺唯一认得的（换树不冒这句）
   item selfcheck_locator_census_counts_only_batches "$out"  # 70) 「数了几批」由尺答：夹具树里的合成 -runN 不进批次分母、容器第二层算数、空根要判错（#90）、家族外但形状像批次的要出声（#95）
   item selfcheck_quiescence_recheck_states "$out"  # 71) 收尾人手复核「没做成」不许被读成「做成且没人动」：三态七格 + 写侧到读侧那条链真跑（#127，列在最后：新项不与既有项抢顺序）
+  item selfcheck_load_window_uncollected_has_reader "$out"  # 72) 整窗负载「没采到」这一格必须有读者：四格＋端到端（#128，列在最后：新项不与既有项抢顺序）
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：那个 for 必须在 cmd_selfcheck 之前，
