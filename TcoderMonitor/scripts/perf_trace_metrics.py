@@ -116,13 +116,24 @@ def launch_ready_ms(rows):
       · 找出"尾巴段"= 时长超过整表跨度一半的那些段；有就取其中最早的**起点**当就绪点；
       · 没有尾巴段（进程很快就退出）⇒ 取所有段的末端最大值，那本来就是全部启动成本。
     空表返回 None（调用方按"未观测到"处理，不许拿 0 当达标）。
+
+    ⚠ 2026-09-27 补的第二种"未观测到"（#114）：**尾巴段从录制起点就开始**时，就绪点会算成 0.0
+    ——而 0.0 在 T4（冷启动 ≤1.0 s）那条**绝对毫秒**判据上读起来像"秒开、达标"。
+    现场：修后的产物在低载机上跑 `switch` 档，表里只有一段 `States 396 ms`（整表跨度 695 ms），
+    尾巴起点 0.0 ⇒ `ready_ms: 0.0`，而认证跑棒的判定式只挡 `is not None` ⇒ 会印
+    「p50 = 0 ms ⇒ **T4 达标**」。**"整表只有一段、且那段从第 0 ms 就开始"**的意思不是"立刻就绪"，
+    是**启动过程根本没进这张表**（实例没被探到、或起得太快就退了）⇒ 一并返回 None。
     """
     spans, horizon = window_span_and_tails(rows)
     if not spans:
         return None
     tails = [s for s, d in spans if is_window_tail(d, horizon)]
     if tails:
-        return min(tails)
+        ready = min(tails)
+        # 就绪点必须**晚于**表里最早那段的起点；不晚于就是"没看见启动"，不是"0 ms 就绪"。
+        if ready <= min(s for s, _ in spans):
+            return None
+        return ready
     return horizon
 
 
