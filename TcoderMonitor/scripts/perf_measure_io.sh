@@ -43,9 +43,25 @@ post_window_quiescence() {  # post_window_quiescence <outdir> <窗口秒数>；�
   # idle 档要的是"整窗没人动"；interact 档要的正好相反——没人动那批只能退回当 idle 数。
   local out="$1" window="$2" quiet period="${PERIOD:-idle}" verdict
   quiet=$(quietest_seconds "$(quiescence_probe)")
-  probe_usable "$quiet" || { echo "    （收尾静默探针取不到，污染判定不做）"; return 0; }
+  if ! probe_usable "$quiet"; then
+    # 【#127 的根治】取不到**不许只印一行**：原来这里什么都不落就 `return 0`，
+    # 而唯一的资格判据 `period_eligibility` 的形状是「没有污染标记就算合格」
+    # ⇒ 尺子掉下来的那一趟**必然放行**：交互档印「有资格答 T1」、心跳档印「只答心跳期」，
+    # 两句都是绿灯，而且同一句还被一致性尺（`perf_trio_agreement`）读进 3/3 的计数。
+    # 「探针时好时坏地报 -1.00」不是假想：`quiescence_probe` 编译到 $SCRATCH 下的哈希名，
+    # 别的会话在同名位置放个目录就编译失败（`perf_probes.sh` 头注 ①② 记的就是这个形状）。
+    # ⇒ 把「未判」落成显式标记，交给资格尺去拒。**只加字段，不加闸门**：
+    #   本函数照旧 return 0、样本照旧留盘，拒发生在引用那一刻（不在录制中途灭失一趟）。
+    meta_write "$out" "quiescence_recheck=unavailable" "period=$period"
+    echo "    （收尾静默探针取不到 ⇒ 人手这一维**未判**，已落 meta.quiescence_recheck=unavailable）" >&2
+    echo "      这一趟不得作为判据①/② 的达标证据：既没证「窗口内有人在动」也没证「没人动」。" >&2
+    return 0
+  fi
   verdict=$(human_input_in_window "$quiet" "$window")
-  meta_write "$out" "quiescence_after_seconds=$quiet" "period=$period" "window_verdict=$verdict"
+  # `quiescence_recheck=measured` 这一格是**正对照**：没有它，「没写成 unavailable」与
+  # 「这段代码根本没跑」在下游长得一模一样（第 46 类「标记要有读者」的正半句）。
+  meta_write "$out" "quiescence_recheck=measured" "quiescence_after_seconds=$quiet" \
+    "period=$period" "window_verdict=$verdict"
   if [ "$period" = "interaction" ]; then
     if [ "$verdict" = "窗口内没人" ]; then
       meta_write "$out" "no_human_input_during_window=1"
