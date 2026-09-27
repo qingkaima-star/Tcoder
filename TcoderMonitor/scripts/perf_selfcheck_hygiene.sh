@@ -184,7 +184,13 @@ selfcheck_artifact_locator_fork_honest() {  # 68) 同名产物分在三处时要
   # **包含**分叉（2 且说「名单更全」、且**不许**说「都不能单独删」）、同一根传两遍（0）、
   # 批名不存在（1，且必须明说"一处都没找到"而不是静默）。
   local fx a b c r1 r2 r3 r4 r5 out
-  fx=$(mktemp -d 2>/dev/null || echo /tmp/locator-fx)
+    # 夹具落**本轮 outdir 之下**，不用 `mktemp -d`、更不用它的 `|| echo /tmp/固定名` 兜底（#113）：
+  # 固定名在两棵树／两轮并发时会撞，而收尾那句 `rm -rf "$fx"` 会**删掉别人正在用的夹具**——
+  # 同一枚病本仓付过学费：静默探针那把 `/tmp/tcoder-quiesce-$$` 撞上别人放的目录，
+  # 症状是"探针时好时坏地报 -1.00"（`perf_probes.sh` 头注记着）。`cmd_selfcheck` 起跑已 `rm -rf` 整个 outdir
+  # ⇒ 按轮天然隔离，也顺带满足 AGENTS §1.6「一次性产物不进 $TMPDIR」。全仓其余夹具都是这个形状。
+  fx="$1/locator-fx"; rm -rf "$fx"; mkdir -p "$fx" \
+    || { fail "建不出本轮夹具目录（$fx）——这一项等于没跑，别把没跑当通过"; return; }
   a="$fx/rootA"; b="$fx/rootB"; c="$fx/rootC"
   mkdir -p "$a/tcoder-perf-fake-run1" "$b/tcoder-perf-fake-run1/fake.trace" \
            "$c/tcoder-perf-fake-run1/big.trace"
@@ -221,7 +227,8 @@ selfcheck_artifact_locator_names_the_tree_copy() {  # 69) 分叉时必须点名�
   # 改成拿 cwd 造一棵合成树——定位尺认「本树」只认 `cwd/.scratch` 与 `父目录/.scratch` 两个前缀。
   # 反向格：两处都在本树之外（同一棵合成树的**兄弟目录**）⇒ 不许冒出这句。
   local fx loc r1 r2 out
-  fx=$(mktemp -d 2>/dev/null || echo /tmp/locator-tree-fx)
+    fx="$1/locator-tree-fx"; rm -rf "$fx"; mkdir -p "$fx" \
+    || { fail "建不出本轮夹具目录（$fx）——这一项等于没跑，别把没跑当通过"; return; }
   loc="$PWD/scripts/perf_artifact_locator.py"
   mkdir -p "$fx/tree/.scratch/tcoder-perf-fake-run1" "$fx/else/.scratch/tcoder-perf-fake-run1/q.trace"
   : > "$fx/tree/.scratch/tcoder-perf-fake-run1/meta.json"
@@ -264,7 +271,8 @@ selfcheck_locator_census_counts_only_batches() {  # 70) 「数了几批」由尺
   # 这类**合成夹具**数了进去 ⇒ 554 个"批次"而真批次只有 222 个。形状完全一样，只有
   # 「住在夹具树里」能分开 ⇒ 这条口径必须钉住，且**逐名模式与普查档共用同一份枚举**（两处入口两个数=老账）。
   local fx a b r1 r2 out
-  fx=$(mktemp -d 2>/dev/null || echo /tmp/locator-census-fx)
+    fx="$1/locator-census-fx"; rm -rf "$fx"; mkdir -p "$fx" \
+    || { fail "建不出本轮夹具目录（$fx）——这一项等于没跑，别把没跑当通过"; return; }
   a="$fx/rootA"; b="$fx/rootB"
   mkdir -p "$a/tcoder-perf-real-idle-run1" "$b/tcoder-perf-real-idle-run1" \
            "$a/container/tcoder-perf-moved-idle-run2" \

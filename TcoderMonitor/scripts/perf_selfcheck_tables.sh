@@ -320,7 +320,13 @@ selfcheck_threads_window_grill() {  # 75) threads 那把尺第一次有自己的
   #   · 零命中 ⇒ 它说"确认导出的是 time-profile 表（而不是空的 time-profile）"，可表根本不空，是窗口选错；
   #   · `--thread` 认不到 ⇒ 它悄悄换成"样本最多的那条"照样出数（要 A 给 B）。
   local fx tp r_none r_bad r_fb out
-  fx=$(mktemp -d 2>/dev/null || echo /tmp/threads-window-fx)
+    # 夹具落**本轮 outdir 之下**，不用 `mktemp -d`、更不用它的 `|| echo /tmp/固定名` 兜底（#113）：
+  # 固定名在两棵树／两轮并发时会撞，而收尾那句 `rm -rf "$fx"` 会**删掉别人正在用的夹具**——
+  # 同一枚病本仓付过学费：静默探针那把 `/tmp/tcoder-quiesce-$$` 撞上别人放的目录，
+  # 症状是"探针时好时坏地报 -1.00"（`perf_probes.sh` 头注记着）。`cmd_selfcheck` 起跑已 `rm -rf` 整个 outdir
+  # ⇒ 按轮天然隔离，也顺带满足 AGENTS §1.6「一次性产物不进 $TMPDIR」。全仓其余夹具都是这个形状。
+  fx="$1/threads-window-fx"; rm -rf "$fx"; mkdir -p "$fx" \
+    || { fail "建不出本轮夹具目录（$fx）——这一项等于没跑，别把没跑当通过"; return; }
   tp="$fx/tp.xml"
   threads_window_fixture "$tp"
   python3 scripts/trace_report.py threads "$tp" --top 1 --leaf 1 --pairs 1 >"$fx/full.txt" 2>&1
