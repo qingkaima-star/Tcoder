@@ -159,6 +159,8 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_mutation_teeth_are_proved "$out"  # 78) 反例自己也要被反证：正控制走绿、sed 落空要喊、改了报告不读的那一行也要喊（卷十二 §185→§186，反例造法从 /tmp 搬进门禁）
   item selfcheck_capture_verdicts_have_teeth "$out"  # 80) 九页取证的三条判据都要有后果：字节相同判败、0 字节截图不充进"页齐"、拍砸页数非零判败（#116／§207；旧写法只印不判，且空文件会被 ls 数进 N）
   item selfcheck_threads_root_frame "$out"  # 81) 入口根帧不许顶「热点第一名」：底盘名单按字面量认会被自家一次改名废掉，比例兜底又量不到 94.1 %（#118／§211）
+  item selfcheck_criterion2_gate "$out"  # 82) 缺判据② 那一族表的一趟不许算落定：只有 time-profile 的 run2 形状判废并归 empty_tables（#117／§212）
+  item selfcheck_criterion2_count_and_token "$out"  # 83) 「含 ② 表 M 趟／缺整族 K 趟」数得准，且分类词由写者与读者共用一枚常量（换一个词当场降级成 other，#117＋#119）
   item selfcheck_arms_are_all_wired "$out"  # 79) 三张表对齐：盘上块 ↔ `_part` 名单 ↔ 臂的调用点（拆文件最容易掉臂，而两种掉法都不报错）
 }
 

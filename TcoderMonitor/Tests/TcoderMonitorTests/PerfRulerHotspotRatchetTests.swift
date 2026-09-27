@@ -64,7 +64,7 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // eligibility 500、harness 454、summary 413），按"拆文件才是修复"搬出五片。
         // **搬出来的每一片都照样要点名进来**——拆文件如果顺手免检，那拆本身就是新的通道
         // （这条教训在上面 09-21 那段注释里已经写过一次，今天是第二次用到它）。
-        "perf_measure_io.sh", "perf_report.sh", "perf_trace_frames.py",
+        "perf_measure_io.sh", "perf_report.sh", "perf_trace_frames.py", "perf_measure_verdicts.sh",
         "perf_selfcheck_launchers.sh", "perf_selfcheck_tables.sh",
         // 2026-09-27（卷十三 §211）：`threads` 那把尺的两项臂（75 窗口切片／81 底盘识别）搬出成独立一块——
         // 触发点是门禁自己报的：把第六格塞进第 75 项会把那个函数顶到 CC 16。新块当场点名，不留免检通道。

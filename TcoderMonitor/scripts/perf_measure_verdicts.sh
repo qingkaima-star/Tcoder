@@ -1,0 +1,158 @@
+#!/bin/bash
+# =============================================================================
+# perf_measure_verdicts.sh —— 「这一趟当场怎么判」那一层：判废、分类、重试裁决、覆盖点名。
+# 自 `perf_measure_io.sh` **逐字搬出**（2026-09-27 §212／#117：给 `export_table` 补"缺表原因留档"
+# 再加两支配函数之后，宿主涨到 **428 行**，越过仓库自己那把「巨大文件」口径
+# `FileSystemCodeAnalyzer.mediumFileLines = 400` ⇒ 本仓规约是**拆，不抬线**，不是往名单里塞条目）。
+#
+# 由 `perf_measure_io.sh` 自己 source（不是由调用方各自 source）：
+# `perf_preflight.sh` 与 `perf_selfcheck_windows.sh` 都是**单独 source io 那一层**的，
+# 换源点就会造出两个入口各拿一半函数——那正是 io 头注第 7~9 行警告过的形状。
+# 判据、告警文案、退出码逐字未动；新建这块文件当场进 `PerfRulerHotspotRatchetTests.rulerScripts`
+# （函数级 ≤50 行／CC<16 那两把尺），否则"拆"本身变成免检通道。
+# =============================================================================
+
+refuse_sample() {  # refuse_sample <outdir> <原因…>：一趟当场自认没采到数
+  # 形状与上面那道上下文闸门一致（同一个 `REFUSED` 文件、同一个读者）：
+  # `usable_sample` 与 `perf_trio_agreement` 都按这个文件跳趟。
+  # **不再另开一枚 meta 键**：理由写进正文就已经有读者，再开键就是第二个入口。
+  printf 'REFUSED\n%s\n' "$2" > "$1/REFUSED"
+}
+
+# 【判废原因里"用来分类那半句"命名成常量（#117）】
+# `refusal_kind` 只能按**文案**分类（这是上面那条「不开第二枚键」的决定换来的代价）。
+# 本轮要加第二类"表族缺失"，如果让分类去猜一句新散文，那就是第四次栽在
+# **语义守卫挂文本代理**上：写者换个词，读者静默降级成 `other`。
+# ⇒ 写者与读者共用这两个名字；判据本身仍然只有 `REFUSED` 一个落点。
+#   （另两类 `挂死`／`在录制期间消失`／`测量上下文不合格` 仍由各自写者的原句供给，
+#     第 62 项拿**真路径**产出的 REFUSED 喂它们——迁移那三类不在本轮范围内，别顺手改。）
+REFUSE_KIND_EMPTY_TABLES="一张都没有行数"      # 三张关键表全空（既有类）
+REFUSE_KIND_NO_CRITERION="判据表整族缺失"      # 新增：这一档答不了它自己存在的理由（同归 empty_tables）
+
+refusal_kind() {  # refusal_kind <outdir> → hang / target_gone / empty_tables / context_gate / other / none
+  # 只读 `REFUSED` 的**原因行**：那是 `refuse_sample` 唯一的落点，另开一枚机读键就是
+  # 第二个入口（两份迟早分叉，而分叉的方向永远是"看起来更宽松的那一份"）。
+  # ⚠ 这是**按文案匹配**：改上面那三句判废文案会把它降级成 `other` ⇒ 少补一次重试
+  #   （方向安全：绝不会把坏样本放进来）。第 62 项反例喂给它的是**真路径产出的** REFUSED
+  #   （假 xcrun 走 `record_bounded`、真闸门走 `preflight_context`），
+  #   所以文案与判据一分叉那一项当场红。
+  # `context_gate` 是 2026-09-25 t20 批补上的第四类：那一趟**根本没开录**就被闸门拒了
+  #   （当晚两次都掉进 `other`，小结只能说"不是挂死"、说不出"为什么不用补"）。
+  local file="$1/REFUSED" reason
+  [ -f "$file" ] || { echo none; return 0; }
+  reason=$(sed -n '2p' "$file")
+  case "$reason" in
+    *挂死*)               echo hang ;;
+    *在录制期间消失*)      echo target_gone ;;
+    *"$REFUSE_KIND_EMPTY_TABLES"*)   echo empty_tables ;;
+    *"$REFUSE_KIND_NO_CRITERION"*)   echo empty_tables ;;   # 表族缺失不是"再试一次"能救的（同 #55 判据）
+    *测量上下文不合格*)     echo context_gate ;;
+    *)                    echo other ;;
+  esac
+}
+
+attempt_verdict() {  # attempt_verdict <outdir> <这一趟的退出码> → retry（同窗补一次）/ slot（占掉一个计划槽位）
+  # #55 的判据：**只有录制挂死**值得在同窗原地补一次——挂死时环境往往仍然干净，
+  # 而一次挂死的真实代价不是那 140 秒，是**把一个稀缺的干净窗口整段扔掉**。
+  # 别的判废原因（人手静默不够、被测进程消失、表全空）都不补：那些恰恰说明**这个窗口不行**，
+  # 补一次只会把同一份坏条件再量一遍。
+  # 预算**按批封顶**（默认 1 次，`HANG_RETRY_BUDGET` 可调）：每条挂死都免费补一次
+  # = "攒够可用为止"那种数据相关的停止规则，那正是单向朝好看的计数那一族。
+  local out="$1" rc="$2"
+  [ "$rc" = "0" ] && { echo slot; return 0; }
+  [ "$(refusal_kind "$out")" = "hang" ] || { echo slot; return 0; }
+  if [ "${HANG_RETRIES_USED:-0}" -lt "${HANG_RETRY_BUDGET:-1}" ]; then
+    echo retry; return 0
+  fi
+  echo slot        # 挂死但预算已用完 ⇒ 照旧占槽位，而挂死计数仍要加（见 batch_hang_summary）
+}
+
+hang_recovery_meta_arg() {  # 补试那一趟要往 meta 里加的整枚参数；没挂过的趟**一个字节都不吐**
+  # 为什么是**函数**而不是在调用点直接写 `${HANG_RECOVERED:+…}`：反例（第 62 项）必须喂同一个
+  # 出口。写在调用点的话，反例只能自己抄一份表达式——那份副本和真的那处一起腐烂，没人管。
+  # 也不用"键值写 0"：那会让每一趟都带一枚 `hang_recovered`，哪些读数是补出来的反而分不出。
+  printf '%s' "${HANG_RECOVERED:+hang_recovered=$HANG_RECOVERED}"
+}
+
+batch_hang_summary() {  # batch_hang_summary <挂死趟数> <用掉的补试次数> <补试补回来的可用趟数>
+  # 挂死计数**必须照印**，哪怕补试全部成功：重试是为了"别把好窗口扔了"，
+  # **不是**为了把这一维的失败率抹成 0。
+  local hangs="$1" used="$2" recovered="$3" budget="${HANG_RETRY_BUDGET:-1}"
+  if [ "$hangs" = "0" ]; then
+    echo "    录制挂死：0 趟（这一批一趟都没挂）"
+    return 0
+  fi
+  echo "    录制挂死：$hangs 趟 ⇒ 同窗补试 $used 次（本批封顶 $budget 次），补回可用 $recovered 趟"
+  echo "      补试不换窗口、不顺延预热（同一枚实例、同一个 measured_rev）；挂死那几趟的 REFUSED 原样留在盘上，一致性尺照旧跳它们"
+}
+
+require_covered_evidence() {  # require_covered_evidence <outdir>：这一档答不了它自己存在的理由 ⇒ 不算完成
+  # 为什么必须在代码里：排程器那句"这一趟完成"的 ✓ 只看本脚本的退出码，
+  # 而 `set -uo pipefail`（无 -e）让失败的 xctrace 一路走到 summary 照样退 0 ⇒
+  # 今天那趟五张表全空也被印成「✓ 完成」，只差没被计进 3/3。
+  # 【#117：从"有没有任意一张表"改成"判据要的那一族在不在"】
+  # 旧写法只查 `hitches / hitches-renders / time-profile` 里**任意一张**非空 ⇒
+  # 2026-09-27 实测：交付头上那趟 `cert14probe-idle-run2` 九张 hitch 族表**一张都没落盘**
+  # （它的 `hitches.trace` 13 GB 打不开，见 #119），只靠 `time-profile.xml` 就"落定"了，
+  # 而 summary 里判据② 那四行全印「未覆盖」。⇒ **「落定 N 趟」不等于「② 有 N 个样本」**，
+  # 这个混用让 #47 那句"四趟可用"从写下那天起就是前一种口径。
+  # 判"在不在"用**文件存在性**而不是行数：零 hitch 的完美一趟照样落表（cert9a-idle-run1 实测
+  # `hitches.xml` 1010 B／`hitches-updates.xml` 2064 B／`potential-hangs.xml` 686 B），
+  # 按行数判会把"真不卡"误杀成"这趟坏了"——反向阈值要先问失败值在哪端。
+  local out="$1" t hit=0 tp=0
+  # 【这两条判废为什么自己 `return 1`、不写 `die`】本仓有条明文规约：闸门说不合格就是不合格，
+  # 不许依赖被调函数里的 `die`——`die` 缺席时它只是"回 1 就完了"，而本函数在判废之后**还有两条分支**，
+  # 于是判废会一路走到末尾的 `return 0`。09-27 冒烟实测到这个形状（只 source preflight、
+  # 环境里没有 `die` 时，缺表的目录 rc=0）。⇒ 自己出声、自己退 1，
+  # 怎么停由调用点决定（`perf_harness.sh` 那句 `|| die` 就是它的停法）。
+  [ "$DRY_RUN" = "1" ] && return 0     # 演练档本来就不导表，不拿这条判它
+  for t in "${HITCH_TABLES[@]}"; do    # 表名单一来源：就是导表那一步用的那份，不手抄
+    [ -f "$out/$t.xml" ] && { hit=1; break; }
+  done
+  [ -f "$out/time-profile.xml" ] && tp=1
+  if [ "$hit" = "0" ] && [ "$tp" = "0" ]; then
+    refuse_sample "$out" "这一趟判废：三张关键表（hitches / hitches-renders / time-profile）$REFUSE_KIND_EMPTY_TABLES。"
+    echo "!! 采不到任何一张关键表 ⇒ 这趟不许被印成『完成』（见同目录 REFUSED）" >&2
+    return 1
+  fi
+  if [ "$hit" = "0" ]; then
+    refuse_sample "$out" "$REFUSE_KIND_NO_CRITERION：这一趟没有判据② 要的任何一张表（${HITCH_TABLES[*]}），time-profile 有数也答不了 ②；缺表原因见 $out/export-errors.txt。"
+    echo "!! 缺判据② 那一族表 ⇒ 这趟不许计进 ② 的样本数（见同目录 REFUSED）" >&2
+    return 1
+  fi
+  [ "$tp" = "1" ] || echo "    ⚠ 缺 time-profile：② 答得了，但「主线程 CPU 样本占比／热点第一名」两列会写未覆盖（不判废）"
+  return 0
+}
+
+run_covers_criterion2() {  # run_covers_criterion2 <outdir> → yes / no：这一趟的产物里有没有判据② 能读的那一族表
+  # 为什么单独一支函数：排程器收尾要数「这批里含 ② 表的有几趟」（§210 定的过渡规矩：
+  # 「落定 N 趟」以前一直被当「② 有 N 个样本」用，而 #117 量出两者能差 5 倍）。
+  # 它**不重新判**"这趟好不好"——那只由 `require_covered_evidence` 判一次；这里只回答
+  # "② 的那族表在不在"，读者拿它做分母，不再开第二个判据入口。
+  local out="$1" t
+  for t in "${HITCH_TABLES[@]}"; do
+    [ -f "$out/$t.xml" ] && { echo yes; return 0; }
+  done
+  echo no
+}
+
+criterion2_batch_line() {  # criterion2_batch_line <run 目录...>：印一行「这批含 ② 表几趟／缺族判废几趟」
+  # 「落定」与「含 ②」是两个数：前者由排程器的 ✓ 给，后者由这里给。#117 之前没有后面那一格，
+  # 于是交付头上"落定 2 趟"读起来像"② 有 2 个样本"，实际含表的是 **0 趟**（另 5 趟挂死）。
+  local d n=0 m=0 k=0 reason
+  for d in "$@"; do
+    [ -d "$d" ] || continue
+    n=$((n + 1))
+    if [ "$(run_covers_criterion2 "$d")" = "yes" ]; then
+      m=$((m + 1))
+    fi
+    if [ -f "$d/REFUSED" ]; then
+      reason=$(sed -n '2p' "$d/REFUSED")
+      case "$reason" in
+        *"$REFUSE_KIND_NO_CRITERION"*) k=$((k + 1)) ;;
+      esac
+    fi
+  done
+  echo "    判据② 覆盖：这批 $n 个 run 目录里含 ② 那一族表的 **$m 趟**；因缺整族被判废 $k 趟" \
+       "（缺表原因逐趟在 export-errors.txt，#119）"
+}

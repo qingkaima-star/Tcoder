@@ -221,7 +221,9 @@ cmd_idle() {
   fi
   idle_parse_tables "$out"
   idle_write_summary "$out"
-  require_covered_evidence "$out"
+  # 判废那三支函数自己 `return 1`（它不该依赖 `die` 在不在），**停不停由这里决定**——
+  # 与上面 `preflight_context … || die` 同一个形状（本仓规约：闸门说不合格就是不合格，调用方自己停）。
+  require_covered_evidence "$out" || die "这一档的表不齐 ⇒ 不许被印成『完成』（见同目录 REFUSED）"
 }
 
 idle_record_hitches() {  # idle_record_hitches <outdir> <period>
