@@ -374,7 +374,9 @@ require_idle_target() {  # 返回全局 PID；!= 1 个实例即拒跑（除非�
 }
 
 # 录制的墙钟兜底与被测进程存活复核（包 14）。默认值可被夹具改小，不改判定形状。
-RECORD_SLACK_S="${RECORD_SLACK_S:-120}"
+# ⚠ 余量必须罩得住 finalize：120 s 时 `cert16` 三趟里两趟被砍在 finalize 当中（只剩 16 GB 原始流、
+# 无 corespace ⇒ 永不可导出），420 s 时 `cert17` 三趟全部自行停表并导齐九张表（09-27 实盘，#122）。
+RECORD_SLACK_S="${RECORD_SLACK_S:-420}"
 RECORD_POLL_S="${RECORD_POLL_S:-5}"
 
 prepare_sandbox() {  # prepare_sandbox <dir> <扫描目标>：与 capture_pages_isolated.sh 同一做法
