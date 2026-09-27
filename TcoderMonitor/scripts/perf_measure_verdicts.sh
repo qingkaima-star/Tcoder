@@ -166,6 +166,34 @@ batch_hang_summary() {  # batch_hang_summary <挂死趟数> <用掉的补试次�
   echo "      补试不换窗口、不顺延预热（同一枚实例、同一个 measured_rev）；挂死那几趟的 REFUSED 原样留在盘上，一致性尺照旧跳它们"
 }
 
+criterion1_missing() {  # criterion1_missing <outdir> → 空＝四张齐；否则空格分隔的缺表名
+  # 【#130】判据① 的权威读数只来自这三张**一帧一行**的表 + 呈现侧 `hitches-renders` 的 p95（包 13／§AC）：
+  # `hitches` 那一枚下游计数同一份内容能报 14 / 22 / 364 行，判据不能建在它上面。
+  # ⚠ 这四个名字**必须都在 `HITCH_TABLES` 里**（导表那一步的唯一名单）——
+  # 手抄一份子清单迟早与导表分叉，而分叉的方向永远是"看起来更宽松的那一份"（#117 同一课）。
+  # 判"在不在"沿用 `require_covered_evidence` 的**文件存在性**口径：零 hitch 的完美一趟照样落表，
+  # 按行数判会把"真不卡"误杀成"这趟坏了"。
+  local c1 miss=""
+  for c1 in hitches-renders hitches-framewait hitches-gpu hitches-frame-lifetimes; do
+    [ -f "$1/$c1.xml" ] || miss="$miss $c1"
+  done
+  printf '%s' "$miss"
+}
+
+criterion1_gate() {  # criterion1_gate <outdir> → 0 逐帧表齐／1 已判废：交互档的 ① 输入闸
+  # 【#130】判据① 按包 13／§AC 只能由三张一帧一行的表 + 呈现侧 `hitches-renders` 的 p95 来答。
+  # 09-22 那批交互样本正是从"8 张里命中一张"那个口子"落定"的：报表写着
+  # 「每帧 GPU 用时：未覆盖（这份 trace 里没有这张表）」，那一趟却被算进样本数。
+  # 判废类型复用 `REFUSE_KIND_NO_CRITERION` 那一枚常量（#119 的课：写者与读者共用一个词，
+  # 否则分类静默降级成 `other` ⇒ 排程器会把它当成"再试一次"能救的挂死去补烧第二趟）。
+  local miss1
+  miss1=$(criterion1_missing "$1")
+  [ -n "$miss1" ] || return 0
+  refuse_sample "$1" "$REFUSE_KIND_NO_CRITERION：交互档缺判据① 要的逐帧表（$miss1），这一趟答不了 ①；缺表原因见 $1/export-errors.txt。"
+  echo "!! 交互档缺判据① 那族逐帧表（缺：$miss1）⇒ 这趟不许计进 ① 的样本数（见同目录 REFUSED）" >&2
+  return 1
+}
+
 require_covered_evidence() {  # require_covered_evidence <outdir>：这一档答不了它自己存在的理由 ⇒ 不算完成
   # 为什么必须在代码里：排程器那句"这一趟完成"的 ✓ 只看本脚本的退出码，
   # 而 `set -uo pipefail`（无 -e）让失败的 xctrace 一路走到 summary 照样退 0 ⇒
@@ -199,6 +227,11 @@ require_covered_evidence() {  # require_covered_evidence <outdir>：这一档答
     refuse_sample "$out" "$REFUSE_KIND_NO_CRITERION：这一趟没有判据② 要的任何一张表（${HITCH_TABLES[*]}），time-profile 有数也答不了 ②；缺表原因见 $out/export-errors.txt。"
     echo "!! 缺判据② 那一族表 ⇒ 这趟不许计进 ② 的样本数（见同目录 REFUSED）" >&2
     return 1
+  fi
+  # 【#130】交互档那一支抽成 `criterion1_gate`：并进本函数时它 52 行，撞「函数 ≤50 行」那把门
+  # （本仓第 9 次撞这把尺——判据一个字没少，只是换个住处）。
+  if [ "${PERIOD:-idle}" = "interaction" ]; then
+    criterion1_gate "$out" || return 1
   fi
   [ "$tp" = "1" ] || echo "    ⚠ 缺 time-profile：② 答得了，但「主线程 CPU 样本占比／热点第一名」两列会写未覆盖（不判废）"
   return 0
