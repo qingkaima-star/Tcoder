@@ -221,3 +221,50 @@ selfcheck_heartbeat_line_has_a_machine_reader() {  # 87) 判据② 的 4.0 ms �
   ok "判据② 的 4.0 ms 线第一次有机器读者：越线那批判 1 并点名线值、在界内判 0、" \
      "交互档明说「不参与」且不许声称过线（87）"
 }
+
+selfcheck_trio_comparability_dims_are_read() {  # selfcheck_trio_comparability_dims_are_read <outdir>
+  # 73) 【#129】§7.3「release/debug 的绝对值永不混比」与 §7.5「采样期间独占实例」
+  #     这两条一直只有写点：`build_flavor`／`coexisting_instances` 落进 meta 之后
+  #     **全仓没有任何一处读它们** ⇒ 三种条件的趟并成一池比散布不会红。
+  #     #127／#128 是"一趟之内没落盘"，这一条是同一族的第三副面具：**落了盘、跨趟没人比**。
+  local r
+  r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_trio_agreement import verdict
+from perf_comparability import comparability_of
+def R(n, flavor="release", coexist="1"):
+    d = {"dir": "run", "seconds": 20.0, "hitch_n": int(round(n * 20.0)), "hitch_per_s": n,
+         "period": "interaction", "render_p50_ms": 4.1, "update_values": [],
+         "update_max_ms": None, "surfaces_p50_fps": 119.0}
+    if flavor is not None:
+        d["flavor"] = flavor
+    if coexist is not None:
+        d["coexist"] = coexist
+    return d
+mapped = comparability_of({"build_flavor": "release", "coexisting_instances": "3"})
+print("%s|%s|%s|%s|%s|%s" % (
+    verdict([R(1.2), R(1.3), R(1.5)], ["a", "b", "c"])[1],
+    verdict([R(1.2), R(1.3, flavor="debug"), R(1.5)], ["a", "b", "c"])[1],
+    verdict([R(1.2), R(1.3), R(1.5, coexist="3")], ["a", "b", "c"])[1],
+    verdict([R(1.2), R(1.3, flavor="未知（取不到被采二进制）"), R(1.5)], ["a", "b", "c"])[1],
+    verdict([R(1.2, flavor=None, coexist=None) for _ in range(3)], ["a", "b", "c"])[1],
+    "Y" if mapped == {"flavor": "release", "coexist": "3"} else "N"))')
+  [ "$r" = "0|2|2|2|0|Y" ] \
+    || { fail "可比条件六格没各判对（拿到 $r，应为 0|2|2|2|0|Y）⇒ 第 1 条不是 0 就是这条闸恒拒（正常批也拦），" \
+              "第 2、3、4 条不是 2 就是混口径／多实例／未知又被并进同一池，" \
+              "第 5 条不是 0 就是有人拿它追溯老批次，第 6 条不是 Y 就是键名改了而这里没跟上"; return; }
+  local lines
+  lines=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_trio_agreement import verdict
+def R(n, **kw):
+    d = {"dir": "run", "seconds": 20.0, "hitch_n": int(round(n * 20.0)), "hitch_per_s": n,
+         "period": "interaction", "render_p50_ms": 4.1, "update_values": [],
+         "update_max_ms": None, "surfaces_p50_fps": 119.0, "flavor": "release", "coexist": "1"}
+    d.update(kw); return d
+print(verdict([R(1.2), R(1.3, flavor="debug"), R(1.5)], ["a", "b", "c"])[0][-1])
+print(verdict([R(1.2), R(1.3), R(1.5, coexist="3")], ["a", "b", "c"])[0][-1])')
+  printf '%s\n' "$lines" | grep -q '§7\.3' \
+    || { fail "混口径那一行没引用 §7.3 ⇒ 拒了却没人知道被哪条规矩拒（拒因要能指回出处）"; return; }
+  printf '%s\n' "$lines" | grep -q '§7\.5' \
+    || { fail "混共存实例那一行没引用 §7.5 ⇒ 同上"; return; }
+  ok "两纸可比条件（§7.3 口径／§7.5 独占实例）第一次有并池读者：混着不判、各引出处、同条件放行、缺格不追溯"
+}

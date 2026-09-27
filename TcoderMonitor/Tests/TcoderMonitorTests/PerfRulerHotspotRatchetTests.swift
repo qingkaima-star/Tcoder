@@ -60,6 +60,11 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         "perf_measure_rev.sh",
         // 09-23 同一条规矩的第二次自犯：新写的"同档取值一致性"尺子差点没点进来。
         "perf_trio_agreement.py",
+        // 2026-09-27（卷十四 §223／#129）：`perf_trio_agreement.py` 加进两枚可比条件判据后涨到 424 行，
+        // 越过「实现文件（含 .py/.sh）≤400 行」那把门 ⇒ 按本仓唯一口径**拆文件**（抬线、塞挂账清单都不算），
+        // 把「这几趟是不是一种条件」那一层搬成 `perf_comparability.py`。搬出来必须同批点名——
+        // 「拆文件顺手免检」这条教训在上面已经记过四次，这是第五次。
+        "perf_comparability.py",
         // 09-23 中午：这条分支把自己撑过了「巨大文件 400 行」口径（preflight 448、gates 587、
         // eligibility 500、harness 454、summary 413），按"拆文件才是修复"搬出五片。
         // **搬出来的每一片都照样要点名进来**——拆文件如果顺手免检，那拆本身就是新的通道

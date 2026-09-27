@@ -56,6 +56,7 @@ import sys
 from perf_trace_metrics import FRAME_BUDGET_MS_DEFAULT, disp_values, fps_counts, percentile
 from perf_update_caliber import dedupe_pairs, heartbeat_verdict_lines
 from perf_eligibility import period_eligibility      # 资格判据的**真家**（09-25 从 summary 层拆出）
+from perf_comparability import comparability_of, comparability_precheck  # 跨趟可比条件（#129）
 from perf_trace_summary import summary_load
 
 SPREAD_BAR = 2.0          # hitch/s 极差比上限（保守）
@@ -135,6 +136,9 @@ def read_run(d):
     # 「整窗在场」是**读数**（#53 裁 C：只加读数、不动阈值）。旧批次 meta 里没这格 ⇒
     # 明写"这一维没采到"，不许让下游把"没有这一格"读成"整窗都在屏"。
     reading["presence"] = str(meta.get("presence_summary") or "这一维没采到")
+    # 【#129】两纸可比条件（§7.3 产物口径／§7.5 独占实例）此前只有写点没有读者，
+    # 判据本体在 `perf_comparability.py`（本文件加完就撞 400 行口径 ⇒ 拆文件才是修复）。
+    reading.update(comparability_of(meta))
     return reading
 
 
@@ -314,6 +318,9 @@ def _precheck(got, periods):
     if len(periods) > 1:
         return (["   判定：**不判**——这些趟的档位不同（%s），混档比散布没有意义"
                  % " / ".join(sorted(periods))], 2)
+    cmp_ = comparability_precheck(got)
+    if cmp_:
+        return cmp_
     return None
 
 
