@@ -66,6 +66,9 @@ final class PerfRulerHotspotRatchetTests: XCTestCase {
         // （这条教训在上面 09-21 那段注释里已经写过一次，今天是第二次用到它）。
         "perf_measure_io.sh", "perf_report.sh", "perf_trace_frames.py",
         "perf_selfcheck_launchers.sh", "perf_selfcheck_tables.sh",
+        // 2026-09-27（卷十三 §211）：`threads` 那把尺的两项臂（75 窗口切片／81 底盘识别）搬出成独立一块——
+        // 触发点是门禁自己报的：把第六格塞进第 75 项会把那个函数顶到 CC 16。新块当场点名，不留免检通道。
+        "perf_selfcheck_threads.sh",
         // 2026-09-27（卷十二 §186）：把"变异臂自己的反证"从 /tmp 搬进门禁，新增的一块。
         // 新文件必须当场进名单——否则"新建文件"本身就成了免检通道（上面 09-21／09-22 那两段记的同一族教训）。
         "perf_selfcheck_mutation.sh",
