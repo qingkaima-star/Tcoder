@@ -101,6 +101,11 @@ def base_hotspot_line():
         BASELINE["hotspot_top1_pct"], "_updateViewGraph")
 
 FRAME_BUDGET_MS_DEFAULT = 8.333  # 120 Hz 下单帧预算，实测 Hz 不同时由 --budget-ms 覆盖
+# 判据②（T2：1.5 s 心跳期主线程占用）自己的目标线。**这条线此前只活在文档里**
+# （`docs/检测正确性整改清单-第十卷.md` 的 T2 那几节按它读 max），而报表那句「达标」量的是上面那条
+# 一帧预算 ⇒ max 落进 4.0~8.333 之间时报表照旧绿、② 已经不成立（#124）。
+# 唯一住处放这里，一致性尺与文档都回指它，别在两处各写一遍数字。
+HEARTBEAT_BUDGET_MS = 4.0
 
 
 def launch_ready_ms(rows):

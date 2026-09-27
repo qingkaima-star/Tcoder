@@ -53,8 +53,8 @@ import json
 import os
 import sys
 
-from perf_trace_metrics import disp_values, fps_counts, percentile
-from perf_update_caliber import dedupe_pairs
+from perf_trace_metrics import FRAME_BUDGET_MS_DEFAULT, disp_values, fps_counts, percentile
+from perf_update_caliber import dedupe_pairs, heartbeat_verdict_lines
 from perf_eligibility import period_eligibility      # 资格判据的**真家**（09-25 从 summary 层拆出）
 from perf_trace_summary import summary_load
 
@@ -303,11 +303,36 @@ def _judge_spread(got, period):
     return bad, out, name, q
 
 
+def _precheck(got, periods):
+    """→ (话术行, 退出码) 或 None：「够不够 3 趟」「档位齐不齐」在这一个出口问完。
+
+    从 `verdict` 里抽出来是因为加上判据② 那一枝之后它顶到 CC16——本仓那把尺的口径是
+    **拆函数，不抬线**（第 85／81 项各撞过一次，这是第三次）。话术与退出码逐字未改。
+    """
+    if len(got) < 3:
+        return (["   判定：**样本不足**（只有 %d 趟可用，协议要 ≥3）⇒ 不许报「3/3 达标」" % len(got)], 2)
+    if len(periods) > 1:
+        return (["   判定：**不判**——这些趟的档位不同（%s），混档比散布没有意义"
+                 % " / ".join(sorted(periods))], 2)
+    return None
+
+
+def _consistency_sentence(period, median_label, median_value):
+    """合判那句要**按档位说**：#124 之后判据② 只在 idle 判过，
+    给交互档也印「每趟 max 都过 4.0 ms 线」就是给没判过的东西盖合规章（第 34 类）。
+    """
+    tail = ("，且每趟 max 都过 T2 的 4.0 ms 线" if period == "idle"
+            else "；判据② 按档位不参与，见上一行")
+    return ("   判定：一致（两把散布尺都在带宽内%s）。中位 %s %.2f ⇒ 报数时**报中位与范围**，不报均值"
+            % (tail, median_label, median_value))
+
+
 def verdict(runs, dirs):
     """→ (逐行文字, 退出码)。缺件与不足都**不许**伪装成"一致"。
 
     判据量的选择与散布怎么算都在 `_judge_spread` 里（连同一句"为什么 idle 档不比 hitch"），
-    这里只管三件事：够不够 3 趟、档位齐不齐、结论落在哪个退出码。混档一律不判。
+    这里管四件事：够不够 3 趟、档位齐不齐、结论落在哪个退出码、**判据② 那条 4.0 ms 线**（#124）。
+    混档一律不判。
     """
     if not runs:
         return ["!! 一个 run 目录都没给 ⇒ 这支尺子没被喂过数据，别把「没输出」当「通过」"], 2
@@ -320,23 +345,25 @@ def verdict(runs, dirs):
         lines.append("   判定：**不适用**——这一批 %d 趟全按设计不参与认证计数（定位用的归因档）。"
                      "退出码 3 ≠ 失败：要看这一批有没有采到东西，去逐趟的 report。" % len(excluded))
         return lines, 3
-    if len(got) < 3:
-        lines.append("   判定：**样本不足**（只有 %d 趟可用，协议要 ≥3）⇒ 不许报「3/3 达标」" % len(got))
-        return lines, 2
     periods = set(r["period"] for r in got)
-    if len(periods) > 1:
-        lines.append("   判定：**不判**——这些趟的档位不同（%s），混档比散布没有意义"
-                     % " / ".join(sorted(periods)))
-        return lines, 2
-    bad, out, name, q = _judge_spread(got, periods.pop())
+    pre = _precheck(got, periods)
+    if pre:
+        lines += pre[0]
+        return lines, pre[1]
+    periods_only = periods.pop()
+    bad, out, name, q = _judge_spread(got, periods_only)
     lines += out
     if bad:
         lines.append("   判定：**不一致** —— " + "；".join(bad))
         lines.append("   ⇒ 这一档**不能**报「3/3 达标」。要么加趟/排掉被打回的那趟再看一次，"
                      "要么按 spec §1.3 明写「受控重复未满足」。")
         return lines, 1
-    lines.append("   判定：一致（两把尺子都在带宽内）。中位 %s %.2f ⇒ 报数时**报中位与范围**，不报均值"
-                 % (name, sorted(q)[len(q) // 2]))
+    hb_lines, hb_code = heartbeat_verdict_lines(
+        [(r["dir"], r.get("update_max_ms")) for r in got], periods_only)
+    lines += hb_lines
+    if hb_code is not None:      # ② 越线或未采到 ⇒ 散布再齐也不算认证（#124）
+        return lines, hb_code
+    lines.append(_consistency_sentence(periods_only, name, sorted(q)[len(q) // 2]))
     return lines, 0
 
 

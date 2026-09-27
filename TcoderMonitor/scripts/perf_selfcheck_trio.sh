@@ -35,11 +35,14 @@ h = verdict([idle(TIGHT, 1.26), idle(TIGHT, 1.30),                      # 真形
 i = verdict([idle(TIGHT, 1.26), idle([], None), idle(TIGHT, 1.34)], ["a", "b", "c"])[1]
 j = verdict([idle(TIGHT, 1.26), idle(WIDE_MAX, 9.9), idle(TIGHT, 1.34)], ["a", "b", "c"])[1]
 print("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s" % (a, b, c, d, e, f, g, h, i, j))')
+  # 第 10 条在 #124 之前是 0（三趟散布一致就放行，其中一趟 max 9.9 ms），现在是 **1**：
+  # ⇒ 这条改动是本项的**预期改口**，不是回归——9.9 ms 越过 T2 的 4.0 ms 线，散布尺仍说"一致"，
+  #   而认证出口从此由判据② 把关（第 87 项钉住这句话印在产物里）。把 4.0 那格偷偷改回不判 ⇒ 第 10 条变 0，当场红。
   # 第 5 条在 2026-09-26 裁定 A 之前是 1（出帧分歧判不一致），现在是 **0**：
   # 这一格就是那纸裁定的守卫 —— 有人把出帧那一维偷偷改回判据、或反过来把它整维删掉不印，
   # 都会在这里红（改回判据 ⇒ 第 5 条变 1；删掉不印 ⇒ 下面那句 ok 之外另有 grep 钉着参考行）。
-  [ "$r" = "0|1|2|2|0|2|0|1|1|0" ] \
-    || { fail "一致性判定十种形状没各判对（拿到 $r，应为 0|1|2|2|0|2|0|1|1|0）⇒ " \
+  [ "$r" = "0|1|2|2|0|2|0|1|1|1" ] \
+    || { fail "一致性判定十种形状没各判对（拿到 $r，应为 0|1|2|2|0|2|0|1|1|1）⇒ " \
               "第 5 条不是 0 就是出帧那一维又被当成判据（或干脆不印了），其余任一条不对都是这条尺会把「3/3」放行"; return; }
   trio_collapse_probe | grep -q '参考项:有 小n:塌 大n:不塌' \
     || { fail "三格缺一：参考项不印＝把出帧那维的读数藏起来；小n 不报「塌陷」＝n≤10 时「每趟 p90 就是该趟 max」这一格没人出声（§173）；大n 乱报＝把不是极值的也说成极值"; return; }
@@ -170,4 +173,51 @@ selfcheck_trio_false_reject_counts_are_exact() {  # 74) 打回率尺：三分类
   grep -qF '不是全产品抖动率' scripts/perf_trio_false_reject.py \
     || { fail "尺子里那句口径 caveat 不见了 ⇒ 这两个比例会被读成产品抖动率"; bad=1; }
   [ "$bad" = "0" ] && ok "打回率尺三分类数得准（裁定 A 后：出帧分歧那批 4/0/0 就是「出帧不许再当判据」的哨兵；update 慢 4 倍那批 1/0/3 证明它不是怎么都放行）、喂不够趟数不出数、caveat 在位（74）"
+}
+
+trio_heartbeat_probe() {  # trio_heartbeat_probe → 一行复合读数：三种档位/形状下判据② 各判成什么
+  # 夹具形状照 `read_run` 的产物（`update_values` 有值、`update_max_ms` 是它的 max），
+  # 不然臂去抓一个真件里不存在的形状（#118 那一课）。
+  cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 - <<'PYCHK'
+from perf_trace_metrics import HEARTBEAT_BUDGET_MS   # 阈值住在口径层，不在这里另写一份（#124）
+from perf_trio_agreement import verdict
+VALS = [1.0 + 0.02 * i for i in range(14)]          # 稳态心跳：p90 1.24 / max 1.26
+def R(maxms, per="idle"):
+    return {"dir": "run", "seconds": 20.0, "hitch_n": 0, "hitch_per_s": 0.0, "period": per,
+            "render_p50_ms": 4.1, "update_values": VALS, "update_max_ms": maxms,
+            "surfaces_p50_fps": 119.0}
+ok_l, ok_c = verdict([R(3.9), R(3.8), R(3.95)], ["a", "b", "c"])
+bad_l, bad_c = verdict([R(3.9), R(6.0), R(3.95)], ["a", "b", "c"])
+na_l, na_c = verdict([R(3.9, "interaction"), R(3.8, "interaction"), R(3.95, "interaction")],
+                     ["a", "b", "c"])
+pass_line = "每趟 max 都在 T2 的"
+fail_line = "判据②：**不成立**"
+skip_line = "这一档不参与"
+claim = "都过 T2 的 4.0 ms 线"
+print("%d|%d|%d|%s|%s|%s|%s|%s" % (
+    ok_c, bad_c, na_c,
+    "Y" if pass_line in "".join(ok_l) else "N",
+    "Y" if fail_line in "".join(bad_l) else "N",
+    "Y" if skip_line in "".join(na_l) else "N",
+    "Y" if claim in "".join(na_l) else "N",
+    "Y" if "%.1f" % HEARTBEAT_BUDGET_MS in "".join(bad_l) else "N"))
+PYCHK
+}
+
+selfcheck_heartbeat_line_has_a_machine_reader() {  # 87) 判据② 的 4.0 ms 线要有机器读者（#124）
+  # 现场：报表那句「达标（没有一个 update 超预算）」按的是**一帧 8.333 ms**（`FRAME_BUDGET_MS_DEFAULT`），
+  # 而目标口径 4.0 ms 此前只活在文档里由人读 ⇒ max 落进 4.0~8.33 之间时报表照旧绿、② 已不成立。
+  # 认证出口（一致性尺）是那句「3/3 达标」的最后一道闸，所以判据挂在这里；`cert17` 三趟 max
+  # 1.38／1.64／2.23 ms 都在线内，本项当时现打 code=0（这条改动没把已成立的认证判死）。
+  local r
+  r=$(trio_heartbeat_probe)
+  # 逐格读法：0|1|0 三种形状的码；第 4 格＝通过句在；第 5 格＝6.0 ms 那批点名「不成立」；
+  # 第 6 格＝交互档明说「不参与」；第 7 格＝**不许**在没判过的档位上声称过了 4.0 线（第 34 类：
+  # 免责声明绑错对象比没有更危险）；第 8 格＝失败话术里带着那条线的数值。
+  [ "$r" = "0|1|0|Y|Y|Y|N|Y" ] \
+    || { fail "判据② 的 4.0 ms 线在认证出口上没判对（拿到 $r，应为 0|1|0|Y|Y|Y|N|Y）⇒ " \
+              "第 2 格不是 1＝这条线仍然没有机器读者（报表那句按一帧预算判）；" \
+              "第 3 格不是 0＝交互档被心跳期的线误判；第 7 格是 Y＝给没判过的档位盖了合规章"; return; }
+  ok "判据② 的 4.0 ms 线第一次有机器读者：越线那批判 1 并点名线值、在界内判 0、" \
+     "交互档明说「不参与」且不许声称过线（87）"
 }
