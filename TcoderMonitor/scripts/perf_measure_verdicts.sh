@@ -12,6 +12,17 @@
 # （函数级 ≤50 行／CC<16 那两把尺），否则"拆"本身变成免检通道。
 # =============================================================================
 
+# 【idle 档那族表的名单：唯一住处搬进这一层（#125）】
+# 它原先住在 `perf_harness.sh`，而 `criterion2_batch_line` 的**真实调用点** `perf_wait_window.sh`
+# 不经过 harness ⇒ `set -u` 下展开未定义数组当场 `unbound variable`、循环一次不跑，
+# 于是 `cert17` 三趟都带表却被印成「含 ② 那一族表的 0 趟」（2026-09-27 实盘，假零）。
+# 消费它的两处（`require_covered_evidence`／`run_covers_criterion2`）都在本层，名单就跟着搬来本层。
+# spec §4.1 的六张表；包 13（§AC）补的三张**一帧一行**的表——不导出来，T1 就只剩 `hitches`
+# 那一个下游计数，而它同一份内容能报 14 / 22 / 364 行，判据不能建在那上面。
+HITCH_TABLES=(hitches hitches-updates hitches-renders potential-hangs
+              hitches-framewait hitches-gpu hitches-frame-lifetimes
+              device-display-info displayed-surfaces-per-second)
+
 record_probe_schema() {  # record_probe_schema <模板名> → 该档用来验产物的那张表名
   # 为什么从模板派生而不是调用方各写一份：`record_bounded` 有两个 caller（hitches / time-profile），
   # 写死的第二份迟早与模板分叉——而分叉的方向永远是"探测错了表 ⇒ 可用的样本被判成挂死"。
@@ -199,6 +210,10 @@ run_covers_criterion2() {  # run_covers_criterion2 <outdir> → yes / no：这�
   # 它**不重新判**"这趟好不好"——那只由 `require_covered_evidence` 判一次；这里只回答
   # "② 的那族表在不在"，读者拿它做分母，不再开第二个判据入口。
   local out="$1" t
+  # 【名单没接通不许回 `no`（#125）】`no` 会被读者理解成「查过、这趟没表」，
+  # 而真相是「我连查都没查」——`cert17` 那句假零就是这么来的（数组未定义 ⇒ 循环空转）。
+  # 这里把它变成一个**不同的字符串**，让调用侧的计数器与话术都区分开。
+  [ -n "${HITCH_TABLES[*]:-}" ] || { echo "名单没接通"; return 0; }
   for t in "${HITCH_TABLES[@]}"; do
     [ -f "$out/$t.xml" ] && { echo yes; return 0; }
   done
@@ -208,13 +223,13 @@ run_covers_criterion2() {  # run_covers_criterion2 <outdir> → yes / no：这�
 criterion2_batch_line() {  # criterion2_batch_line <run 目录...>：印一行「这批含 ② 表几趟／缺族判废几趟」
   # 「落定」与「含 ②」是两个数：前者由排程器的 ✓ 给，后者由这里给。#117 之前没有后面那一格，
   # 于是交付头上"落定 2 趟"读起来像"② 有 2 个样本"，实际含表的是 **0 趟**（另 5 趟挂死）。
-  local d n=0 m=0 k=0 reason
+  local d n=0 m=0 k=0 u=0 reason cover
   for d in "$@"; do
     [ -d "$d" ] || continue
     n=$((n + 1))
-    if [ "$(run_covers_criterion2 "$d")" = "yes" ]; then
-      m=$((m + 1))
-    fi
+    cover=$(run_covers_criterion2 "$d")
+    [ "$cover" = "yes" ] && m=$((m + 1))
+    [ "$cover" = "名单没接通" ] && u=$((u + 1))
     if [ -f "$d/REFUSED" ]; then
       reason=$(sed -n '2p' "$d/REFUSED")
       case "$reason" in
@@ -224,4 +239,7 @@ criterion2_batch_line() {  # criterion2_batch_line <run 目录...>：印一行�
   done
   echo "    判据② 覆盖：这批 $n 个 run 目录里含 ② 那一族表的 **$m 趟**；因缺整族被判废 $k 趟" \
        "（缺表原因逐趟在 export-errors.txt，#119）"
+  # 这一格专门拦 #125 那种失效：`0 趟` 既可能是"真没表"，也可能是"名单没接通 ⇒ 根本没查"。
+  [ "$u" = "0" ] || echo "    ✗ 有 $u 趟**没查成**（表名单 HITCH_TABLES 在该调用路径下不可见）" \
+                        "⇒ 上面那个 $m 不构成证据，别读成『这批采不到 ②』（#125）" >&2
 }

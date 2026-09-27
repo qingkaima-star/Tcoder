@@ -356,3 +356,34 @@ selfcheck_criterion2_count_and_token() {  # 83) 「含 ② 表几趟」要数得
   [ "$bad" = "0" ] && ok "「含 ② 表 M 趟／缺整族判废 K 趟」数得准，且分类词由写者与读者共用一枚常量" \
                      "（换一个词当场降级成 other，83）"
 }
+
+selfcheck_criterion2_list_is_visible_without_harness() {  # 86) 表名单要在**真实调用路径**里看得见（#125 的假零）
+  # 第 83 项跑在 selfcheck 宿主进程里，那里 `HITCH_TABLES` 是可见的（宿主 source 过 harness）；
+  # 而生产调用点 `perf_wait_window.sh` 只 source 到 io 那一层 ⇒ 名单不可见 ⇒ `set -u` 下
+  # 循环空转，`cert17` 三趟都带表却被印成「0 趟」。**臂在夹具里活、在调用点死**，本项就补调用点。
+  local dir lib fx bad=0 a b c
+  dir=$(dirname "${BASH_SOURCE[0]}")
+  lib="$dir/perf_measure_io.sh"          # 排程器真实走到这一层为止
+  fx="$1/c2list"
+  rm -rf "$fx"; mkdir -p "$fx/with" "$fx/without" \
+    || { fail "建不出本轮夹具目录（$fx）"; return; }
+  : > "$fx/with/hitches.xml"             # 存在性判据（#119）：空文件也算有表
+  # A) 真实形状：只 source io 层、`set -u`，带表的那趟必须数成 1，且不许说「没查成」
+  a=$(bash -c "set -u; source '$lib' >/dev/null 2>&1; criterion2_batch_line '$fx/with'" 2>&1)
+  printf '%s' "$a" | grep -qF "含 ② 那一族表的 **1 趟**" \
+    || { fail "只 source io 层时数不到那 1 趟（印的是：$a）⇒ #125 的假零没修掉"; bad=1; }
+  printf '%s' "$a" | grep -qF "没查成" \
+    && { fail "名单在真实调用路径仍不可见 ⇒ 这一格的 1 趟是靠放宽来的，不算证据"; bad=1; }
+  # B) 反证：把名单 unset 掉（复刻 #125 的现场）⇒ 必须**明说没查成**，不许只留一个像"查过且没有"的 0
+  b=$(bash -c "set -u; source '$lib' >/dev/null 2>&1; unset HITCH_TABLES; criterion2_batch_line '$fx/with'" 2>&1)
+  printf '%s' "$b" | grep -qF "没查成" \
+    || { fail "名单没接通却仍只印一个数 ⇒ 假零回来了（印的是：$b）"; bad=1; }
+  # C) 反向对照：真没表的那趟必须数成 0，且**不许**借道「没查成」蒙过去（证明 A 不是把判据改松）
+  c=$(bash -c "set -u; source '$lib' >/dev/null 2>&1; criterion2_batch_line '$fx/without'" 2>&1)
+  printf '%s' "$c" | grep -qF "含 ② 那一族表的 **0 趟**" \
+    || { fail "空目录没数成 0 趟（印的是：$c）⇒ 这一维的方向反了"; bad=1; }
+  printf '%s' "$c" | grep -qF "没查成" \
+    && { fail "无表的那趟被判成『名单没接通』⇒ 两个出口互相顶替，读数不可解释"; bad=1; }
+  [ "$bad" = "0" ] && ok "表名单在排程器那条真实调用路径（只 source 到 io 层）里可见：带表数成 1、" \
+                        "空目录数成 0，而名单被抽走时明说「没查成」而不是留个假零（86）"
+}

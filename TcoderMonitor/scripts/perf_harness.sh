@@ -110,12 +110,9 @@ DOMAIN="com.tcoder.monitor"
 # 这里赋一次、那边再赋一次，就是"同一件事两把尺子"的老病。
 UUID="11111111-2222-3333-4444-555555555555"
 DRY_RUN="${DRY_RUN:-0}"
-# idle 档要导出的六张表（spec §4.1）；time-profile 来自第二份 trace，单独导。
-# 包 13（§AC）：三张**一帧一行**的表。不导出来，T1 就只剩 `hitches` 那一个下游计数，
-# 而它同一份内容能报 14 / 22 / 364 行——判据不能建在那上面。
-HITCH_TABLES=(hitches hitches-updates hitches-renders potential-hangs
-              hitches-framewait hitches-gpu hitches-frame-lifetimes
-              device-display-info displayed-surfaces-per-second)
+# idle 档要导出的表名单**不在这里赋**（`HITCH_TABLES` 的唯一住处是 `perf_measure_verdicts.sh`，
+# 由 io 那一层 source 进来）：写在这里的话，不经过 harness 的调用点（`perf_wait_window.sh` 的
+# 收尾那行）就看不见它——`cert17` 就是这么把三趟含表印成「0 趟」的（#125）。
 
 die() { echo "!! $1" >&2; exit 1; }
 
