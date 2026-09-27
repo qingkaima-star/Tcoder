@@ -217,6 +217,7 @@ cmd_idle() {
     cp "$MEASURED_PULSE" "$out/pulse.txt" 2>/dev/null || true
   fi
   idle_parse_tables "$out"
+  land_cadence_verdict "$out"   # 判据① 那半句在录制当时就落盘，不等谁重打 report（#123）
   idle_write_summary "$out"
   # 判废那三支函数自己 `return 1`，**停不停由这里决定**——与上面 `preflight_context … || die` 同一形状。
   require_covered_evidence "$out" || die "这一档的表不齐 ⇒ 不许被印成『完成』（见同目录 REFUSED）"
