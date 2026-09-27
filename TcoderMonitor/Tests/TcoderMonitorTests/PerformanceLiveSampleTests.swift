@@ -123,9 +123,30 @@ final class PerformanceLiveSampleTests: XCTestCase {
                 + "\(snapshot.processCount) 进程 · CPU \(cpu) 核 · RAM \(ram)"
                 + " · Threads \(snapshot.totalThreads) · Open Files \(snapshot.totalOpenFiles)")
         }
-        let matched = groups.filter { $0.processCount > 0 }
-        XCTAssertFalse(matched.isEmpty, "本机常驻至少会有 node 或 java 一类进程；若全空需复查匹配逻辑")
-        // 第二轮必须能量出非零核当量（本测试进程自身就在烧 CPU，node/java 家族至少有一个动过）。
+        print("  这一轮采样：看得见 \(sweep.visiblePIDCount) 个 pid，truncated=\(sweep.truncated)")
+        // 「本机常驻至少会有 node 或 java」是**环境状态**，不是匹配逻辑的性质。
+        // 旧写法直接断言内置组有命中 ⇒ 在没跑这些服务的时段/机器上必然红
+        // （09-27 16:12 实测：`pgrep -x node` 当场还有 3 个 pid，这一条仍报 0 命中——
+        //  一轮采样被时间预算截断时高 pid 那批根本没进来，上面那行 truncated 就是这件事的读数）。
+        // ⇒ 正例改由测试自己提供：**本进程是真实在场的进程**，用它验「匹配逻辑不是永远返回空」，
+        //   不依赖别人机器上跑着什么；顺带把「枚举面看不见自己」这种真故障与"机器上没装"分开。
+        let myPid = ProcessInfo.processInfo.processIdentifier
+        guard let me = sweep.processes.first(where: { $0.pid == myPid }) else {
+            // 被时间预算截断的一轮**验不出匹配逻辑**，这只说明现场忙，不说明代码坏；
+            // 但也不许把它读成"过了"⇒ 走 skip（在汇总行里看得见份数），并把成因指回 #126。
+            if sweep.truncated {
+                throw XCTSkip("这一轮采样被时间预算截断（看得见 \(sweep.visiblePIDCount) 个 pid）⇒ "
+                              + "自检正例没对象可验，按未判处理；屏上「未检测到进程」这句的来源见 #126")
+            }
+            return XCTFail("这一轮采样没看见自己（pid \(myPid)，看得见 \(sweep.visiblePIDCount) 个，"
+                           + "truncated=False）⇒ 枚举面坏了，不是环境里没跑服务")
+        }
+        let selfSnapshots = ProcessInspector.groupSnapshots(
+            for: [TrackedProcessGroup(title: "自检进程", matchPattern: me.name, isBuiltIn: false)],
+            processes: sweep.processes)
+        XCTAssertGreaterThanOrEqual(selfSnapshots.first?.processCount ?? 0, 1,
+                                    "按本进程自己的名字都匹配不到 ⇒ 匹配逻辑恒空，不是环境差异")
+        // 第二轮必须能量出非零核当量（本测试进程自己就在烧 CPU，这条与装了什么服务无关）。
         XCTAssertGreaterThan(sweep.processes.reduce(0.0) { $0 + $1.cpuUsage }, 0,
                              "两轮差值必须算出真实 CPU 占用，否则「某服务 CPU 45%」这条链路是断的")
         for snapshot in groups {
