@@ -286,6 +286,9 @@ batch_hang_summary "$HANGS" "$HANG_RETRIES_USED" "$RECOVERED"
 # `break` 出去的那些趟**既不算成功也不算失败**，于是"计划 3 趟、只跑了 1 趟就散场"
 # 会印成「3/3 没被拦下」。现在印真数出来的成功趟数，分母照旧是计划数。
 echo "==> 采集跑完：$oks/$SAMPLES 趟真的出了产物（档=$MODE，尝试 $attempt 次）；**能不能进表由 report 档与同档一致性判**；产物 $SCRATCH/tcoder-perf-$TAG-$MODE-run*/"
+# 【#117：第二个数】「落定 N 趟」过去一直被读成「判据② 有 N 个样本」，而这两件事能差 5 倍
+# （交付头上那批：落定 2 趟、含 ② 表 0 趟）。§210 定的过渡规矩现在由代码出，不靠我记得写。
+criterion2_batch_line "$SCRATCH"/tcoder-perf-"$TAG"-"$MODE"-run*
 echo "    重打读数：./scripts/perf_harness.sh report $SCRATCH/tcoder-perf-$TAG-$MODE-run1"
 echo "    （表头会写明测量期间；interact 档才有资格答 T1，idle 档只答心跳期）"
 [ "$oks" -gt 0 ] || exit 1

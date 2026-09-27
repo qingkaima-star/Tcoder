@@ -1,5 +1,10 @@
 #!/bin/bash
 # =============================================================================
+
+# 判废与覆盖那一族函数搬进了 `perf_measure_verdicts.sh`（本仓 400 行口径：拆文件才是修复）。
+# **必须由这里 source**：preflight 与 selfcheck 的夹具都是单独 source 本文件的，
+# 换源点就会造出第二个入口、各拿一半函数（本文件头注第 7~9 行写的那条链）。
+source "$(dirname "${BASH_SOURCE[0]}")/perf_measure_verdicts.sh"  # shellcheck source=/dev/null
 # perf_measure_io.sh —— 「怎么采、怎么落盘、采完当场复核什么」这一层。
 # 自 `perf_preflight.sh` **逐字节搬出**（本仓 400 行口径：拆文件才是修复，
 # 往 `hugeFileWorkList` 塞条目不算，挪出扫描面也不算）。
@@ -67,81 +72,26 @@ export_table() {  # export_table <trace> <schema> <outdir> [落盘文件名覆�
   # 独立那一趟完全相同，若按 schema 落盘会**盖掉认证档的 time-profile.xml**
   # ——两份不同窗口的读数共用一个文件名，是"两个入口一个数"那条老病的文件版。
   # 所以这里必须能改名落盘（`blame-time-profile.xml`），让两把尺各读各的。
-  local trace="$1" schema="$2" out="$3" name="${4:-}"
+  local trace="$1" schema="$2" out="$3" name="${4:-}" err
   [ -n "$name" ] || name="$schema.xml"
   [ "$DRY_RUN" = "1" ] && { echo "    \$ xctrace export --input $(basename "$trace") --xpath '…@schema=\"$schema\"' --output $out/$name"; return 0; }
-  xcrun xctrace export --input "$trace" \
-    --xpath "/trace-toc/run[@number=\"1\"]/data/table[@schema=\"$schema\"]" \
-    --output "$out/$name" >/dev/null 2>&1
+  # 【缺表的原因要留档（#119）】原来这一行是 `>/dev/null 2>&1`，于是两件**意义相反**的事塌成同一句
+  # 「不存在或为空」：① trace 真的坏了（2026-09-27 实测：某趟 `hitches.trace` 13 GB 却打不开，
+  # 手动 export 报 `Document Missing Template Error`，树里只有 `RunIssues.storedata`＋`Attachments`、
+  # 没有 `instrument_data`）；② 这张表本来零行（被测代码真不卡）。
+  # 前者意味着"这趟坏了"、后者意味着"结论是好的"——压成一句就两头都会读错。
+  # 只收 **stderr**（stdout 那侧是 xctrace 写的 XML，不能被命令替换吃掉）。
+  err=$(xcrun xctrace export --input "$trace" \
+      --xpath "/trace-toc/run[@number=\"1\"]/data/table[@schema=\"$schema\"]" \
+      --output "$out/$name" 2>&1 >/dev/null)
   if [ -s "$out/$name" ]; then
+    [ -n "$err" ] && printf '%s\t%s\n' "$schema" "$err" >> "$out/export-errors.txt"   # 有数但出过声，也留
     echo "    导出 $name（$(wc -c < "$out/$name" | tr -d ' ') 字节）"
   else
     rm -f "$out/$name"
-    echo "    ⚠ 表 $schema 在该 trace 里不存在或为空 —— 汇总表会写「未覆盖」，不会编数"
+    printf '%s\t%s\n' "$schema" "${err:-（xctrace 未出声，落盘为空）}" >> "$out/export-errors.txt"
+    echo "    ⚠ 表 $schema 没拿到数（原因见 $out/export-errors.txt）—— 汇总表会写「未覆盖」，不会编数"
   fi
-}
-
-refuse_sample() {  # refuse_sample <outdir> <原因…>：一趟当场自认没采到数
-  # 形状与上面那道上下文闸门一致（同一个 `REFUSED` 文件、同一个读者）：
-  # `usable_sample` 与 `perf_trio_agreement` 都按这个文件跳趟。
-  # **不再另开一枚 meta 键**：理由写进正文就已经有读者，再开键就是第二个入口。
-  printf 'REFUSED\n%s\n' "$2" > "$1/REFUSED"
-}
-
-refusal_kind() {  # refusal_kind <outdir> → hang / target_gone / empty_tables / context_gate / other / none
-  # 只读 `REFUSED` 的**原因行**：那是 `refuse_sample` 唯一的落点，另开一枚机读键就是
-  # 第二个入口（两份迟早分叉，而分叉的方向永远是"看起来更宽松的那一份"）。
-  # ⚠ 这是**按文案匹配**：改上面那三句判废文案会把它降级成 `other` ⇒ 少补一次重试
-  #   （方向安全：绝不会把坏样本放进来）。第 62 项反例喂给它的是**真路径产出的** REFUSED
-  #   （假 xcrun 走 `record_bounded`、真闸门走 `preflight_context`），
-  #   所以文案与判据一分叉那一项当场红。
-  # `context_gate` 是 2026-09-25 t20 批补上的第四类：那一趟**根本没开录**就被闸门拒了
-  #   （当晚两次都掉进 `other`，小结只能说"不是挂死"、说不出"为什么不用补"）。
-  local file="$1/REFUSED" reason
-  [ -f "$file" ] || { echo none; return 0; }
-  reason=$(sed -n '2p' "$file")
-  case "$reason" in
-    *挂死*)               echo hang ;;
-    *在录制期间消失*)      echo target_gone ;;
-    *一张都没有行数*)      echo empty_tables ;;
-    *测量上下文不合格*)     echo context_gate ;;
-    *)                    echo other ;;
-  esac
-}
-
-attempt_verdict() {  # attempt_verdict <outdir> <这一趟的退出码> → retry（同窗补一次）/ slot（占掉一个计划槽位）
-  # #55 的判据：**只有录制挂死**值得在同窗原地补一次——挂死时环境往往仍然干净，
-  # 而一次挂死的真实代价不是那 140 秒，是**把一个稀缺的干净窗口整段扔掉**。
-  # 别的判废原因（人手静默不够、被测进程消失、表全空）都不补：那些恰恰说明**这个窗口不行**，
-  # 补一次只会把同一份坏条件再量一遍。
-  # 预算**按批封顶**（默认 1 次，`HANG_RETRY_BUDGET` 可调）：每条挂死都免费补一次
-  # = "攒够可用为止"那种数据相关的停止规则，那正是单向朝好看的计数那一族。
-  local out="$1" rc="$2"
-  [ "$rc" = "0" ] && { echo slot; return 0; }
-  [ "$(refusal_kind "$out")" = "hang" ] || { echo slot; return 0; }
-  if [ "${HANG_RETRIES_USED:-0}" -lt "${HANG_RETRY_BUDGET:-1}" ]; then
-    echo retry; return 0
-  fi
-  echo slot        # 挂死但预算已用完 ⇒ 照旧占槽位，而挂死计数仍要加（见 batch_hang_summary）
-}
-
-hang_recovery_meta_arg() {  # 补试那一趟要往 meta 里加的整枚参数；没挂过的趟**一个字节都不吐**
-  # 为什么是**函数**而不是在调用点直接写 `${HANG_RECOVERED:+…}`：反例（第 62 项）必须喂同一个
-  # 出口。写在调用点的话，反例只能自己抄一份表达式——那份副本和真的那处一起腐烂，没人管。
-  # 也不用"键值写 0"：那会让每一趟都带一枚 `hang_recovered`，哪些读数是补出来的反而分不出。
-  printf '%s' "${HANG_RECOVERED:+hang_recovered=$HANG_RECOVERED}"
-}
-
-batch_hang_summary() {  # batch_hang_summary <挂死趟数> <用掉的补试次数> <补试补回来的可用趟数>
-  # 挂死计数**必须照印**，哪怕补试全部成功：重试是为了"别把好窗口扔了"，
-  # **不是**为了把这一维的失败率抹成 0。
-  local hangs="$1" used="$2" recovered="$3" budget="${HANG_RETRY_BUDGET:-1}"
-  if [ "$hangs" = "0" ]; then
-    echo "    录制挂死：0 趟（这一批一趟都没挂）"
-    return 0
-  fi
-  echo "    录制挂死：$hangs 趟 ⇒ 同窗补试 $used 次（本批封顶 $budget 次），补回可用 $recovered 趟"
-  echo "      补试不换窗口、不顺延预热（同一枚实例、同一个 measured_rev）；挂死那几趟的 REFUSED 原样留在盘上，一致性尺照旧跳它们"
 }
 
 record_bounded() {  # record_bounded <outdir> <trace 路径> <模板> <时长秒> [附加仪器]
@@ -192,19 +142,6 @@ record_bounded() {  # record_bounded <outdir> <trace 路径> <模板> <时长秒
   fi
   [ "$rc" = "0" ] || echo "    ⚠ xctrace record 退出码 $rc（导表那一步会如实报缺哪张表）"
   return 0
-}
-
-require_covered_evidence() {  # require_covered_evidence <outdir>：一张表都没行数 ⇒ 这趟不算完成
-  # 为什么必须在代码里：排程器那句"这一趟完成"的 ✓ 只看本脚本的退出码，
-  # 而 `set -uo pipefail`（无 -e）让失败的 xctrace 一路走到 summary 照样退 0 ⇒
-  # 今天那趟五张表全空也被印成「✓ 完成」，只差没被计进 3/3。
-  local out="$1" t
-  [ "$DRY_RUN" = "1" ] && return 0     # 演练档本来就不导表，不拿这条判它
-  for t in hitches hitches-renders time-profile; do
-    [ -s "$out/$t.xml" ] && return 0
-  done
-  refuse_sample "$out" "这一趟判废：三张关键表（hitches / hitches-renders / time-profile）一张都没有行数。"
-  die "采不到任何一张关键表 ⇒ 这趟不许被印成『完成』（见同目录 REFUSED）"
 }
 
 meta_write() {  # meta_write <outdir> <键=值...>

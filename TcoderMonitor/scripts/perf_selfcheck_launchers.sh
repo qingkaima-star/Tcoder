@@ -298,3 +298,61 @@ selfcheck_capture_verdicts_have_teeth() {  # selfcheck_capture_verdicts_have_tee
 
   [ "$bad" = "0" ] && ok "九页取证三条判据都有后果：相同图判败、空图不充数、拍砸页判败（含正对照与两种误用）"
 }
+
+# ===== 第 82/83 项：#117「判据② 的那族表要点名」＋ #119「缺表的原因要留档」的反例 =====
+#
+# 缺陷的现量（不是推的）：交付头上那趟 `cert14probe-idle-run2` 目录里**只有** `time-profile.xml`／
+# `.json`——九张 hitch 族表一张都没落盘（它的 `hitches.trace` 13 GB 却打不开，见 #119），
+# 而旧闸门只看「三张里任意一张非空」⇒ 它在批次账上算"落定"，summary 里判据② 那四行全印「未覆盖」。
+# ⇒ 「落定 N 趟」与「② 有 N 个样本」必须分成两个数，而分这件事只能由代码做。
+criterion2_fixture_tree() {  # 内部工具（不是 item，故不叫 selfcheck_*）：造四枚形状各异的 run 目录
+  local fx="$1" d
+  for d in both tp_only hit_only empty; do mkdir -p "$fx/$d"; done
+  echo "<row/>" > "$fx/both/time-profile.xml";  echo "<row/>" > "$fx/both/hitches-updates.xml"
+  echo "<row/>" > "$fx/tp_only/time-profile.xml"          # run2 的真实形状：有栈、没 ② 那一族
+  echo "<row/>" > "$fx/hit_only/hitches.xml"              # ② 齐、缺 time-profile（两列会未覆盖）
+}
+
+selfcheck_criterion2_gate() {  # 82) 缺判据② 那一族表的一趟不许算落定（#117）
+  local fx="$1/crit2" rc out bad=0
+  rm -rf "$fx"; mkdir -p "$fx" || { fail "建不出本轮夹具目录（$fx）"; return; }
+  criterion2_fixture_tree "$fx"
+  ( require_covered_evidence "$fx/both" )    >"$fx/both.log" 2>&1; rc=$?
+  [ "$rc" = "0" ] || fail "两族齐全的趟被判废（rc=$rc）⇒ 闸门收紧收错了方向"
+  [ -f "$fx/both/REFUSED" ] && { fail "好趟留下了 REFUSED ⇒ 会被 report 与一致性跳趟"; bad=1; }
+  ( require_covered_evidence "$fx/tp_only" ) >"$fx/tp.log" 2>&1; rc=$?
+  [ "$rc" != "0" ] || { fail "只有 time-profile 的一趟（就是 run2 那枚真实形状）仍被放行 ⇒ #117 未修"; bad=1; }
+  [ "$(refusal_kind "$fx/tp_only")" = "empty_tables" ] \
+    || { fail "那趟的判废分类=$(refusal_kind "$fx/tp_only")（要 empty_tables）⇒ 分类没接上新那道判废"; bad=1; }
+  ( require_covered_evidence "$fx/hit_only" ) >"$fx/hit.log" 2>&1; rc=$?
+  [ "$rc" = "0" ] || { fail "② 齐而缺 time-profile 的趟被判废（rc=$rc）——它答得了 ②，不该杀"; bad=1; }
+  grep -qF "缺 time-profile" "$fx/hit.log" \
+    || { fail "缺 time-profile 没出声 ⇒「主线程两列变未覆盖」成了静默降级"; bad=1; }
+  ( require_covered_evidence "$fx/empty" )   >"$fx/e.log" 2>&1; rc=$?
+  [ "$rc" != "0" ] || { fail "一张表都没有的趟被放行 ⇒ 第 44 项那条老判据被这笔改没了"; bad=1; }
+  ( DRY_RUN=1; require_covered_evidence "$fx/empty" ) >/dev/null 2>&1; rc=$?
+  [ "$rc" = "0" ] || fail "演练档被判废 ⇒ selfcheck 自己会红"
+  [ "$bad" = "0" ] && ok "② 那一族表要点名：齐全放行、只有 time-profile 判废并归 empty_tables、" \
+                     "② 齐而缺栈只出声、全空照旧判废、演练档不误伤（82）"
+}
+
+selfcheck_criterion2_count_and_token() {  # 83) 「含 ② 表几趟」要数得准，且分类词是写者与读者共用的一枚常量
+  local fx="$1/crit2c" k out bad=0
+  rm -rf "$fx"; mkdir -p "$fx" || { fail "建不出本轮夹具目录（$fx）"; return; }
+  criterion2_fixture_tree "$fx"
+  # 先走一遍真路径，让判废那侧**自己**写出 REFUSED（抄文案就等于造第二个入口，第 62 项那条教训）
+  ( require_covered_evidence "$fx/tp_only" ) >/dev/null 2>&1
+  ( require_covered_evidence "$fx/empty" )   >/dev/null 2>&1
+  criterion2_batch_line "$fx"/* >"$fx/line.txt" 2>&1
+  grep -qF "含 ② 那一族表的 **2 趟**" "$fx/line.txt" \
+    || { fail "批次那行数错了（印的是：$(sed -n '1p' "$fx/line.txt")）⇒ 分母不可用"; bad=1; }
+  grep -qF "因缺整族被判废 1 趟" "$fx/line.txt" \
+    || { fail "「缺整族判废」没数对（全空那趟该归旧类，不该混进来）"; bad=1; }
+  # 反证：把**读者**那枚常量换一个词 ⇒ 真路径写出的 REFUSED 必须降级成 other。
+  # 这一格证的不是"分类对不对"，而是"写者与读者是否共用同一个名字"——不共用时改文案会静默失真。
+  k=$( REFUSE_KIND_NO_CRITERION="换一个词之后就不匹配了" refusal_kind "$fx/tp_only" )
+  [ "$k" = "other" ] \
+    || { fail "换了分类词仍归 $k ⇒ 读者没在读那枚常量（这一格是假的）"; bad=1; }
+  [ "$bad" = "0" ] && ok "「含 ② 表 M 趟／缺整族判废 K 趟」数得准，且分类词由写者与读者共用一枚常量" \
+                     "（换一个词当场降级成 other，83）"
+}
