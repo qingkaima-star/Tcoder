@@ -158,13 +158,14 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_threads_window_grill "$out"  # 75) threads 尺的窗口切片：全窗自称全窗、筛得对、零命中说「窗口选错」、反向区间拒、认不到执行体要出声（#96／#98，它此前只有形状守卫点名、没有行为级臂）
   item selfcheck_mutation_teeth_are_proved "$out"  # 78) 反例自己也要被反证：正控制走绿、sed 落空要喊、改了报告不读的那一行也要喊（卷十二 §185→§186，反例造法从 /tmp 搬进门禁）
   item selfcheck_capture_verdicts_have_teeth "$out"  # 80) 九页取证的三条判据都要有后果：字节相同判败、0 字节截图不充进"页齐"、拍砸页数非零判败（#116／§207；旧写法只印不判，且空文件会被 ls 数进 N）
+  item selfcheck_threads_root_frame "$out"  # 81) 入口根帧不许顶「热点第一名」：底盘名单按字面量认会被自家一次改名废掉，比例兜底又量不到 94.1 %（#118／§211）
   item selfcheck_arms_are_all_wired "$out"  # 79) 三张表对齐：盘上块 ↔ `_part` 名单 ↔ 臂的调用点（拆文件最容易掉臂，而两种掉法都不报错）
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：那个 for 必须在 cmd_selfcheck 之前，
 # 因为编排器一跑就要点到里面的函数名。
 # shellcheck source=/dev/null
-for _part in ruler_shapes gates provenance eligibility trio mutation launchers hangretry tables chain trap windows hygiene context attribution ledger; do
+for _part in ruler_shapes gates provenance eligibility trio mutation launchers hangretry tables threads chain trap windows hygiene context attribution ledger; do
   source "scripts/perf_selfcheck_${_part}.sh"
 done
 unset _part
