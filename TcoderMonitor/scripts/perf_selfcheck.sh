@@ -79,6 +79,7 @@ items_measurement_verdicts() {  # items_measurement_verdicts <outdir> —— 69.
   item selfcheck_threads_root_frame "$out"  # 81) 入口根帧不许顶「热点第一名」：底盘名单按字面量认会被自家一次改名废掉，比例兜底又量不到 94.1 %（#118／§211）
   item selfcheck_criterion2_gate "$out"  # 82) 缺判据② 那一族表的一趟不许算落定：只有 time-profile 的 run2 形状判废并归 empty_tables（#117／§212）
   item selfcheck_criterion2_count_and_token "$out"  # 83) 「含 ② 表 M 趟／缺整族 K 趟」数得准，且分类词由写者与读者共用一枚常量（换一个词当场降级成 other，#117＋#119）
+  item selfcheck_criterion1_tables_required "$out"  # 74) 交互档缺判据① 那族逐帧表 ⇒ 当场判废并归 empty_tables（#130：09-22 那批的形状不再被计进「落定」）
   item selfcheck_scheduler_waits_for_warmup "$out"  # 84) 预热这一维排程器要等：够才放行、不够与读不到都不放行，阈值跟着 WARMUP_MIN_SECONDS 走（#120，三趟全烧在 5~7 秒）
   item selfcheck_wallclock_asks_the_artifact "$out"  # 85) 墙钟到点之后判产物不判时钟：能导出表格就不判挂死、空表/探测挂死/没有 trace 都照旧判废（#121，cert16 三趟全被误判）
   item selfcheck_criterion2_list_is_visible_without_harness "$out"  # 86) 表名单要在排程器那条真实调用路径（只 source 到 io 层）里可见：带表数成 1、空目录数成 0，名单被抽走时明说「没查成」（#125，cert17 把 3/3 含表印成 0 趟）

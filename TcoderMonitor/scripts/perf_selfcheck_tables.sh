@@ -345,3 +345,40 @@ print("%d|%d|%s|%s|%s" % (rc_ok, rc_lo,
   ok "判据① 的 p95 判定落到批次产物里（cadence-verdict.txt）：达标／未达标两把预算分歧／带退出码，" \
      "缺表那一格明写「未采到」（88）"
 }
+
+criterion1_fixture_tree() {  # 内部工具（不是 item，故不叫 selfcheck_*）：造三枚交互档形状
+  local fx="$1" d t
+  for d in full partial idle_shape; do mkdir -p "$fx/$d"; done
+  # 齐的那趟：① 要的逐帧四张全在（存在性口径，零行也算——见 criterion1_missing 的注释）
+  for t in hitches-renders hitches-framewait hitches-gpu hitches-frame-lifetimes; do
+    echo "<row/>" > "$fx/full/$t.xml"
+  done
+  # 09-22 那批交互样本的真实形状：有 hitches／renders，逐帧那两张没导出来
+  echo "<row/>" > "$fx/partial/hitches.xml"; echo "<row/>" > "$fx/partial/hitches-renders.xml"
+  # 心跳档不背 ① 的账：只有一张 hitch 表也照样合格（越界就会把 cert17 那三批判死）
+  echo "<row/>" > "$fx/idle_shape/hitches.xml"
+}
+
+selfcheck_criterion1_tables_required() {  # 74) 交互档缺判据① 那族逐帧表 ⇒ 当场判废（#130）
+  # 上面第 82 项给 ② 收了同一课（「8 张里命中一张」不算「判据要的那族在」），
+  # 而 ① 一直没被问：09-22 那批交互样本报表里写着「每帧 GPU 用时：未覆盖（这份 trace 里没有这张表）」，
+  # 那一趟照样被计进「落定 N 趟」。判据① 唯一出口是一次稀缺真人窗口 ⇒ 窗口拍完才发现缺表＝白烧。
+  local fx="$1/crit1" rc bad=0 t miss1
+  rm -rf "$fx"; mkdir -p "$fx" || { fail "建不出本轮夹具目录（$fx）"; return; }
+  criterion1_fixture_tree "$fx"
+  ( PERIOD=interaction; require_covered_evidence "$fx/full" ) >"$fx/full.log" 2>&1; rc=$?
+  [ "$rc" = "0" ] || { fail "逐帧四张齐全的交互趟被判废（rc=$rc）⇒ 这条闸恒拒，稀缺窗口会一趟都交不出去"; return; }
+  ( PERIOD=interaction; require_covered_evidence "$fx/partial" ) >"$fx/p.log" 2>&1; rc=$?
+  [ "$rc" != "0" ] || { fail "缺逐帧表的交互趟仍被放行（就是 09-22 那批的形状）⇒ #130 未修"; bad=1; }
+  [ "$(refusal_kind "$fx/partial")" = "empty_tables" ] \
+    || { fail "判废类型不是 empty_tables（拿到「$(refusal_kind "$fx/partial")」）⇒ 会被当成「再试一次」能救的，白补一趟"; bad=1; }
+  ( PERIOD=idle; require_covered_evidence "$fx/idle_shape" ) >"$fx/i.log" 2>&1; rc=$?
+  [ "$rc" = "0" ] || { fail "心跳档被加了 ① 的账（rc=$rc）⇒ cert17 那种合格样本会被误杀，越界了"; bad=1; }
+  # 名单对账：① 那四张必须都在导表名单里（分叉的方向永远是「宽松的那一份」）
+  miss1=""
+  for t in hitches-renders hitches-framewait hitches-gpu hitches-frame-lifetimes; do
+    printf '%s\n' "${HITCH_TABLES[*]}" | grep -q "$t" || miss1="$miss1 $t"
+  done
+  [ -z "$miss1" ] || { fail "判据① 的表名不在导表名单 HITCH_TABLES 里（$miss1）⇒ 两份名单已分叉，这一闸量的是不存在的表"; bad=1; }
+  [ "$bad" = "0" ] && ok "交互档必须有判据① 那族逐帧表：缺表当场判废且归 empty_tables、齐全放行、心跳档不背 ① 的账、表名与导表名单对过账"
+}
