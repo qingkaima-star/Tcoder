@@ -201,7 +201,10 @@ while [ "$slot" -lt "$SAMPLES" ]; do
   PENDING_RETRY=0
   tag_retry=""
   [ "$retrying" = "1" ] && tag_retry="（同窗补试，不占槽位）"
-  echo "==> 第 $attempt 次尝试（档=$MODE，计划 $SAMPLES 趟、已落定 $slot 趟）$tag_retry"
+  # ⚠ 这里不能印「已落定 $slot 趟」：`slot` 在**判废那一支也 +1**（第 272 行），
+  # 于是 #120 那批会印「计划 3 趟、已落定 1/2 趟」而收尾是「0/3 趟真的出了产物」——
+  # 同一批两个数、中途那句还是好看的。⇒ 老实说"占掉几个槽位"，出产物另给一格。
+  echo "==> 第 $attempt 次尝试（档=$MODE，计划 $SAMPLES 趟、已占槽位 $slot 趟／其中真出产物 $oks 趟）$tag_retry"
   # 只有补试那一趟才给 meta 带 `hang_recovered=1`：**没挂的趟不许出现这个字段**，
   # 所以这里 `unset` 而不是写 0 —— `${VAR:+…}` 见 "0" 也算"有值"，写 0 会让每一趟都带上它。
   if [ "$retrying" = "1" ]; then export HANG_RECOVERED=1; else unset HANG_RECOVERED; fi
@@ -223,6 +226,12 @@ while [ "$slot" -lt "$SAMPLES" ]; do
     wait_for "实例数恰为 1" cond_one_instance || break
   fi
   wait_for "前台是被测 App" cond_front_is_ours || break
+  # 【#120：预热这一维现在**等**】2026-09-27 现量：`cert15` 三趟全被录制档的 context_gate 拒在
+  # 「被测实例只跑了 5s/6s/7s（预热线 120s）」——排程器不等它，于是把一个干净窗口烧了三次。
+  # 与上面「录制档会拒的维度，排程器必须先等」同一条判据。
+  # ⚠ 只加在**有实例可等**的这一支：`HARNESS_LAUNCHES=1`（MEASURE_LAUNCH 冷启动档）此刻场上
+  #   还没有实例（由录制档起），等预热等于等一个不存在的 pid，而那一档本来就在测启动本身。
+  wait_for "被测实例已过预热线（${WARMUP_MIN_SECONDS:-120}s）" cond_instance_warm || break
   if [ "$MODE" = "interact" ]; then
     # 【开录时机：等"有人正在动"，不是等"没人动"】前三轮交互期全作废（`窗口内没人`），
     # 根因不是人不配合，是我的时序自相矛盾：这一档要求窗口里有人滚，

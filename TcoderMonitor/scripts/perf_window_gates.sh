@@ -143,3 +143,22 @@ cond_front_is_ours() {
   printf '前台是「%s」' "${f:-未知}"
   return 1
 }
+
+cond_instance_warm() {  # 预热这一维要**等**，不是"拒"（#120 的现量：三趟全烧在"只跑了 5~7 秒"）
+  # 判据本身仍住在录制档那侧（`preflight_gates_warmup`）；这里只是**把它变成一个等待条件**——
+  # 与上面 `cond_no_heavy_jobs` 那句同一条判据：「录制档会拒的维度，排程器必须先等，
+  # 否则只是连续烧掉几次尝试」。#120 现场：`cert15` 三趟全被 context_gate 拒在预热不足，
+  # 排程器连"等 120 秒"这一步都没做，一个稀缺的干净窗口就这么用掉了三次。
+  # 话术复用 `warmup_reading_note`（阈值一改两处不会各说各的）；"取不到"**回 1 继续等**，
+  # 不放行——绕闸这条路本仓不留（`IGNORE_CONTEXT_GATE` 不在这里出现，一次都不出现）。
+  local up line tp
+  line="${WARMUP_MIN_SECONDS:-120}"
+  tp="${TARGET_PID:-$(my_instance_pid 2>/dev/null | head -1)}"
+  up=$(instance_uptime_seconds "$tp" 2>/dev/null) || up=""
+  case "$up" in
+    ''|*[!0-9]*) echo "    预热时长$(warmup_reading_note "")  ⇒ 继续等，不绕闸"; return 1 ;;
+  esac
+  [ "$up" -ge "$line" ] && return 0
+  echo "    预热没够：$(warmup_reading_note "$up") ⇒ 继续等，别用一趟首扫烧掉一个槽位"
+  return 1
+}
