@@ -349,6 +349,10 @@ selfcheck_quiescence() {  # selfcheck_quiescence <outdir>
   qquiet=$(quietest_seconds "$qline")
   if [ -z "$qquiet" ]; then
     fail "静默探针输出解析不出数字（拿到「$qline」）——preflight 那一维会永久取不到数，等于没有这把尺子"
+  elif ! probe_usable "$qquiet"; then
+    # 「可跑可解析」不等于「尺子在场」：探针编不出来／跑不起来时打的是哨兵 `-1.00`，它照样是个"能解析的数"
+    # ⇒ 上一版在这里印一句 ✓，而那一维其实已经掉了。判据复用 `probe_usable`（哨兵全仓只许有一个词）。
+    fail "静默探针只吐哨兵（拿到「$qline」）⇒ 尺子掉了：这一维在闸门里恒拒，不许报「可跑可解析」"
   else
     ok "人手静默探针可跑可解析：距上次人手事件 ${qquiet}s"
   fi
