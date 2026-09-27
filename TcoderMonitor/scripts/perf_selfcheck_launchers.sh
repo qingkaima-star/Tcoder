@@ -255,3 +255,46 @@ selfcheck_covered_evidence() {  # selfcheck_covered_evidence <outdir>
 # ⚠ 喂给判据的 REFUSED 一律由**真路径**产出（假 xcrun 走 record_bounded /
 #   require_covered_evidence），不抄判废文案：文案一改这里当场读成别的类型而红，
 #   而不是拿着两份各自成立的字符串继续互证。
+
+selfcheck_capture_verdicts_have_teeth() {  # selfcheck_capture_verdicts_have_teeth <outdir>
+  # 80) 九页取证的结果判据：三条都必须有后果（#116／§207）。
+  #     现场不是假想：旧写法里 `FAILED` 与 `DUP` **只印不判**，而 `capture` 有一条失败路径
+  #     会留下 0 字节 png —— `ls *.png | wc -l` 把它数进"页齐"，于是真少一页也照样退 0。
+  #     这一格能测的唯一前提就是判据本体已抽成 `scripts/capture_result_check.sh`
+  #     （带主流程的取证脚本不能 source：source 等于执行）。
+  #     正对照放第一个：一把永远判败的尺子与一把永远放行的尺子，都只会有一格红。
+  local fx="$1/capcheck" bad=0 rc
+  rm -rf "$fx"; mkdir -p "$fx/ok" "$fx/dup" "$fx/empty" "$fx/short"
+  printf 'a' > "$fx/ok/p1.png";   printf 'b' > "$fx/ok/p2.png";   printf 'c' > "$fx/ok/p3.png"
+  printf 'a' > "$fx/dup/p1.png";  printf 'a' > "$fx/dup/p2.png";  printf 'b' > "$fx/dup/p3.png"
+  printf 'a' > "$fx/empty/p1.png"; printf 'b' > "$fx/empty/p2.png"; : > "$fx/empty/p3.png"
+  printf 'a' > "$fx/short/p1.png"; printf 'b' > "$fx/short/p2.png"
+
+  ( bash scripts/capture_result_check.sh "$fx/ok" 3 0 ) >"$fx/ok.log" 2>&1; rc=$?
+  [ "$rc" = "0" ] || { fail "正对照被判败（rc=$rc）⇒ 这把尺子谁也用不了"; bad=1; }
+  grep -q '产出 3 张 / 3 页，失败 0 页' "$fx/ok.log" \
+    || { fail "合格那一格没印出「产出 3 张 / 3 页」⇒ 汇报行换形状了，台账里的引用会腐烂"; bad=1; }
+
+  ( bash scripts/capture_result_check.sh "$fx/dup" 3 0 ) >"$fx/dup.log" 2>&1; rc=$?
+  [ "$rc" != "0" ] && grep -q '字节级完全相同' "$fx/dup.log" \
+    || { fail "两张字节相同的图被判合格（rc=$rc）⇒ 切页静默失败又会当成九页各就各位"; bad=1; }
+
+  ( bash scripts/capture_result_check.sh "$fx/empty" 3 0 ) >"$fx/empty.log" 2>&1; rc=$?
+  [ "$rc" != "0" ] && grep -q '非空' "$fx/empty.log" \
+    || { fail "0 字节截图被数进「页齐」（rc=$rc）⇒ 这正是旧写法那条假绿"; bad=1; }
+
+  ( bash scripts/capture_result_check.sh "$fx/empty" 3 1 ) >"$fx/failed.log" 2>&1; rc=$?
+  [ "$rc" != "0" ] && grep -q '被判没拍到' "$fx/failed.log" \
+    || { fail "拍砸页数非零仍放行（rc=$rc）⇒ FAILED 又变成只印不判"; bad=1; }
+
+  ( bash scripts/capture_result_check.sh "$fx/short" 3 0 ) >"$fx/short.log" 2>&1; rc=$?
+  [ "$rc" != "0" ] || { fail "少一张图没判败（rc=$rc）⇒ 页齐这条唯一的闸丢了"; bad=1; }
+
+  ( bash scripts/capture_result_check.sh "$fx/ok" 0 0 ) >"$fx/zero.log" 2>&1; rc=$?
+  [ "$rc" != "0" ] || { fail "应拍 0 页被放行 ⇒ 空总体又会伪装成一次完整取证"; bad=1; }
+
+  ( bash scripts/capture_result_check.sh ) >"$fx/usage.log" 2>&1; rc=$?
+  [ "$rc" = "2" ] || { fail "缺参数退的是 $rc（要 2）⇒ 用法错与判据不过混成一个码，排障会找错地方"; bad=1; }
+
+  [ "$bad" = "0" ] && ok "九页取证三条判据都有后果：相同图判败、空图不充数、拍砸页判败（含正对照与两种误用）"
+}
