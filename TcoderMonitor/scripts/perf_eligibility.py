@@ -38,6 +38,27 @@ def human_recheck_refusal(meta):
             "① 不许交、也不许进 ② 的 3/3；要重录到探针在场的那一趟")
 
 
+def load_window_refusal(meta):
+    """整窗负载**没采到** ⇒ 返回该拒的那一句；采到了／老批次没这一格 ⇒ 返回 ""。
+
+    【#128】与 `human_recheck_refusal` 同一族、只差一维：写侧 `load_window_verdict`
+    在 `load-in-window.tsv` 为空时**已经**落了 `load_in_window=未采到`（比 #127 那条诚实），
+    但**这个值全仓没有任何读者**——资格判据读的是 `contaminated_by_foreign_load`
+    与收窗那两个点（`load1_at_end`/`heavy_at_end`），于是「中段有没有编译挤满」这一维
+    在零采样的那趟里被**缺席**补成了「干净」。而 §AP 立这一维的原因恰恰是
+    「八趟里唯一落在 4.0 ms 红线内的那趟，收窗负载 19.73，两端看不件中段的编译」。
+    ⇒ 「标记落地而判据住空集合」（第 38 类）：这一格必须有读者，否则记它等于没记。
+
+    ⚠ 同样**不追溯**：`load_samples` 与 `load_in_window` 两个都没有的老批次
+    （盘上现量 109 批，早于窗口内采样这一维）按原样处理，不在这里改口。
+    """
+    if str(meta.get("load_in_window") or "").strip() != "未采到":
+        return ""
+    return ("窗口内负载一个样本都没采到（meta.load_in_window=未采到）"
+            "⇒ 闸门只看得到起窗与收窗两个点，中段有没有重活**未判**；"
+            "两端干净不许补成整窗干净，这一趟不得作为判据①/② 的达标证据")
+
+
 def period_eligibility(meta):
     """档位**声明**与收尾**复核**是否一致 → (样本可用吗, 给表头看的一句话)。
 
@@ -62,8 +83,9 @@ def period_eligibility(meta):
     if str(meta.get("contaminated_by_foreign_load") or "") == "1":
         return False, ("窗口结束时负载显示整机在忙（meta.load1_at_end / heavy_at_end）"
                        "⇒ 这批量的是别人占着机器时的帧，不得作为结论提交")
-    # 【#127】人手这一维**没量到**与**量到了没人动**是两件事，前者不许折算成后者。
-    refusal = human_recheck_refusal(meta)
+    # 【#127／#128】「没量到」与「量到了且干净」是两件事，前者不许折算成后者。
+    # 两维共用一个出口：人手复核没做成、整窗负载零采样——都按未判拒掉（缺格的老批次不追溯）。
+    refusal = human_recheck_refusal(meta) or load_window_refusal(meta)
     if refusal:
         return False, refusal
     # 输入来源**与投递节奏**决定这句话能不能说"真人"、能不能答"到不到 120Hz"。
