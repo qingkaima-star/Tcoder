@@ -312,6 +312,28 @@ threads_window_fixture() {  # 内部工具（不是 item，故不叫 selfcheck_*
 XML
 }
 
+root_plumbing_fixture() {  # 内部工具：主线程 6 个样本——入口根帧 `.main()` 在 5 个里（83.3 %），真热点 4／次热 2
+  # 为什么要单独一份夹具（不复用上面那份）：上面那份的根帧出现在**每一个**样本里（100 %），
+  # 会被 `PLUMBING_SHARE_PCT=98` 那道"比例兜底"顺手挡掉 ⇒ 测不到真正那条脆弱面：
+  # **按字面名单认底盘**。真出事的就是这条——无头 CLI 把入口改名成 `TcoderEntry.main()`，
+  # 名单里的 `App.main()` 不匹配，根帧以 94.1 % 当上"热点第一名"、把真热点挤下榜（cert14probe 实测）。
+  # 所以这里故意让根帧只占 83.3 %（低于 98 的兜底），只有**名字**这一道能挡住它。
+  # 帧序照真件（leaf 在前、根在最后；本机实测最外两帧＝`static TcoderEntry.main()`／`start`）：
+  # 抄反了根帧会同时冒充"叶子帧（自身耗时）"，臂就去抓一个真件里不存在的形状。
+  cat > "$1" <<'XML'
+<?xml version="1.0"?>
+<trace-query-result>
+<node xpath='//trace-toc[1]/run[1]/data[1]/table[9]'><schema name="time-profile"><col><mnemonic>time</mnemonic></col><col><mnemonic>thread</mnemonic></col></schema>
+<row><sample-time id="1" fmt="00:00.100.000">100000000</sample-time><thread id="2" fmt="Main Thread (0x1) (TcoderMonitor, pid: 1)"><tid id="3" fmt="0x1">1</tid><process id="4" fmt="TcoderMonitor (1)"><pid id="5" fmt="1">1</pid></process></thread><thread-state id="6" fmt="Running">1</thread-state><weight id="7" fmt="1">1</weight><tagged-backtrace id="8" fmt="a"><backtrace id="9"><frame id="10" name="hotWork()" addr="0x1"/><frame id="11" name="specialized static TcoderEntry.main()" addr="0x2"/></backtrace></tagged-backtrace></row>
+<row><sample-time id="12" fmt="00:00.200.000">200000000</sample-time><thread ref="2"/><process ref="4"/><thread-state ref="6"/><weight ref="7"/><tagged-backtrace id="13" fmt="b"><backtrace id="14"><frame ref="10"/><frame ref="11"/></backtrace></tagged-backtrace></row>
+<row><sample-time id="15" fmt="00:00.300.000">300000000</sample-time><thread ref="2"/><process ref="4"/><thread-state ref="6"/><weight ref="7"/><tagged-backtrace id="16" fmt="c"><backtrace id="17"><frame ref="10"/><frame ref="11"/></backtrace></tagged-backtrace></row>
+<row><sample-time id="18" fmt="00:00.400.000">400000000</sample-time><thread ref="2"/><process ref="4"/><thread-state ref="6"/><weight ref="7"/><tagged-backtrace id="19" fmt="d"><backtrace id="20"><frame ref="10"/><frame ref="11"/></backtrace></tagged-backtrace></row>
+<row><sample-time id="21" fmt="00:00.500.000">500000000</sample-time><thread ref="2"/><process ref="4"/><thread-state ref="6"/><weight ref="7"/><tagged-backtrace id="22" fmt="e"><backtrace id="23"><frame id="24" name="otherWork()" addr="0x3"/><frame ref="11"/></backtrace></tagged-backtrace></row>
+<row><sample-time id="25" fmt="00:00.600.000">600000000</sample-time><thread ref="2"/><process ref="4"/><thread-state ref="6"/><weight ref="7"/><tagged-backtrace id="26" fmt="f"><backtrace id="27"><frame ref="24"/></backtrace></tagged-backtrace></row>
+</node></trace-query-result>
+XML
+}
+
 selfcheck_threads_window_grill() {  # 75) threads 那把尺第一次有自己的臂：切片要印得对、零命中要说对原因（#96/#98）
   # 为什么这一项非有不可：`threads` 产出的 `time-profile.json` 是汇总表里
   # 「主线程 CPU 样本占比」与「热点第一名」两列的**唯一来源**，而此前全仓没有一条臂跑过它
@@ -319,7 +341,7 @@ selfcheck_threads_window_grill() {  # 75) threads 那把尺第一次有自己的
   # 于是本轮给它加 `--window` 时，两处旧话术一查就是假的：
   #   · 零命中 ⇒ 它说"确认导出的是 time-profile 表（而不是空的 time-profile）"，可表根本不空，是窗口选错；
   #   · `--thread` 认不到 ⇒ 它悄悄换成"样本最多的那条"照样出数（要 A 给 B）。
-  local fx tp r_none r_bad r_fb out
+  local fx tp r_none r_bad r_fb out h1
     # 夹具落**本轮 outdir 之下**，不用 `mktemp -d`、更不用它的 `|| echo /tmp/固定名` 兜底（#113）：
   # 固定名在两棵树／两轮并发时会撞，而收尾那句 `rm -rf "$fx"` 会**删掉别人正在用的夹具**——
   # 同一枚病本仓付过学费：静默探针那把 `/tmp/tcoder-quiesce-$$` 撞上别人放的目录，
@@ -348,8 +370,14 @@ selfcheck_threads_window_grill() {  # 75) threads 那把尺第一次有自己的
   grep -qF "恒空窗口" "$fx/bad.txt" || out="$out 反向窗口没解释为什么拒"
   [ "$r_fb" = "0" ] || out="$out 认不到线程名时不该改变退出码（回退是有意的，但必须出声）"
   grep -qF "不是**你要的那个执行体的" "$fx/fb.txt" || out="$out 悄悄换了执行体（要 A 线程给了 B 线程的数）"
+  # 75g) 入口根帧不许顶掉「热点第一名」——查的是落盘那格（汇总表的唯一来源），不是散文
+  root_plumbing_fixture "$fx/root.xml"
+  python3 scripts/trace_report.py threads "$fx/root.xml" --top 3 --json "$fx/root.json" >"$fx/root.txt" 2>&1
+  h1=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["hotspot_top1"])' "$fx/root.json" 2>/dev/null)
+  [ "$h1" = "hotWork()" ] || out="$out 热点第一名=$h1（要 hotWork()；是入口根帧就是 RUNLOOP_PLUMBING 的结构形状那格被拿掉了）"
+  grep -qF "事件循环本体占 83.3%" "$fx/root.txt" || out="$out 剥掉根帧却没印它占多少（剥了要出声，不许静默改榜）"
   rm -rf "$fx"
   [ "$out" = "ok" ] || { fail "threads 的窗口切片不成立：$out"; return; }
-  ok "threads 尺五格有牙：全窗自称全窗、窗口筛得对、零命中说「窗口选错」而不是「表是空的」、" \
-     "反向区间直接拒、认不到执行体要出声（75）"
+  ok "threads 尺六格有牙：全窗自称全窗、窗口筛得对、零命中说「窗口选错」而不是「表是空的」、" \
+     "反向区间直接拒、认不到执行体要出声、入口根帧不顶热点第一名（75）"
 }

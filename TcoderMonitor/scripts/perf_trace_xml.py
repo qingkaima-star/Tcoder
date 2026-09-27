@@ -205,6 +205,13 @@ RUNLOOP_PLUMBING = (
     "NSMessagePort", "___chkstk_darwin", "start", "libsystem_pthread", "thread_start",
     # App 入口链与链接器产物：每个样本都有，且不指向任何可改的代码
     "runApp", "App.main()", "$main()", "nextEventMatchingMask", "<deduplicated_symbol>",
+    # ⚠ 2026-09-27 补：入口类型改名会把上面两条同时打穿。无头 CLI 那轮把入口挪进
+    #   `TcoderEntry`（`static func main()`），帧名于是变成 `specialized static TcoderEntry.main()`
+    #   与 `static TcoderEntry.main()`——**不含** `App.main()` 这个字面量，于是调用树根
+    #   当上了「热点第一名」（cert14probe 实测 32/34 = 94.1 %，把真热点 `_updateViewGraph` 19/34 挤到第二），
+    #   报告还据此印出「已换位」这句假话。⇒ 加一条**结构形状** `.main()`：
+    #   任何 `X.main()` 都是进程入口链，不随类型改名失效（比再补一个字面量更耐久）。
+    ".main()",
     "dispatch_main_queue_callback", "__CFRUNLOOP_IS_SERVICING_THE_MAIN_DISPATCH_QUEUE__",
 )
 
