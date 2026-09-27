@@ -118,13 +118,7 @@ record_bounded() {  # record_bounded <outdir> <trace 路径> <模板> <时长秒
   [ -n "$extra" ] && set -- "$@" --instrument "$extra"
   xcrun xctrace record "$@" --output "$trace" --no-prompt --quiet &
   pid=$!
-  while [ "$waited" -lt "$limit" ]; do
-    kill -0 "$pid" 2>/dev/null || break     # kill -0 只探活，不发信号
-    sleep "$RECORD_POLL_S"; waited=$((waited + RECORD_POLL_S))
-    # 这个循环本来就每 5 s 在窗口内醒一次 ⇒ 顺手采一发整机负载。
-    # 没有这一发，闸门就只看得到"起窗前"和"收窗时"两个点，中段起的那趟编译看不见（§AP）。
-    load_sample_once "$out" "$pid" "$PID"
-  done
+  waited=$(record_wait_loop "$out" "$pid" "$limit")
   local stuck=0
   if kill -0 "$pid" 2>/dev/null; then
     stuck="$waited"
@@ -137,8 +131,7 @@ record_bounded() {  # record_bounded <outdir> <trace 路径> <模板> <时长秒
     die "被测进程在录制期间消失 ⇒ 这一趟判废（宁可没数，也不要一份五张表全空的『读数』）"
   fi
   if [ "$stuck" != "0" ]; then
-    refuse_sample "$out" "这一趟判废：xctrace 未在墙钟上限 ${limit}s 内自行停表（挂死 ${stuck}s）。"
-    die "录制挂死 ⇒ 这一趟判废"
+    wallclock_verdict "$out" "$trace" "$template" "$stuck" "$limit" || die "录制挂死 ⇒ 这一趟判废"
   fi
   [ "$rc" = "0" ] || echo "    ⚠ xctrace record 退出码 $rc（导表那一步会如实报缺哪张表）"
   return 0

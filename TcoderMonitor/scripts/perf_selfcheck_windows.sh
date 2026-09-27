@@ -258,3 +258,72 @@ selfcheck_scheduler_waits_for_warmup() {  # 84) 预热这一维排程器要"等"
   [ "$bad" = "0" ] && ok "排程器对预热是**等**：够才放行、不够与读不到都不放行且各出一句、" \
                      "阈值跟着 WARMUP_MIN_SECONDS 走（84）"
 }
+
+wallartifact_fake_xcrun() {  # wallartifact_fake_xcrun <bin 目录>：造一枚假 xcrun（record 会挂死；export 形状由 FAKE_EXPORT 选）
+  # 单拆出来是因为第 85 项四格共用它，而本仓那把「函数 ≤50 行」的尺子刚在第十五轮红过两条
+  # （见卷十三 §212）——判据格与夹具造法分家，格子数才加得动。
+  mkdir -p "$1"
+  cat > "$1/xcrun" <<'FIX'
+#!/bin/bash
+out=""; mode=""; prev=""
+for a in "$@"; do
+  case "$prev" in --output) out="$a";; esac
+  case "$a" in export) mode=export ;; record) mode=record ;; esac
+  prev="$a"
+done
+if [ "$mode" = record ]; then
+  [ "${FAKE_MKTRACE:-1}" = "1" ] && [ -n "$out" ] && mkdir -p "$out"
+  case "${FAKE_XC:-hang}" in
+    ok) exit 0 ;;
+    *)  trap 'exit 0' TERM; while :; do sleep 0.2; done ;;
+  esac
+fi
+case "${FAKE_EXPORT:-table}" in
+  table) printf '<schema name="hitches"/>\n' > "$out"; exit 0 ;;
+  empty) : > "$out"; exit 0 ;;
+  *)     trap 'exit 0' TERM; while :; do sleep 0.2; done ;;
+esac
+FIX
+  chmod +x "$1/xcrun"
+}
+
+selfcheck_wallclock_asks_the_artifact() {  # 85) 墙钟到点之后要**问产物**，不能只看时钟（#121）
+  # 现量：`cert16` 三趟全被判成"录制挂死"，而 run1 那棵被砍掉的 trace 手动导出**仍然成功**
+  # （`hitches` 表在、0 行＝零卡顿的正常形状）。⇒ 只看时钟＝这台机器上永远拿不到判据② 的样本。
+  # 真子进程测：假 `xcrun` 三种 export 形状各判一次（有表格 / 空文件 / 探测自己也挂死）。
+  local fx="$1/wallartifact" path0="$PATH" bad=0 out rc out2
+  rm -rf "$fx"; mkdir -p "$fx"
+  wallartifact_fake_xcrun "$fx/bin"
+  chmod +x "$fx/bin/xcrun"
+  PATH="$fx/bin:$PATH"; export PATH
+  local RECORD_SLACK_S=2 RECORD_POLL_S=1 PROBE_BOUND_S=3
+
+  out="$fx/usable"; mkdir -p "$out"
+  sleep 300 & PID=$!; disown
+  out2=$( FAKE_XC=hang FAKE_EXPORT=table record_bounded "$out" "$out/x.trace" "Animation Hitches" 1 2>&1 ); rc=$?
+  [ "$rc" = "0" ] && [ ! -f "$out/REFUSED" ]     || { fail "产物能导出表格却仍被判废（rc=$rc）⇒ #121 没修到位，好样本还是全砍光"; bad=1; }
+  printf '%s' "$out2" | grep -qF "不判挂死" || { fail "放行时没出声 ⇒ 读日志的人以为走了常规路径"; bad=1; }
+  kill -TERM "$PID" 2>/dev/null; wait "$PID" 2>/dev/null
+
+  out="$fx/emptytable"; mkdir -p "$out"
+  sleep 300 & PID=$!; disown
+  ( FAKE_XC=hang FAKE_EXPORT=empty record_bounded "$out" "$out/x.trace" "Animation Hitches" 1 ) >"$out/log.txt" 2>&1; rc=$?
+  [ "$rc" != "0" ] && grep -q "挂死" "$out/REFUSED" 2>/dev/null     || { fail "trace 导不出表格却没判废（rc=$rc）⇒ 这条判据朝反了，坏样本会进表"; bad=1; }
+  kill -0 "$PID" 2>/dev/null && kill -TERM "$PID" 2>/dev/null; wait "$PID" 2>/dev/null
+
+  out="$fx/probehang"; mkdir -p "$out"
+  sleep 300 & PID=$!; disown
+  ( FAKE_XC=hang FAKE_EXPORT=hang record_bounded "$out" "$out/x.trace" "Animation Hitches" 1 ) >"$out/log.txt" 2>&1; rc=$?
+  [ "$rc" != "0" ]     || { fail "探测器自己被挂死拖住却没判废 ⇒ 只是把永等从录制挪到探测"; bad=1; }
+  kill -TERM "$PID" 2>/dev/null; wait "$PID" 2>/dev/null
+
+  out="$fx/notrace"; mkdir -p "$out"
+  sleep 300 & PID=$!; disown
+  ( FAKE_XC=hang FAKE_MKTRACE=0 record_bounded "$out" "$out/x.trace" "Animation Hitches" 1 ) >"$out/log.txt" 2>&1; rc=$?
+  [ "$rc" != "0" ] && grep -q "挂死" "$out/REFUSED" 2>/dev/null     || { fail "连 trace 目录都没有却被放行（rc=$rc）⇒ #121 把旧那条判废改松了"; bad=1; }
+  kill -0 "$PID" 2>/dev/null && kill -TERM "$PID" 2>/dev/null; wait "$PID" 2>/dev/null
+
+  PATH="$path0"; export PATH
+  unset FAKE_XC FAKE_EXPORT FAKE_MKTRACE
+  [ "$bad" = "0" ] && ok "墙钟到点后判的是产物：能导表格就放行且出声、空表/探测挂死/没有 trace 都照旧判废（85）"
+}
