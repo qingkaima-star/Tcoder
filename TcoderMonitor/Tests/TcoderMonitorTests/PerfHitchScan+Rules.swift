@@ -29,7 +29,14 @@ extension PerfHitchScan {
         // 尾随闭包 `.sorted { … }` 与带参 `.sorted(by:)` 都是全量排序，两个形状都要抓：
         // 只写 `\.sorted\s*\(` 会漏掉尾随闭包那种写法，而 `badSamples` 里用的正是它——
         // 元测试 `testScannerFiresOnBadSamples` 就是靠这个把"规则过窄"照出来的。
-        ("fullSort", #"\.sorted\s*(?:\(|\{)"#),
+        // 【#131】另一半 API 对以前根本不在词表里：**就地排序** `.sort { … }` / `.sort(by:)`。
+        // 「body/Mark 内零排序」这句话量的是"排一次全量"这个动作，与它落在新数组还是原地无关——
+        // 而 `\.sorted` 那种写法看不见它。本仓确实写得出这个形状（`Services/Code/CodeLineNormalization.swift`
+        // 里 `delimiters.sort { … }` 与 `prefixes.sort { … }` 两处），所以这不是假想形状：
+        // 谁把它写进 `var body`，判据③ 的「零排序」会照样报绿。（#65 是同一族：词表不认 ⇒ 射程从没写清。）
+        // ⚠ 两个备选都要单独有牙：`|\.sort` 那格由 `soleResponsibilityProbes` 验
+        //   （整条正则命中不了 ≠ 那一格有用——它可能被邻居盖住，见 §190 那条）。
+        ("fullSort", #"(?:\.sorted|\.sort)\s*(?:\(|\{)"#),
         // 2026-09-25（缺陷 #65）补两类**确实打盘**却不在词表里的形状：
         //   · `resolvingSymlinksInPath()` —— 路径解析，按目录组件逐个 lstat（`ScanProvenance` 就在用）；
         //   · `Process(` / `NSTask(` —— 起子进程，本仓 git 那一族的主形状，比一次 `stat` 贵几个数量级。
@@ -82,7 +89,10 @@ extension PerfHitchScan {
                             "RoundedRectangle().fill(state.badgeFill)",
                             "Image(systemName: \"x\").foregroundStyle(colorSet.onFillColor)"]),
         ("fullSort", ["let rows = allRows.sorted { $0.name < $1.name }",
-                      "let names = allNames.sorted(by: { $0.count > $1.count })"]),
+                      "let names = allNames.sorted(by: { $0.count > $1.count })",
+                      // #131：就地排序那两形（样例抄本仓真形状，不手搓好看的版本）
+                      "delimiters.sort { $0.count > $1.count }",
+                      "ecosystems.sort(by: Self.manifestOrder)"]),
         ("syncFileIO", ["guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }",
                         "if FileManager.default.fileExists(atPath: project.path) {",
                         "let kids = try FileManager.default.contentsOfDirectory(atPath: root)",
@@ -127,6 +137,9 @@ extension PerfHitchScan {
          "try? fileManager.removeItem(at: reportURL(for: project.id))"),
         // §184 那一格（写盘的 `.write(to:)`）也一并纳进来：这条名单不该只服务新词。
         ("syncFileIO", #"|\.write\(to(?:URL)?:"#, "try data.write(to: fileURL, options: .atomic)"),
+        // #131：`.sort`（就地）那一格自己有没有牙——减掉它之后 `.sorted` 那格**打不中**就地排序的样例。
+        // 不写这条的话，加上去的 `|\.sort` 可能永远被邻居盖住，而作者以为建了防线（§190 的同一课）。
+        ("fullSort", #"|\.sort"#, "ecosystems.sort(by: Self.manifestOrder)"),
     ]
 
     /// 把某一格备选从模式里**减掉**，样例必须因此打不中。

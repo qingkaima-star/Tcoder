@@ -305,6 +305,7 @@ final class PerfHitchGuardTests: XCTestCase {
                 let formatter = DateFormatter()
                 let number = NumberFormatter()
                 let names = allNames.sorted()
+                var ranks = allScores; ranks.sort { $0.value > $1.value }
                 let attrs = try? FileManager.default.attributesOfItem(atPath: "/tmp/x")
                 let flag = UserDefaults.standard.bool(forKey: "showSplash")
                 let prefs = CFPreferencesCopyAppValue("key" as CFString, app as CFString)
@@ -319,6 +320,10 @@ final class PerfHitchGuardTests: XCTestCase {
         for rule in PerfHitchScan.rules.map(\.name) {
             XCTAssertGreaterThan(counts[rule] ?? 0, 0, "整条流水线对合成坏文件漏报了 \(rule)")
         }
+        // 【#131】就地排序那一格必须在**整条流水线**上也抓到（只测正则会漏「跨度解析退化成空集」，
+        // 上面那段循环只要求每条规则 >0，`fullSort` 靠 `.sorted()` 那一行就能满足 ⇒ 新词形没被验）。
+        XCTAssertGreaterThanOrEqual(counts["fullSort"] ?? 0, 2,
+                                    "body 内 `.sorted()` 与就地 `.sort {}` 要各算一次（只抓到前一种＝词表又窄了）")
     }
 
     /// 反向：合规写法不许被误伤（否则下一个人在报告里写"守卫太吵"，守卫就死了）。

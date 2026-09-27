@@ -106,4 +106,51 @@ extension PerfHitchGuardTests {
         XCTAssertTrue(Set(Self.knownBaseline.keys).isDisjoint(with: Self.readings.keys),
                       "一条规则只能属于一栏：债（有上限）或读数（有下限）")
     }
+
+    /// 仓库根（本文件 → TcoderMonitorTests → Tests → TcoderMonitor → 工作树根）。
+    /// 与 `DocReferenceRatchetTests.repoRoot` 同一把定位法：**不写绝对路径**，
+    /// 否则换一棵 worktree 这条测试就随 checkout 位置变色（第 12 类）。
+    private static let specRelPath = "docs/superpowers/specs/2026-09-20-performance-120hz-design.md"
+
+    /// spec 那张 T5 规则表必须**逐条点名**词表里的每条禁则，且不许留着已改名/删掉的旧规则。
+    ///
+    /// 为什么要（2026-09-27 #131）：那张表此前抄了"现量/上限"两个数，于是它从 09-22 起就在说谎
+    /// （抄的是 `fullSort 9/9`、`syncFileIO 2/2`，守卫现量已是 `8/8` 与 `1/1`），而全仓没有一条测试
+    /// 读过它 ⇒ 文档与尺子各说各话、两边都自洽（第 37 类那句"数抄进文档那天起开始倒计时"的又一实例）。
+    /// 数已经搬回守卫那一行；这里补**名字级**对账——它是可机检的，而"数字对不对"不是。
+    func testSpecRuleTableNamesEveryRule() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(Self.specRelPath)
+        let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n")
+        // **只取 T5 那一张表**：表头行往后、连续以 `|` 开头的行段。
+        // 第一版我把整份文档的表格行都收进来，当场误报四行别的表
+        // （`CVDisplayLinkCreateWithActiveCGDisplays`／`CADisplayLink`／`GlassEffectContainer`／`onScrollPhaseChange`）
+        // ——那是我的解析窗口太宽，不是规范过期：**报"名单过期"之前要先确认数的是哪张表**。
+        guard let header = lines.firstIndex(where: { $0.contains("| 规则 | 终点 | 为什么 |") }) else {
+            XCTFail("spec 里找不到 T5 那张规则表（表头改了吗？）⇒ 这条对账没有对象，不许当通过")
+            return
+        }
+        var documented = Set<String>()
+        var idx = header + 1
+        while idx < lines.count {
+            let row = lines[idx].trimmingCharacters(in: .whitespaces)
+            guard row.hasPrefix("|") else { break }
+            idx += 1
+            guard !row.contains("---"), row.hasPrefix("| `") else { continue }
+            let cells = row.split(separator: "|")
+            guard let first = cells.first.map({ $0.trimmingCharacters(in: .whitespaces) }),
+                  first.hasPrefix("`"), first.contains("`") else { continue }
+            let name = first.dropFirst().split(separator: "`").first.map(String.init) ?? ""
+            if !name.isEmpty { documented.insert(name) }
+        }
+        let declared = Set(PerfHitchScan.rules.map(\.name))
+        XCTAssertFalse(documented.isEmpty, "T5 表里一条规则名都没数到 ⇒ 表格形状变了，这条对账在空转")
+        XCTAssertEqual(documented.subtracting(declared), [],
+                       "spec 的 T5 表里点着词表已经没有的规则名 ⇒ 名单过期（改名或删规则没同步文档）")
+        XCTAssertEqual(declared.subtracting(documented), [],
+                       "词表里有 \(declared.subtracting(documented).sorted()) 这条禁则没写进 spec 的 T5 表"
+                       + "——新加判据不写进这张表，读规范的人就以为终点不是 0")
+    }
 }
