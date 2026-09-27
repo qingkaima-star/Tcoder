@@ -79,6 +79,7 @@ items_measurement_verdicts() {  # items_measurement_verdicts <outdir> —— 69.
   item selfcheck_threads_root_frame "$out"  # 81) 入口根帧不许顶「热点第一名」：底盘名单按字面量认会被自家一次改名废掉，比例兜底又量不到 94.1 %（#118／§211）
   item selfcheck_criterion2_gate "$out"  # 82) 缺判据② 那一族表的一趟不许算落定：只有 time-profile 的 run2 形状判废并归 empty_tables（#117／§212）
   item selfcheck_criterion2_count_and_token "$out"  # 83) 「含 ② 表 M 趟／缺整族 K 趟」数得准，且分类词由写者与读者共用一枚常量（换一个词当场降级成 other，#117＋#119）
+  item selfcheck_scheduler_waits_for_warmup "$out"  # 84) 预热这一维排程器要等：够才放行、不够与读不到都不放行，阈值跟着 WARMUP_MIN_SECONDS 走（#120，三趟全烧在 5~7 秒）
   item selfcheck_arms_are_all_wired "$out"  # 79) 三张表对齐：盘上块 ↔ `_part` 名单 ↔ 臂的调用点（拆文件最容易掉臂，而两种掉法都不报错）
 }
 

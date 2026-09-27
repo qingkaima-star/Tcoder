@@ -210,3 +210,51 @@ selfcheck_presence_reading_is_honest() {  # 71) 「整窗在场」只加读数�
   rm -rf "$fx"
   [ "$bad" = "0" ] && ok "在场读数五面有牙：无 pid／探针没热都答未知（不在窗口里编译）、桩探针两态各判对（失败落保守侧）、旧批次缺列明写没采到、混合形状逐态计数"
 }
+
+warm_probe_run() {  # warm_probe_run <uptime 印什么> <它回几> <预热线> ⇒ 印「rc<TAB>话术」
+  # 为什么要这一支：`cond_instance_warm` 住在 `perf_window_gates.sh`，而那层**只被排程器 source**
+  # （selfcheck 进程里本来没有它）。这一层头注写着"`cond_*` 可以被单独 source 来喂夹具"，
+  # 本轮就把这个口子开给最该测的那一条：预热不足与"读不到"都不许放行。
+  local up="$1" urc="$2" line="$3"
+  # 只 source 被测那一层（`warmup_reading_note` 等依赖在 selfcheck 进程里本来就有）。
+  # ⚠ 这一层的头注写明它**读调用方的全局**、且必须在 source 前定义，否则第一次调用就在
+  #   `set -u` 下报未初始化——那是有意的（闸门不许带着默认值放行）。本轮第一版没定义
+  #   `START_BIN` ⇒ 子壳在 source 那一行就死了，症状是"四格全红＋话术空白"：
+  #   **探针坏了长得很像判据坏了**，所以这一格先证"cond 在不在"再怪判据。
+  ( START_BIN="$PWD/dist/Tcoder.app"; export START_BIN
+    source scripts/perf_window_gates.sh
+    STUB_UP="$up"; STUB_RC="$urc"
+    instance_uptime_seconds() { printf '%s' "$STUB_UP"; return "$STUB_RC"; }
+    my_instance_pid() { printf '4242'; }
+    WARMUP_MIN_SECONDS="$line"
+    o=$(cond_instance_warm 2>&1); r=$?
+    printf '%s\t%s' "$r" "$o" )
+}
+
+warm_probe_rc() {  # 取回 rc 那一格
+  local up="$1" urc="$2" line="$3" res; res=$(warm_probe_run "$up" "$urc" "$line")
+  printf '%s' "${res%%	*}"
+}
+
+warm_probe_text() {  # 取回话术那一格
+  local up="$1" urc="$2" line="$3" res; res=$(warm_probe_run "$up" "$urc" "$line")
+  printf '%s' "${res#*	}"
+}
+
+selfcheck_scheduler_waits_for_warmup() {  # 84) 预热这一维排程器要"等"——等不了也要**不放行**（#120）
+  # 现量：`cert15` 那批三趟全被录制档的 context_gate 拒在「被测实例只跑了 5s/6s/7s（线 120s）」，
+  # 排程器自己不等预热 ⇒ 一个稀缺的干净窗口被连烧三次。修法＝`cond_instance_warm`；
+  # 这一项就是它第一条行为级臂（库文件头注那句"下一步的口子，本次先不扩"，本轮开给它）。
+  local bad=0 t
+  [ "$(warm_probe_rc 300 0 120)" = "0" ]     || { fail "跑了 300s（线 120s）仍不放行 ⇒ 排程器会一直等到超时"; bad=1; }
+  [ "$(warm_probe_rc 5 0 120)" != "0" ]     || { fail "只跑 5s 就放行 ⇒ 首扫尾巴又会伪装成稳态心跳（包 35 白做）"; bad=1; }
+  t=$(warm_probe_text 5 0 120)
+  printf '%s' "$t" | grep -qF "预热没够"     || { fail "5s 那一格没印「预热没够」而印了别的 ⇒ 话术与阈值分叉（拿到：$t）"; bad=1; }
+  # **读不到**这一端最要紧：空读数绝不该被当成一个合格窗口
+  [ "$(warm_probe_rc 取不到 1 120)" != "0" ]     || { fail "预热时长读不到却放行 ⇒ 空读数又变成一个合法窗口"; bad=1; }
+  t=$(warm_probe_text 取不到 1 120)
+  printf '%s' "$t" | grep -qF "取不到"     || { fail "读不到那一格没出声 ⇒ 等待与静默通过长得一样（拿到：$t）"; bad=1; }
+  [ "$(warm_probe_rc 5 0 3)" = "0" ]     || fail "WARMUP_MIN_SECONDS=3 时 5s 仍不放行 ⇒ 这一维没读那枚阈值（写死的阈值迟早与判据分叉）"
+  [ "$bad" = "0" ] && ok "排程器对预热是**等**：够才放行、不够与读不到都不放行且各出一句、" \
+                     "阈值跟着 WARMUP_MIN_SECONDS 走（84）"
+}
