@@ -10,6 +10,18 @@
 # 正解还是拆开而不是抬线（本仓这条红线今天是第六次咬到自己）：
 # 链闸三项与显示两项本来就各判各的事——**混在一起时，显示那半坏了会被链闸的绿掩护掉**（盲区第 26 类的镜像）。
 
+chain_clash_line() {  # chain_clash_line <lib> <tree> ⇒ 打印与本树冲突的链（同树或归属不可辨），没有则空
+  # 为什么单立两支都用它：第 56 项的**前提**与「之二」问的是同一个问题（"这棵树上还有别的链吗"），
+  # 各写一遍 `bash -c source…` 就是"同一件事两把手抄尺子"的老账（口径会分叉）。
+  #
+  # 【为什么前提要问它、而不是全机 `pgrep -f perf_wait_window`】#111，2026-09-27：
+  # 上一版夹具的前提是**全机数 argv**，于是别的流在等窗口（并行开发的常态）、或两棵树同时跑 selfcheck，
+  # 这一项就被染红——**夹具的前提比它要测的判据更严，还严在了一个更大的范围上**：
+  # 真判据 `clashing_chains` 是按树归属的。换成问它，红的时候还能顺带印出 pid／树／现场
+  # （旧版只说"有一条在跑"，读的人得自己猜是哪棵树）。
+  CHAIN_TREE="$2" bash -c "source '$1'; clashing_chains" 2>/dev/null
+}
+
 selfcheck_chain_guard_one_per_tree() {  # selfcheck_chain_guard_one_per_tree <outdir>
   # 56) 同树只许一条测量链。触发事件是 §BM 烧掉的那一整批：
   #     trap 等 `sleep` 返回 ⇒ 旧链收尾时把新链刚起的实例按路径「收养」掉，新链整批作废。
@@ -19,9 +31,11 @@ selfcheck_chain_guard_one_per_tree() {  # selfcheck_chain_guard_one_per_tree <ou
   tree=$(cd "$(dirname "$0")/../.." && git rev-parse --show-toplevel)
   mkdir -p "$1/chain" || { fail "建不了反例目录 $1/chain"; return; }
   bad=0
-  # 反例前提：现场必须没有真的链（有就**判红**，不许悄悄 skip——skip 是一项不会痛的假绿）
-  if [ -n "$(pgrep -f 'perf_wait_window\.sh' 2>/dev/null)" ]; then
-    fail "现场已有一条 perf_wait_window 在跑，这一项判不了 ⇒ 判红而不是跳过：等它退出再跑"
+  # 反例前提：现场必须没有真的链（有就**判红**，不许悄悄 skip——skip 是一项不会痛的假绿）。
+  # 问的是**这道闸自己**（按树），不是全机数一遍 argv —— 为什么，见 `chain_clash_line` 的头（#111）。
+  clash=$(chain_clash_line "$lib" "$tree")
+  if [ -n "$clash" ]; then
+    fail "本树现场已有链（判红而不是跳过）：$(printf '%s' "$clash" | tr '\n' ' ')⇒ 等它退出再跑"
     return
   fi
   # 之一：场上没有别的链 ⇒ 必须放行（恒拒的闸看起来最尽职，所以这条不可省）
@@ -31,14 +45,16 @@ selfcheck_chain_guard_one_per_tree() {  # selfcheck_chain_guard_one_per_tree <ou
   ( cd "$tree" && exec bash -c 'exec -a perf_wait_window.sh sleep 6' ) >/dev/null 2>&1 &
   fake=$!
   sleep 1
-  clash=$(CHAIN_TREE="$tree" bash -c "source '$lib'; clashing_chains" 2>/dev/null)
+  clash=$(chain_clash_line "$lib" "$tree")
   case "$clash" in
     *"$fake"*) : ;;
     *) fail "假链 pid=$fake 没被认出来（实得「$clash」）⇒ 归属判据看不见自己起的链，闸等于没装"; bad=1 ;;
   esac
   kill -TERM "$fake" 2>/dev/null; wait "$fake" 2>/dev/null
-  [ -z "$(pgrep -f 'perf_wait_window\.sh' 2>/dev/null)" ] \
-    || { fail "假链没收干净 ⇒ 下一次 selfcheck 会被自己上一条残迹判红"; bad=1; }
+  # 收尾只查**自己那枚 pid**（#111 同因）：旧版"全机再数一遍"会把别人的真链算成我的残迹。
+  # 断言的主体是"这个夹具自己留没留东西"，尺子就该量那个 pid——**不是放宽**：自己留的同名进程照样红。
+  kill -0 "$fake" 2>/dev/null \
+    && { fail "假链 pid=$fake 没收干净 ⇒ 下一次 selfcheck 会被自己上一条残迹判红"; bad=1; }
   # 之三：显式放行口必须**出声**（跨闸不许静默）
   rc=$(ALLOW_CONCURRENT_CHAIN=1 CHAIN_TREE="$tree" bash -c "source '$lib'; refuse_second_chain 2>&1" 2>/dev/null)
   case "$rc" in *"ALLOW_CONCURRENT_CHAIN"*) : ;;
