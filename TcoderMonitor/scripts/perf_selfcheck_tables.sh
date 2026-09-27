@@ -296,9 +296,8 @@ PYCHK
 }
 
 selfcheck_cadence_verdict_lands_in_the_batch() {  # 88) 判据① 的判定要落进批次产物，不是只打一次 stdout（#123）
-  # 现场：真人滚 3×30 秒是判据① 唯一合法的取证出口（AGENTS §2.2 禁自动化），窗口极稀缺；
-  # 而 `perf_report.sh` 那两行把节拍尺的判定打成 stdout 的最后 7 行还 `|| true` ⇒ 拍完仍然没有持久证据。
-  # 现在 `land_cadence_verdict` 在**录制当时**就落 `cadence.txt` ＋ `cadence-verdict.txt`，三态齐：
+  # 现场：真人滚 3×30 秒是判据① 唯一合法的取证出口（AGENTS §2.2 禁自动化），窗口极稀缺，
+  # 而旧写法把判定打成 stdout 的最后 7 行还 `|| true` ⇒ 拍完仍然没有持久证据。现在 `land_cadence_verdict` 在**录制当时**就落 `cadence.txt` ＋ `cadence-verdict.txt`，三态齐：
   # 达标／未达标／**未采到**（缺 `hitches-renders.xml` 也要写，"没输入"不许被读成"过了"）。
   local res fx
   res=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '

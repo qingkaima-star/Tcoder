@@ -173,9 +173,8 @@ start_synth_input() {  # 闸门之后、开录之前才投；投递必须盖住*
 # =============================================================================
 cmd_idle() {
   local out="${1:-$SCRATCH/tcoder-perf-$REV}"
-  # period 决定这一批读数**有资格回答哪个问题**：idle 只能答"心跳期"，T1（交互期 hitch=0）
-  # 只认 period=interaction 的样本。写进 meta 是为了让 report 阶段还能看见它——
-  # 否则过两天没人记得当时到底碰没碰鼠标，就会拿心跳期的数去交交互期的结论。
+  # period 决定这一批读数**有资格回答哪个问题**：idle 只答"心跳期"，T1（交互期 hitch=0）只认 period=interaction。
+  # 写进 meta 是让 report 阶段还看得见它——否则过两天没人记得当时碰没碰鼠标，会拿心跳期的数去交交互期的结论。
   local period="${PERIOD:-idle}"
   PERIOD="$period"   # 让 preflight / 收尾复核这些被调函数看得见同一档，不靠调用点的隐式作用域
   [ "$period" = "interaction" ] \
