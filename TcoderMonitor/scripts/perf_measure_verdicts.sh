@@ -12,6 +12,75 @@
 # （函数级 ≤50 行／CC<16 那两把尺），否则"拆"本身变成免检通道。
 # =============================================================================
 
+record_probe_schema() {  # record_probe_schema <模板名> → 该档用来验产物的那张表名
+  # 为什么从模板派生而不是调用方各写一份：`record_bounded` 有两个 caller（hitches / time-profile），
+  # 写死的第二份迟早与模板分叉——而分叉的方向永远是"探测错了表 ⇒ 可用的样本被判成挂死"。
+  case "$1" in
+    *Hitches*|*hitches*) echo hitches ;;
+    *)                   echo time-profile ;;
+  esac
+}
+
+trace_probe_usable() {  # trace_probe_usable <trace> <schema> <探针落盘名> → 0 产物能导出该表格（**零行也算**）
+  # 【#121 的判据】墙钟到点不等于没采到：本机实测 `Animation Hitches` 录 20 s，
+  # finalize 会花掉几分钟（原始 trace 一度 14 GB），而**那趟数据是完整的**——
+  # `cert16-idle-run1` 被我按墙钟砍掉之后，手动导出仍然成功，`hitches` 表 1010 B／0 行
+  # ＝「零卡顿」的正常形状（与 cert9a-idle-run1 那枚好样本同尺寸）。
+  # 只看时钟判挂死 ⇒ 这台机器上**永远拿不到判据② 的样本**（本次实测 3/3 全被判废）。
+  # ⇒ 到点之后**先看产物再判**：能导出表格就照常走导表那一步；导不出（或干脆没有 trace）才判废。
+  # ⚠ 探测自己也要有墙钟，否则只是把挂死从录制挪到探测；且只收自己 spawn 的那个 pid。
+  local trace="$1" schema="$2" probe="$3" pid rc=0 waited=0
+  [ -e "$trace" ] || return 1     # 假 xcrun 那几格根本不会造 trace ⇒ 不启动探测器，旧行为原样
+  xcrun xctrace export --input "$trace" \
+      --xpath "/trace-toc/run[@number=\"1\"]/data/table[@schema=\"$schema\"]" \
+      --output "$probe" >/dev/null 2>&1 &
+  pid=$!
+  while [ "$waited" -lt "${PROBE_BOUND_S:-90}" ]; do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 2; waited=$((waited + 2))
+  done
+  if kill -0 "$pid" 2>/dev/null; then kill -TERM "$pid" 2>/dev/null; rc=1; fi
+  wait "$pid" 2>/dev/null || rc=1
+  if [ -s "$probe" ] && grep -q "<schema" "$probe"; then
+    rc=0
+  else
+    rc=1
+  fi
+  rm -f "$probe"
+  return "$rc"
+}
+
+record_wait_loop() {  # record_wait_loop <outdir> <采集 pid> <墙钟秒> → 印实际等了多久
+  # 从 `record_bounded` 里抽出来是因为那个函数加进"判产物"这一枝之后顶到 59 行，
+  # 而本仓「函数 ≤50 行」那把尺第十五轮刚红过两条（卷十三 §212）——拆函数，不抬线。
+  # 循环本来就每 `RECORD_POLL_S` 秒在窗口内醒一次 ⇒ 顺手采一发整机负载：
+  # 没有这一发，闸门只看得到"起窗前"和"收窗时"两个点，中段起的那趟编译看不见（§AP）。
+  local out="$1" pid="$2" limit="$3" waited=0
+  while [ "$waited" -lt "$limit" ]; do
+    kill -0 "$pid" 2>/dev/null || break     # kill -0 只探活，不发信号
+    sleep "$RECORD_POLL_S"; waited=$((waited + RECORD_POLL_S))
+    load_sample_once "$out" "$pid" "$PID"
+  done
+  printf '%s' "$waited"
+}
+
+wallclock_verdict() {  # wallclock_verdict <outdir> <trace> <模板> <卡住秒> <墙钟秒> → 0 产物可用／1 判废
+  # 【#121：墙钟到点之后，判废要由产物说话】墙钟是 #14 为"永等 72 分钟"造的，但本机
+  # `Animation Hitches` 录 20 s 的 **finalize 就要几分钟**（原始 trace 一度 14 GB），
+  # 于是"到点"与"没采到"被同一把尺混判——2026-09-27 实测 `cert16` 三趟全被判废，
+  # 而被砍掉那趟的 trace 手动导出仍然成功（`hitches` 表在、0 行＝零卡顿的正常形状）。
+  # ⇒ 时钟只负责"停下来看"；导不出表格（或压根没有 trace）才真是挂死。
+  local out="$1" trace="$2" template="$3" stuck="$4" limit="$5" schema
+  schema=$(record_probe_schema "$template")
+  if trace_probe_usable "$trace" "$schema" "$out/.trace-probe.xml"; then
+    echo "    ✓ 墙钟到点（${stuck}s）但产物已能导出 $schema 表格 ⇒ 不判挂死，照常走导表那一步"
+    echo "      （finalize 比墙钟慢 ≠ 没采到；判据见 #121，常驻臂 selfcheck 第 85 项四格）"
+    return 0
+  fi
+  refuse_sample "$out" "这一趟判废：xctrace 未在墙钟上限 ${limit}s 内自行停表（挂死 ${stuck}s），且产物里导不出 $schema 表格。"
+  return 1
+}
+
 refuse_sample() {  # refuse_sample <outdir> <原因…>：一趟当场自认没采到数
   # 形状与上面那道上下文闸门一致（同一个 `REFUSED` 文件、同一个读者）：
   # `usable_sample` 与 `perf_trio_agreement` 都按这个文件跳趟。

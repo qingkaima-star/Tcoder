@@ -64,9 +64,13 @@ while :; do
       return 0
     fi
     if [ "$waited" -ge "$DEADLINE_SECS" ]; then
+      # 条件函数自己的缩进是写给"单独占一行"的，拼进这句就变成双层缩进、
+      # 一句话读到一半换了行（09-27 实测日志）。⇒ 拼句之前先削掉行首空白。
+      reason="${reason#"${reason%%[![:space:]]*}"}"
       echo "!! 等了 ${DEADLINE_SECS}s 仍未等到「$what」（最后一次：$reason）——放弃，不绕闸、不采脏样本"
       return 1
     fi
+    reason="${reason#"${reason%%[![:space:]]*}"}"
     [ "$waited" -eq 0 ] && echo "    … 还没等到「$what」（$reason），每 ${POLL}s 再看一次"
     sleep "$POLL"; waited=$((waited + POLL))
   done
