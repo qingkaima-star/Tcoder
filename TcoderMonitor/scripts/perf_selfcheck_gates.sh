@@ -232,56 +232,52 @@ selfcheck_heavy_jobs_probe() {  # selfcheck_heavy_jobs_probe <outdir>
     || fail "探针不再认识这些重活：${missing# }——全量门禁在跑时会被读成机器空"
 }
 
-selfcheck_gate_matrix() {  # selfcheck_gate_matrix <outdir>
-  # 17) 七维闸门合成矩阵：喂一份"全合格"的假上下文，要求
-  #     ① 全合格 ⇒ 放行；② 每一维单独破坏 ⇒ 拒。
-  #     为什么必须有：前五维各自都修过一次 bug，但没有一个测试证明"闸门既能放行也会拒"。
-  #     恒拒（前台名比错）与恒放行（探针函数不在场）都不报错，只能靠这张矩阵抓。
-  if ! declare -f preflight_gates >/dev/null; then
-    fail "preflight_gates 不在作用域里——这张矩阵没跑"
-    return
-  fi
-  local head_sha hard_all=0
-  head_sha=$(git rev-parse HEAD 2>/dev/null)
+gate_matrix_fixture() {  # gate_matrix_fixture <outdir> <head_sha> → stdout 夹具目录（成功）／拒因（失败）
   # 【身份维的现场必须自带，不能吃宿主的构建产物】#110，2026-09-27 实测：
   # selfcheck 是被 `perf_harness.sh` **source 进同一进程**的，而 harness 把 `PERF_BIN` 默认成
   # `$PWD/dist/Tcoder.app/…` ⇒ 上一版在**没建过 release 产物的树**里跑，这一项的"全合格⇒放行"
   # 直接判红，话术还是"造出一条永远不可能通过的闸门"（**假红，且挡的是别人的门禁**）。
   # 反过来，在有产物的树里它又只覆盖"配对放行"这一向——错配那一向从来没被钉过。
-  # 夹具自带两枚文件（内容不同的 A/B）＋一份只记 A 的 manifest，两个方向就都有常驻臂了。
-  local fixdir="$1/provenance-fixture" saved_bin="${TARGET_BINARY:-}" \
-        saved_pbin="${PERF_BIN:-}" saved_manifest="${PROVENANCE_MANIFEST:-}"
-  if ! { mkdir -p "$fixdir" && printf 'fixture-A\n' > "$fixdir/bin" \
-           && printf 'fixture-B\n' > "$fixdir/bin-mismatch"; }; then
-    fail "建不出身份维夹具（$fixdir）——这一项等于没跑，别把矩阵当覆盖"
-    return
-  fi
-  PROVENANCE_MANIFEST="$fixdir/manifest.env"
-  { printf 'TCODER_GIT_REVISION="%s"\n' "$head_sha"
-    printf 'TCODER_BINARY_SHA256="%s"\n' "$(shasum -a 256 "$fixdir/bin" | cut -d' ' -f1)"
-  } > "$PROVENANCE_MANIFEST" \
-    || { fail "写不出夹具 manifest（$PROVENANCE_MANIFEST）"; PROVENANCE_MANIFEST="$saved_manifest"; return; }
-  # 一份"全合格"的上下文（各维取数都是本文件的 local，动态作用域里直接覆盖）
-  gate_feed() {
-    others=""; BUILD_REV="$head_sha"; BUILD_CLEAN="true"; front="Tcoder"
-    visible="有在屏窗口（Tcoder）"; load1=3; cores=15; quiet=30; qline="静默=30s"
-    other_detail=""
-    COEXIST=1; SECONDS_HITCHES=20; SECONDS_TP=25; i18n_ledger=""
-    BUILD_TREE=""; HEAD_TREE=""; hard=0; free_gib=400
-    TARGET_BINARY="$fixdir/bin"     # 内容对账那一向：现场自带，不读宿主的 dist（见上）
-  }
+  # 所以这里自带两枚**内容不同**的假产物（A／B）＋一份只记 A 的 manifest：两个方向从此都有常驻臂。
+  # 走 stdout 回传目录（调用方形如 `x=$(…)`），失败时同一路上回拒因——留痕必须在 stdout 里才出得了子 shell。
+  local dir="$1/provenance-fixture"
+  { mkdir -p "$dir" && printf 'fixture-A\n' > "$dir/bin" \
+      && printf 'fixture-B\n' > "$dir/bin-mismatch"; } \
+    || { printf '建不出身份维夹具（%s）' "$dir"; return 1; }
+  { printf 'TCODER_GIT_REVISION="%s"\n' "$2"
+    printf 'TCODER_BINARY_SHA256="%s"\n' "$(shasum -a 256 "$dir/bin" | cut -d' ' -f1)"
+  } > "$dir/manifest.env" \
+    || { printf '写不出夹具 manifest（%s/manifest.env）' "$dir"; return 1; }
+  printf '%s' "$dir"
+}
+
+gate_feed() {  # 一份"全合格"的上下文。取数用的 `head_sha`／`fixdir` 都是**调用方的 local**
+  # （bash 动态作用域穿得过这层调用）——所以这个函数只许在 `selfcheck_gate_matrix` 的作用域里调，
+  # 单另调用它拿到的是空值，那不是"全合格"而是"喂了个寂寞"。
+  others=""; BUILD_REV="$head_sha"; BUILD_CLEAN="true"; front="Tcoder"
+  visible="有在屏窗口（Tcoder）"; load1=3; cores=15; quiet=30; qline="静默=30s"
+  other_detail=""
+  COEXIST=1; SECONDS_HITCHES=20; SECONDS_TP=25; i18n_ledger=""
+  BUILD_TREE=""; HEAD_TREE=""; hard=0; free_gib=400
+  TARGET_BINARY="$fixdir/bin"     # 内容对账那一向：现场自带，不读宿主的 dist（见 `gate_matrix_fixture`）
+}
+
+gate_matrix_identity_rows() {  # 归属那一族的四行：放行一次、判拒三次（rev／脏／内容错配）
   gate_feed; preflight_gates >/dev/null 2>&1
   [ "$hard" = "0" ] || { fail "六维全合格却被拒 ⇒ 又造出一条永远不可能通过的闸门"; hard_all=1; }
   # 内容与 manifest 对不上 ⇒ 必须拒。这一行是 §195 未闭① 的常驻臂：
   # 上一版只有"配对放行"被量到过（还是靠宿主的 dist 恰好自洽），装配层从没钉过拒的那一向。
   gate_feed; TARGET_BINARY="$fixdir/bin-mismatch"; preflight_gates >/dev/null 2>&1
   [ "$hard" = "1" ] || { fail "被量的二进制内容与 manifest 记的不符却放行 ⇒ #107 那条假绿通道在装配层没闸"; hard_all=1; }
-  gate_feed; others="1234";   preflight_gates >/dev/null 2>&1
-  [ "$hard" = "1" ] || { fail "有并发重活却放行"; hard_all=1; }
   gate_feed; BUILD_REV=$(printf 'f%.0s' $(seq 1 40)); preflight_gates >/dev/null 2>&1
   [ "$hard" = "1" ] || { fail "产物 rev 与代码不符却放行（归错对象那一族的入口）"; hard_all=1; }
   gate_feed; BUILD_CLEAN="false"; preflight_gates >/dev/null 2>&1
   [ "$hard" = "1" ] || { fail "构建时工作树是脏的却放行"; hard_all=1; }
+}
+
+gate_matrix_environment_rows() {  # 机器与环境那六行：并发重活／前台／load／台账开关／盘（含空值）
+  gate_feed; others="1234";   preflight_gates >/dev/null 2>&1
+  [ "$hard" = "1" ] || { fail "有并发重活却放行"; hard_all=1; }
   gate_feed; front="Finder";  preflight_gates >/dev/null 2>&1
   [ "$hard" = "1" ] || { fail "前台不是被测 App 却放行"; hard_all=1; }
   gate_feed; load1=99;        preflight_gates >/dev/null 2>&1
@@ -292,6 +288,29 @@ selfcheck_gate_matrix() {  # selfcheck_gate_matrix <outdir>
   [ "$hard" = "1" ] || { fail "盘只剩 3 GiB 还放行——盘满时 trace 写不进去，样本会静默变形"; hard_all=1; }
   gate_feed; free_gib="";   preflight_gates >/dev/null 2>&1
   [ "$hard" = "1" ] || { fail "磁盘可用取不到（空值）却放行——取不到必须按不合格处理"; hard_all=1; }
+}
+
+selfcheck_gate_matrix() {  # selfcheck_gate_matrix <outdir>
+  # 17) 七维闸门合成矩阵：喂一份"全合格"的假上下文，要求
+  #     ① 全合格 ⇒ 放行；② 每一维单独破坏 ⇒ 拒。
+  #     为什么必须有：前五维各自都修过一次 bug，但没有一个测试证明"闸门既能放行也会拒"。
+  #     恒拒（前台名比错）与恒放行（探针函数不在场）都不报错，只能靠这张矩阵抓。
+  #     行本身按"归属／环境"分成两个函数（不是为分数拆：这一项上一版 65 行、CC 17，
+  #     被**尺子自己的**「≤50 行／CC<16」那条门当场判红过——拆行才是修复，抬线不是）。
+  if ! declare -f preflight_gates >/dev/null; then
+    fail "preflight_gates 不在作用域里——这张矩阵没跑"
+    return
+  fi
+  local head_sha hard_all=0 fixdir saved_bin="${TARGET_BINARY:-}" \
+        saved_pbin="${PERF_BIN:-}" saved_manifest="${PROVENANCE_MANIFEST:-}"
+  head_sha=$(git rev-parse HEAD 2>/dev/null)
+  if ! fixdir=$(gate_matrix_fixture "$1" "$head_sha"); then
+    fail "身份维夹具建不出来：${fixdir}——这一项等于没跑，别把矩阵当覆盖"
+    return
+  fi
+  PROVENANCE_MANIFEST="$fixdir/manifest.env"
+  gate_matrix_identity_rows
+  gate_matrix_environment_rows
   # 夹具动过的是**全局**（`gate_feed` 里是裸赋值，动态作用域穿过去）⇒ 不还回去，
   # 后面的项会读到"被量的产物是我那枚 10 字节的假文件"。
   TARGET_BINARY="$saved_bin"; PERF_BIN="$saved_pbin"; PROVENANCE_MANIFEST="$saved_manifest"
