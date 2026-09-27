@@ -340,13 +340,21 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
     实际 `role(for:)` 返回 `static let`、`.textColor` 读的是 init 里算好的 `let color`——
     **去做这趟只会把 62 抬成 54 而运行时一个字节都不省，是假还债。**
     所以五条禁则的终点并不一样：
-    | 规则 | 现量/上限（2026-09-22 复扫） | 终点 | 为什么 |
-    |---|---|---|---|
-    | `directFormatters` | 1/1 | **0** | 真违规：渲染路径里现造 formatter |
-    | `dynamicColorConstruction` | 2/2 | **0** | 真违规：渲染路径里现造动态色（2026-09-22 起才有尺子；归 UI 流） |
-    | `fullSort` | 9/9 | **0** | 真违规：body 内全量排序（缓存或挪到 publish） |
-    | `syncFileIO` | 2/2 | **0** | 真违规：body 内 `exists`/`attributesOfItem` |
-    | `tokenReference` | 62/**下限 40** | **不是 0，也不是债**（#68 起它是**读数**，住 `PerfHitchGuardTests+Readings.swift`）。取色本身没错，错的是"每次访问现造"。⚠ 2026-09-22~09-25 期间它曾以 `62/62` 零余量**上限**的形式留在债表里，于是"body 里新写一处正确的令牌取色"会被门禁打红——那正是这条拆分的初衷的反面，机制与注释互相矛盾了三天。达标判据仍是两件事：① `Design/**` 里不许再出现 `var color: Color {` 这类计算属性（已有守卫）；② 引用点不许嵌在 O(n) 循环 / Mark 闭包里重复求值（**这条靠人工核，不靠上限**——上限只会拦错方向）。 |
+    | 规则 | 终点 | 为什么 |
+    |---|---|---|
+    | `directFormatters` | **0** | 真违规：渲染路径里现造 formatter |
+    | `dynamicColorConstruction` | **0** | 真违规：渲染路径里现造动态色（2026-09-22 起才有尺子；归 UI 流） |
+    | `fullSort` | **0** | 真违规：body 内全量排序（缓存或挪到 publish）。**两种写法都算**（#131）：`x.sorted(…)` / `x.sorted {…}` 与就地 `x.sort(…)` / `x.sort {…}`——"排一次全量"这个动作与它落在新数组还是原地无关 |
+    | `syncFileIO` | **0** | 真违规：body 内 `exists`/`attributesOfItem`/写盘/起子进程那一族 |
+    | `syncPrefs` | **0** | 真违规：body 内 `UserDefaults`/`CFPreferences`/`PropertyListSerialization`（§177 实测它在首帧后的主线程栈里占 40%） |
+    | `tokenReference` | **不是 0，也不是债**（#68 起它是**读数**，现量住守卫自己那一行） | 取色本身没错，错的是「每次访问现造」。⚠ 2026-09-22~09-25 期间它曾以零余量**上限**的形式留在债表里，于是「body 里新写一处正确的令牌取色」会被门禁打红——那正是这条拆分的初衷的反面，机制与注释互相矛盾了三天。达标判据仍是两件事：① `Design/**` 里不许再出现 `var color: Color {` 这类计算属性（已有守卫）；② 引用点不许嵌在 O(n) 循环 / Mark 闭包里重复求值（**这条靠人工核，不靠上限**——上限只会拦错方向）。 |
+
+    ⚠ **这张表刻意不再抄"现量/上限"那两个数**（第 37 类：数抄进文档那天起就开始倒计时）。
+    上一版抄的是 `fullSort 9/9`、`syncFileIO 2/2`，而守卫现量已是 `8/8` 与 `1/1`（§170 拧过一次上限、
+    #72 还掉一处豁免）——**文档说 9、尺子说 8，两边各自都自洽，没人会红**。
+    现量与上限唯一住处是守卫自己那一行：跑 `PerfHitchGuardTests` 会印
+    「【渲染路径禁则】现量/上限 —— …」；**规则名与终点的对账由 `testSpecRuleTableNamesEveryRule` 钉**
+    （新加一条禁则而不写进这张表、或表里留着已改名的旧规则，当场红）。
     **不许为了凑"零动态色"去删令牌引用**——那会同时砸掉观感一致性与 T8（颜色承载语义），
     属于"为了指标改语义"，是本规范第一条禁止的事。
 - **T6 合成层预算**：内容层 0 填充、投影只给 `.floating`、每屏材质/backdrop 层 ≤ 2。
@@ -382,7 +390,7 @@ dl.remove(from: RunLoop.main, forMode: .common); dl.invalidate()
    | 交互期 **hitch 帧 = 0** | xctrace `hitches` 表（`interact` 档） | 它只列**超预算**的那些帧 |
    | **p95 帧间隔 ≤ 8.4 ms** | **只有 `FramePulse`**（`pulse` 档 / `probe` 档） | 这是**全部帧**的分位数；hitches 表没有这一列，`displayed-surfaces-per-second` 也只有"每秒几张"——09-22 之前这条**没有任何仪器在量** |
    | 1.5 s 心跳主线程占用 ≤ 4.0 ms | xctrace `hitches-updates`（`idle` 档） | 逐次 update 时长；只用 max 判会同时说反两件事（见 §1.6） |
-   | body/Mark 零动态色/零排序/零同步 I/O | 静态守卫 `PerfHitchGuardTests` + 台账 | 每条打"现量/上限"并逐条可点名。**这句的真实射程（#65，09-25 写死）**：跨度只认 `var body: some View` 与 `Chart { … }`；helper 跳展开**只在同一份文件内**；词表认的是那几类形状（09-25 起含 `resolvingSymlinksInPath()` 与 `Process(`/`NSTask(`）。⇒ 它答的是"**渲染跨度内**没有这些写法"，**不答**"主线程在任何地方都没打过盘"——后者由 §D-持久化 那条量级尺与 T2/T4 的实测管 |
+   | body/Mark 零动态色/零排序/零同步 I/O | 静态守卫 `PerfHitchGuardTests` + 台账 | 每条打"现量/上限"并逐条可点名。**这句的真实射程（#65，09-25 写死）**：跨度只认 `var body: some View` 与 `Chart { … }`；helper 跳展开**只在同一份文件内**；词表认的是那几类形状（09-25 起含 `resolvingSymlinksInPath()` 与 `Process(`/`NSTask(`；09-27 起 `syncFileIO` 还含写盘那一族，`fullSort` **两种写法都认**——`.sorted(` / `.sorted {` 与就地 `.sort(` / `.sort {`，见 #131）。⇒ 它答的是"**渲染跨度内**没有这些写法"，**不答**"主线程在任何地方都没打过盘"——后者由 §D-持久化 那条量级尺与 T2/T4 的实测管 |
 
    ⇒ 交叉核对的义务：`pulse` 读的是 **CVDisplayLink 回调送达时刻**，不等于"上屏时刻"。
    同一次 `interact` 采样里的 `displayed-surfaces-per-second` 是独立第二把尺子
