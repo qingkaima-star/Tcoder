@@ -58,9 +58,28 @@ cmd_selfcheck() {
   items_ruler_shapes "$out"
   items_gates "$out"
   items_sample_eligibility "$out"
+  items_measurement_verdicts "$out"
 
   echo "◇ selfcheck：$checked 项通过，$fails 项失败（产物 $out）"
   [ "$fails" -eq 0 ] || die "尺子坏了 $fails 项——修尺子，别改读数"
+}
+
+# 【为什么单开一群】`items_sample_eligibility` 到本轮涨到 **51 行**，被
+# `PerfRulerHotspotRatchetTests.testRulerFunctionsStayBelowTheComplexityBar` 判红（线是 ≤50）。
+# 本仓规约是**拆，不抬线** ⇒ 把 69 之后的臂搬进这一群：原那一群管 20..52，
+# 这一群管 69..83（产物定位、在场读数、threads 两档、九页取证、覆盖闸门、三张表对齐）。
+items_measurement_verdicts() {  # items_measurement_verdicts <outdir> —— 69..83 读数、行为级臂与覆盖闸门
+  item selfcheck_presence_reading_is_honest "$out"  # 71) 整窗在场只是读数：无 pid／探针没热答未知、桩探针两态、缺列明写没采到（#53 裁 C）
+  item selfcheck_ledger_binding_reads_the_real_ledger "$out"  # 72) 台账装订层在真文档上全绿，且"数到几本"由尺自己出声（分母<10 判错）
+  item selfcheck_ledger_binding_names_each_blemish "$out"  # 73) 五种坏形状各红一次并点名：缺指路行、双前缀、假节号造成跨卷重复、同卷重复节号、集体看不见（卷十 §165；同卷重复那一臂是 §174 补的）
+  item selfcheck_trio_false_reject_counts_are_exact "$out"  # 74) 打回率尺：三分类要数得准（2/2/0 与 1/0/3）、喂不够趟数不出数、caveat 不许掉（#53 裁定材料）
+  item selfcheck_threads_window_grill "$out"  # 75) threads 尺的窗口切片：全窗自称全窗、筛得对、零命中说「窗口选错」、反向区间拒、认不到执行体要出声（#96／#98，它此前只有形状守卫点名、没有行为级臂）
+  item selfcheck_mutation_teeth_are_proved "$out"  # 78) 反例自己也要被反证：正控制走绿、sed 落空要喊、改了报告不读的那一行也要喊（卷十二 §185→§186，反例造法从 /tmp 搬进门禁）
+  item selfcheck_capture_verdicts_have_teeth "$out"  # 80) 九页取证的三条判据都要有后果：字节相同判败、0 字节截图不充进"页齐"、拍砸页数非零判败（#116／§207；旧写法只印不判，且空文件会被 ls 数进 N）
+  item selfcheck_threads_root_frame "$out"  # 81) 入口根帧不许顶「热点第一名」：底盘名单按字面量认会被自家一次改名废掉，比例兜底又量不到 94.1 %（#118／§211）
+  item selfcheck_criterion2_gate "$out"  # 82) 缺判据② 那一族表的一趟不许算落定：只有 time-profile 的 run2 形状判废并归 empty_tables（#117／§212）
+  item selfcheck_criterion2_count_and_token "$out"  # 83) 「含 ② 表 M 趟／缺整族 K 趟」数得准，且分类词由写者与读者共用一枚常量（换一个词当场降级成 other，#117＋#119）
+  item selfcheck_arms_are_all_wired "$out"  # 79) 三张表对齐：盘上块 ↔ `_part` 名单 ↔ 臂的调用点（拆文件最容易掉臂，而两种掉法都不报错）
 }
 
 # -----------------------------------------------------------------------------
@@ -151,17 +170,6 @@ items_sample_eligibility() {  # items_sample_eligibility <outdir> —— 20..30 
   item selfcheck_artifact_locator_fork_honest "$out"  # 68) 同名产物分在三处时按形状说对话（互补／包含），不许替人挑一份（#89，清树的前置）
   item selfcheck_artifact_locator_names_the_tree_copy "$out"  # 69) 分叉里点名本树那一份：它是 report／一致性尺唯一认得的（换树不冒这句）
   item selfcheck_locator_census_counts_only_batches "$out"  # 70) 「数了几批」由尺答：夹具树里的合成 -runN 不进批次分母、容器第二层算数、空根要判错（#90）、家族外但形状像批次的要出声（#95）
-  item selfcheck_presence_reading_is_honest "$out"  # 71) 整窗在场只是读数：无 pid／探针没热答未知、桩探针两态、缺列明写没采到（#53 裁 C）
-  item selfcheck_ledger_binding_reads_the_real_ledger "$out"  # 72) 台账装订层在真文档上全绿，且"数到几本"由尺自己出声（分母<10 判错）
-  item selfcheck_ledger_binding_names_each_blemish "$out"  # 73) 五种坏形状各红一次并点名：缺指路行、双前缀、假节号造成跨卷重复、同卷重复节号、集体看不见（卷十 §165；同卷重复那一臂是 §174 补的）
-  item selfcheck_trio_false_reject_counts_are_exact "$out"  # 74) 打回率尺：三分类要数得准（2/2/0 与 1/0/3）、喂不够趟数不出数、caveat 不许掉（#53 裁定材料）
-  item selfcheck_threads_window_grill "$out"  # 75) threads 尺的窗口切片：全窗自称全窗、筛得对、零命中说「窗口选错」、反向区间拒、认不到执行体要出声（#96／#98，它此前只有形状守卫点名、没有行为级臂）
-  item selfcheck_mutation_teeth_are_proved "$out"  # 78) 反例自己也要被反证：正控制走绿、sed 落空要喊、改了报告不读的那一行也要喊（卷十二 §185→§186，反例造法从 /tmp 搬进门禁）
-  item selfcheck_capture_verdicts_have_teeth "$out"  # 80) 九页取证的三条判据都要有后果：字节相同判败、0 字节截图不充进"页齐"、拍砸页数非零判败（#116／§207；旧写法只印不判，且空文件会被 ls 数进 N）
-  item selfcheck_threads_root_frame "$out"  # 81) 入口根帧不许顶「热点第一名」：底盘名单按字面量认会被自家一次改名废掉，比例兜底又量不到 94.1 %（#118／§211）
-  item selfcheck_criterion2_gate "$out"  # 82) 缺判据② 那一族表的一趟不许算落定：只有 time-profile 的 run2 形状判废并归 empty_tables（#117／§212）
-  item selfcheck_criterion2_count_and_token "$out"  # 83) 「含 ② 表 M 趟／缺整族 K 趟」数得准，且分类词由写者与读者共用一枚常量（换一个词当场降级成 other，#117＋#119）
-  item selfcheck_arms_are_all_wired "$out"  # 79) 三张表对齐：盘上块 ↔ `_part` 名单 ↔ 臂的调用点（拆文件最容易掉臂，而两种掉法都不报错）
 }
 
 # 反例分块（每块一个文件，宿主只留编排）：那个 for 必须在 cmd_selfcheck 之前，
