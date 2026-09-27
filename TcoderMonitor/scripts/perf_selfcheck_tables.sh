@@ -294,3 +294,54 @@ PYCHK
   [ "$r" = "True|True|True|True" ] || { fail "app-update 口径四形状没各判对（拿到 $r）⇒ 又会变成『两处入口两个数』"; return; }
   ok "app-update 一个口径：sidecar 与汇总表同 n、双行收成事件、按值并不许少计、回落不再截 40"
 }
+
+selfcheck_cadence_verdict_lands_in_the_batch() {  # 88) 判据① 的判定要落进批次产物，不是只打一次 stdout（#123）
+  # 现场：真人滚 3×30 秒是判据① 唯一合法的取证出口（AGENTS §2.2 禁自动化），窗口极稀缺，
+  # 而旧写法把判定打成 stdout 的最后 7 行还 `|| true` ⇒ 拍完仍然没有持久证据。现在 `land_cadence_verdict` 在**录制当时**就落 `cadence.txt` ＋ `cadence-verdict.txt`，三态齐：
+  # 达标／未达标／**未采到**（缺 `hitches-renders.xml` 也要写，"没输入"不许被读成"过了"）。
+  local res fx
+  res=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+import os, tempfile
+from perf_cadence import main as cadence_main
+
+def xml(path, step_ns, n=1500):
+    # 夹具形状照第 35 项那份（生产解析器按 id 建表回查：没有全局唯一 id 会静默解析成 0 帧）
+    rows = "".join(
+        "<row><start-time id=\"%d\" fmt=\"s\">%d</start-time>"
+        "<duration id=\"%d\" fmt=\"d\">3000000</duration></row>"
+        % (2 * i + 1, i * step_ns, 2 * i + 2) for i in range(n))
+    open(path, "w", encoding="utf-8").write("<table><schema name=\"hitches-renders\"/>%s</table>" % rows)
+
+d = tempfile.mkdtemp()
+ok_d, lo_d = [os.path.join(d, x) for x in ("ok", "lo")]
+for x in (ok_d, lo_d):
+    os.makedirs(x)
+xml(os.path.join(ok_d, "hitches-renders.xml"), 8333333)     # 精确 8.3333 ms ⇒ 两把预算都过
+xml(os.path.join(lo_d, "hitches-renders.xml"), 8500000)      # 8.5 ms ⇒ 名义不过、实测过
+# `main()` 自己会往 stdout 打整份报告 ⇒ 不接住它，臂的复合读数会被报告行淹没（第一版就栽在这）。
+import contextlib, io as _buf
+buf = _buf.StringIO()
+with contextlib.redirect_stdout(buf):
+    rc_ok = cadence_main([os.path.join(ok_d, "hitches-renders.xml"),
+                          "--verdict-out", os.path.join(ok_d, "v.txt")])
+    rc_lo = cadence_main([os.path.join(lo_d, "hitches-renders.xml"),
+                          "--verdict-out", os.path.join(lo_d, "v.txt")])
+def read(p):
+    return open(p, encoding="utf-8").read() if os.path.exists(p) else ""
+v_ok, v_lo = read(os.path.join(ok_d, "v.txt")), read(os.path.join(lo_d, "v.txt"))
+print("%d|%d|%s|%s|%s" % (rc_ok, rc_lo,
+      "全过" if ("未达标" not in v_ok and "退出码 0" in v_ok) else "杂",
+      "分歧" if ("名义(120Hz)预算 8.417 ms：p95 **未达标**" in v_lo and "实测周期预算" in v_lo) else "缺",
+      "带码" if "退出码" in v_ok else "没码"))')
+  [ "$res" = "0|1|全过|分歧|带码" ] \
+    || { fail "判定没落到文件或三态判错（拿到 ${res:-解析失败}，应为 0|1|全过|分歧|带码）⇒ " \
+              "第 4 格是「缺」＝另落的那份文件根本没写或标记换了名字"; return; }
+  # 第二腿走 bash 侧的落盘口：缺 renders 表 ⇒ 必须写「未采到」（这一格少一次，下一轮就会有人把空目录读成达标）
+  fx="$1/cadverdict"; rm -rf "$fx"; mkdir -p "$fx" \
+    || { fail "建不出本轮夹具目录（$fx）"; return; }
+  land_cadence_verdict "$fx" >/dev/null 2>&1
+  grep -qF "未采到" "$fx/cadence-verdict.txt" 2>/dev/null \
+    || { fail "缺 hitches-renders.xml 时没写「未采到」⇒ 三态少一格，\"没输入\"会被读成\"查过且没问题\""; return; }
+  ok "判据① 的 p95 判定落到批次产物里（cadence-verdict.txt）：达标／未达标两把预算分歧／带退出码，" \
+     "缺表那一格明写「未采到」（88）"
+}

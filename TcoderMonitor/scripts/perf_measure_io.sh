@@ -203,6 +203,24 @@ heavy_names_for_pids() {  # heavy_names_for_pids <明细串> <保留的 pid 串>
   printf '%s\n' "${out% }"
 }
 
+land_cadence_verdict() {  # land_cadence_verdict <outdir>：把判据① 那半句**落到批次产物里**（#123）
+  # 旧写法只在 `perf_report.sh` 里 `… | tail -7 | sed … || true`——判定没有持久读者：
+  # 判据① 唯一的取证出口是真人滚 3×30 秒（AGENTS §2.2 禁一切点击/滚动自动化），
+  # 那种稀缺窗口拍完若只剩一次 stdout 的尾巴，就等于没量过（`tail -7` 还可能把判定截掉）。
+  # ⇒ 全文落 `cadence.txt`、判定行落 `cadence-verdict.txt`；**缺输入也要写**「未采到」，
+  #   三态齐（达标／未达标／未采到）才不许把"没输入"读成"过了"。report 档的退出码不改（既定口径）。
+  # 住在这一层是因为录制侧（`cmd_idle`）与重打侧（`cmd_report`）都要用同一个出口——两处各写一份必然分叉。
+  local out="$1"
+  if [ -s "$out/hitches-renders.xml" ]; then
+    python3 "$CADENCE_REPORT" "$out/hitches-renders.xml" --pulse "$out/pulse.txt" \
+        --verdict-out "$out/cadence-verdict.txt" > "$out/cadence.txt" 2>&1 || true
+    [ -s "$out/cadence.txt" ] && tail -7 "$out/cadence.txt" | sed 's/^/    /'
+  else
+    printf '未采到（缺 hitches-renders.xml ⇒ 帧间隔 p95 这条判据没有输入）\n' > "$out/cadence-verdict.txt"
+    echo "    ⓘ 这一趟没有 hitches-renders.xml ⇒ 呈现侧节拍**未采到**（已写进 cadence-verdict.txt，不是达标）"
+  fi
+}
+
 load_sample_once() {  # load_sample_once <outdir> [自己 spawn 的采集 pid] [被测 pid] —— 追加一行「时刻/load1/重活数/明细/在场/前台」
   # 为什么挂在 `record_bounded` 的轮询里而不是自己起后台子壳：那个 poll 循环本来就在窗口内每 5 s 醒一次，
   # 借它顺手采样**不新增进程**，也就不会有"录制链半路 die 掉、留下一个还在写 tsv 的孤儿"这种形状

@@ -35,9 +35,7 @@ PY
   # 节拍这一把是**独立于回调时间戳**的（合成器逐帧起点差），所以没有脉冲也要印：
   # 09-22 就是靠它才发现名义 120 Hz 与实测 119.33~119.39 Hz 差 0.5%，
   # 而"p95 未达标"的残差（0.04~0.10 ms）小于两台仪器的分歧（0.66 ms）。
-  if [ -s "$out/hitches-renders.xml" ]; then
-    python3 "$CADENCE_REPORT" "$out/hitches-renders.xml" --pulse "$out/pulse.txt" 2>&1 | tail -7 | sed 's/^/    /' || true
-  fi
+  land_cadence_verdict "$out"   # 判定落盘走录制侧同一个出口（#123；原来这两行只打 stdout）
   if [ -s "$out/pulse.txt" ]; then
     python3 "$PULSE_REPORT" --sample-dir "$out" --interaction 2>&1 | tail -3 | sed 's/^/    /' || true
   else

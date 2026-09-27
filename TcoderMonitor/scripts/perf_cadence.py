@@ -27,6 +27,7 @@ p95 落在 8.51 ms 就"永远未达标"——**空闲档量出来也是 8.519 ms
 """
 
 import argparse
+import io
 import json
 import os
 import sys
@@ -98,6 +99,22 @@ def report(path, pulse_path=None, min_frames=1200):
         if pcode is not None:
             code = pcode
     return lines, code
+
+
+VERDICT_MARKS = ("按名义", "按实测周期", "权威 hitch 数")
+
+
+def write_verdict(path, lines, code):
+    """把判定那几行**逐字**另落一份文件（#123：判定此前只活在 stdout 的尾巴里）。
+
+    取行按标记，不按行号——行号会随脉冲有无漂移；标记是这些话术自己的名字。
+    末行带退出码，读者不必再猜"没印"是"没判"还是"判了没输"。
+    """
+    keep = [l.strip() for l in lines if any(m in l for m in VERDICT_MARKS)]
+    with io.open(path, "w", encoding="utf-8") as fh:
+        for line in (keep or ["未采到（节拍尺没给出判定行 ⇒ 帧间隔 p95 这一维当前答不了）"]):
+            fh.write(line + "\n")
+        fh.write("退出码 %d\n" % code)
 
 
 def pulse_crosscheck(pulse_path, gaps, p95, span, bud):
@@ -232,6 +249,8 @@ def main(argv=None):
     ap.add_argument("--baseline", default="",
                     help="同一次测量里的空闲档 hitches-renders.xml；给了就按相对地板判据下结论")
     ap.add_argument("--min-frames", type=int, default=1200)
+    ap.add_argument("--verdict-out", default="",
+                    help="把判定那几行另落一份文件（#123：判据① 的持久读者；stdout 一字不动）")
     args = ap.parse_args(argv)
     lines, code = report(args.xml, args.pulse or None, args.min_frames)
     if args.baseline:
@@ -239,6 +258,8 @@ def main(argv=None):
         lines += blines
         code = bcode if code in (0, 1) else code     # 数据不足优先按"不足"报，不被相对判据盖掉
     print("\n".join(lines))
+    if args.verdict_out:
+        write_verdict(args.verdict_out, lines, code)
     return code
 
 
