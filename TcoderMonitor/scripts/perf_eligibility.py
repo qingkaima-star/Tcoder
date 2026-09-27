@@ -14,6 +14,30 @@
 """
 from perf_trace_metrics import input_rate_qualification
 
+
+def human_recheck_refusal(meta):
+    """收尾人手复核**没做成** ⇒ 返回该拒的那一句；做成了／老批次没这一格 ⇒ 返回 ""。
+
+    为什么单独一枚函数而不是往 `period_eligibility` 里塞：那枚函数现在 42 行，
+    再长就撞「函数 ≤ 50 行」那把门（本仓口径：拆一格一个函数才是修复，抬线不算）。
+
+    【#127】`post_window_quiescence` 原来在探针取不到时**只印一行 stdout 就返回**，
+    meta 一个字段都不落 ⇒ 下面那句「没有污染标记就算合格」把它读成「做成且没人动」：
+    交互档拿「有资格答 T1」、心跳档拿「只答心跳期」，两句都是绿灯，
+    而这同一句还被 `perf_trio_agreement` 读进 3/3 的计数（一把判据、两个读者）。
+    现在写侧显式落 `quiescence_recheck=unavailable|measured`，读侧在这里拒。
+
+    ⚠ **不追溯**：`quiescence_recheck` 缺失＝这一格还没被写过的老批次（含 09-27 那几批
+    录制前就被闸门拒掉的 REFUSED 趟，它们已经出不了对照表）。把「缺字段」一律判死
+    会顺手改动历史读数，而本函数的职责只是「不许把未判读成达标」。
+    """
+    if str(meta.get("quiescence_recheck") or "").strip() != "unavailable":
+        return ""
+    return ("收尾人手复核没做成（meta.quiescence_recheck=unavailable：那一刻静默探针取不到）"
+            "⇒ 这一趟既没证「窗口内有人在动」也没证「没人动」，"
+            "① 不许交、也不许进 ② 的 3/3；要重录到探针在场的那一趟")
+
+
 def period_eligibility(meta):
     """档位**声明**与收尾**复核**是否一致 → (样本可用吗, 给表头看的一句话)。
 
@@ -38,6 +62,10 @@ def period_eligibility(meta):
     if str(meta.get("contaminated_by_foreign_load") or "") == "1":
         return False, ("窗口结束时负载显示整机在忙（meta.load1_at_end / heavy_at_end）"
                        "⇒ 这批量的是别人占着机器时的帧，不得作为结论提交")
+    # 【#127】人手这一维**没量到**与**量到了没人动**是两件事，前者不许折算成后者。
+    refusal = human_recheck_refusal(meta)
+    if refusal:
+        return False, refusal
     # 输入来源**与投递节奏**决定这句话能不能说"真人"、能不能答"到不到 120Hz"。
     # 25 Hz 的合成滚动器（每 40 ms 一拍）比 8.333 ms 的帧预算还慢，出帧上限是仪器锁的
     # —— 今晚实测过，那两批差点被当"交互期 hitch 读数"直接引用（现已移出充数）。

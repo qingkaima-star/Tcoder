@@ -230,3 +230,88 @@ print(h(low, 8.333))')
     || { fail "越档时话术里没有「不判档」——档位词还在乱印"; return; }
   ok "越档读数改口为「不判档，只记形状」；四边界与三态话术全对"
 }
+
+quiescence_chain_probe() {  # quiescence_chain_probe <夹具根绝对路径> → 每行 `档位|recheck|Y/N`
+  # 【#127 的端到端腿】真跑**写侧**（`post_window_quiescence` + `meta_write`），再让**读侧**
+  # （`period_eligibility`）判那份落盘——夹具只喂探针的形状：
+  #   -1.00＝尺子当场掉了／3.00＝窗口里有人在动／99.00＝整窗没人。
+  # 为什么不许只测 python 那半：#125 记的就是「臂在真实调用点死在 unbound variable」，
+  # 写侧与读侧各自单测都会绿，串起来才钉得住这一格（也是本项能印出 `quiescence_recheck` 现值的唯一腿）。
+  local root="$1" tier q
+  while IFS='|' read -r tier q; do
+    [ -n "$tier" ] || continue
+    # `bash -c` 而不是在同进程里改函数：`quiescence_probe` 是全局函数，
+    # 本项一 stub 它就会漏给后面的每一项（自检是一项一项顺序跑的）。
+    bash -c '
+      set -uo pipefail
+      tier="$1"; q="$2"; dir="$3"
+      source scripts/perf_preflight.sh >/dev/null 2>&1 || { echo "$tier|source-fail|N"; exit 0; }
+      REV=selfcheck; DIRTY=0; PERIOD="$tier"
+      quiescence_probe() { printf "%s\n" "静默=${q}s"; }
+      mkdir -p "$dir"
+      meta_write "$dir" "period=$tier" >/dev/null 2>&1
+      post_window_quiescence "$dir" 20 >/dev/null 2>&1
+      cd scripts && python3 - "$dir" <<PY
+import json, sys
+from perf_eligibility import period_eligibility as pe
+m = json.load(open(sys.argv[1] + "/meta.json", encoding="utf-8"))
+ok, _ = pe(m)
+print("%s|%s|%s" % (m.get("period"), m.get("quiescence_recheck", "(absent)"), "Y" if ok else "N"))
+PY
+    ' _ "$tier" "$q" "$root/$tier-$q"
+  done <<'ROWS'
+interaction|-1.00
+idle|-1.00
+interaction|3.00
+idle|99.00
+ROWS
+}
+
+selfcheck_quiescence_recheck_states() {  # selfcheck_quiescence_recheck_states <outdir>
+  # 71) 【#127】收尾人手复核「没做成」不许被读成「做成且没人动」。
+  #     09-27 实测复现的旧形状：探针取不到时 `post_window_quiescence` 只印一行 stdout 就 return，
+  #     meta **一个字段都不落**，而资格判据的形状是「没有污染标记就算合格」⇒
+  #     交互档拿到「有资格答 T1」、心跳档拿到「只答心跳期」，两句都是绿灯；
+  #     同一句还被 `perf_trio_agreement` 读进 §1.3 的 3/3 计数（一把判据、两个读者）。
+  #     危害不是假想：判据① 唯一的取证出口是一次稀缺的真人窗口，那一趟若正好撞上尺子掉，
+  #     **就会在没有任何一次人手证据的情况下把「交互期 hitch=0」交出去**。
+  local r
+  r=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_eligibility import period_eligibility as pe
+def m(period, recheck="measured", **kw):
+    d = {"period": period}
+    if recheck is not None:
+        d["quiescence_recheck"] = recheck
+    d.update(kw)
+    return d
+def g(d):
+    return "1" if pe(d)[0] else "0"
+print("|".join([
+    g(m("interaction", window_verdict="窗口内有人", input_source="synth@8ms")),
+    g(m("interaction", recheck="unavailable")),
+    g(m("idle", recheck="unavailable")),
+    g(m("idle", window_verdict="窗口内没人")),
+    g(m("idle", contaminated_by_human_input="1")),
+    g(m("interaction", no_human_input_during_window="1")),
+    g(m("interaction", recheck=None)),
+]))')
+  [ "$r" = "1|0|0|1|0|0|1" ] \
+    || { fail "收尾复核三态七格没各判对（拿到 $r，应为 1|0|0|1|0|0|1）⇒ 第 2、3 条不是 0 就是「未判」又被读成「达标」，" \
+              "第 7 条不是 1 就是有人把「缺字段」也判了死（那会追溯改动历史批次，要重新裁而不是顺手改）"; return; }
+  # 话术钉：拒因必须点名「没做成」——写成「有人在动」就把排查方向带走了（包 9 那一族）。
+  # ⚠ 这一腿必须待在 `$( )` 里：直接 `cd` 会把 cwd 改到 scripts/，
+  # 而编排器与后面每一项都按「cwd = TcoderMonitor/」写相对路径（本项第一版就是这么坏的，
+  # 症状是**下一段**的 `source scripts/...` 全报 source-fail——红在下一项身上，不在坏掉的那一项）。
+  local words
+  words=$(cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 -c '
+from perf_eligibility import period_eligibility as pe
+print(pe({"period": "interaction", "quiescence_recheck": "unavailable"})[1])')
+  printf '%s\n' "$words" | grep -q '没做成' \
+    || { fail "拒因那句里没有出现「没做成」⇒ 会被引用成「样本本身脏了」（包 9 指错方向那一族）"; return; }
+  local fx got
+  fx="$(cd "$1" && pwd)/quiescence-recheck"
+  got=$(quiescence_chain_probe "$fx" | sort | tr '\n' ' ')
+  [ "$got" = "idle|measured|Y idle|unavailable|N interaction|measured|Y interaction|unavailable|N " ] \
+    || { fail "写侧到读侧那条链没走通（拿到 $got）⇒ 要么 unavailable 那一格又没落盘，要么落了盘却没被资格尺读回来"; return; }
+  ok "收尾复核未判/做成两态都落盘且被同一把资格尺读回；① ② 各不放过，缺字段不追溯"
+}
