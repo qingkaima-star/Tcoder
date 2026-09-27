@@ -244,7 +244,9 @@ fi
 
 # 4) 防"九张其实是同一张"：尺寸一致曾经正是取了旧二进制的破绽。
 echo "==> 4/4 结果核对"
-N=$(ls -1 "$OUT"/*.png 2>/dev/null | wc -l | tr -d ' ')
+# ⚠ `N` 只数**非空** png：`capture` 的失败路径之一是"screencapture 落了一个 0 字节文件"，
+#    旧写法 `ls *.png | wc -l` 会把那枚空文件数进去 ⇒ 九页里有一页根本没拍到、N 却照样等于 9。
+N=$(find "$OUT" -maxdepth 1 -name '*.png' -size +0 2>/dev/null | wc -l | tr -d ' ')
 DUP=$(shasum -a 256 "$OUT"/*.png 2>/dev/null | awk '{print $1}' | sort | uniq -d | wc -l | tr -d ' ')
 EXPECTED_PAGES=${#SECTIONS[@]}
 # 分母取"本轮实际要拍的那几页"，不是写死 9：`CAPTURE_PAGES` 缩小范围时写死 9 会让
@@ -253,9 +255,18 @@ EXPECTED_PAGES=${#SECTIONS[@]}
 if [ "$EXPECTED_PAGES" -eq 0 ]; then echo "    ❌ 要拍的页数为 0，本取证不出数"; exit 1; fi
 echo "    产出 $N 张 / $EXPECTED_PAGES 页，失败 $FAILED 页，内容完全相同的图组数 $DUP"
 if [ "$N" != "$EXPECTED_PAGES" ]; then echo "    ❌ 页不齐：本轮口径是 $EXPECTED_PAGES 页"; exit 1; fi
+# 下面两条 09-27 之前**只印不判**（`FAILED` 与 `DUP` 打出来就往下走，只有页齐这一条有后果）。
+# 而它们恰恰是"九页各就各位"这件事的正面判据：`FAILED` 兜住空文件/窗口取不到，
+# `DUP` 兜住"切页静默失败 ⇒ 九张其实是同一张"（`single` 模式九张共用一个窗口，
+# 这条判据是那一趟唯一的机械证据）。
+if [ "$FAILED" != "0" ]; then
+  echo "    ❌ 有 $FAILED 页被判没拍到（窗口 id 取不到 / 截图文件为空）——本次取证不作数"
+  exit 1
+fi
 if [ "$DUP" != "0" ]; then
-  echo "    ⚠ 存在字节级完全相同的两张图：要么切页没生效，要么两页真的同构。逐个 sha 如下"
+  echo "    ❌ 有 $DUP 组字节级完全相同的图：切页没生效（single）或 argv 回落到默认页（argv）"
   shasum -a 256 "$OUT"/*.png
+  exit 1
 fi
 echo "    沙箱保留在 $SANDBOX（含本次报告，可回读核对）；用户状态未被触碰"
 echo "截图目录: $OUT"
