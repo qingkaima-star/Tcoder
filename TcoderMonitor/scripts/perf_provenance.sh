@@ -18,7 +18,13 @@
 provenance_manifest_value() {  # provenance_manifest_value <KEY> [manifest 路径]
   # manifest 是 `build_app.sh` 落的 `KEY="value"`；注释行以 # 开头，天然不匹配。
   # 不 eval：值里曾有空格（旧包名），去引号再 eval 会词分割成注入面。
-  local key="$1" path="${2:-dist/RELEASE_MANIFEST.env}" line
+  #
+  # `PROVENANCE_MANIFEST` 是**取数出处**的唯一覆盖点（不给 `provenance_binary_matches` 单独开一枚）：
+  # 判据本体只从这一个读点进，覆盖点也只有一个，才不会"rev 读夹具、内容读宿主"两半各说各话。
+  # 它存在的理由很具体（#110，2026-09-27 实测）：selfcheck 被 harness source 进同一进程，
+  # 于是 `PERF_BIN` 的默认值 `$PWD/dist/…` 会让**没建过 release 产物的树**里第 17 项假红。
+  # 真实测量一律不设这个变量 ⇒ 行为一字不变。
+  local key="$1" path="${2:-${PROVENANCE_MANIFEST:-dist/RELEASE_MANIFEST.env}}" line
   [ -f "$path" ] || { echo ""; return 1; }
   line=$(grep -m1 "^${key}=" "$path" 2>/dev/null)
   printf '%s' "${line#*=}" | tr -d '"'
@@ -36,7 +42,10 @@ provenance_binary_matches() {  # provenance_binary_matches <被量的二进制> 
   # 按设计不参与的一格由**调用方**决定：debug 产物的哈希不在 release manifest 里
   # （那格是 codesign 之后对 `dist/…` 那个文件算的），所以调用方对 debug 要**明着跳过并说出来**，
   # 不许静默放行——这里只回答"内容对不对得上"，不替调用方判"该不该问这个问题"。
-  local bin="$1" path="${2:-dist/RELEASE_MANIFEST.env}" want got
+  #
+  # 第二枚参数**缺省时不在这里填默认值**：出处只有 `provenance_manifest_value` 那一处（同一件事两把
+  # 尺子的老账）。这里传空过去，读点自己按 `PROVENANCE_MANIFEST` → `dist/RELEASE_MANIFEST.env` 落。
+  local bin="$1" path="${2:-}" want got
   if [ -z "$bin" ]; then
     echo "取不到被量的二进制路径（TARGET_BINARY 为空）⇒ 这一格没法对账"
     return 1
@@ -44,7 +53,7 @@ provenance_binary_matches() {  # provenance_binary_matches <被量的二进制> 
   [ -f "$bin" ] || { echo "被量的二进制不在场：$bin"; return 1; }
   want=$(provenance_manifest_value TCODER_BINARY_SHA256 "$path")
   if [ -z "$want" ]; then
-    echo "manifest 里没有 TCODER_BINARY_SHA256（看 $path）⇒ 无从对账，别当通过"
+    echo "manifest 里没有 TCODER_BINARY_SHA256（看 ${path:-PROVENANCE_MANIFEST 未设，即默认的 dist/RELEASE_MANIFEST.env}）⇒ 无从对账，别当通过"
     return 1
   fi
   got=$(shasum -a 256 "$bin" 2>/dev/null | cut -d' ' -f1)
