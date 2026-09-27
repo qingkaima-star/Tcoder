@@ -179,7 +179,8 @@ trio_heartbeat_probe() {  # trio_heartbeat_probe → 一行复合读数：三种
   # 夹具形状照 `read_run` 的产物（`update_values` 有值、`update_max_ms` 是它的 max），
   # 不然臂去抓一个真件里不存在的形状（#118 那一课）。
   cd "$(dirname "$TRACE_REPORT")" && PYTHONPATH=. python3 - <<'PYCHK'
-from perf_trio_agreement import HEARTBEAT_BUDGET_MS, verdict
+from perf_trace_metrics import HEARTBEAT_BUDGET_MS   # 阈值住在口径层，不在这里另写一份（#124）
+from perf_trio_agreement import verdict
 VALS = [1.0 + 0.02 * i for i in range(14)]          # 稳态心跳：p90 1.24 / max 1.26
 def R(maxms, per="idle"):
     return {"dir": "run", "seconds": 20.0, "hitch_n": 0, "hitch_per_s": 0.0, "period": per,
