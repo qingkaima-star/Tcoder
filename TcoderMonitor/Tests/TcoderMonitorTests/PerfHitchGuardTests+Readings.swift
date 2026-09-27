@@ -72,7 +72,11 @@ extension PerfHitchGuardTests {
         let reading = readings.keys.sorted().map { rule -> String in
             "\(rule) \(counts[rule] ?? -1)/下限 \(readings[rule] ?? 0)"
         }.joined(separator: "  ")
+        // 【#132】合计那一格是给台账/工单**抄**的：判据③ 的名单此前只有"逐条相加"这一步在人脑里做，
+        // 于是我 09-27 把 12 抄成 13（§225 那条改口）。分母由守卫自己算，文档与工单只许指这一行。
+        let total = knownBaseline.keys.reduce(0) { $0 + (counts[$1] ?? 0) }
         return "现量/上限 —— \(debt)   读数（只许在上限之上自由增长）—— \(reading)"
+            + "   合计真债 \(total) 处（逐条相加，不含读数；判据③ 的名单分母以这一行为准，别再手抄）"
     }
 
     /// 双向元测试（合成计数，不扫盘）：**新增一处正确的令牌引用不许红**，
